@@ -141,13 +141,13 @@ export function TurnEvaluationReview({
   }
 
   return (
-    <div className="space-y-3 rounded border border-zinc-800 bg-zinc-900/40 p-3 text-zinc-200">
+    <div className="border-border bg-muted/40 text-foreground space-y-3 rounded border p-3">
       {/* Status line */}
       <div className="flex items-center gap-2 text-xs">
         <Flag className="h-3.5 w-3.5 text-[color:var(--cq-accent)]" aria-hidden />
         <span className="font-medium">{FLAG_LABELS[flagStatus]}</span>
         {actionedDatasetId && (
-          <span className="font-mono text-[0.65rem] text-zinc-500">
+          <span className="text-muted-foreground font-mono text-[0.65rem]">
             ({actionedDatasetId.slice(0, 8)}…)
           </span>
         )}
@@ -157,7 +157,7 @@ export function TurnEvaluationReview({
       <div className="space-y-1.5">
         <label
           htmlFor={`eval-comment-${evaluationId}`}
-          className="block text-[0.7rem] font-medium tracking-wide text-zinc-400 uppercase"
+          className="text-muted-foreground block text-[0.7rem] font-medium tracking-wide uppercase"
         >
           Reviewer comment
         </label>
@@ -168,13 +168,13 @@ export function TurnEvaluationReview({
           rows={3}
           maxLength={5000}
           placeholder="Why does this turn matter? What should the interviewer learn from it?"
-          className="w-full resize-y rounded border border-zinc-700 bg-zinc-950/60 p-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-[color:var(--cq-accent)] focus:outline-none"
+          className="border-border bg-background text-foreground placeholder:text-muted-foreground w-full resize-y rounded border p-2 text-xs focus:border-[color:var(--cq-accent)] focus:outline-none"
         />
         <button
           type="button"
           onClick={() => void saveComment()}
           disabled={busy !== null || !commentDirty}
-          className="inline-flex items-center gap-1.5 rounded bg-zinc-800 px-2.5 py-1 text-[0.7rem] font-semibold text-zinc-100 transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="bg-secondary text-secondary-foreground hover:bg-secondary/80 inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[0.7rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy === 'comment' ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : null}
           Save comment
@@ -218,10 +218,10 @@ export function TurnEvaluationReview({
 
       {/* Dataset action panel */}
       {showAction && !locked && (
-        <div className="space-y-2 rounded border border-zinc-800 bg-zinc-950/50 p-2.5">
+        <div className="border-border bg-background space-y-2 rounded border p-2.5">
           <label
             htmlFor={`eval-dataset-${evaluationId}`}
-            className="block text-[0.7rem] font-medium tracking-wide text-zinc-400 uppercase"
+            className="text-muted-foreground block text-[0.7rem] font-medium tracking-wide uppercase"
           >
             Append to learning dataset
           </label>
@@ -229,7 +229,7 @@ export function TurnEvaluationReview({
             id={`eval-dataset-${evaluationId}`}
             value={datasetId}
             onChange={(e) => setDatasetId(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 p-1.5 text-xs text-zinc-100 focus:border-[color:var(--cq-accent)] focus:outline-none"
+            className="border-border bg-background text-foreground w-full rounded border p-1.5 text-xs focus:border-[color:var(--cq-accent)] focus:outline-none"
           >
             <option value="">{datasets === null ? 'Loading…' : 'Choose a dataset…'}</option>
             {(datasets ?? []).map((d) => (
@@ -251,7 +251,7 @@ export function TurnEvaluationReview({
             <button
               type="button"
               onClick={() => setShowAction(false)}
-              className="rounded px-2.5 py-1 text-[0.7rem] font-medium text-zinc-400 hover:text-zinc-100"
+              className="text-muted-foreground hover:text-foreground rounded px-2.5 py-1 text-[0.7rem] font-medium"
             >
               Cancel
             </button>
@@ -260,7 +260,7 @@ export function TurnEvaluationReview({
       )}
 
       {error && (
-        <p className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[0.7rem] text-red-300">
+        <p className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[0.7rem] text-red-700 dark:text-red-300">
           {error}
         </p>
       )}
@@ -289,7 +289,7 @@ function FlagButton({
       className={
         accent
           ? 'inline-flex items-center gap-1.5 rounded border border-[color:var(--cq-accent)]/40 bg-[color:var(--cq-accent)]/10 px-2.5 py-1 text-[0.7rem] font-semibold text-[color:var(--cq-accent)] transition-colors hover:bg-[color:var(--cq-accent)]/20 disabled:opacity-50'
-          : 'inline-flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-800/60 px-2.5 py-1 text-[0.7rem] font-semibold text-zinc-200 transition-colors hover:bg-zinc-700 disabled:opacity-50'
+          : 'border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[0.7rem] font-semibold transition-colors disabled:opacity-50'
       }
     >
       {busy ? (

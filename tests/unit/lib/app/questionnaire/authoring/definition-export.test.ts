@@ -145,6 +145,24 @@ describe('parseDefinitionImport', () => {
     );
   });
 
+  it('round-trips the built-in-persona config, allowRespondentSwitch included', () => {
+    // The interviewer voice (personaSelection, incl. the switching opt-in) is part of the instrument
+    // and must survive definition export → import through the config validator unchanged.
+    const personaSelection = {
+      enabled: true,
+      defaultPersonaKey: 'philosopher',
+      allowRespondentSwitch: true,
+      switcher: 'both' as const,
+    };
+    const graph: VersionGraphView = {
+      ...GRAPH,
+      config: { ...GRAPH.config, personaSelection },
+    };
+    const text = JSON.stringify(buildDefinitionExport('T', graph, DATA_SLOTS, SCORING, 'now'));
+    const parsed = parseDefinitionImport(text);
+    expect(parsed.version.config?.personaSelection).toEqual(personaSelection);
+  });
+
   it('rejects invalid JSON', () => {
     expect(() => parseDefinitionImport('{not json')).toThrow(/not valid JSON/i);
   });

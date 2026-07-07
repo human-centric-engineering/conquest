@@ -125,7 +125,7 @@ export function SessionLifecycleBar({
               </span>
             )}
             {hasActions && (
-              <span className="inline-flex items-center gap-2">
+              <span className="flex flex-wrap items-center justify-end gap-2">
                 {actionError && (
                   <span role="alert" className="text-destructive inline-flex items-center gap-1">
                     <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />

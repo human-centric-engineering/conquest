@@ -122,6 +122,8 @@ export async function copyVersionGraph(
         profileFields: jsonInput(source.config.profileFields),
         inviteeFields: jsonInput(source.config.inviteeFields),
         tone: jsonInput(source.config.tone),
+        personas: jsonInput(source.config.personas),
+        personaSelection: jsonInput(source.config.personaSelection),
         interviewerStrategy: jsonInput(source.config.interviewerStrategy),
         respondentReport: jsonInput(source.config.respondentReport),
         cohortReport: jsonInput(source.config.cohortReport),

@@ -30,6 +30,9 @@ import type {
   FindingApplicability,
   ProposedEdit,
 } from '@/lib/app/questionnaire/evaluation';
+// Ref-lookup turns carry their full inspector call trace so the admin evaluator can show the raw
+// prompt of every call (same shape the preview drawer / diagnostics render).
+import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector/types';
 
 /** A vocabulary tag (F2.2) — client-safe projection of `AppQuestionTag`. */
 export interface TagView {
@@ -288,14 +291,18 @@ export interface TurnEvaluationListItem {
  * shared turn-evaluation components; the schema validates them at write time).
  */
 /**
- * One turn in a ref-lookup result — enough for an admin to see what happened and re-evaluate it.
- * Messages are trimmed previews; `hasTraces` says whether the saved inspector dump is present (so
- * the turn can be re-evaluated), and `evaluationCount` how many verdicts already exist for it.
+ * One turn in a ref-lookup result — enough for an admin to read what happened, inspect the raw
+ * calls, and re-evaluate it. Messages are the **full** respondent/interviewer text (not truncated),
+ * and `calls` is the complete saved inspector trace (every LLM/embedding call with its raw prompt +
+ * response) so the admin evaluator can show all of them, matching the preview drawer / diagnostics.
+ * `callCount` mirrors `calls.length`; `hasTraces` says whether any dump is present (so the turn can
+ * be re-evaluated); `evaluationCount` is how many verdicts already exist for it.
  */
 export interface RefLookupTurn {
   ordinal: number;
-  userMessagePreview: string;
-  agentResponsePreview: string;
+  userMessage: string;
+  agentResponse: string;
+  calls: AgentCallTrace[];
   callCount: number;
   hasTraces: boolean;
   evaluationCount: number;

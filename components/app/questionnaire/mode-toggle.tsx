@@ -9,9 +9,9 @@
  * escape-hatch, and (when present) the Intro recap — is one tap away. Honours
  * `prefers-reduced-motion`.
  *
- * Generic over its `items`: two segments for plain chat ↔ form, three when an Intro recap rides
- * alongside. The indicator width and offset are computed from the item count, so any 2–3 segment
- * set lands pixel-aligned without bespoke classes.
+ * Generic over its `items`: two segments for plain chat ↔ form, more when an Intro recap and/or the
+ * "Choose your interviewer" persona picker ride alongside. The indicator width and offset are
+ * computed from the item count, so any N-segment set lands pixel-aligned without bespoke classes.
  */
 
 import { MessageSquare, ListChecks, type LucideIcon } from 'lucide-react';
@@ -79,14 +79,18 @@ export function ModeToggle({ value, onChange, items = DEFAULT_ITEMS, className }
             type="button"
             role="tab"
             aria-selected={active}
+            aria-label={label}
             onClick={() => onChange(id)}
             className={cn(
-              'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors',
+              'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors sm:px-3',
               active ? 'text-white' : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-            {label}
+            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {/* Icon + word at every normal width. Only on EXTREMELY small screens (≤360px) does the
+                word drop to icon-only, so a crowded 4-segment strip can't overflow. `aria-label`
+                keeps each tab named when the word is hidden. */}
+            <span className="max-[360px]:hidden">{label}</span>
           </button>
         );
       })}

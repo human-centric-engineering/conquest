@@ -42,6 +42,7 @@ import {
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
 import { narrowInterviewerStrategy } from '@/lib/app/questionnaire/chat/interviewer-strategy';
+import { narrowPersonas, narrowPersonaSelection } from '@/lib/app/questionnaire/persona/settings';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { narrowIntroSettings } from '@/lib/app/questionnaire/intro/settings';
@@ -124,6 +125,8 @@ export const CONFIG_SELECT = {
   reasoningStreamPersist: true,
   previewInspectorEnabled: true,
   tone: true,
+  personas: true,
+  personaSelection: true,
   interviewerStrategy: true,
   respondentReport: true,
   cohortReport: true,
@@ -166,6 +169,8 @@ type ConfigRow = {
   reasoningStreamPersist: boolean;
   previewInspectorEnabled: boolean;
   tone: Prisma.JsonValue;
+  personas: Prisma.JsonValue;
+  personaSelection: Prisma.JsonValue;
   interviewerStrategy: Prisma.JsonValue;
   respondentReport: Prisma.JsonValue;
   cohortReport: Prisma.JsonValue;
@@ -271,6 +276,8 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     reasoningStreamPersist: row.reasoningStreamPersist,
     previewInspectorEnabled: row.previewInspectorEnabled,
     tone: narrowToneSettings(row.tone),
+    personas: narrowPersonas(row.personas),
+    personaSelection: narrowPersonaSelection(row.personaSelection),
     interviewerStrategy: narrowInterviewerStrategy(row.interviewerStrategy),
     respondentReport: narrowRespondentReportSettings(row.respondentReport),
     cohortReport: narrowCohortReportSettings(row.cohortReport),

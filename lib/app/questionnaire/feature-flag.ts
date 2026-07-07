@@ -23,6 +23,7 @@ import {
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
   APP_QUESTIONNAIRES_TONE_FLAG,
+  APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
@@ -59,6 +60,7 @@ export {
   APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
   APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG,
   APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
+  APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
@@ -758,6 +760,51 @@ export function withIntroScreenEnabled<C>(
 ): (request: NextRequest, context: C) => Promise<Response> {
   return async (request, context) => {
     const blocked = await ensureIntroScreenEnabled();
+    if (blocked) return blocked;
+    return handler(request, context);
+  };
+}
+
+/**
+ * Whether **built-in interviewer personas** (F-persona) may be used. Requires BOTH the master app
+ * flag and the persona-selection sub-flag — a master-only child (like intro/cohorts), NOT
+ * live-dependent: the admin picks a persona and it governs ahead of the turn loop. The per-version
+ * `config.personaSelection.enabled` toggle (built-in mode on) is the second gate; the respondent
+ * picker/switcher additionally needs `personaSelection.allowRespondentSwitch`.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isPersonaSelectionEnabled(): Promise<boolean> {
+  const [app, persona] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG),
+  ]);
+  return app && persona;
+}
+
+/**
+ * Flag gate for the session persona routes (read the menu / set the choice) — 404 when either the
+ * master flag or the persona-selection sub-flag is off, `null` when both are on. The
+ * {@link ensureQuestionnairesEnabled} analogue for the persona surface; call it first.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function ensurePersonaSelectionEnabled(): Promise<Response | null> {
+  if (await isPersonaSelectionEnabled()) {
+    return null;
+  }
+  return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
+}
+
+/**
+ * Wrap a session persona route handler so the persona gate runs **before** anything else (auth,
+ * handler work). The {@link withQuestionnairesEnabled} analogue for the persona surface.
+ */
+export function withPersonaSelectionEnabled<C>(
+  handler: (request: NextRequest, context: C) => Promise<Response>
+): (request: NextRequest, context: C) => Promise<Response> {
+  return async (request, context) => {
+    const blocked = await ensurePersonaSelectionEnabled();
     if (blocked) return blocked;
     return handler(request, context);
   };

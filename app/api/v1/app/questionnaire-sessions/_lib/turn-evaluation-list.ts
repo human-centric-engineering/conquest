@@ -19,6 +19,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { TURN_EFFECTIVENESS } from '@/lib/app/questionnaire/turn-evaluation';
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
+import { agentCallTraceSchema } from '@/lib/app/questionnaire/inspector/schema';
+import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector/types';
 import type {
   TurnEvaluationListItem,
   TurnEvaluationDetail,
@@ -28,13 +30,14 @@ import type {
 
 import { TURN_EVAL_FLAG_STATUSES } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 
-/** How much of a turn message the lookup ships as a preview. */
-const MESSAGE_PREVIEW_CHARS = 200;
-
-/** Trim a string to a bounded preview with an ellipsis. */
-function trimPreview(value: string, max: number): string {
-  const s = value.trim();
-  return s.length > max ? `${s.slice(0, max)}…` : s;
+/**
+ * Validate a turn's persisted `inspectorCalls` JSON into typed traces (external data at the read
+ * seam → never `as`). A malformed/absent dump degrades to `[]` so the turn still lists (it just
+ * can't be re-evaluated or expanded), matching the saved-trace re-eval path's own tolerance.
+ */
+function parseInspectorCalls(value: unknown): AgentCallTrace[] {
+  const result = z.array(agentCallTraceSchema).safeParse(value);
+  return result.success ? result.data : [];
 }
 
 /** How much of a comment the list row ships as a preview. */
@@ -250,13 +253,16 @@ export async function lookupSessionByRef(rawRef: string): Promise<RefLookupResul
   const v = versionMap.get(session.versionId) ?? null;
 
   const turnViews: RefLookupTurn[] = turns.map((t) => {
-    const callCount = Array.isArray(t.inspectorCalls) ? t.inspectorCalls.length : 0;
+    const calls = parseInspectorCalls(t.inspectorCalls);
     return {
       ordinal: t.ordinal,
-      userMessagePreview: trimPreview(t.userMessage, MESSAGE_PREVIEW_CHARS),
-      agentResponsePreview: trimPreview(t.agentResponse, MESSAGE_PREVIEW_CHARS),
-      callCount,
-      hasTraces: callCount > 0,
+      // Full text (not truncated): the admin evaluator shows the whole respondent answer and
+      // interviewer reply, and the complete raw prompt of every call.
+      userMessage: t.userMessage,
+      agentResponse: t.agentResponse,
+      calls,
+      callCount: calls.length,
+      hasTraces: calls.length > 0,
       evaluationCount: evalCountByOrdinal.get(t.ordinal) ?? 0,
       createdAt: t.createdAt.toISOString(),
     };

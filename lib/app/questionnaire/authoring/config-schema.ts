@@ -32,6 +32,8 @@ import {
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
+  PERSONA_KEY_MAX_LENGTH,
+  PERSONA_SWITCHERS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
@@ -45,6 +47,7 @@ import {
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 import { resolveIntroVideo } from '@/lib/app/questionnaire/intro/video';
+import { BUILT_IN_PERSONA_KEYS } from '@/lib/app/questionnaire/persona/presets';
 
 /** One invitee-field visibility entry (email's forced shown+required is applied server-side). */
 const inviteeFieldConfigSchema = z.object({
@@ -138,6 +141,24 @@ const toneSettingsSchema = z
     readingComplexity: toneDimensionSchema,
     humour: toneDimensionSchema,
     persona: tonePersonaSchema,
+  })
+  .strict();
+
+/**
+ * Built-in persona mode (F-persona) — the either/or partner of the custom `tone` block. `enabled`
+ * on ⇒ a built-in library persona governs the interviewer; `defaultPersonaKey` pins which one
+ * (validated against the built-in keys in the refinement below); `allowRespondentSwitch` opts into
+ * letting respondents change it via `switcher` and **defaults to `false`** when omitted (so a
+ * hand-authored or older import file without it still parses — matching the read-path narrower). The
+ * library itself is fixed ({@link BUILT_IN_PERSONAS}) — not per-version config — so no custom personas
+ * are accepted here.
+ */
+const personaSelectionSchema = z
+  .object({
+    enabled: z.boolean(),
+    defaultPersonaKey: z.string().trim().min(1).max(PERSONA_KEY_MAX_LENGTH),
+    allowRespondentSwitch: z.boolean().default(false),
+    switcher: z.enum(PERSONA_SWITCHERS),
   })
   .strict();
 
@@ -288,6 +309,10 @@ export const updateConfigSchema = z
     // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
     // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
     tone: toneSettingsSchema.optional(),
+    // Respondent persona-selection toggle + default key (F-persona). The persona library is fixed
+    // (BUILT_IN_PERSONAS) and never sent by the editor; only the on/off toggle and the default key
+    // are stored. Gated additionally by APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED.
+    personaSelection: personaSelectionSchema.optional(),
     interviewerStrategy: interviewerStrategySchema.optional(),
     // Respondent Report. Sent whole when present; gated additionally by the platform flag
     // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
@@ -354,6 +379,17 @@ export const updateConfigSchema = z
           code: 'custom',
           message: 'Profile field keys must be unique',
           path: ['profileFields'],
+        });
+      }
+    }
+
+    // The default persona must be one of the fixed built-in personas.
+    if (cfg.personaSelection !== undefined) {
+      if (!BUILT_IN_PERSONA_KEYS.includes(cfg.personaSelection.defaultPersonaKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Default persona must be one of the built-in personas',
+          path: ['personaSelection', 'defaultPersonaKey'],
         });
       }
     }

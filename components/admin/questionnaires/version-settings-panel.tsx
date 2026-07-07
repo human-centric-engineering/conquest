@@ -38,6 +38,8 @@ export interface VersionSettingsPanelProps {
   adaptiveDataSlotsEnabled: boolean;
   /** Respondent intro / splash sub-flag state, threaded to the Intro card. */
   introScreenEnabled: boolean;
+  /** Selectable-persona sub-flag state, threaded to the Interviewer personas card. */
+  personaSelectionEnabled: boolean;
 }
 
 export function VersionSettingsPanel({
@@ -46,6 +48,7 @@ export function VersionSettingsPanel({
   adaptiveEnabled,
   adaptiveDataSlotsEnabled,
   introScreenEnabled,
+  personaSelectionEnabled,
 }: VersionSettingsPanelProps) {
   const router = useRouter();
   const versionId = graph.id;
@@ -120,6 +123,7 @@ export function VersionSettingsPanel({
           adaptiveEnabled={adaptiveEnabled}
           adaptiveDataSlotsEnabled={adaptiveDataSlotsEnabled}
           introScreenEnabled={introScreenEnabled}
+          personaSelectionEnabled={personaSelectionEnabled}
           isVersionLaunched={graph.status === 'launched'}
           run={run}
           busy={busy}

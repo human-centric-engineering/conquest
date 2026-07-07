@@ -21,6 +21,7 @@ import {
   buildSettingsExport,
   parseSettingsImport,
 } from '@/lib/app/questionnaire/authoring/config-export';
+import { updateConfigSchema } from '@/lib/app/questionnaire/authoring/config-schema';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 
@@ -80,6 +81,26 @@ describe('parseSettingsImport', () => {
     const result = parseSettingsImport(JSON.stringify({ selectionStrategy: 'random' }));
     expect(result.config).toEqual({ selectionStrategy: 'random' });
     expect(result.keyCount).toBe(1);
+  });
+
+  it('round-trips the whole personaSelection block, allowRespondentSwitch included', () => {
+    // A non-default built-in-persona config: every nested persona field must survive export → import
+    // → the server validator (updateConfigSchema), so the interviewer voice can't silently reset.
+    const personaSelection = {
+      enabled: true,
+      defaultPersonaKey: 'philosopher',
+      allowRespondentSwitch: true,
+      switcher: 'both' as const,
+    };
+    const view: ConfigView = { ...SAVED_VIEW, personaSelection };
+    const text = JSON.stringify(buildSettingsExport(view, '2026-06-28T00:00:00.000Z'));
+
+    const result = parseSettingsImport(text);
+    expect(result.config.personaSelection).toEqual(personaSelection);
+
+    // And the picked config is accepted by the real server validator unchanged.
+    const parsed = updateConfigSchema.parse(result.config);
+    expect(parsed.personaSelection).toEqual(personaSelection);
   });
 
   it('strips the read-only `saved` flag and envelope metadata from a bare object', () => {

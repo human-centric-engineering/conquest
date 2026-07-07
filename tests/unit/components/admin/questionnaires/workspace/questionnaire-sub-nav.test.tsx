@@ -61,6 +61,7 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   respondentReport: true,
   cohortReport: true,
   introScreen: true,
+  personaSelection: true,
   advisor: true,
   editAgent: true,
 };

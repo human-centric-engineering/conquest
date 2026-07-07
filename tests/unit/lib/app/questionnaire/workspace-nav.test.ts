@@ -31,6 +31,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     respondentReport: true,
     cohortReport: true,
     introScreen: false,
+    personaSelection: false,
     advisor: true,
     editAgent: true,
     ...over,

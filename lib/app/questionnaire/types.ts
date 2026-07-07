@@ -436,13 +436,29 @@ export type ToneSettings = Record<ToneDimensionKey, ToneDimension> & {
   persona: TonePersona;
 };
 
-/** Lowest / highest valid slider position. */
+/** Lowest / highest valid slider position (STORED scale). */
 export const TONE_LEVEL_MIN = 1;
 export const TONE_LEVEL_MAX = 5;
-/** Neutral midpoint a bipolar dimension defaults to. */
+/** Neutral midpoint a bipolar dimension defaults to (STORED scale). */
 export const TONE_LEVEL_NEUTRAL = 3;
+
+/**
+ * Tone dials are STORED as 1–5 (min/neutral/max above) but PRESENTED to admins on a signed −2…+2
+ * scale centred on 0, which reads more naturally: 0 is the balanced midpoint, negative/positive move
+ * toward the two poles. These convert between the two — display = stored − 3. Storage stays 1–5 so no
+ * migration of existing `tone` JSON is needed (mirrors the coverage fraction↔percent split in the
+ * config editor). Preset personas author their dials on this display scale too (see `persona/presets.ts`).
+ */
+export const TONE_DISPLAY_MIN = -2;
+export const TONE_DISPLAY_MAX = 2;
+export const TONE_DISPLAY_NEUTRAL = 0;
+/** Stored 1–5 level → displayed −2…+2 value (3 → 0). */
+export const toDisplayLevel = (storedLevel: number): number => storedLevel - TONE_LEVEL_NEUTRAL;
+/** Displayed −2…+2 value → stored 1–5 level (0 → 3). */
+export const fromDisplayLevel = (displayLevel: number): number => displayLevel + TONE_LEVEL_NEUTRAL;
+
 /** Max length of the free-text persona (matches the Zod bound). */
-export const TONE_PERSONA_MAX_LENGTH = 400;
+export const TONE_PERSONA_MAX_LENGTH = 600;
 
 /** Every dimension disabled at the neutral midpoint, persona off — today's behaviour. */
 export const DEFAULT_TONE_SETTINGS: ToneSettings = {
@@ -456,6 +472,73 @@ export const DEFAULT_TONE_SETTINGS: ToneSettings = {
   readingComplexity: { enabled: false, level: TONE_LEVEL_NEUTRAL },
   humour: { enabled: false, level: TONE_LEVEL_NEUTRAL },
   persona: { enabled: false, text: '' },
+};
+
+/**
+ * Selectable interviewer persona (F-persona): one named voice in the version's persona *library*.
+ * Each option is a self-contained {@link ToneSettings} — its prose lives in `tone.persona.text` and
+ * its character comes from preset tone dimensions — so a chosen persona plugs straight into the
+ * existing `buildToneInstructions` pipeline with no new prompt machinery. When the admin enables
+ * respondent selection ({@link PersonaSelectionSettings}), the respondent picks one of these and it
+ * REPLACES the version's `tone` for their session.
+ */
+export type PersonaOption = {
+  /** Stable slug, unique within the library — persisted as the session's choice. */
+  key: string;
+  /** Display name (admin + respondent facing), e.g. "The Straight-Talking Curmudgeon". */
+  label: string;
+  /** One-line respondent-facing description shown on the selection card. */
+  description: string;
+  /** The full voice for this persona — reuses the tone block wholesale. */
+  tone: ToneSettings;
+};
+
+/**
+ * How the respondent switches interviewer (F-persona), when respondent switching is allowed:
+ *   - `page`      — a pre-chat "Choose your interviewer" step + the Interviewer segment in the
+ *                   carousel toggle (the original behaviour). No in-chat chip.
+ *   - `indicator` — no pre-chat page; the session opens on the default persona and an in-chat
+ *                   "Interviewer: {name} · Change" chip opens a modal picker to switch anytime.
+ *   - `both`      — the pre-chat page AND the in-chat chip; the chip's "Change" returns to the page.
+ */
+export const PERSONA_SWITCHERS = ['page', 'indicator', 'both'] as const;
+export type PersonaSwitcher = (typeof PERSONA_SWITCHERS)[number];
+
+/**
+ * Built-in interviewer persona settings (F-persona). This is one half of an either/or against the
+ * version's custom {@link ToneSettings}: `enabled` true ⇒ a built-in library persona governs the
+ * interviewer (the chosen persona's tone REPLACES the version `tone`), false ⇒ the version's own
+ * hand-tuned tone applies. The admin picks one, never both (enforced in the Settings UI).
+ */
+export type PersonaSelectionSettings = {
+  /** On ⇒ built-in persona mode: the pinned/chosen library persona governs (replacing `tone`). */
+  enabled: boolean;
+  /** The pinned persona — applied to every respondent (and pre-selected when switching is allowed). */
+  defaultPersonaKey: string;
+  /**
+   * When true, respondents may switch interviewer among the library (via {@link switcher}); when
+   * false, everyone gets the pinned `defaultPersonaKey` and no picker/switcher renders. Only
+   * meaningful while `enabled`.
+   */
+  allowRespondentSwitch: boolean;
+  /** How the respondent picks/switches interviewer, when switching is allowed. See {@link PersonaSwitcher}. */
+  switcher: PersonaSwitcher;
+};
+
+/** Max lengths for the editable persona fields (match the Zod bounds). */
+export const PERSONA_LABEL_MAX_LENGTH = 60;
+export const PERSONA_DESCRIPTION_MAX_LENGTH = 160;
+export const PERSONA_KEY_MAX_LENGTH = 40;
+
+/** Stable key of the neutral default persona (objective coach/consultant). */
+export const DEFAULT_PERSONA_KEY = 'neutral-coach';
+
+/** Selection off, default = the neutral coach — today's behaviour (version tone prevails). */
+export const DEFAULT_PERSONA_SELECTION: PersonaSelectionSettings = {
+  enabled: false,
+  defaultPersonaKey: DEFAULT_PERSONA_KEY,
+  allowRespondentSwitch: false,
+  switcher: 'page',
 };
 
 /**
@@ -904,6 +987,18 @@ export type QuestionnaireConfigShape = {
    * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
    */
   tone: ToneSettings;
+  /**
+   * Selectable interviewer persona library — the menu of named voices a respondent may choose from.
+   * See {@link PersonaOption}. Fixed: the read path always fills this with the built-in library
+   * ({@link narrowPersonas}); the legacy `personas` column is ignored. Only surfaced when the platform
+   * flag `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED` and `personaSelection.enabled` are both on.
+   */
+  personas: PersonaOption[];
+  /**
+   * Built-in persona mode + which persona is pinned + whether respondents may switch. The either/or
+   * partner of {@link tone} above (`enabled` picks which one governs). See {@link PersonaSelectionSettings}.
+   */
+  personaSelection: PersonaSelectionSettings;
   /** Interviewer questioning approach (off ⇒ default prompts). See {@link InterviewerStrategySettings}. */
   interviewerStrategy: InterviewerStrategySettings;
   /**
@@ -990,6 +1085,9 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   // Admin-only debugging surface — off by default; an operator turns it on per version.
   previewInspectorEnabled: false,
   tone: DEFAULT_TONE_SETTINGS,
+  // Fixed library: the read-path narrower always returns BUILT_IN_PERSONAS regardless of this value.
+  personas: [],
+  personaSelection: DEFAULT_PERSONA_SELECTION,
   interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,

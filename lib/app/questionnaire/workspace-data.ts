@@ -31,6 +31,7 @@ import {
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
+  APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
   APP_QUESTIONNAIRES_ADVISOR_FLAG,
   APP_QUESTIONNAIRES_EDIT_AGENT_FLAG,
 } from '@/lib/app/questionnaire/constants';
@@ -224,6 +225,8 @@ export interface QuestionnaireWorkspaceFlags {
   cohortReport: boolean;
   /** Respondent intro / splash screen — the Intro card in the config editor. */
   introScreen: boolean;
+  /** Selectable interviewer personas — the Interviewer personas card in the config editor. */
+  personaSelection: boolean;
   /** Config Advisor panel on the Settings tab — admin-triggered AI config review. */
   advisor: boolean;
   /** Structure Edit Agent panel on the Structure editor — instruction-driven whole-doc edits. */
@@ -251,6 +254,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       cohorts,
       cohortReport,
       introScreen,
+      personaSelection,
       advisor,
       editAgent,
     ] = await Promise.all([
@@ -264,6 +268,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_EDIT_AGENT_FLAG),
     ]);
@@ -280,6 +285,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       // Cohort report (incl. the Scoring tab) is round-scoped, so it also requires the cohorts flag.
       cohortReport: master && cohorts && cohortReport,
       introScreen: master && introScreen,
+      personaSelection: master && personaSelection,
       advisor: master && advisor,
       editAgent: master && editAgent,
     };

@@ -29,6 +29,7 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   DEFAULT_INVITEE_FIELDS,
 } from '@/lib/app/questionnaire/types';
+import { DIMENSION_PHRASES, personaToneClause } from '@/lib/app/questionnaire/chat/tone';
 
 // ─── Shadcn Select → native <select> ─────────────────────────────────────────
 // Radix Select's popover doesn't work in jsdom; replace with a native select so
@@ -102,7 +103,7 @@ function makeConfig(over: Partial<ConfigView> = {}): ConfigView {
 }
 
 /** Capture the [method, path, body] the editor hands to `run`. */
-function setup(over: Partial<ConfigView> = {}) {
+function setup(over: Partial<ConfigView> = {}, opts: { personaSelectionEnabled?: boolean } = {}) {
   const specs: MutationSpec[] = [];
   const run = vi.fn((thunk: () => MutationSpec): Promise<boolean> => {
     specs.push(thunk());
@@ -118,6 +119,7 @@ function setup(over: Partial<ConfigView> = {}) {
       config={config}
       questionCount={5}
       adaptiveEnabled
+      personaSelectionEnabled={opts.personaSelectionEnabled ?? false}
       run={run}
       busy={false}
     />
@@ -947,6 +949,32 @@ describe('ConfigEditor', () => {
     expect(persona).toEqual({ enabled: true, text: 'You are a blunt consultant.' });
   });
 
+  it('previews the exact tone clause a dimension injects, from the real prompt source', () => {
+    setup();
+    // Mirroring is unipolar — it emits a clause even at the default midpoint (3).
+    fireEvent.click(switchNear(/^Mirroring/));
+    const clause = DIMENSION_PHRASES.mirroring[3];
+    expect(clause.length).toBeGreaterThan(0);
+    expect(screen.getByText((c) => c.includes(clause))).toBeInTheDocument();
+  });
+
+  it('shows the neutral “adds nothing” message for a bipolar dimension at the midpoint', () => {
+    setup();
+    // Empathy is bipolar — the midpoint (3) is neutral-empty, so no clause is injected.
+    expect(DIMENSION_PHRASES.empathy[3]).toBe('');
+    fireEvent.click(switchNear(/^Empathy/));
+    expect(screen.getByText(/no tone clause is added/i)).toBeInTheDocument();
+  });
+
+  it('previews the exact persona clause the prompt receives', () => {
+    setup();
+    fireEvent.click(switchNear(/^Persona/));
+    const textarea = screen.getByPlaceholderText(/supportive career coach/i);
+    fireEvent.change(textarea, { target: { value: 'You are a blunt consultant' } });
+    const clause = personaToneClause('You are a blunt consultant');
+    expect(screen.getByText((c) => c.includes(clause))).toBeInTheDocument();
+  });
+
   it('reflects a stored enabled dimension from config', () => {
     setup({
       tone: {
@@ -956,5 +984,96 @@ describe('ConfigEditor', () => {
     });
     // The slider's pole captions are visible because the dimension is enabled.
     expect(screen.getByText('Formal')).toBeInTheDocument();
+  });
+
+  it('shows the signed −2…+2 dial value (stored 1–5 → display) and a scale legend', () => {
+    const content = () => settingsContent();
+    // Stored 5 (the max pole) shows as +2 on the display scale.
+    setup({
+      tone: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
+        formality: { enabled: true, level: 5 },
+      },
+    });
+    expect(content().getByText('+2')).toBeInTheDocument();
+    // The scale legend explains the balanced-vs-intensity split (phrases unique to the legend).
+    expect(content().getByText(/Each dial runs from/)).toBeInTheDocument();
+    expect(content().getByText(/treat 0 as neutral/)).toBeInTheDocument();
+  });
+
+  it('marks a balanced dial as neutral at 0 (stored midpoint 3)', () => {
+    setup({
+      tone: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
+        empathy: { enabled: true, level: 3 }, // display 0, bipolar ⇒ neutral
+      },
+    });
+    expect(settingsContent().getByText('0 · neutral')).toBeInTheDocument();
+  });
+
+  // ── Interviewer voice either/or (custom tone vs built-in persona, F-persona) ──
+
+  it('shows no voice-mode toggle when the persona-selection sub-flag is off (custom tone only)', () => {
+    setup(); // personaSelectionEnabled defaults to false
+    const content = settingsContent();
+    expect(content.queryByText('Built-in persona')).not.toBeInTheDocument();
+    // The custom tone editor is present (a tone dimension row renders).
+    expect(content.getByText(/^Empathy/)).toBeInTheDocument();
+  });
+
+  it('offers the either/or and starts in Custom voice mode when built-in mode is off', () => {
+    const content = () => settingsContent();
+    setup({}, { personaSelectionEnabled: true });
+    expect(content().getByText('Custom voice')).toBeInTheDocument();
+    expect(content().getByText('Built-in persona')).toBeInTheDocument();
+    // Custom mode → tone dials shown, persona-library controls hidden.
+    expect(content().getByText(/^Empathy/)).toBeInTheDocument();
+    expect(content().queryByText('Let respondents switch interviewer')).not.toBeInTheDocument();
+  });
+
+  it('switches to Built-in persona mode, hiding the tone editor, and saves enabled:true', () => {
+    const { specs } = setup({}, { personaSelectionEnabled: true });
+    fireEvent.click(screen.getByText('Built-in persona'));
+    const content = settingsContent();
+    // Built-in mode → the library controls show and the custom tone dials are gone.
+    expect(content.getByText(/^Let respondents switch interviewer/)).toBeInTheDocument();
+    expect(content.queryByText(/^Empathy/)).not.toBeInTheDocument();
+    clickSave();
+    const personaSelection = bodyOf(specs).personaSelection as { enabled: boolean };
+    expect(personaSelection.enabled).toBe(true);
+  });
+
+  it('opens directly in Built-in persona mode when the version is already on it', () => {
+    setup(
+      {
+        personaSelection: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+          enabled: true,
+          defaultPersonaKey: 'philosopher',
+        },
+      },
+      { personaSelectionEnabled: true }
+    );
+    const content = settingsContent();
+    expect(content.getByText(/^Let respondents switch interviewer/)).toBeInTheDocument();
+    // The switcher style is hidden until respondents are allowed to switch.
+    expect(content.queryByText(/How respondents switch interviewer/)).not.toBeInTheDocument();
+  });
+
+  it('reveals the switcher style only once respondents may switch, and saves the flag', () => {
+    const { specs } = setup(
+      {
+        personaSelection: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+          enabled: true,
+        },
+      },
+      { personaSelectionEnabled: true }
+    );
+    fireEvent.click(switchNear(/^Let respondents switch interviewer/));
+    expect(screen.getByText(/How respondents switch interviewer/)).toBeInTheDocument();
+    clickSave();
+    const personaSelection = bodyOf(specs).personaSelection as { allowRespondentSwitch: boolean };
+    expect(personaSelection.allowRespondentSwitch).toBe(true);
   });
 });

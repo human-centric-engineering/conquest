@@ -163,6 +163,8 @@ export interface LoadedTurnContext {
     roundId: string | null;
     /** Cohorts & Rounds: the cohort member the session belongs to (null when round-less or link-grant). */
     cohortMemberId: string | null;
+    /** Selectable interviewer persona: the respondent's chosen persona key (null ⇒ default applies). */
+    selectedPersonaKey: string | null;
   };
   base: TurnContextBase;
   /** Richer slot views for the capability args (the orchestrator only needs QuestionView). */
@@ -210,6 +212,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // access guard (round window + active membership). Null on every open-ended session.
       roundId: true,
       cohortMemberId: true,
+      // Selectable interviewer persona: the respondent's chosen persona key, resolved against the
+      // version's persona library at turn time (resolveEffectiveTone) so the chosen voice governs.
+      selectedPersonaKey: true,
       // Admin preview marker — gates the admin-only Turn Inspector telemetry in the route.
       isPreview: true,
       // Seriousness / abuse gate: the prior strike count the orchestrator folds a new strike into.
@@ -476,6 +481,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       publicRef: session.publicRef,
       roundId: session.roundId,
       cohortMemberId: session.cohortMemberId,
+      selectedPersonaKey: session.selectedPersonaKey,
     },
     base: {
       sessionId: session.id,

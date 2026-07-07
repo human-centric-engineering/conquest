@@ -264,6 +264,14 @@ model AppQuestionnaireConfig {
   // Fed into the phraser system prompt by buildToneInstructions (lib/.../chat/tone.ts). (types.ts)
   tone Json @default("{}")
 
+  // Selectable interviewer personas (F-persona). The persona library is FIXED (BUILT_IN_PERSONAS);
+  // `personas` is a legacy column, always [] and ignored — the read path always returns the built-in
+  // library (narrowPersonas, lib/.../persona/settings.ts). personaSelection = { enabled,
+  // defaultPersonaKey }: whether respondents may pick + which built-in persona is the default. Only
+  // surfaced when APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED and personaSelection.enabled are on. (types.ts)
+  personas         Json @default("[]")
+  personaSelection Json @default("{}")
+
   // Interviewer strategy (questioning approach): { enabled, approach: funnel|open|targeted, probeDepth,
   // reflect, batchRelated }. When enabled, OVERRIDES the default open-invitation questioning prompt with
   // the chosen openness arc + additive tactics. Off by default. Rendered into the phraser system prompt by
@@ -832,6 +840,11 @@ model AppQuestionnaireSession {
   // per-phase completion STATS group without a member join and survive later roster edits. Null for
   // non-round sessions, or members with no subgroup. Read for stats only, never to attribute answers.
   cohortSubgroupId     String?
+  // Selectable interviewer persona (F-persona): the persona key the respondent chose (or was
+  // pre-selected) for this session, keyed into the version's persona library. Null = use the version's
+  // default persona / its own tone. Read at turn time by resolveEffectiveTone so the chosen voice
+  // governs the interviewer's prompt. Only meaningful when persona selection is enabled. (persona/settings.ts)
+  selectedPersonaKey   String?
   // Seriousness / abuse gate: cumulative count of non-genuine answers flagged this session.
   // The route increments it; at `config.abuseThreshold` the session is abandoned.
   abuseStrikes         Int      @default(0)

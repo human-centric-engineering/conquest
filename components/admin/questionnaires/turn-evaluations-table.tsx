@@ -363,7 +363,7 @@ function DetailDrawer({
         onClick={onClose}
         className="absolute inset-0 cursor-default bg-black/40"
       />
-      <div className="relative h-full w-full max-w-xl overflow-y-auto bg-zinc-950 p-4 text-zinc-100 shadow-xl">
+      <div className="dark relative h-full w-full max-w-xl overflow-y-auto bg-zinc-950 p-4 text-zinc-100 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold tracking-wide text-zinc-300 uppercase">
             Turn evaluation

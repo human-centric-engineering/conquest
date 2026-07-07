@@ -4,6 +4,7 @@ import {
   profileFieldSchema,
   updateConfigSchema,
 } from '@/lib/app/questionnaire/authoring/config-schema';
+import { TONE_PERSONA_MAX_LENGTH } from '@/lib/app/questionnaire/types';
 
 /**
  * Request-body contract for the version configuration endpoint (F3.1).
@@ -322,9 +323,111 @@ describe('updateConfigSchema — tone (F-tone)', () => {
     ).toBe(false);
     expect(
       updateConfigSchema.safeParse({
-        tone: { ...fullTone, persona: { enabled: true, text: 'x'.repeat(401) } },
+        tone: {
+          ...fullTone,
+          persona: { enabled: true, text: 'x'.repeat(TONE_PERSONA_MAX_LENGTH + 1) },
+        },
       }).success
     ).toBe(false);
+  });
+});
+
+describe('updateConfigSchema — persona selection (F-persona)', () => {
+  // The persona library is fixed (BUILT_IN_PERSONAS) — no custom library is accepted; only the
+  // on/off toggle and a built-in default key are stored.
+  it('accepts a personaSelection whose default is a built-in persona key', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'neutral-coach',
+          allowRespondentSwitch: false,
+          switcher: 'page',
+        },
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects a default persona key that is not a built-in persona', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'not-a-builtin',
+          allowRespondentSwitch: false,
+          switcher: 'page',
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('defaults a missing allowRespondentSwitch to false (tolerates hand-authored / older imports)', () => {
+    const res = updateConfigSchema.safeParse({
+      personaSelection: { enabled: true, defaultPersonaKey: 'director', switcher: 'page' },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.personaSelection?.allowRespondentSwitch).toBe(false);
+    }
+    // A non-boolean is still rejected — the default only fills an omitted field.
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'director',
+          allowRespondentSwitch: 'yes',
+          switcher: 'page',
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('accepts each valid switcher style and rejects an unknown one', () => {
+    for (const switcher of ['page', 'indicator', 'both']) {
+      expect(
+        updateConfigSchema.safeParse({
+          personaSelection: {
+            enabled: true,
+            defaultPersonaKey: 'director',
+            allowRespondentSwitch: true,
+            switcher,
+          },
+        }).success
+      ).toBe(true);
+    }
+    expect(
+      updateConfigSchema.safeParse({
+        personaSelection: {
+          enabled: true,
+          defaultPersonaKey: 'director',
+          allowRespondentSwitch: true,
+          switcher: 'modal',
+        },
+      }).success
+    ).toBe(false);
+  });
+
+  it('ignores a custom persona library — a stray `personas` field is not stored', () => {
+    const custom = [{ key: 'a', label: 'A', description: 'A voice.' }];
+    // Sent alongside a valid selection: parses, but `personas` is stripped (not a known field).
+    const res = updateConfigSchema.safeParse({
+      personas: custom,
+      personaSelection: {
+        enabled: true,
+        defaultPersonaKey: 'director',
+        allowRespondentSwitch: true,
+        switcher: 'both',
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data).not.toHaveProperty('personas');
+    }
+  });
+
+  it('rejects a payload whose only field is a (now-ignored) persona library', () => {
+    // `personas` is stripped, leaving no field to update.
+    expect(updateConfigSchema.safeParse({ personas: [{ key: 'a' }] }).success).toBe(false);
   });
 });
 

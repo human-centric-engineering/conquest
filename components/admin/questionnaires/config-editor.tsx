@@ -43,7 +43,6 @@ import { Input } from '@/components/ui/input';
 import { PublicRespondentLink } from '@/components/admin/questionnaires/public-respondent-link';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -60,6 +59,16 @@ import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimat
 import { AdaptiveEmbeddingStep } from '@/components/admin/questionnaires/adaptive-embedding-step';
 import { DataSlotEmbeddingStep } from '@/components/admin/questionnaires/data-slot-embedding-step';
 import { IntroBackgroundField } from '@/components/admin/questionnaires/intro-background-field';
+import {
+  TONE_DIMENSION_META,
+  ToneDimensionRow,
+} from '@/components/admin/questionnaires/tone-dimensions';
+import {
+  PersonaLibraryPanel,
+  PersonaLibraryIcon,
+} from '@/components/admin/questionnaires/persona-library-panel';
+import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
+import { personaToneClause } from '@/lib/app/questionnaire/chat/tone';
 import { API } from '@/lib/api/endpoints';
 import {
   ACCESS_MODES,
@@ -73,8 +82,6 @@ import {
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
-  TONE_LEVEL_MAX,
-  TONE_LEVEL_MIN,
   TONE_PERSONA_MAX_LENGTH,
   type AccessMode,
   type IntroSettings,
@@ -90,6 +97,7 @@ import {
   type ToneDimension,
   type ToneDimensionKey,
   type ToneSettings,
+  type PersonaSelectionSettings,
   INTERVIEWER_APPROACHES,
   INTERVIEWER_APPROACH_LABELS,
   type InterviewerApproach,
@@ -278,125 +286,72 @@ function SettingsGroup({
 }
 
 /**
- * Tone dimensions (F-tone) — display metadata for the nine sliders. `left`/`right` label the 1 and
- * 5 poles; `help` is the FieldHelp copy. Order matches the on-screen order (mirrors the prompt).
+ * The either/or mode selector for the "Interviewer tone & persona" group — a two-option segmented
+ * radio. "Custom voice" hand-tunes the tone dials + persona prose (`personaSelection.enabled` off);
+ * "Built-in persona" hands the interviewer to a library persona (`enabled` on). Only rendered when
+ * the persona-selection sub-flag is on — when off there is no choice, just the custom tone editor.
  */
-const TONE_DIMENSION_META: {
-  key: ToneDimensionKey;
-  label: string;
-  left: string;
-  right: string;
-  help: string;
-}[] = [
-  {
-    key: 'empathy',
-    label: 'Empathy',
-    left: 'Dispassionate',
-    right: 'Highly empathetic',
-    help: 'How much the interviewer acknowledges and validates feelings in an answer. Low keeps a matter-of-fact, clinical manner; high names and gently validates emotion before moving on. The middle is balanced.',
-  },
-  {
-    key: 'mirroring',
-    label: 'Mirroring',
-    left: 'Never',
-    right: 'Always',
-    help: 'How often the interviewer reflects what the respondent said back — reframed in its own words — before the next question. Higher means it confirms understanding more often, which can feel attentive but slows the pace.',
-  },
-  {
-    key: 'formality',
-    label: 'Formality',
-    left: 'Casual',
-    right: 'Formal',
-    help: 'The register. Low is relaxed and conversational (contractions, friendly phrasing); high is polished and businesslike. The middle leaves it unconstrained.',
-  },
-  {
-    key: 'mimicry',
-    label: 'Mimicry',
-    left: 'Own voice',
-    right: 'Mirror them',
-    help: "How much the interviewer adopts the respondent's own vocabulary, register, and speech patterns. Higher makes it sound more like the person it's talking to. When enabled, this replaces the default gentle 'match their tone' behaviour.",
-  },
-  {
-    key: 'verbosity',
-    label: 'Verbosity',
-    left: 'Terse',
-    right: 'Expansive',
-    help: 'How much the interviewer says per turn. Low is the fewest words that ask clearly; high adds context and elaboration. The opening questions are always kept short regardless, so they stay effortless.',
-  },
-  {
-    key: 'warmth',
-    label: 'Warmth & encouragement',
-    left: 'Neutral',
-    right: 'Very encouraging',
-    help: 'How much affirmation and reassurance the interviewer offers. Higher gives generous, genuine encouragement as the conversation goes; this is about positive reinforcement, distinct from empathy (acknowledging difficulty).',
-  },
-  {
-    key: 'curiosity',
-    label: 'Curiosity',
-    left: 'Take at face value',
-    right: 'Probe deeply',
-    help: 'How hard the interviewer digs with follow-ups before moving on. Higher means it consistently probes for detail, examples, and the “why”. Note the move-on cap still parks a question after the configured number of attempts.',
-  },
-  {
-    key: 'readingComplexity',
-    label: 'Reading complexity',
-    left: 'Plain',
-    right: 'Sophisticated',
-    help: 'The language level. Low uses plain, everyday words and short sentences; high uses richer vocabulary and more developed sentences. Audience expertise (set on the Structure tab) also influences this.',
-  },
-  {
-    key: 'humour',
-    label: 'Humour',
-    left: 'Earnest',
-    right: 'Playful',
-    help: 'How much light playfulness the interviewer allows. Low stays strictly earnest; high is good-humoured where it fits (never at the respondent’s expense). Use sparingly on sensitive questionnaires.',
-  },
-];
-
-/**
- * One tone dimension row: an enable toggle + (when on) a 1–5 slider with pole labels. Kept local —
- * it's only used by the tone group below and shares its edit-state callbacks.
- */
-function ToneDimensionRow({
-  meta,
-  value,
-  busy,
-  onToggle,
-  onLevel,
+function VoiceModeToggle({
+  mode,
+  onChange,
+  disabled,
 }: {
-  meta: (typeof TONE_DIMENSION_META)[number];
-  value: ToneDimension;
-  busy: boolean;
-  onToggle: (enabled: boolean) => void;
-  onLevel: (level: number) => void;
+  mode: 'custom' | 'persona';
+  onChange: (mode: 'custom' | 'persona') => void;
+  disabled: boolean;
 }) {
+  const options: { id: 'custom' | 'persona'; label: string; hint: string; icon: LucideIcon }[] = [
+    {
+      id: 'custom',
+      label: 'Custom voice',
+      hint: 'Hand-tune tone & persona',
+      icon: SlidersHorizontal,
+    },
+    {
+      id: 'persona',
+      label: 'Built-in persona',
+      hint: 'Pick from the library',
+      icon: PersonaLibraryIcon,
+    },
+  ];
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Switch checked={value.enabled} onCheckedChange={onToggle} disabled={busy} />
-        <Label className="text-sm font-medium">
-          {meta.label} <FieldHelp title={meta.label}>{meta.help}</FieldHelp>
-        </Label>
-      </div>
-      {value.enabled && (
-        <div className="border-border/60 ml-1 space-y-1.5 border-l pl-4">
-          <Slider
-            value={[value.level]}
-            min={TONE_LEVEL_MIN}
-            max={TONE_LEVEL_MAX}
-            step={1}
-            onValueChange={([v]) => onLevel(v)}
-            disabled={busy}
-            className="max-w-xs"
-            aria-label={`${meta.label} level`}
-          />
-          <div className="text-muted-foreground flex max-w-xs justify-between text-xs">
-            <span>{meta.left}</span>
-            <span className="text-foreground font-medium">{value.level}/5</span>
-            <span>{meta.right}</span>
-          </div>
-        </div>
-      )}
+    <div role="radiogroup" aria-label="Interviewer voice" className="grid gap-2 sm:grid-cols-2">
+      {options.map((opt) => {
+        const active = mode === opt.id;
+        const Icon = opt.icon;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            disabled={disabled}
+            onClick={() => onChange(opt.id)}
+            className={cn(
+              'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+              active
+                ? 'border-fuchsia-500/60 bg-fuchsia-500/5 ring-1 ring-fuchsia-500/30'
+                : 'border-border hover:bg-muted/40',
+              disabled && 'cursor-not-allowed opacity-60'
+            )}
+          >
+            <span
+              className={cn(
+                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                active
+                  ? 'bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400'
+                  : 'bg-muted text-muted-foreground'
+              )}
+            >
+              <Icon className="h-4 w-4" />
+            </span>
+            <span>
+              <span className="block text-sm font-medium">{opt.label}</span>
+              <span className="text-muted-foreground block text-xs">{opt.hint}</span>
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -409,6 +364,7 @@ export function ConfigEditor({
   adaptiveEnabled = true,
   adaptiveDataSlotsEnabled = false,
   introScreenEnabled = false,
+  personaSelectionEnabled = false,
   isVersionLaunched = false,
   run,
   busy,
@@ -436,6 +392,11 @@ export function ConfigEditor({
    * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
    */
   introScreenEnabled?: boolean;
+  /**
+   * Whether the selectable-persona sub-flag is on. When `false` the Interviewer personas card is
+   * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
+   */
+  personaSelectionEnabled?: boolean;
   /**
    * Whether the version being edited is launched. Drives only the public-link helper note
    * (a draft version's `/q/<versionId>` link won't boot a session until launch). Defaults to
@@ -525,6 +486,12 @@ export function ConfigEditor({
   // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
   // a single dimension / the persona immutably.
   const [tone, setTone] = useState<ToneSettings>(config.tone);
+  // Selectable interviewer personas (F-persona): only the respondent-selection toggle + default key
+  // are editable. The persona library itself is fixed (BUILT_IN_PERSONAS), so there's no editable
+  // persona state — the panel reads the built-ins for its dropdown + read-only preview.
+  const [personaSelection, setPersonaSelection] = useState<PersonaSelectionSettings>(
+    config.personaSelection
+  );
   // Interviewer strategy (questioning approach) — edited as one object, patched by `setStrategy`.
   const [interviewerStrategy, setInterviewerStrategy] = useState<InterviewerStrategySettings>(
     config.interviewerStrategy
@@ -571,6 +538,7 @@ export function ConfigEditor({
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
     setTone(config.tone);
+    setPersonaSelection(config.personaSelection);
     setInterviewerStrategy(config.interviewerStrategy);
     setIntro(config.intro);
   }, [config]);
@@ -584,6 +552,9 @@ export function ConfigEditor({
     setTone((t) => ({ ...t, persona: { ...t.persona, ...patch } }));
   const setStrategy = (patch: Partial<InterviewerStrategySettings>) =>
     setInterviewerStrategy((s) => ({ ...s, ...patch }));
+
+  const setPersonaSelectionPatch = (patch: Partial<PersonaSelectionSettings>) =>
+    setPersonaSelection((s) => ({ ...s, ...patch }));
 
   const updateField = (index: number, patch: Partial<ProfileFieldRow>) =>
     setProfileFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
@@ -701,6 +672,10 @@ export function ConfigEditor({
         // Interviewer tone & persona (F-tone). Sent whole; trim the persona text. Requires the
         // platform tone flag to take effect.
         tone: { ...tone, persona: { ...tone.persona, text: tone.persona.text.trim() } },
+        // Respondent persona selection (F-persona). Only the on/off toggle + default key are stored;
+        // the persona library is fixed (BUILT_IN_PERSONAS), never sent. Requires the platform
+        // persona-selection flag AND `personaSelection.enabled` to surface to a respondent.
+        personaSelection,
         // Interviewer strategy (questioning approach). Sent whole; off ⇒ default prompts unchanged.
         interviewerStrategy,
         // Respondent intro / splash. Sent whole; trim the background + button label. Requires the
@@ -1363,58 +1338,123 @@ export function ConfigEditor({
             </div>
           </SettingsGroup>
 
-          {/* ── 2c. Interviewer tone & persona — how the conversational interviewer responds. Each
-             dimension is independent (toggle + 1–5 slider); persona casts the agent. Off by default
-             and gated by the platform tone flag, so it's inert until both are switched on. ── */}
+          {/* ── 2c. Interviewer voice — an either/or: EITHER a hand-tuned custom tone & persona, OR a
+             built-in library persona. The two are mutually exclusive — the mode toggle flips
+             `personaSelection.enabled` and only the chosen mode's editor renders, so an admin can
+             never configure both at once (the built-in persona would silently win at runtime). The
+             built-in-persona option only appears when the persona-selection sub-flag is on; with it
+             off this is just the custom tone editor, exactly as before. ── */}
           <SettingsGroup
             icon={SlidersHorizontal}
             accent="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
             id="tone"
             title="Interviewer tone & persona"
-            description="Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag."
+            description={
+              personaSelectionEnabled
+                ? 'How the conversational interviewer sounds. Choose one — hand-tune a custom voice (a persona plus tone dials), or use one of the built-in personas. They’re mutually exclusive. Also requires the platform tone / persona-selection flags.'
+                : 'Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag.'
+            }
           >
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Switch
-                  checked={tone.persona.enabled}
-                  onCheckedChange={(v) => setTonePersona({ enabled: v })}
-                  disabled={busy}
-                />
-                <Label className="text-sm font-medium">
-                  Persona{' '}
-                  <FieldHelp title="Persona">
-                    Cast the interviewer in a role and it will speak from that perspective — for
-                    example “You are an experienced, supportive career coach” or “You are a concise
-                    management consultant.” Free text; keep it a sentence or two. The tone sliders
-                    below still apply on top of the persona.
-                  </FieldHelp>
-                </Label>
-              </div>
-              {tone.persona.enabled && (
-                <div className="border-border/60 ml-1 border-l pl-4">
-                  <Textarea
-                    value={tone.persona.text}
-                    onChange={(e) => setTonePersona({ text: e.target.value })}
-                    maxLength={TONE_PERSONA_MAX_LENGTH}
-                    rows={2}
-                    disabled={busy}
-                    placeholder="e.g. You are an experienced, supportive career coach."
-                    className="max-w-md"
-                  />
-                </div>
-              )}
-            </div>
-
-            {TONE_DIMENSION_META.map((meta) => (
-              <ToneDimensionRow
-                key={meta.key}
-                meta={meta}
-                value={tone[meta.key]}
-                busy={busy}
-                onToggle={(enabled) => setToneDimension(meta.key, { enabled })}
-                onLevel={(level) => setToneDimension(meta.key, { level })}
+            {personaSelectionEnabled && (
+              <VoiceModeToggle
+                mode={personaSelection.enabled ? 'persona' : 'custom'}
+                onChange={(mode) => setPersonaSelectionPatch({ enabled: mode === 'persona' })}
+                disabled={busy}
               />
-            ))}
+            )}
+
+            {personaSelectionEnabled && personaSelection.enabled ? (
+              <PersonaLibraryPanel
+                personas={BUILT_IN_PERSONAS}
+                selection={personaSelection}
+                busy={busy}
+                onSelectionChange={setPersonaSelectionPatch}
+              />
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={tone.persona.enabled}
+                      onCheckedChange={(v) => setTonePersona({ enabled: v })}
+                      disabled={busy}
+                    />
+                    <Label className="text-sm font-medium">
+                      Persona{' '}
+                      <FieldHelp title="Persona">
+                        <p>
+                          Cast the interviewer in a role and it will speak from that perspective —
+                          for example “You are an experienced, supportive career coach” or “You are
+                          a concise management consultant.” Free text; keep it a sentence or two.
+                          The tone sliders below still apply on top of the persona.
+                        </p>
+                        <p className="mt-2">
+                          When on, your text is wrapped in a leading clause and added to the
+                          interviewer’s prompt (via{' '}
+                          <code className="text-xs">buildToneInstructions</code>):{' '}
+                          <span className="italic">
+                            “Adopt this persona throughout — let it shape your voice and the
+                            perspective you bring: …”
+                          </span>{' '}
+                          The exact clause is shown beneath the box.
+                        </p>
+                      </FieldHelp>
+                    </Label>
+                  </div>
+                  {tone.persona.enabled && (
+                    <div className="border-border/60 ml-1 space-y-1.5 border-l pl-4">
+                      <Textarea
+                        value={tone.persona.text}
+                        onChange={(e) => setTonePersona({ text: e.target.value })}
+                        maxLength={TONE_PERSONA_MAX_LENGTH}
+                        rows={2}
+                        disabled={busy}
+                        placeholder="e.g. You are an experienced, supportive career coach."
+                        className="max-w-md"
+                      />
+                      {/* Live "what's added" preview — the precise persona clause the prompt receives. */}
+                      <p className="text-muted-foreground max-w-md text-xs leading-relaxed">
+                        {tone.persona.text.trim() ? (
+                          <>
+                            <span className="font-medium">Adds to the prompt:</span>{' '}
+                            <span className="text-foreground/80 italic">
+                              “{personaToneClause(tone.persona.text)}”
+                            </span>
+                          </>
+                        ) : (
+                          'Enter persona text above to see the exact clause it adds.'
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Scale legend — explains the signed −2…+2 dials and the balanced-vs-intensity split
+                    (the same distinction each row's help + live preview reflect per dial). */}
+                <div className="bg-muted/30 text-muted-foreground rounded-md border p-3 text-xs leading-relaxed">
+                  Each dial runs from <strong className="text-foreground">−2 to +2</strong> with{' '}
+                  <strong className="text-foreground">0</strong> in the middle.{' '}
+                  <strong className="text-foreground">Balanced</strong> dials (empathy, formality,
+                  verbosity, reading complexity, humour) treat 0 as neutral — it adds nothing —
+                  while − and + push toward the two opposite styles shown under each slider.{' '}
+                  <strong className="text-foreground">Intensity</strong> dials (mirroring, mimicry,
+                  warmth, curiosity) run low → high, so every position adds a clause; switch the
+                  dial off for none. The exact clause each position injects is shown live beneath
+                  its slider.
+                </div>
+
+                {TONE_DIMENSION_META.map((meta) => (
+                  <ToneDimensionRow
+                    key={meta.key}
+                    meta={meta}
+                    value={tone[meta.key]}
+                    busy={busy}
+                    onToggle={(enabled) => setToneDimension(meta.key, { enabled })}
+                    onLevel={(level) => setToneDimension(meta.key, { level })}
+                  />
+                ))}
+              </>
+            )}
           </SettingsGroup>
 
           {/* ── Interviewer strategy — overrides the default questioning approach when enabled. ── */}
@@ -1423,7 +1463,7 @@ export function ConfigEditor({
             accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
             id="interviewer-strategy"
             title="Interviewer strategy"
-            description="How the agent asks — its questioning approach. Off uses the default open, conversational style; on overrides it with the approach and tactics you choose."
+            description="How the interviewer decides what to ask each turn. Off keeps the built-in default — ask the one provided question, one thing at a time, phrased as an open invitation. On adds an approach + tactics that override that default in the interviewer's prompt."
           >
             <div className="flex items-center gap-2">
               <Switch
@@ -1434,8 +1474,17 @@ export function ConfigEditor({
               <Label className="text-sm font-medium">
                 Override the default questioning approach{' '}
                 <FieldHelp title="Interviewer strategy">
-                  When on, the chosen approach and tactics replace the default open-invitation
-                  prompt that governs how the interviewer asks questions. When off, nothing changes.
+                  <p>
+                    By default the interviewer prompt tells it to{' '}
+                    <strong>ask the one provided question, one thing at a time</strong>, phrased as
+                    an open invitation (“Tell me about…”), in a neutral register.
+                  </p>
+                  <p className="mt-2">
+                    When on, an <code className="text-xs">&lt;interviewer_strategy&gt;</code> block
+                    is appended to the prompt <em>after</em> those default rules — so it takes
+                    precedence — carrying the approach and tactics below. When off, that block is
+                    omitted entirely and nothing about the default changes.
+                  </p>
                 </FieldHelp>
               </Label>
             </div>
@@ -1446,13 +1495,32 @@ export function ConfigEditor({
                   <Label className="text-sm font-medium">
                     Approach{' '}
                     <FieldHelp title="Approach">
-                      The openness arc for the whole session. <strong>Funnel</strong> opens broad to
-                      let people ramble and fill several answers at once, then narrows to targeted
-                      questions to close gaps near the end — and goes targeted sooner if the
-                      respondent is terse. <strong>Open throughout</strong> stays broad and
-                      exploratory the whole way (best for rich, qualitative discovery).{' '}
-                      <strong>Targeted/efficient</strong> asks one specific thing at a time for the
-                      fastest completion (best for factual questionnaires).
+                      <p>
+                        The questioning-approach clause added to the prompt. It sets how open vs.
+                        targeted each ask is:
+                      </p>
+                      <ul className="mt-2 list-disc space-y-2 pl-4">
+                        <li>
+                          <strong>Funnel (open → targeted)</strong> — a coverage-driven arc. While
+                          little is covered it <em>overrides</em> the “ask the one question / one
+                          thing at a time” rules and asks a broad opener about the topic{' '}
+                          <em>area</em> (“Tell me about…”), so one wide answer can fill several
+                          gaps; the first couple of asks get an extra permission-giving opening. As
+                          coverage builds it steers toward the specific points still missing, then
+                          near the end asks one concrete question at a time. Terse answers move it
+                          toward targeted a step sooner.
+                        </li>
+                        <li>
+                          <strong>Open throughout</strong> — the broad opener above, the whole way;
+                          keeps overriding “one question / one thing at a time” so it stays
+                          exploratory. Best for rich, qualitative discovery.
+                        </li>
+                        <li>
+                          <strong>Targeted / efficient</strong> — one specific, concrete question at
+                          a time with minimal preamble, favouring a direct answerable ask over a
+                          broad invitation. Best for factual questionnaires and fastest completion.
+                        </li>
+                      </ul>
                     </FieldHelp>
                   </Label>
                   <Select
@@ -1483,9 +1551,11 @@ export function ConfigEditor({
                     <Label className="text-sm font-medium">
                       Probe for depth{' '}
                       <FieldHelp title="Probe for depth">
-                        On a shallow or low-confidence answer, the interviewer asks one brief
-                        follow-up (&ldquo;What makes you say that?&rdquo;) before moving on. Deepens
-                        qualitative answers at the cost of a few more turns.
+                        Adds a <strong>PROBE FOR DEPTH</strong> clause on top of the approach: if
+                        the last answer was shallow or vague, ask ONE brief follow-up (“What makes
+                        you say that?”, “Can you give an example?”) before moving on to anything
+                        new. Deepens qualitative answers at the cost of a few more turns. Combines
+                        with any approach.
                       </FieldHelp>
                     </Label>
                   </div>
@@ -1498,9 +1568,11 @@ export function ConfigEditor({
                     <Label className="text-sm font-medium">
                       Reflect &amp; confirm{' '}
                       <FieldHelp title="Reflect & confirm">
-                        The interviewer briefly plays back what it understood before the next
-                        question, so the respondent can confirm or correct it. Builds trust and
-                        strengthens answer confidence through corroboration.
+                        Adds a <strong>REFLECT AND CONFIRM</strong> clause: before the next
+                        question, briefly play back the gist of the last answer in one short clause
+                        (“So it sounds like… — is that right?”) so they can confirm or correct it —
+                        not a verbatim repeat. Builds trust and strengthens answer confidence
+                        through corroboration.
                       </FieldHelp>
                     </Label>
                   </div>
@@ -1513,9 +1585,11 @@ export function ConfigEditor({
                     <Label className="text-sm font-medium">
                       Batch related questions{' '}
                       <FieldHelp title="Batch related questions">
-                        When a few remaining gaps are closely related, the interviewer may invite
-                        them together in one natural question rather than strictly one at a time.
-                        Faster and more conversational; slightly harder to extract cleanly.
+                        Adds a <strong>BATCH RELATED</strong> clause: when several remaining gaps
+                        are closely related, the interviewer MAY invite two or three together in one
+                        natural question — the one allowed exception to the default “one thing at a
+                        time” rule. Faster and more conversational; slightly harder to extract
+                        cleanly.
                       </FieldHelp>
                     </Label>
                   </div>

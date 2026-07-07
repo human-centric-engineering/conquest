@@ -61,6 +61,12 @@ export interface QuestionnaireSplashProps {
    * already considers it "started" internally (that only governs the deferred kickoff).
    */
   inProgress?: boolean;
+  /**
+   * Overrides the begin-label on the CTA when the next surface isn't the conversation itself — e.g.
+   * "Select your interviewer" when a persona picker rides between the intro and the chat. Ignored
+   * while `inProgress` (a mid-run re-read always reads "Continue"). Omit for the plain begin label.
+   */
+  proceedLabel?: string;
   /** Slide to the conversation and begin (the parent {@link SessionWorkspace} owns the swap). */
   onProceed: () => void;
   className?: string;
@@ -69,6 +75,7 @@ export interface QuestionnaireSplashProps {
 export function QuestionnaireSplash({
   intro,
   inProgress = false,
+  proceedLabel,
   onProceed,
   className,
 }: QuestionnaireSplashProps) {
@@ -89,7 +96,7 @@ export function QuestionnaireSplash({
   const reveal =
     'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500';
 
-  const ctaLabel = inProgress ? 'Continue' : copy.buttonLabel;
+  const ctaLabel = inProgress ? 'Continue' : (proceedLabel ?? copy.buttonLabel);
 
   return (
     <div className={cn('h-full min-h-0', className)}>

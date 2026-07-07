@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation';
 import {
   isAttachmentInputEnabled,
   isIntroScreenEnabled,
+  isPersonaSelectionEnabled,
   isLiveSessionsEnabled,
   isReasoningStreamEnabled,
   isVoiceInputEnabled,
@@ -98,6 +99,7 @@ export default async function PublicQuestionnairePage({
     inlineCorrectionEnabled,
     previewMeta,
     introScreenEnabled,
+    personaSelectionEnabled,
   ] = await Promise.all([
     isVoiceInputEnabled(),
     isAttachmentInputEnabled(),
@@ -113,6 +115,7 @@ export default async function PublicQuestionnairePage({
     resolveInlineCorrectionForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
     isIntroScreenEnabled(),
+    isPersonaSelectionEnabled(),
   ]);
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
@@ -165,6 +168,7 @@ export default async function PublicQuestionnairePage({
             inlineCorrectionEnabled={inlineCorrectionEnabled}
             welcomeCopy={theme.welcomeCopy}
             introScreenEnabled={introScreenEnabled}
+            personaSelectionEnabled={personaSelectionEnabled}
           />
         </BrandThemeProvider>
       </div>

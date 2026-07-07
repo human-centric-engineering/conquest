@@ -136,6 +136,13 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       reasoningStreamPersist: true,
       previewInspectorEnabled: false,
       tone: DEFAULT_TONE_SETTINGS,
+      personas: [],
+      personaSelection: {
+        enabled: false,
+        defaultPersonaKey: 'neutral-coach',
+        allowRespondentSwitch: false,
+        switcher: 'page',
+      },
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
@@ -973,13 +980,16 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED'
       );
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED');
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
+        'APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED'
+      );
       // Cohort report (incl. the Scoring tab) requires cohorts + its own sub-flag.
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORTS_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_ADVISOR_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED');
-      // Also verify exactly 12 calls — prevents accidental re-resolution of the master flag
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(12);
+      // Also verify exactly 13 calls — prevents accidental re-resolution of the master flag
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(13);
     });
   });
 
@@ -1054,6 +1064,7 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
           'introScreen',
           'liveSessions',
           'master',
+          'personaSelection',
           'respondentReport',
         ].sort()
       );

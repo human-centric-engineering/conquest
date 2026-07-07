@@ -13,8 +13,31 @@ import { buildToneInstructions, narrowToneSettings } from '@/lib/app/questionnai
 import {
   DEFAULT_TONE_SETTINGS,
   TONE_DIMENSION_KEYS,
+  TONE_LEVEL_MAX,
+  TONE_LEVEL_MIN,
+  TONE_LEVEL_NEUTRAL,
+  TONE_PERSONA_MAX_LENGTH,
+  toDisplayLevel,
+  fromDisplayLevel,
   type ToneSettings,
 } from '@/lib/app/questionnaire/types';
+
+describe('tone display scale (−2…+2 ⇄ stored 1–5)', () => {
+  it('centres neutral on 0 and maps the poles to ±2', () => {
+    expect(toDisplayLevel(TONE_LEVEL_NEUTRAL)).toBe(0);
+    expect(toDisplayLevel(TONE_LEVEL_MIN)).toBe(-2);
+    expect(toDisplayLevel(TONE_LEVEL_MAX)).toBe(2);
+    expect(fromDisplayLevel(0)).toBe(TONE_LEVEL_NEUTRAL);
+    expect(fromDisplayLevel(-2)).toBe(TONE_LEVEL_MIN);
+    expect(fromDisplayLevel(2)).toBe(TONE_LEVEL_MAX);
+  });
+
+  it('round-trips every stored level', () => {
+    for (let level = TONE_LEVEL_MIN; level <= TONE_LEVEL_MAX; level++) {
+      expect(fromDisplayLevel(toDisplayLevel(level))).toBe(level);
+    }
+  });
+});
 
 /** A fresh, deep copy of the all-off default so per-test mutation can't leak across cases. */
 function freshTone(): ToneSettings {
@@ -51,10 +74,10 @@ describe('narrowToneSettings', () => {
   });
 
   it('trims and length-caps the persona text', () => {
-    const long = 'x'.repeat(900);
+    const long = 'x'.repeat(TONE_PERSONA_MAX_LENGTH + 500);
     const out = narrowToneSettings({ persona: { enabled: true, text: `  ${long}  ` } });
     expect(out.persona.enabled).toBe(true);
-    expect(out.persona.text.length).toBe(400);
+    expect(out.persona.text.length).toBe(TONE_PERSONA_MAX_LENGTH);
   });
 });
 

@@ -90,6 +90,7 @@ export default async function SettingsTab({ params }: PageProps) {
           adaptiveEnabled={flags.adaptive}
           adaptiveDataSlotsEnabled={flags.adaptiveDataSlots}
           introScreenEnabled={flags.introScreen}
+          personaSelectionEnabled={flags.personaSelection}
         />
       )}
 

@@ -8,8 +8,9 @@
  * `serializeTurnEvaluation`). Used by the Preview Turn Inspector drawer (live, ephemeral) and
  * the admin persisted-evaluation detail (stored) so both render a verdict identically.
  *
- * Presentational only — no data fetching. Styled as a dark "console" panel to match the
- * inspector; the admin detail wraps it in a dark container.
+ * Presentational only — no data fetching. Theme-aware: it uses semantic tokens (card / muted /
+ * foreground) so it follows the surrounding page theme — dark inside the always-dark hosts (the
+ * inspector and admin drawer both establish a `.dark` context), light on a light admin page.
  */
 
 import { useMemo, useState } from 'react';
@@ -49,11 +50,11 @@ function CopyButton({ getText, label }: { getText: () => string; label: string }
     <button
       type="button"
       onClick={() => void copy()}
-      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+      className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide uppercase transition-colors"
       aria-label={label}
     >
       {copied ? (
-        <Check className="h-3 w-3 text-emerald-400" aria-hidden />
+        <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" aria-hidden />
       ) : (
         <Copy className="h-3 w-3" aria-hidden />
       )}
@@ -65,14 +66,14 @@ function CopyButton({ getText, label }: { getText: () => string; label: string }
 /** A labelled score/rating chip in the verdict header. */
 function VerdictChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="min-w-0 rounded border border-zinc-800 bg-zinc-900/60 px-2 py-1">
-      <div className="font-mono text-[0.52rem] tracking-[0.12em] text-zinc-500 uppercase">
+    <div className="border-border bg-muted/40 min-w-0 rounded border px-2 py-1">
+      <div className="text-muted-foreground font-mono text-[0.52rem] tracking-[0.12em] uppercase">
         {label}
       </div>
       <div
         className={cn(
           'truncate font-mono text-xs font-semibold',
-          accent ? 'text-[color:var(--cq-accent)]' : 'text-zinc-100'
+          accent ? 'text-[color:var(--cq-accent)]' : 'text-foreground'
         )}
       >
         {value}
@@ -84,9 +85,9 @@ function VerdictChip({ label, value, accent }: { label: string; value: string; a
 /** A 1–10 interviewer sub-score cell. */
 function SubScore({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded bg-zinc-900/50 px-1.5 py-1">
-      <span className="truncate text-zinc-400">{label}</span>
-      <span className="shrink-0 font-semibold text-zinc-100">{value}/10</span>
+    <div className="bg-muted/40 flex items-center justify-between gap-2 rounded px-1.5 py-1">
+      <span className="text-muted-foreground truncate">{label}</span>
+      <span className="text-foreground shrink-0 font-semibold">{value}/10</span>
     </div>
   );
 }
@@ -127,7 +128,7 @@ export function TurnEvaluationVerdict({
           <button
             type="button"
             onClick={() => downloadMarkdown(`turn-${turnIndex + 1}-evaluation.md`, markdown)}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide uppercase transition-colors"
             aria-label={`Download turn ${turnIndex + 1} evaluation as Markdown`}
           >
             <Download className="h-3 w-3" aria-hidden />
@@ -151,7 +152,7 @@ export function TurnEvaluationVerdict({
 
       {/* Interviewer sub-scores */}
       <div>
-        <p className="mb-1 font-mono text-[0.58rem] tracking-[0.15em] text-zinc-500 uppercase">
+        <p className="text-muted-foreground mb-1 font-mono text-[0.58rem] tracking-[0.15em] uppercase">
           Interviewer question quality
         </p>
         <div className="grid grid-cols-2 gap-1 font-mono text-[0.62rem]">
@@ -169,7 +170,7 @@ export function TurnEvaluationVerdict({
       {/* Full markdown verdict (authoritative — identical to Copy/Download). */}
       <MarkdownContent
         content={markdown}
-        className="max-h-[28rem] overflow-y-auto rounded border border-zinc-800 bg-zinc-900/40 p-2.5 text-xs text-zinc-300"
+        className="border-border bg-muted/40 text-foreground max-h-[28rem] overflow-y-auto rounded border p-2.5 text-xs"
       />
     </div>
   );
