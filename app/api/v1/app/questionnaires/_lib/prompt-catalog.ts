@@ -882,7 +882,10 @@ const TURN_EVALUATOR: PromptAgentCatalogEntry = {
     'Judges ONE completed interview turn from the Preview Turn Inspector — instruction adherence, interviewing/extraction/selection quality, information gain, prompt drift, and cost/efficiency.',
   dispatch: 'On demand from the inspector drawer, once per turn an admin chooses to evaluate.',
   builderModule: 'lib/app/questionnaire/turn-evaluation/prompt.ts',
-  instructionsAreLoadBearing: true,
+  // The rubric is code-defined (`SYSTEM_RUBRIC` in the builder), NOT the agent's editable
+  // `systemInstructions` — evaluate-turn.ts dispatches via `buildTurnEvaluatorPrompt`, the same
+  // in-code split the design-evaluation judges use. Only the streamChat selector is load-bearing.
+  instructionsAreLoadBearing: false,
   specimens: [
     specimen({
       id: 'turn-eval.judge',

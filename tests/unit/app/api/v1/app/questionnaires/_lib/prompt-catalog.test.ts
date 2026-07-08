@@ -18,6 +18,7 @@ import {
   QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
+  TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 import { EVALUATION_DIMENSIONS } from '@/lib/app/questionnaire/evaluation/types';
 
@@ -29,9 +30,13 @@ describe('buildPromptCatalog', () => {
     expect(stages).toEqual(new Set(['authoring', 'live', 'evaluation']));
   });
 
-  it('includes one judge entry per evaluation dimension', () => {
-    const judges = catalog.filter((e) => e.stage === 'evaluation');
+  it('includes one judge entry per evaluation dimension, alongside the turn evaluator', () => {
+    const evaluationStage = catalog.filter((e) => e.stage === 'evaluation');
+    // The turn evaluator is an evaluation-stage agent but NOT a per-dimension design judge,
+    // so it sits alongside the one-per-dimension judge panel rather than counting toward it.
+    const judges = evaluationStage.filter((e) => e.slug !== TURN_EVALUATOR_AGENT_SLUG);
     expect(judges).toHaveLength(EVALUATION_DIMENSIONS.length);
+    expect(evaluationStage).toHaveLength(EVALUATION_DIMENSIONS.length + 1);
   });
 
   it('uses unique, non-empty agent slugs', () => {
