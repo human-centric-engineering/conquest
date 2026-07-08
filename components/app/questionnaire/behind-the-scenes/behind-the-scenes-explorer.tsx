@@ -87,7 +87,7 @@ export function BehindTheScenesExplorer({ initialWorkflows }: BehindTheScenesExp
     <div className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Behind the scenes</h1>
+          <h1 className="text-xl font-semibold">Agentic Workflows</h1>
           <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
             The agentic pipelines that power ConQuest. Pick a workflow, then click any step to see
             the agent, its prompt, the tools it calls, and where knowledge plugs in.

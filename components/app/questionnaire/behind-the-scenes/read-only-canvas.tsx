@@ -31,6 +31,7 @@ import '@xyflow/react/dist/style.css';
 
 import { workflowDefinitionToFlow } from '@/components/admin/orchestration/workflow-builder/workflow-mappers';
 import {
+  buildGroupNodes,
   conquestNodeTypes,
   miniMapNodeColor,
 } from '@/components/app/questionnaire/behind-the-scenes/conquest-workflow-node';
@@ -48,7 +49,12 @@ function normaliseEdges(edges: Edge[]): Edge[] {
 }
 
 function CanvasInner({ definition, onSelectNode }: ReadOnlyCanvasProps) {
-  const initial = useMemo(() => workflowDefinitionToFlow(definition), [definition]);
+  // Prepend synthesised group-container nodes so they paint *behind* their member steps
+  // (e.g. the "Judge panel" box around the seven design-evaluation judges).
+  const initial = useMemo(() => {
+    const flow = workflowDefinitionToFlow(definition);
+    return { nodes: [...buildGroupNodes(flow.nodes), ...flow.nodes], edges: flow.edges };
+  }, [definition]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(normaliseEdges(initial.edges));
 
@@ -71,7 +77,7 @@ function CanvasInner({ definition, onSelectNode }: ReadOnlyCanvasProps) {
       edgesFocusable={false}
       fitView
       proOptions={{ hideAttribution: true }}
-      onNodeClick={(_, node) => onSelectNode(node.id)}
+      onNodeClick={(_, node) => onSelectNode(node.type === 'panelGroup' ? null : node.id)}
       onPaneClick={() => onSelectNode(null)}
     >
       <Background />

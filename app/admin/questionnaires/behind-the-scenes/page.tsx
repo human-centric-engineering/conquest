@@ -9,7 +9,7 @@ import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { WorkflowSummary } from '@/lib/app/questionnaire/workflows/types';
 
 export const metadata: Metadata = {
-  title: 'Behind the scenes',
+  title: 'Agentic Workflows',
   description: 'See the agentic pipelines that power ConQuest — agents, prompts, tools, knowledge.',
 };
 

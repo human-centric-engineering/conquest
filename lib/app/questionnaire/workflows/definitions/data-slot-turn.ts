@@ -3,9 +3,11 @@
  *
  * The data-slot-driven variant of the live loop
  * (`lib/app/questionnaire/orchestrator/data-slot-orchestrator.ts`). One combined
- * extraction fills both question answers and slot fills; a park gate synthesises
- * a provisional fill after too many attempts and bridges to a new theme; then the
- * turn branches to offer, a lagging question, or the next slot.
+ * extraction fills both question answers and slot fills; the safety gates
+ * (sensitivity + genuineness) clear in parity with question mode before merge; a
+ * park gate synthesises a provisional fill after too many attempts and bridges to
+ * a new theme; then the turn branches to offer, a lagging question, or the next
+ * slot.
  */
 
 import {
@@ -63,13 +65,70 @@ export const dataSlotTurnWorkflow = diagram({
           },
         ],
       },
-      next: ['merge'],
+      next: ['sensitivity'],
+    }),
+    node({
+      id: 'sensitivity',
+      name: 'Sensitivity gate',
+      type: 'guard',
+      x: 220,
+      y: 0,
+      description:
+        'A hybrid safeguarding gate — parity with question mode: a deterministic keyword floor AND a dedicated LLM detector (plus the extractor’s own signal) spot genuine sensitive disclosures and signpost support. Runs before merge so a genuine disclosure is never judged for sincerity or struck. Pass → continue.',
+      meta: {
+        promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
+        promptSpecimenId: 'extract-answer.sensitivity-detector',
+        hybrid: true,
+        note: 'Keyword floor + dedicated LLM detector + extractor field, merged (defence-in-depth); signposts support once per session on a genuine high-severity disclosure.',
+        settings: [
+          {
+            key: 'sensitivityAwareness',
+            label: 'Sensitivity awareness',
+            effect: 'Enables safeguarding detection and signposting on sensitive disclosures.',
+          },
+          {
+            key: 'supportMessage',
+            label: 'Support message',
+            effect: 'The supportive message shown when a sensitive disclosure is detected.',
+          },
+          {
+            key: 'supportResourceUrl',
+            label: 'Support resource link',
+            effect: 'Optional help link offered alongside the support message.',
+          },
+        ],
+      },
+      next: [{ targetStepId: 'seriousness', condition: 'Pass' }],
+    }),
+    node({
+      id: 'seriousness',
+      name: 'Genuineness gate',
+      type: 'guard',
+      x: 440,
+      y: 0,
+      description:
+        "A genuineness check — parity with question mode: a keyword abuse floor, or an LLM judge run under the extractor's binding, filters non-serious input; repeated strikes abandon abusive sessions. Skipped when the turn was a genuine disclosure (safeguarding outranks the sincerity gate). Pass → continue.",
+      meta: {
+        promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
+        promptSpecimenId: 'extract-answer.seriousness',
+        hybrid: true,
+        note: "Genuineness gate: keyword abuse floor OR an LLM judge run under the extractor's binding; strikes abandon abusive sessions.",
+        settings: [
+          {
+            key: 'abuseThreshold',
+            label: 'Abuse threshold',
+            effect:
+              'Number of non-genuine strikes before the session is abandoned; 0 turns the gate off.',
+          },
+        ],
+      },
+      next: [{ targetStepId: 'merge', condition: 'Pass' }],
     }),
     node({
       id: 'merge',
       name: 'Merge state',
       type: 'tool_call',
-      x: 220,
+      x: 660,
       y: 0,
       description:
         'Merge the extracted answers and slot fills into the effective state so the rest of the turn reasons over one coherent picture.',
@@ -80,7 +139,7 @@ export const dataSlotTurnWorkflow = diagram({
       id: 'park',
       name: 'Park gate',
       type: 'guard',
-      x: 440,
+      x: 880,
       y: 0,
       description:
         'When a slot has resisted several attempts, synthesise a provisional fill and bridge to a new theme rather than badgering the respondent. Pass → continue.',
@@ -101,7 +160,7 @@ export const dataSlotTurnWorkflow = diagram({
       id: 'contradiction',
       name: 'Detect contradictions',
       type: 'agent_call',
-      x: 660,
+      x: 1100,
       y: 0,
       description:
         'The Contradiction Detector checks the newly filled slots against earlier answers for genuine conflicts to reconcile.',
@@ -125,7 +184,7 @@ export const dataSlotTurnWorkflow = diagram({
       id: 'respond',
       name: 'Decide next move',
       type: 'route',
-      x: 880,
+      x: 1320,
       y: 0,
       description:
         'Route the turn: Offer to wrap up, interleave a lagging required Question, or move to the Next slot.',
@@ -151,7 +210,7 @@ export const dataSlotTurnWorkflow = diagram({
       id: 'offer',
       name: 'Offer to wrap up',
       type: 'agent_call',
-      x: 1100,
+      x: 1540,
       y: -120,
       description:
         'The Completion agent phrases the wrap-up offer when enough of the slots are satisfactorily filled.',
@@ -166,7 +225,7 @@ export const dataSlotTurnWorkflow = diagram({
       id: 'question',
       name: 'Ask a lagging question',
       type: 'agent_call',
-      x: 1100,
+      x: 1540,
       y: 0,
       description:
         "The Interviewer interleaves a lagging required question that the topic-led flow has not yet covered, phrased in the run's voice.",
@@ -193,7 +252,7 @@ export const dataSlotTurnWorkflow = diagram({
       id: 'nextslot',
       name: 'Pick the next slot',
       type: 'agent_call',
-      x: 1100,
+      x: 1540,
       y: 120,
       description:
         'The Selector picks the next data slot to pursue — topic-local when a theme is in flight, or adaptive embedding-ranked to find the most relevant next fact.',

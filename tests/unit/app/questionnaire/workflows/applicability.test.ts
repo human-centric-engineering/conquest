@@ -30,6 +30,8 @@ function flags(value: boolean): WorkflowFlags {
     personaSelection: value,
     adaptiveSelection: value,
     turnEvaluation: value,
+    designEvaluation: value,
+    advisor: value,
   };
 }
 
@@ -151,6 +153,17 @@ describe('workflow applicability', () => {
         })
       )
     ).toBe('unavailable');
+  });
+
+  it('design evaluation and config advisor gate purely on their flags', () => {
+    expect(statusOf('design-evaluation', makeCtx())).toBe('applies');
+    expect(
+      statusOf('design-evaluation', makeCtx({ flags: { ...flags(true), designEvaluation: false } }))
+    ).toBe('unavailable');
+    expect(statusOf('config-advisor', makeCtx())).toBe('applies');
+    expect(statusOf('config-advisor', makeCtx({ flags: { ...flags(true), advisor: false } }))).toBe(
+      'unavailable'
+    );
   });
 
   it('turn evaluation needs the turn-evaluation flag and captured turns', () => {

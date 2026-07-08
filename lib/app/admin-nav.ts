@@ -61,7 +61,7 @@ export function initAppNav(): void {
       },
       {
         href: '/admin/questionnaires/behind-the-scenes',
-        label: 'Behind the scenes',
+        label: 'Agentic Workflows',
         icon: Workflow,
         description: 'See the agentic pipelines — agents, prompts, tools, knowledge',
       },

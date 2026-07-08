@@ -20,16 +20,19 @@ import { buildPromptCatalog } from '@/app/api/v1/app/questionnaires/_lib/prompt-
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities/registry';
 import * as constants from '@/lib/app/questionnaire/constants';
+import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
 import { getNodeMeta } from '@/lib/app/questionnaire/workflows/types';
 
-// Every `*_AGENT_SLUG` export is a legitimate agent slug a node may reference.
-const KNOWN_AGENT_SLUGS = new Set(
-  Object.entries(constants)
+// Every `*_AGENT_SLUG` export is a legitimate agent slug a node may reference, plus the seven
+// design-evaluation judge agents (whose slugs live in the dimension registry, not constants.ts).
+const KNOWN_AGENT_SLUGS = new Set<string>([
+  ...Object.entries(constants)
     .filter(([name, value]) => name.endsWith('_AGENT_SLUG') && typeof value === 'string')
-    .map(([, value]) => value as string)
-);
+    .map(([, value]) => value as string),
+  ...EVALUATION_JUDGE_SLUGS,
+]);
 
 const catalog = buildPromptCatalog();
 const catalogBySlug = new Map(catalog.map((entry) => [entry.slug, entry]));
@@ -84,6 +87,7 @@ describe('workflow diagram integrity', () => {
     constants.REPORT_FORMATTER_AGENT_SLUG,
     constants.COHORT_REPORT_AGENT_SLUG,
     constants.QUESTIONNAIRE_EDIT_AGENT_SLUG,
+    constants.QUESTIONNAIRE_ADVISOR_AGENT_SLUG,
   ]);
 
   it('every agent-backed step exposes a catalogued prompt (or is a known exception)', () => {

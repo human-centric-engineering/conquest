@@ -94,15 +94,18 @@ export const answerExtractionWorkflow = diagram({
       x: 660,
       y: 0,
       description:
-        "Semantic per-type validation checks each answer against the slot's real typeConfig — a date is a valid date, a choice is an allowed option. Pass → propagate.",
+        "Hybrid gate: deterministic per-type validation checks each answer against the slot's real typeConfig — a date is a valid date, a choice is an allowed option. In 'fallback'/'always' answer-fit mode, free text that fails that floor is force-fit to the closest option by a second LLM resolver pass. Pass → propagate.",
       meta: {
-        note: "Semantic per-type validation against the slot's real typeConfig.",
+        promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
+        promptSpecimenId: 'extract-answer.force-fit',
+        hybrid: true,
+        note: "Deterministic per-type validation floor + an LLM force-fit resolver (fallback/always mode) run under the extractor's binding.",
         settings: [
           {
             key: 'answerFitMode',
             label: 'Answer fit mode',
             effect:
-              "In 'fallback'/'always' mode, unmatched free text is force-fit to the closest option here.",
+              "off / fallback / always — in 'fallback'/'always', unmatched free text is force-fit to the closest option by an LLM resolver pass here.",
           },
         ],
       },

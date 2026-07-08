@@ -93,6 +93,12 @@ export interface NodeMeta {
   /** Questionnaire Settings-tab options that affect this step's behaviour. */
   settings?: StepSetting[];
   /**
+   * Visual grouping: steps that share a `group.id` are drawn inside one labelled container box on
+   * the canvas (e.g. the seven design-evaluation judges as a "Judge panel"). Pure presentation —
+   * the box is synthesised client-side from member positions; it is not a DAG node.
+   */
+  group?: { id: string; label: string };
+  /**
    * Marks a step that runs BOTH a deterministic path and an LLM path in the same turn — a
    * "hybrid" step. The safety gates are the canonical case: the sensitivity gate merges a
    * deterministic keyword floor with a dedicated LLM safeguarding detector (and the extractor's
@@ -173,6 +179,8 @@ export interface WorkflowFlags {
   personaSelection: boolean;
   adaptiveSelection: boolean;
   turnEvaluation: boolean;
+  designEvaluation: boolean;
+  advisor: boolean;
 }
 
 /** Everything a diagram's `applicability` predicate reads. Built per version, server-side. */

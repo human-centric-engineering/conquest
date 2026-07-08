@@ -14,7 +14,9 @@ import type {
 
 import { answerExtractionWorkflow } from '@/lib/app/questionnaire/workflows/definitions/answer-extraction';
 import { cohortReportWorkflow } from '@/lib/app/questionnaire/workflows/definitions/cohort-report';
+import { configAdvisorWorkflow } from '@/lib/app/questionnaire/workflows/definitions/config-advisor';
 import { conversationTurnWorkflow } from '@/lib/app/questionnaire/workflows/definitions/conversation-turn';
+import { designEvaluationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/design-evaluation';
 import { dataSlotGenerationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-generation';
 import { dataSlotTurnWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-turn';
 import { generativeAuthoringWorkflow } from '@/lib/app/questionnaire/workflows/definitions/generative-authoring';
@@ -35,6 +37,8 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   dataSlotTurnWorkflow,
   respondentReportWorkflow,
   cohortReportWorkflow,
+  designEvaluationWorkflow,
+  configAdvisorWorkflow,
   turnInspectorWorkflow,
   turnEvaluationWorkflow,
 ] as const;

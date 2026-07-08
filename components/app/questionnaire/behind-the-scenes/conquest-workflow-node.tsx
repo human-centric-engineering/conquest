@@ -28,7 +28,11 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { Blend, Boxes, Database, HelpCircle, Sparkles } from 'lucide-react';
 
 import { getStepMetadata, getStepOutputs } from '@/lib/orchestration/engine/step-registry';
-import { nodeExecutionKind, nodeRetrievalKind } from '@/lib/app/questionnaire/workflows/types';
+import {
+  getNodeMeta,
+  nodeExecutionKind,
+  nodeRetrievalKind,
+} from '@/lib/app/questionnaire/workflows/types';
 import type { NodeExecutionKind, RetrievalKind } from '@/lib/app/questionnaire/workflows/types';
 import { cn } from '@/lib/utils';
 import type { PatternNode as PatternNodeType } from '@/components/admin/orchestration/workflow-builder/workflow-mappers';
@@ -153,12 +157,94 @@ export function ConquestWorkflowNode({ data, selected }: NodeProps<PatternNodeTy
   );
 }
 
+// ---------------------------------------------------------------------------
+// Panel group box — a labelled container drawn *behind* a set of member nodes
+// (e.g. the seven design-evaluation judges). Synthesised client-side from member
+// positions by `buildGroupNodes`; not a DAG node. Non-interactive: it never
+// intercepts clicks (the members render on top) and is never selectable.
+// ---------------------------------------------------------------------------
+
+interface PanelGroupData extends Record<string, unknown> {
+  label: string;
+  width: number;
+  height: number;
+}
+
+export function PanelGroupNode({ data }: NodeProps) {
+  const { label, width, height } = data as PanelGroupData;
+  return (
+    <div
+      style={{ width, height }}
+      className="pointer-events-none relative rounded-xl border-2 border-dashed border-slate-300/80 bg-slate-100/30 dark:border-slate-600/70 dark:bg-slate-800/20"
+    >
+      <span className="absolute -top-2.5 left-3 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 uppercase dark:bg-slate-700 dark:text-slate-200">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// Approx node footprint + padding used to size a group box from member positions
+// (member `position` is the hand-placed `_layout`, so this is deterministic — no
+// dependence on React Flow's measured dimensions).
+const GROUP_APPROX_W = 176;
+const GROUP_APPROX_H = 104;
+const GROUP_PAD_X = 28;
+const GROUP_PAD_TOP = 44;
+const GROUP_PAD_BOTTOM = 24;
+
+/**
+ * Synthesise a container node for every `_meta.group` on the mapped nodes. Returned nodes are
+ * meant to be prepended to the node list (so they paint *behind* their members) by the canvas.
+ */
+export function buildGroupNodes(nodes: PatternNodeType[]): Node[] {
+  const groups = new Map<string, { label: string; members: PatternNodeType[] }>();
+  for (const n of nodes) {
+    const meta = getNodeMeta((n.data as { config?: Record<string, unknown> }).config ?? {});
+    if (!meta.group) continue;
+    const entry = groups.get(meta.group.id) ?? { label: meta.group.label, members: [] };
+    entry.members.push(n);
+    groups.set(meta.group.id, entry);
+  }
+
+  const out: Node[] = [];
+  for (const [id, { label, members }] of groups) {
+    if (members.length === 0) continue;
+    const xs = members.map((m) => m.position.x);
+    const ys = members.map((m) => m.position.y);
+    const x = Math.min(...xs) - GROUP_PAD_X;
+    const y = Math.min(...ys) - GROUP_PAD_TOP;
+    out.push({
+      id: `group-${id}`,
+      type: 'panelGroup',
+      position: { x, y },
+      data: {
+        label,
+        width: Math.max(...xs) + GROUP_APPROX_W + GROUP_PAD_X - x,
+        height: Math.max(...ys) + GROUP_APPROX_H + GROUP_PAD_BOTTOM - y,
+      },
+      selectable: false,
+      draggable: false,
+      // Click-through: the box is pure decoration, so clicks in its padding reach the pane
+      // (which deselects) rather than the container.
+      style: { pointerEvents: 'none' },
+      zIndex: 0,
+    });
+  }
+  return out;
+}
+
 /** nodeTypes map for the read-only ConQuest canvas (keyed 'pattern' to match the mapper). */
-export const conquestNodeTypes = { pattern: ConquestWorkflowNode } as const;
+export const conquestNodeTypes = {
+  pattern: ConquestWorkflowNode,
+  panelGroup: PanelGroupNode,
+} as const;
 
 /** MiniMap fill for a node, matching the retrieval/agent/hybrid/deterministic node treatment.
  *  Defensive: MiniMap must never throw here or it renders no nodes at all. */
 export function miniMapNodeColor(node: Node): string {
+  // Group container: a pale fill so it reads as background, not a step.
+  if (node?.type === 'panelGroup') return '#e2e8f0';
   const data = node?.data as { config?: Record<string, unknown> } | undefined;
   // violet-600 for retrieval (KB/vector); blue-600 for AI; sky-500 for hybrid; slate-400 for
   // deterministic (all dark enough to read on the light map).

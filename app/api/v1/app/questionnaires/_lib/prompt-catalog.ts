@@ -548,6 +548,14 @@ const ANSWER_EXTRACTOR: PromptAgentCatalogEntry = {
       },
     }),
     specimen({
+      id: 'extract-answer.force-fit',
+      label: 'Answer-fit resolver (force-fit pass)',
+      description:
+        'When `answerFitMode` is `fallback` or `always`, a second pass — run under this agent’s binding with a force-fit framing — maps free-text that failed deterministic per-type validation onto the closest allowed choice/scale option. The deterministic validation is the floor; this LLM pass only resolves what it could not.',
+      conditions: ['Answer fit mode: fallback / always'],
+      build: () => norm(buildAnswerExtractionPrompt({ ...answerCtx(), forceFit: true })),
+    }),
+    specimen({
       id: 'extract-answer.seriousness',
       label: 'Seriousness gate (stage 2)',
       description:

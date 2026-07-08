@@ -83,6 +83,13 @@ describe('diagram execution tags', () => {
   it('tags the safety gates as hybrid (deterministic floor + an LLM path)', () => {
     expect(kinds['conversation-turn/sensitivity']).toBe('hybrid');
     expect(kinds['conversation-turn/seriousness']).toBe('hybrid');
+    // Data-slot mode runs the same gates in parity (before merge).
+    expect(kinds['data-slot-turn/sensitivity']).toBe('hybrid');
+    expect(kinds['data-slot-turn/seriousness']).toBe('hybrid');
+  });
+
+  it('tags the answer-fit validate gate as hybrid (type-validation floor + LLM force-fit)', () => {
+    expect(kinds['answer-extraction/validate']).toBe('hybrid');
   });
 
   it('keeps pure LLM steps as agent', () => {
@@ -92,5 +99,8 @@ describe('diagram execution tags', () => {
 
   it('leaves deterministic plumbing as deterministic', () => {
     expect(kinds['conversation-turn/merge']).toBe('deterministic');
+    expect(kinds['data-slot-turn/merge']).toBe('deterministic');
+    // The park gate infers via the extraction call + a deterministic placeholder — not its own LLM path.
+    expect(kinds['data-slot-turn/park']).toBe('deterministic');
   });
 });
