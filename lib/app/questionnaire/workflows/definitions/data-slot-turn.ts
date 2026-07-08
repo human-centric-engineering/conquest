@@ -48,7 +48,20 @@ export const dataSlotTurnWorkflow = diagram({
         promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
         promptSpecimenId: 'extract-answer.data-slots',
         capabilitySlugs: [EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG],
+        vector: {
+          status: 'pluggable',
+          description:
+            'At scale a pgvector pre-filter embeds the message and narrows the combined question + data-slot candidate set handed to the extractor to the top-K most similar (plus safety-rail slots) — behaviour-preserving and fail-soft.',
+        },
         note: 'ONE combined call fills question answers AND data-slot fills.',
+        settings: [
+          {
+            key: 'answerFitMode',
+            label: 'Answer fit mode',
+            effect:
+              'Controls free-text→option mapping for question answers filled alongside slots.',
+          },
+        ],
       },
       next: ['merge'],
     }),
@@ -73,6 +86,14 @@ export const dataSlotTurnWorkflow = diagram({
         'When a slot has resisted several attempts, synthesise a provisional fill and bridge to a new theme rather than badgering the respondent. Pass → continue.',
       meta: {
         note: 'After N attempts, synthesise a provisional fill and bridge to a new theme.',
+        settings: [
+          {
+            key: 'maxDataSlotAttempts',
+            label: 'Max slot attempts',
+            effect:
+              "How many tries on a slot before it's parked with a provisional fill and the topic moves on.",
+          },
+        ],
       },
       next: [{ targetStepId: 'contradiction', condition: 'Pass' }],
     }),
@@ -90,6 +111,13 @@ export const dataSlotTurnWorkflow = diagram({
         promptSpecimenId: 'detect.probe',
         capabilitySlugs: [DETECT_CONTRADICTIONS_CAPABILITY_SLUG],
         note: 'Compare slot fills against earlier answers for genuine conflicts.',
+        settings: [
+          {
+            key: 'contradictionMode',
+            label: 'Contradiction mode',
+            effect: 'off / flag / probe — how conflicts across captured answers are handled.',
+          },
+        ],
       },
       next: ['respond'],
     }),
@@ -103,6 +131,15 @@ export const dataSlotTurnWorkflow = diagram({
         'Route the turn: Offer to wrap up, interleave a lagging required Question, or move to the Next slot.',
       config: {
         routes: [{ label: 'Offer' }, { label: 'Question' }, { label: 'Next slot' }],
+      },
+      meta: {
+        settings: [
+          {
+            key: 'presentationMode',
+            label: 'Presentation mode',
+            effect: 'chat / form / both — shapes delivery of the next prompt.',
+          },
+        ],
       },
       next: [
         { targetStepId: 'offer', condition: 'Offer' },
@@ -138,6 +175,18 @@ export const dataSlotTurnWorkflow = diagram({
         promptCatalogSlug: QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
         promptSpecimenId: 'interview.tone',
         note: 'Interleave a lagging required question.',
+        settings: [
+          {
+            key: 'tone',
+            label: 'Interviewer tone',
+            effect: 'Tone dials shape phrasing when a lagging required question is interleaved.',
+          },
+          {
+            key: 'personaSelection.enabled',
+            label: 'Interviewer personas',
+            effect: 'A chosen persona replaces the tone dials for phrasing.',
+          },
+        ],
       },
     }),
     node({
@@ -152,7 +201,20 @@ export const dataSlotTurnWorkflow = diagram({
         agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
         promptCatalogSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
         promptSpecimenId: 'select.pick',
+        vector: {
+          status: 'active',
+          description:
+            'When no theme is in flight, the adaptive path embeds the conversation and ranks the open data slots by pgvector similarity to find the most relevant next fact to pursue (the "Adaptive data-slot ranking" embedding call).',
+        },
         note: 'Pick the next data slot — topic-local or adaptive embedding-ranked.',
+        settings: [
+          {
+            key: 'selectionStrategy',
+            label: 'Selection strategy',
+            effect:
+              "'adaptive' enables embedding-ranked next-slot selection; otherwise slots are picked topic-locally.",
+          },
+        ],
       },
     }),
   ],

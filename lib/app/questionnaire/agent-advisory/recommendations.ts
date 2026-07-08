@@ -55,14 +55,15 @@ import {
   QUESTIONNAIRE_ANSWER_REFINER_AGENT_SLUG,
   QUESTIONNAIRE_COMPLETION_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
+  TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
 /**
- * The turn-evaluator judge slug. Defined in its seed
- * (`prisma/seeds/app-questionnaire/043-turn-evaluator-agent.ts`) but not
- * exported from `constants.ts`, so it's mirrored here with this comment.
+ * The turn-evaluator judge slug. Canonically defined in `constants.ts` (the single home for
+ * questionnaire agent slugs, which the workflow-diagram integrity test pins against); re-exported
+ * here for the advisory recommendations that reference it.
  */
-export const TURN_EVALUATOR_AGENT_SLUG = 'turn-evaluator';
+export { TURN_EVALUATOR_AGENT_SLUG };
 
 /** The three generative task tiers the questionnaire agents resolve under. */
 export type AdvisoryTaskTier = 'reasoning' | 'chat' | 'routing';

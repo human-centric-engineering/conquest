@@ -69,6 +69,14 @@ export const respondentReportWorkflow = diagram({
             "When the questionnaire is attributed to a demo client with a knowledge tag, the report is grounded in that client's documents (top-6, best-effort).",
         },
         note: 'Optional client-KB grounding, scoped to the demo client.',
+        settings: [
+          {
+            key: 'respondentReport.generation.useClientKnowledge',
+            label: 'Client knowledge grounding',
+            effect:
+              "When on, the report is grounded in the attributed demo client's knowledge documents.",
+          },
+        ],
       },
       next: ['generate'],
     }),
@@ -83,6 +91,14 @@ export const respondentReportWorkflow = diagram({
       meta: {
         agentSlug: RESPONDENT_REPORT_AGENT_SLUG,
         note: 'The reasoning model writes the report.',
+        settings: [
+          {
+            key: 'respondentReport.mode',
+            label: 'Report mode',
+            effect:
+              "raw / raw_plus_insights / narrative — only the latter two invoke the AI writer; 'raw' is deterministic.",
+          },
+        ],
       },
       next: ['format'],
     }),

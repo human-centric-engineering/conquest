@@ -16,15 +16,21 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import {
+  nodeExecutionKindFromMeta,
+  type NodeExecutionKind,
+} from '@/lib/app/questionnaire/workflows/types';
 import type { NodeEnrichment } from '@/lib/app/questionnaire/workflows/views';
 
 interface NodeInfoPanelProps {
   nodeLabel: string;
   nodeType: string;
+  /** The step's authored role text (`WorkflowStep.description`). */
+  nodeRole?: string;
   enrichment: NodeEnrichment | null;
 }
 
-export function NodeInfoPanel({ nodeLabel, nodeType, enrichment }: NodeInfoPanelProps) {
+export function NodeInfoPanel({ nodeLabel, nodeType, nodeRole, enrichment }: NodeInfoPanelProps) {
   if (!enrichment) {
     return (
       <PanelShell nodeLabel={nodeLabel} nodeType={nodeType}>
@@ -33,56 +39,136 @@ export function NodeInfoPanel({ nodeLabel, nodeType, enrichment }: NodeInfoPanel
     );
   }
 
-  const { meta, agent, prompt, kb, capabilities } = enrichment;
+  const { meta, agent, prompt, kb, vector, capabilities } = enrichment;
+  const execution = nodeExecutionKindFromMeta(meta);
+  const retrieval = kb ? 'kb' : vector ? 'vector' : null;
 
   return (
-    <PanelShell nodeLabel={nodeLabel} nodeType={nodeType} note={meta.note}>
-      <Tabs defaultValue="agent" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="agent">Agent</TabsTrigger>
-          <TabsTrigger value="prompt">Prompt</TabsTrigger>
-          <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
-          <TabsTrigger value="tools">Tools</TabsTrigger>
-        </TabsList>
+    <PanelShell
+      nodeLabel={nodeLabel}
+      nodeType={nodeType}
+      execution={execution}
+      retrieval={retrieval}
+    >
+      <div className="space-y-4">
+        {/* Role — always shown, applies to every step incl. deterministic ones. */}
+        <section>
+          <SectionLabel>Role</SectionLabel>
+          <p className="text-sm">{nodeRole ?? meta.note ?? 'No description for this step.'}</p>
+          {nodeRole && meta.note ? (
+            <p className="text-muted-foreground mt-1 text-xs">{meta.note}</p>
+          ) : null}
+        </section>
 
-        <TabsContent value="agent" className="mt-4">
-          <AgentTab agent={agent} />
-        </TabsContent>
-        <TabsContent value="prompt" className="mt-4">
-          <PromptTab prompt={prompt} />
-        </TabsContent>
-        <TabsContent value="knowledge" className="mt-4">
-          <KnowledgeTab kb={kb} agentAccessMode={agent?.knowledgeAccessMode ?? null} />
-        </TabsContent>
-        <TabsContent value="tools" className="mt-4">
-          <ToolsTab capabilities={capabilities} />
-        </TabsContent>
-      </Tabs>
+        {/* Settings that change this step's behaviour. */}
+        <section>
+          <SectionLabel>Settings that affect this step</SectionLabel>
+          {meta.settings && meta.settings.length > 0 ? (
+            <ul className="space-y-2">
+              {meta.settings.map((s) => (
+                <li key={s.key} className="rounded-md border p-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{s.label}</span>
+                    <code className="text-muted-foreground bg-muted rounded px-1 py-0.5 text-[10px]">
+                      {s.key}
+                    </code>
+                  </div>
+                  <p className="text-muted-foreground mt-0.5 text-xs">{s.effect}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              No questionnaire settings change this step directly.
+            </p>
+          )}
+        </section>
+
+        <Separator />
+
+        <Tabs defaultValue="agent" className="w-full">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="agent">Agent</TabsTrigger>
+            <TabsTrigger value="prompt">Prompt</TabsTrigger>
+            <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
+            <TabsTrigger value="tools">Tools</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="agent" className="mt-4">
+            <AgentTab agent={agent} execution={execution} />
+          </TabsContent>
+          <TabsContent value="prompt" className="mt-4">
+            <PromptTab prompt={prompt} />
+          </TabsContent>
+          <TabsContent value="knowledge" className="mt-4">
+            <KnowledgeTab
+              kb={kb}
+              vector={vector}
+              agentAccessMode={agent?.knowledgeAccessMode ?? null}
+            />
+          </TabsContent>
+          <TabsContent value="tools" className="mt-4">
+            <ToolsTab capabilities={capabilities} />
+          </TabsContent>
+        </Tabs>
+      </div>
     </PanelShell>
   );
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="text-muted-foreground mb-1.5 text-[11px] font-semibold tracking-wide uppercase">
+      {children}
+    </h4>
+  );
+}
+
+/** Header badge label per execution kind. */
+const EXECUTION_LABEL: Record<NodeExecutionKind, string> = {
+  agent: 'AI agent',
+  hybrid: 'Hybrid',
+  deterministic: 'Deterministic',
+};
+
 function PanelShell({
   nodeLabel,
   nodeType,
-  note,
+  execution,
+  retrieval,
   children,
 }: {
   nodeLabel: string;
   nodeType: string;
-  note?: string;
+  execution?: NodeExecutionKind;
+  retrieval?: 'kb' | 'vector' | null;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b p-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-base font-semibold">{nodeLabel}</h3>
+          {execution === undefined ? null : (
+            <Badge
+              variant={execution === 'deterministic' ? 'outline' : 'default'}
+              className={cn(
+                execution === 'hybrid' &&
+                  'border-transparent bg-sky-500 text-white hover:bg-sky-500/90'
+              )}
+            >
+              {EXECUTION_LABEL[execution]}
+            </Badge>
+          )}
+          {retrieval ? (
+            <Badge className="bg-violet-100 text-violet-900 dark:bg-violet-900/50 dark:text-violet-100">
+              {retrieval === 'kb' ? 'Knowledge base' : 'Vector engine'}
+            </Badge>
+          ) : null}
           <code className="text-muted-foreground bg-muted rounded px-1.5 py-0.5 text-[10px] uppercase">
             {nodeType}
           </code>
         </div>
-        {note ? <p className="text-muted-foreground mt-1 text-xs">{note}</p> : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
     </div>
@@ -102,8 +188,23 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function AgentTab({ agent }: { agent: NodeEnrichment['agent'] }) {
+function AgentTab({
+  agent,
+  execution,
+}: {
+  agent: NodeEnrichment['agent'];
+  execution: NodeExecutionKind;
+}) {
   if (!agent) {
+    if (execution === 'hybrid') {
+      return (
+        <Empty>
+          This step blends a deterministic path (a keyword floor) with a dedicated LLM call that
+          runs under the Answer Extractor’s provider/model binding — it has no agent row of its own.
+          See the Prompt tab for the LLM path.
+        </Empty>
+      );
+    }
     return <Empty>This step runs deterministic code — no AI agent.</Empty>;
   }
   const modelLabel = agent.resolved
@@ -158,7 +259,7 @@ function PromptTab({ prompt }: { prompt: NodeEnrichment['prompt'] }) {
             <div className="text-muted-foreground bg-muted/50 border-b px-2 py-1 text-[10px] font-semibold uppercase">
               {m.role}
             </div>
-            <pre className="max-h-48 overflow-auto p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+            <pre className="max-h-[28rem] overflow-auto p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
               {m.content}
             </pre>
           </div>
@@ -178,34 +279,61 @@ function PromptTab({ prompt }: { prompt: NodeEnrichment['prompt'] }) {
   );
 }
 
+function StatusBadge({ status, label }: { status: 'active' | 'pluggable'; label: string }) {
+  return (
+    <Badge
+      className={cn(
+        status === 'active'
+          ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-100'
+          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
+      )}
+    >
+      {label}
+    </Badge>
+  );
+}
+
 function KnowledgeTab({
   kb,
+  vector,
   agentAccessMode,
 }: {
   kb: NodeEnrichment['kb'];
+  vector: NodeEnrichment['vector'];
   agentAccessMode: string | null;
 }) {
-  if (!kb) {
-    return <Empty>No knowledge base is wired into this step.</Empty>;
+  if (!kb && !vector) {
+    return <Empty>No knowledge base or vector engine is wired into this step.</Empty>;
   }
   return (
-    <div className="space-y-3">
-      <Badge
-        className={cn(
-          kb.status === 'active'
-            ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-100'
-            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
-        )}
-      >
-        {kb.status === 'active' ? 'Knowledge base active' : 'Knowledge base pluggable'}
-      </Badge>
-      <p className="text-sm">{kb.description}</p>
-      <Separator />
-      <Field
-        label="Mechanism"
-        value={kb.mechanism === 'agent-grant' ? 'Agent knowledge grant' : 'Per-client KB tag'}
-      />
-      {agentAccessMode ? <Field label="Agent access mode" value={agentAccessMode} /> : null}
+    <div className="space-y-4">
+      {kb ? (
+        <section className="space-y-2">
+          <StatusBadge
+            status={kb.status}
+            label={kb.status === 'active' ? 'Knowledge base active' : 'Knowledge base pluggable'}
+          />
+          <p className="text-sm">{kb.description}</p>
+          <Field
+            label="Mechanism"
+            value={kb.mechanism === 'agent-grant' ? 'Agent knowledge grant' : 'Per-client KB tag'}
+          />
+          {agentAccessMode ? <Field label="Agent access mode" value={agentAccessMode} /> : null}
+        </section>
+      ) : null}
+
+      {kb && vector ? <Separator /> : null}
+
+      {vector ? (
+        <section className="space-y-2">
+          <StatusBadge
+            status={vector.status}
+            label={vector.status === 'active' ? 'Vector engine active' : 'Vector engine pluggable'}
+          />
+          <p className="text-sm">{vector.description}</p>
+          <Field label="Mechanism" value="Embedding similarity (pgvector)" />
+        </section>
+      ) : null}
     </div>
   );
 }

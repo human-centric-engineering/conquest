@@ -29,6 +29,7 @@ function flags(value: boolean): WorkflowFlags {
     voiceInput: value,
     personaSelection: value,
     adaptiveSelection: value,
+    turnEvaluation: value,
   };
 }
 
@@ -126,5 +127,53 @@ describe('workflow applicability', () => {
       roundItemCount: 0,
     });
     expect(statusOf('cohort-report', noRound)).toBe('inactive');
+  });
+
+  it('turn inspector needs live sessions and the inspector toggle on', () => {
+    const on = makeCtx({
+      config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
+    });
+    expect(statusOf('turn-inspector', on)).toBe('applies');
+    // Toggle off → inactive (flag on, per-version config gate off).
+    expect(
+      statusOf(
+        'turn-inspector',
+        makeCtx({ config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: false } })
+      )
+    ).toBe('inactive');
+    // Live sessions off → unavailable.
+    expect(
+      statusOf(
+        'turn-inspector',
+        makeCtx({
+          flags: { ...flags(true), liveSessions: false },
+          config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
+        })
+      )
+    ).toBe('unavailable');
+  });
+
+  it('turn evaluation needs the turn-evaluation flag and captured turns', () => {
+    const on = makeCtx({
+      config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
+    });
+    expect(statusOf('turn-evaluation', on)).toBe('applies');
+    // Flag off → unavailable.
+    expect(
+      statusOf(
+        'turn-evaluation',
+        makeCtx({
+          flags: { ...flags(true), turnEvaluation: false },
+          config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
+        })
+      )
+    ).toBe('unavailable');
+    // Flag on but no inspector (no captured turns) → inactive.
+    expect(
+      statusOf(
+        'turn-evaluation',
+        makeCtx({ config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: false } })
+      )
+    ).toBe('inactive');
   });
 });

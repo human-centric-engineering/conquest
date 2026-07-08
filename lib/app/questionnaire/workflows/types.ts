@@ -43,6 +43,34 @@ export interface NodeKbPlugPoint {
 }
 
 /**
+ * Where an embedding model / vector store is used on a step — semantic similarity ranking or
+ * vector search (pgvector). Distinct from {@link NodeKbPlugPoint}: a KB is a document corpus the
+ * step *reads*; a vector plug-point is the embedding/similarity *engine* the step *runs*. Both are
+ * "retrieval" for the visualizer's highlight ({@link nodeRetrievalKind}).
+ */
+export interface NodeVectorPlugPoint {
+  /** `active` = embeddings run on this step's enabled path (e.g. adaptive selection); `pluggable` =
+   *  an optional/at-scale insertion point (e.g. the extraction candidate pre-filter). */
+  status: 'active' | 'pluggable';
+  /** One line: what is embedded and what the vector similarity ranks or narrows. */
+  description: string;
+}
+
+/**
+ * A questionnaire Settings-tab option that changes this step's behaviour. `key`
+ * is a dotted path into {@link QuestionnaireConfigShape} (validated by the
+ * integrity test), so an operator can find it on the Settings tab.
+ */
+export interface StepSetting {
+  /** Dotted config path, e.g. `contradictionMode` or `personaSelection.enabled`. */
+  key: string;
+  /** Human label for the setting. */
+  label: string;
+  /** One line: how changing this setting changes the step's behaviour. */
+  effect: string;
+}
+
+/**
  * ConQuest overlay stored on each `WorkflowStep.config` under `_meta`. All
  * fields are string keys resolved server-side by `enrich.ts` — the definition
  * files never embed live data.
@@ -58,14 +86,66 @@ export interface NodeMeta {
   capabilitySlugs?: string[];
   /** Knowledge-base plug-point, if this step reads or could read a KB. */
   kb?: NodeKbPlugPoint;
+  /** Embedding/vector-engine plug-point, if this step ranks or searches by vector similarity. */
+  vector?: NodeVectorPlugPoint;
   /** Short "what runs here / when" note shown in the info panel. */
   note?: string;
+  /** Questionnaire Settings-tab options that affect this step's behaviour. */
+  settings?: StepSetting[];
+  /**
+   * Marks a step that runs BOTH a deterministic path and an LLM path in the same turn — a
+   * "hybrid" step. The safety gates are the canonical case: the sensitivity gate merges a
+   * deterministic keyword floor with a dedicated LLM safeguarding detector (and the extractor's
+   * structured field); the genuineness gate runs a keyword floor OR an LLM judge. The binary
+   * agent/deterministic split misreads these — a gate with an LLM detector is not "just code", nor
+   * is it a pure agent step. Set alongside a `promptCatalogSlug` so the Prompt tab can show the LLM
+   * path's prompt. See {@link nodeExecutionKind}.
+   */
+  hybrid?: boolean;
 }
 
 /** Read the `_meta` overlay off a step config (safe on any config blob). */
 export function getNodeMeta(config: Record<string, unknown>): NodeMeta {
   const raw = config['_meta'];
   return raw && typeof raw === 'object' ? raw : {};
+}
+
+/**
+ * How a step executes, for the visualizer's node treatment and legend:
+ *  - `agent` — an LLM agent runs it (`agentSlug`/`promptCatalogSlug`), no deterministic branch.
+ *  - `hybrid` — it runs a deterministic path AND an LLM path in the same turn ({@link NodeMeta.hybrid}).
+ *  - `deterministic` — plumbing / code-only (parse, merge, persist, a pure-code guard).
+ * `hybrid` is checked first: a hybrid gate also carries a `promptCatalogSlug`, so it would otherwise
+ * be mistaken for a pure `agent` step.
+ */
+export type NodeExecutionKind = 'agent' | 'hybrid' | 'deterministic';
+
+/** {@link NodeExecutionKind} for a resolved `_meta` overlay. */
+export function nodeExecutionKindFromMeta(meta: NodeMeta): NodeExecutionKind {
+  if (meta.hybrid) return 'hybrid';
+  if (meta.agentSlug || meta.promptCatalogSlug) return 'agent';
+  return 'deterministic';
+}
+
+/** {@link NodeExecutionKind} for a raw step config blob (reads its `_meta` overlay). */
+export function nodeExecutionKind(config: Record<string, unknown> | undefined): NodeExecutionKind {
+  return nodeExecutionKindFromMeta(getNodeMeta(config ?? {}));
+}
+
+/** The two kinds of retrieval a step can perform — a knowledge-base read, or a vector-engine run. */
+export type RetrievalKind = 'kb' | 'vector';
+
+/**
+ * The retrieval kind a step involves, or `null`. A step is "retrieval" when it reads a knowledge
+ * base ({@link NodeMeta.kb}) or runs an embedding/vector engine ({@link NodeMeta.vector}) — these
+ * get the visualizer's distinct third node treatment (violet), separate from the agentic (blue) /
+ * deterministic (dashed) split. `kb` takes precedence when a step somehow carries both.
+ */
+export function nodeRetrievalKind(config: Record<string, unknown>): RetrievalKind | null {
+  const meta = getNodeMeta(config);
+  if (meta.kb) return 'kb';
+  if (meta.vector) return 'vector';
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +172,7 @@ export interface WorkflowFlags {
   voiceInput: boolean;
   personaSelection: boolean;
   adaptiveSelection: boolean;
+  turnEvaluation: boolean;
 }
 
 /** Everything a diagram's `applicability` predicate reads. Built per version, server-side. */

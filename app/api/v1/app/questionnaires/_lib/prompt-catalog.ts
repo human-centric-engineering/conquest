@@ -27,6 +27,8 @@ import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 import { buildExtractionPrompt } from '@/lib/app/questionnaire/ingestion/extraction-prompt';
 import {
   buildComposeFullPrompt,
+  buildComposeOutlinePrompt,
+  buildComposeSectionQuestionsPrompt,
   buildRefineStructurePrompt,
 } from '@/lib/app/questionnaire/ingestion/compose-prompt';
 import { buildAnswerExtractionPrompt } from '@/lib/app/questionnaire/extraction/extraction-prompt';
@@ -34,12 +36,15 @@ import { buildContradictionDetectionPrompt } from '@/lib/app/questionnaire/contr
 import { buildRefinementPrompt } from '@/lib/app/questionnaire/refinement/refinement-prompt';
 import { buildCompletionOfferPrompt } from '@/lib/app/questionnaire/completion/completion-prompt';
 import { buildSeriousnessJudgePrompt } from '@/lib/app/questionnaire/seriousness/judge-prompt';
+import { buildSensitivityDetectPrompt } from '@/lib/app/questionnaire/sensitivity';
 import {
   buildDataSlotGenerationPrompt,
   buildDataSlotRefinementPrompt,
   buildDataSlotAssignmentPrompt,
 } from '@/lib/app/questionnaire/data-slots/generation';
 import { buildJudgePrompt } from '@/lib/app/questionnaire/evaluation/judge-prompt';
+import { buildTurnEvaluatorPrompt } from '@/lib/app/questionnaire/turn-evaluation/prompt';
+import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation/types';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { DEFAULT_PERSONA_KEY, DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
 import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
@@ -65,6 +70,7 @@ import {
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
+  TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
 // ---------------------------------------------------------------------------
@@ -283,10 +289,42 @@ const COMPOSER: PromptAgentCatalogEntry = {
   instructionsAreLoadBearing: false,
   specimens: [
     specimen({
-      id: 'compose.full',
-      label: 'Compose from brief',
+      id: 'compose.outline',
+      label: 'Compose outline (streaming · phase 1)',
       description:
-        'Sent when an admin describes a questionnaire in plain English and asks to build it.',
+        'Phase 1 of streaming composition: plan the questionnaire SHAPE only — an inferred goal/audience and a section outline, with no questions written yet.',
+      build: () =>
+        norm(
+          buildComposeOutlinePrompt(
+            '{{ the admin plain-English brief describing the questionnaire to build }}',
+            { goal: '{{ admin-supplied goal, if any }}', audience: SAMPLE_AUDIENCE }
+          )
+        ),
+    }),
+    specimen({
+      id: 'compose.sections',
+      label: 'Draft section questions (streaming · phase 2)',
+      description:
+        'Phase 2 of streaming composition: write the questions for ONE section, fanned out per section in parallel so a long questionnaire composes as fast as a short one.',
+      build: () =>
+        norm(
+          buildComposeSectionQuestionsPrompt(
+            '{{ the admin plain-English brief describing the questionnaire to build }}',
+            {
+              ordinal: 0,
+              title: '{{ section 1 title }}',
+              description: '{{ section 1 description }}',
+              siblingTitles: ['{{ section 1 title }}', '{{ section 2 title }}'],
+              goal: '{{ questionnaire goal }}',
+            }
+          )
+        ),
+    }),
+    specimen({
+      id: 'compose.full',
+      label: 'Compose from brief (single-shot)',
+      description:
+        'The single-shot, API-accessible composition capability: the whole questionnaire — sections and all their questions — in one call.',
       build: () =>
         norm(
           buildComposeFullPrompt(
@@ -489,6 +527,25 @@ const ANSWER_EXTRACTOR: PromptAgentCatalogEntry = {
         'When safeguarding is enabled — an extra block asks the extractor to flag genuine sensitive disclosures.',
       conditions: ['Sensitivity awareness on'],
       build: () => norm(buildAnswerExtractionPrompt({ ...answerCtx(), sensitivityAware: true })),
+    }),
+    specimen({
+      id: 'extract-answer.sensitivity-detector',
+      label: 'Sensitivity detector (dedicated safeguarding call)',
+      description:
+        'A separate single-purpose structured call — run under this agent’s binding on every answered turn while safeguarding is on — that rules whether THIS message carries a genuine sensitive disclosure. It backs up the extractor’s optional field and a deterministic keyword floor (defence-in-depth), so a miss by one source is caught by another.',
+      conditions: ['Sensitivity awareness on'],
+      build: () => {
+        const { system, user } = buildSensitivityDetectPrompt({
+          questionPrompt: '{{ the question the respondent was asked }}',
+          userMessage: '{{ the respondent message to rule on for a sensitive disclosure }}',
+          recentMessages: ['{{ an earlier message }}'],
+          sessionId: 'sample-session',
+        });
+        return [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ];
+      },
     }),
     specimen({
       id: 'extract-answer.seriousness',
@@ -762,6 +819,74 @@ function completionInput() {
 }
 
 // ---------------------------------------------------------------------------
+// Turn evaluator — the interview-quality judge the Preview Turn Inspector runs
+// ---------------------------------------------------------------------------
+
+/** A representative one-turn inspector dump + objectives the evaluator judges. */
+const SAMPLE_TURN_EVAL_INPUT: TurnEvaluationInput = {
+  turn: {
+    turnIndex: 3,
+    calls: [
+      {
+        label: 'Answer extraction',
+        model: '{{ model }}',
+        provider: '{{ provider }}',
+        latencyMs: 0,
+        costUsd: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        prompt: [
+          { role: 'system', content: '{{ the extractor system prompt }}' },
+          { role: 'user', content: '{{ the respondent message + candidate slots }}' },
+        ],
+        response: '{{ the extracted typed answers (JSON) }}',
+      },
+      {
+        kind: 'embedding',
+        label: 'Adaptive data-slot ranking',
+        model: '{{ embedding model }}',
+        provider: '{{ provider }}',
+        latencyMs: 0,
+        costUsd: 0,
+        tokensIn: 0,
+        dimensions: 1536,
+        prompt: [{ role: 'input', content: 'Embedded (query): "{{ respondent message }}"' }],
+        response: '{{ ranking summary, e.g. "Ranked 62 → kept 8 slots" }}',
+      },
+    ],
+  },
+  context: {
+    goal: '{{ questionnaire goal }}',
+    audience: '{{ target audience }}',
+    selectionStrategy: 'adaptive',
+    tone: '{{ configured interviewer tone }}',
+    respondentMessage: '{{ the respondent answer that opened this turn }}',
+    interviewerMessage: '{{ the interviewer reply that closed this turn }}',
+    recentMessages: ['{{ a recent respondent message }}', '{{ a recent interviewer message }}'],
+  },
+};
+
+const TURN_EVALUATOR: PromptAgentCatalogEntry = {
+  slug: TURN_EVALUATOR_AGENT_SLUG,
+  name: 'Turn evaluator',
+  stage: 'evaluation',
+  summary:
+    'Judges ONE completed interview turn from the Preview Turn Inspector — instruction adherence, interviewing/extraction/selection quality, information gain, prompt drift, and cost/efficiency.',
+  dispatch: 'On demand from the inspector drawer, once per turn an admin chooses to evaluate.',
+  builderModule: 'lib/app/questionnaire/turn-evaluation/prompt.ts',
+  instructionsAreLoadBearing: true,
+  specimens: [
+    specimen({
+      id: 'turn-eval.judge',
+      label: 'Judge a turn',
+      description:
+        'The load-bearing rubric plus the serialized turn dump the evaluator scores — here one LLM extraction call and one embedding (VEC) ranking call, alongside the questionnaire objectives.',
+      build: () => norm(buildTurnEvaluatorPrompt(SAMPLE_TURN_EVAL_INPUT)),
+    }),
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Evaluation judges — one agent per dimension, generated from the registry
 // ---------------------------------------------------------------------------
 
@@ -810,6 +935,7 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     ANSWER_REFINER,
     COMPLETION_AGENT,
     // Evaluation
+    TURN_EVALUATOR,
     ...JUDGES,
   ];
 }

@@ -5,14 +5,15 @@
  *
  * A view-only mirror of the platform `workflow-canvas.tsx`: it reuses the pure
  * `workflowDefinitionToFlow` adapter and renders the ConQuest node, but drops
- * authoring wiring (drag/drop, connect, the interactive retry edge). Nodes are
- * non-draggable/non-connectable.
+ * authoring wiring (connect, the interactive retry edge). Nodes are
+ * non-connectable, but stay draggable so viewers can rearrange steps to untangle
+ * the layout — drags are local-only and reset when the selected workflow changes.
  *
- * It DOES keep `onNodesChange`/`onEdgesChange` (via `useNodesState`/
- * `useEdgesState`) — not for editing, but because React Flow applies measured
- * node dimensions through the change pipeline. Without it the MiniMap never
- * learns node sizes and renders blank. Node/edge state is re-seeded whenever the
- * selected workflow changes.
+ * `onNodesChange`/`onEdgesChange` (via `useNodesState`/`useEdgesState`) drive both
+ * that drag repositioning and React Flow's measured-dimension pipeline. The latter
+ * matters even in a static view: without it the MiniMap never learns node sizes
+ * and renders blank. Node/edge state is re-seeded whenever the selected workflow
+ * changes.
  */
 
 import { useEffect, useMemo } from 'react';
@@ -64,7 +65,7 @@ function CanvasInner({ definition, onSelectNode }: ReadOnlyCanvasProps) {
       nodeTypes={conquestNodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
-      nodesDraggable={false}
+      nodesDraggable
       nodesConnectable={false}
       elementsSelectable
       edgesFocusable={false}

@@ -51,7 +51,26 @@ export const conversationTurnWorkflow = diagram({
         promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
         promptSpecimenId: 'extract-answer.question',
         capabilitySlugs: [EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG],
+        vector: {
+          status: 'pluggable',
+          description:
+            'At scale (50+ slots), a pgvector pre-filter embeds the respondent message and narrows the candidate slots handed to the extractor to the top-K most similar plus the safety-rail set — behaviour-preserving, fail-soft.',
+        },
         note: 'Turns the respondent message into typed answers.',
+        settings: [
+          {
+            key: 'answerFitMode',
+            label: 'Answer fit mode',
+            effect:
+              'Controls whether free-text replies are mapped onto choice/likert options — off / fallback / always.',
+          },
+          {
+            key: 'attachmentsEnabled',
+            label: 'Attachments',
+            effect:
+              'When on, images and documents the respondent sends are included in extraction.',
+          },
+        ],
       },
       next: ['sensitivity'],
     }),
@@ -62,9 +81,29 @@ export const conversationTurnWorkflow = diagram({
       x: 220,
       y: 0,
       description:
-        'A keyword floor plus a detector spot genuine sensitive disclosures and signpost support when needed — without derailing the interview. Pass → continue.',
+        'A hybrid safeguarding gate: a deterministic keyword floor AND a dedicated LLM detector (plus the extractor’s own signal) spot genuine sensitive disclosures and signpost support when needed — without derailing the interview. Pass → continue.',
       meta: {
-        note: 'Keyword floor + detector; signposts support if a sensitive disclosure is genuine.',
+        promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
+        promptSpecimenId: 'extract-answer.sensitivity-detector',
+        hybrid: true,
+        note: 'Keyword floor + dedicated LLM detector + extractor field, merged (defence-in-depth); signposts support once per session on a genuine high-severity disclosure.',
+        settings: [
+          {
+            key: 'sensitivityAwareness',
+            label: 'Sensitivity awareness',
+            effect: 'Enables safeguarding detection and signposting on sensitive disclosures.',
+          },
+          {
+            key: 'supportMessage',
+            label: 'Support message',
+            effect: 'The supportive message shown when a sensitive disclosure is detected.',
+          },
+          {
+            key: 'supportResourceUrl',
+            label: 'Support resource link',
+            effect: 'Optional help link offered alongside the support message.',
+          },
+        ],
       },
       next: [{ targetStepId: 'seriousness', condition: 'Pass' }],
     }),
@@ -79,7 +118,16 @@ export const conversationTurnWorkflow = diagram({
       meta: {
         promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
         promptSpecimenId: 'extract-answer.seriousness',
+        hybrid: true,
         note: "Genuineness gate: keyword floor OR an LLM judge run under the extractor's binding; strikes abandon abusive sessions.",
+        settings: [
+          {
+            key: 'abuseThreshold',
+            label: 'Abuse threshold',
+            effect:
+              'Number of non-genuine strikes before the session is abandoned; 0 turns the gate off.',
+          },
+        ],
       },
       next: [{ targetStepId: 'merge', condition: 'Pass' }],
     }),
@@ -108,6 +156,24 @@ export const conversationTurnWorkflow = diagram({
         promptSpecimenId: 'detect.probe',
         capabilitySlugs: [DETECT_CONTRADICTIONS_CAPABILITY_SLUG],
         note: 'Compare answers across slots for genuine conflicts.',
+        settings: [
+          {
+            key: 'contradictionMode',
+            label: 'Contradiction mode',
+            effect:
+              'off / flag / probe — whether conflicts are ignored, surfaced, or reconciled with a follow-up.',
+          },
+          {
+            key: 'contradictionWindowN',
+            label: 'Comparison window',
+            effect: 'How many recent answers are compared for conflicts.',
+          },
+          {
+            key: 'contradictionEveryNTurns',
+            label: 'Check cadence',
+            effect: 'How often the contradiction check runs, in turns.',
+          },
+        ],
       },
       next: ['refine'],
     }),
@@ -125,6 +191,13 @@ export const conversationTurnWorkflow = diagram({
         promptSpecimenId: 'refine.triggered',
         capabilitySlugs: [REFINE_ANSWER_CAPABILITY_SLUG],
         note: 'Update an earlier answer when a conflict is reconciled.',
+        settings: [
+          {
+            key: 'contradictionMode',
+            label: 'Contradiction mode',
+            effect: 'Refinement only runs when contradiction handling is enabled (flag or probe).',
+          },
+        ],
       },
       next: ['assess'],
     }),
@@ -138,6 +211,13 @@ export const conversationTurnWorkflow = diagram({
         'A deterministic, free completion assessment scores how much of the questionnaire is genuinely answered — the signal that decides whether to keep asking or offer to wrap up.',
       meta: {
         note: 'Deterministic, free completion assessment — decides whether enough is answered.',
+        settings: [
+          {
+            key: 'costBudgetUsd',
+            label: 'Cost budget',
+            effect: 'When set, an exhausted per-session budget forces the completion offer early.',
+          },
+        ],
       },
       next: ['respond'],
     }),
@@ -151,6 +231,15 @@ export const conversationTurnWorkflow = diagram({
         'Route on the assessment: keep going with the next Question, make an Offer to wrap up, or mark the run Complete.',
       config: {
         routes: [{ label: 'Question' }, { label: 'Offer' }, { label: 'Complete' }],
+      },
+      meta: {
+        settings: [
+          {
+            key: 'presentationMode',
+            label: 'Presentation mode',
+            effect: 'chat / form / both — shapes how the next prompt is delivered.',
+          },
+        ],
       },
       next: [
         { targetStepId: 'select', condition: 'Question' },
@@ -170,7 +259,20 @@ export const conversationTurnWorkflow = diagram({
         agentSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
         promptCatalogSlug: QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
         promptSpecimenId: 'select.pick',
+        vector: {
+          status: 'active',
+          description:
+            'Under the adaptive strategy the selector embeds the conversation so far and ranks the remaining question candidates by pgvector similarity, so the most relevant next question surfaces first.',
+        },
         note: 'Adaptive strategy ranks candidates and picks what flows next.',
+        settings: [
+          {
+            key: 'selectionStrategy',
+            label: 'Selection strategy',
+            effect:
+              "sequential / random / weighted / adaptive — how the next question is chosen; only 'adaptive' uses the LLM selector.",
+          },
+        ],
       },
       next: ['ask'],
     }),
@@ -187,6 +289,34 @@ export const conversationTurnWorkflow = diagram({
         promptCatalogSlug: QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
         promptSpecimenId: 'interview.tone',
         note: 'Phrases the next question as warm prose; persona/tone/voice apply here.',
+        settings: [
+          {
+            key: 'tone',
+            label: 'Interviewer tone',
+            effect:
+              'Per-dimension tone dials (empathy, warmth, …) shape how the question is phrased.',
+          },
+          {
+            key: 'personaSelection.enabled',
+            label: 'Interviewer personas',
+            effect: 'When on, a chosen built-in persona replaces the tone dials.',
+          },
+          {
+            key: 'personaSelection.allowRespondentSwitch',
+            label: 'Respondent persona switch',
+            effect: 'Lets the respondent switch interviewer persona mid-conversation.',
+          },
+          {
+            key: 'voiceEnabled',
+            label: 'Voice input',
+            effect: 'Lets the respondent answer by voice (transcribed before extraction).',
+          },
+          {
+            key: 'reasoningStreamEnabled',
+            label: 'Reasoning trace',
+            effect: "Streams the interviewer's brief reasoning to the respondent.",
+          },
+        ],
       },
     }),
     node({
@@ -203,6 +333,13 @@ export const conversationTurnWorkflow = diagram({
         promptSpecimenId: 'complete.stream',
         capabilitySlugs: [COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG],
         note: 'Phrases the wrap-up offer.',
+        settings: [
+          {
+            key: 'costBudgetUsd',
+            label: 'Cost budget',
+            effect: 'A near-exhausted budget makes the offer wrap up sooner.',
+          },
+        ],
       },
     }),
     node({

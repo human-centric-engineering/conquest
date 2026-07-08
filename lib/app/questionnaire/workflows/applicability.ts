@@ -19,6 +19,7 @@ import {
   isAdaptiveSelectionEnabled,
   isAnswerExtractionEnabled,
   isGenerativeAuthoringEnabled,
+  isTurnEvaluationEnabled,
   isVoiceInputEnabled,
 } from '@/lib/app/questionnaire/feature-flag';
 import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
@@ -39,13 +40,14 @@ function coerceStatus(raw: string): AppQuestionnaireStatus {
 
 /** Resolve the normalised {@link WorkflowFlags} the predicates read. */
 async function resolveWorkflowFlags(): Promise<WorkflowFlags> {
-  const [ws, generativeAuthoring, answerExtraction, voiceInput, adaptiveSelection] =
+  const [ws, generativeAuthoring, answerExtraction, voiceInput, adaptiveSelection, turnEvaluation] =
     await Promise.all([
       resolveQuestionnaireWorkspaceFlags(),
       isGenerativeAuthoringEnabled(),
       isAnswerExtractionEnabled(),
       isVoiceInputEnabled(),
       isAdaptiveSelectionEnabled(),
+      isTurnEvaluationEnabled(),
     ]);
   return {
     master: ws.master,
@@ -60,6 +62,7 @@ async function resolveWorkflowFlags(): Promise<WorkflowFlags> {
     voiceInput,
     personaSelection: ws.personaSelection,
     adaptiveSelection,
+    turnEvaluation,
   };
 }
 

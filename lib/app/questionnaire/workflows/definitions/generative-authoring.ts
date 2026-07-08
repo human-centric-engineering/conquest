@@ -11,6 +11,7 @@
 import {
   COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG,
   QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
+  REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
 import {
@@ -52,9 +53,9 @@ export const generativeAuthoringWorkflow = diagram({
       meta: {
         agentSlug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
         promptCatalogSlug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
-        promptSpecimenId: 'compose.full',
+        promptSpecimenId: 'compose.outline',
         capabilitySlugs: [COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG],
-        note: 'The first LLM pass — goal, audience, and section outline.',
+        note: 'The first LLM pass — goal, audience, and section outline (streaming phase 1).',
       },
       next: ['sections'],
     }),
@@ -68,7 +69,10 @@ export const generativeAuthoringWorkflow = diagram({
         'Each section is drafted by its own structured Composer call, fanned out in parallel so a long questionnaire composes as fast as a short one.',
       meta: {
         agentSlug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
-        note: 'One structured call per section, 4 in parallel.',
+        promptCatalogSlug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
+        promptSpecimenId: 'compose.sections',
+        capabilitySlugs: [COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG],
+        note: 'One structured call per section, 4 in parallel (phase 2 of the same compose capability).',
       },
       config: { branches: [{}, {}, {}] },
       next: ['assemble'],
@@ -107,7 +111,8 @@ export const generativeAuthoringWorkflow = diagram({
         agentSlug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
         promptCatalogSlug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
         promptSpecimenId: 'compose.refine',
-        note: "Each conversational 'make it shorter' turn re-writes the draft.",
+        capabilitySlugs: [REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG],
+        note: "Each conversational 'make it shorter' turn re-writes the draft via the refine capability.",
       },
     }),
   ],

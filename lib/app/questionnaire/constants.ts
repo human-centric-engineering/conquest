@@ -1038,6 +1038,18 @@ export const APP_QUESTIONNAIRES_EDIT_AGENT_FLAG = 'APP_QUESTIONNAIRES_EDIT_AGENT
  */
 export const QUESTIONNAIRE_EDIT_AGENT_SLUG = 'app-questionnaire-structure-editor';
 
+/**
+ * Slug of the seeded **Turn Evaluator** judge `AiAgent` — the interview-quality evaluator the
+ * Preview Turn Inspector runs over ONE completed turn (`lib/app/questionnaire/turn-evaluation`).
+ * Unlike the other questionnaire agents it is NOT `app-`prefixed: it is a generic reasoning judge
+ * seeded by `prisma/seeds/app-questionnaire/043-turn-evaluator-agent.ts`. Ships with empty
+ * `model`/`provider` so it resolves dynamically via `agent-resolver.ts` (reasoning tier); the
+ * evaluate-turn route loads it by slug. Its load-bearing rubric lives in code
+ * (`turn-evaluation/prompt.ts`), not the seeded `systemInstructions`. Re-exported from
+ * `agent-advisory/recommendations.ts` for back-compat.
+ */
+export const TURN_EVALUATOR_AGENT_SLUG = 'turn-evaluator';
+
 /** Slug of the compose-from-brief capability. One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the compose routes. */
 export const COMPOSE_QUESTIONNAIRE_CAPABILITY_SLUG = 'app_compose_questionnaire';

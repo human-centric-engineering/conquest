@@ -172,6 +172,7 @@ export async function enrichWorkflow(
       capabilities: (meta.capabilitySlugs ?? []).map(capabilityView),
       prompt,
       kb: meta.kb ?? null,
+      vector: meta.vector ?? null,
     };
   }
 

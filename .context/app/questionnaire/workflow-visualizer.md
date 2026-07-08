@@ -26,25 +26,38 @@ components/app/questionnaire/behind-the-scenes/          # client: explorer, can
 
 **Reused platform code (read-only imports — never edited):** `nodeTypes`/`PatternNode`, the pure `workflowDefinitionToFlow` adapter, and `step-registry.ts` (icon/colour/handles) under `components/admin/orchestration/workflow-builder/` + `lib/orchestration/engine/`. The read-only canvas mirrors `workflow-canvas.tsx` (drops drag/drop, connect, change handlers, and the interactive retry edge) rather than reusing it.
 
-**Data model:** each diagram is a platform `WorkflowDefinition` verbatim. The ConQuest per-node overlay (`agentSlug`, `promptCatalogSlug`, `promptSpecimenId`, `capabilitySlugs`, `kb`, `note`) rides under `WorkflowStep.config._meta`, alongside the hand-placed `config._layout` (deterministic demo layout — no BFS). The platform mapper tolerates unknown config keys, so this is schema-safe. Deterministic (non-LLM) steps have no `agentSlug`.
+**Data model:** each diagram is a platform `WorkflowDefinition` verbatim. The ConQuest per-node overlay (`agentSlug`, `promptCatalogSlug`, `promptSpecimenId`, `capabilitySlugs`, `kb`, `vector`, `hybrid`, `note`, `settings`) rides under `WorkflowStep.config._meta`, alongside the hand-placed `config._layout` (deterministic demo layout — no BFS). The platform mapper tolerates unknown config keys, so this is schema-safe. Deterministic (non-LLM) steps have no `agentSlug`.
+
+**Node treatment (four categories).** `conquest-workflow-node.tsx` colours each step by what it is, and `miniMapNodeColor` + the explorer legend mirror it. The execution split (agent / hybrid / deterministic) is `nodeExecutionKind(config)` in `types.ts` — the single classifier, checked `hybrid` first (a hybrid gate also carries a `promptCatalogSlug`, so it would otherwise read as pure agent):
+
+- **Retrieval** (violet, "KB"/"Vector" badge) — the step reads a knowledge base (`_meta.kb`) or runs an embedding/vector engine (`_meta.vector`). This wins over the execution split (an agentic retrieval step keeps its "AI" badge too), because "where does knowledge/vector plug in" is the question the highlight answers. `nodeRetrievalKind(config)` is a separate classifier — `kb` takes precedence when a step carries both. `kb` = a document corpus the step _reads_ (agent knowledge grant or per-demo-client tag); `vector` = the embedding/pgvector similarity engine the step _runs_ (adaptive question/slot selection is `active`; the at-scale extraction candidate pre-filter is `pluggable`). The info panel's **Knowledge** tab renders both.
+- **Agentic** (blue, "AI" badge) — an LLM agent runs it (`_meta.agentSlug`/`promptCatalogSlug`), with no deterministic branch.
+- **Hybrid** (blue with a _dashed_ border, "Hybrid" badge) — `_meta.hybrid`: the step runs a deterministic path AND an LLM path in the same turn. The **safety gates** are the canonical case, and both looked "deterministic" before this category existed: the **Sensitivity gate** merges a deterministic keyword floor + a dedicated LLM safeguarding detector + the extractor's structured field (defence-in-depth, `sensitivity/`), and the **Genuineness gate** runs a keyword floor OR an LLM judge (`seriousness/`). Set `hybrid: true` alongside a `promptCatalogSlug`/`promptSpecimenId` so the info panel's **Prompt** tab shows the LLM path's real prompt. The LLM path reuses the Answer Extractor's binding (no dedicated agent row), so the **Agent** tab says so rather than showing "no AI agent".
+- **Deterministic** (dashed slate) — plumbing: parse, merge, persist, pure-code guards.
+
+**Node info panel** (on click) shows, top to bottom: the step's **Role** (its `WorkflowStep.description`), the **Settings that affect this step** (`_meta.settings` — each a `{ key, label, effect }` where `key` is a dotted path into `QuestionnaireConfigShape`, so an operator can find it on the Settings tab), then the **Agent / Prompt / Knowledge / Tools** tabs. The per-workflow **Purpose** (the diagram `description`) shows above the canvas.
 
 **Step type → registry type** is a visual mapping only (icon/colour): agent call → `agent_call`, gate → `guard`, branch → `route`, tool → `tool_call`, KB read → `rag_retrieve`, fan-out → `parallel`, confirm → `human_approval`, persist/deliver → `report`, scoring → `evaluate`. **Never add ConQuest step types to the platform `step-registry.ts`** — it's platform-owned and merges from upstream.
 
 ## The workflows
 
-| slug                   | pipeline                                                                         | source module                            |
-| ---------------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
-| `document-ingestion`   | upload → parse → guard → extract → coherence → persist                           | `_lib/extract-pipeline.ts`               |
-| `generative-authoring` | brief → outline → parallel sections → assemble → persist (+ refine)              | `ingestion/stream-compose.ts`            |
-| `structure-edit`       | instruction → translate to edit-ops → preview → confirm → apply                  | `_lib/edit-agent-pipeline.ts`            |
-| `data-slot-generation` | authored questions → generate slots → review                                     | `data-slots/generation.ts`               |
-| `conversation-turn`    | per-turn orchestrator: extract → gates → contradiction → assess → respond branch | `orchestrator/orchestrator.ts`           |
-| `answer-extraction`    | message → extract → normalise → validate → propagate                             | `extraction/extraction-prompt.ts`        |
-| `data-slot-turn`       | combined extract → park → contradiction → respond (offer/question/next-slot)     | `orchestrator/data-slot-orchestrator.ts` |
-| `respondent-report`    | load → transcript → (client KB) → generate → format → deliver                    | `report/generate.ts`                     |
-| `cohort-report`        | dataset → material → (context KB) → synthesise → charts → publish                | `cohort-report/generate.ts`              |
+| slug                   | pipeline                                                                             | source module                            |
+| ---------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------- |
+| `document-ingestion`   | upload → parse → guard → extract → coherence → persist                               | `_lib/extract-pipeline.ts`               |
+| `generative-authoring` | brief → outline → parallel sections → assemble → persist (+ refine)                  | `ingestion/stream-compose.ts`            |
+| `structure-edit`       | instruction → translate to edit-ops → preview → confirm → apply                      | `_lib/edit-agent-pipeline.ts`            |
+| `data-slot-generation` | authored questions → generate slots → review                                         | `data-slots/generation.ts`               |
+| `conversation-turn`    | per-turn orchestrator: extract → gates → contradiction → assess → respond branch     | `orchestrator/orchestrator.ts`           |
+| `answer-extraction`    | message → extract → normalise → validate → propagate                                 | `extraction/extraction-prompt.ts`        |
+| `data-slot-turn`       | combined extract → park → contradiction → respond (offer/question/next-slot)         | `orchestrator/data-slot-orchestrator.ts` |
+| `respondent-report`    | load → transcript → (client KB) → generate → format → deliver                        | `report/generate.ts`                     |
+| `cohort-report`        | dataset → material → (context KB) → synthesise → charts → publish                    | `cohort-report/generate.ts`              |
+| `turn-inspector`       | gate → capture calls → capture vector calls → assemble → stream → (serialize/eval)   | `inspector/index.ts`                     |
+| `turn-evaluation`      | load turn+objectives → rubric prompt → judge → validate/repair → serialize → persist | `turn-evaluation/evaluate-turn.ts`       |
 
 Leaf behaviours (intro/kickoff, voice transcription, interviewer personas/tone, adaptive selection) appear as nodes/notes within `conversation-turn` rather than separate diagrams.
+
+`turn-inspector` and `turn-evaluation` are the **admin diagnostic** pair (preview-only): the Inspector is pure observability (every node deterministic except the violet vector-capture step) that records a turn's agent + embedding calls and streams them to the drawer; from there the Evaluator runs a single structured reasoning judge (`turn-evaluator` agent, rubric in `turn-evaluation/prompt.ts`) over the serialized turn. The Inspector's applicability gates on `liveSessions` + `config.previewInspectorEnabled`; the Evaluator gates on the `turnEvaluation` flag (`isTurnEvaluationEnabled`) + the same inspector toggle. The `turn-evaluator` agent slug is canonically defined in `constants.ts` (re-exported from `agent-advisory/recommendations.ts`) so the integrity test pins it.
 
 ## The questionnaire lens (applicability)
 
@@ -58,7 +71,7 @@ With a `?versionId=` lens, `buildApplicabilityContext(versionId)` combines the r
 
 Edge/ordering and the applicability predicates are the one thing **not** derivable from code — a diagram can misrepresent a changed pipeline. Mitigations:
 
-- `tests/unit/app/questionnaire/workflows/integrity.test.ts` pins every `agentSlug` / `promptCatalogSlug` / `promptSpecimenId` / `capabilitySlug` to the live constants, prompt catalog, and capability registry — a renamed/removed reference fails CI.
+- `tests/unit/app/questionnaire/workflows/integrity.test.ts` pins every `agentSlug` / `promptCatalogSlug` / `promptSpecimenId` / `capabilitySlug` to the live constants, prompt catalog, and capability registry, and every `_meta.settings` key to a real `QuestionnaireConfigShape` path — a renamed/removed reference fails CI. It also (a) asserts each referenced prompt specimen actually **renders** (a builder-signature drift shows as `error: true` / a ⚠️ in the Prompt tab, and fails CI), and (b) requires every **agent-backed** step to carry a `promptCatalogSlug` unless its agent is on an explicit allowlist. That allowlist is the set of agents the Prompt Library deliberately does not catalogue (see the `buildPromptCatalog` docstring): the **respondent report**, **cohort report**, **report formatter**, and **structure editor** — post-completion / support agents whose prompts are built in code. Their nodes correctly show no Prompt tab. (The **turn evaluator** _is_ catalogued — its load-bearing rubric renders under `turn-eval.judge`.)
 - `tests/unit/app/questionnaire/workflows/applicability.test.ts` pins the predicates to real flag/config field names.
 - `tests/unit/app/questionnaire/workflows/definitions.test.ts` asserts each diagram is a valid, renderable DAG.
 - Each diagram carries a `sourceModule` naming the code it documents — the anchor for review when that code changes.

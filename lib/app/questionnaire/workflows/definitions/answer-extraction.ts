@@ -54,7 +54,25 @@ export const answerExtractionWorkflow = diagram({
         promptCatalogSlug: QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
         promptSpecimenId: 'extract-answer.question',
         capabilitySlugs: [EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG],
+        vector: {
+          status: 'pluggable',
+          description:
+            'At scale a pgvector pre-filter embeds the reply and narrows the candidate slots sent to the extractor to the top-K most similar (plus safety-rail slots) — the extraction sibling of adaptive selection, behaviour-preserving and fail-soft.',
+        },
         note: 'LLM returns typed answers + confidence + provenance.',
+        settings: [
+          {
+            key: 'answerFitMode',
+            label: 'Answer fit mode',
+            effect:
+              'off / fallback / always — whether a second pass maps free text onto choice/likert options.',
+          },
+          {
+            key: 'attachmentsEnabled',
+            label: 'Attachments',
+            effect: 'When on, attached images/documents are included in extraction.',
+          },
+        ],
       },
       next: ['normalize'],
     }),
@@ -77,7 +95,17 @@ export const answerExtractionWorkflow = diagram({
       y: 0,
       description:
         "Semantic per-type validation checks each answer against the slot's real typeConfig — a date is a valid date, a choice is an allowed option. Pass → propagate.",
-      meta: { note: "Semantic per-type validation against the slot's real typeConfig." },
+      meta: {
+        note: "Semantic per-type validation against the slot's real typeConfig.",
+        settings: [
+          {
+            key: 'answerFitMode',
+            label: 'Answer fit mode',
+            effect:
+              "In 'fallback'/'always' mode, unmatched free text is force-fit to the closest option here.",
+          },
+        ],
+      },
       next: [{ targetStepId: 'propagate', condition: 'Pass' }],
     }),
     node({

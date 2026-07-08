@@ -11,6 +11,7 @@ import type { WorkflowDefinition } from '@/types/orchestration';
 import type {
   NodeKbPlugPoint,
   NodeMeta,
+  NodeVectorPlugPoint,
   WorkflowApplicability,
 } from '@/lib/app/questionnaire/workflows/types';
 
@@ -64,6 +65,7 @@ export interface NodeEnrichment {
   capabilities: CapabilityView[];
   prompt: PromptView | null;
   kb: NodeKbPlugPoint | null;
+  vector: NodeVectorPlugPoint | null;
 }
 
 export interface WorkflowDetail {

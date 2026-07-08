@@ -20,6 +20,7 @@ import { buildPromptCatalog } from '@/app/api/v1/app/questionnaires/_lib/prompt-
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities/registry';
 import * as constants from '@/lib/app/questionnaire/constants';
+import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
 import { getNodeMeta } from '@/lib/app/questionnaire/workflows/types';
 
@@ -63,7 +64,36 @@ describe('workflow diagram integrity', () => {
       if (entry && meta.promptSpecimenId) {
         const specimen = entry.specimens.find((s) => s.id === meta.promptSpecimenId);
         expect(specimen, `${slug}/${stepId} → specimen ${meta.promptSpecimenId}`).toBeTruthy();
+        // The specimen must actually render from its sample context — a builder throw is
+        // captured as `error: true` (a visible ⚠️ in the UI), which is a silent gap in the
+        // Prompt tab. Fail CI on it so a changed prompt-builder signature is caught here.
+        expect(
+          specimen?.error,
+          `${slug}/${stepId} → specimen ${meta.promptSpecimenId} failed to render`
+        ).not.toBe(true);
       }
+    }
+  });
+
+  // Agents deliberately outside the Prompt Library's scope (see the `buildPromptCatalog`
+  // docstring): post-completion / support agents that build prompts in code and are not
+  // catalogued. Their diagram nodes legitimately show no Prompt tab — but the exception is
+  // pinned here so a NEW agent-backed step can't silently ship without a prompt.
+  const UNCATALOGUED_AGENT_SLUGS = new Set<string>([
+    constants.RESPONDENT_REPORT_AGENT_SLUG,
+    constants.REPORT_FORMATTER_AGENT_SLUG,
+    constants.COHORT_REPORT_AGENT_SLUG,
+    constants.QUESTIONNAIRE_EDIT_AGENT_SLUG,
+  ]);
+
+  it('every agent-backed step exposes a catalogued prompt (or is a known exception)', () => {
+    for (const { slug, stepId, meta } of allMetas) {
+      if (!meta.agentSlug) continue;
+      if (UNCATALOGUED_AGENT_SLUGS.has(meta.agentSlug)) continue;
+      expect(
+        meta.promptCatalogSlug,
+        `${slug}/${stepId} (agent ${meta.agentSlug}) has no promptCatalogSlug — add one or allowlist the agent`
+      ).toBeTruthy();
     }
   });
 
@@ -71,6 +101,22 @@ describe('workflow diagram integrity', () => {
     for (const { slug, stepId, meta } of allMetas) {
       for (const cap of meta.capabilitySlugs ?? []) {
         expect(capabilityDispatcher.has(cap), `${slug}/${stepId} → ${cap}`).toBe(true);
+      }
+    }
+  });
+
+  it('every step-setting key resolves to a real config field', () => {
+    const resolve = (path: string): unknown =>
+      path.split('.').reduce<unknown>((acc, key) => {
+        if (acc && typeof acc === 'object' && key in (acc as Record<string, unknown>)) {
+          return (acc as Record<string, unknown>)[key];
+        }
+        return undefined;
+      }, DEFAULT_QUESTIONNAIRE_CONFIG);
+
+    for (const { slug, stepId, meta } of allMetas) {
+      for (const setting of meta.settings ?? []) {
+        expect(resolve(setting.key), `${slug}/${stepId} → ${setting.key}`).not.toBeUndefined();
       }
     }
   });

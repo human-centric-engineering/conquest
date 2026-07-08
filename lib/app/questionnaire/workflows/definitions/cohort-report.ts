@@ -65,6 +65,13 @@ export const cohortReportWorkflow = diagram({
             'Round-scoped cohort reports can pull the cohort/round knowledge context to ground the synthesis.',
         },
         note: 'Optional round/cohort/KB context.',
+        settings: [
+          {
+            key: 'cohortReport.generation.useClientKnowledge',
+            label: 'Client knowledge grounding',
+            effect: "When on, cohort synthesis can pull the client's knowledge context.",
+          },
+        ],
       },
       next: ['synthesize'],
     }),
@@ -79,6 +86,13 @@ export const cohortReportWorkflow = diagram({
       meta: {
         agentSlug: COHORT_REPORT_AGENT_SLUG,
         note: 'The model writes sections + proposes charts.',
+        settings: [
+          {
+            key: 'cohortReport.enabled',
+            label: 'Cohort report',
+            effect: 'Master toggle for cohort report generation for this questionnaire.',
+          },
+        ],
       },
       next: ['charts'],
     }),
@@ -90,7 +104,16 @@ export const cohortReportWorkflow = diagram({
       y: 0,
       description:
         'Render the proposed charts — distributions and segment means — deterministically from the dataset so the visuals are exact, not model-drawn.',
-      meta: { note: 'Render proposed charts (distributions, segment means).' },
+      meta: {
+        note: 'Render proposed charts (distributions, segment means).',
+        settings: [
+          {
+            key: 'cohortReport.generation.scoringEnabled',
+            label: 'Deterministic scoring',
+            effect: 'When on, scored metrics feed the proposed charts alongside the AI synthesis.',
+          },
+        ],
+      },
       next: ['publish'],
     }),
     node({

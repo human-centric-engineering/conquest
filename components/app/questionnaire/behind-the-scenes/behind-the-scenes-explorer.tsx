@@ -112,13 +112,16 @@ export function BehindTheScenesExplorer({ initialWorkflows }: BehindTheScenesExp
       ) : null}
 
       {selectedSummary ? (
-        <div>
-          <p className="text-muted-foreground text-sm">{selectedSummary.description}</p>
-          {lens ? (
-            <p className="text-muted-foreground mt-1 text-xs">
-              Lens: <span className="font-medium">{lens.title}</span> (v{lens.versionNumber})
-            </p>
-          ) : null}
+        <div className="bg-muted/30 rounded-lg border p-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold">Purpose</h2>
+            {lens ? (
+              <span className="text-muted-foreground text-xs">
+                Lens: <span className="font-medium">{lens.title}</span> (v{lens.versionNumber})
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm">{selectedSummary.description}</p>
         </div>
       ) : null}
 
@@ -139,13 +142,21 @@ export function BehindTheScenesExplorer({ initialWorkflows }: BehindTheScenesExp
           AI agent (an LLM runs the step)
         </span>
         <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-4 rounded-sm border-2 border-dashed border-blue-400 bg-blue-50/80 dark:bg-blue-950/40" />
+          Hybrid (deterministic + an LLM)
+        </span>
+        <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-4 rounded-sm border-2 border-dashed border-slate-300 bg-slate-50 dark:bg-slate-900/40" />
           Deterministic (code — no LLM)
         </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-4 rounded-sm border-2 border-violet-400 bg-violet-50 dark:bg-violet-950/50" />
+          Knowledge base / vector engine
+        </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
-        <div className="bg-muted/20 relative h-[560px] rounded-lg border">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1fr_400px]">
+        <div className="bg-muted/20 relative h-[520px] rounded-lg border lg:h-[calc(100vh-7rem)] lg:min-h-[520px]">
           {detail ? (
             <ReadOnlyCanvas definition={detail.definition} onSelectNode={setSelectedNodeId} />
           ) : (
@@ -155,10 +166,11 @@ export function BehindTheScenesExplorer({ initialWorkflows }: BehindTheScenesExp
           )}
         </div>
 
-        <div className="h-[560px] overflow-hidden rounded-lg border">
+        <div className="h-[560px] overflow-hidden rounded-lg border lg:sticky lg:top-6 lg:h-[calc(100vh-7rem)] lg:min-h-[520px]">
           <NodeInfoPanel
             nodeLabel={selectedStep?.name ?? 'No step selected'}
             nodeType={selectedStep?.type ?? '—'}
+            nodeRole={selectedStep?.description}
             enrichment={enrichment}
           />
         </div>

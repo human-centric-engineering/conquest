@@ -8,7 +8,10 @@
  * Draft-only — launched versions fork on edit.
  */
 
-import { QUESTIONNAIRE_EDIT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import {
+  QUESTIONNAIRE_EDIT_AGENT_SLUG,
+  REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
+} from '@/lib/app/questionnaire/constants';
 
 import {
   applies,
@@ -48,7 +51,8 @@ export const structureEditWorkflow = diagram({
         'The Structure Editor turns the instruction into a list of precise, typed edit-ops (add/move/retype/remove) — or a whole-document rewrite when the change is sweeping.',
       meta: {
         agentSlug: QUESTIONNAIRE_EDIT_AGENT_SLUG,
-        note: 'LLM turns the instruction into precise edit-ops.',
+        capabilitySlugs: [REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG],
+        note: 'LLM turns the instruction into precise edit-ops (via the refine-structure capability).',
       },
       next: ['plan'],
     }),

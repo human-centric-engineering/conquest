@@ -21,6 +21,8 @@ import { generativeAuthoringWorkflow } from '@/lib/app/questionnaire/workflows/d
 import { ingestionWorkflow } from '@/lib/app/questionnaire/workflows/definitions/ingestion';
 import { respondentReportWorkflow } from '@/lib/app/questionnaire/workflows/definitions/respondent-report';
 import { structureEditWorkflow } from '@/lib/app/questionnaire/workflows/definitions/structure-edit';
+import { turnEvaluationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/turn-evaluation';
+import { turnInspectorWorkflow } from '@/lib/app/questionnaire/workflows/definitions/turn-inspector';
 
 /** All diagrams, in demo/presentation order. */
 export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
@@ -33,6 +35,8 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   dataSlotTurnWorkflow,
   respondentReportWorkflow,
   cohortReportWorkflow,
+  turnInspectorWorkflow,
+  turnEvaluationWorkflow,
 ] as const;
 
 /** Look up one diagram by slug. */
