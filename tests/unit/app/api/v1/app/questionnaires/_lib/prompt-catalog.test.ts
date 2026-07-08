@@ -91,6 +91,18 @@ describe('buildPromptCatalog', () => {
     expect(opening).toBeDefined();
     expect(tone).toBeDefined();
     // The tone-on specimen carries condition metadata the default does not.
-    expect(tone?.conditions).toContain('Tone on');
+    expect(tone?.conditions).toContain('Custom tone on');
+  });
+
+  it('renders a built-in persona interviewer specimen that injects the persona clause', () => {
+    const interviewer = catalog.find((e) => e.slug === QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG);
+    const persona = interviewer?.specimens.find((s) => s.id === 'interview.persona');
+    expect(persona).toBeDefined();
+    expect(persona?.error).toBeUndefined();
+    expect(persona?.conditions).toContain('Persona mode on');
+    // The persona flows through the same tone block and adds the "Adopt this persona…" wrapper the
+    // custom-tone variant (empathy + warmth only) never emits — proving personas are actually shown.
+    const system = persona?.messages.find((m) => m.role === 'system')?.content ?? '';
+    expect(system).toContain('Adopt this persona');
   });
 });

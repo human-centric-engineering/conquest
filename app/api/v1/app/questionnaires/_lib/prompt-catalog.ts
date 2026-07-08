@@ -41,13 +41,17 @@ import {
 } from '@/lib/app/questionnaire/data-slots/generation';
 import { buildJudgePrompt } from '@/lib/app/questionnaire/evaluation/judge-prompt';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
-import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import { DEFAULT_PERSONA_KEY, DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 import {
   EVALUATION_DIMENSIONS,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation/types';
 
-import { buildStreamingQuestionPrompt } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
+import {
+  buildStreamingQuestionPrompt,
+  type QuestionComposeInput,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { buildStreamingOfferPrompt } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { buildSelectorPrompt } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
 
@@ -623,12 +627,39 @@ const ANSWER_REFINER: PromptAgentCatalogEntry = {
   ],
 };
 
+/** The default built-in persona (The Coach), used to render the persona-mode interviewer specimen. */
+const DEFAULT_INTERVIEWER_PERSONA =
+  BUILT_IN_PERSONAS.find((p) => p.key === DEFAULT_PERSONA_KEY) ?? BUILT_IN_PERSONAS[0];
+
+/**
+ * Shared mid-conversation interviewer context (a normal acknowledge-and-ask turn). Both the custom-
+ * tone and built-in-persona specimens spread this and layer their `tone` on top, so the two variants
+ * differ only in the voice block — exactly as they do at run time (a persona is resolved into `tone`).
+ */
+function interviewFollowUpBase(): QuestionComposeInput {
+  return {
+    prompt: '{{ the next question to ask, in raw form }}',
+    type: 'free_text',
+    goal: '{{ questionnaire goal }}',
+    audience: SAMPLE_AUDIENCE,
+    recentMessages: ['{{ the respondent last message }}'],
+    lastUserMessage: '{{ the respondent last message }}',
+    priorAnswers: [
+      '{{ data slot 1 name }}: {{ what they shared about it }}',
+      '{{ data slot 2 name }}: {{ what they shared about it }}',
+    ],
+    isReask: false,
+    isOpening: false,
+    questionsAsked: 2,
+  };
+}
+
 const INTERVIEWER: PromptAgentCatalogEntry = {
   slug: QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   name: 'Interviewer',
   stage: 'live',
   summary:
-    'Phrases the next question as warm, natural prose — acknowledging the prior answer and calibrating to the audience and (when enabled) the configured tone.',
+    'Phrases the next question as warm, natural prose — acknowledging the prior answer and calibrating to the audience and, when enabled, the configured tone or a chosen built-in persona (both flow through the same tone block).',
   dispatch:
     'Per asked question when conversational phrasing is enabled; streamed to the respondent.',
   builderModule: 'app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts',
@@ -658,29 +689,31 @@ const INTERVIEWER: PromptAgentCatalogEntry = {
       id: 'interview.tone',
       label: 'Mid-conversation with tone',
       description:
-        'A follow-up question with the interviewer tone settings applied (empathy + warmth here).',
-      conditions: ['Tone on'],
+        'A follow-up question with a custom interviewer tone applied (empathy + warmth here).',
+      conditions: ['Custom tone on'],
       build: () =>
         norm(
           buildStreamingQuestionPrompt({
-            prompt: '{{ the next question to ask, in raw form }}',
-            type: 'free_text',
-            goal: '{{ questionnaire goal }}',
-            audience: SAMPLE_AUDIENCE,
-            recentMessages: ['{{ the respondent last message }}'],
-            lastUserMessage: '{{ the respondent last message }}',
-            priorAnswers: [
-              '{{ data slot 1 name }}: {{ what they shared about it }}',
-              '{{ data slot 2 name }}: {{ what they shared about it }}',
-            ],
-            isReask: false,
-            isOpening: false,
-            questionsAsked: 2,
+            ...interviewFollowUpBase(),
             tone: {
               ...DEFAULT_TONE_SETTINGS,
               empathy: { enabled: true, level: 4 },
               warmth: { enabled: true, level: 4 },
             },
+          })
+        ),
+    }),
+    specimen({
+      id: 'interview.persona',
+      label: 'Built-in persona',
+      description:
+        'When respondent persona mode is on, the chosen (or default) library persona replaces the version tone — injecting an “Adopt this persona…” clause plus its tuned dials into the same tone block. Rendered here with the default persona, The Coach.',
+      conditions: ['Persona mode on'],
+      build: () =>
+        norm(
+          buildStreamingQuestionPrompt({
+            ...interviewFollowUpBase(),
+            tone: DEFAULT_INTERVIEWER_PERSONA.tone,
           })
         ),
     }),
@@ -758,9 +791,10 @@ const JUDGES: PromptAgentCatalogEntry[] = EVALUATION_DIMENSIONS.map((dimension) 
 // ---------------------------------------------------------------------------
 
 /**
- * Build the full prompt catalog — every questionnaire agent with the exact
- * prompt(s) it sends, rendered from representative sample contexts. Pure; the route
- * merges each agent's DB binding on top.
+ * Build the prompt catalog — the questionnaire agents across the core authoring → live → evaluation
+ * lifecycle, each with the exact prompt(s) it sends, rendered from representative sample contexts.
+ * Post-completion and support agents (report formatter, respondent/cohort report, advisor, structure
+ * editor) are out of scope here. Pure; the route merges each agent's DB binding on top.
  */
 export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
   return [
