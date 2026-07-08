@@ -358,6 +358,10 @@ export const API = {
       definitionImport: '/api/v1/app/questionnaires/import',
       /** Read-only prompt library — every agent + the real prompt(s) it sends (GET). */
       prompts: '/api/v1/app/questionnaires/prompts',
+      /** Behind-the-Scenes visualizer — list of pipeline diagrams (GET; optional ?versionId= lens). */
+      workflows: '/api/v1/app/questionnaires/workflows',
+      /** One pipeline diagram + live agent/prompt/tool enrichment (GET; optional ?versionId= lens). */
+      workflowById: (slug: string): string => `/api/v1/app/questionnaires/workflows/${slug}`,
       /** Agent settings evaluation — current vs advisory model/temperature/cost per agent (GET). */
       agentSettings: '/api/v1/app/questionnaires/agent-settings',
       /** Explain one agent's settings with AI — narrative + optional suggestion (POST JSON). */
