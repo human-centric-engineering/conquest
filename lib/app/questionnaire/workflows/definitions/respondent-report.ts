@@ -25,8 +25,7 @@ import {
 export const respondentReportWorkflow = diagram({
   slug: 'respondent-report',
   title: 'Respondent report',
-  description:
-    "When a respondent finishes, ConQuest can write them a tailored report. It loads their answers, rebuilds the Q&A transcript, optionally grounds itself in the attributed client's knowledge base, and lets a reasoning model compose the narrative — with an optional formatting pass on top.",
+  description: 'Writes one respondent a tailored narrative report.',
   sourceModule: 'lib/app/questionnaire/report/generate.ts',
   entryStepId: 'load',
   errorStrategy: 'fail',

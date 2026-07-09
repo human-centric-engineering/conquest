@@ -82,6 +82,29 @@ describe('workflow applicability', () => {
     expect(statusOf('conversation-turn', makeCtx({ versionStatus: 'draft' }))).toBe('inactive');
   });
 
+  it('answer extraction applies on launched versions, inactive on drafts, off without the flag', () => {
+    expect(statusOf('answer-extraction', makeCtx({ versionStatus: 'launched' }))).toBe('applies');
+    expect(statusOf('answer-extraction', makeCtx({ versionStatus: 'draft' }))).toBe('inactive');
+    expect(
+      statusOf('answer-extraction', makeCtx({ flags: { ...flags(true), answerExtraction: false } }))
+    ).toBe('unavailable');
+  });
+
+  it('structure edit applies on drafts, inactive once launched, off without the flag', () => {
+    expect(statusOf('structure-edit', makeCtx({ versionStatus: 'draft' }))).toBe('applies');
+    expect(statusOf('structure-edit', makeCtx({ versionStatus: 'launched' }))).toBe('inactive');
+    expect(
+      statusOf('structure-edit', makeCtx({ flags: { ...flags(true), editAgent: false } }))
+    ).toBe('unavailable');
+  });
+
+  it('data-slot generation applies on any version, off without the flag', () => {
+    expect(statusOf('data-slot-generation', makeCtx())).toBe('applies');
+    expect(
+      statusOf('data-slot-generation', makeCtx({ flags: { ...flags(true), dataSlots: false } }))
+    ).toBe('unavailable');
+  });
+
   it('data-slot turn needs both a launched version and data slots', () => {
     expect(
       statusOf('data-slot-turn', makeCtx({ versionStatus: 'launched', dataSlotCount: 4 }))
@@ -164,6 +187,15 @@ describe('workflow applicability', () => {
     expect(statusOf('config-advisor', makeCtx({ flags: { ...flags(true), advisor: false } }))).toBe(
       'unavailable'
     );
+  });
+
+  it('agent settings advisor applies workspace-wide, gating only on the master flag', () => {
+    // Workspace-level (not version-specific): available whenever the surface is on.
+    expect(statusOf('agent-settings-advisor', makeCtx())).toBe('applies');
+    // The master-off case is also covered by the "all flags off" sweep above; pin it explicitly.
+    expect(
+      statusOf('agent-settings-advisor', makeCtx({ flags: { ...flags(true), master: false } }))
+    ).toBe('unavailable');
   });
 
   it('turn evaluation needs the turn-evaluation flag and captured turns', () => {

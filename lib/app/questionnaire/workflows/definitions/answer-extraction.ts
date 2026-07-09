@@ -24,8 +24,7 @@ import {
 export const answerExtractionWorkflow = diagram({
   slug: 'answer-extraction',
   title: 'Answer extraction & mapping',
-  description:
-    'How a free-text reply becomes structured data. The extractor returns typed answers with confidence and provenance; a structural pass and per-type semantic validation drop anything that does not hold up; and confidence propagates from data-slot fills onto the questions they map to.',
+  description: 'Turns a free-text reply into validated structured answers.',
   sourceModule: 'lib/app/questionnaire/extraction/extraction-prompt.ts',
   entryStepId: 'message',
   errorStrategy: 'fail',

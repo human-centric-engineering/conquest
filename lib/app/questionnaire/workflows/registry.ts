@@ -12,6 +12,7 @@ import type {
   WorkflowSummary,
 } from '@/lib/app/questionnaire/workflows/types';
 
+import { agentSettingsAdvisorWorkflow } from '@/lib/app/questionnaire/workflows/definitions/agent-settings-advisor';
 import { answerExtractionWorkflow } from '@/lib/app/questionnaire/workflows/definitions/answer-extraction';
 import { cohortReportWorkflow } from '@/lib/app/questionnaire/workflows/definitions/cohort-report';
 import { configAdvisorWorkflow } from '@/lib/app/questionnaire/workflows/definitions/config-advisor';
@@ -39,6 +40,7 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   cohortReportWorkflow,
   designEvaluationWorkflow,
   configAdvisorWorkflow,
+  agentSettingsAdvisorWorkflow,
   turnInspectorWorkflow,
   turnEvaluationWorkflow,
 ] as const;

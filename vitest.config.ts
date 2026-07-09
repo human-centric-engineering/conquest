@@ -62,8 +62,12 @@ export default defineConfig({
       },
     },
 
-    // Test timeout (useful for async tests)
-    testTimeout: 10000,
+    // Test timeout. Heavy component/integration tests (async server-component
+    // renders, userEvent-driven form flows) do 1–3s of real work but can inflate
+    // to ~10s+ when CPU-starved during a full unsharded local run — enough to trip
+    // a 10s limit even though they pass in isolation. 20s gives contention headroom
+    // without masking a genuine hang.
+    testTimeout: 20000,
 
     // Mock CSS modules
     css: false,

@@ -22,8 +22,7 @@ import {
 export const turnInspectorWorkflow = diagram({
   slug: 'turn-inspector',
   title: 'Preview turn inspector',
-  description:
-    "A glass-box view of a live turn, for admins previewing a questionnaire. As the turn runs, the inspector records every agent and embedding call — the model, the cost, the latency, and the exact prompt and response — assembles them into a per-turn trace, and streams it to a drawer. It's pure observability: it changes nothing about the turn, and it never runs for a real respondent.",
+  description: "Records a preview turn's agent and model calls.",
   sourceModule: 'lib/app/questionnaire/inspector/index.ts',
   entryStepId: 'gate',
   errorStrategy: 'fail',

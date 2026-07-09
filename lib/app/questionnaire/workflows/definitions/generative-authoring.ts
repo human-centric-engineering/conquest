@@ -24,9 +24,8 @@ import {
 
 export const generativeAuthoringWorkflow = diagram({
   slug: 'generative-authoring',
-  title: 'Generative authoring',
-  description:
-    'No document? Describe the questionnaire in a sentence or two and an agent composes the whole thing — a goal, an audience, sections, and typed questions — then keeps refining it as you chat.',
+  title: 'Questionnaire authoring',
+  description: 'Compose a whole questionnaire from a one-sentence brief.',
   sourceModule: 'lib/app/questionnaire/ingestion/stream-compose.ts',
   entryStepId: 'brief',
   errorStrategy: 'fail',

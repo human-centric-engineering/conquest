@@ -21,8 +21,7 @@ import {
 export const cohortReportWorkflow = diagram({
   slug: 'cohort-report',
   title: 'Cohort report',
-  description:
-    "Across a whole round of respondents, the cohort report finds the pattern. It builds a k-anonymised dataset and the data-slot theme material, optionally pulls the round's context, then a model writes the synthesis and proposes charts — distributions and segment means — that get rendered into the published report.",
+  description: 'Synthesises a whole round into a cohort report.',
   sourceModule: 'lib/app/questionnaire/cohort-report/generate.ts',
   entryStepId: 'dataset',
   errorStrategy: 'fail',

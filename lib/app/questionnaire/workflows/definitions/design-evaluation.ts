@@ -50,9 +50,8 @@ const judgeNodes: WorkflowStep[] = EVALUATION_DIMENSIONS.map((dimension, i) => {
 
 export const designEvaluationWorkflow = diagram({
   slug: 'design-evaluation',
-  title: 'Design evaluation (judge panel)',
-  description:
-    'Before a questionnaire goes live, a panel of specialist judges grades its design. Seven judges — clarity, coverage, duplicates, type-fit, ordering, audience-match, and goal-match — each score the draft out of 100 and return concrete findings the admin can apply with one click. They run in parallel, and one flaky judge never sinks the rest.',
+  title: 'Questionnaire design evaluation (judge panel)',
+  description: "A judge panel scores the questionnaire's design.",
   sourceModule: 'lib/app/questionnaire/evaluation/run-panel.ts',
   entryStepId: 'structure',
   // Per-judge failure is fail-soft *inside* the panel (a diagnostic for that one dimension), so the

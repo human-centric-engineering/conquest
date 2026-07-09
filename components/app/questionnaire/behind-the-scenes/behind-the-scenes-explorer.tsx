@@ -96,32 +96,40 @@ export function BehindTheScenesExplorer({ initialWorkflows }: BehindTheScenesExp
         <QuestionnaireLens value={lens} onChange={setLens} />
       </header>
 
-      <WorkflowPicker
-        workflows={workflows}
-        selectedSlug={selectedSlug}
-        onSelect={setSelectedSlug}
-        lensActive={Boolean(lens)}
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="shrink-0">
+          <WorkflowPicker
+            workflows={workflows}
+            selectedSlug={selectedSlug}
+            onSelect={setSelectedSlug}
+            lensActive={Boolean(lens)}
+          />
+        </div>
+
+        {selectedSummary ? (
+          <div className="bg-muted/30 border-l-primary/60 min-w-0 flex-1 rounded-md border border-l-[3px] px-4 py-2.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-primary/90 text-[11px] font-semibold tracking-wider uppercase">
+                Purpose
+              </p>
+              {lens ? (
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  Lens: <span className="font-medium">{lens.title}</span> (v{lens.versionNumber})
+                </span>
+              ) : null}
+            </div>
+            <p className="text-foreground/80 mt-1 text-sm leading-relaxed text-pretty">
+              {selectedSummary.description}
+            </p>
+          </div>
+        ) : null}
+      </div>
 
       {lens ? (
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           <LegendDot className="bg-emerald-500" label="Applies to this questionnaire" />
           <LegendDot className="bg-amber-500" label="Available, but off in its settings" />
           <LegendDot className="bg-slate-400" label="Not enabled in this workspace" />
-        </div>
-      ) : null}
-
-      {selectedSummary ? (
-        <div className="bg-muted/30 rounded-lg border p-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-sm font-semibold">Purpose</h2>
-            {lens ? (
-              <span className="text-muted-foreground text-xs">
-                Lens: <span className="font-medium">{lens.title}</span> (v{lens.versionNumber})
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-1 text-sm">{selectedSummary.description}</p>
         </div>
       ) : null}
 
