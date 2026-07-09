@@ -316,8 +316,8 @@ describe('VersionGraph — sections', () => {
         })}
       />
     );
-    // QUESTION_TYPE_LABELS.single_choice === 'Single choice'
-    expect(screen.getByText('Single choice')).toBeInTheDocument();
+    // QUESTION_TYPE_LABELS.single_choice === 'Multi-Choice (One Answer)'
+    expect(screen.getByText('Multi-Choice (One Answer)')).toBeInTheDocument();
   });
 
   it('falls back to the raw type string when the type is unknown', () => {

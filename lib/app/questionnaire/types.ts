@@ -108,8 +108,8 @@ export type QuestionType = (typeof QUESTION_TYPES)[number];
  */
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   free_text: 'Free text',
-  single_choice: 'Single choice',
-  multi_choice: 'Multi choice',
+  single_choice: 'Multi-Choice (One Answer)',
+  multi_choice: 'Multi-Choice (Multiple Answers)',
   likert: 'Likert',
   numeric: 'Numeric',
   date: 'Date',
