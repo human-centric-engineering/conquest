@@ -23,6 +23,7 @@ import * as constants from '@/lib/app/questionnaire/constants';
 import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
+import { WORKFLOW_CATEGORIES, categoryForSlug } from '@/lib/app/questionnaire/workflows/categories';
 import { getNodeMeta } from '@/lib/app/questionnaire/workflows/types';
 
 // Every `*_AGENT_SLUG` export is a legitimate agent slug a node may reference, plus the seven
@@ -121,6 +122,36 @@ describe('workflow diagram integrity', () => {
     for (const { slug, stepId, meta } of allMetas) {
       for (const setting of meta.settings ?? []) {
         expect(resolve(setting.key), `${slug}/${stepId} → ${setting.key}`).not.toBeUndefined();
+      }
+    }
+  });
+});
+
+describe('workflow category grouping', () => {
+  it('every diagram is filed under exactly one category', () => {
+    for (const d of WORKFLOW_DIAGRAMS) {
+      expect(
+        categoryForSlug(d.slug),
+        `${d.slug} has no category — add it to WORKFLOW_CATEGORIES`
+      ).not.toBeUndefined();
+    }
+  });
+
+  it('every category slug names a real diagram (no dangling membership)', () => {
+    const known = new Set(WORKFLOW_DIAGRAMS.map((d) => d.slug));
+    for (const category of WORKFLOW_CATEGORIES) {
+      for (const slug of category.slugs) {
+        expect(known.has(slug), `category ${category.id} → unknown slug ${slug}`).toBe(true);
+      }
+    }
+  });
+
+  it('no diagram appears in two categories', () => {
+    const seen = new Set<string>();
+    for (const category of WORKFLOW_CATEGORIES) {
+      for (const slug of category.slugs) {
+        expect(seen.has(slug), `${slug} appears in more than one category`).toBe(false);
+        seen.add(slug);
       }
     }
   });
