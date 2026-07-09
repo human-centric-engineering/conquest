@@ -32,7 +32,7 @@ export const dataSlotTurnWorkflow = diagram({
   slug: 'data-slot-turn',
   title: 'Data-slot conversation (per turn)',
   description:
-    'When a questionnaire has data slots, the interview flows by topic rather than by question order. A single extraction fills questions and slots at once; a park gate keeps things moving when a slot resists; and each turn chooses to wrap up, slip in a lagging required question, or move to the next slot.',
+    'The topic-led alternative — used when the Data Slots feature is on and the version has data slots. The conversation targets data slots (short topics), lingering to fill a theme, while the underlying authored questions fill in the background as the deliverable.',
   sourceModule: 'lib/app/questionnaire/orchestrator/data-slot-orchestrator.ts',
   entryStepId: 'extract',
   errorStrategy: 'fail',

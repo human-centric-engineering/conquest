@@ -17,8 +17,7 @@ import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/wor
 export const dataSlotGenerationWorkflow = diagram({
   slug: 'data-slot-generation',
   title: 'Data-slot generation',
-  description:
-    'Data slots are the atomic facts a conversation aims to capture. Point the generator at your questions and it proposes a typed set of slots for you to review — the scaffolding that lets the interview flow by topic rather than by rigid question order.',
+  description: 'Propose the data slots a conversation should capture.',
   sourceModule: 'lib/app/questionnaire/data-slots/generation.ts',
   entryStepId: 'structure',
   errorStrategy: 'fail',

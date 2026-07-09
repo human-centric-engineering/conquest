@@ -22,8 +22,7 @@ import {
 export const turnEvaluationWorkflow = diagram({
   slug: 'turn-evaluation',
   title: 'Turn evaluation',
-  description:
-    'Grading the interview, one turn at a time. From the inspector drawer, an admin can ask a reasoning model to judge a single turn — how well each call followed its instructions, the quality of the interviewing, extraction, and question selection, how much information the turn gained, and where it drifted or overspent. The verdict is structured, saved, and searchable.',
+  description: 'Scores a single preview turn against its objectives.',
   sourceModule: 'lib/app/questionnaire/turn-evaluation/evaluate-turn.ts',
   entryStepId: 'dump',
   errorStrategy: 'fail',

@@ -31,9 +31,9 @@ import {
 
 export const conversationTurnWorkflow = diagram({
   slug: 'conversation-turn',
-  title: 'Conversational run (per turn)',
+  title: 'Question-led conversation (per turn)',
   description:
-    'This is the heart of ConQuest. Every message a respondent sends runs the full loop: pull out typed answers, clear the safety and genuineness gates, reconcile anything that contradicts an earlier answer, judge whether enough has been captured, then decide what to say next — a warm follow-up question, an offer to wrap up, or completion.',
+    'The default interview — used whenever a questionnaire has no data slots (or the Data Slots feature is off). It walks the authored questions in order: each turn extracts answers, clears the safety gates, reconciles contradictions, assesses completion, then asks the next question or offers to submit.',
   sourceModule: 'lib/app/questionnaire/orchestrator/orchestrator.ts',
   entryStepId: 'extract',
   errorStrategy: 'fail',

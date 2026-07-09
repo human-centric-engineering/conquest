@@ -20,6 +20,7 @@ import { buildPromptCatalog } from '@/app/api/v1/app/questionnaires/_lib/prompt-
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities/registry';
 import * as constants from '@/lib/app/questionnaire/constants';
+import { AGENT_SETTINGS_ADVISOR_SLUG } from '@/lib/app/questionnaire/agent-advisory/explain-schema';
 import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
@@ -33,6 +34,9 @@ const KNOWN_AGENT_SLUGS = new Set<string>([
     .filter(([name, value]) => name.endsWith('_AGENT_SLUG') && typeof value === 'string')
     .map(([, value]) => value as string),
   ...EVALUATION_JUDGE_SLUGS,
+  // The Agent Settings Advisor's slug lives in agent-advisory/explain-schema.ts (named
+  // `*_SLUG`, not a constants.ts `*_AGENT_SLUG`), so add it explicitly.
+  AGENT_SETTINGS_ADVISOR_SLUG,
 ]);
 
 const catalog = buildPromptCatalog();
@@ -89,6 +93,8 @@ describe('workflow diagram integrity', () => {
     constants.COHORT_REPORT_AGENT_SLUG,
     constants.QUESTIONNAIRE_EDIT_AGENT_SLUG,
     constants.QUESTIONNAIRE_ADVISOR_AGENT_SLUG,
+    // The Agent Settings Advisor builds its prompt in code and is not in the Prompt Library.
+    AGENT_SETTINGS_ADVISOR_SLUG,
   ]);
 
   it('every agent-backed step exposes a catalogued prompt (or is a known exception)', () => {
@@ -154,5 +160,18 @@ describe('workflow category grouping', () => {
         seen.add(slug);
       }
     }
+  });
+
+  // Pin the notable placements this taxonomy deliberately chose — the structural invariants above
+  // pass regardless of WHICH category a diagram lands in, so an accidental re-file (e.g. design
+  // evaluation slipping back under evaluation, or an advisor leaving config) would silently change
+  // the picker grouping without failing a test. These lock the intent.
+  it('files the key workflows under their intended category', () => {
+    expect(categoryForSlug('config-advisor')).toBe('config');
+    expect(categoryForSlug('agent-settings-advisor')).toBe('config');
+    expect(categoryForSlug('design-evaluation')).toBe('creation');
+    expect(categoryForSlug('document-ingestion')).toBe('creation');
+    expect(categoryForSlug('conversation-turn')).toBe('conversation');
+    expect(categoryForSlug('turn-inspector')).toBe('evaluation');
   });
 });

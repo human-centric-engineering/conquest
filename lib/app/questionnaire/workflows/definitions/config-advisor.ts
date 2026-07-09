@@ -17,8 +17,7 @@ import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/wor
 export const configAdvisorWorkflow = diagram({
   slug: 'config-advisor',
   title: 'Config Advisor',
-  description:
-    'From the Settings tab, the Config Advisor reads the whole questionnaire — structure, goal and audience, run-time configuration, data slots, and scoring — and talks you through it: a plain-language review of the respondent experience and where the questionnaire sits in its lifecycle, followed by concrete, one-click configuration tweaks. It only ever proposes; you decide what to apply.',
+  description: 'Reviews configuration and proposes one-click setting tweaks.',
   sourceModule: 'lib/app/questionnaire/advisor/stream-advisor.ts',
   entryStepId: 'snapshot',
   errorStrategy: 'fail',

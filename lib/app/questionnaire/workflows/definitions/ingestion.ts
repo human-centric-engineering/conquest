@@ -22,9 +22,8 @@ import {
 
 export const ingestionWorkflow = diagram({
   slug: 'document-ingestion',
-  title: 'Document ingestion',
-  description:
-    'An admin uploads a questionnaire document; an agent reads it and proposes a full structure — sections, typed questions, an inferred goal and audience, and an editorial change log.',
+  title: 'Questionnaire ingestion',
+  description: 'Turn an uploaded document into a proposed questionnaire structure.',
   sourceModule: 'app/api/v1/app/questionnaires/_lib/extract-pipeline.ts',
   entryStepId: 'parse',
   errorStrategy: 'fail',

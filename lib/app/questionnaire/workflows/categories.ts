@@ -18,8 +18,8 @@
  * @see .context/app/questionnaire/workflow-visualizer.md
  */
 
-/** A lifecycle stage a workflow belongs to. */
-export type WorkflowCategory = 'authoring' | 'conversation' | 'reporting' | 'evaluation';
+/** The part of ConQuest a workflow belongs to. */
+export type WorkflowCategory = 'creation' | 'config' | 'conversation' | 'reporting' | 'evaluation';
 
 export interface WorkflowCategoryMeta {
   id: WorkflowCategory;
@@ -37,16 +37,22 @@ export interface WorkflowCategoryMeta {
  */
 export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
   {
-    id: 'authoring',
-    label: 'Authoring & setup',
-    description: 'Building and configuring a questionnaire before it goes live.',
+    id: 'creation',
+    label: 'Questionnaire Creation',
+    description: 'Building a questionnaire — from a document, a brief, or by hand.',
     slugs: [
       'document-ingestion',
       'generative-authoring',
+      'design-evaluation',
       'structure-edit',
       'data-slot-generation',
-      'config-advisor',
     ],
+  },
+  {
+    id: 'config',
+    label: 'Config / Settings',
+    description: 'AI advisors that review configuration and agent settings.',
+    slugs: ['config-advisor', 'agent-settings-advisor'],
   },
   {
     id: 'conversation',
@@ -63,8 +69,8 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
   {
     id: 'evaluation',
     label: 'Evaluation & QA',
-    description: 'Inspecting and scoring quality — a design, a single turn, or a run.',
-    slugs: ['design-evaluation', 'turn-inspector', 'turn-evaluation'],
+    description: 'Inspecting and scoring a single preview turn.',
+    slugs: ['turn-inspector', 'turn-evaluation'],
   },
 ] as const;
 

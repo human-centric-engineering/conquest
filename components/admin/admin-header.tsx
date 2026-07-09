@@ -27,6 +27,7 @@ const segmentLabels: Record<string, string> = {
   features: 'Feature Flags',
   'demo-clients': 'Demo clients',
   questionnaires: 'Questionnaires',
+  'behind-the-scenes': 'Agentic Workflows',
   orchestration: 'AI Orchestration',
   v: 'Version',
 };

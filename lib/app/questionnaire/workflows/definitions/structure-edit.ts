@@ -23,9 +23,8 @@ import {
 
 export const structureEditWorkflow = diagram({
   slug: 'structure-edit',
-  title: 'Structure edit agent',
-  description:
-    'Edit a draft by describing the change — "merge the last two sections", "make question 3 a single-select". The agent turns your instruction into precise edit-ops, shows you exactly what will change, and applies it only once you confirm.',
+  title: 'Questionnaire structure edit',
+  description: 'Edit the draft by describing the change in words.',
   sourceModule: 'app/api/v1/app/questionnaires/_lib/edit-agent-pipeline.ts',
   entryStepId: 'instruction',
   errorStrategy: 'fail',
