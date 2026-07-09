@@ -54,6 +54,16 @@ describe('questionConfigIssue — clean configs surface nothing', () => {
       expect(questionConfigIssue(type, null)).not.toBeNull();
     }
   );
+
+  // Regression: the extractor tags free_text fields with commentAggregation
+  // (extraction-prompt.ts). That is a valid config and must NOT surface a cue —
+  // previously it tripped a spurious "Check config" on every tagged field.
+  it.each(['isolated', 'section'] as const)(
+    'returns null for a free_text with commentAggregation=%s',
+    (mode) => {
+      expect(questionConfigIssue('free_text', { commentAggregation: mode })).toBeNull();
+    }
+  );
 });
 
 describe('questionConfigIssue — likert gaps', () => {

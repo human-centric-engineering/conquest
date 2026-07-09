@@ -110,6 +110,22 @@ describe('buildExtractionPrompt — vocabulary from the single source of truth',
     expect(system).toMatch(/do NOT default to agree\/disagree/i);
     expect(system).toMatch(/to what extent[\s\S]*great extent/i);
   });
+
+  it('tells the model to detect enumerated-option questions and populate every option', () => {
+    // Regression guard: without an explicit choice rule the extractor emitted choice
+    // questions with no options. The rule must name the choice types and demand all options.
+    expect(system).toMatch(/single_choice[\s\S]*multi_choice/i);
+    expect(system).toMatch(/EVERY option/i);
+  });
+
+  it('requires choices as {value,label} objects, never a bare string array', () => {
+    // The old example told the model to emit choices:["A","B"] (strings), which every
+    // downstream reader silently dropped. The prompt must show the object shape instead.
+    expect(system).toMatch(/"value"[\s\S]*"label"/);
+    expect(system).toMatch(/array of objects/i);
+    // The broken string-array example must be gone.
+    expect(system).not.toContain('"choices":["A","B"]');
+  });
 });
 
 describe('buildExtractionPrompt — inference suppression instruction', () => {

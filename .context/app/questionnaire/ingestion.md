@@ -248,6 +248,32 @@ database.
 directly via `updateMany` (`PATCH …/versions/:vid/questions`), not through this
 policy.
 
+### Choice-option normalisation
+
+The extractor's structured-output schema keeps `suggestedTypeConfig` loose
+(`z.record(z.string(), z.unknown())`), so a model may shape a `single_choice` /
+`multi_choice` question's options however it likes — including a bare string
+array (`{"choices":["Never","Once or twice"]}`). Every downstream reader
+(`readChoicesConfig`, the interviewer's `choiceOptions`, the admin
+`ChoicesEditor`) parses through the **tight** authoring schema, which requires
+`choices: [{ value, label }, …]` with ≥2 distinct values — so an unnormalised
+string array persists verbatim and then renders as **nothing selectable**.
+
+`writeGraph` closes that gap deterministically: it runs each slot's config
+through `normalizeSuggestedTypeConfig(type, raw)`
+(`lib/app/questionnaire/ingestion/normalize-type-config.ts`, pure) before
+storage. For choice types it coerces every entry into `{ value, label }` (string
+→ derive a snake_case `value` from the label; half-object → fill the missing
+side; object → pass through), de-dupes colliding values, and drops empties. A
+config that yields fewer than 2 usable options, a non-object config, or any
+non-choice type is returned untouched (the admin corrects a degenerate list in
+the Structure editor). Because both `persistIngestion` (ingest, compose,
+compose-stream) and `replaceVersionStructure` (re-ingest) go through
+`writeGraph`, this one step covers every extraction path. The prompts
+(`extraction-prompt.ts`, `compose-prompt.ts`) also instruct the model to emit the
+object shape directly; the normaliser is the belt-and-braces defence since
+prompts are probabilistic.
+
 ### Goal / audience merge (admin-wins-per-field)
 
 `mergeGoalAudience` (`_lib/merge.ts`, pure) resolves each of `goal` and every

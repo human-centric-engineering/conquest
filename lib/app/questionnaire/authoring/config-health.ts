@@ -114,8 +114,9 @@ export function questionConfigIssue(
           'Give the yes/no options non-empty labels, or remove the custom labels to use the defaults.',
       };
     default:
-      // Reached only by a config-less type (free_text / date) carrying leftover
-      // config that no longer matches its type.
+      // Reached only by a (near-)config-less type — `date`, or a `free_text` whose
+      // config carries something other than the allowed `commentAggregation` — that
+      // is holding leftover config no longer matching its type.
       return {
         label: 'Check config',
         detail:

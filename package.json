@@ -34,6 +34,7 @@
     "db:migrate:single-doc": "tsx --env-file=.env.local scripts/migrate-knowledge-to-single-doc.ts",
     "db:backfill:data-slots": "tsx --env-file=.env.local scripts/migrations/2026-06-13-backfill-data-slots.ts",
     "db:backfill:likert-labels": "tsx --env-file=.env.local scripts/migrations/2026-06-25-backfill-likert-labels.ts",
+    "db:backfill:choice-typeconfig": "tsx --env-file=.env.local scripts/migrations/2026-07-09-backfill-choice-typeconfig.ts",
     "db:reset": "prisma migrate reset --force",
     "db:drift-check": "tsx --env-file=.env.local scripts/db/check-drift.ts",
     "smoke:chat": "tsx --env-file=.env.local scripts/smoke/chat.ts",

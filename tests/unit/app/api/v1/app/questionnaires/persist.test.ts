@@ -228,6 +228,41 @@ describe('persistIngestion', () => {
     });
   });
 
+  it('normalizes a choice question so a bare string array persists as {value,label} objects', async () => {
+    // The extractor/composer may emit choices as strings; writeGraph must coerce them
+    // into the canonical object shape, else the field renders nothing selectable.
+    await persistIngestion(
+      input({
+        extraction: extraction({
+          sections: [{ ordinal: 0, title: 'S' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'silence_duration',
+              prompt: 'How long does a failing project survive before someone says so?',
+              suggestedType: 'single_choice',
+              suggestedTypeConfig: { choices: ['Days', 'Weeks', 'Until a customer tells us'] },
+              extractionConfidence: 0.8,
+            },
+          ],
+          changes: [],
+        }),
+      })
+    );
+
+    const data = (tx.appQuestionSlot.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
+    >;
+    expect(data[0].type).toBe('single_choice');
+    expect(data[0].typeConfig).toEqual({
+      choices: [
+        { value: 'days', label: 'Days' },
+        { value: 'weeks', label: 'Weeks' },
+        { value: 'until_a_customer_tells_us', label: 'Until a customer tells us' },
+      ],
+    });
+  });
+
   it('resolves change-record targetEntityId to the version only for version-level changes', async () => {
     await persistIngestion(
       input({
@@ -338,7 +373,7 @@ describe('persistIngestion', () => {
   });
 
   it('includes guidelines and rationale on a slot when the question supplies them', async () => {
-    // This covers the true-branch of the guidelines/rationale optional spreads (lines 159-160).
+    // This covers the true-branch of the guidelines/rationale optional spreads in writeGraph.
     await persistIngestion(
       input({
         extraction: extraction({
@@ -372,8 +407,8 @@ describe('persistIngestion', () => {
   });
 
   it('omits afterJson from a change record when the change has no afterJson', async () => {
-    // Covers the false-branch of the afterJson ternary (line 183): when a change only
-    // has beforeJson (e.g. a prune with no after-value), afterJson must not appear.
+    // Covers the false-branch of the afterJson ternary: when a change only has
+    // beforeJson (e.g. a prune with no after-value), afterJson must not appear.
     await persistIngestion(
       input({
         extraction: extraction({

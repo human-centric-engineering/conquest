@@ -34,8 +34,8 @@ export interface PreviewSection {
 /** Human label for a question type badge. */
 const TYPE_LABELS: Record<string, string> = {
   free_text: 'Text',
-  single_choice: 'Single choice',
-  multi_choice: 'Multi choice',
+  single_choice: 'Multi-Choice (one)',
+  multi_choice: 'Multi-Choice (many)',
   likert: 'Likert',
   numeric: 'Number',
   date: 'Date',
