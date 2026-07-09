@@ -22,9 +22,12 @@
  * untouched.
  */
 
-import { isRecord } from '@/lib/utils';
+import { isRecord, slugify } from '@/lib/utils';
 import type { QuestionType } from '@/lib/app/questionnaire/types';
 import { nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
+
+/** The question types whose `typeConfig.choices` this module normalises. */
+export const CHOICE_QUESTION_TYPES = ['single_choice', 'multi_choice'] as const;
 
 /** The canonical option shape every downstream reader expects (see `choiceSchema`). */
 interface NormalizedChoice {
@@ -32,24 +35,20 @@ interface NormalizedChoice {
   label: string;
 }
 
-const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(['single_choice', 'multi_choice']);
+const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(CHOICE_QUESTION_TYPES);
 
 /**
  * Snake_case slug for a choice `value`, matching the prompt's `snake_case`
- * instruction and the `defaultTypeConfig` convention (`option_1`, …). Deliberately
- * NOT `slugifyKey` — that strips stopwords and caps at 4 words, which would mangle
- * an option label ("Once or twice" → "once_twice"). We keep every word: NFKD-fold
- * accents (so "café" → "cafe"), lowercase, collapse every non-alphanumeric run
- * (including the combining marks NFKD leaves behind) to `_`, and trim. Returns ''
- * when the label has no slug-able characters (e.g. a stray glyph) — the caller
- * falls back to a positional value so a value is never empty.
+ * instruction and the `defaultTypeConfig` convention (`option_1`, …). Reuses the
+ * shared `slugify` (which lowercases + collapses non-alphanumerics), converting its
+ * hyphens to underscores; before that we NFKD-fold accents and DROP the combining
+ * marks the fold leaves, so "être" → "etre" (not "e_tre") and "café" → "cafe".
+ * Deliberately NOT `slugifyKey`, which strips stopwords and caps at 4 words
+ * ("Once or twice" → "once_twice"). Returns '' when the label has no slug-able
+ * characters (e.g. a stray glyph) — the caller falls back to a positional value.
  */
 function slugifyChoiceValue(label: string): string {
-  return label
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  return slugify(label.normalize('NFKD').replace(/\p{Mn}/gu, '')).replace(/-/g, '_');
 }
 
 /**
@@ -109,5 +108,10 @@ export function normalizeSuggestedTypeConfig(type: QuestionType, raw: unknown): 
   if (!isRecord(raw)) return raw;
   const choices = normalizeChoices(raw.choices);
   if (!choices || choices.length < 2) return raw;
-  return { ...raw, choices };
+  // Emit ONLY the keys the tight choice schema recognises. Carrying a stray or
+  // wrongly-typed sibling through (e.g. a model emitting `allowOther: "true"`)
+  // would fail `choicesConfigSchema` and re-introduce the very "nothing
+  // selectable" bug this normaliser exists to prevent. `allowOther` defaults to
+  // false, so we only keep it when it's genuinely `true`.
+  return raw.allowOther === true ? { choices, allowOther: true } : { choices };
 }

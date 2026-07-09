@@ -65,12 +65,62 @@ describe('normalizeSuggestedTypeConfig — choice coercion', () => {
     ]);
   });
 
-  it('preserves sibling config keys such as allowOther', () => {
+  it('preserves allowOther when it is genuinely true', () => {
     const out = normalizeSuggestedTypeConfig('single_choice', {
       choices: ['A', 'B'],
       allowOther: true,
     });
     expect(out).toMatchObject({ allowOther: true });
+  });
+
+  it('drops a wrongly-typed allowOther so the result still passes the choice reader', () => {
+    // A model emitting allowOther:"true" (string) must not sink the whole config —
+    // choicesConfigSchema would reject a non-boolean allowOther and the field would
+    // render nothing. The normaliser keeps only choices + a real boolean allowOther.
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Yes', 'No'],
+      allowOther: 'true',
+    });
+    expect(out).toEqual({
+      choices: [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+      ],
+    });
+    expect(readChoicesConfig('single_choice', out)).not.toBeNull();
+  });
+
+  it('folds accents when deriving a value instead of inserting stray underscores', () => {
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Être présent', 'Élève'],
+    }) as { choices: Array<{ value: string; label: string }> };
+    expect(out.choices).toEqual([
+      { value: 'etre_present', label: 'Être présent' },
+      { value: 'eleve', label: 'Élève' },
+    ]);
+  });
+
+  it('drops unusable entries (empty objects, non-string/object junk) and keeps the valid ones', () => {
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Yes', {}, { value: '', label: '  ' }, 42, null, 'No'],
+    }) as { choices: Array<{ value: string; label: string }> };
+    // Only the two real string options survive; the empty object, the label-less
+    // object, and the non-string/object entries are all discarded.
+    expect(out.choices).toEqual([
+      { value: 'yes', label: 'Yes' },
+      { value: 'no', label: 'No' },
+    ]);
+  });
+
+  it('derives a value from an object that supplies only a value (no label)', () => {
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: [{ value: 'Blue' }, { value: 'Green' }],
+    }) as { choices: Array<{ value: string; label: string }> };
+    // With no label, the given value doubles as the label and seeds the slug.
+    expect(out.choices).toEqual([
+      { value: 'Blue', label: 'Blue' },
+      { value: 'Green', label: 'Green' },
+    ]);
   });
 
   it('leaves a degenerate (<2 usable options) list untouched for the admin to fix', () => {

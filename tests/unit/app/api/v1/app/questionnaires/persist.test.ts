@@ -373,7 +373,7 @@ describe('persistIngestion', () => {
   });
 
   it('includes guidelines and rationale on a slot when the question supplies them', async () => {
-    // This covers the true-branch of the guidelines/rationale optional spreads (lines 159-160).
+    // This covers the true-branch of the guidelines/rationale optional spreads in writeGraph.
     await persistIngestion(
       input({
         extraction: extraction({
@@ -407,8 +407,8 @@ describe('persistIngestion', () => {
   });
 
   it('omits afterJson from a change record when the change has no afterJson', async () => {
-    // Covers the false-branch of the afterJson ternary (line 183): when a change only
-    // has beforeJson (e.g. a prune with no after-value), afterJson must not appear.
+    // Covers the false-branch of the afterJson ternary: when a change only has
+    // beforeJson (e.g. a prune with no after-value), afterJson must not appear.
     await persistIngestion(
       input({
         extraction: extraction({

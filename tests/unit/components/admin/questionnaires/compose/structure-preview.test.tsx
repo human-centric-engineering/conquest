@@ -188,8 +188,8 @@ describe('StructurePreview', () => {
       render(<StructurePreview sections={[makeSection({ status: 'done', questions })]} />);
       expect(screen.getByText('Likert')).toBeInTheDocument();
       expect(screen.getByText('Text')).toBeInTheDocument();
-      expect(screen.getByText('Choice (one)')).toBeInTheDocument();
-      expect(screen.getByText('Choice (many)')).toBeInTheDocument();
+      expect(screen.getByText('Multi-Choice (one)')).toBeInTheDocument();
+      expect(screen.getByText('Multi-Choice (many)')).toBeInTheDocument();
       expect(screen.getByText('Number')).toBeInTheDocument();
       expect(screen.getByText('Date')).toBeInTheDocument();
       expect(screen.getByText('Yes/No')).toBeInTheDocument();
