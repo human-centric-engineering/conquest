@@ -205,6 +205,14 @@ describe('buildComposeFullPrompt', () => {
     expect(systemContent).toContain('sections');
     expect(systemContent).toContain('questions');
   });
+
+  it('requires choice options as {value,label} objects, not a bare string array', () => {
+    const systemContent = buildComposeFullPrompt(BRIEF)[0]?.content ?? '';
+    // Mirror of the extractor fix: composed choice questions must carry object options.
+    expect(systemContent).toMatch(/single_choice[\s\S]*multi_choice/i);
+    expect(systemContent).toMatch(/array of objects/i);
+    expect(systemContent).not.toContain('"choices":["A","B"]');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ const QUESTION_SHAPE = `{
   "key": "<stable unique slug, snake_case>",
   "prompt": "<the question text shown to the respondent — REQUIRED>",
   "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-  "suggestedTypeConfig": { <choice: {"choices":["A","B"]}; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
+  "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}]} — required, ≥2 objects; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
   "guidelines": "<optional answering guidance>",
   "rationale": "<optional why-this-question>",
   "extractionConfidence": <number between 0 and 1; your confidence the question fits the brief>
@@ -80,6 +80,13 @@ unlikely → Very likely"; importance → "Not at all important → Extremely im
 evenly for the in-between points. These labels are shown in the final report instead of a bare \
 number. Use "likert" only when each point has a qualitative meaning; for a purely numeric rating \
 (e.g. "rate 0–10", a count) use "numeric", which needs no labels.`;
+
+/** Shared choice rule: enumerated options must be emitted as `{value,label}` objects. */
+const CHOICE_RULE = `For a "single_choice" (pick one) or "multi_choice" (pick several) question, set \
+"suggestedTypeConfig.choices" to an ARRAY OF OBJECTS, each {"value": "<stable snake_case slug>", \
+"label": "<the option text>"}, with at least 2 options and distinct "value"s. Never emit choices as \
+a bare array of strings. Use "single_choice"/"multi_choice" for an asymmetric or unordered option \
+list; reserve "likert" for a symmetric agree/rate scale.`;
 
 // ---------------------------------------------------------------------------
 // Phase 1 — outline (sections + inferred goal/audience)
@@ -138,6 +145,8 @@ Output a JSON object with EXACTLY this key:
 
 ${SCALE_RULE}
 
+${CHOICE_RULE}
+
 ${JSON_ONLY}`;
 
 export function buildComposeSectionQuestionsPrompt(
@@ -185,6 +194,8 @@ Design 2–7 sections; every question's "sectionOrdinal" must match a declared s
 question keys must be unique across the whole questionnaire (snake_case).
 
 ${SCALE_RULE}
+
+${CHOICE_RULE}
 
 ${JSON_ONLY}`;
 

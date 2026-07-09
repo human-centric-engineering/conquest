@@ -228,6 +228,41 @@ describe('persistIngestion', () => {
     });
   });
 
+  it('normalizes a choice question so a bare string array persists as {value,label} objects', async () => {
+    // The extractor/composer may emit choices as strings; writeGraph must coerce them
+    // into the canonical object shape, else the field renders nothing selectable.
+    await persistIngestion(
+      input({
+        extraction: extraction({
+          sections: [{ ordinal: 0, title: 'S' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'silence_duration',
+              prompt: 'How long does a failing project survive before someone says so?',
+              suggestedType: 'single_choice',
+              suggestedTypeConfig: { choices: ['Days', 'Weeks', 'Until a customer tells us'] },
+              extractionConfidence: 0.8,
+            },
+          ],
+          changes: [],
+        }),
+      })
+    );
+
+    const data = (tx.appQuestionSlot.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
+    >;
+    expect(data[0].type).toBe('single_choice');
+    expect(data[0].typeConfig).toEqual({
+      choices: [
+        { value: 'days', label: 'Days' },
+        { value: 'weeks', label: 'Weeks' },
+        { value: 'until_a_customer_tells_us', label: 'Until a customer tells us' },
+      ],
+    });
+  });
+
   it('resolves change-record targetEntityId to the version only for version-level changes', async () => {
     await persistIngestion(
       input({

@@ -19,6 +19,7 @@ import { Prisma } from '@prisma/client';
 import { executeTransaction } from '@/lib/db/utils';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
+import { normalizeSuggestedTypeConfig } from '@/lib/app/questionnaire/ingestion/normalize-type-config';
 import {
   mergeGoalAudience,
   type MergeProvenance,
@@ -185,8 +186,15 @@ export async function writeGraph(
           weight: 0.5,
           ...(q.guidelines !== undefined ? { guidelines: q.guidelines } : {}),
           ...(q.rationale !== undefined ? { rationale: q.rationale } : {}),
+          // Coerce loose extractor/composer choice configs into the canonical
+          // `{ value, label }[]` shape before storage — a bare string array would
+          // otherwise persist verbatim and render as nothing selectable.
           ...(q.suggestedTypeConfig !== undefined
-            ? { typeConfig: jsonInput(q.suggestedTypeConfig) }
+            ? {
+                typeConfig: jsonInput(
+                  normalizeSuggestedTypeConfig(q.suggestedType, q.suggestedTypeConfig)
+                ),
+              }
             : {}),
           extractionConfidence: q.extractionConfidence,
         };

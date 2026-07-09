@@ -139,6 +139,15 @@ rather than forcing agreement.
 - Use "likert" ONLY when each point carries a qualitative meaning. If a question asks for a \
 purely numeric rating with no qualitative scale (e.g. "rate 0–10", a count, an age, a percentage), \
 use "numeric" instead — numeric questions need no labels.
+- When a question offers a fixed list of answer options — radio buttons, checkboxes (☐ / ☑ / □), \
+"select one" / "select all that apply", a lettered or numbered answer list, or a named-level \
+rubric — classify it as "single_choice" (pick exactly one) or "multi_choice" (pick several) and \
+populate EVERY option. Set "suggestedTypeConfig.choices" to an ARRAY OF OBJECTS, each \
+{"value": "<stable snake_case slug>", "label": "<the option text, verbatim>"}, in document order, \
+with at least 2 options and distinct "value"s. Never emit choices as a bare array of strings. \
+Prefer "likert" over "single_choice" ONLY when the options form a symmetric agree/rate scale (see \
+the likert rule); an asymmetric or unordered option list (e.g. "No / Yes, one / Yes, several", \
+"Days / Weeks / Months / Until a customer tells us") is "single_choice".
 - For a "free_text" question, set "suggestedTypeConfig.commentAggregation": "section" when the \
 question is a SECTION-WIDE comment that should reflect the whole section's discussion (e.g. "Please \
 provide comments to support your scores", "Any other comments on this section?", "Anything else \
@@ -180,7 +189,7 @@ these top-level keys, using EXACTLY these field names:
       "key": "<stable unique slug>",
       "prompt": "<the question text shown to the respondent — REQUIRED>",
       "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-      "suggestedTypeConfig": { <choice: {"choices":["A","B"]}; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
+      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}]} — required, ≥2 objects; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
       "guidelines": "<optional answering guidance>",
       "rationale": "<optional why-this-question>",
       "extractionConfidence": <number between 0 and 1>,
