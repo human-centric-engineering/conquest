@@ -27,6 +27,8 @@ import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 import { buildExtractionPrompt } from '@/lib/app/questionnaire/ingestion/extraction-prompt';
 import {
   buildComposeFullPrompt,
+  buildComposeOutlinePrompt,
+  buildComposeSectionQuestionsPrompt,
   buildRefineStructurePrompt,
 } from '@/lib/app/questionnaire/ingestion/compose-prompt';
 import { buildAnswerExtractionPrompt } from '@/lib/app/questionnaire/extraction/extraction-prompt';
@@ -34,20 +36,27 @@ import { buildContradictionDetectionPrompt } from '@/lib/app/questionnaire/contr
 import { buildRefinementPrompt } from '@/lib/app/questionnaire/refinement/refinement-prompt';
 import { buildCompletionOfferPrompt } from '@/lib/app/questionnaire/completion/completion-prompt';
 import { buildSeriousnessJudgePrompt } from '@/lib/app/questionnaire/seriousness/judge-prompt';
+import { buildSensitivityDetectPrompt } from '@/lib/app/questionnaire/sensitivity';
 import {
   buildDataSlotGenerationPrompt,
   buildDataSlotRefinementPrompt,
   buildDataSlotAssignmentPrompt,
 } from '@/lib/app/questionnaire/data-slots/generation';
 import { buildJudgePrompt } from '@/lib/app/questionnaire/evaluation/judge-prompt';
+import { buildTurnEvaluatorPrompt } from '@/lib/app/questionnaire/turn-evaluation/prompt';
+import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation/types';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
-import { DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import { DEFAULT_PERSONA_KEY, DEFAULT_TONE_SETTINGS } from '@/lib/app/questionnaire/types';
+import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 import {
   EVALUATION_DIMENSIONS,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation/types';
 
-import { buildStreamingQuestionPrompt } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
+import {
+  buildStreamingQuestionPrompt,
+  type QuestionComposeInput,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { buildStreamingOfferPrompt } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { buildSelectorPrompt } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
 
@@ -61,6 +70,7 @@ import {
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
+  TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
 // ---------------------------------------------------------------------------
@@ -279,10 +289,42 @@ const COMPOSER: PromptAgentCatalogEntry = {
   instructionsAreLoadBearing: false,
   specimens: [
     specimen({
-      id: 'compose.full',
-      label: 'Compose from brief',
+      id: 'compose.outline',
+      label: 'Compose outline (streaming · phase 1)',
       description:
-        'Sent when an admin describes a questionnaire in plain English and asks to build it.',
+        'Phase 1 of streaming composition: plan the questionnaire SHAPE only — an inferred goal/audience and a section outline, with no questions written yet.',
+      build: () =>
+        norm(
+          buildComposeOutlinePrompt(
+            '{{ the admin plain-English brief describing the questionnaire to build }}',
+            { goal: '{{ admin-supplied goal, if any }}', audience: SAMPLE_AUDIENCE }
+          )
+        ),
+    }),
+    specimen({
+      id: 'compose.sections',
+      label: 'Draft section questions (streaming · phase 2)',
+      description:
+        'Phase 2 of streaming composition: write the questions for ONE section, fanned out per section in parallel so a long questionnaire composes as fast as a short one.',
+      build: () =>
+        norm(
+          buildComposeSectionQuestionsPrompt(
+            '{{ the admin plain-English brief describing the questionnaire to build }}',
+            {
+              ordinal: 0,
+              title: '{{ section 1 title }}',
+              description: '{{ section 1 description }}',
+              siblingTitles: ['{{ section 1 title }}', '{{ section 2 title }}'],
+              goal: '{{ questionnaire goal }}',
+            }
+          )
+        ),
+    }),
+    specimen({
+      id: 'compose.full',
+      label: 'Compose from brief (single-shot)',
+      description:
+        'The single-shot, API-accessible composition capability: the whole questionnaire — sections and all their questions — in one call.',
       build: () =>
         norm(
           buildComposeFullPrompt(
@@ -487,6 +529,33 @@ const ANSWER_EXTRACTOR: PromptAgentCatalogEntry = {
       build: () => norm(buildAnswerExtractionPrompt({ ...answerCtx(), sensitivityAware: true })),
     }),
     specimen({
+      id: 'extract-answer.sensitivity-detector',
+      label: 'Sensitivity detector (dedicated safeguarding call)',
+      description:
+        'A separate single-purpose structured call — run under this agent’s binding on every answered turn while safeguarding is on — that rules whether THIS message carries a genuine sensitive disclosure. It backs up the extractor’s optional field and a deterministic keyword floor (defence-in-depth), so a miss by one source is caught by another.',
+      conditions: ['Sensitivity awareness on'],
+      build: () => {
+        const { system, user } = buildSensitivityDetectPrompt({
+          questionPrompt: '{{ the question the respondent was asked }}',
+          userMessage: '{{ the respondent message to rule on for a sensitive disclosure }}',
+          recentMessages: ['{{ an earlier message }}'],
+          sessionId: 'sample-session',
+        });
+        return [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ];
+      },
+    }),
+    specimen({
+      id: 'extract-answer.force-fit',
+      label: 'Answer-fit resolver (force-fit pass)',
+      description:
+        'When `answerFitMode` is `fallback` or `always`, a second pass — run under this agent’s binding with a force-fit framing — maps free-text that failed deterministic per-type validation onto the closest allowed choice/scale option. The deterministic validation is the floor; this LLM pass only resolves what it could not.',
+      conditions: ['Answer fit mode: fallback / always'],
+      build: () => norm(buildAnswerExtractionPrompt({ ...answerCtx(), forceFit: true })),
+    }),
+    specimen({
       id: 'extract-answer.seriousness',
       label: 'Seriousness gate (stage 2)',
       description:
@@ -623,12 +692,39 @@ const ANSWER_REFINER: PromptAgentCatalogEntry = {
   ],
 };
 
+/** The default built-in persona (The Coach), used to render the persona-mode interviewer specimen. */
+const DEFAULT_INTERVIEWER_PERSONA =
+  BUILT_IN_PERSONAS.find((p) => p.key === DEFAULT_PERSONA_KEY) ?? BUILT_IN_PERSONAS[0];
+
+/**
+ * Shared mid-conversation interviewer context (a normal acknowledge-and-ask turn). Both the custom-
+ * tone and built-in-persona specimens spread this and layer their `tone` on top, so the two variants
+ * differ only in the voice block — exactly as they do at run time (a persona is resolved into `tone`).
+ */
+function interviewFollowUpBase(): QuestionComposeInput {
+  return {
+    prompt: '{{ the next question to ask, in raw form }}',
+    type: 'free_text',
+    goal: '{{ questionnaire goal }}',
+    audience: SAMPLE_AUDIENCE,
+    recentMessages: ['{{ the respondent last message }}'],
+    lastUserMessage: '{{ the respondent last message }}',
+    priorAnswers: [
+      '{{ data slot 1 name }}: {{ what they shared about it }}',
+      '{{ data slot 2 name }}: {{ what they shared about it }}',
+    ],
+    isReask: false,
+    isOpening: false,
+    questionsAsked: 2,
+  };
+}
+
 const INTERVIEWER: PromptAgentCatalogEntry = {
   slug: QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   name: 'Interviewer',
   stage: 'live',
   summary:
-    'Phrases the next question as warm, natural prose — acknowledging the prior answer and calibrating to the audience and (when enabled) the configured tone.',
+    'Phrases the next question as warm, natural prose — acknowledging the prior answer and calibrating to the audience and, when enabled, the configured tone or a chosen built-in persona (both flow through the same tone block).',
   dispatch:
     'Per asked question when conversational phrasing is enabled; streamed to the respondent.',
   builderModule: 'app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts',
@@ -658,29 +754,31 @@ const INTERVIEWER: PromptAgentCatalogEntry = {
       id: 'interview.tone',
       label: 'Mid-conversation with tone',
       description:
-        'A follow-up question with the interviewer tone settings applied (empathy + warmth here).',
-      conditions: ['Tone on'],
+        'A follow-up question with a custom interviewer tone applied (empathy + warmth here).',
+      conditions: ['Custom tone on'],
       build: () =>
         norm(
           buildStreamingQuestionPrompt({
-            prompt: '{{ the next question to ask, in raw form }}',
-            type: 'free_text',
-            goal: '{{ questionnaire goal }}',
-            audience: SAMPLE_AUDIENCE,
-            recentMessages: ['{{ the respondent last message }}'],
-            lastUserMessage: '{{ the respondent last message }}',
-            priorAnswers: [
-              '{{ data slot 1 name }}: {{ what they shared about it }}',
-              '{{ data slot 2 name }}: {{ what they shared about it }}',
-            ],
-            isReask: false,
-            isOpening: false,
-            questionsAsked: 2,
+            ...interviewFollowUpBase(),
             tone: {
               ...DEFAULT_TONE_SETTINGS,
               empathy: { enabled: true, level: 4 },
               warmth: { enabled: true, level: 4 },
             },
+          })
+        ),
+    }),
+    specimen({
+      id: 'interview.persona',
+      label: 'Built-in persona',
+      description:
+        'When respondent persona mode is on, the chosen (or default) library persona replaces the version tone — injecting an “Adopt this persona…” clause plus its tuned dials into the same tone block. Rendered here with the default persona, The Coach.',
+      conditions: ['Persona mode on'],
+      build: () =>
+        norm(
+          buildStreamingQuestionPrompt({
+            ...interviewFollowUpBase(),
+            tone: DEFAULT_INTERVIEWER_PERSONA.tone,
           })
         ),
     }),
@@ -729,6 +827,77 @@ function completionInput() {
 }
 
 // ---------------------------------------------------------------------------
+// Turn evaluator — the interview-quality judge the Preview Turn Inspector runs
+// ---------------------------------------------------------------------------
+
+/** A representative one-turn inspector dump + objectives the evaluator judges. */
+const SAMPLE_TURN_EVAL_INPUT: TurnEvaluationInput = {
+  turn: {
+    turnIndex: 3,
+    calls: [
+      {
+        label: 'Answer extraction',
+        model: '{{ model }}',
+        provider: '{{ provider }}',
+        latencyMs: 0,
+        costUsd: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        prompt: [
+          { role: 'system', content: '{{ the extractor system prompt }}' },
+          { role: 'user', content: '{{ the respondent message + candidate slots }}' },
+        ],
+        response: '{{ the extracted typed answers (JSON) }}',
+      },
+      {
+        kind: 'embedding',
+        label: 'Adaptive data-slot ranking',
+        model: '{{ embedding model }}',
+        provider: '{{ provider }}',
+        latencyMs: 0,
+        costUsd: 0,
+        tokensIn: 0,
+        dimensions: 1536,
+        prompt: [{ role: 'input', content: 'Embedded (query): "{{ respondent message }}"' }],
+        response: '{{ ranking summary, e.g. "Ranked 62 → kept 8 slots" }}',
+      },
+    ],
+  },
+  context: {
+    goal: '{{ questionnaire goal }}',
+    audience: '{{ target audience }}',
+    selectionStrategy: 'adaptive',
+    tone: '{{ configured interviewer tone }}',
+    respondentMessage: '{{ the respondent answer that opened this turn }}',
+    interviewerMessage: '{{ the interviewer reply that closed this turn }}',
+    recentMessages: ['{{ a recent respondent message }}', '{{ a recent interviewer message }}'],
+  },
+};
+
+const TURN_EVALUATOR: PromptAgentCatalogEntry = {
+  slug: TURN_EVALUATOR_AGENT_SLUG,
+  name: 'Turn evaluator',
+  stage: 'evaluation',
+  summary:
+    'Judges ONE completed interview turn from the Preview Turn Inspector — instruction adherence, interviewing/extraction/selection quality, information gain, prompt drift, and cost/efficiency.',
+  dispatch: 'On demand from the inspector drawer, once per turn an admin chooses to evaluate.',
+  builderModule: 'lib/app/questionnaire/turn-evaluation/prompt.ts',
+  // The rubric is code-defined (`SYSTEM_RUBRIC` in the builder), NOT the agent's editable
+  // `systemInstructions` — evaluate-turn.ts dispatches via `buildTurnEvaluatorPrompt`, the same
+  // in-code split the design-evaluation judges use. Only the streamChat selector is load-bearing.
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: 'turn-eval.judge',
+      label: 'Judge a turn',
+      description:
+        'The load-bearing rubric plus the serialized turn dump the evaluator scores — here one LLM extraction call and one embedding (VEC) ranking call, alongside the questionnaire objectives.',
+      build: () => norm(buildTurnEvaluatorPrompt(SAMPLE_TURN_EVAL_INPUT)),
+    }),
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Evaluation judges — one agent per dimension, generated from the registry
 // ---------------------------------------------------------------------------
 
@@ -758,9 +927,10 @@ const JUDGES: PromptAgentCatalogEntry[] = EVALUATION_DIMENSIONS.map((dimension) 
 // ---------------------------------------------------------------------------
 
 /**
- * Build the full prompt catalog — every questionnaire agent with the exact
- * prompt(s) it sends, rendered from representative sample contexts. Pure; the route
- * merges each agent's DB binding on top.
+ * Build the prompt catalog — the questionnaire agents across the core authoring → live → evaluation
+ * lifecycle, each with the exact prompt(s) it sends, rendered from representative sample contexts.
+ * Post-completion and support agents (report formatter, respondent/cohort report, advisor, structure
+ * editor) are out of scope here. Pure; the route merges each agent's DB binding on top.
  */
 export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
   return [
@@ -776,6 +946,7 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     ANSWER_REFINER,
     COMPLETION_AGENT,
     // Evaluation
+    TURN_EVALUATOR,
     ...JUDGES,
   ];
 }

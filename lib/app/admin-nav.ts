@@ -20,6 +20,7 @@ import {
   Gauge,
   MessageSquareText,
   SlidersHorizontal,
+  Workflow,
 } from 'lucide-react';
 
 import { QuestionnairesNavBrand } from '@/components/app/questionnaire/questionnaires-nav-brand';
@@ -35,6 +36,14 @@ export function initAppNav(): void {
     // app surface carries the product identity (matches the marketing pages).
     titleNode: createElement(QuestionnairesNavBrand),
     items: [
+      // DEMO-ONLY (F2.5.1): demo-client attribution + branding for the sales demo.
+      // A real client engagement strips demo tenancy — see forking.md.
+      {
+        href: '/admin/demo-clients',
+        label: 'Demo clients',
+        icon: Building2,
+        description: 'Attribute questionnaires to a prospect for branded demos',
+      },
       {
         href: '/admin/questionnaires',
         label: 'Questionnaires',
@@ -51,6 +60,12 @@ export function initAppNav(): void {
         description: 'Read the exact prompts each questionnaire agent sends',
       },
       {
+        href: '/admin/questionnaires/behind-the-scenes',
+        label: 'Agentic Workflows',
+        icon: Workflow,
+        description: 'See the agentic pipelines — agents, prompts, tools, knowledge',
+      },
+      {
         href: '/admin/questionnaires/agent-settings',
         label: 'Agent settings',
         icon: SlidersHorizontal,
@@ -61,14 +76,6 @@ export function initAppNav(): void {
         label: 'Turn evaluations',
         icon: Gauge,
         description: 'Search, review, and flag persisted interview-turn evaluations',
-      },
-      // DEMO-ONLY (F2.5.1): demo-client attribution + branding for the sales demo.
-      // A real client engagement strips demo tenancy — see forking.md.
-      {
-        href: '/admin/demo-clients',
-        label: 'Demo clients',
-        icon: Building2,
-        description: 'Attribute questionnaires to a prospect for branded demos',
       },
     ],
   });

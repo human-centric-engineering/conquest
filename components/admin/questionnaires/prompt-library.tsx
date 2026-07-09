@@ -10,7 +10,7 @@
  * detail. Purely presentational; all data arrives from the server page.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Check,
@@ -65,6 +65,16 @@ export function PromptLibrary({ agents }: PromptLibraryProps) {
   const [activeSlug, setActiveSlug] = useState<string>(agents[0]?.slug ?? '');
   const [specimenBySlug, setSpecimenBySlug] = useState<Record<string, string>>({});
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Deep-link support: the Behind-the-Scenes visualizer links here with
+  // `?agent=<slug>` to preselect the agent behind a clicked node. Read it once on
+  // mount (avoids a Suspense boundary) and select it when it matches.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('agent');
+    if (requested && agents.some((a) => a.slug === requested)) {
+      setActiveSlug(requested);
+    }
+  }, [agents]);
 
   // Selecting an agent swaps the detail pane; if the page was scrolled down (a long
   // prompt), start the new agent from the top rather than mid-scroll.
