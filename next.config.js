@@ -13,13 +13,13 @@ const nextConfig = {
   // it isn't installed (the runtime try/catch already handles absence).
   // `@opentelemetry/api` is the same pattern — opt-in tracer dep loaded
   // lazily by `lib/orchestration/tracing/otel-bootstrap.ts`.
-  // `pdf-parse` and `pdfjs-dist` both dynamically `import('./pdf.worker.mjs')`
-  // from inside their own package. When Turbopack bundles them into
-  // `.next/dev/server/chunks/`, that relative dynamic-import target
-  // doesn't get copied alongside and PDF uploads fail with
-  // "Setting up fake worker failed: Cannot find module …/pdf.worker.mjs".
-  // Marking both external keeps them in node_modules where the relative
-  // resolution works.
+  // `pdf-parse` wraps `pdfjs-dist`, which loads its worker via a runtime
+  // `import('./pdf.worker.mjs')`. Bundling it (Turbopack chunks) or tracing it
+  // (Vercel NFT) can't follow that variable specifier, so the worker file goes
+  // missing and PDF uploads fail with "Setting up fake worker failed: Cannot
+  // find module …/pdf.worker.mjs". Marking both external keeps them in
+  // node_modules; `pdf-parser.ts` then statically registers the worker on
+  // `globalThis.pdfjsWorker` so the file is traced and the fallback is skipped.
   serverExternalPackages: [
     '@prisma/client',
     '@prisma/adapter-pg',

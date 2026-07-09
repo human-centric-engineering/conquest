@@ -51,6 +51,26 @@ function loadPdfParse(): Promise<typeof import('pdf-parse')> {
         globalScope.Path2D = canvas.Path2D;
         globalScope.ImageData = canvas.ImageData;
       }
+      // Register the pdfjs worker module on the main thread. In Node, pdfjs
+      // otherwise falls back to a "fake worker" it loads via a *runtime*
+      // `import(GlobalWorkerOptions.workerSrc)` where workerSrc defaults to the
+      // relative './pdf.worker.mjs'. That variable-specifier dynamic import is
+      // invisible to Vercel's Node File Tracer, so `pdf.worker.mjs` never ships
+      // in the serverless function and every PDF parse dies with
+      // "Setting up fake worker failed: Cannot find module …/pdf.worker.mjs".
+      // pdfjs checks `globalThis.pdfjsWorker?.WorkerMessageHandler` first
+      // (pdf.mjs `#mainThreadWorkerMessageHandler`) and, when present, uses it
+      // directly — skipping the fallback entirely. The literal import specifier
+      // below IS traceable, so the worker file gets bundled AND pdfjs picks it
+      // up from globalThis. Load lazily to keep merely importing this module
+      // cheap (see the note above loadPdfParse).
+      if (typeof globalScope.pdfjsWorker === 'undefined') {
+        globalScope.pdfjsWorker = await import(
+          // pdfjs-dist ships no type declarations for the worker build entry.
+          // @ts-expect-error -- untyped worker module; only WorkerMessageHandler is read
+          'pdfjs-dist/legacy/build/pdf.worker.mjs'
+        );
+      }
       return import('pdf-parse');
     })().catch((err: unknown) => {
       // Don't cache a failed load — a transient import failure shouldn't

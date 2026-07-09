@@ -135,6 +135,42 @@ describe('parsePdf', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Serverless worker registration (Vercel fake-worker fix)
+  // ---------------------------------------------------------------------------
+
+  it('registers the pdfjs worker on globalThis.pdfjsWorker when loadPdfParse first runs', async () => {
+    // Regression for the Vercel "Setting up fake worker failed: Cannot find
+    // module …/pdf.worker.mjs" crash. pdfjs's default Node "fake worker" loads
+    // via a runtime `import(GlobalWorkerOptions.workerSrc)` (default
+    // './pdf.worker.mjs'); the Node File Tracer can't follow that variable
+    // specifier, so the worker file is absent from the deployed function.
+    // loadPdfParse instead registers the worker on `globalThis.pdfjsWorker` via
+    // a literal (traceable) import so pdfjs reads it from there
+    // (pdf.mjs `#mainThreadWorkerMessageHandler`) and never needs the fallback.
+    //
+    // This asserts the mechanism the fix relies on: after a parse, the global
+    // holds a `WorkerMessageHandler`. loadPdfParse memoises at module scope, so
+    // reset the module registry AND clear the global first — otherwise the
+    // assertion would read a global left by an earlier test rather than proving
+    // *this* parse ran the registration branch. (pdfjs's own fallback-selection
+    // is internal to pdfjs-dist and not exercised here — PDFParse is mocked.)
+    delete (globalThis as Record<string, unknown>).pdfjsWorker;
+    vi.resetModules();
+    const { parsePdf: freshParsePdf } =
+      await import('@/lib/orchestration/knowledge/parsers/pdf-parser');
+
+    mockGetText.mockResolvedValue(textResult('hello world'));
+    mockGetInfo.mockResolvedValue(infoResult());
+
+    await freshParsePdf(fakeBuffer(), 'doc.pdf');
+
+    const worker = (globalThis as Record<string, unknown>).pdfjsWorker as
+      | { WorkerMessageHandler?: unknown }
+      | undefined;
+    expect(typeof worker?.WorkerMessageHandler).toBe('function');
+  });
+
+  // ---------------------------------------------------------------------------
   // Multi-page PDFs
   // ---------------------------------------------------------------------------
 
