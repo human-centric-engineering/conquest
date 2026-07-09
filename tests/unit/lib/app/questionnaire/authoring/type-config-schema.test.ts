@@ -173,8 +173,34 @@ describe('validateTypeConfig — config-less types', () => {
       expect(empty).toEqual({ ok: true, value: null });
     });
 
-    it(`${type}: rejects a populated config`, () => {
+    it(`${type}: rejects an off-type populated config`, () => {
       expect(validateTypeConfig(type, { choices: [] }).ok).toBe(false);
     });
   }
+});
+
+describe('validateTypeConfig — free_text commentAggregation', () => {
+  // The extractor/composer tags a free_text field with commentAggregation
+  // (extraction-prompt.ts); it MUST validate, else every tagged field trips the
+  // "Check config" cue and blocks launch.
+  it.each(['isolated', 'section'] as const)('accepts commentAggregation=%s', (mode) => {
+    expect(validateTypeConfig('free_text', { commentAggregation: mode })).toEqual({
+      ok: true,
+      value: { commentAggregation: mode },
+    });
+  });
+
+  it('rejects an unknown commentAggregation value', () => {
+    expect(validateTypeConfig('free_text', { commentAggregation: 'whole' }).ok).toBe(false);
+  });
+
+  it('rejects an unknown extra key', () => {
+    expect(validateTypeConfig('free_text', { commentAggregation: 'isolated', foo: 1 }).ok).toBe(
+      false
+    );
+  });
+
+  it('date does NOT accept commentAggregation (free_text-only field)', () => {
+    expect(validateTypeConfig('date', { commentAggregation: 'section' }).ok).toBe(false);
+  });
 });

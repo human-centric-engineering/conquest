@@ -17,7 +17,11 @@
 
 import { z } from 'zod';
 
-import { QUESTION_TYPES, type QuestionType } from '@/lib/app/questionnaire/types';
+import {
+  QUESTION_TYPES,
+  FREE_TEXT_COMMENT_AGGREGATIONS,
+  type QuestionType,
+} from '@/lib/app/questionnaire/types';
 
 /** One selectable option for a choice question. */
 const choiceSchema = z.object({
@@ -110,14 +114,30 @@ const booleanConfigSchema = z.object({
 });
 
 /**
- * `free_text` and `date` carry no config. We accept an absent value or an empty
- * object (the UI may send `{}`) and normalise both to `null`; any populated config
- * is rejected so a stray payload can't be silently stored.
+ * `date` carries no config. We accept an absent value or an empty object (the UI
+ * may send `{}`) and normalise both to `null`; any populated config is rejected so
+ * a stray payload can't be silently stored.
  */
 const noConfigSchema = z.union([z.null(), z.object({}).strict()]).transform(() => null);
 
+/**
+ * `free_text` carries no *structural* config, but it MAY hold a single runtime
+ * field — `commentAggregation` ('isolated' | 'section') — which the extractor/composer
+ * classifies and {@link readCommentAggregation} reads to decide how the field's living
+ * paraphrase is built. So it is NOT config-less: accept an absent value, an empty
+ * object, or a lone `commentAggregation`, and reject any other key so a stray payload
+ * still can't be silently stored. An empty/aggregation-less config normalises to `null`
+ * (the default `isolated` behaviour needs nothing stored).
+ */
+const freeTextConfigSchema = z
+  .union([
+    z.null(),
+    z.object({ commentAggregation: z.enum(FREE_TEXT_COMMENT_AGGREGATIONS).optional() }).strict(),
+  ])
+  .transform((cfg) => (cfg && cfg.commentAggregation ? cfg : null));
+
 const SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
-  free_text: noConfigSchema,
+  free_text: freeTextConfigSchema,
   date: noConfigSchema,
   single_choice: choicesConfigSchema,
   multi_choice: choicesConfigSchema,
