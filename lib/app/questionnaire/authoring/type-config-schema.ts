@@ -68,6 +68,18 @@ const likertLabelsComplete = (c: { min: number; max: number; labels?: string[] }
   Array.isArray(c.labels) &&
   c.labels.length === c.max - c.min + 1 &&
   c.labels.every((l) => l.trim().length > 0);
+/**
+ * True when a scale carries BOTH endpoint labels (`minLabel`/`maxLabel`). This is
+ * the faithful representation of a source scale that anchors only its ends
+ * ("1 — Not at all … 5 — Very much") — the middle points have no qualitative
+ * wording in the source, so we do NOT invent them. An endpoint-anchored scale is a
+ * valid, launchable likert even without a full per-point `labels` array.
+ */
+const likertHasEndpointLabels = (c: { minLabel?: string; maxLabel?: string }) =>
+  typeof c.minLabel === 'string' &&
+  c.minLabel.trim().length > 0 &&
+  typeof c.maxLabel === 'string' &&
+  c.maxLabel.trim().length > 0;
 
 /**
  * likert (read): bounded integer scale, `max > min`. Deliberately lenient on `labels` — a
@@ -81,18 +93,33 @@ const likertConfigSchema = likertBaseShape.refine(likertMaxGtMin, {
 });
 
 /**
- * likert (write): bounded scale PLUS a hard requirement that every scale point carries a
- * non-empty label. A purely numeric rating (no qualitative meaning) must use the `numeric`
- * type instead — there is deliberately no "unlabelled likert". Enforced at the authoring
- * boundary by {@link validateTypeConfig} and reused by the launch gate.
+ * likert (write): bounded scale that is *labelled* one of two faithful ways — EITHER a
+ * complete per-point `labels` array (every point named), OR both endpoint labels
+ * (`minLabel`/`maxLabel`) for a scale the source anchors only at its ends. What stays
+ * forbidden is a fully **unlabelled** scale — a purely numeric rating (no qualitative
+ * meaning) must use the `numeric` type instead. Enforced at the authoring boundary by
+ * {@link validateTypeConfig} and reused by the launch gate via {@link isLikertLabelled}.
  */
-const likertWriteConfigSchema = likertBaseShape
-  .refine(likertMaxGtMin, { message: 'max must be greater than min', path: ['max'] })
-  .refine(likertLabelsComplete, {
+const likertWriteConfigSchema = likertConfigSchema.refine(
+  (c) => likertLabelsComplete(c) || likertHasEndpointLabels(c),
+  {
     message:
-      'a likert scale needs one label per point — label every point, or use the numeric type for an unlabelled rating',
+      'a likert scale needs either one label per point, or both endpoint labels (minLabel/maxLabel) — or use the numeric type for an unlabelled rating',
     path: ['labels'],
-  });
+  }
+);
+
+/**
+ * The stricter "every point named" schema, kept separate from the write schema so
+ * {@link hasCompleteLikertLabels} still means *fully* labelled — the report maps each
+ * stored value to its per-point word and needs a label for every point, which an
+ * endpoint-anchored scale does not have. Both label schemas layer on
+ * {@link likertConfigSchema}'s bounds check so the `max > min` rule lives in one place.
+ */
+const likertFullyLabelledSchema = likertConfigSchema.refine(likertLabelsComplete, {
+  message: 'label every point',
+  path: ['labels'],
+});
 
 /** numeric: optional coherent bounds + step/unit. */
 const numericConfigSchema = z
@@ -163,12 +190,23 @@ export function typeConfigSchemaFor(type: QuestionType): z.ZodTypeAny {
 }
 
 /**
- * True when a likert `typeConfig` carries one non-empty label per scale point. The
- * single source of truth for "this scale is fully labelled", reused by the launch
- * gate, the ingestion normaliser, and the backfill script. Non-likert configs and
- * unreadable input return `false`.
+ * True when a likert `typeConfig` carries one non-empty label per scale point — i.e. a
+ * *fully* labelled scale where every stored value maps to a word. The report renderer
+ * uses this to decide it can show per-point labels; it is deliberately STRICTER than
+ * {@link isLikertLabelled} (an endpoint-anchored scale is a valid, launchable likert but
+ * is not "complete" in this sense). Non-likert configs and unreadable input return `false`.
  */
 export function hasCompleteLikertLabels(typeConfig: unknown): boolean {
+  return likertFullyLabelledSchema.safeParse(typeConfig).success;
+}
+
+/**
+ * True when a likert `typeConfig` is labelled well enough to launch — a complete
+ * per-point `labels` array OR both endpoint labels. This is exactly the write schema's
+ * acceptance rule, so the launch gate and the structure editor's "needs labels" cue agree
+ * with what save enforces. Non-likert configs and unreadable input return `false`.
+ */
+export function isLikertLabelled(typeConfig: unknown): boolean {
   return likertWriteConfigSchema.safeParse(typeConfig).success;
 }
 

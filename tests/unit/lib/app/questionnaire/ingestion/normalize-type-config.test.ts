@@ -155,6 +155,73 @@ describe('normalizeSuggestedTypeConfig — non-choice types pass through', () =>
   });
 });
 
+describe('normalizeSuggestedTypeConfig — "Other" escape hatch → allowOther', () => {
+  it('turns a trailing "Other" option into allowOther and drops the dead option', () => {
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Own outright', 'Renting', 'Other'],
+    }) as { choices: Array<{ label: string }>; allowOther?: boolean };
+    expect(out.allowOther).toBe(true);
+    expect(out.choices.map((c) => c.label)).toEqual(['Own outright', 'Renting']);
+  });
+
+  it('detects "Other (please specify)" and "Something else" as escape hatches', () => {
+    const specify = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['A', 'B', 'Other (please specify)'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(specify.allowOther).toBe(true);
+    expect(specify.choices).toHaveLength(2);
+
+    const somethingElse = normalizeSuggestedTypeConfig('multi_choice', {
+      choices: ['A', 'B', 'Something else'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(somethingElse.allowOther).toBe(true);
+    expect(somethingElse.choices).toHaveLength(2);
+  });
+
+  it('detects a mid-list "Prefer to self-describe" (gender-style) and drops just that option', () => {
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Male', 'Female', 'Non-binary', 'Prefer to self-describe', 'Prefer not to say'],
+    }) as { choices: Array<{ label: string }>; allowOther?: boolean };
+    expect(out.allowOther).toBe(true);
+    // The self-describe hatch is removed; "Prefer not to say" — a real answer — stays.
+    expect(out.choices.map((c) => c.label)).toEqual([
+      'Male',
+      'Female',
+      'Non-binary',
+      'Prefer not to say',
+    ]);
+  });
+
+  it('does NOT treat "Prefer not to say" / "None" / "No preference" as escape hatches', () => {
+    const out = normalizeSuggestedTypeConfig('multi_choice', {
+      choices: ['Petrol', 'Diesel', 'No preference / open to advice'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(out.allowOther).toBeUndefined();
+    expect(out.choices).toHaveLength(3);
+
+    const preferNot = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Under £20k', 'Over £20k', 'Prefer not to say'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(preferNot.allowOther).toBeUndefined();
+    expect(preferNot.choices).toHaveLength(3);
+  });
+
+  it('leaves a 2-option list untouched when dropping "Other" would fall below the floor', () => {
+    // Dropping "Other" here would leave a single selectable option — worse than a dead
+    // "Other" radio. Keep the list intact for the admin to fix rather than collapse it.
+    const out = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['Yes', 'Other'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(out.choices).toHaveLength(2);
+    expect(out.allowOther).toBeUndefined();
+  });
+
+  it('does not touch escape-hatch-looking words on non-choice types', () => {
+    const freeText = { choices: ['A', 'Other'] };
+    expect(normalizeSuggestedTypeConfig('free_text', freeText)).toBe(freeText);
+  });
+});
+
 describe('normalizeSuggestedTypeConfig — render path recovers', () => {
   it('produces a config the choice reader accepts (the end-to-end symptom fix)', () => {
     // Before the fix, `readChoicesConfig` returned null for a string-array config,

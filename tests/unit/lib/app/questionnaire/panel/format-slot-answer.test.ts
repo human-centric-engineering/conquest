@@ -82,6 +82,23 @@ describe('formatSlotAnswer', () => {
       expect(formatSlotAnswer('likert', { min: 1, max: 5 }, 3)).toBe('3');
       expect(formatSlotAnswer('likert', LIKERT, 9)).toBe('9');
     });
+
+    it('renders the point over its range with the anchor wording for an endpoint-anchored scale', () => {
+      const ANCHORED = { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' };
+      expect(formatSlotAnswer('likert', ANCHORED, 4)).toBe('4/5 — Not at all → Very much');
+    });
+
+    it('falls back to the bare number for an endpoint-anchored scale when the value is out of range', () => {
+      const ANCHORED = { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' };
+      expect(formatSlotAnswer('likert', ANCHORED, 9)).toBe('9');
+    });
+
+    it('falls back to the bare number for a half-anchored scale (only one endpoint label)', () => {
+      // The read schema is lenient, so a legacy row may carry just one endpoint. The anchor
+      // renderer needs BOTH ends to be meaningful, so it degrades to the plain value.
+      expect(formatSlotAnswer('likert', { min: 1, max: 5, minLabel: 'Not at all' }, 4)).toBe('4');
+      expect(formatSlotAnswer('likert', { min: 1, max: 5, maxLabel: 'Very much' }, 4)).toBe('4');
+    });
   });
 
   it('renders an em-dash for a nullish answer regardless of type', () => {

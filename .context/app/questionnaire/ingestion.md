@@ -11,7 +11,22 @@
 
 `POST /api/v1/app/questionnaires` — multipart upload of one questionnaire
 document. Admin-only. Synchronous: the request blocks through parse → LLM
-extraction → transactional write, then returns the new ids.
+extraction → transactional write, then returns the new ids. **Still supported and
+tested** (API clients, the F1.1 regression net), but the UI no longer uses it — see
+the streaming variant below.
+
+**`POST /api/v1/app/questionnaires/stream`** (the surface the `UploadQuestionnaireDialog`
+now uses) runs the identical pipeline over **SSE**. A multi-page PDF's extractor call is
+bounded at 120s and the table pass adds to it, which can outrun a synchronous request's
+idle timeout; streaming keeps the socket alive (the `sseResponse` bridge emits keepalive
+frames on an independent timer) and hands back the draft's ids on a terminal `done` event.
+Pre-stream validation (rate-limit, upload guard, demo-client check) still returns a normal
+JSON error envelope; once the stream opens, a failure is a terminal `error` event (never a
+5xx). Events: `phase` (`extracting` → `saving`), then `done { questionnaireId, versionId,
+counts }` or `error { code, message }`. Mirrors `compose/stream`'s `drive()` pattern; the
+route reuses the same `parseAndGuardUpload` / `extractFromDocument` / `persistIngestion`
+helpers, so the two endpoints can't drift. Event contract:
+`lib/app/questionnaire/ingestion/extraction-stream-events.ts`.
 
 | Field              | In       | Notes                                                                              |
 | ------------------ | -------- | ---------------------------------------------------------------------------------- |
@@ -22,7 +37,7 @@ extraction → transactional write, then returns the new ids.
 | `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.** |
 | `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.            |
 | `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.          |
-| `extractTables`    | optional | PDF only — truthy string turns on table extraction.                                |
+| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.      |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
@@ -93,7 +108,15 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
    `parseDocument(buffer, fileName, { extractTables })` directly (not the knowledge
    KB's `previewDocument`/`confirmPreview`, which chunk + embed into RAG). Either
    path yields the same `ParsedDocument` shape. `422 PARSE_FAILED` on a throw. See
-   [Spreadsheet ingestion](#spreadsheet-ingestion-xlsx).
+   [Spreadsheet ingestion](#spreadsheet-ingestion-xlsx). **Table extraction is on by
+   default** (`parseExtractTablesFlag` defaults `true`): a questionnaire's rating
+   grids, 1–5 scales, and option lists are usually PDF _tables_, and with table
+   parsing off they reach the extractor as scrambled loose text — the classic cause
+   of a matrix collapsing into one `multi_choice` or a scale losing its bounds. The
+   pass is self-detecting: `applyPageTables` merges rendered tables only where the
+   parser actually finds them (`tablesRendered > 0`), so it's a no-op on prose PDFs.
+   The dialog checkbox is an **override** (default checked), not a prerequisite the
+   admin must know to tick.
 10. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
     report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
 11. **Dispatch** — load the seeded extractor agent, then
@@ -273,6 +296,36 @@ compose-stream) and `replaceVersionStructure` (re-ingest) go through
 (`extraction-prompt.ts`, `compose-prompt.ts`) also instruct the model to emit the
 object shape directly; the normaliser is the belt-and-braces defence since
 prompts are probabilistic.
+
+`normalizeSuggestedTypeConfig` also turns a trailing **"Other" escape hatch** into
+`allowOther`: an option whose label is "Other", "Other (please specify)", "Prefer to
+self-describe", or "Something else" is dropped from the fixed list and the config gets
+`allowOther: true` (the form renders its own "Other…" free-text input). It is
+deliberately conservative — "Prefer not to say", "None"/"None of the above", and "No
+preference" are **real** selectable answers, not escape hatches, and are never touched —
+and it never drops below the ≥2-option floor. The prompt asks the model to do this too;
+the normaliser makes it reliable.
+
+### Question-type fidelity (matrix, scales)
+
+Two extraction rules in `extraction-prompt.ts` keep the model faithful to richer source
+layouts:
+
+- **Rating grid / matrix → per-row scales.** A table where several row items share one
+  rating scale (a "Factor" column beside `1 2 3 4 5`, or a "Rate each: 1 = … 5 = …"
+  instruction over a list) is **not** one `multi_choice` — its rows are not options. The
+  model emits **one `likert` per row**, folding the row item into a self-contained prompt
+  ("Fuel efficiency" under "How important…?" → "How important is fuel efficiency to
+  you?") and carrying the shared scale, plus one `split_question` change. This relies on
+  table extraction (above) surfacing the grid as a Markdown table in the first place.
+- **Endpoint-anchored scales.** When a 1–5 scale anchors only its ends ("1 — Not at all …
+  5 — Very much"), the model stores `min`/`max` + `minLabel`/`maxLabel` **verbatim** and
+  does not fabricate middle labels. This is now a first-class, launchable `likert` shape:
+  `likertWriteConfigSchema` accepts a scale labelled **either** with a complete per-point
+  `labels` array **or** both endpoint labels (`isLikertLabelled`). A fully _unlabelled_
+  scale is still rejected (use `numeric`). `hasCompleteLikertLabels` stays stricter — the
+  report maps every value to a per-point word — so an endpoint-anchored answer renders as
+  `"4/5 — Not at all → Very much"` (`formatSlotAnswer`) rather than a bare number.
 
 ### Goal / audience merge (admin-wins-per-field)
 

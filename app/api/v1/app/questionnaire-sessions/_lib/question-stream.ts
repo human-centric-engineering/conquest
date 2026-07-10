@@ -208,15 +208,35 @@ export function extractOptionLabels(typeConfig: unknown): string[] | undefined {
 }
 
 /**
- * Best-effort integer bounds from a likert slot's config, for the explicit-scale clarifying
- * fallback. Likert `typeConfig` is `{ min, max }` (no labels array, so {@link extractOptionLabels}
- * returns nothing for it). Returns `undefined` when no usable bounds are present.
+ * Best-effort integer bounds + endpoint anchor labels from a likert slot's config, for the
+ * explicit-scale clarifying fallback. Prefers explicit `minLabel`/`maxLabel` (an endpoint-anchored
+ * scale like "1 — Not at all … 5 — Very much"), falling back to the ends of a full `labels` array.
+ * The anchor wording lets a re-ask name the poles instead of a bare "min–max where max is most
+ * positive". Returns `undefined` when no usable bounds are present.
  */
-export function extractLikertScale(typeConfig: unknown): { min: number; max: number } | undefined {
+export function extractLikertScale(
+  typeConfig: unknown
+): { min: number; max: number; minLabel?: string; maxLabel?: string } | undefined {
   if (typeConfig === null || typeof typeConfig !== 'object') return undefined;
-  const { min, max } = typeConfig as Record<string, unknown>;
-  if (typeof min === 'number' && typeof max === 'number' && max > min) return { min, max };
-  return undefined;
+  const cfg = typeConfig as Record<string, unknown>;
+  const { min, max } = cfg;
+  if (typeof min !== 'number' || typeof max !== 'number' || max <= min) return undefined;
+  // `Array.isArray` narrows `unknown` to `any[]`; pin it back to `unknown[]` so each
+  // element stays `unknown` and must pass the string guard below (no unsafe `any`).
+  // Only trust the array's ends when it is a COMPLETE per-point array (one label per
+  // scale point) — a short/mismatched array (persist writes the extractor's config
+  // through with no length check) would otherwise map the wrong word onto an endpoint
+  // (e.g. labels[2] read as the "5" anchor on a 5-point scale). Mirrors readLikertConfig.
+  const rawLabels: unknown[] | undefined = Array.isArray(cfg.labels) ? cfg.labels : undefined;
+  const labels = rawLabels && rawLabels.length === max - min + 1 ? rawLabels : undefined;
+  const endLabel = (explicit: unknown, arrIdx: number): string | undefined => {
+    if (typeof explicit === 'string' && explicit.trim().length > 0) return explicit.trim();
+    const fromArr = labels?.[arrIdx];
+    return typeof fromArr === 'string' && fromArr.trim().length > 0 ? fromArr.trim() : undefined;
+  };
+  const minLabel = endLabel(cfg.minLabel, 0);
+  const maxLabel = endLabel(cfg.maxLabel, (labels?.length ?? 0) - 1);
+  return { min, max, ...(minLabel ? { minLabel } : {}), ...(maxLabel ? { maxLabel } : {}) };
 }
 
 /** Build the plain-prose interviewer prompt — explicitly NOT JSON, so tokens stream as prose. */
@@ -523,7 +543,11 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     : options
       ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY gently offer the choices to make it easy: ${options.join(', ')}.`
       : likertScale
-        ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale (where ${likertScale.max} is the most positive) to make it easy.`
+        ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale ${
+            likertScale.minLabel && likertScale.maxLabel
+              ? `(where ${likertScale.min} is "${likertScale.minLabel}" and ${likertScale.max} is "${likertScale.maxLabel}")`
+              : `(where ${likertScale.max} is the most positive)`
+          } to make it easy.`
         : '';
 
   // What they've already shared this session (continuity). Explicitly background-only: the

@@ -31,6 +31,20 @@ describe('questionConfigIssue — clean configs surface nothing', () => {
     expect(questionConfigIssue('numeric', { min: 0, max: 10 })).toBeNull();
   });
 
+  // Endpoint-anchored likert: the write schema accepts a scale that only anchors
+  // its ends (no per-point labels) as a faithful, launchable representation of a
+  // source that never named the middle points.
+  it('returns null for an endpoint-anchored likert (minLabel/maxLabel, no per-point labels)', () => {
+    expect(
+      questionConfigIssue('likert', {
+        min: 1,
+        max: 5,
+        minLabel: 'Not at all',
+        maxLabel: 'Very much',
+      })
+    ).toBeNull();
+  });
+
   // The DB stores config-less / config-optional types as JSON null — these need no
   // setup and must not be flagged (regression: a null boolean read as "Needs setup").
   it.each(['boolean', 'numeric', 'free_text', 'date'] as const)(
@@ -84,6 +98,13 @@ describe('questionConfigIssue — likert gaps', () => {
 
   it('flags an incomplete label set (one per point required)', () => {
     const issue = questionConfigIssue('likert', { min: 1, max: 3, labels: ['low', '', 'high'] });
+    expect(issue?.label).toBe('Add scale labels');
+  });
+
+  // A half-anchored scale (only one endpoint labelled) is neither a full per-point
+  // set nor a complete endpoint anchoring, so it must still be flagged.
+  it('still flags a half-anchored likert (only minLabel set)', () => {
+    const issue = questionConfigIssue('likert', { min: 1, max: 5, minLabel: 'Not at all' });
     expect(issue?.label).toBe('Add scale labels');
   });
 });

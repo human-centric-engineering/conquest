@@ -126,6 +126,34 @@ describe('buildExtractionPrompt — vocabulary from the single source of truth',
     // The broken string-array example must be gone.
     expect(system).not.toContain('"choices":["A","B"]');
   });
+
+  // Fidelity fix: a rating grid/matrix must become one likert per row, not a single
+  // multi_choice with the row items as options.
+  it('tells the model to split a rating grid/matrix into one likert per row', () => {
+    expect(system).toMatch(/MATRIX/);
+    expect(system).toMatch(/ONE question per ROW/i);
+    expect(system).toMatch(/split_question/);
+  });
+
+  // Fidelity fix: an "Other"/"please specify" escape hatch becomes allowOther, not a
+  // literal choice option (which would need its own free-text answer to be usable).
+  it('tells the model to map an "Other"/self-describe escape hatch to allowOther, omitting it from choices', () => {
+    expect(system).toMatch(/allowOther/);
+    expect(system).toMatch(/please specify/i);
+    expect(system).toMatch(/self-describe/i);
+    expect(system).toMatch(/OMIT[\s\S]*that option from "choices"/);
+    // Real selectable answers must not be swept up as an escape hatch.
+    expect(system).toMatch(/Prefer not to say/);
+  });
+
+  // Fidelity fix: endpoint-only anchors (source names only the ends) must be captured
+  // faithfully via minLabel/maxLabel rather than fabricating in-between labels.
+  it('tells the model to use minLabel/maxLabel for an endpoint-anchored likert', () => {
+    expect(system).toMatch(/ENDPOINT anchors/i);
+    expect(system).toMatch(/"minLabel"[\s\S]*"maxLabel"/);
+    expect(system).toMatch(/VERBATIM/);
+    expect(system).toMatch(/do not fabricate the in-between points/i);
+  });
 });
 
 describe('buildExtractionPrompt — inference suppression instruction', () => {

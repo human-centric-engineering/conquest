@@ -16,6 +16,7 @@ export {
   validateTypeConfig,
   defaultTypeConfig,
   hasCompleteLikertLabels,
+  isLikertLabelled,
   type TypeConfigValidation,
 } from '@/lib/app/questionnaire/authoring/type-config-schema';
 export {

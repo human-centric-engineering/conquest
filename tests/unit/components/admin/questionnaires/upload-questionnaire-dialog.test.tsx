@@ -1,11 +1,11 @@
 /**
  * UploadQuestionnaireDialog component tests.
  *
- * Anti-green-bar: asserts the dialog POSTs a multipart FormData to the ingest
- * endpoint with exactly the fields the admin filled (file + non-empty overrides),
- * omits untouched audience/enum keys rather than sending blanks, navigates to the
- * new questionnaire's detail page on success, and surfaces server / network errors
- * inline without navigating.
+ * Anti-green-bar: asserts the dialog POSTs a multipart FormData to the streaming
+ * ingest endpoint with exactly the fields the admin filled (file + non-empty
+ * overrides), omits untouched audience/enum keys rather than sending blanks, consumes
+ * the SSE stream and navigates to the new questionnaire's detail page on the terminal
+ * `done` event, and surfaces server / network errors inline without navigating.
  *
  * @see components/admin/questionnaires/upload-questionnaire-dialog.tsx
  */
@@ -48,20 +48,40 @@ function fileInput(): HTMLInputElement {
   return el as HTMLInputElement;
 }
 
+/** A one-shot `text/event-stream` body carrying the given SSE events, then closing. */
+function sseBody(
+  events: Array<Record<string, unknown> & { type: string }>
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const frames = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join('');
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(frames));
+      controller.close();
+    },
+  });
+}
+
+/**
+ * The ingest endpoint streams SSE now: a `phase` ping then a terminal `done` frame
+ * carrying the new ids. The dialog reads `res.body` (not `res.json()`), so the mock
+ * must expose a real `ReadableStream` body.
+ */
 function mockFetchSuccess(questionnaireId = 'qn-1'): ReturnType<typeof vi.fn> {
   const fn = vi.fn().mockResolvedValue({
     ok: true,
-    status: 201,
-    json: async () => ({
-      success: true,
-      data: {
+    status: 200,
+    body: sseBody([
+      { type: 'phase', phase: 'extracting', message: 'Reading…' },
+      {
+        type: 'done',
         questionnaireId,
         versionId: 'v-1',
         sectionCount: 3,
         questionCount: 12,
         changeCount: 0,
       },
-    }),
+    ]),
   });
   vi.stubGlobal('fetch', fn);
   return fn;
@@ -114,7 +134,7 @@ describe('UploadQuestionnaireDialog', () => {
     expect(fileInput()).toHaveAttribute('accept', '.pdf,.docx,.md,.txt,.xlsx');
   });
 
-  it('POSTs multipart FormData to the ingest endpoint and navigates to the new detail page', async () => {
+  it('POSTs multipart FormData to the streaming ingest endpoint and navigates on `done`', async () => {
     const fetchMock = mockFetchSuccess('qn-77');
     const user = await openDialog();
 
@@ -127,7 +147,7 @@ describe('UploadQuestionnaireDialog', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        API.APP.QUESTIONNAIRES.ROOT,
+        API.APP.QUESTIONNAIRES.ingestStream,
         expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
       );
     });
@@ -141,7 +161,7 @@ describe('UploadQuestionnaireDialog', () => {
     });
   });
 
-  it('omits untouched audience / enum / table keys rather than sending blanks', async () => {
+  it('omits untouched audience / enum keys rather than sending blanks', async () => {
     const fetchMock = mockFetchSuccess();
     const user = await openDialog();
 
@@ -157,7 +177,9 @@ describe('UploadQuestionnaireDialog', () => {
     // Enum selects left at "Infer" must be omitted entirely (server rejects unknowns).
     expect(fd.has('audience.expertiseLevel')).toBe(false);
     expect(fd.has('audience.sensitivity')).toBe(false);
-    expect(fd.has('extractTables')).toBe(false);
+    // extractTables is NOT omitted — it defaults on and is always sent explicitly so an
+    // admin can override it off (the server also defaults on when the field is absent).
+    expect(fd.get('extractTables')).toBe('true');
   });
 
   it('sends the admin-supplied name as the title field', async () => {
@@ -229,7 +251,19 @@ describe('UploadQuestionnaireDialog', () => {
     expect(postedFormData(fetchMock).get('requiredMode')).toBe('source');
   });
 
-  it('sends extractTables=true when the toggle is checked', async () => {
+  it('sends extractTables=true by default (the checkbox starts checked)', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = await openDialog();
+
+    expect(screen.getByRole('checkbox', { name: /extract tables from pdf/i })).toBeChecked();
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedFormData(fetchMock).get('extractTables')).toBe('true');
+  });
+
+  it('sends extractTables=false when the admin unticks the toggle (override off)', async () => {
     const fetchMock = mockFetchSuccess();
     const user = await openDialog();
 
@@ -238,7 +272,7 @@ describe('UploadQuestionnaireDialog', () => {
     await user.click(screen.getByRole('button', { name: /upload & extract/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(postedFormData(fetchMock).get('extractTables')).toBe('true');
+    expect(postedFormData(fetchMock).get('extractTables')).toBe('false');
   });
 
   it('shows the server error message inline and does not navigate', async () => {
@@ -253,6 +287,34 @@ describe('UploadQuestionnaireDialog', () => {
     });
     expect(mockPush).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard
     // The form must re-enable so the admin can fix the input and retry.
+    expect(screen.getByRole('button', { name: /upload & extract/i })).toBeEnabled();
+  });
+
+  it('shows a mid-stream error frame inline and does not navigate', async () => {
+    // The stream opened (2xx), then extraction failed: a terminal `error` event arrives with no
+    // `done`. The dialog must surface its message and stay put — exercising the reader-loop error branch.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: sseBody([
+        { type: 'phase', phase: 'extracting', message: 'Reading…' },
+        {
+          type: 'error',
+          code: 'EXTRACTION_FAILED',
+          message: 'The extractor could not read this file.',
+        },
+      ]),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = await openDialog();
+
+    await user.upload(fileInput(), makeFile());
+    await user.click(screen.getByRole('button', { name: /upload & extract/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not read this file/i)).toBeInTheDocument();
+    });
+    expect(mockPush).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard
     expect(screen.getByRole('button', { name: /upload & extract/i })).toBeEnabled();
   });
 
@@ -316,7 +378,7 @@ describe('UploadQuestionnaireDialog', () => {
     await user.click(screen.getByRole('combobox', { name: /sensitivity/i }));
     await user.click(await screen.findByRole('option', { name: /moderate/i }));
 
-    await user.click(screen.getByRole('checkbox', { name: /extract tables from pdf/i }));
+    // extractTables defaults on, so it's sent 'true' without touching the checkbox.
     await user.click(screen.getByRole('button', { name: /upload & extract/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());

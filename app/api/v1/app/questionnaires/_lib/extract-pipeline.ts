@@ -85,6 +85,14 @@ export interface ExtractedDocument {
 
 type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
 
+/** Title for the new questionnaire — the parsed document title, else the filename. */
+export function deriveTitle(parsedTitle: string, fileName: string): string {
+  const trimmed = parsedTitle.trim();
+  if (trimmed.length > 0) return trimmed;
+  const withoutExt = fileName.replace(/\.[^./\\]+$/, '').trim();
+  return withoutExt.length > 0 ? withoutExt : fileName;
+}
+
 /** Map a capability dispatch error code to an HTTP status. */
 function dispatchErrorStatus(code: string | undefined): number {
   switch (code) {

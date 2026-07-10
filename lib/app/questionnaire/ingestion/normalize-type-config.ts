@@ -38,6 +38,32 @@ interface NormalizedChoice {
 const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(CHOICE_QUESTION_TYPES);
 
 /**
+ * A choice option that is really a free-text escape hatch ("Other", "Other
+ * (please specify)", "Prefer to self-describe", "Something else") rather than a
+ * fixed selectable value. Such an option should become `allowOther: true` (the
+ * widget renders its own "Other…" free-text input) and be dropped from the fixed
+ * list — otherwise the respondent gets a dead "Other" radio with nowhere to type.
+ *
+ * Deliberately CONSERVATIVE: it must NOT match legitimate terminal options that
+ * only *look* open-ended — "Prefer not to say", "None"/"None of the above", "No
+ * preference / open to advice", "I'm open to not owning a car at all". Those are
+ * real, selectable answers, not a request to elaborate. Anchored with `^`/`$`
+ * (allowing a trailing "(please specify)"/":" note) so a substring like the "other"
+ * in "another" or "brother" can't trip it.
+ */
+const OTHER_ESCAPE_HATCH =
+  /^(other|something else|prefer to (self[-\s]?describe|describe)|self[-\s]?describe)\b[\s:(–—-]*(please\s+specify)?\)?\.?$/i;
+
+/** True when a normalised option label is a free-text escape hatch (see {@link OTHER_ESCAPE_HATCH}). */
+function isOtherEscapeHatch(label: string): boolean {
+  const trimmed = label.trim();
+  // "Other (please specify)" and "Please specify" both count; the anchored regex
+  // handles the former, this handles a bare "(please specify)" / "please specify".
+  if (/^\(?please\s+specify\)?\.?$/i.test(trimmed)) return true;
+  return OTHER_ESCAPE_HATCH.test(trimmed);
+}
+
+/**
  * Snake_case slug for a choice `value`, matching the prompt's `snake_case`
  * instruction and the `defaultTypeConfig` convention (`option_1`, …). Reuses the
  * shared `slugify` (which lowercases + collapses non-alphanumerics), converting its
@@ -108,10 +134,24 @@ export function normalizeSuggestedTypeConfig(type: QuestionType, raw: unknown): 
   if (!isRecord(raw)) return raw;
   const choices = normalizeChoices(raw.choices);
   if (!choices || choices.length < 2) return raw;
+
+  // Deterministic "Other/please specify" → allowOther backstop. The prompt asks
+  // the model to do this, but a probabilistic model often keeps the literal
+  // "Other" as a dead radio; here we make it reliable. Drop any escape-hatch
+  // option and flag `allowOther`, but only when ≥2 real options survive (the tight
+  // schema's floor) — a 2-option list where one is "Other" is left untouched
+  // rather than collapsed to a single selectable choice.
+  const kept = choices.filter((c) => !isOtherEscapeHatch(c.label));
+  const droppedEscapeHatch = kept.length < choices.length && kept.length >= 2;
+  const effectiveChoices = droppedEscapeHatch ? kept : choices;
+  const allowOther = raw.allowOther === true || droppedEscapeHatch;
+
   // Emit ONLY the keys the tight choice schema recognises. Carrying a stray or
   // wrongly-typed sibling through (e.g. a model emitting `allowOther: "true"`)
   // would fail `choicesConfigSchema` and re-introduce the very "nothing
   // selectable" bug this normaliser exists to prevent. `allowOther` defaults to
   // false, so we only keep it when it's genuinely `true`.
-  return raw.allowOther === true ? { choices, allowOther: true } : { choices };
+  return allowOther
+    ? { choices: effectiveChoices, allowOther: true }
+    : { choices: effectiveChoices };
 }

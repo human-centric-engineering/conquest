@@ -69,13 +69,21 @@ export function formatSlotAnswer(type: QuestionType, typeConfig: unknown, value:
   }
 
   // Likert: a stored value is a scale point (an integer in [min, max]). Render the
-  // point's human-readable label ("Neutral") rather than a meaningless number. Falls
-  // back to the bare value for a legacy/unlabelled scale or an out-of-range point.
+  // point's human-readable label ("Neutral") rather than a meaningless number.
   if (type === 'likert' && typeof value === 'number') {
     const config = readLikertConfig(typeConfig);
-    if (config?.labels) {
-      const label = config.labels[value - config.min];
-      if (label) return label;
+    if (config) {
+      // Fully labelled scale — every point has a word.
+      if (config.labels) {
+        const label = config.labels[value - config.min];
+        if (label) return label;
+      }
+      // Endpoint-anchored scale — no middle words to invent, so show the point over
+      // its range with the anchor wording for context ("4/5 — Not at all → Very much")
+      // rather than a bare, meaningless number.
+      if (config.minLabel && config.maxLabel && value >= config.min && value <= config.max) {
+        return `${value}/${config.max} — ${config.minLabel} → ${config.maxLabel}`;
+      }
     }
   }
 
