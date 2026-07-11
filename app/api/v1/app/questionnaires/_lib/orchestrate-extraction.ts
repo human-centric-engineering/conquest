@@ -93,7 +93,64 @@ export async function* orchestrateExtraction(
     message: 'Structure extractor — reading and understanding the document…',
   };
 
-  const extracted = await extractFromDocument(upload, ctx);
+  // Bridge the extractor's push-based "questions so far" callback (fired deep
+  // inside the capability dispatch as the response streams) into pull-based
+  // generator yields. A tiny queue + one-shot notifier converts callbacks into
+  // awaited events without dropping the terminal result; bursts coalesce to the
+  // latest count so a fast stream collapses into one up-to-date event, not a
+  // backlog. Fail-soft: if the extractor never streams a count (blocking
+  // fallback, tool-based extraction, a zero-question doc) the loop simply waits
+  // for the result and no extra events fire.
+  // Coalescing slot, not a queue: only the LATEST count matters, so a burst of
+  // callbacks between drains collapses to one up-to-date event. `-1` = nothing
+  // pending (a real count is always ≥ 0), which keeps this a plain `number` and
+  // sidesteps closure-narrowing on a nullable slot.
+  let pending = -1;
+  let settled = false;
+  let wake: (() => void) | null = null;
+  const bump = (): void => {
+    const w = wake;
+    wake = null;
+    w?.();
+  };
+
+  const extractionPromise = extractFromDocument(upload, {
+    ...ctx,
+    onExtractionProgress: (questionsSoFar) => {
+      pending = questionsSoFar;
+      bump();
+    },
+  }).finally(() => {
+    settled = true;
+    bump();
+  });
+
+  for (;;) {
+    if (pending >= 0) {
+      const latest = pending;
+      pending = -1;
+      yield {
+        type: 'phase',
+        phase: 'extracting',
+        message: `Structure extractor — reading the document… ${latest} question${latest === 1 ? '' : 's'} so far`,
+        progress: { done: latest },
+      };
+      continue;
+    }
+    if (settled) break;
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+      // Close the race: if a callback (or the terminal settle) landed between the
+      // checks above and this assignment, its `bump()` saw a null `wake` and did
+      // nothing — so re-check and resolve immediately rather than block forever.
+      if (pending >= 0 || settled) {
+        wake = null;
+        resolve();
+      }
+    });
+  }
+
+  const extracted = await extractionPromise;
   if (!extracted.ok) return extracted;
 
   // Sub-flag off → today's exact behaviour (single extractor pass, already coherence-checked).

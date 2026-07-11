@@ -17,13 +17,21 @@
  */
 export type ExtractionPhase = 'extracting' | 'verifying' | 'repairing' | 'saving';
 
-/** A real progress event — the client renders `message` and, on `repairing`, the `progress` counts. */
+/** A real progress event — the client renders `message` and, when present, the `progress` counts. */
 export interface ExtractionPhaseEvent {
   type: 'phase';
   phase: ExtractionPhase;
   message: string;
-  /** Populated on `repairing` — how many of the flagged questions are being repaired. */
-  progress?: { done: number; total: number };
+  /**
+   * Live counts, when the stage can report them:
+   *  - `extracting` — a RISING count of questions parsed out of the response so
+   *    far, with `total` omitted (the model doesn't know its own count up front).
+   *  - `repairing` — how many of the flagged questions are being repaired, with a
+   *    known `total`.
+   * `message` always restates the count in prose, so a client that ignores this
+   * field still shows progress.
+   */
+  progress?: { done: number; total?: number };
 }
 
 /** A terminal failure. The response is already streaming, so a failure can't be a 5xx. */

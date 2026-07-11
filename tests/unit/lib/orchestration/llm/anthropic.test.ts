@@ -729,6 +729,49 @@ describe('AnthropicProvider.chatStream', () => {
     const done = chunks[chunks.length - 1] as { type: string };
     expect(done.type).toBe('done');
   });
+
+  it('forwards a per-request timeout and signal to the SDK create call', async () => {
+    // Streaming must honour a per-request timeout override so a long extraction
+    // stream isn't capped at the client's construction default.
+    const events = [
+      { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+      { type: 'message_stop' },
+    ];
+    createMock.mockResolvedValue(makeStream(events));
+    const controller = new AbortController();
+
+    const provider = makeProvider();
+    for await (const _chunk of provider.chatStream([{ role: 'user', content: 'hi' }], {
+      model: 'claude-haiku-4-5',
+      timeoutMs: 300_000,
+      signal: controller.signal,
+    })) {
+      // consume
+    }
+
+    const requestOptions = createMock.mock.calls[0]?.[1] as
+      | { timeout?: number; signal?: AbortSignal }
+      | undefined;
+    expect(requestOptions?.timeout).toBe(300_000);
+    expect(requestOptions?.signal).toBe(controller.signal);
+  });
+
+  it('passes no request options when neither timeout nor signal is supplied', async () => {
+    const events = [
+      { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+      { type: 'message_stop' },
+    ];
+    createMock.mockResolvedValue(makeStream(events));
+
+    const provider = makeProvider();
+    for await (const _chunk of provider.chatStream([{ role: 'user', content: 'hi' }], {
+      model: 'claude-haiku-4-5',
+    })) {
+      // consume
+    }
+
+    expect(createMock.mock.calls[0]?.[1]).toBeUndefined();
+  });
 });
 
 describe('AnthropicProvider.testConnection', () => {

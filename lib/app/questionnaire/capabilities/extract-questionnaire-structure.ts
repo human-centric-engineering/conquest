@@ -40,7 +40,6 @@ import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import {
   runStructuredCompletion,
   tryParseJson,
-  type StructuredCompletionResult,
 } from '@/lib/orchestration/evaluations/parse-structured';
 
 import {
@@ -61,6 +60,9 @@ import {
   buildExtractionRetryMessage,
 } from '@/lib/app/questionnaire/ingestion/extraction-prompt';
 import { normalizeChangeRecords } from '@/lib/app/questionnaire/ingestion/change-records';
+import { createQuestionCountScanner } from '@/lib/app/questionnaire/ingestion/question-count-scanner';
+import { runStreamingStructuredExtraction } from '@/lib/app/questionnaire/ingestion/stream-structured-extraction';
+import { readExtractionProgressSink } from '@/lib/app/questionnaire/ingestion/extraction-progress-context';
 import type {
   AdminSuppliedMetadata,
   ChangeRecordIntent,
@@ -305,43 +307,77 @@ export class AppExtractQuestionnaireStructureCapability extends BaseCapability<
     // of blaming the schema for what is really an "output too large / raise the
     // cap" problem.
     let lastResponseChars = 0;
-    let completion: StructuredCompletionResult<ExtractionResult>;
-    try {
-      completion = await runStructuredCompletion<ExtractionResult>({
-        provider,
-        model,
-        messages,
-        maxTokens: EXTRACTION_MAX_TOKENS,
-        timeoutMs: EXTRACTION_TIMEOUT_MS,
-        parse: (raw) => {
-          lastResponseChars = raw.length;
-          return tryParseJson(raw, (parsed) => {
-            const validation = validateExtraction(parsed);
-            if (validation.ok) return validation.value;
-            lastIssuePaths = validation.issues.map((issue) =>
-              issue.path.length > 0 ? issue.path.join('.') : '(root)'
-            );
-            return null;
-          });
-        },
-        // Generic: lastIssuePaths is still empty here (the parse callback that
-        // populates it runs later), and runStructuredCompletion fixes this
-        // string before the first attempt — so it can't carry runtime issues.
-        retryUserMessage: buildExtractionRetryMessage([]),
-        onFinalFailure: () => {
-          if (lastIssuePaths.length > 0) {
-            return new Error(
-              `Extraction response was not valid against the schema after one retry (invalid at: ${lastIssuePaths.join(', ')})`
-            );
-          }
-          // No issue paths ⇒ JSON.parse itself failed on both attempts. On a
-          // reasoning model this is overwhelmingly truncated output, not a
-          // schema mismatch — say so, and point at the token cap.
-          return new Error(
-            `Extraction response was not parseable JSON after one retry (${lastResponseChars} chars) — likely truncated at the ${EXTRACTION_MAX_TOKENS}-token output cap; try a smaller document or raise the cap`
-          );
-        },
+
+    // Parse + failure-diagnostic policy is identical for the streamed and
+    // blocking paths — build it once so the two branches can't drift.
+    const parse = (raw: string): ExtractionResult | null => {
+      lastResponseChars = raw.length;
+      return tryParseJson(raw, (parsed) => {
+        const validation = validateExtraction(parsed);
+        if (validation.ok) return validation.value;
+        lastIssuePaths = validation.issues.map((issue) =>
+          issue.path.length > 0 ? issue.path.join('.') : '(root)'
+        );
+        return null;
       });
+    };
+    const onFinalFailure = (): Error => {
+      if (lastIssuePaths.length > 0) {
+        return new Error(
+          `Extraction response was not valid against the schema after one retry (invalid at: ${lastIssuePaths.join(', ')})`
+        );
+      }
+      // No issue paths ⇒ JSON.parse itself failed on both attempts. On a
+      // reasoning model this is overwhelmingly truncated output, not a
+      // schema mismatch — say so, and point at the token cap.
+      return new Error(
+        `Extraction response was not parseable JSON after one retry (${lastResponseChars} chars) — likely truncated at the ${EXTRACTION_MAX_TOKENS}-token output cap; try a smaller document or raise the cap`
+      );
+    };
+    // Generic retry text: lastIssuePaths is still empty at build time (the parse
+    // callback that populates it runs later), so this can't carry runtime issues.
+    const retryUserMessage = buildExtractionRetryMessage([]);
+
+    // When the caller (the streaming ingest route) supplies a progress sink, run
+    // the first attempt STREAMED and count complete `questions` entries as the
+    // JSON arrives, reporting a rising count. Absent a sink (non-streaming ingest
+    // / re-ingest), keep the single blocking call — identical behaviour to before.
+    const onProgress = readExtractionProgressSink(context.entityContext);
+
+    // Shared call options — the streamed and blocking helpers take the same
+    // provider/model/messages/limits/parse/retry/failure wiring; only the
+    // streamed path adds `onTextDelta`. Build once so the two branches can't drift.
+    const baseOptions = {
+      provider,
+      model,
+      messages,
+      maxTokens: EXTRACTION_MAX_TOKENS,
+      timeoutMs: EXTRACTION_TIMEOUT_MS,
+      parse,
+      retryUserMessage,
+      onFinalFailure,
+    };
+
+    let completion: { value: ExtractionResult; tokenUsage: { input: number; output: number } };
+    try {
+      if (onProgress) {
+        const scanner = createQuestionCountScanner();
+        let lastReported = 0;
+        completion = await runStreamingStructuredExtraction<ExtractionResult>({
+          ...baseOptions,
+          onTextDelta: (delta) => {
+            const count = scanner.push(delta);
+            // Report only on a strict increase — a single SSE event per newly
+            // completed question, never a flood of same-count repeats.
+            if (count > lastReported) {
+              lastReported = count;
+              onProgress(count);
+            }
+          },
+        });
+      } else {
+        completion = await runStructuredCompletion<ExtractionResult>(baseOptions);
+      }
     } catch (err) {
       logger.error('extract_questionnaire_structure: structured completion failed', {
         agentId: context.agentId,
@@ -349,6 +385,7 @@ export class AppExtractQuestionnaireStructureCapability extends BaseCapability<
         provider: providerSlug,
         issuePaths: lastIssuePaths,
         responseChars: lastResponseChars,
+        streamed: onProgress !== undefined,
         error: errorMessage(err),
       });
       return this.error(errorMessage(err), 'extraction_failed');
