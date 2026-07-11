@@ -87,7 +87,11 @@ export async function* orchestrateExtraction(
   upload: GuardedUpload,
   ctx: ExtractCtx
 ): AsyncGenerator<ExtractionPhaseEvent, PipelineResult<ExtractedDocument>> {
-  yield { type: 'phase', phase: 'extracting', message: 'Reading and understanding the document…' };
+  yield {
+    type: 'phase',
+    phase: 'extracting',
+    message: 'Structure extractor — reading and understanding the document…',
+  };
 
   const extracted = await extractFromDocument(upload, ctx);
   if (!extracted.ok) return extracted;
@@ -102,12 +106,21 @@ export async function* orchestrateExtraction(
   const total = extraction.questions.length;
 
   // ── Verify (fail-soft): flag questions whose type/config doesn't match the source. ──
-  yield { type: 'phase', phase: 'verifying', message: 'Checking scale and matrix questions…' };
+  yield {
+    type: 'phase',
+    phase: 'verifying',
+    message: `Fidelity critic — checking all ${total} question${total === 1 ? '' : 's'} against the source…`,
+  };
   const flags = await runVerification(extraction, documentText, fileName, ctx);
   const flagged = flags.verdicts.filter((v) => v.verdict === 'suspect');
 
   if (flagged.length === 0) {
     // Verifier clean → no repair call at all (the common, cheap case).
+    yield {
+      type: 'phase',
+      phase: 'verifying',
+      message: 'All questions look faithful — no repairs needed.',
+    };
   } else if (flagged.length > REPAIR_FLAG_CEILING) {
     ctx.log.warn('ingest verify flagged too many questions; skipping repair', {
       flagged: flagged.length,
@@ -118,7 +131,7 @@ export async function* orchestrateExtraction(
     yield {
       type: 'phase',
       phase: 'repairing',
-      message: `Repairing ${flagged.length} of ${total} question${total === 1 ? '' : 's'}…`,
+      message: `Scales & matrix specialist — repairing ${flagged.length} flagged question${flagged.length === 1 ? '' : 's'}…`,
       progress: { done: 0, total: flagged.length },
     };
     const repairs = await runRepair(extraction, flags, flagged, documentText, fileName, ctx);
