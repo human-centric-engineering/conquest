@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateTypeConfig,
   hasCompleteLikertLabels,
+  isLikertLabelled,
   typeConfigSchemaFor,
   defaultTypeConfig,
 } from '@/lib/app/questionnaire/authoring/type-config-schema';
@@ -58,12 +59,26 @@ describe('validateTypeConfig — likert', () => {
     expect(res.ok).toBe(true);
   });
 
-  it('requires labels — rejects a bounds-only config', () => {
-    // Write boundary now demands per-point labels (a numeric rating must use the numeric type).
+  it('rejects a fully unlabelled (bounds-only) config', () => {
+    // A purely numeric rating with no qualitative anchors must use the numeric type.
     expect(validateTypeConfig('likert', { min: 1, max: 5 }).ok).toBe(false);
-    expect(
-      validateTypeConfig('likert', { min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' }).ok
-    ).toBe(false);
+  });
+
+  it('accepts an endpoint-anchored scale (both endpoint labels, no per-point labels)', () => {
+    // "1 — Not at all … 5 — Very much": the source anchors only the ends, so we store the
+    // real anchors rather than fabricating middle labels.
+    const res = validateTypeConfig('likert', {
+      min: 1,
+      max: 5,
+      minLabel: 'Not at all',
+      maxLabel: 'Very much',
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('still rejects a half-anchored scale (only one endpoint label, no per-point labels)', () => {
+    expect(validateTypeConfig('likert', { min: 1, max: 5, minLabel: 'Not at all' }).ok).toBe(false);
+    expect(validateTypeConfig('likert', { min: 1, max: 5, maxLabel: 'Very much' }).ok).toBe(false);
   });
 
   it('rejects a labels array of the wrong length', () => {
@@ -133,6 +148,30 @@ describe('hasCompleteLikertLabels', () => {
     expect(hasCompleteLikertLabels({ min: 1, max: 5, labels: ['Low', 'High'] })).toBe(false);
     expect(hasCompleteLikertLabels({ choices: [] })).toBe(false);
     expect(hasCompleteLikertLabels(null)).toBe(false);
+  });
+
+  it('is STRICTER than isLikertLabelled — an endpoint-anchored scale is not "complete"', () => {
+    // The report maps every value to a per-point word, so endpoints alone are not "complete";
+    // but launch/save only needs the scale to be labelled one of the two faithful ways.
+    const endpointAnchored = { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' };
+    expect(hasCompleteLikertLabels(endpointAnchored)).toBe(false);
+    expect(isLikertLabelled(endpointAnchored)).toBe(true);
+  });
+});
+
+describe('isLikertLabelled — launch/save acceptance', () => {
+  it('accepts full per-point labels OR both endpoint labels', () => {
+    expect(isLikertLabelled({ min: 1, max: 3, labels: ['Low', 'Mid', 'High'] })).toBe(true);
+    expect(
+      isLikertLabelled({ min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' })
+    ).toBe(true);
+  });
+
+  it('rejects a fully unlabelled scale, a half-anchored scale, and non-likert configs', () => {
+    expect(isLikertLabelled({ min: 1, max: 5 })).toBe(false);
+    expect(isLikertLabelled({ min: 1, max: 5, minLabel: 'Not at all' })).toBe(false);
+    expect(isLikertLabelled(null)).toBe(false);
+    expect(isLikertLabelled({ choices: [] })).toBe(false);
   });
 });
 

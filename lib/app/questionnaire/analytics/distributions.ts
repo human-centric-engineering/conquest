@@ -78,6 +78,18 @@ function readLikert(typeConfig: unknown): {
   };
 }
 
+function readMatrix(typeConfig: unknown): {
+  rows: Array<{ key: string; label: string }>;
+  scale: { min: number; max: number; minLabel?: string; maxLabel?: string; labels?: string[] };
+} | null {
+  const parsed = typeConfigSchemaFor('matrix').safeParse(typeConfig);
+  if (!parsed.success) return null;
+  return parsed.data as {
+    rows: Array<{ key: string; label: string }>;
+    scale: { min: number; max: number; minLabel?: string; maxLabel?: string; labels?: string[] };
+  };
+}
+
 function readBooleanLabels(typeConfig: unknown): { trueLabel: string; falseLabel: string } {
   const parsed = typeConfigSchemaFor('boolean').safeParse(typeConfig ?? {});
   const cfg = parsed.success ? (parsed.data as { trueLabel?: string; falseLabel?: string }) : {};
@@ -197,6 +209,45 @@ function buildDetail(
       }
       const mean = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
       return { kind: 'likert', min, max, buckets, mean };
+    }
+
+    case 'matrix': {
+      // A rating grid: each composite answer is a `{ [rowKey]: point }` map. Build one
+      // likert-shaped distribution per row, all sharing the grid's scale + point labels.
+      const cfg = readMatrix(typeConfig);
+      const rows = cfg?.rows ?? [];
+      const min = cfg?.scale.min ?? 1;
+      const max = cfg?.scale.max ?? 5;
+      const s = cfg?.scale;
+      const perPoint =
+        s?.labels && s.labels.length === max - min + 1 && s.labels.every((l) => l.trim().length > 0)
+          ? s.labels
+          : null;
+      const pointLabel = (v: number): string => {
+        const word =
+          perPoint?.[v - min] ??
+          (v === min ? s?.minLabel : undefined) ??
+          (v === max ? s?.maxLabel : undefined);
+        return word ? `${v} (${word})` : `${v}`;
+      };
+      const rowDetails = rows.map((row) => {
+        const counts = new Map<number, number>();
+        const nums: number[] = [];
+        for (const raw of values) {
+          if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
+          const n = asFiniteNumber((raw as Record<string, unknown>)[row.key]);
+          if (n === null || !Number.isInteger(n) || n < min || n > max) continue;
+          counts.set(n, (counts.get(n) ?? 0) + 1);
+          nums.push(n);
+        }
+        const buckets: ValueBucket[] = [];
+        for (let v = min; v <= max; v += 1) {
+          buckets.push({ value: `${v}`, label: pointLabel(v), count: counts.get(v) ?? 0 });
+        }
+        const mean = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+        return { key: row.key, label: row.label, buckets, mean };
+      });
+      return { kind: 'matrix', min, max, rows: rowDetails };
     }
 
     case 'numeric': {

@@ -11,7 +11,7 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
 import type { LlmProvider } from '@/lib/orchestration/llm/provider';
-import { validateTypeConfig, hasCompleteLikertLabels } from '@/lib/app/questionnaire/authoring';
+import { validateTypeConfig, isLikertLabelled } from '@/lib/app/questionnaire/authoring';
 import {
   buildLikertLabelMessages,
   parseLikertLabelDecision,
@@ -136,7 +136,12 @@ async function findTargets(flags: Flags): Promise<Target[]> {
 
   const targets: Target[] = [];
   for (const s of slots) {
-    const labelled = hasCompleteLikertLabels(s.typeConfig);
+    // A launchable, adequately-labelled scale — full per-point labels OR both endpoint
+    // labels (an endpoint-anchored scale the extractor deliberately left anchor-only). Both
+    // are skipped unless `--relabel`; only a fully-unlabelled scale is a default backfill
+    // target. Using isLikertLabelled (not the stricter hasCompleteLikertLabels) prevents the
+    // backfill from clobbering faithful endpoint anchors with fabricated per-point labels.
+    const labelled = isLikertLabelled(s.typeConfig);
     // Idempotent skip — unless `--relabel`, which re-derives already-labelled scales too.
     if (labelled && !flags.relabel) continue;
 

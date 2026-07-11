@@ -27,7 +27,9 @@ import {
   AppRefineAnswerCapability,
   AppRefineDataSlotCapability,
   AppRefineQuestionnaireStructureCapability,
+  AppRepairQuestionsCapability,
   AppSuggestRoundBriefingCapability,
+  AppVerifyExtractionStructureCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
@@ -65,6 +67,14 @@ export function initAppCapabilities(): void {
   // the flag-gated evaluate-preview route dispatches it), so unconditional registration
   // here is safe.
   registerAppCapability(new AppEvaluateStructureCapability());
+
+  // Ingest verify + repair — the extraction critic + scales/matrix repair specialist that run
+  // between extract and persist on the streaming ingest surface. Inert until the
+  // APP_QUESTIONNAIRES_ENABLED master flag and the APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR sub-flag
+  // are both on (only the flag-gated orchestrator dispatches them), so unconditional registration
+  // here is safe.
+  registerAppCapability(new AppVerifyExtractionStructureCapability());
+  registerAppCapability(new AppRepairQuestionsCapability());
 
   // Data Slots — the data-slot generator. Inert until the APP_QUESTIONNAIRES_ENABLED master
   // flag and the APP_QUESTIONNAIRES_DATA_SLOTS sub-flag are both on (only the flag-gated

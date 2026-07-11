@@ -354,6 +354,8 @@ export const API = {
     QUESTIONNAIRES: {
       /** List + ingest (GET list, POST multipart ingest). */
       ROOT: '/api/v1/app/questionnaires',
+      /** Streaming ingest — upload → extract → verify → persist over SSE (POST multipart). */
+      ingestStream: '/api/v1/app/questionnaires/stream',
       /** Import a definition export as a brand-new questionnaire (POST JSON — F14.9). */
       definitionImport: '/api/v1/app/questionnaires/import',
       /** Read-only prompt library — every agent + the real prompt(s) it sends (GET). */

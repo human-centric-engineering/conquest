@@ -37,6 +37,7 @@ const TYPE_LABELS: Record<string, string> = {
   single_choice: 'Multi-Choice (one)',
   multi_choice: 'Multi-Choice (many)',
   likert: 'Likert',
+  matrix: 'Matrix',
   numeric: 'Number',
   date: 'Date',
   boolean: 'Yes/No',

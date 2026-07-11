@@ -68,6 +68,18 @@ const likertLabelsComplete = (c: { min: number; max: number; labels?: string[] }
   Array.isArray(c.labels) &&
   c.labels.length === c.max - c.min + 1 &&
   c.labels.every((l) => l.trim().length > 0);
+/**
+ * True when a scale carries BOTH endpoint labels (`minLabel`/`maxLabel`). This is
+ * the faithful representation of a source scale that anchors only its ends
+ * ("1 — Not at all … 5 — Very much") — the middle points have no qualitative
+ * wording in the source, so we do NOT invent them. An endpoint-anchored scale is a
+ * valid, launchable likert even without a full per-point `labels` array.
+ */
+const likertHasEndpointLabels = (c: { minLabel?: string; maxLabel?: string }) =>
+  typeof c.minLabel === 'string' &&
+  c.minLabel.trim().length > 0 &&
+  typeof c.maxLabel === 'string' &&
+  c.maxLabel.trim().length > 0;
 
 /**
  * likert (read): bounded integer scale, `max > min`. Deliberately lenient on `labels` — a
@@ -81,17 +93,80 @@ const likertConfigSchema = likertBaseShape.refine(likertMaxGtMin, {
 });
 
 /**
- * likert (write): bounded scale PLUS a hard requirement that every scale point carries a
- * non-empty label. A purely numeric rating (no qualitative meaning) must use the `numeric`
- * type instead — there is deliberately no "unlabelled likert". Enforced at the authoring
- * boundary by {@link validateTypeConfig} and reused by the launch gate.
+ * likert (write): bounded scale that is *labelled* one of two faithful ways — EITHER a
+ * complete per-point `labels` array (every point named), OR both endpoint labels
+ * (`minLabel`/`maxLabel`) for a scale the source anchors only at its ends. What stays
+ * forbidden is a fully **unlabelled** scale — a purely numeric rating (no qualitative
+ * meaning) must use the `numeric` type instead. Enforced at the authoring boundary by
+ * {@link validateTypeConfig} and reused by the launch gate via {@link isLikertLabelled}.
  */
-const likertWriteConfigSchema = likertBaseShape
-  .refine(likertMaxGtMin, { message: 'max must be greater than min', path: ['max'] })
-  .refine(likertLabelsComplete, {
+const likertWriteConfigSchema = likertConfigSchema.refine(
+  (c) => likertLabelsComplete(c) || likertHasEndpointLabels(c),
+  {
     message:
-      'a likert scale needs one label per point — label every point, or use the numeric type for an unlabelled rating',
+      'a likert scale needs either one label per point, or both endpoint labels (minLabel/maxLabel) — or use the numeric type for an unlabelled rating',
     path: ['labels'],
+  }
+);
+
+/**
+ * The stricter "every point named" schema, kept separate from the write schema so
+ * {@link hasCompleteLikertLabels} still means *fully* labelled — the report maps each
+ * stored value to its per-point word and needs a label for every point, which an
+ * endpoint-anchored scale does not have. Both label schemas layer on
+ * {@link likertConfigSchema}'s bounds check so the `max > min` rule lives in one place.
+ */
+const likertFullyLabelledSchema = likertConfigSchema.refine(likertLabelsComplete, {
+  message: 'label every point',
+  path: ['labels'],
+});
+
+/** One row (sub-question) of a matrix — its stable key + display label. */
+const matrixRowSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+});
+
+/**
+ * matrix base shape: N keyed row-items sharing ONE rating scale. The scale reuses
+ * {@link likertBaseShape} so each row renders and validates exactly like a likert
+ * point. A matrix answer is a composite `{ [rowKey]: integer }` map (one point per
+ * row), so the type is config-required — an empty grid is unanswerable.
+ */
+const matrixBaseShape = z.object({
+  rows: z.array(matrixRowSchema).min(1),
+  scale: likertBaseShape,
+});
+
+const matrixRowKeysDistinct = (c: { rows: { key: string }[] }) => {
+  const keys = c.rows.map((r) => r.key);
+  return new Set(keys).size === keys.length;
+};
+
+/**
+ * matrix (read): ≥1 row + a coherent shared scale (`max > min`). Lenient on labels and
+ * key-distinctness like {@link likertConfigSchema} — the form/report/answer readers must
+ * not lose a valid grid over an imperfect labels array. Completeness is the write schema's job.
+ */
+const matrixConfigSchema = matrixBaseShape.refine((c) => likertMaxGtMin(c.scale), {
+  message: 'scale max must be greater than min',
+  path: ['scale', 'max'],
+});
+
+/**
+ * matrix (write): distinct row keys AND a shared scale labelled one of the two faithful
+ * ways (complete per-point `labels` OR both endpoint labels) — the same rule as
+ * {@link likertWriteConfigSchema}. Row labels are already required by {@link matrixRowSchema}.
+ */
+const matrixWriteConfigSchema = matrixConfigSchema
+  .refine(matrixRowKeysDistinct, {
+    message: 'Matrix row keys must be unique',
+    path: ['rows'],
+  })
+  .refine((c) => likertLabelsComplete(c.scale) || likertHasEndpointLabels(c.scale), {
+    message:
+      'a matrix scale needs either one label per point, or both endpoint labels (minLabel/maxLabel)',
+    path: ['scale', 'labels'],
   });
 
 /** numeric: optional coherent bounds + step/unit. */
@@ -142,6 +217,7 @@ const SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
   single_choice: choicesConfigSchema,
   multi_choice: choicesConfigSchema,
   likert: likertConfigSchema,
+  matrix: matrixConfigSchema,
   numeric: numericConfigSchema,
   boolean: booleanConfigSchema,
 };
@@ -155,6 +231,7 @@ const SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
 const WRITE_SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
   ...SCHEMA_BY_TYPE,
   likert: likertWriteConfigSchema,
+  matrix: matrixWriteConfigSchema,
 };
 
 /** The Zod schema that validates `typeConfig` for a given question type (read-side, lenient). */
@@ -163,13 +240,34 @@ export function typeConfigSchemaFor(type: QuestionType): z.ZodTypeAny {
 }
 
 /**
- * True when a likert `typeConfig` carries one non-empty label per scale point. The
- * single source of truth for "this scale is fully labelled", reused by the launch
- * gate, the ingestion normaliser, and the backfill script. Non-likert configs and
- * unreadable input return `false`.
+ * True when a likert `typeConfig` carries one non-empty label per scale point — i.e. a
+ * *fully* labelled scale where every stored value maps to a word. The report renderer
+ * uses this to decide it can show per-point labels; it is deliberately STRICTER than
+ * {@link isLikertLabelled} (an endpoint-anchored scale is a valid, launchable likert but
+ * is not "complete" in this sense). Non-likert configs and unreadable input return `false`.
  */
 export function hasCompleteLikertLabels(typeConfig: unknown): boolean {
+  return likertFullyLabelledSchema.safeParse(typeConfig).success;
+}
+
+/**
+ * True when a likert `typeConfig` is labelled well enough to launch — a complete
+ * per-point `labels` array OR both endpoint labels. This is exactly the write schema's
+ * acceptance rule, so the launch gate and the structure editor's "needs labels" cue agree
+ * with what save enforces. Non-likert configs and unreadable input return `false`.
+ */
+export function isLikertLabelled(typeConfig: unknown): boolean {
   return likertWriteConfigSchema.safeParse(typeConfig).success;
+}
+
+/**
+ * True when a matrix `typeConfig` is complete enough to launch — ≥1 row with distinct
+ * keys and a labelled/anchored shared scale. This is exactly the write schema's acceptance
+ * rule, so the launch gate and the structure editor's "needs labels" cue agree with what
+ * save enforces. Non-matrix configs and unreadable input return `false`.
+ */
+export function isMatrixLabelled(typeConfig: unknown): boolean {
+  return matrixWriteConfigSchema.safeParse(typeConfig).success;
 }
 
 /** Discriminated result of validating a `typeConfig` against its question type. */
@@ -219,6 +317,17 @@ export function defaultTypeConfig(type: QuestionType): unknown {
         min: 1,
         max: 5,
         labels: ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'],
+      };
+    case 'matrix':
+      // Two rows on an endpoint-anchored 1–5 importance scale — the most common matrix
+      // shape (a battery of items sharing one rating), and one that already satisfies the
+      // write schema (distinct keys + both endpoint labels).
+      return {
+        rows: [
+          { key: 'row_1', label: 'Row 1' },
+          { key: 'row_2', label: 'Row 2' },
+        ],
+        scale: { min: 1, max: 5, minLabel: 'Not important', maxLabel: 'Essential' },
       };
     case 'numeric':
     case 'boolean':

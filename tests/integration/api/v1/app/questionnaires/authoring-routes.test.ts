@@ -380,7 +380,9 @@ describe('status PATCH', () => {
       selectionStrategy: 'sequential',
     });
     // One likert with bounds but no per-point labels → not launch-ready.
-    prismaMock.appQuestionSlot.findMany.mockResolvedValue([{ typeConfig: { min: 1, max: 5 } }]);
+    prismaMock.appQuestionSlot.findMany.mockResolvedValue([
+      { type: 'likert', typeConfig: { min: 1, max: 5 } },
+    ]);
 
     const res = await statusPATCH(req({ status: 'launched' }), ctx(VERSION_PARAMS));
     const json = await res.json();

@@ -172,7 +172,15 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     let completion: ChatCompletion;
     try {
       completion = await withRetry<ChatCompletion>(
-        () => this.client.chat.completions.create(params),
+        // Forward a per-request `timeout` when the caller supplied one, so a long
+        // job (e.g. document extraction on a reasoning model) can override the
+        // client's construction-time default rather than being silently capped by
+        // it. Undefined ⇒ the client default applies, so this is backward-compatible.
+        () =>
+          this.client.chat.completions.create(
+            params,
+            options.timeoutMs != null ? { timeout: options.timeoutMs } : undefined
+          ),
         {
           maxRetries: this.maxRetries,
           isLocal: this.isLocal,

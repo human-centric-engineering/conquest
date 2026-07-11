@@ -132,19 +132,30 @@ the version; no `User` FK anywhere (UG-1 — uploader/reverter identity is a pla
   **denormalised `versionId`** (F2.2 validates tag+slot share a version) and a
   per-version stable `key` slug: `@@unique([versionId, key])`. Vocabulary:
   `prompt`, `guidelines?`, `rationale?`, `type` (default `free_text`;
-  `free_text|single_choice|multi_choice|likert|numeric|date|boolean`), `typeConfig`
+  `free_text|single_choice|multi_choice|likert|matrix|numeric|date|boolean`), `typeConfig`
   `Json?`, `required`, `weight` (default `1.0`, feeds F4.1), `extractionConfidence?`.
   `typeConfig` is opaque at the DB layer but pinned per type by
-  `authoring/type-config-schema.ts`. A **`likert`** carries `{ min, max, labels }` —
-  one non-empty `labels` entry per scale point (`labels[i]` ⇒ value `min+i`); the
-  report and analytics render that word instead of a bare number. Labels are
-  **required at the write boundary** (`validateTypeConfig`) and at launch (the
-  `scaleLabels` readiness check): a purely numeric rating with no qualitative meaning
-  must use `numeric`, not an unlabelled `likert`. The read schema stays lenient so
-  pre-backfill rows (legacy `minLabel`/`maxLabel`, or bounds-only) still validate
-  answers; `npm run db:backfill:likert-labels` LLM-fills missing labels (or
-  reclassifies a numeric scale). `hasCompleteLikertLabels()` is the shared "fully
-  labelled?" predicate.
+  `authoring/type-config-schema.ts`. A **`likert`** carries `{ min, max }` plus labels
+  one of two faithful ways: **either** a complete `labels` array — one non-empty entry
+  per scale point (`labels[i]` ⇒ value `min+i`), which the report and analytics render
+  instead of a bare number — **or** just both endpoint labels `minLabel`/`maxLabel`, for
+  a scale the source anchors only at its ends ("1 — Not at all … 5 — Very much"), where
+  inventing middle words would be unfaithful. One of the two is **required at the write
+  boundary** (`validateTypeConfig`) and at launch (the `scaleLabels` readiness check via
+  `isLikertLabelled`): a fully _unlabelled_ rating with no qualitative meaning must use
+  `numeric`. The read schema stays lenient so pre-backfill rows (legacy `minLabel`/
+  `maxLabel`, or bounds-only) still validate answers; `npm run db:backfill:likert-labels`
+  LLM-fills missing labels (or reclassifies a numeric scale). `hasCompleteLikertLabels()`
+  is the stricter "every point named?" predicate (the report needs it to map each value
+  to a word); `isLikertLabelled()` is the looser launch/save predicate (full labels **or**
+  endpoints). A **`matrix`** (rating grid) carries `{ rows: [{key,label}, …], scale }`
+  where `scale` is a likert config (the shared scale every row is rated on); its answer is
+  a composite `{ [rowKey]: point }` map in the **single** `AppAnswerSlot` (no schema change
+  — `value` is open JSON). `matrixWriteConfigSchema` requires ≥1 row with distinct keys and
+  a labelled/anchored scale (`isMatrixLabelled`, sharing the `scaleLabels` launch check with
+  likert). The conversational surface asks a matrix row-by-row; the form/editor render it as
+  a grid. Row-level numeric scoring is a v1 non-goal (a composite answer is skipped by
+  `scoring/compute.ts`).
   Cascades through its `section` (no direct version FK). **No `embedding` column —
   deferred to F4.1** (pgvector is a Prisma-unmodelled object with no consumer until
   then). `@@index([versionId])`, `@@index([sectionId])`.

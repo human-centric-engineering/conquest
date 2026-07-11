@@ -145,6 +145,10 @@ export async function runStructuredCompletion<T>(
         temperature,
         maxTokens,
         signal: firstSignal,
+        // Forward the effective timeout so it caps the provider request itself, not
+        // just the abort signal — otherwise a long call is capped at the provider
+        // client's construction default regardless of this timeout.
+        timeoutMs,
         ...(responseFormat ? { responseFormat } : {}),
       });
       setSpanAttributes(span, {
@@ -187,6 +191,7 @@ export async function runStructuredCompletion<T>(
           temperature: 0,
           maxTokens,
           signal: retrySignal,
+          timeoutMs,
           ...(responseFormat ? { responseFormat } : {}),
         }
       );

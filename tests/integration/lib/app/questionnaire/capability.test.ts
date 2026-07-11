@@ -319,6 +319,44 @@ describe('AppExtractQuestionnaireStructureCapability — dispatch', () => {
     expect(result.error?.code).toBe('extraction_failed');
     expect(result.data).toBeUndefined();
     expect(provider.chat).toHaveBeenCalledTimes(2);
+    // No Zod issue paths (JSON.parse itself failed) ⇒ the message must name the
+    // real cause — an unparseable/truncated response — not blame the schema.
+    // This is the exact production failure mode for a reasoning model whose
+    // output overruns the token cap and comes back as cut-off JSON.
+    expect(result.error?.message).toMatch(/not parseable JSON/i);
+    expect(result.error?.message).toMatch(/truncat/i);
+    expect(result.error?.message).not.toMatch(/not valid against the schema/i);
+  });
+
+  it('names the schema fields (not truncation) when the JSON parses but violates the schema on both attempts', async () => {
+    // Parses as JSON on both attempts but `questions` is the wrong type — the Zod
+    // arm populates issue paths, so the error must cite the invalid field rather
+    // than the truncation message. Guards against the two failure modes bleeding
+    // into one another.
+    const schemaInvalid = JSON.stringify({ sections: [], questions: 'nope', changes: [] });
+    const provider = makeProvider([{ content: schemaInvalid }, { content: schemaInvalid }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('extraction_failed');
+    expect(result.error?.message).toMatch(/not valid against the schema/i);
+    expect(result.error?.message).toMatch(/invalid at:/i);
+    expect(result.error?.message).not.toMatch(/truncat/i);
+  });
+
+  it('gives the extraction call generous token headroom for reasoning-model output', async () => {
+    // Regression guard: 16k truncated real questionnaires mid-JSON on gpt-5.4
+    // (reasoning + faithful table/scale output overran the cap). The extraction
+    // call must request a budget comfortably above that.
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    const firstCall = provider.chat.mock.calls[0] as unknown as [unknown, { maxTokens?: number }];
+    expect(firstCall?.[1]?.maxTokens).toBeGreaterThanOrEqual(32_000);
   });
 
   it('suppresses infer_goal when the admin supplied the goal', async () => {

@@ -4,6 +4,7 @@ import {
   ALLOWED_EXTENSIONS,
   hasAllowedExtension,
   parseAdminMetadata,
+  parseExtractTablesFlag,
   MAX_INSTRUCTIONS_LENGTH,
 } from '@/app/api/v1/app/questionnaires/_lib/upload-input';
 import { ValidationError } from '@/lib/api/errors';
@@ -51,5 +52,33 @@ describe('parseAdminMetadata — instructions', () => {
     const form = new FormData();
     form.set('instructions', 'x'.repeat(MAX_INSTRUCTIONS_LENGTH));
     expect(parseAdminMetadata(form).instructions).toHaveLength(MAX_INSTRUCTIONS_LENGTH);
+  });
+});
+
+describe('parseExtractTablesFlag', () => {
+  it('defaults to true when the field is absent (questionnaires are table-dense)', () => {
+    expect(parseExtractTablesFlag(new FormData())).toBe(true);
+  });
+
+  it('defaults to true when the field is present but blank (un-filled, not an override)', () => {
+    const form = new FormData();
+    form.set('extractTables', '   ');
+    expect(parseExtractTablesFlag(form)).toBe(true);
+  });
+
+  it('reads explicit truthy values as true', () => {
+    for (const value of ['true', '1', 'on', 'yes']) {
+      const form = new FormData();
+      form.set('extractTables', value);
+      expect(parseExtractTablesFlag(form)).toBe(true);
+    }
+  });
+
+  it('treats an explicit non-truthy value as an admin override to false', () => {
+    for (const value of ['false', '0', 'off', 'no']) {
+      const form = new FormData();
+      form.set('extractTables', value);
+      expect(parseExtractTablesFlag(form)).toBe(false);
+    }
   });
 });

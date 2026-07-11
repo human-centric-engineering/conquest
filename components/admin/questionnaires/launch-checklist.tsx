@@ -66,6 +66,10 @@ export interface LaunchChecklistProps {
   likertCount?: number;
   /** How many of those likert questions still lack complete per-point labels (launch requires 0). */
   unlabelledLikertCount?: number;
+  /** Number of matrix (rating-grid) questions — also gates the "every scale is labelled" row. */
+  matrixCount?: number;
+  /** How many matrix questions are misconfigured (no rows / unlabelled scale) — launch requires 0. */
+  misconfiguredMatrixCount?: number;
 }
 
 interface LaunchCheck {
@@ -116,6 +120,8 @@ export function LaunchChecklist({
   dataSlotEmbeddingsReady = false,
   likertCount = 0,
   unlabelledLikertCount = 0,
+  matrixCount = 0,
+  misconfiguredMatrixCount = 0,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -148,6 +154,8 @@ export function LaunchChecklist({
     questionCount,
     likertCount,
     unlabelledLikertCount,
+    matrixCount,
+    misconfiguredMatrixCount,
     configSaved,
     dataSlotsRequired,
     dataSlotsReady,

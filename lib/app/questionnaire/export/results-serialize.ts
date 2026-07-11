@@ -44,6 +44,14 @@ export function renderAnswerValue(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number' || typeof value === 'bigint') return value.toString();
+  if (typeof value === 'object') {
+    // A composite answer (a matrix's `{ rowKey: point }` map): render as flat `key=value`
+    // pairs — spreadsheet-friendly and faithful — rather than raw JSON.
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length > 0) {
+      return entries.map(([k, v]) => `${k}=${renderAnswerValue(v)}`).join('; ');
+    }
+  }
   try {
     return JSON.stringify(value) ?? '';
   } catch {

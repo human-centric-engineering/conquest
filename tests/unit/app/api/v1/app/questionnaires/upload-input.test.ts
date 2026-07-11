@@ -26,7 +26,7 @@ function form(fields: Record<string, string>): FormData {
 }
 
 describe('extension allowlist', () => {
-  it('accepts the four supported extensions, case-insensitively', () => {
+  it('accepts every supported extension, case-insensitively', () => {
     for (const ext of ALLOWED_EXTENSIONS) {
       expect(hasAllowedExtension(`doc${ext}`)).toBe(true);
       expect(hasAllowedExtension(`DOC${ext.toUpperCase()}`)).toBe(true);
@@ -159,8 +159,17 @@ describe('parseExtractTablesFlag', () => {
     }
   });
 
-  it('is false when absent or non-truthy', () => {
-    expect(parseExtractTablesFlag(form({}))).toBe(false);
-    expect(parseExtractTablesFlag(form({ extractTables: 'false' }))).toBe(false);
+  // Defaults to ON: questionnaires are table-dense (rating grids, scales, option
+  // lists render as tables), and the table pass self-detects, so it's harmless on
+  // prose-only PDFs. An absent/blank field is "un-filled", not an admin override.
+  it('defaults to true when absent or blank (not an explicit override)', () => {
+    expect(parseExtractTablesFlag(form({}))).toBe(true);
+    expect(parseExtractTablesFlag(form({ extractTables: '   ' }))).toBe(true);
+  });
+
+  it('is false for an explicit non-truthy value (the admin override)', () => {
+    for (const v of ['false', '0', 'off', 'no']) {
+      expect(parseExtractTablesFlag(form({ extractTables: v }))).toBe(false);
+    }
   });
 });

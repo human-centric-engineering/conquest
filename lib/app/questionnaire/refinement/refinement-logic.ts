@@ -58,7 +58,27 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
     const sb = arrB.map((v) => JSON.stringify(v)).sort();
     return sa.every((v, i) => v === sb[i]);
   }
+  // Plain objects (a matrix's `{ rowKey: point }` map): compare key-INsensitively so a grid
+  // re-stated with its rows serialised in a different order counts as a no-op, not a change —
+  // otherwise every matrix re-emit would spuriously register as a refinement.
+  if (isPlainObject(a) && isPlainObject(b)) {
+    return stableStringify(a) === stableStringify(b);
+  }
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Deterministic JSON with recursively sorted object keys, so equality ignores key order. */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
 }
 
 /**

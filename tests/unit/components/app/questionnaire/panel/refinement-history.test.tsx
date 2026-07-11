@@ -21,12 +21,14 @@ const ENTRY: PanelRefinementEntry = {
 
 describe('RefinementHistory', () => {
   it('renders nothing when there is no history', () => {
-    const { container } = render(<RefinementHistory entries={[]} />);
+    const { container } = render(
+      <RefinementHistory entries={[]} type="free_text" typeConfig={null} />
+    );
     expect(container).toBeEmptyDOMElement();
   });
 
   it('shows a revision count trigger and reveals the change on open', () => {
-    render(<RefinementHistory entries={[ENTRY]} />);
+    render(<RefinementHistory entries={[ENTRY]} type="free_text" typeConfig={null} />);
     // Collapsed: count is shown, detail is hidden.
     expect(screen.getByText('1 revision')).toBeInTheDocument();
     expect(screen.queryByText('Clarified the title.')).not.toBeInTheDocument();
@@ -38,7 +40,13 @@ describe('RefinementHistory', () => {
   });
 
   it('pluralises the revision count', () => {
-    render(<RefinementHistory entries={[ENTRY, { ...ENTRY, newValue: 'Staff Engineer' }]} />);
+    render(
+      <RefinementHistory
+        entries={[ENTRY, { ...ENTRY, newValue: 'Staff Engineer' }]}
+        type="free_text"
+        typeConfig={null}
+      />
+    );
     expect(screen.getByText('2 revisions')).toBeInTheDocument();
   });
 
@@ -49,6 +57,8 @@ describe('RefinementHistory', () => {
           { ...ENTRY, source: 'contradiction' },
           { ...ENTRY, source: 'correction' },
         ]}
+        type="free_text"
+        typeConfig={null}
       />
     );
     fireEvent.click(screen.getByText('2 revisions'));

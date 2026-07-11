@@ -48,7 +48,7 @@ const QUESTION_SHAPE = `{
   "key": "<stable unique slug, snake_case>",
   "prompt": "<the question text shown to the respondent — REQUIRED>",
   "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-  "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}]} — required, ≥2 objects; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
+  "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}]} — required, ≥2 objects; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert; matrix: {"rows":[{"key":"price","label":"Price"},{"key":"reliability","label":"Reliability"}],"scale":{"min":1,"max":5,"minLabel":"Not important","maxLabel":"Essential"}}> },
   "guidelines": "<optional answering guidance>",
   "rationale": "<optional why-this-question>",
   "extractionConfidence": <number between 0 and 1; your confidence the question fits the brief>
@@ -87,6 +87,15 @@ const CHOICE_RULE = `For a "single_choice" (pick one) or "multi_choice" (pick se
 "label": "<the option text>"}, with at least 2 options and distinct "value"s. Never emit choices as \
 a bare array of strings. Use "single_choice"/"multi_choice" for an asymmetric or unordered option \
 list; reserve "likert" for a symmetric agree/rate scale.`;
+
+/** Shared matrix rule: a battery of items sharing one rating scale is ONE "matrix" question. */
+const MATRIX_RULE = `When several related items should each be rated on the SAME scale (a battery like \
+"How important are the following: price, reliability, comfort…"), use ONE "matrix" question rather \
+than many separate likerts. Set "suggestedTypeConfig.rows" to an ARRAY OF OBJECTS, one per item, \
+each {"key": "<stable snake_case slug>", "label": "<the item text>"} (≥1 row, distinct keys), and \
+"suggestedTypeConfig.scale" to the shared scale as a likert config ({"min","max"} plus a "labels" \
+array OR "minLabel"/"maxLabel" endpoint anchors — the SAME scale applies to every row). Keep the \
+battery's overall wording as the "prompt".`;
 
 // ---------------------------------------------------------------------------
 // Phase 1 — outline (sections + inferred goal/audience)
@@ -147,6 +156,8 @@ ${SCALE_RULE}
 
 ${CHOICE_RULE}
 
+${MATRIX_RULE}
+
 ${JSON_ONLY}`;
 
 export function buildComposeSectionQuestionsPrompt(
@@ -196,6 +207,8 @@ question keys must be unique across the whole questionnaire (snake_case).
 ${SCALE_RULE}
 
 ${CHOICE_RULE}
+
+${MATRIX_RULE}
 
 ${JSON_ONLY}`;
 

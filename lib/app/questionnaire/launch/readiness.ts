@@ -53,6 +53,17 @@ export interface LaunchReadinessInput {
    * should use the `numeric` type instead. See [[hasCompleteLikertLabels]].
    */
   unlabelledLikertCount?: number;
+  /**
+   * The number of `matrix` (rating-grid) question slots. Matrices are rating scales too, so they
+   * share the "every rating scale is labelled" check — it appears when likert OR matrix count ≥1.
+   */
+  matrixCount?: number;
+  /**
+   * How many matrix slots are misconfigured (no rows, or an unlabelled/unanchored shared scale).
+   * Launch requires this to be 0, for the same reason as {@link unlabelledLikertCount}. See
+   * [[isMatrixLabelled]].
+   */
+  misconfiguredMatrixCount?: number;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -99,11 +110,13 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
     { key: 'sections', ok: input.sectionCount >= 1, label: 'At least one section' },
     { key: 'questions', ok: input.questionCount >= 1, label: 'At least one question' },
     { key: 'config', ok: input.configSaved, label: 'Configuration saved' },
-    ...((input.likertCount ?? 0) >= 1
+    ...((input.likertCount ?? 0) >= 1 || (input.matrixCount ?? 0) >= 1
       ? [
           {
             key: 'scaleLabels' as const,
-            ok: (input.unlabelledLikertCount ?? 0) === 0,
+            ok:
+              (input.unlabelledLikertCount ?? 0) === 0 &&
+              (input.misconfiguredMatrixCount ?? 0) === 0,
             label: 'Every rating scale is labelled',
           },
         ]

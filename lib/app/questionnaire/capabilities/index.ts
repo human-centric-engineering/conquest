@@ -51,6 +51,18 @@ export {
 } from '@/lib/app/questionnaire/capabilities/evaluate-structure';
 
 export {
+  AppVerifyExtractionStructureCapability,
+  type VerifyExtractionStructureArgs,
+  type VerifyExtractionStructureData,
+} from '@/lib/app/questionnaire/capabilities/verify-extraction-structure';
+
+export {
+  AppRepairQuestionsCapability,
+  type RepairQuestionsArgs,
+  type RepairQuestionsData,
+} from '@/lib/app/questionnaire/capabilities/repair-questions';
+
+export {
   AppGenerateDataSlotsCapability,
   type GenerateDataSlotsArgs,
   type GenerateDataSlotsData,

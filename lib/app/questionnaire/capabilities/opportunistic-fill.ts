@@ -135,7 +135,8 @@ export function selectOpportunisticTargets(opts: {
       } else if (FIT_TYPES.has(slot.type)) {
         if (!typedByKey.has(questionKey)) typedByKey.set(questionKey, slot);
       }
-      // numeric / boolean / date: no honest free-form→value mapping here — leave for the extractor.
+      // numeric / boolean / date / matrix: no honest free-form→value mapping here — a matrix
+      // needs a per-row composite the fit resolver can't produce — so leave them for the extractor.
     }
   }
 

@@ -68,6 +68,13 @@ export interface HistogramBin {
 export type DistributionDetail =
   | { kind: 'choice'; buckets: ValueBucket[]; otherCount: number }
   | { kind: 'likert'; min: number; max: number; buckets: ValueBucket[]; mean: number | null }
+  | {
+      /** A rating grid: one likert-shaped distribution per row, all sharing the scale. */
+      kind: 'matrix';
+      min: number;
+      max: number;
+      rows: { key: string; label: string; buckets: ValueBucket[]; mean: number | null }[];
+    }
   | { kind: 'numeric'; summary: NumericSummary | null; histogram: HistogramBin[] }
   | {
       kind: 'boolean';

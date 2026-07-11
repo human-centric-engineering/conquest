@@ -8,6 +8,7 @@ import {
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_FLAG,
   APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
@@ -48,6 +49,7 @@ export {
   APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG,
   APP_QUESTIONNAIRES_COMPLETION_FLAG,
   APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
+  APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_FLAG,
   APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG,
   APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
   APP_QUESTIONNAIRES_VOICE_INPUT_FLAG,
@@ -193,6 +195,25 @@ export async function isDesignEvaluationEnabled(): Promise<boolean> {
     isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
   ]);
   return app && evaluation;
+}
+
+/**
+ * Whether the **ingest verify + repair** pass may run during document ingestion. Requires BOTH
+ * the master app flag and the verify-repair sub-flag — verification spends one extra reasoning
+ * call, and repair a second only when questions are flagged, so it's opt-in on top of an
+ * already-enabled app (the same shape as {@link isDesignEvaluationEnabled}). The streaming ingest
+ * orchestrator consults this: when `false`, ingestion is exactly today's single-extractor
+ * behaviour. There is no route to 404 — this gates a behaviour *inside* the already-gated ingest
+ * stream route, not a route of its own.
+ *
+ * Server-only (resolves both flags from the database).
+ */
+export async function isIngestVerifyRepairEnabled(): Promise<boolean> {
+  const [app, verifyRepair] = await Promise.all([
+    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
+    isFeatureEnabled(APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_FLAG),
+  ]);
+  return app && verifyRepair;
 }
 
 /**
