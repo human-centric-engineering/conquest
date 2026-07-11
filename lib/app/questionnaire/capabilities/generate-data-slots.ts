@@ -22,11 +22,11 @@ import {
 } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import {
   runStructuredCompletion,
-  tryParseJson,
   type StructuredCompletionResult,
-} from '@/lib/orchestration/evaluations/parse-structured';
+} from '@/lib/orchestration/llm/structured-completion';
 
 import { GENERATE_DATA_SLOTS_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
 import {

@@ -132,8 +132,9 @@ surfaces the blanket rule had missed (e.g. the `apiClient` methods in
 `lib/app/**` is the supported surface where forks/apps add their own platform-level
 code. Its inhabitants are the **auto-wired bootstrap files** — `lib/app/env.ts`
 (env schema), `lib/app/rate-limit.ts`, `lib/app/capabilities.ts`,
-`lib/app/admin-nav.ts` — each imported by the core consumer that runs in the
-matching Next.js bundle realm (server / middleware / client). A dedicated
+`lib/app/admin-nav.ts`, `lib/app/protected-routes.ts` (extra authed route
+prefixes, read by the proxy) — each imported by the core consumer that runs in
+the matching Next.js bundle realm (server / middleware / client). A dedicated
 flat-config override keeps that surface **framework-agnostic** so it survives Next.js
 upgrades and can be reasoned about in isolation:
 
@@ -168,6 +169,34 @@ scope for this rule.
 The rule's behaviour (runtime-`next` rejected, type-only allowed, relative imports
 rejected, `@/` allowed) is locked by `tests/unit/eslint-app-boundary.test.ts`, which
 runs the shipped rule from `eslint.config.mjs` through ESLint's `Linter`.
+
+### Fork-owned config seam — `lib/app/eslint.config.mjs`
+
+The boundary above is Sunrise's own. A **fork** that needs to add its _own_
+import-boundary rules (e.g. a framework tier enforcing `framework ↔ core`) does
+so without editing the root config: the root `eslint.config.mjs` imports and
+spreads the reserved `lib/app/eslint.config.mjs` (ships `export default []`) as
+its **last** argument, so fork blocks land after every core block and win for
+their own `files`. Forks edit the reserved file; the platform config stays
+conflict-free on `git merge vX.Y.Z`.
+
+Two rules of the seam, both consequences of flat-config semantics already
+described above:
+
+- **Spread order is load-bearing — the seam lands last.** A later block overrides
+  an earlier one for overlapping `files`. A framework-tier fork (Sunrise →
+  framework → leaf) spreads its `lib/framework/eslint.config.mjs` first and keeps
+  the leaf seam last.
+- **`no-restricted-imports` replaces, it does not merge** (same footgun the
+  `lib/app/**` block works around above). A fork block restricting imports for a
+  glob must **restate the base `@/`-alias ban** for that glob, or relative-import
+  enforcement silently drops there. The worked example lives in the header of
+  `lib/app/eslint.config.mjs`.
+
+The companion **CI seam** is a `package.json` addition, not a config file: the
+`lint` job runs `npm run app:ci-checks --if-present`, so a fork adds an
+`app:ci-checks` script (a boundary check, migration-hygiene lint, etc.) with **no
+`ci.yml` edit**. It no-ops in vanilla Sunrise, which ships no such script.
 
 ## Backlog (post-fork-readiness, not blockers)
 

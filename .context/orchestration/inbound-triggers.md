@@ -148,14 +148,46 @@ POST /api/v1/inbound/:channel/:slug
   ↓ normalised = adapter.normalise(bodyParsed, headers)
   ↓ optional metadata.eventTypes filter           → 200 {skipped} if filtered
   ↓ compute dedupKey per channel                  (see "Replay protection" below)
+  ↓ scope = { ...resolvePersistedScope(normalised.scope), ...resolvePersistedScope(trigger.scope) }
+  ↓                                                (static trigger scope wins; both dropped-to-unscoped if malformed)
   ↓ workflowDefinitionSchema.safeParse(snapshot)  → 500 on operator error
-  ↓ prisma.aiWorkflowExecution.create({...dedupKey})
+  ↓ prisma.aiWorkflowExecution.create({...dedupKey, ...scope})
   ↓                                              → 200 {deduped: true} if P2002 on dedupKey
   ↓ trigger.lastFiredAt update (best-effort)
   ↓ logAdminAction(workflow_trigger.fire)
   ↓ void drainEngine(...)                        # fire-and-forget; identical crash handling to schedule path
   ↓ 202 {executionId, channel, workflowSlug, status: 'pending'}
 ```
+
+## Scope carrier — static + payload-derived
+
+A run fired through an inbound trigger can carry a `CapabilityContext.scope` (a
+flat string→string map mirroring [`CapabilityContext.scope`](./capabilities.md))
+so capabilities inside it enforce it. Core names no keys; a fork maps them to its
+own domain (e.g. `{ projectId }`). The scope is assembled from **two sources**:
+
+- **Static** — `AiWorkflowTrigger.scope` (`Json?`), operator-configured via the
+  admin trigger create/PATCH endpoints. Validated on read via
+  `resolvePersistedScope` (a malformed row drops to unscoped, never wedging a
+  fire). Fixed per trigger, higher trust.
+- **Payload-derived** — an adapter's `normalise()` may return an optional `scope`
+  on `NormalisedTriggerPayload`, computed from the **verified** request body
+  (e.g. a fork's GitHub adapter maps the `pull_request` repo to `{ projectId }`).
+  Core's built-in adapters leave it undefined; derivation is fork-specific. It is
+  **lower-trust than the static scope** — the route runs it through the same
+  `resolvePersistedScope` validate-on-read guard as the static column (adapters
+  aren't trusted to return well-formed data; a malformed value is dropped to
+  unscoped) before use.
+
+The two are **shallow-merged with the static scope last** (`{ ...adapterScope,
+...triggerScope }`), so the operator's config **wins on key conflicts**: an
+adapter may fill in keys the operator didn't pin, but cannot override one they
+did. The merged map is stamped onto the created `AiWorkflowExecution.scope`;
+`NULL`/unset from both sources = unscoped.
+
+The generic webhook trigger (`/api/v1/webhooks/trigger/:slug`) has no trigger row
+and stays unscoped — register an inbound adapter when a webhook-driven run needs a
+scope.
 
 ## Adapter interface
 
@@ -164,6 +196,9 @@ interface InboundAdapter {
   readonly channel: string;
   handleHandshake?(rawBody: unknown): Response | null;
   verify(req: NextRequest, ctx: VerifyContext): Promise<VerifyResult>;
+  // normalise() may return an optional `scope` on NormalisedTriggerPayload —
+  // an adapter-derived CapabilityContext.scope computed from the verified
+  // payload (see "Scope carrier" above). Core built-ins leave it undefined.
   normalise(rawBody: unknown, headers: Headers): NormalisedTriggerPayload;
 }
 
@@ -174,8 +209,7 @@ interface VerifyContext {
 }
 
 type VerifyResult =
-  | { valid: true; externalId?: string }
-  | { valid: false; reason: VerifyFailureReason };
+  { valid: true; externalId?: string } | { valid: false; reason: VerifyFailureReason };
 
 type VerifyFailureReason =
   | 'missing_signature'

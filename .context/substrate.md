@@ -39,6 +39,17 @@ Entry point for the `.context/` documentation system. Load specific domains base
 | **Commands**       | `commands.md`    | All CLI commands reference                        |
 | **Workflow**       | `workflow.md`    | Git, commits, PR process                          |
 
+> **Two fork tiers are reserved — Sunrise must never create or write under
+> either.** `/app` is the **leaf-fork** tier: `.context/app/` is the fork-owned
+> documentation tree (mirroring this platform substrate), alongside the
+> `lib/app/**` scaffold. `/framework` is the **framework-layer** tier for a fork
+> that sits between Sunrise and its own leaf forks (e.g. Daybreak):
+> `.context/framework/`, `lib/framework/`, `prisma/schema/framework-*.prisma`,
+> and the `framework_` table prefix. Keeping both empty upstream is what lets a
+> fork's files there merge without ever conflicting; Sunrise platform docs always
+> go under a named domain folder above. See
+> [`CUSTOMIZATION.md`](../CUSTOMIZATION.md#the-appplatform-model).
+
 ## Task Lookup
 
 | Task                                                | Start Here                                       | Also See                                  |

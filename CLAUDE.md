@@ -271,6 +271,17 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 
 **Entry point:** `.context/substrate.md` — full navigation and AI usage patterns
 
+> **Two namespace tiers are reserved for downstream forks — Sunrise core must
+> never create files or tables under either.** `/app` is the **leaf-fork** tier
+> (`.context/app/`, `lib/app/**` fork-owned scaffold). `/framework` is the
+> **framework-layer** tier for forks that sit _between_ Sunrise and their own
+> leaf forks (e.g. Daybreak): `lib/framework/`, `.context/framework/`,
+> `prisma/schema/framework-*.prisma`, and the `framework_` table prefix. Keeping
+> both empty upstream is what lets a fork's files there merge cleanly. Sunrise
+> platform docs go under a named domain folder (below); the app boot seam is
+> `lib/app/bootstrap.ts` (empty `initApp()`). See
+> [`CUSTOMIZATION.md`](./CUSTOMIZATION.md#the-appplatform-model).
+
 | Domain                   | Path                                                      | Key Content                                                                                                                      |
 | ------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Architecture             | `.context/architecture/`                                  | System design, deployment                                                                                                        |

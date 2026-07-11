@@ -47,18 +47,26 @@ for await (const event of streamChat({
 
 Everything is exported from `@/lib/orchestration/chat`:
 
-| Export                 | Kind     | Purpose                                                                                                                                                                   |
-| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `streamChat`           | function | Convenience wrapper around `StreamingChatHandler.run`                                                                                                                     |
-| `StreamingChatHandler` | class    | Main handler. Instantiate and call `.run(request)` for multiple invocations                                                                                               |
-| `ChatError`            | class    | Narrow error type with `code` + `message`, caught by the outer try                                                                                                        |
-| `ChatRequest`          | type     | Input shape (see below)                                                                                                                                                   |
-| `ChatStream`           | type     | Alias for `AsyncIterable<ChatEvent>`                                                                                                                                      |
-| `MAX_TOOL_ITERATIONS`  | const    | Tool loop cap (currently `5`)                                                                                                                                             |
-| `MAX_HISTORY_MESSAGES` | const    | Platform default for the message-count history cap (currently `50`). Per-agent overridable via `AiAgent.maxHistoryMessages` — `null` ⇒ use this default, `0` ⇒ stateless. |
-| `buildContext`         | function | Loads and frames entity context with a 60 s TTL cache                                                                                                                     |
-| `invalidateContext`    | function | Drop a single cache entry after a mutating capability                                                                                                                     |
-| `clearContextCache`    | function | Wipe the entire cache (tests and admin hooks)                                                                                                                             |
+| Export                                                                                    | Kind     | Purpose                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `streamChat`                                                                              | function | Convenience wrapper around `StreamingChatHandler.run`                                                                                                                     |
+| `StreamingChatHandler`                                                                    | class    | Main handler. Instantiate and call `.run(request)` for multiple invocations                                                                                               |
+| `ChatError`                                                                               | class    | Narrow error type with `code` + `message`, caught by the outer try                                                                                                        |
+| `ChatRequest`                                                                             | type     | Input shape (see below)                                                                                                                                                   |
+| `ChatStream`                                                                              | type     | Alias for `AsyncIterable<ChatEvent>`                                                                                                                                      |
+| `MAX_TOOL_ITERATIONS`                                                                     | const    | Tool loop cap (currently `5`)                                                                                                                                             |
+| `MAX_HISTORY_MESSAGES`                                                                    | const    | Platform default for the message-count history cap (currently `50`). Per-agent overridable via `AiAgent.maxHistoryMessages` — `null` ⇒ use this default, `0` ⇒ stateless. |
+| `buildContext`                                                                            | function | Loads and frames entity context with a 60 s TTL cache                                                                                                                     |
+| `invalidateContext`                                                                       | function | Drop a single cache entry after a mutating capability                                                                                                                     |
+| `clearContextCache`                                                                       | function | Wipe the entire cache (tests and admin hooks)                                                                                                                             |
+| `registerContextContributor`                                                              | function | Register a fork-owned prompt-context loader for a new `contextType` (see Context Builder)                                                                                 |
+| `ContextRequest`                                                                          | type     | Per-request inputs threaded into `buildContext`/contributors: `{ userId? }` (per-user context + cache partition)                                                          |
+| `registerGuardFloorContributor`                                                           | function | Register a fork-owned per-turn **minimum** mode for the inline input/output/citation guards (see Guard-floor seam)                                                        |
+| `GuardKind` / `GuardMode` / `GuardFloors` / `GuardFloorRequest` / `GuardFloorContributor` | types    | Guard-floor seam types                                                                                                                                                    |
+| `registerGuardEventContributor`                                                           | function | Register a fork-owned fire-and-forget observer for an inline guard firing (see Guard-events seam)                                                                         |
+| `GuardEventContext` / `GuardEvent` / `GuardEventContributor`                              | types    | Guard-events seam types                                                                                                                                                   |
+| `findResumableConversation`                                                               | function | Resolve a surface's most-recent-active conversation by `(userId, agentId, contextType, contextId)` (see Resuming a surface conversation)                                  |
+| `ResumableConversationQuery`                                                              | type     | Input to `findResumableConversation`                                                                                                                                      |
 
 `buildMessages` and the internal `PersistMessageParams` type are **not** re-exported — the public surface is deliberately small.
 
@@ -73,6 +81,7 @@ interface ChatRequest {
   contextType?: string;
   contextId?: string;
   entityContext?: Record<string, unknown>;
+  scope?: Record<string, string>;
   attachments?: { name: string; mimeType: string; data: string }[];
   requestId?: string;
   signal?: AbortSignal;
@@ -83,6 +92,7 @@ interface ChatRequest {
 - Omit `conversationId` to create a new `AiConversation` — `contextType` and `contextId` are persisted on the row at creation time only.
 - Supply `conversationId` to continue an existing conversation. Mismatched `userId` / `agentId` → `conversation_not_found`.
 - `entityContext` is opaque to the handler — it's passed straight through to `CapabilityContext.entityContext` so capabilities can read it.
+- `scope` is opaque to the handler — it's threaded straight through to `CapabilityContext.scope` (a generic carrier; core reads no keys). Absent and inert in vanilla Sunrise.
 - `requestId` is a correlation ID for structured log tracing. When provided, the handler creates a scoped logger via `logger.withContext({ requestId })` so all log entries from the chat turn are traceable. The chat stream route extracts this from the `x-request-id` header automatically.
 - `signal` is forwarded into every `provider.chatStream` call.
 - `includeTrace` is the admin-only opt-in for inline tool-call diagnostics. See [Inline trace annotations](#inline-trace-annotations-admin-only) below.
@@ -396,7 +406,7 @@ See [`.context/orchestration/agent-profiles.md`](./agent-profiles.md) for the re
 
 ## Context Builder
 
-`buildContext(type, id)` returns a `LOCKED CONTEXT` text block that gets spliced in as a second `system` message after the agent's stable instructions (KV-cache friendly — the instructions prefix is invariant across turns).
+`buildContext(type, id, request?)` returns a `LOCKED CONTEXT` text block that gets spliced in as a second `system` message after the agent's stable instructions (KV-cache friendly — the instructions prefix is invariant across turns). The optional `request` is a generic `ContextRequest { userId? }` carrying per-request inputs — the streaming handler passes the turn's `userId` so a contributor can return **per-user** context, and the cache partitions by it. Omitting `request` (or an empty `userId`) is the shared-cache behaviour from before the widening.
 
 ```
 === LOCKED CONTEXT ===
@@ -414,11 +424,84 @@ Reasoning plus acting is a reflex loop.
 === END LOCKED CONTEXT ===
 ```
 
-**Supported types:** only `pattern` in Phase 2c (delegates to `getPatternDetail`). Other types log a warn and return a benign "no loader" placeholder so the model doesn't hallucinate. Adding types is a ~10-line change — add a `case` in the switch.
+**Supported types:** only `pattern` is a built-in (delegates to `getPatternDetail`). Types with neither a built-in case nor a registered contributor (below) log a warn and return a benign "no loader" placeholder so the model doesn't hallucinate. Adding a built-in type is a ~10-line change — add a `case` in the switch.
 
-**Cache:** plain `Map<string, { value, expiresAt }>` with a 60 s TTL per `(type, id)` pair. Matches the dispatcher's pattern — no shared TTL utility is introduced.
+**App-contributed context types (forks):** `registerContextContributor(type, loader)` teaches `buildContext` about additional types without editing the core switch. On a cache miss with no matching built-in case, the loader registered for that `type` is invoked; its returned body is framed and cached identically to a built-in. A built-in case always takes precedence over a same-type contributor. Put registrations in the auto-wired fork-owned scaffold **`lib/app/context-contributors.ts`** → `initAppContextContributors()`, which `buildContext` runs once before its first lookup (mirrors `lib/app/capabilities.ts` → `initAppCapabilities`):
 
-**Invalidation:** `invalidateContext(type, id)` drops a single entry. The streaming handler calls this after every tool dispatch when a context is bound, so a future mutating capability (e.g. `update_pattern`) triggers a re-fetch on the next turn. Phase 2c ships no mutating capabilities, but the hook is wired so later slices don't need to retrofit.
+```typescript
+// lib/app/context-contributors.ts — called once by buildContext() before the first lookup
+import { registerContextContributor } from '@/lib/orchestration/chat';
+
+export function initAppContextContributors(): void {
+  // The loader receives the entity id and the per-request ContextRequest, so it
+  // can key on `request.userId` to return per-user context.
+  registerContextContributor('invoice', async (id, request) =>
+    loadInvoiceSummary(id, request.userId)
+  );
+}
+```
+
+Registration is idempotent by type: re-registering a type replaces its loader. The loader signature is `(id, request: ContextRequest) => Promise<string>`; a loader that ignores the 2nd arg (`(id) => …`) stays valid. Ships empty upstream so a fork's edits merge cleanly.
+
+**Cache:** plain `Map<string, { value, expiresAt }>` with a 60 s TTL per `(type, id, userId)`. An empty `userId` collapses to a single shared partition (byte-for-byte the pre-widening `(type, id)` key space), so one user's per-user context never leaks to another. Matches the dispatcher's pattern — no shared TTL utility is introduced.
+
+**Invalidation:** `invalidateContext(type, id, request?)` drops a single entry — pass the same `request` (i.e. `userId`) given to `buildContext` so the matching per-user partition is cleared. The streaming handler calls this after every tool dispatch when a context is bound, so a future mutating capability (e.g. `update_pattern`) triggers a re-fetch on the next turn. Phase 2c ships no mutating capabilities, but the hook is wired so later slices don't need to retrofit.
+
+## Resuming a surface conversation
+
+A **surface** is a stable place a user returns to that is bound to an entity tuple — `AiConversation.(contextType, contextId)` (a pattern, a document, a fork's "module" or "role"). The chat handler already does two of the three things you'd expect with that tuple: it **binds** it onto a conversation at creation (`loadOrCreateConversation` stamps `contextType`/`contextId`) and **injects** entity context for it (`buildContext`). The third leg — **resuming** the surface's conversation — is `findResumableConversation`:
+
+```typescript
+import { findResumableConversation, streamChat } from '@/lib/orchestration/chat';
+
+const conversationId =
+  (await findResumableConversation({ userId, agentId, contextType, contextId })) ?? undefined;
+
+// null → undefined → streamChat opens a fresh conversation, tagged with the tuple.
+const events = streamChat({ message, agentSlug, userId, conversationId, contextType, contextId });
+```
+
+It returns the **id** of the user's most-recent-active conversation for that tuple (ordered by `updatedAt` desc), or `null` if none. The query is always scoped to `userId` + `agentId` + `isActive`, so a surface can never resume into another user's, another agent's, or an archived conversation — centralising that scoping is the point (a hand-rolled copy that forgets `userId` is a cross-user leak). **Deciding when to resume is the caller's job** — the handler never resumes by tuple on its own (a chat request with no `conversationId` still opens a fresh conversation), so this is opt-in per surface. Vanilla Sunrise ships no surface that calls it; it's the primitive a fork (or a future core UI) uses instead of re-deriving the query. The existing `@@index([contextType, contextId])` on `AiConversation` supports the lookup — no migration.
+
+## Guard-floor seam
+
+The three inline guards — input (prompt-injection scan), [output](./output-guard.md) (topic/brand), [citation](./output-guard.md#citation-guard) — resolve their mode from the agent config (falling back to the global setting). `registerGuardFloorContributor(key, contributor)` lets a fork enforce a per-turn **minimum** mode for any of them without editing the guard sites — e.g. a governance policy that says "this surface must at least warn on output".
+
+**A floor only ever RAISES a guard, never lowers it.** Strictness is ordered `none` < `log_only` < `warn_and_continue` < `block`, and the effective mode is `max(resolved agent/global mode, strictest registered floor)`. An empty registry leaves guard-mode resolution byte-for-byte unchanged (inert in vanilla Sunrise).
+
+A contributor is keyed on the turn's `(contextType, contextId, agentId)` and returns a `GuardFloors` = `Partial<Record<'input'|'output'|'citation', GuardMode>>` (it may be async). The handler collects floors **once** per turn (`collectGuardFloors`) and applies each via `applyGuardFloor(guard, resolvedMode, floors)` at the three guard sites. Multiple contributors merge to the strictest per guard; a contributor that throws is logged and ignored (never fails the turn); a returned value that isn't a known `GuardMode` is dropped.
+
+```typescript
+// lib/app/guard-floor-contributors.ts — called once by the chat handler
+import { registerGuardFloorContributor } from '@/lib/orchestration/chat';
+
+export function initAppGuardFloorContributors(): void {
+  registerGuardFloorContributor('facilitation-policy', async ({ contextType, agentId }) =>
+    contextType === 'facilitation' ? { output: 'warn_and_continue' } : {}
+  );
+}
+```
+
+Pairs with the [Guard-events seam](#guard-events-seam) below: a floor is a **pre-detection** input to how strictly a guard acts; an event is a **post-detection** observation that a guard fired.
+
+## Guard-events seam
+
+The post-detection sibling of the guard-floor seam. When an inline guard **flags**, the handler calls `emitGuardEvent(...)` so a fork can OBSERVE the firing and react — notify, log, escalate — without editing the guard sites or changing detection. `registerGuardEventContributor(key, contributor)` registers the observer.
+
+**Fire-and-forget.** Emission never delays or breaks the turn: each contributor runs on a microtask (so it can't block the handler), and a synchronous throw or an async rejection is swallowed and logged. It fires **before** the `block` short-circuit, so a `block` outcome is still observed. An empty registry is a no-op — inert in vanilla Sunrise.
+
+A contributor receives a `GuardEventContext` keyed on the turn's `(contextType, contextId, agentId, userId, conversationId)` and a `GuardEvent` = `{ guard: 'input'|'output'|'citation', outcome: GuardMode }` — where `outcome` is the effective mode the guard acted in (`block` = turn stopped, `warn_and_continue` = warned, `log_only` = logged only, `none` = flagged but no action). It is **observation only**: it cannot change detection or the action taken (use a guard-floor contributor to raise strictness).
+
+```typescript
+// lib/app/guard-event-contributors.ts — called once by the chat handler
+import { registerGuardEventContributor } from '@/lib/orchestration/chat';
+
+export function initAppGuardEventContributors(): void {
+  registerGuardEventContributor('escalation', (ctx, event) => {
+    if (event.outcome === 'block') void notifyModerators(ctx, event); // fire-and-forget
+  });
+}
+```
 
 ## Rolling Conversation Summary
 

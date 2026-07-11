@@ -72,7 +72,8 @@ SSE push (notifications/{tools,resources,prompts}/list_changed,
 3. Client uses `Authorization: Bearer smcp_...` header
 4. Scopes control access: `tools:list`, `tools:execute`, `resources:read`, `prompts:read`
 5. Keys can be revoked immediately; `expiresAt` for automatic expiry
-6. **Key rotation:** `POST /api/v1/admin/orchestration/mcp/keys/:id/rotate` — generates new key material, returns new plaintext once, immediately invalidates the old key. Optionally set `{ expiresAt }` in the body.
+6. **Application scope carrier** — a key may carry an optional `scope` (`McpApiKey.scope`, a flat string→string map, distinct from the protocol `scopes` above). It is validated on read (`mcpKeyScopeSchema`) and folded into `CapabilityContext.scope` for every `tools/call`, so a scoped capability can refuse to run outside the key's scope. Core names no keys; a fork maps it to its own domain (e.g. `{ projectId }`). NULL = unscoped (unchanged behaviour). Set it as opaque JSON on create/PATCH; clearing it via PATCH uses the `Prisma.DbNull` sentinel. A malformed stored value is dropped at auth (key treated as unscoped) rather than failing authentication.
+7. **Key rotation:** `POST /api/v1/admin/orchestration/mcp/keys/:id/rotate` — generates new key material, returns new plaintext once, immediately invalidates the old key. Optionally set `{ expiresAt }` in the body.
 
 ## Authentication & OAuth 2.1 Roadmap
 
@@ -128,9 +129,13 @@ Rough estimate: 2–3 weeks of one engineer for a production-ready implementatio
 
 1. Admin enables a capability as an MCP tool via the Tools page
 2. `McpExposedTool` row links to `AiCapability` with `isEnabled: true`
-3. `tools/list` joins both tables, serves only doubly-enabled tools
-4. `tools/call` dispatches through `capabilityDispatcher.dispatch()` using the `mcp-system` agent
+3. `tools/list` joins both tables and serves the doubly-enabled tools. When the calling key is **bound to an agent** (`scopedAgentId`), the list is filtered so discovery matches dispatch: a capability **explicitly disabled** for that agent (an `AiAgentCapability` row with `isEnabled = false`) is hidden, because `tools/call` would refuse it (step 4). Scoping is **default-allow** — a capability with no binding row stays callable and stays listed; only explicit disables are honoured (same opt-out semantics as the dispatcher). Unscoped keys see the full global list. The global list stays cached (5-min TTL); the per-agent disable filter is a small live query.
+4. `tools/call` dispatches through `capabilityDispatcher.dispatch()` under the key's `scopedAgentId` when the key is bound to an agent, else the shared `mcp-system` agent — the same resolution the `resources/read` path uses, so cost/budget attribution and knowledge-base grant resolution (`resolveAgentDocumentAccess`) follow the scoped agent. It also threads the optional per-dispatch `scope` carrier (`CapabilityContext.scope`) through to `execute()`. A direct call to a tool disabled for the scoped agent still resolves (name lookup uses the unscoped list) and returns `capability_disabled_for_agent` — whose message deliberately names no agent id (the internal cuid stays in server logs only).
 5. Full 9-step pipeline applies: validation, rate limiting, execution, cost tracking
+
+> **`tools/list` ↔ `tools/call` parity.** Since a scoped key's `tools/list` hides capabilities explicitly disabled for its agent, everything a scoped key can discover, it can call without a `capability_disabled_for_agent` error. Default-allowed-but-unbound tools remain both listed and callable. (Whether "scoped" should ever mean allow-list-only rather than default-allow is a deliberate open question tied to per-key project scope — not this behaviour.)
+
+> **Rate-limit bucket semantics under scoped keys.** The dispatcher rate limiter is keyed on `(capabilitySlug, agentId)`. Because step 4 resolves `agentId` from the key's `scopedAgentId`, each scoped key gets its **own** per-capability bucket, whereas all unscoped keys share the single `mcp-system` bucket per capability. So a capability's `rateLimit` acts as a **per-scoped-agent** cap for scoped traffic, not a single global MCP cap — `N` scoped keys permit up to `N ×` the configured limit in aggregate. This is intended (per-tenant fairness); size `rateLimit` accordingly for expensive tools.
 
 If `capabilityDispatcher.dispatch()` throws an unexpected exception (as opposed to returning `{ success: false }`), `callMcpTool` catches it and returns an MCP error content block (`isError: true`) with a generic message rather than escalating to a JSON-RPC protocol error.
 

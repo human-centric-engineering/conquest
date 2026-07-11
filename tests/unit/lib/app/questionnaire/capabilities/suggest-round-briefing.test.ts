@@ -14,8 +14,10 @@ vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
 }));
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
 vi.mock('@/lib/orchestration/evaluations/parse-structured', () => ({
-  runStructuredCompletion: vi.fn(),
   tryParseJson: vi.fn(),
+}));
+vi.mock('@/lib/orchestration/llm/structured-completion', () => ({
+  runStructuredCompletion: vi.fn(),
 }));
 vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
   logCost: vi.fn().mockResolvedValue(undefined),
@@ -26,8 +28,7 @@ vi.mock('@/lib/logging', () => ({
 
 const { resolveAgentProviderAndModel } = await import('@/lib/orchestration/llm/agent-resolver');
 const { getProvider } = await import('@/lib/orchestration/llm/provider-manager');
-const { runStructuredCompletion } =
-  await import('@/lib/orchestration/evaluations/parse-structured');
+const { runStructuredCompletion } = await import('@/lib/orchestration/llm/structured-completion');
 const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
 const { AppSuggestRoundBriefingCapability } =
   await import('@/lib/app/questionnaire/capabilities/suggest-round-briefing');

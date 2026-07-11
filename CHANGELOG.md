@@ -16,6 +16,399 @@ release process.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-09
+
+> **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
+> public surface: seven fork-facing seams and primitives requested by Daybreak
+> under the fork-first pattern, all additive and inert in vanilla Sunrise until
+> a fork opts in. Two chat guard seams — **`registerGuardFloorContributor`**
+> (raise an inline input/output/citation guard to a per-turn minimum; raise-only)
+> and its post-detection sibling **`registerGuardEventContributor`**
+> (fire-and-forget observation of a guard firing). Context + conversation —
+> **per-user `buildContext`** (`ContextRequest { userId? }` threaded to
+> contributors + a user-partitioned cache) and **`findResumableConversation`**
+> (resume a surface's conversation by its `(contextType, contextId)` tuple).
+> Capability + chat carriers — **`CapabilityContext.customConfig` + `isEnabled`**
+> surfaced from the resolved binding, and a bounded **consumer chat `scope` map**
+> on the public route. Plus **`runStructuredCompletion` relocated** to a neutral
+> `lib/orchestration/llm/` home with an open `phase` tag. No breaking changes.
+
+### Added
+
+- **Chat guard-event seam — a fork can OBSERVE an inline guard firing
+  (post-detection) and react** (#414). New `registerGuardEventContributor(key,
+  contributor)` (exported from `@/lib/orchestration/chat`, with types
+  `GuardEventContext` / `GuardEvent` / `GuardEventContributor`). When an inline
+  guard (input / output / citation) flags, the handler calls `emitGuardEvent`
+  **fire-and-forget** to contributors keyed on the turn's `(contextType,
+  contextId, agentId, userId, conversationId)` with `{ guard, outcome }`, so a
+  fork can notify / log / escalate without editing the guard sites. Fire-and-forget
+  — it never delays or breaks the turn (contributors run on a microtask; a
+  throwing/rejecting contributor is swallowed), it fires before the `block`
+  short-circuit so a block is still observed, and an empty registry is inert.
+  Observation only — it cannot change detection or the guard's action (use the
+  guard-floor seam for that). Fork-owned scaffold
+  `lib/app/guard-event-contributors.ts`. The post-detection sibling of the
+  guard-floor seam (#413).
+- **Chat guard-floor seam — a fork can RAISE an inline guard to a minimum for a
+  turn** (#413). New `registerGuardFloorContributor(key, contributor)` (exported
+  from `@/lib/orchestration/chat`, with types `GuardKind` / `GuardMode` /
+  `GuardFloors` / `GuardFloorRequest` / `GuardFloorContributor`). A contributor
+  keyed on the turn's `(contextType, contextId, agentId)` returns a per-guard
+  **minimum** mode for the three inline guards (input / output / citation), and
+  the handler raises each guard to the strictest registered floor. **A floor
+  only ever RAISES a guard, never lowers it** (`none` < `log_only` <
+  `warn_and_continue` < `block`); an empty registry leaves guard-mode resolution
+  byte-for-byte unchanged, and a throwing contributor is skipped. Fork-owned
+  scaffold `lib/app/guard-floor-contributors.ts` (`initAppGuardFloorContributors()`).
+- **`CapabilityContext` now carries the resolved binding's `customConfig` +
+  `isEnabled`** (#411). The dispatcher populates `context.customConfig`
+  (`AiAgentCapability.customConfig`, normalised to an object or `null`) and
+  `context.isEnabled` from the per-agent binding it already resolves at step 4,
+  so a capability can read its own per-binding config inside `execute()` without
+  re-querying `AiAgentCapability`. Both are set on a shallow copy (the caller's
+  context object is untouched) and stay opaque carriers alongside `scope` — core
+  sets `customConfig` but reads no keys, so consumers must still validate it
+  (e.g. Zod). `AgentCapabilityBinding` gains a matching `customConfig` field.
+  Inert for existing capabilities (they may adopt it to drop their own lookup);
+  no behaviour change.
+- **Consumer chat request accepts an opaque `scope` map** (#415).
+  `consumerChatRequestSchema` (`POST /api/v1/chat/stream`) now takes an optional
+  `scope: Record<string, string>`, threaded verbatim into every capability
+  dispatch for the turn as `CapabilityContext.scope` — the same carrier the
+  internal chat handler already threads. Inert in vanilla Sunrise (no built-in
+  reads it); a fork can surface-scope a consumer conversation without shadowing
+  the route. Because it arrives on an untrusted end-user request it is bounded
+  (≤ 32 entries, keys ≤ 100 chars, values ≤ 500 chars), and a fork reading it
+  for access decisions must re-validate against the user's entitlements — a
+  consumer-supplied scope is a hint, not an authorization grant.
+- **`findResumableConversation` — resume a surface's conversation by its context
+  tuple** (#416). New helper (exported from `@/lib/orchestration/chat`, with type
+  `ResumableConversationQuery`) that resolves a user's most-recent-active
+  conversation for a `(userId, agentId, contextType, contextId)` surface, ordered
+  by `updatedAt` desc, or `null` if none. Core already **binds** that tuple onto a
+  conversation at creation and **injects** entity context for it (`buildContext`)
+  but had no resume-by-tuple path — a "surface" (a stable place a user returns to)
+  had to re-derive the query. The lookup is always scoped to `userId` + `agentId`
+  + `isActive`, so centralising it also removes the risk a hand-rolled copy omits
+  `userId` (a cross-user leak). Deciding *when* to resume stays the caller's job
+  (the handler never resumes by tuple on its own); the existing
+  `@@index([contextType, contextId])` supports it — no migration. Inert in vanilla
+  Sunrise (no core surface calls it).
+
+### Changed
+
+- **Context builder threads per-request `userId` + partitions its cache by
+  user** (#412). `buildContext` and `invalidateContext` take an optional third
+  argument — a generic `ContextRequest { userId? }` (new exported type) — passed
+  through to each `ContextContributor` (its loader signature widens to
+  `(id, request) => Promise<string>`), and the 60 s result cache now keys on
+  `(type, id, userId)` instead of `(type, id)`. Lets a fork return **per-user**
+  prompt context without risking a cross-user cache leak. An empty/absent
+  `userId` collapses to a single shared partition — byte-for-byte the previous
+  behaviour — and a loader that ignores the new arg (`(id) => …`) stays valid.
+  The streaming handler passes the turn's `userId` at all three call sites.
+- **LLM structured-completion runner relocated to a neutral home** (#410). Moved
+  `runStructuredCompletion` (with `StructuredCompletionOptions` /
+  `StructuredCompletionResult`) out of
+  `lib/orchestration/evaluations/parse-structured.ts` into
+  `lib/orchestration/llm/structured-completion.ts` — it is a general LLM utility
+  with no evaluation coupling, so a non-evaluation caller no longer imports
+  through an eval-shaped path. The `phase` option widens from the closed
+  `'summary' | 'scoring'` union to an open `string`, letting a caller tag its own
+  span/cost phase (e.g. `'slot-extraction'`). No behaviour change: the OTEL
+  attributes (`gen_ai.operation.name`, `sunrise.evaluation.phase`) and the
+  omitted-`phase` default (`'evaluation'`) are unchanged. The `tryParseJson` /
+  `stripCodeFence` JSON parse helpers remain in `parse-structured.ts` (every
+  caller is an evaluation grader).
+
+## [0.6.0] — 2026-07-06
+
+> **Alpha release.** Eighth tagged Sunrise release. **MINOR bump** — adds new
+> public surface, all fork-facing seams that stay inert in vanilla Sunrise: the
+> capability `register()` **slug override + pre-execute `guard`**
+> (`CapabilityRegisterOptions` / `CapabilityGuard` / `CapabilityGuardDecision`;
+> guard runs as dispatch step 4a, fail-closed), the **knowledge
+> access-contributor** seam (`registerAgentAccessContributor` — a fork widens a
+> restricted agent's document set live), the reserved **`/framework` namespace
+> tier** + generic `initApp()` boot seam (`lib/app/bootstrap.ts`), the fork-owned
+> **ESLint config + `app:ci-checks`** seams, MCP **`tools/list` agent scoping**
+> (with the `callMcpTool()` caller-object signature change), and
+> `send_notification` **`to` interpolation**. Plus fixes: workflow
+> `{{trigger.*}}` template resolution, the admin MCP key-hash audit leak
+> (Security), and spurious `updatedAt` audit-diff noise across nine admin routes.
+> Both new dispatcher/knowledge seams are byte-for-byte inert until a fork opts
+> in.
+
+### Security
+
+- **Admin MCP API-key audit no longer records the key hash.** The
+  `PATCH /api/v1/admin/orchestration/mcp/keys/:id` handler diffed a full-row
+  `existing` against a narrower `select`-ed `updated`, so `computeChanges`
+  recorded every column present only on `existing` — including `keyHash` (the
+  SHA-256 of the key), which `SECRET_PATTERN` did not redact — as a spurious
+  `→ undefined` change on **every** PATCH, writing the hash into
+  `AiAdminAuditLog.changes`. Both rows are now fetched through the same
+  projection (which omits `keyHash`/`scopedAgentId`/`createdBy`), and
+  `SECRET_PATTERN` additionally redacts `key`/`token` digest fields (`keyHash`,
+  `tokenHash`) as defense in depth — without over-redacting non-secret digests
+  like `fileHash`/`contentHash`. The hash is not the key and the log is
+  admin-only, so impact is low — but a credential-derived value no longer sits
+  in the audit table. (#388)
+
+### Added
+
+- **Capability `register` options — `slug` override + pre-execute `guard`.**
+  `capabilityDispatcher.register(capability, options?)` and
+  `registerAppCapability(capability, options?)` now accept an optional
+  `{ slug?, guard? }` (new exported types `CapabilityRegisterOptions`,
+  `CapabilityGuard`, `CapabilityGuardDecision`). `slug` overrides the in-memory
+  handler key so a fork can mount one capability class under a namespaced slug;
+  `guard` is an async-capable predicate run as dispatch **step 4a** (after the
+  per-agent binding, before the rate limiter) that reads the generic
+  `CapabilityContext.scope` and returns `{ allow, reason? }` — `{ allow: false }`
+  (or a throw) denies with the new `capability_guard_denied` code, failing
+  **closed**. Together they let a fork mount and scope-gate a capability
+  **without wrapping it** — a wrapper would have defeated `register()`'s
+  PII-redaction own-property check, so both options keep that guard inspecting
+  the real subclass. Hard contract: an override `slug` must map to an **active
+  `AiCapability` row** or dispatch dies at `capability_inactive` before the
+  handler/guard runs. Both fields are opt-in; core attaches no guards and uses
+  no slug overrides, so vanilla behaviour is byte-for-byte unchanged. (#398)
+- **`lib/app/knowledge-access-contributors.ts` — fork-owned knowledge
+  access-contributor seam.** A new `lib/app/**` seam mirroring
+  `registerContextContributor`: a fork registers
+  `registerAgentAccessContributor(key, (agentId) => Promise<{ documentIds?, tagIds? }>)`
+  to **widen a restricted agent's searchable document set** from a relationship
+  it owns (module membership, team ACL, per-tenant grant), composed **live** by
+  `resolveAgentDocumentAccess()` instead of materialising derived grants onto the
+  per-agent pivot (which has no provenance column, making copy-down
+  clobber-or-leak). Contributors run only in the `restricted` branch (a `full`
+  agent is never touched) and can only **widen**; contributed `tagIds` expand to
+  their documents like a tag grant; a contributor that throws is logged and
+  ignored; an empty registry is byte-for-byte the previous behaviour. When the
+  data a contributor reads changes, the subsystem calls the existing
+  `invalidateAgentAccess(agentId)`. (#403)
+- **`lib/app/eslint.config.mjs` + `app:ci-checks` — fork-owned ESLint & CI
+  seams.** A fork can now add its own ESLint import-boundary rules and CI checks
+  without editing platform-owned files (which would conflict on every
+  `git merge vX.Y.Z`). The root `eslint.config.mjs` imports and spreads the
+  reserved `lib/app/eslint.config.mjs` (ships `export default []`) as its **last**
+  argument, so fork blocks land after core and win for their own `files`; the
+  seam header documents the load-bearing spread order and the flat-config
+  `no-restricted-imports` **replace-not-merge** footgun (restate the `@/`-alias
+  ban per glob). The CI `lint` job runs `npm run app:ci-checks --if-present`, so
+  a fork adds an `app:ci-checks` script to `package.json` with **no `ci.yml`
+  edit** (no-op in vanilla Sunrise). Both default to inert. (#382)
+- **`lib/app/bootstrap.ts` — fork-owned server boot seam (`initApp`).** A new
+  `lib/app/**` seam: `instrumentation.ts` `register()` calls the reserved,
+  empty-by-default `initApp()` once per server process for one-time startup work
+  (warm a cache, start a worker, boot a framework tier). It runs in **every**
+  environment (placed above the dev-only maintenance-ticker guards) and is
+  isolated in a try/catch, so a fork's boot failure is logged but never crashes
+  instrumentation or stops the dev ticker arming. Core imports only
+  `@/lib/app/bootstrap`; a fork imports its own tier **dynamically** from there
+  (a static `@/lib/framework` specifier breaks `next build` in vanilla Sunrise).
+  Also **reserves a second fork-namespace tier, `/framework`**, for
+  framework-layer forks that sit between Sunrise and their own leaf forks
+  (`lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`,
+  the `framework_` table prefix) — Sunrise core never creates files or tables
+  there, generalising #371's `/app` (leaf) reservation to two tiers. Default
+  (empty `initApp`) is unchanged behaviour. (#385)
+- **`lib/app/protected-routes.ts` — fork-owned protected-route registry.** A new
+  `lib/app/**` seam: a fork lists extra authenticated route prefixes in
+  `appProtectedRoutes` (ships empty) and the proxy **merges** them with the core
+  prefixes (`/dashboard`, `/settings`, `/profile`) for the edge redirect-to-login,
+  instead of editing the `proxy.ts` literal. Append semantics (core prefixes always
+  stay protected); malformed entries not starting with `/` (e.g. an empty string
+  that would match every path) are dropped. This is only the "is-logged-in-at-all"
+  edge gate — per-resource authorisation stays in the `withAuth`/`withAdminAuth`
+  guards. Default (empty list) is unchanged behaviour.
+- **Payload-derived inbound scope — `NormalisedTriggerPayload.scope`.** An inbound
+  adapter's `normalise()` may now return an optional `scope` (a flat string→string
+  map) computed from the verified request body, letting an event-triggered run be
+  scoped by what the caller sent (e.g. a fork's GitHub adapter mapping a
+  `pull_request` repo to `{ projectId }`). The inbound route runs the
+  adapter-returned value through the shared `resolvePersistedScope` validate-on-read
+  guard (adapters aren't trusted to return well-formed data — malformed drops to
+  unscoped) and shallow-merges it **under** the static `AiWorkflowTrigger.scope`,
+  so the operator's config wins on key conflicts. Core's built-in adapters leave it undefined; derivation is
+  fork-specific. Completes the `CapabilityContext.scope` trigger-entry population
+  (the static half shipped alongside).
+- **`AiWorkflowSchedule.scope` + `AiWorkflowTrigger.scope` (nullable JSON) —
+  trigger-entry scope population.** Scheduled and inbound-triggered workflow runs
+  can now carry a static application-level `scope` (a flat string→string map),
+  stamped onto the created `AiWorkflowExecution.scope` so capabilities inside the
+  run enforce it. A schedule/trigger's `scope` is settable as opaque JSON via the
+  admin schedule/trigger create + PATCH endpoints (clearing uses the
+  `Prisma.DbNull` sentinel); the admin `POST /workflows/:id/execute` +
+  `execute-stream` routes accept an optional `scope` for a manual run. Persisted
+  values are validated on read via a new shared helper `resolvePersistedScope`
+  (`lib/orchestration/scope.ts`) — a malformed row is dropped to unscoped (never
+  wedges a run) — which also now backs the engine resume path. The generic
+  webhook trigger is deliberately left unscoped: scoped event triggers use the
+  inbound-adapter seam. Core names no keys; `NULL`/unset is unchanged behaviour.
+  The second populator of the `CapabilityContext.scope` carrier (after the MCP
+  key); payload-derived (dynamic) scope for inbound adapters is tracked
+  separately.
+- **`McpApiKey.scope` (nullable JSON) — per-key scope population.** An MCP API
+  key may now carry an optional application-level `scope` (a flat string→string
+  map, distinct from the coarse protocol `scopes` array). It is validated on read
+  (`mcpKeyScopeSchema`) and folded into `CapabilityContext.scope` for every
+  `tools/call` made with the key (the dormant `callMcpTool` param from the MCP
+  `tools/call` work is now populated), so an external MCP caller's tool calls are
+  automatically scoped without passing scope on each call. Settable as opaque JSON
+  via the admin key create/PATCH endpoints (clearing uses the `Prisma.DbNull`
+  sentinel); a malformed stored value is dropped at auth (key treated as unscoped)
+  rather than failing authentication. Core names no keys; `NULL`/unset is
+  unchanged behaviour. First populator of the `CapabilityContext.scope` carrier;
+  workflow trigger entry points are tracked separately.
+- **`AiWorkflowExecution.scope` (nullable JSON) + workflow `tool_call` scope
+  threading.** Completes the `CapabilityContext.scope` seam (0.5.0) on the
+  workflow path. A run started via `OrchestrationEngine.execute` may now carry
+  an optional `scope` (`ExecuteOptions.scope`); it is persisted on the execution
+  row so it survives crash-resume (the resume path reads it back, validated by
+  `workflowScopeSchema`, and rethreads it into the rebuilt `ExecutionContext`),
+  and every capability dispatch forwards it — the `tool_call` executor and the
+  `agent_call` tool-use loop (so `orchestrator` delegations are scoped too).
+  Core names
+  no keys and no built-in capability reads it; `NULL`/unset leaves behaviour
+  unchanged. With the MCP `tools/call` path (above), `scope` now reaches
+  capability `execute()` on all three dispatch paths (chat, MCP, workflow).
+  The execution **rerun** endpoint inherits the original run's `scope`
+  (alongside its inputData / budget / version), and the `run_workflow`
+  capability inherits the parent run's `scope` into a sub-workflow — so
+  a capability at any workflow depth sees the run's scope.
+
+### Changed
+
+- **MCP `tools/list` is scoped to the key's agent (list/call parity).** When an
+  MCP API key is bound to an agent (`scopedAgentId`), `tools/list` now hides
+  capabilities **explicitly disabled** for that agent (an `AiAgentCapability`
+  row with `isEnabled = false`) — so a scoped key can no longer *discover* a
+  tool it would then be refused on *call* (since #380, `tools/call` dispatches
+  under the scoped agent). Scoping stays **default-allow**: capabilities with no
+  binding row remain listed and callable; only explicit disables are honoured.
+  Unscoped keys see the full global list, unchanged. The shared
+  `capability_disabled_for_agent` dispatcher error message no longer embeds the
+  internal agent cuid (it's surfaced verbatim to MCP clients); the id stays in
+  server logs only. (#381)
+- **`send_notification` step interpolates the `to` recipient.** The email
+  recipient(s) are now run through the same `{{…}}` interpolation as `subject`
+  and `bodyTemplate`, and the **resolved** value is validated as an email at
+  runtime (a template resolving to a non-email fails the step non-retriably with
+  `INVALID_RECIPIENT`). A literal `to` is still validated as an email when the
+  step config is parsed at execution start (`INVALID_CONFIG` on a mistyped
+  literal) and behaves identically. This lets a per-user scheduled workflow
+  template the recipient (`to: '{{input.userEmail}}'`) with the built-in step
+  instead of a bespoke `sendEmail` capability. The exported
+  `sendNotificationConfigSchema` relaxes `to` accordingly: a plain string with no
+  template token is still validated as an email; a `{{…}}` template is accepted
+  and validated on resolution.
+- **`callMcpTool()` signature** — the third parameter changed from
+  `userId: string | null` to a caller object
+  `{ userId: string | null; scopedAgentId?: string | null; scope?: Record<string, string> }`.
+  This lets an MCP tool call run under the API key's scoped agent and carry the
+  optional per-dispatch `scope` carrier (`CapabilityContext.scope`, added in
+  0.5.0) through to `execute()`. Direct callers passing a bare `userId` must
+  wrap it as `{ userId }`.
+
+### Fixed
+
+- **Workflow template namespace `{{trigger.*}}` did not resolve.** The engine's
+  `interpolatePrompt` had no `trigger.` branch, so a documented, widely-used token
+  like `{{trigger.conversationId}}` / `{{trigger.text}}` (the default config for
+  inbound-triggered `chat_turn` steps, and what the step's own error messages tell
+  you to use) silently expanded to the empty string — an inbound-triggered
+  `chat_turn` would fail with `missing_conversation_id` / `missing_message` on
+  every real run. `{{trigger.<dotted.path>}}` now reads an inbound run's data —
+  the verified adapter payload (`inputData.trigger`) with a fallback to the
+  resolved envelope (`inputData.triggerMeta`), so `{{trigger.text}}` reads the
+  payload and `{{trigger.conversationId}}` the envelope where the resolved id
+  actually lives. It also works inside `{{#if …}}` conditionals. The bug was
+  masked because the `chat_turn` unit + inbound integration suites **mocked**
+  `interpolatePrompt` with a stub that faked `trigger.` support (and fabricated a
+  `trigger.conversationId` shape production never emits); both now exercise the
+  real interpolator against the real inbound shape. Also corrected the workflow-builder editors'
+  help text (`{{steps.<stepId>.output}}` → `{{<stepId>.output}}`; there is no
+  `steps.` prefix) and stopped the builder's `send_notification` check from
+  false-flagging a valid array-shaped `to` as "needs recipients".
+- **MCP `tools/call` ignored the API key's `scopedAgentId`.** Tool calls always
+  ran under the shared `mcp-system` agent, so cost/budget attribution and
+  knowledge-base grant resolution (`resolveAgentDocumentAccess`) did not honour a
+  scoped key — inconsistent with the `resources/read` path, which already
+  resolved via `scopedAgentId`. `tools/call` now resolves the executing agent
+  from the key's `scopedAgentId` when set, falling back to `mcp-system` for
+  unscoped keys (unchanged behaviour for keys with no scoped agent).
+- **Admin config-update audit diffs no longer record a spurious `updatedAt`
+  change.** Nine admin orchestration PATCH routes (`settings`, `mcp/settings`,
+  `triggers/:id`, `providers/:id`, `workflows/:id`, `knowledge/tags/:id`,
+  `hooks/:id`, `webhooks/:id`, `agent-profiles/:id`) diffed the pre-update row
+  against the post-update row without ignoring Prisma's `@updatedAt` column,
+  which bumps on every `update()` — so `AiAdminAuditLog.changes` recorded a
+  timestamp `from`/`to` on **every** edit, drowning the real field changes. All
+  nine now pass `ignoreKeys: ['updatedAt', 'createdAt']` to `computeChanges`,
+  matching the `agents/:id` route that already did. Signal-quality only — no data
+  exposure. (#396)
+
+## [0.5.0] — 2026-07-01
+
+> **Alpha release.** Seventh tagged Sunrise release. **MINOR bump** — adds new
+> public surface: two generic core seams a downstream framework layer needs, both
+> inert in vanilla Sunrise. The per-dispatch **scope carrier**
+> (`CapabilityContext.scope`, threaded verbatim from a new `ChatRequest.scope`;
+> core names no keys and no built-in capability reads it) lets a consumer make a
+> capability refuse to run outside its intended scope. The **context-contributor
+> registry** (`registerContextContributor()` + the fork-owned empty scaffold
+> `lib/app/context-contributors.ts` → `initAppContextContributors()`, a new named
+> seam in [`VERSIONING.md`](./VERSIONING.md#covered)) lets a fork inject its own
+> `LOCKED CONTEXT` block per turn without editing the core `buildContext` switch —
+> with fork loader and one-time-init errors caught so they never fail a chat turn.
+> Both were added so a fork can attach per-dispatch scope and pluggable
+> prompt-context loaders without patching platform code. Ships in `0.x` per
+> [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) — forks
+> adopting this release should expect real merge work between any two `0.x`
+> releases.
+
+### Added
+
+- **`CapabilityContext.scope?: Record<string, string>`** — an optional, free-form
+  scope map the dispatcher's caller can populate; the dispatcher threads it
+  verbatim into `execute()`. Generic by design: core names no keys and no
+  built-in capability reads it. The chat handler threads it from a new
+  `ChatRequest.scope`. Lets a downstream consumer make a capability refuse to run
+  outside its intended scope. Inert (`undefined`) when unused. (#372)
+- **`registerContextContributor(type, loader)`** (exported from
+  `@/lib/orchestration/chat`) — registers a prompt-context loader for a new
+  `buildContext` `contextType`, so a fork can inject its own `LOCKED CONTEXT`
+  block per turn without editing the core switch. Built-in cases take precedence;
+  the 60 s per-`(type, id)` cache and invalidation behaviour are preserved. A
+  contributor (or the fork's one-time init) that throws is caught and degraded
+  so a loader error never fails the chat turn; the errored-contributor
+  placeholder alone is returned uncached, so a transient loader failure
+  self-heals on the next turn. Auto-wired once via the new fork-owned empty
+  scaffold
+  `lib/app/context-contributors.ts` → `initAppContextContributors()` (mirrors
+  `lib/app/capabilities.ts`). (#372)
+
+## [0.4.1] — 2026-07-01
+
+> **Alpha release.** Sixth tagged Sunrise release. **PATCH bump** — no change to
+> the covered public surface (see [`VERSIONING.md`](./VERSIONING.md#covered)):
+> one backward-compatible enhancement to an uncovered `lib/db/` helper plus
+> routine dependency and CI maintenance. Cut as a clean forking point. Ships in
+> `0.x` per [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design).
+
+### Changed
+
+- `executeTransaction()` (`lib/db/utils.ts`) now accepts an optional second
+  argument forwarding Prisma's interactive-transaction options
+  (`timeout`, `maxWait`, `isolationLevel`) to `prisma.$transaction`. Fully
+  backward-compatible — existing callers keep Prisma's defaults (5000 ms
+  timeout / 2000 ms maxWait). Lets forks raise the ceiling for genuinely heavy
+  callbacks (e.g. bulk imports over remote/pooled Postgres) without patching the
+  core utility. [#368]
+
 ## [0.4.0] — 2026-06-30
 
 > **Alpha release.** Fifth tagged Sunrise release. **MINOR bump** — adds new

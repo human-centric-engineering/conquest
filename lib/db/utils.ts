@@ -1,5 +1,4 @@
-import { Prisma } from '@prisma/client';
-
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 
@@ -56,7 +55,7 @@ export async function getDatabaseHealth(): Promise<{
 
 /**
  * Execute a database transaction
- * Wrapper for Prisma transactions with error handling
+ * Wrapper for Prisma interactive transactions.
  *
  * Pass `options` to override Prisma's interactive-transaction defaults (5000 ms `timeout`,
  * 2000 ms `maxWait`) for unusually heavy callbacks — e.g. a bulk import whose many writes can
@@ -72,14 +71,32 @@ export async function getDatabaseHealth(): Promise<{
  * // heavy callback needing more headroom:
  * await executeTransaction(work, { timeout: 20_000, maxWait: 10_000 })
  * ```
+ *
+ * The optional `options` argument is forwarded verbatim to
+ * `prisma.$transaction` and mirrors Prisma's interactive-transaction options:
+ * - `timeout` — max ms the callback may run before the transaction expires
+ *   (Prisma default: 5000)
+ * - `maxWait` — max ms to wait for a connection from the pool
+ *   (Prisma default: 2000)
+ * - `isolationLevel` — transaction isolation level
+ *
+ * ```ts
+ * await executeTransaction(work, { timeout: 20_000, maxWait: 10_000 })
+ * ```
+ *
+ * Raising `timeout` buys headroom for genuinely heavy callbacks (e.g. a bulk
+ * import where each round-trip to a remote/pooled Postgres costs 10–30 ms), but
+ * it is a ceiling, not a fix. Prefer reducing round-trips first — batch with
+ * `createMany` / `createManyAndReturn` in your own transaction code — and reach
+ * for a higher `timeout` only when the work is irreducibly large.
  */
 export async function executeTransaction<T>(
   callback: (
     tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'>
   ) => Promise<T>,
   options?: {
-    timeout?: number;
     maxWait?: number;
+    timeout?: number;
     isolationLevel?: Prisma.TransactionIsolationLevel;
   }
 ): Promise<T> {

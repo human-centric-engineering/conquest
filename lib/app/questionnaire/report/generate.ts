@@ -17,10 +17,8 @@ import { logger } from '@/lib/logging';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import {

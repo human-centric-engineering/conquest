@@ -59,6 +59,7 @@ import {
   executeWorkflowBodySchema,
   approveExecutionBodySchema,
   chatStreamRequestSchema,
+  consumerChatRequestSchema,
   listConversationsQuerySchema,
   clearConversationsBodySchema,
   listDocumentsQuerySchema,
@@ -85,6 +86,7 @@ import {
   listProviderModelsQuerySchema,
   updateOrchestrationSettingsSchema,
   executionCountsResponseSchema,
+  sendNotificationConfigSchema,
 } from '@/lib/validations/orchestration';
 
 beforeEach(() => {
@@ -1633,6 +1635,70 @@ describe('executionCountsResponseSchema', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// sendNotificationConfigSchema — templatable `to` recipient (#379)
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('sendNotificationConfigSchema — email recipient (#379)', () => {
+  const baseEmail = {
+    channel: 'email' as const,
+    subject: 'Daily brief',
+    bodyTemplate: 'Here is your brief.',
+  };
+
+  it('accepts a literal email `to` (unchanged behaviour)', () => {
+    const result = sendNotificationConfigSchema.safeParse({
+      ...baseEmail,
+      to: 'user@example.com',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a templated `to` so a per-user run can resolve the recipient', () => {
+    // The literal-email constraint used to reject this at design time, forcing
+    // a bespoke capability. The resolved value is validated at runtime instead.
+    const result = sendNotificationConfigSchema.safeParse({
+      ...baseEmail,
+      to: '{{trigger.userEmail}}',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a mixed array of a literal and a templated recipient', () => {
+    const result = sendNotificationConfigSchema.safeParse({
+      ...baseEmail,
+      to: ['ops@example.com', '{{input.userEmail}}'],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('still rejects a non-email literal that contains no template token', () => {
+    // A plain string with no `{{…}}` is treated as a literal and validated as an
+    // email now — a mistyped address is caught at design time, as before.
+    const result = sendNotificationConfigSchema.safeParse({
+      ...baseEmail,
+      to: 'not-an-email',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an empty-string recipient', () => {
+    const result = sendNotificationConfigSchema.safeParse({ ...baseEmail, to: '' });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an empty recipient array', () => {
+    const result = sendNotificationConfigSchema.safeParse({ ...baseEmail, to: [] });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // executeWorkflowBodySchema
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1743,6 +1809,61 @@ describe('chatStreamRequestSchema', () => {
       agentSlug: 'test-agent',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('consumerChatRequestSchema — scope carrier (#415)', () => {
+  const base = { message: 'hi', agentSlug: 'helper-bot' };
+
+  it('accepts a minimal body with no scope', () => {
+    const result = consumerChatRequestSchema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.scope).toBeUndefined();
+  });
+
+  it('accepts a valid string→string scope map', () => {
+    const result = consumerChatRequestSchema.safeParse({
+      ...base,
+      scope: { module: 'billing', role: 'facilitator' },
+    });
+    expect(result.success).toBe(true);
+    if (result.success)
+      expect(result.data.scope).toEqual({ module: 'billing', role: 'facilitator' });
+  });
+
+  it('rejects a non-string scope value', () => {
+    const result = consumerChatRequestSchema.safeParse({ ...base, scope: { module: 42 } });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a scope value longer than 500 chars', () => {
+    const result = consumerChatRequestSchema.safeParse({
+      ...base,
+      scope: { module: 'x'.repeat(501) },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a scope key longer than 100 chars', () => {
+    const result = consumerChatRequestSchema.safeParse({
+      ...base,
+      scope: { ['k'.repeat(101)]: 'v' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a scope map with more than 32 entries', () => {
+    const scope: Record<string, string> = {};
+    for (let i = 0; i < 33; i++) scope[`key${i}`] = 'v';
+    const result = consumerChatRequestSchema.safeParse({ ...base, scope });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a scope map at the 32-entry boundary', () => {
+    const scope: Record<string, string> = {};
+    for (let i = 0; i < 32; i++) scope[`key${i}`] = 'v';
+    const result = consumerChatRequestSchema.safeParse({ ...base, scope });
+    expect(result.success).toBe(true);
   });
 });
 

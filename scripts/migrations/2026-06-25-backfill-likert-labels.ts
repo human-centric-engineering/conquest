@@ -9,7 +9,7 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
-import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import type { LlmProvider } from '@/lib/orchestration/llm/provider';
 import { validateTypeConfig, hasCompleteLikertLabels } from '@/lib/app/questionnaire/authoring';
 import {

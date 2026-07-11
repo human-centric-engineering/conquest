@@ -12,7 +12,7 @@ import {
   assertModelSupportsAttachments,
   getProvider,
 } from '@/lib/orchestration/llm/provider-manager';
-import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 
 import {
   buildPeopleImagePrompt,

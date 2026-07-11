@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
+import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be hoisted before any dynamic imports
@@ -68,6 +69,28 @@ class OkCapability extends BaseCapability<{ n: number }, { doubled: number }> {
 
   async execute(args: { n: number }) {
     return this.success({ doubled: args.n * 2 });
+  }
+}
+
+/**
+ * Captures the `CapabilityContext` it receives so a test can assert that the
+ * dispatcher passes the caller's context (including the free-form `scope`
+ * carrier) through to `execute()` verbatim.
+ */
+class ContextCapturingCapability extends BaseCapability<unknown, { ok: true }> {
+  readonly slug = 'capture-context';
+  readonly functionDefinition = {
+    name: 'capture-context',
+    description: '',
+    parameters: {},
+  };
+  protected readonly schema = z.unknown();
+
+  received: CapabilityContext | null = null;
+
+  async execute(_args: unknown, context: CapabilityContext) {
+    this.received = context;
+    return this.success({ ok: true as const });
   }
 }
 
@@ -143,6 +166,38 @@ function makeCapabilityRow(overrides: CapabilityRowOverrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper — build a minimal AiAgentCapability pivot row (with its included
+// base capability) as returned by `findMany({ include: { capability } })`
+// ---------------------------------------------------------------------------
+
+function makeAgentBindingRow(opts: {
+  slug: string;
+  isEnabled?: boolean;
+  customConfig?: unknown;
+  customRateLimit?: number | null;
+}) {
+  const { slug } = opts;
+  return {
+    id: `aac-${slug}`,
+    agentId: 'agent-1',
+    capabilityId: `cap-${slug}`,
+    isEnabled: opts.isEnabled ?? true,
+    customConfig: opts.customConfig ?? null,
+    customRateLimit: opts.customRateLimit ?? null,
+    capability: {
+      id: `cap-${slug}`,
+      slug,
+      name: slug,
+      category: 'test',
+      isActive: true,
+      requiresApproval: false,
+      rateLimit: null,
+      functionDefinition: { name: slug, description: '', parameters: {} },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Default context used throughout
 // ---------------------------------------------------------------------------
 
@@ -212,6 +267,96 @@ describe('CapabilityDispatcher', () => {
         success: false,
         error: expect.objectContaining({ code: 'capability_inactive' }),
       });
+    });
+  });
+
+  describe('context pass-through', () => {
+    it('threads the caller scope map through to execute() verbatim', async () => {
+      const capability = new ContextCapturingCapability();
+      capabilityDispatcher.register(capability);
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'capture-context' })]);
+
+      const scopedCtx = { ...ctx, scope: { module: 'billing' } };
+      const result = await capabilityDispatcher.dispatch('capture-context', {}, scopedCtx);
+
+      expect(result.success).toBe(true);
+      expect(capability.received?.scope).toEqual({ module: 'billing' });
+    });
+
+    it('leaves scope undefined when the caller omits it', async () => {
+      const capability = new ContextCapturingCapability();
+      capabilityDispatcher.register(capability);
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'capture-context' })]);
+
+      const result = await capabilityDispatcher.dispatch('capture-context', {}, ctx);
+
+      expect(result.success).toBe(true);
+      expect(capability.received?.scope).toBeUndefined();
+    });
+
+    it('surfaces the resolved binding customConfig + isEnabled on the execute context (#411)', async () => {
+      const capability = new ContextCapturingCapability();
+      capabilityDispatcher.register(capability);
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'capture-context' })]);
+      mockAgentFindMany.mockResolvedValue([
+        makeAgentBindingRow({
+          slug: 'capture-context',
+          isEnabled: true,
+          customConfig: { allow: ['alpha', 'beta'] },
+        }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('capture-context', {}, ctx);
+
+      expect(result.success).toBe(true);
+      expect(capability.received?.customConfig).toEqual({ allow: ['alpha', 'beta'] });
+      expect(capability.received?.isEnabled).toBe(true);
+    });
+
+    it('surfaces customConfig=null + isEnabled=true for the default-allow binding (no pivot row) (#411)', async () => {
+      const capability = new ContextCapturingCapability();
+      capabilityDispatcher.register(capability);
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'capture-context' })]);
+      // mockAgentFindMany defaults to [] → synthesized default-allow binding.
+
+      const result = await capabilityDispatcher.dispatch('capture-context', {}, ctx);
+
+      expect(result.success).toBe(true);
+      expect(capability.received?.customConfig).toBeNull();
+      expect(capability.received?.isEnabled).toBe(true);
+    });
+
+    it('normalises a non-object binding customConfig to null (#411)', async () => {
+      const capability = new ContextCapturingCapability();
+      capabilityDispatcher.register(capability);
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'capture-context' })]);
+      mockAgentFindMany.mockResolvedValue([
+        makeAgentBindingRow({
+          slug: 'capture-context',
+          customConfig: ['not', 'an', 'object'],
+        }),
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('capture-context', {}, ctx);
+
+      expect(result.success).toBe(true);
+      expect(capability.received?.customConfig).toBeNull();
+    });
+
+    it('does not mutate the caller context object (#411)', async () => {
+      const capability = new ContextCapturingCapability();
+      capabilityDispatcher.register(capability);
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'capture-context' })]);
+      mockAgentFindMany.mockResolvedValue([
+        makeAgentBindingRow({ slug: 'capture-context', customConfig: { a: 1 } }),
+      ]);
+
+      const callerCtx = { userId: 'user-1', agentId: 'agent-1' };
+      await capabilityDispatcher.dispatch('capture-context', {}, callerCtx);
+
+      // Enrichment is a shallow copy — the caller's object stays clean.
+      expect(callerCtx).not.toHaveProperty('customConfig');
+      expect(callerCtx).not.toHaveProperty('isEnabled');
     });
   });
 
@@ -352,6 +497,201 @@ describe('CapabilityDispatcher', () => {
         error: expect.objectContaining({ code: 'capability_disabled_for_agent' }),
       });
     });
+
+    it('does not leak the internal agent id in the client-facing message (#381)', async () => {
+      // The message is surfaced verbatim to callers (e.g. the MCP tool-registry
+      // passes error.message through), so the internal cuid must not appear.
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+      mockAgentFindMany.mockResolvedValue([
+        {
+          id: 'aac-1',
+          agentId: 'agent-1',
+          capabilityId: 'cap-1',
+          isEnabled: false,
+          customRateLimit: null,
+          capability: {
+            id: 'cap-1',
+            slug: 'ok',
+            name: 'ok',
+            category: 'test',
+            isActive: true,
+            requiresApproval: false,
+            rateLimit: null,
+            functionDefinition: { name: 'ok', description: '', parameters: {} },
+          },
+        },
+      ]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result.success).toBe(false);
+      const message = (result as { error: { message: string } }).error.message;
+      expect(message).toBe('Capability ok is disabled for this agent');
+      expect(message).not.toContain(ctx.agentId);
+    });
+  });
+
+  describe('capability guard (#398)', () => {
+    // Re-register 'ok' WITHOUT a guard after each guard test so a guard set on
+    // the shared singleton can't leak into later suites (clearCache() does not
+    // touch handlers/guards). register() drops a prior guard when none is given.
+    afterEach(() => {
+      capabilityDispatcher.register(new OkCapability());
+    });
+
+    it('runs the capability when the guard allows', async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: true });
+      const executeSpy = vi.spyOn(OkCapability.prototype, 'execute');
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 3 }, ctx);
+
+      expect(result).toEqual({ success: true, data: { doubled: 6 } });
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the caller context (incl. the scope carrier) to the guard', async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: true });
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const scopedCtx = { ...ctx, scope: { module: 'billing' } };
+      await capabilityDispatcher.dispatch('ok', { n: 1 }, scopedCtx);
+
+      expect(guard).toHaveBeenCalledTimes(1);
+      expect(guard).toHaveBeenCalledWith(scopedCtx);
+    });
+
+    it('blocks with capability_guard_denied and never executes when the guard denies', async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: false });
+      const executeSpy = vi.spyOn(OkCapability.prototype, 'execute');
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: 'capability_guard_denied',
+          message: 'Capability ok was blocked by a guard',
+        },
+      });
+      expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("folds the guard's reason into the denial message", async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: false, reason: 'out of scope' });
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      const message = (result as { error: { message: string } }).error.message;
+      expect(message).toBe('Capability ok was blocked: out of scope');
+      // Client-surfaced message: no internal ids leak (mirrors the #381 contract).
+      expect(message).not.toContain(ctx.agentId);
+    });
+
+    it('awaits an async guard', async () => {
+      const guard = vi.fn(
+        () =>
+          new Promise<{ allow: boolean }>((resolve) =>
+            setTimeout(() => resolve({ allow: false }), 0)
+          )
+      );
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result.error?.code).toBe('capability_guard_denied');
+    });
+
+    it('fails closed (denies + logs) when the guard throws', async () => {
+      const guard = vi.fn().mockRejectedValue(new Error('guard bug'));
+      const executeSpy = vi.spyOn(OkCapability.prototype, 'execute');
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: 'capability_guard_denied',
+          message: 'Capability ok was blocked by a guard',
+        },
+      });
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        'Capability dispatch: guard threw — denying',
+        expect.objectContaining({ slug: 'ok', error: 'guard bug' })
+      );
+    });
+
+    it('runs before the rate limiter — a denied call consumes no rate token', async () => {
+      // rateLimit=1 would let exactly one call through the limiter. If the guard
+      // ran AFTER the limiter, repeated denied calls would eventually surface
+      // rate_limited; every call staying guard_denied proves guard-before-limit.
+      const guard = vi.fn().mockResolvedValue({ allow: false });
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ rateLimit: 1 })]);
+
+      const r1 = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+      const r2 = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+      const r3 = await capabilityDispatcher.dispatch('ok', { n: 1 }, ctx);
+
+      expect(r1.error?.code).toBe('capability_guard_denied');
+      expect(r2.error?.code).toBe('capability_guard_denied');
+      expect(r3.error?.code).toBe('capability_guard_denied');
+    });
+
+    it('re-registering without a guard drops the prior guard', async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: false });
+      capabilityDispatcher.register(new OkCapability(), { guard });
+      // Overwrite the same key with a guard-less registration.
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 2 }, ctx);
+
+      expect(result).toEqual({ success: true, data: { doubled: 4 } });
+      expect(guard).not.toHaveBeenCalled();
+    });
+
+    it('registers a handler under an override slug and guards that key', async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: false });
+      capabilityDispatcher.register(new OkCapability(), { slug: 'ns:ok', guard });
+      // The override slug must have its own active AiCapability row (the
+      // documented contract) or dispatch dies at capability_inactive first.
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'ns:ok' })]);
+
+      const result = await capabilityDispatcher.dispatch('ns:ok', { n: 1 }, ctx);
+
+      expect(result.error?.code).toBe('capability_guard_denied');
+      expect(guard).toHaveBeenCalledTimes(1);
+      // The original slug is untouched — no guard, no handler collision.
+      expect(capabilityDispatcher.has('ns:ok')).toBe(true);
+      // Clean up the override registration (survives clearCache()).
+      capabilityDispatcher.register(new OkCapability(), { slug: 'ns:ok' });
+    });
+
+    it('an override slug with no active AiCapability row dies at capability_inactive', async () => {
+      const guard = vi.fn().mockResolvedValue({ allow: false });
+      capabilityDispatcher.register(new OkCapability(), { slug: 'ns:missing', guard });
+      // No matching active row → registry lookup (step 3) rejects before the
+      // guard gate (step 4a) is ever reached.
+      mockFindMany.mockResolvedValue([]);
+
+      const result = await capabilityDispatcher.dispatch('ns:missing', { n: 1 }, ctx);
+
+      expect(result.error?.code).toBe('capability_inactive');
+      expect(guard).not.toHaveBeenCalled();
+      capabilityDispatcher.register(new OkCapability(), { slug: 'ns:missing' });
+    });
   });
 
   describe('rate limiting', () => {
@@ -479,14 +819,19 @@ describe('CapabilityDispatcher', () => {
       );
     });
 
-    it('passes validated args and full context to execute', async () => {
+    it('passes validated args and the binding-enriched context to execute', async () => {
       const executeSpy = vi.spyOn(OkCapability.prototype, 'execute');
       capabilityDispatcher.register(new OkCapability());
       mockFindMany.mockResolvedValue([makeCapabilityRow()]);
 
       await capabilityDispatcher.dispatch('ok', { n: 7 }, ctx);
 
-      expect(executeSpy).toHaveBeenCalledWith({ n: 7 }, ctx);
+      // No explicit pivot row → default-allow binding: customConfig null,
+      // isEnabled true, layered onto the caller's context.
+      expect(executeSpy).toHaveBeenCalledWith(
+        { n: 7 },
+        { ...ctx, customConfig: null, isEnabled: true }
+      );
       executeSpy.mockRestore();
     });
   });

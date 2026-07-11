@@ -7,7 +7,7 @@
  * cost logging, and message persistence.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Module mocks — hoisted before dynamic imports
@@ -163,6 +163,10 @@ const { streamChat } = await import('@/lib/orchestration/chat/streaming-handler'
 const { CostOperation } = await import('@/types/orchestration');
 const { getBreaker } = await import('@/lib/orchestration/llm/circuit-breaker');
 const { scanForInjection } = await import('@/lib/orchestration/chat/input-guard');
+const { registerGuardFloorContributor, __resetGuardFloorContributorsForTests } =
+  await import('@/lib/orchestration/chat/guard-floor');
+const { registerGuardEventContributor, __resetGuardEventContributorsForTests } =
+  await import('@/lib/orchestration/chat/guard-events');
 const { scanOutput, scanCitations } = await import('@/lib/orchestration/chat/output-guard');
 const { getOrchestrationSettings } = await import('@/lib/orchestration/settings');
 const { summarizeMessages } = await import('@/lib/orchestration/chat/summarizer');
@@ -475,14 +479,13 @@ describe('StreamingChatHandler', () => {
       })
     );
 
-    // buildContext was called
-    expect(buildContext).toHaveBeenCalledWith('pattern', '7');
+    // buildContext was called with the per-request userId (#412)
+    expect(buildContext).toHaveBeenCalledWith('pattern', '7', { userId: 'u1' });
 
     // The locked context block was included in the messages passed to chatStream
     const allChatStreamCalls = provider.chatStream.mock.calls as unknown as unknown[][];
     const chatStreamMessages = allChatStreamCalls[0]?.[0] as
-      | Array<{ role: string; content: string }>
-      | undefined;
+      Array<{ role: string; content: string }> | undefined;
     expect(chatStreamMessages).toBeDefined();
     const hasLockedCtx = (chatStreamMessages ?? []).some(
       (m) => m.role === 'system' && m.content.includes('LOCKED CONTEXT')
@@ -1063,7 +1066,7 @@ describe('StreamingChatHandler', () => {
     const request = { ...baseRequest, contextType: 'pattern', contextId: '5' };
     await collect(streamChat(request));
 
-    expect(invalidateContext).toHaveBeenCalledWith('pattern', '5');
+    expect(invalidateContext).toHaveBeenCalledWith('pattern', '5', { userId: 'u1' });
   });
 
   // 14a ---------------------------------------------------------------------
@@ -2826,6 +2829,194 @@ describe('input guard mode dispatch', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Guard-floor seam (#413) — a registered floor RAISES an inline guard for a turn
+// ---------------------------------------------------------------------------
+
+describe('guard-floor seam (#413)', () => {
+  afterEach(() => {
+    __resetGuardFloorContributorsForTests();
+  });
+
+  it('raises the input guard to block for the turn even though the agent mode is log_only', async () => {
+    // Agent + settings both resolve the input guard to log_only (would only log).
+    (scanForInjection as ReturnType<typeof vi.fn>).mockReturnValue({
+      flagged: true,
+      patterns: ['system_override'],
+    });
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ inputGuardMode: 'log_only' })
+    );
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Hello' },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 5 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    // A fork policy floors the input guard to block for this surface.
+    registerGuardFloorContributor('policy', () => ({ input: 'block' }));
+
+    const events = await collect(streamChat(baseRequest));
+
+    const errorEvt = events.find(
+      (e: unknown) => (e as Record<string, unknown>).type === 'error'
+    ) as Record<string, unknown> | undefined;
+    expect(errorEvt).toMatchObject({ type: 'error', code: 'input_blocked' });
+    // Floor raised log_only → block, so the turn short-circuits before the LLM.
+    expect(provider.chatStream).not.toHaveBeenCalled();
+  });
+
+  it('leaves the input guard at log_only when no floor is registered (inert)', async () => {
+    (scanForInjection as ReturnType<typeof vi.fn>).mockReturnValue({
+      flagged: true,
+      patterns: ['system_override'],
+    });
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ inputGuardMode: 'log_only' })
+    );
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Hello' },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 5 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    const events = await collect(streamChat(baseRequest));
+
+    // No floor → log_only stays log_only → not blocked, no warning, LLM runs.
+    expect(
+      events.find((e: unknown) => (e as Record<string, unknown>).type === 'error')
+    ).toBeUndefined();
+    expect(provider.chatStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard-events seam (#414) — a registered contributor OBSERVES a guard firing
+// ---------------------------------------------------------------------------
+
+describe('guard-events seam (#414)', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  afterEach(() => {
+    __resetGuardEventContributorsForTests();
+  });
+
+  it('emits a fire-and-forget event with the guard + outcome when the input guard fires', async () => {
+    (scanForInjection as ReturnType<typeof vi.fn>).mockReturnValue({
+      flagged: true,
+      patterns: ['system_override'],
+    });
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ inputGuardMode: 'block' })
+    );
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Hello' },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 5 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    const observer = vi.fn();
+    registerGuardEventContributor('obs', observer);
+
+    // The turn blocks on input — the observer must still see the firing.
+    const events = await collect(streamChat(baseRequest));
+    await flush();
+
+    expect(
+      events.find((e: unknown) => (e as Record<string, unknown>).type === 'error')
+    ).toMatchObject({ code: 'input_blocked' });
+    expect(observer).toHaveBeenCalledTimes(1);
+    const [ctxArg, eventArg] = observer.mock.calls[0] as [
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+    expect(eventArg).toEqual({ guard: 'input', outcome: 'block' });
+    expect(ctxArg).toMatchObject({ agentId: 'agent-1', userId: 'u1', conversationId: 'conv-1' });
+  });
+
+  it('does not emit when no registry contributor is present and does not break the turn (inert)', async () => {
+    (scanForInjection as ReturnType<typeof vi.fn>).mockReturnValue({
+      flagged: true,
+      patterns: ['system_override'],
+    });
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ inputGuardMode: 'log_only' })
+    );
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Hello' },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 5 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    // No contributor registered — log_only just logs, stream proceeds.
+    const events = await collect(streamChat(baseRequest));
+    await flush();
+
+    expect(
+      events.find((e: unknown) => (e as Record<string, unknown>).type === 'error')
+    ).toBeUndefined();
+    expect(provider.chatStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing observer never breaks the turn', async () => {
+    (scanForInjection as ReturnType<typeof vi.fn>).mockReturnValue({
+      flagged: true,
+      patterns: ['system_override'],
+    });
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ inputGuardMode: 'log_only' })
+    );
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Hello' },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 5 } },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    registerGuardEventContributor('boom', () => {
+      throw new Error('observer bug');
+    });
+
+    // log_only → not blocked; the throwing observer is swallowed, turn completes.
+    const events = await collect(streamChat(baseRequest));
+    await flush();
+
+    expect(
+      events.find((e: unknown) => (e as Record<string, unknown>).type === 'error')
+    ).toBeUndefined();
+    expect(provider.chatStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Rolling summarization — history-window exceeded (L243-266)
 // ---------------------------------------------------------------------------
 
@@ -3223,8 +3414,7 @@ describe('input guard global settings fallback (block)', () => {
 
     // Assert: input_blocked error is emitted
     const errorEvt = events.find((e) => (e as { type: string }).type === 'error') as
-      | { type: 'error'; code: string }
-      | undefined;
+      { type: 'error'; code: string } | undefined;
     expect(errorEvt).toBeDefined();
     expect(errorEvt?.code).toBe('input_blocked');
 
@@ -3467,7 +3657,7 @@ describe('context invalidation after parallel capability results', () => {
     await collect(streamChat(request));
 
     // Assert: invalidateContext was called with the correct arguments (parallel path L781-782)
-    expect(invalidateContext).toHaveBeenCalledWith('page', 'page-1');
+    expect(invalidateContext).toHaveBeenCalledWith('page', 'page-1', { userId: 'u1' });
   });
 });
 
@@ -3515,8 +3705,7 @@ describe('mid-loop budget re-check with limit:null', () => {
 
     // Assert: budget_exceeded error event emitted after the tool call
     const errorEvt = events.find((e) => (e as { type: string }).type === 'error') as
-      | { type: 'error'; code: string; message: string }
-      | undefined;
+      { type: 'error'; code: string; message: string } | undefined;
     expect(errorEvt).toBeDefined();
     expect(errorEvt?.code).toBe('budget_exceeded');
     // When limit is null, the message should use "its" rather than "$X.XX"
@@ -3932,8 +4121,7 @@ describe('evaluation log mirroring', () => {
     // The turn-3 skipped result must carry the tool_unavailable code.
     const turn3Skip = skippedResultRows[skippedResultRows.length - 1];
     const out = turn3Skip.data.outputData as
-      | { success: boolean; error?: { code: string } }
-      | undefined;
+      { success: boolean; error?: { code: string } } | undefined;
     expect(out?.success).toBe(false);
     expect(out?.error?.code).toBe('tool_unavailable');
   });
