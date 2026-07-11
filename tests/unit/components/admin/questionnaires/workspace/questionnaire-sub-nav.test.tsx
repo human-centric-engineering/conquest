@@ -70,7 +70,11 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
 const cohortReportOff: QuestionnaireWorkspaceFlags = { ...allFlagsOn, cohortReport: false };
 
 const tabHref = (id: string) =>
-  workspaceTabHref(QID, VID, QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === id)!);
+  workspaceTabHref(
+    QID,
+    VID,
+    QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === id)!
+  );
 
 function renderNav(
   pathname: string,

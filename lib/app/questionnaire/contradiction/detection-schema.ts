@@ -58,8 +58,7 @@ export const contradictionDetectionJsonSchema: Record<string, unknown> = z.toJSO
 
 /** Discriminated result of validating a parsed candidate against the contract. */
 export type ContradictionDetectionValidation =
-  | { ok: true; value: ContradictionDetection }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: ContradictionDetection } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /**
  * Validate an already-JSON-parsed value against {@link contradictionDetectionSchema}.

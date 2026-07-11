@@ -82,11 +82,7 @@ export interface ExtractionCandidateInput {
 }
 
 export type ExtractionPrefilterReason =
-  | 'below_threshold'
-  | 'no_message'
-  | 'embed_failed'
-  | 'no_embeddings'
-  | 'narrowed';
+  'below_threshold' | 'no_message' | 'embed_failed' | 'no_embeddings' | 'narrowed';
 
 export interface ExtractionCandidateResult {
   /** Narrowed question slots — a SUBSET of the input, original order preserved. */

@@ -30,8 +30,7 @@ import {
 
 /** Loose verdict — the pure denial codes plus `ROUND_NOT_FOUND` (create-only). */
 export type RoundAccessResult =
-  | { ok: true }
-  | { ok: false; status: number; code: string; message: string };
+  { ok: true } | { ok: false; status: number; code: string; message: string };
 
 export interface AssertRoundAccessInput {
   roundId: string;

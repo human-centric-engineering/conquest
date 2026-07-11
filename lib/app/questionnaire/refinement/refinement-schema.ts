@@ -65,8 +65,7 @@ export const refinementJsonSchema: Record<string, unknown> = z.toJSONSchema(refi
 
 /** Discriminated result of validating a parsed candidate against the contract. */
 export type RefinementValidation =
-  | { ok: true; value: Refinement }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: Refinement } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /**
  * Validate an already-JSON-parsed value against {@link refinementSchema}. Returns

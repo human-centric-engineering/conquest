@@ -128,8 +128,7 @@ export const judgeVerdictJsonSchema: Record<string, unknown> = z.toJSONSchema(ju
 
 /** Discriminated result of validating a parsed candidate against the contract. */
 export type JudgeVerdictValidation =
-  | { ok: true; value: JudgeVerdictOutput }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: JudgeVerdictOutput } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /**
  * Validate an already-JSON-parsed value against {@link judgeVerdictSchema}. Returns

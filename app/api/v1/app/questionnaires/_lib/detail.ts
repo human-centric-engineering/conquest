@@ -449,22 +449,20 @@ export async function getVersionGraph(
     ordinal: s.ordinal,
     title: s.title,
     description: s.description,
-    questions: s.questions.map(
-      (qn): QuestionSlotView => ({
-        id: qn.id,
-        ordinal: qn.ordinal,
-        key: qn.key,
-        prompt: qn.prompt,
-        guidelines: qn.guidelines,
-        rationale: qn.rationale,
-        type: qn.type as QuestionSlotView['type'],
-        typeConfig: qn.typeConfig ?? null,
-        required: qn.required,
-        weight: qn.weight,
-        extractionConfidence: qn.extractionConfidence,
-        tags: qn.tags.map((t) => toTagView(t.tag)),
-      })
-    ),
+    questions: s.questions.map((qn): QuestionSlotView => ({
+      id: qn.id,
+      ordinal: qn.ordinal,
+      key: qn.key,
+      prompt: qn.prompt,
+      guidelines: qn.guidelines,
+      rationale: qn.rationale,
+      type: qn.type as QuestionSlotView['type'],
+      typeConfig: qn.typeConfig ?? null,
+      required: qn.required,
+      weight: qn.weight,
+      extractionConfidence: qn.extractionConfidence,
+      tags: qn.tags.map((t) => toTagView(t.tag)),
+    })),
   }));
 
   return {

@@ -330,8 +330,7 @@ export function classifyGenerationFailure(
 }
 
 export type DataSlotValidation =
-  | { ok: true; value: DataSlotGenerationOutput }
-  | { ok: false; issues: z.ZodIssue[] };
+  { ok: true; value: DataSlotGenerationOutput } | { ok: false; issues: z.ZodIssue[] };
 
 /** Validate a parsed generator response against the output schema. */
 export function validateDataSlotGeneration(parsed: unknown): DataSlotValidation {
@@ -342,8 +341,7 @@ export function validateDataSlotGeneration(parsed: unknown): DataSlotValidation 
 }
 
 export type DataSlotRefinementValidation =
-  | { ok: true; value: DataSlotRefinementOutput }
-  | { ok: false; issues: z.ZodIssue[] };
+  { ok: true; value: DataSlotRefinementOutput } | { ok: false; issues: z.ZodIssue[] };
 
 /** Validate a parsed refine response ({ slot }) against the refinement output schema. */
 export function validateDataSlotRefinement(parsed: unknown): DataSlotRefinementValidation {
@@ -354,8 +352,7 @@ export function validateDataSlotRefinement(parsed: unknown): DataSlotRefinementV
 }
 
 export type DataSlotAssignmentValidation =
-  | { ok: true; value: DataSlotAssignmentOutput }
-  | { ok: false; issues: z.ZodIssue[] };
+  { ok: true; value: DataSlotAssignmentOutput } | { ok: false; issues: z.ZodIssue[] };
 
 /** Validate a parsed assign response ({ placements }) against the assignment output schema. */
 export function validateDataSlotAssignment(parsed: unknown): DataSlotAssignmentValidation {

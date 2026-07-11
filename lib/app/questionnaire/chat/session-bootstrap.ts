@@ -21,8 +21,7 @@ interface CreatedSession {
 }
 
 export type AuthedSessionBootstrap =
-  | { ok: true; sessionId: string; resumed: boolean }
-  | { ok: false; code: string; message: string };
+  { ok: true; sessionId: string; resumed: boolean } | { ok: false; code: string; message: string };
 
 /** Arguments mirror the create route's union body: an invitation token OR a version id. */
 export type AuthedSessionRequest = { invitationToken: string } | { versionId: string };

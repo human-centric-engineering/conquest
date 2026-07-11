@@ -115,8 +115,7 @@ export const extractionJsonSchema: Record<string, unknown> = z.toJSONSchema(extr
 
 /** Discriminated result of validating a parsed candidate against the contract. */
 export type ExtractionValidation =
-  | { ok: true; value: ExtractionResult }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: ExtractionResult } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /**
  * Validate an already-JSON-parsed value against {@link extractionSchema}.

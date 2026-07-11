@@ -165,8 +165,7 @@ describe('parsePdf', () => {
     await freshParsePdf(fakeBuffer(), 'doc.pdf');
 
     const worker = (globalThis as Record<string, unknown>).pdfjsWorker as
-      | { WorkerMessageHandler?: unknown }
-      | undefined;
+      { WorkerMessageHandler?: unknown } | undefined;
     expect(typeof worker?.WorkerMessageHandler).toBe('function');
   });
 

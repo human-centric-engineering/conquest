@@ -143,8 +143,7 @@ export interface RevertPlan {
 }
 
 export type RevertPlanResult =
-  | { ok: true; plan: RevertPlan }
-  | { ok: false; reason: RevertImpossibleReason; detail: string };
+  { ok: true; plan: RevertPlan } | { ok: false; reason: RevertImpossibleReason; detail: string };
 
 function impossible(reason: RevertImpossibleReason, detail: string): RevertPlanResult {
   return { ok: false, reason, detail };
@@ -514,9 +513,11 @@ function planMergeRestore(change: RevertableChange, snapshot: GraphSnapshot): Re
     plan: {
       ops: [
         { op: 'delete-question', questionId: merged.id },
-        ...specs.map(
-          (question): RevertOp => ({ op: 'create-question', sectionId: merged.sectionId, question })
-        ),
+        ...specs.map((question): RevertOp => ({
+          op: 'create-question',
+          sectionId: merged.sectionId,
+          question,
+        })),
       ],
       summary: `Split the merged question back into ${specs.length} source questions.`,
     },

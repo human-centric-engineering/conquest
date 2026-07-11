@@ -65,8 +65,7 @@ export type RefineStructureOutput = z.infer<typeof refineStructureSchema>;
 
 /** Discriminated validation result, mirroring `validateExtraction`. */
 export type ComposeValidation<T> =
-  | { ok: true; value: T }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: T } | { ok: false; issues: z.core.$ZodIssue[] };
 
 function validate<T>(schema: z.ZodType<T>, parsed: unknown): ComposeValidation<T> {
   const result = schema.safeParse(parsed);
