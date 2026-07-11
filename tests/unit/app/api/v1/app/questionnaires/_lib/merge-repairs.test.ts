@@ -128,4 +128,97 @@ describe('mergeRepairs', () => {
     expect(merged.questions.map((x) => x.key)).toEqual(['row_a', 'row_b']);
     expect(merged.changes).toHaveLength(0);
   });
+
+  // Regression: the merge anchor must be the first RESOLVED row, not `originalKeys[0]`. When the
+  // model's first listed key is stale/hallucinated (absent from the extraction) but later keys are
+  // valid, the matrix must still be inserted and the real rows preserved — never silently dropped.
+  it('merges when the first originalKey is stale but ≥2 later keys resolve (keeps the matrix)', () => {
+    const ex = extraction([
+      q('row_fuel', 'likert', goodLikert),
+      q('row_reliability', 'likert', goodLikert),
+      q('other', 'free_text', null),
+    ]);
+    const matrix = q('importance', 'matrix', {
+      rows: [
+        { key: 'fuel', label: 'Fuel' },
+        { key: 'reliability', label: 'Reliability' },
+      ],
+      scale: goodLikert,
+    });
+    const repairs: RepairResult = {
+      repairs: [
+        {
+          // 'ghost_row' does not exist in the extraction; the two real rows follow it.
+          originalKeys: ['ghost_row', 'row_fuel', 'row_reliability'],
+          action: 'merge',
+          questions: [matrix],
+        },
+      ],
+    };
+    const merged = mergeRepairs(ex, repairs, log);
+    // The matrix is inserted at the first resolved row's position; both real rows collapse into it.
+    expect(merged.questions.map((x) => x.suggestedType)).toEqual(['matrix', 'free_text']);
+    expect(merged.questions.map((x) => x.key)).toEqual(['importance', 'other']);
+    expect(merged.changes).toHaveLength(1);
+  });
+
+  // Regression: a row already merged into one matrix must not be merged into a second — no row may
+  // appear in two persisted matrices.
+  it('does not merge a row that an earlier repair already consumed', () => {
+    const ex = extraction([
+      q('row_a', 'likert', goodLikert),
+      q('row_b', 'likert', goodLikert),
+      q('row_c', 'likert', goodLikert),
+    ]);
+    const first = q('grid_1', 'matrix', {
+      rows: [
+        { key: 'a', label: 'A' },
+        { key: 'b', label: 'B' },
+      ],
+      scale: goodLikert,
+    });
+    const second = q('grid_2', 'matrix', {
+      rows: [
+        { key: 'b', label: 'B' },
+        { key: 'c', label: 'C' },
+      ],
+      scale: goodLikert,
+    });
+    const repairs: RepairResult = {
+      repairs: [
+        { originalKeys: ['row_a', 'row_b'], action: 'merge', questions: [first] },
+        // 'row_b' is already consumed → only 'row_c' resolves → < 2 → this merge is skipped.
+        { originalKeys: ['row_b', 'row_c'], action: 'merge', questions: [second] },
+      ],
+    };
+    const merged = mergeRepairs(ex, repairs, log);
+    // Only the first matrix lands; row_c stays as its original likert; no duplicate row_b.
+    expect(merged.questions.map((x) => x.key)).toEqual(['grid_1', 'row_c']);
+    expect(merged.changes).toHaveLength(1);
+  });
+
+  // Regression: a `correct` targeting a key an earlier merge already removed must not record a
+  // discarded change (the merged-away question no longer exists in the output).
+  it('skips a correct whose key was already merged away (no orphan change record)', () => {
+    const ex = extraction([q('row_a', 'likert', goodLikert), q('row_b', 'likert', goodLikert)]);
+    const matrix = q('grid', 'matrix', {
+      rows: [
+        { key: 'a', label: 'A' },
+        { key: 'b', label: 'B' },
+      ],
+      scale: goodLikert,
+    });
+    const repairs: RepairResult = {
+      repairs: [
+        { originalKeys: ['row_a', 'row_b'], action: 'merge', questions: [matrix] },
+        // row_a was merged away; a later 'correct' on it must be ignored.
+        { originalKeys: ['row_a'], action: 'correct', questions: [q('row_a', 'numeric', {})] },
+      ],
+    };
+    const merged = mergeRepairs(ex, repairs, log);
+    expect(merged.questions.map((x) => x.key)).toEqual(['grid']);
+    // Exactly one change (the merge); no discarded 'correct' entry for the vanished row.
+    expect(merged.changes).toHaveLength(1);
+    expect(merged.changes[0].changeType).toBe('merge_questions');
+  });
 });

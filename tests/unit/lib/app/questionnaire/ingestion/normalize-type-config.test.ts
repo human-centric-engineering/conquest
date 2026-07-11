@@ -178,6 +178,22 @@ describe('normalizeSuggestedTypeConfig — "Other" escape hatch → allowOther',
     expect(somethingElse.choices).toHaveLength(2);
   });
 
+  it('detects a bare "Please specify" option (no "Other" prefix) as an escape hatch', () => {
+    // Hits the standalone /^\(?please\s+specify\)?\.?$/i branch, distinct from the
+    // "Other"-anchored regex the cases above exercise.
+    const bare = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['A', 'B', 'Please specify'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(bare.allowOther).toBe(true);
+    expect(bare.choices).toHaveLength(2);
+
+    const parenthesised = normalizeSuggestedTypeConfig('single_choice', {
+      choices: ['A', 'B', '(please specify)'],
+    }) as { choices: unknown[]; allowOther?: boolean };
+    expect(parenthesised.allowOther).toBe(true);
+    expect(parenthesised.choices).toHaveLength(2);
+  });
+
   it('detects a mid-list "Prefer to self-describe" (gender-style) and drops just that option', () => {
     const out = normalizeSuggestedTypeConfig('single_choice', {
       choices: ['Male', 'Female', 'Non-binary', 'Prefer to self-describe', 'Prefer not to say'],

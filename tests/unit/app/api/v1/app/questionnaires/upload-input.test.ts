@@ -26,7 +26,7 @@ function form(fields: Record<string, string>): FormData {
 }
 
 describe('extension allowlist', () => {
-  it('accepts the four supported extensions, case-insensitively', () => {
+  it('accepts every supported extension, case-insensitively', () => {
     for (const ext of ALLOWED_EXTENSIONS) {
       expect(hasAllowedExtension(`doc${ext}`)).toBe(true);
       expect(hasAllowedExtension(`DOC${ext.toUpperCase()}`)).toBe(true);

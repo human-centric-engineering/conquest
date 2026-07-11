@@ -156,4 +156,13 @@ describe('formatSlotAnswer', () => {
     };
     expect(formatSlotAnswer('matrix', config, {})).toBe('—');
   });
+
+  it('falls back to raw value formatting when the matrix config is unreadable', () => {
+    // readMatrixConfig returns null (no scale) → the row-label prose path is skipped and
+    // the stored map is rendered verbatim, never blank and never a thrown error.
+    expect(formatSlotAnswer('matrix', null, { fuel: 5 })).toBe('{"fuel":5}');
+    expect(
+      formatSlotAnswer('matrix', { rows: [{ key: 'fuel', label: 'Fuel' }] }, { fuel: 5 })
+    ).toBe('{"fuel":5}');
+  });
 });

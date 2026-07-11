@@ -47,7 +47,7 @@ const OP_REFERENCE = `Available operations (emit a JSON array under "operations"
 - {"op":"move_question","key":"<key>","toSectionOrdinal":<n>,"toIndex":<optional n>} — move a question to another section.
 
 Question selector <qsel> is one of:
-  {"scope":"all"} | {"scope":"section","sectionOrdinal":<n>} | {"scope":"type","questionType":"free_text|single_choice|multi_choice|likert|numeric|date|boolean"} | {"scope":"keys","keys":["..."]}
+  {"scope":"all"} | {"scope":"section","sectionOrdinal":<n>} | {"scope":"type","questionType":"free_text|single_choice|multi_choice|likert|matrix|numeric|date|boolean"} | {"scope":"keys","keys":["..."]}
 Section selector <ssel> is one of:
   {"scope":"all"} | {"scope":"ordinals","ordinals":[<n>,...]}`;
 

@@ -34,17 +34,17 @@ import { isIngestVerifyRepairEnabled } from '@/lib/app/questionnaire/feature-fla
 import { validateTypeConfig } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
-import type {
-  VerifyExtractionStructureData,
-  RepairQuestionsData,
-} from '@/lib/app/questionnaire/capabilities';
 import type { ExtractedQuestion } from '@/lib/app/questionnaire/ingestion/extraction-schema';
 import type { ChangeRecordIntent } from '@/lib/app/questionnaire/ingestion/types';
-import type {
-  VerifyResult,
-  QuestionVerdict,
+import {
+  validateVerifyResult,
+  type VerifyResult,
+  type QuestionVerdict,
 } from '@/lib/app/questionnaire/ingestion/verify-schema';
-import type { RepairResult } from '@/lib/app/questionnaire/ingestion/repair-schema';
+import {
+  validateRepairResult,
+  type RepairResult,
+} from '@/lib/app/questionnaire/ingestion/repair-schema';
 import type { ExtractionPhaseEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
 import {
@@ -214,7 +214,19 @@ async function runVerification(
       });
       return EMPTY_VERIFY;
     }
-    return (dispatch.data as VerifyExtractionStructureData).result;
+    // Validate the capability payload rather than trust its shape: a malformed `result` must
+    // fall back to "no flags" (fail-soft), never crash the generator and abort the whole ingest.
+    const validated = validateVerifyResult((dispatch.data as { result?: unknown }).result);
+    if (!validated.ok) {
+      ctx.log.warn(
+        'ingest verification returned an unparseable result; persisting raw extraction',
+        {
+          issues: validated.issues,
+        }
+      );
+      return EMPTY_VERIFY;
+    }
+    return validated.value;
   } catch (err) {
     ctx.log.warn('ingest verification threw; persisting raw extraction', {
       error: errorMessage(err),
@@ -281,7 +293,19 @@ async function runRepair(
       });
       return EMPTY_REPAIR;
     }
-    return (dispatch.data as RepairQuestionsData).result;
+    // Validate the capability payload rather than trust its shape: a malformed `result` must
+    // fall back to "no repairs" (fail-soft), never crash the generator and abort the whole ingest.
+    const validated = validateRepairResult((dispatch.data as { result?: unknown }).result);
+    if (!validated.ok) {
+      ctx.log.warn(
+        'ingest repair returned an unparseable result; keeping flagged questions as-is',
+        {
+          issues: validated.issues,
+        }
+      );
+      return EMPTY_REPAIR;
+    }
+    return validated.value;
   } catch (err) {
     ctx.log.warn('ingest repair threw; keeping flagged questions as-is', {
       error: errorMessage(err),
@@ -350,12 +374,17 @@ export function mergeRepairs(
   const replacements = new Map<string, ExtractedQuestion>();
   const mergeByAnchor = new Map<string, ExtractedQuestion>();
 
+  // A key is "consumed" once an earlier repair removed it (merged away) or replaced it (corrected).
+  const isConsumed = (key: string): boolean => removedKeys.has(key) || replacements.has(key);
+
   for (const repair of repairs.repairs) {
     if (repair.action === 'correct') {
       const originalKey = repair.originalKeys[0];
       const original = originalKey ? byKey.get(originalKey) : undefined;
       const candidate = repair.questions[0];
       if (!original || !candidate) continue;
+      // A prior repair already claimed this key — don't record a second (discarded) change for it.
+      if (isConsumed(originalKey)) continue;
       if (candidate.key !== originalKey) {
         log.warn('ingest repair: correct changed the key; keeping original', { originalKey });
         continue;
@@ -370,10 +399,12 @@ export function mergeRepairs(
       replacements.set(originalKey, candidate);
       newChanges.push(changeForCorrect(original, candidate));
     } else {
-      // merge: N mis-split rows → one matrix.
+      // merge: N mis-split rows → one matrix. Keep only rows that actually resolve to a real,
+      // still-available question — a stale/hallucinated key from the model is dropped, and a row
+      // already consumed by an earlier repair can't be merged twice (no duplicate across matrices).
       const originals = repair.originalKeys
         .map((k) => byKey.get(k))
-        .filter((q): q is ExtractedQuestion => q !== undefined);
+        .filter((q): q is ExtractedQuestion => q !== undefined && !isConsumed(q.key));
       const matrix = repair.questions[0];
       if (originals.length < 2 || !matrix) continue;
       if (
@@ -388,9 +419,12 @@ export function mergeRepairs(
       matrix.sectionOrdinal = originals[0].sectionOrdinal;
       matrix.key = nextAvailableKey(matrix.key, allKeys);
       allKeys.add(matrix.key);
-      const anchor = repair.originalKeys[0];
-      for (const k of repair.originalKeys) removedKeys.add(k);
-      if (anchor) mergeByAnchor.set(anchor, matrix);
+      // Anchor the inserted matrix at the first RESOLVED row's position — never `originalKeys[0]`,
+      // which may be a stale key absent from `order`: the matrix would then never be re-inserted
+      // and every merged row would be silently dropped (violating the "never worse" contract).
+      const anchor = originals[0].key;
+      for (const q of originals) removedKeys.add(q.key);
+      mergeByAnchor.set(anchor, matrix);
       newChanges.push(changeForMerge(originals, matrix));
     }
   }

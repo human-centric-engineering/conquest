@@ -161,6 +161,27 @@ describe('questionConfigIssue — other types', () => {
     );
   });
 
+  // Matrix (rating grid): rows come first — a grid with nothing to rate can't have a
+  // labelled scale yet, so an empty/absent rows array reports "Add rows".
+  it('flags a matrix with no rows as needing rows', () => {
+    const issue = questionConfigIssue('matrix', { rows: [], scale: { min: 1, max: 5 } });
+    expect(issue?.label).toBe('Add rows');
+    expect(issue?.detail).toBe('A rating grid needs at least one row item to rate.');
+  });
+
+  // Matrix with rows but an unlabelled shared scale reports "Add scale labels" — the
+  // same launch bar as a bare likert.
+  it('flags a matrix whose shared scale is unlabelled as needing scale labels', () => {
+    const issue = questionConfigIssue('matrix', {
+      rows: [{ key: 'speed', label: 'Speed' }],
+      scale: { min: 1, max: 5 },
+    });
+    expect(issue?.label).toBe('Add scale labels');
+    expect(issue?.detail).toBe(
+      'Label the grid’s shared rating scale — every point, or both endpoints (e.g. 1 = “Not important”, 5 = “Essential”).'
+    );
+  });
+
   // Schema drift: a stored type outside the current union has no config contract
   // to check — return null rather than throwing on its absent write schema.
   it('returns null (does not throw) for an unrecognised type', () => {

@@ -127,12 +127,14 @@ describe('buildExtractionPrompt — vocabulary from the single source of truth',
     expect(system).not.toContain('"choices":["A","B"]');
   });
 
-  // Fidelity fix: a rating grid/matrix must become one likert per row, not a single
-  // multi_choice with the row items as options.
-  it('tells the model to split a rating grid/matrix into one likert per row', () => {
+  // Fidelity fix (first-class matrix): a rating grid/matrix must stay ONE `matrix`
+  // question with its rows as `suggestedTypeConfig.rows` — NOT split into one question
+  // per row, and NOT a single multi_choice with the row items as options.
+  it('tells the model to keep a rating grid/matrix as one matrix question, not split it per row', () => {
     expect(system).toMatch(/MATRIX/);
-    expect(system).toMatch(/ONE question per ROW/i);
-    expect(system).toMatch(/split_question/);
+    expect(system).toMatch(/SINGLE question/);
+    expect(system).toMatch(/do NOT split it into one/i);
+    expect(system).toMatch(/"suggestedTypeConfig\.rows"/);
   });
 
   // Fidelity fix: an "Other"/"please specify" escape hatch becomes allowOther, not a
