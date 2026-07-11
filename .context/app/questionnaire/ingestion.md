@@ -22,11 +22,15 @@ idle timeout; streaming keeps the socket alive (the `sseResponse` bridge emits k
 frames on an independent timer) and hands back the draft's ids on a terminal `done` event.
 Pre-stream validation (rate-limit, upload guard, demo-client check) still returns a normal
 JSON error envelope; once the stream opens, a failure is a terminal `error` event (never a
-5xx). Events: `phase` (`extracting` → `saving`), then `done { questionnaireId, versionId,
-counts }` or `error { code, message }`. Mirrors `compose/stream`'s `drive()` pattern; the
-route reuses the same `parseAndGuardUpload` / `extractFromDocument` / `persistIngestion`
-helpers, so the two endpoints can't drift. Event contract:
-`lib/app/questionnaire/ingestion/extraction-stream-events.ts`.
+5xx). Events: `phase` (`extracting` → `verifying` → `repairing` → `saving` — the middle two
+only when the verify+repair sub-flag is on), then `done { questionnaireId, versionId, counts }`
+or `error { code, message }`. Mirrors `compose/stream`'s `drive()` pattern; the route drives
+`orchestrateExtraction` (which wraps the shared `extractFromDocument` + the optional
+verify/repair pass) and reuses `parseAndGuardUpload` / `persistIngestion`, so the streaming and
+non-streaming endpoints can't drift on the core pipeline. The phase messages the admin sees are
+the **real** ones the orchestrator emits (no scripted ticker — `ExtractionProgress`). Event
+contract: `lib/app/questionnaire/ingestion/extraction-stream-events.ts`. See
+[Streaming ingest + the verify / repair pass](#streaming-ingest--the-verify--repair-pass).
 
 | Field              | In       | Notes                                                                              |
 | ------------------ | -------- | ---------------------------------------------------------------------------------- |
@@ -137,6 +141,44 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
     `AppQuestionnaire` row.
 14. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
 'questionnaire', entityId: versionId, metadata: { counts, fileName, fileHash, demoClientId } })`.
+
+## Streaming ingest + the verify / repair pass
+
+The **streaming** ingest surface (`POST …/questionnaires/stream`, the "watch it extract"
+dialog) does not call `extractFromDocument` directly — it drives
+`orchestrateExtraction` (`_lib/orchestrate-extraction.ts`), an async generator that yields
+**real** phase events (`extracting → verifying → repairing → saving`) and returns the same
+`PipelineResult` the non-streaming route uses. The non-streaming `POST /questionnaires` and
+`reingest` routes keep the single synchronous extractor pass unchanged.
+
+When the **`APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_ENABLED`** sub-flag is on
+(`isIngestVerifyRepairEnabled()`, AND-ed with the master flag), the orchestrator inserts a
+critic + repair pass between extract and coherence:
+
+1. **Verify** — dispatch `app_verify_extraction_structure` (the Extraction Verifier agent)
+   once over all questions + the source. It returns per-question verdicts (`ok` / `suspect`
+   - an `issue`) and any detected rating-grid spans. Flags only; never rewrites. Small
+     (flags-only) output, so one call stays cheap even for a long questionnaire.
+2. **Repair** — only when questions are flagged (and ≤ `REPAIR_FLAG_CEILING = 20`), dispatch
+   `app_repair_questions` (the Scales & Matrix Repair Specialist) over the **flagged subset
+   only**. It re-reads each source span and returns corrected questions (`action: 'correct'`
+   replaces in place; `action: 'merge'` collapses mis-split rows into one matrix).
+3. **Merge guard (`mergeRepairs`)** — the "never worse" core: a `correct` is accepted only
+   if it keeps the key and its config passes the **tight write schema**; a `merge` only if
+   it yields a valid `matrix` from ≥2 originals. Rejected repairs leave the original
+   untouched. Accepted repairs append revertible `infer_type` / `augment_question` /
+   `merge_questions` change intents. Coherence is then re-checked after the merge.
+
+**Fail-soft throughout:** a missing/failing verifier or repair agent, a repair that doesn't
+validate, or > 20 flags (systemic) all fall back to persisting the raw extraction — the
+draft is never worse than the single-extractor pass. Both agents seed **disabled** with the
+sub-flag; when off, ingestion is exactly today's behaviour. The agents/capabilities are
+seeded by `065`–`068`; the flag by `064`. The verifier + repair prompts (load-bearing) live
+in `ingestion/verify-prompt.ts` and `ingestion/repair-prompt.ts`; both appear in the Prompt
+Library and the "Questionnaire ingestion" workflow diagram (a "Fidelity check & repair"
+group). **Scoring of matrix rows is out of scope for v1** — a composite answer contributes
+nothing to the numeric `scoring/compute.ts` aggregate (non-crashing); per-row scoring is a
+follow-up.
 
 ## The extractor capability (the LLM step)
 
@@ -311,13 +353,18 @@ the normaliser makes it reliable.
 Two extraction rules in `extraction-prompt.ts` keep the model faithful to richer source
 layouts:
 
-- **Rating grid / matrix → per-row scales.** A table where several row items share one
-  rating scale (a "Factor" column beside `1 2 3 4 5`, or a "Rate each: 1 = … 5 = …"
-  instruction over a list) is **not** one `multi_choice` — its rows are not options. The
-  model emits **one `likert` per row**, folding the row item into a self-contained prompt
-  ("Fuel efficiency" under "How important…?" → "How important is fuel efficiency to
-  you?") and carrying the shared scale, plus one `split_question` change. This relies on
-  table extraction (above) surfacing the grid as a Markdown table in the first place.
+- **Rating grid / matrix → one `matrix` question.** A table where several row items share
+  one rating scale (a "Factor" column beside `1 2 3 4 5`, or a "Rate each: 1 = … 5 = …"
+  instruction over a list) is a **single question of type `matrix`** — its rows are not
+  choice options, and it is **not** split into one question per row. The model sets
+  `suggestedTypeConfig.rows` to `[{key,label}, …]` (distinct keys) and
+  `suggestedTypeConfig.scale` to the shared scale (a likert config — bounds + a `labels`
+  array OR `minLabel`/`maxLabel` anchors). The answer is a composite `{ rowKey: point }`
+  map in the single `AppAnswerSlot`. `matrix` is a first-class type end to end (form grid,
+  admin grid editor, per-row report formatting, per-row analytics distributions); only the
+  conversational surface asks it row-by-row. This relies on table extraction (above)
+  surfacing the grid as a Markdown table in the first place. Row keys are canonicalised at
+  persist by `normalizeSuggestedTypeConfig` (slugify + de-dupe, mirroring choices).
 - **Endpoint-anchored scales.** When a 1–5 scale anchors only its ends ("1 — Not at all …
   5 — Very much"), the model stores `min`/`max` + `minLabel`/`maxLabel` **verbatim** and
   does not fabricate middle labels. This is now a first-class, launchable `likert` shape:

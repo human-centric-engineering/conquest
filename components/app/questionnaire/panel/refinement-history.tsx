@@ -13,7 +13,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
-import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
+import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
+import type { QuestionType } from '@/lib/app/questionnaire/types';
 import type { PanelRefinementEntry } from '@/lib/app/questionnaire/panel/types';
 import type { RefinementSource } from '@/lib/app/questionnaire/refinement/types';
 
@@ -26,9 +27,12 @@ const SOURCE_LABELS: Record<RefinementSource, string> = {
 
 export interface RefinementHistoryProps {
   entries: PanelRefinementEntry[];
+  /** The slot's type + config, so each value diff renders slot-aware (choice labels, likert/matrix points). */
+  type: QuestionType;
+  typeConfig: unknown;
 }
 
-export function RefinementHistory({ entries }: RefinementHistoryProps) {
+export function RefinementHistory({ entries, type, typeConfig }: RefinementHistoryProps) {
   if (entries.length === 0) return null;
 
   return (
@@ -41,9 +45,13 @@ export function RefinementHistory({ entries }: RefinementHistoryProps) {
           <ol className="space-y-2">
             {entries.map((entry, i) => (
               <li key={i} className="text-muted-foreground text-xs">
-                <span className="line-through">{formatAnswerValue(entry.previousValue)}</span>
+                <span className="line-through">
+                  {formatSlotAnswer(type, typeConfig, entry.previousValue)}
+                </span>
                 {' → '}
-                <span className="text-foreground">{formatAnswerValue(entry.newValue)}</span>
+                <span className="text-foreground">
+                  {formatSlotAnswer(type, typeConfig, entry.newValue)}
+                </span>
                 <div>
                   {SOURCE_LABELS[entry.source]}
                   {entry.rationale ? ` — ${entry.rationale}` : ''}

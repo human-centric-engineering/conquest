@@ -121,6 +121,54 @@ const likertFullyLabelledSchema = likertConfigSchema.refine(likertLabelsComplete
   path: ['labels'],
 });
 
+/** One row (sub-question) of a matrix — its stable key + display label. */
+const matrixRowSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+});
+
+/**
+ * matrix base shape: N keyed row-items sharing ONE rating scale. The scale reuses
+ * {@link likertBaseShape} so each row renders and validates exactly like a likert
+ * point. A matrix answer is a composite `{ [rowKey]: integer }` map (one point per
+ * row), so the type is config-required — an empty grid is unanswerable.
+ */
+const matrixBaseShape = z.object({
+  rows: z.array(matrixRowSchema).min(1),
+  scale: likertBaseShape,
+});
+
+const matrixRowKeysDistinct = (c: { rows: { key: string }[] }) => {
+  const keys = c.rows.map((r) => r.key);
+  return new Set(keys).size === keys.length;
+};
+
+/**
+ * matrix (read): ≥1 row + a coherent shared scale (`max > min`). Lenient on labels and
+ * key-distinctness like {@link likertConfigSchema} — the form/report/answer readers must
+ * not lose a valid grid over an imperfect labels array. Completeness is the write schema's job.
+ */
+const matrixConfigSchema = matrixBaseShape.refine((c) => likertMaxGtMin(c.scale), {
+  message: 'scale max must be greater than min',
+  path: ['scale', 'max'],
+});
+
+/**
+ * matrix (write): distinct row keys AND a shared scale labelled one of the two faithful
+ * ways (complete per-point `labels` OR both endpoint labels) — the same rule as
+ * {@link likertWriteConfigSchema}. Row labels are already required by {@link matrixRowSchema}.
+ */
+const matrixWriteConfigSchema = matrixConfigSchema
+  .refine(matrixRowKeysDistinct, {
+    message: 'Matrix row keys must be unique',
+    path: ['rows'],
+  })
+  .refine((c) => likertLabelsComplete(c.scale) || likertHasEndpointLabels(c.scale), {
+    message:
+      'a matrix scale needs either one label per point, or both endpoint labels (minLabel/maxLabel)',
+    path: ['scale', 'labels'],
+  });
+
 /** numeric: optional coherent bounds + step/unit. */
 const numericConfigSchema = z
   .object({
@@ -169,6 +217,7 @@ const SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
   single_choice: choicesConfigSchema,
   multi_choice: choicesConfigSchema,
   likert: likertConfigSchema,
+  matrix: matrixConfigSchema,
   numeric: numericConfigSchema,
   boolean: booleanConfigSchema,
 };
@@ -182,6 +231,7 @@ const SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
 const WRITE_SCHEMA_BY_TYPE: Record<QuestionType, z.ZodTypeAny> = {
   ...SCHEMA_BY_TYPE,
   likert: likertWriteConfigSchema,
+  matrix: matrixWriteConfigSchema,
 };
 
 /** The Zod schema that validates `typeConfig` for a given question type (read-side, lenient). */
@@ -208,6 +258,16 @@ export function hasCompleteLikertLabels(typeConfig: unknown): boolean {
  */
 export function isLikertLabelled(typeConfig: unknown): boolean {
   return likertWriteConfigSchema.safeParse(typeConfig).success;
+}
+
+/**
+ * True when a matrix `typeConfig` is complete enough to launch — ≥1 row with distinct
+ * keys and a labelled/anchored shared scale. This is exactly the write schema's acceptance
+ * rule, so the launch gate and the structure editor's "needs labels" cue agree with what
+ * save enforces. Non-matrix configs and unreadable input return `false`.
+ */
+export function isMatrixLabelled(typeConfig: unknown): boolean {
+  return matrixWriteConfigSchema.safeParse(typeConfig).success;
 }
 
 /** Discriminated result of validating a `typeConfig` against its question type. */
@@ -257,6 +317,17 @@ export function defaultTypeConfig(type: QuestionType): unknown {
         min: 1,
         max: 5,
         labels: ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'],
+      };
+    case 'matrix':
+      // Two rows on an endpoint-anchored 1–5 importance scale — the most common matrix
+      // shape (a battery of items sharing one rating), and one that already satisfies the
+      // write schema (distinct keys + both endpoint labels).
+      return {
+        rows: [
+          { key: 'row_1', label: 'Row 1' },
+          { key: 'row_2', label: 'Row 2' },
+        ],
+        scale: { min: 1, max: 5, minLabel: 'Not important', maxLabel: 'Essential' },
       };
     case 'numeric':
     case 'boolean':

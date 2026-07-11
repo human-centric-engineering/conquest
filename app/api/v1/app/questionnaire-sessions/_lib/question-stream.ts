@@ -239,6 +239,33 @@ export function extractLikertScale(
   return { min, max, ...(minLabel ? { minLabel } : {}), ...(maxLabel ? { maxLabel } : {}) };
 }
 
+/**
+ * Best-effort matrix rows + shared scale from a matrix slot's config, for the clarifying fallback.
+ * A matrix rates several row items on ONE scale, so a re-ask can list the items and name the poles.
+ * Reuses {@link extractLikertScale} on the nested `scale`. Returns `undefined` when no usable
+ * rows/scale are present.
+ */
+export function extractMatrix(
+  typeConfig: unknown
+): { rows: string[]; min: number; max: number; minLabel?: string; maxLabel?: string } | undefined {
+  if (typeConfig === null || typeof typeConfig !== 'object') return undefined;
+  const cfg = typeConfig as { rows?: unknown; scale?: unknown };
+  if (!Array.isArray(cfg.rows) || cfg.rows.length === 0) return undefined;
+  const rows = cfg.rows
+    .map((r) =>
+      r !== null &&
+      typeof r === 'object' &&
+      typeof (r as Record<string, unknown>).label === 'string'
+        ? ((r as Record<string, unknown>).label as string).trim()
+        : null
+    )
+    .filter((l): l is string => l !== null && l.length > 0);
+  if (rows.length === 0) return undefined;
+  const scale = extractLikertScale(cfg.scale);
+  if (!scale) return undefined;
+  return { rows, ...scale };
+}
+
 /** Build the plain-prose interviewer prompt — explicitly NOT JSON, so tokens stream as prose. */
 export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMessage[] {
   const a = input.audience ?? {};
@@ -534,6 +561,7 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
 
   const options = extractOptionLabels(input.typeConfig);
   const likertScale = extractLikertScale(input.typeConfig);
+  const matrix = extractMatrix(input.typeConfig);
   const transcript = input.recentMessages.slice(-6).join('\n');
 
   // Phase 5 — only spell out the choices/scale when we're STRUGGLING (a re-ask after the prior
@@ -542,13 +570,19 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     ? ''
     : options
       ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY gently offer the choices to make it easy: ${options.join(', ')}.`
-      : likertScale
-        ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale ${
-            likertScale.minLabel && likertScale.maxLabel
-              ? `(where ${likertScale.min} is "${likertScale.minLabel}" and ${likertScale.max} is "${likertScale.maxLabel}")`
-              : `(where ${likertScale.max} is the most positive)`
-          } to make it easy.`
-        : '';
+      : matrix
+        ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY gently list the items and ask them to rate each on the simple ${matrix.min}–${matrix.max} scale ${
+            matrix.minLabel && matrix.maxLabel
+              ? `(where ${matrix.min} is "${matrix.minLabel}" and ${matrix.max} is "${matrix.maxLabel}")`
+              : `(where ${matrix.max} is the most positive)`
+          }. The items are: ${matrix.rows.join(', ')}.`
+        : likertScale
+          ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale ${
+              likertScale.minLabel && likertScale.maxLabel
+                ? `(where ${likertScale.min} is "${likertScale.minLabel}" and ${likertScale.max} is "${likertScale.maxLabel}")`
+                : `(where ${likertScale.max} is the most positive)`
+            } to make it easy.`
+          : '';
 
   // What they've already shared this session (continuity). Explicitly background-only: the
   // interviewer may glance back at one point when it helps, but must not recap or re-ask it.

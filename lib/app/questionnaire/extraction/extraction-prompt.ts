@@ -30,7 +30,9 @@ For each answer, output one entry with:
 - "slotKey": the key of the question it answers. Use ONLY a key from the provided candidate list.
 - "value": the answer, typed for that question's type:
     free_text → a string; single_choice → one choice "value"; multi_choice → an array of choice \
-"value"s; likert → an integer on the given scale; numeric → a number; date → an ISO-8601 date \
+"value"s; likert → an integer on the given scale; matrix → an object mapping each rated row's KEY \
+to an integer on the shared scale (e.g. {"fuel_efficiency": 5, "reliability": 3}), including ONLY \
+the rows the message actually supports; numeric → a number; date → an ISO-8601 date \
 (YYYY-MM-DD); boolean → true/false.
   For choice questions, return the choice's "value" (the slug), NEVER its label and NEVER the \
 respondent's raw words. Do not invent options.
@@ -352,6 +354,10 @@ function describeSlot(slot: ExtractionSlotView): string {
   if (options.length > 0) lines.push(`  options: ${options.join(', ')}`);
   const scale = likertScale(slot.typeConfig);
   if (scale) lines.push(`  scale: ${scale}`);
+  // Matrix grids: show the shared scale AND every row's key/label, so the model knows which
+  // rowKeys to emit in the composite `{ rowKey: point }` value.
+  const matrix = matrixDescription(slot.typeConfig);
+  if (matrix) lines.push(matrix);
   // Free-text comment fields: tell the model how to build the living paraphrase, and show the
   // current one so it accumulates new mentions rather than starting over.
   if (slot.type === 'free_text') {
@@ -378,6 +384,24 @@ function choiceOptions(typeConfig: unknown): string[] {
         typeof c === 'object' && c !== null && typeof (c as { value?: unknown }).value === 'string'
     )
     .map((c) => (typeof c.label === 'string' ? `${c.value} (${c.label})` : c.value));
+}
+
+/** Render a matrix slot's shared scale + row keys/labels, so the model knows which rowKeys to emit. */
+function matrixDescription(typeConfig: unknown): string | null {
+  if (typeConfig === null || typeof typeConfig !== 'object') return null;
+  const cfg = typeConfig as { rows?: unknown; scale?: { min?: unknown; max?: unknown } };
+  if (!Array.isArray(cfg.rows) || cfg.rows.length === 0) return null;
+  const rows = cfg.rows
+    .filter(
+      (r): r is { key: string; label?: string } =>
+        typeof r === 'object' && r !== null && typeof (r as { key?: unknown }).key === 'string'
+    )
+    .map((r) => (typeof r.label === 'string' ? `${r.key} (${r.label})` : r.key));
+  if (rows.length === 0) return null;
+  const s = cfg.scale;
+  const scale =
+    s && typeof s.min === 'number' && typeof s.max === 'number' ? `${s.min}–${s.max}` : '(scale)';
+  return `  matrix scale: ${scale} — rate each row on it\n  rows: ${rows.join(', ')}`;
 }
 
 /** Render a likert slot's bounds as `min–max`, if present. */

@@ -240,3 +240,45 @@ describe('normalizeSuggestedTypeConfig — render path recovers', () => {
     ]);
   });
 });
+
+describe('normalizeSuggestedTypeConfig — matrix rows', () => {
+  const scale = { min: 1, max: 5, minLabel: 'Not important', maxLabel: 'Essential' };
+
+  it('canonicalises row keys and keeps the shared scale', () => {
+    const out = normalizeSuggestedTypeConfig('matrix', {
+      rows: [{ label: 'Fuel efficiency' }, { label: 'Low emissions' }],
+      scale,
+    }) as { rows: Array<{ key: string; label: string }>; scale: unknown };
+    expect(out.rows.map((r) => r.key)).toEqual(['fuel_efficiency', 'low_emissions']);
+    expect(out.rows.map((r) => r.label)).toEqual(['Fuel efficiency', 'Low emissions']);
+    expect(out.scale).toEqual(scale);
+  });
+
+  it('de-dupes colliding row keys with a numeric suffix', () => {
+    const out = normalizeSuggestedTypeConfig('matrix', {
+      rows: [
+        { key: 'cost', label: 'Cost' },
+        { key: 'cost', label: 'Cost (again)' },
+      ],
+      scale,
+    }) as { rows: Array<{ key: string }> };
+    const keys = out.rows.map((r) => r.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('emits only { rows, scale } (drops stray keys)', () => {
+    const out = normalizeSuggestedTypeConfig('matrix', {
+      rows: [{ key: 'a', label: 'A' }],
+      scale,
+      stray: 'x',
+    }) as Record<string, unknown>;
+    expect(Object.keys(out).sort()).toEqual(['rows', 'scale']);
+  });
+
+  it('leaves a degenerate grid (no rows / no scale) untouched', () => {
+    const noRows = { rows: [], scale };
+    expect(normalizeSuggestedTypeConfig('matrix', noRows)).toBe(noRows);
+    const noScale = { rows: [{ key: 'a', label: 'A' }] };
+    expect(normalizeSuggestedTypeConfig('matrix', noScale)).toBe(noScale);
+  });
+});

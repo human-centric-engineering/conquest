@@ -166,9 +166,9 @@ describe('questionConfigIssue — other types', () => {
   it('returns null (does not throw) for an unrecognised type', () => {
     expect(() =>
       // @ts-expect-error — simulating a legacy/unknown stored type value.
-      questionConfigIssue('matrix', { some: 'config' })
+      questionConfigIssue('legacy_unknown_type', { some: 'config' })
     ).not.toThrow();
     // @ts-expect-error — same unknown type, assert the null result.
-    expect(questionConfigIssue('matrix', { some: 'config' })).toBeNull();
+    expect(questionConfigIssue('legacy_unknown_type', { some: 'config' })).toBeNull();
   });
 });

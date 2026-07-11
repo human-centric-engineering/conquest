@@ -31,9 +31,9 @@ import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-fla
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
   deriveTitle,
-  extractFromDocument,
   parseAndGuardUpload,
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
+import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orchestrate-extraction';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import type { ExtractionStreamEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
@@ -103,23 +103,21 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
   }
 
   async function* drive(): AsyncGenerator<ExtractionStreamEvent> {
-    yield {
-      type: 'phase',
-      phase: 'extracting',
-      message: 'Reading and understanding the document…',
-    };
-
-    // Parse → scanned/empty detection → extractor dispatch → coherence pre-check.
-    const extracted = await extractFromDocument(upload, { adminId, log });
-    if (!extracted.ok) {
-      yield await errorEventFromResponse(extracted.response);
+    // The orchestrator runs extract → (verify → repair, when the sub-flag is on) → coherence,
+    // yielding real phase events (extracting / verifying / repairing) as it goes. Drain it,
+    // re-yielding each event over the stream, then take its returned PipelineResult.
+    const orchestrator = orchestrateExtraction(upload, { adminId, log });
+    let step = await orchestrator.next();
+    while (!step.done) {
+      yield step.value;
+      step = await orchestrator.next();
+    }
+    const orchestrated = step.value;
+    if (!orchestrated.ok) {
+      yield await errorEventFromResponse(orchestrated.response);
       return;
     }
-    const { extraction, parsed } = extracted.value;
-
-    // Step 5 (verification/repair critic) will run here, between extract and persist,
-    // emitting a { type:'phase', phase:'verifying' } event and repairing mis-typed
-    // questions before they are written.
+    const { extraction, parsed } = orchestrated.value;
 
     yield { type: 'phase', phase: 'saving', message: 'Saving the questionnaire…' };
     try {

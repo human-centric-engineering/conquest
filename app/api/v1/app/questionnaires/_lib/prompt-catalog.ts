@@ -25,6 +25,8 @@
 import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 
 import { buildExtractionPrompt } from '@/lib/app/questionnaire/ingestion/extraction-prompt';
+import { buildVerifyPrompt } from '@/lib/app/questionnaire/ingestion/verify-prompt';
+import { buildRepairPrompt } from '@/lib/app/questionnaire/ingestion/repair-prompt';
 import {
   buildComposeFullPrompt,
   buildComposeOutlinePrompt,
@@ -67,8 +69,10 @@ import {
   QUESTIONNAIRE_COMPOSER_AGENT_SLUG,
   QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG,
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
+  QUESTIONNAIRE_EXTRACTION_VERIFIER_AGENT_SLUG,
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
+  QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
   TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
@@ -272,6 +276,92 @@ const STRUCTURE_EXTRACTOR: PromptAgentCatalogEntry = {
               goal: '{{ admin-supplied goal, if any }}',
               audience: SAMPLE_AUDIENCE,
             },
+          })
+        ),
+    }),
+  ],
+};
+
+const EXTRACTION_VERIFIER: PromptAgentCatalogEntry = {
+  slug: QUESTIONNAIRE_EXTRACTION_VERIFIER_AGENT_SLUG,
+  name: 'Extraction Verifier',
+  stage: 'authoring',
+  summary:
+    'Critic that reads the extracted questions + the source and flags any whose answer type/config is unfaithful (a mis-typed scale, a likert missing anchors, a flattened or row-lost rating grid). Flags only — it never rewrites.',
+  dispatch:
+    'Between extract and persist on the streaming ingest route, when the ingest verify+repair sub-flag is on.',
+  builderModule: 'lib/app/questionnaire/ingestion/verify-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: 'verify.default',
+      label: 'Verify extracted questions',
+      description: 'The prompt sent to flag questions whose type/config does not match the source.',
+      build: () =>
+        norm(
+          buildVerifyPrompt({
+            questions: [
+              {
+                key: 'q1',
+                prompt: '{{ question 1 prompt }}',
+                suggestedType: 'likert',
+                suggestedTypeConfig: { min: 1, max: 5 },
+                sourceQuote: '{{ the source span this question came from }}',
+                extractionConfidence: 0.7,
+              },
+            ],
+            documentText:
+              '{{ text extracted from the uploaded document — its questions, sections, and rating grids }}',
+            fileName: '{{ uploaded-file.pdf }}',
+          })
+        ),
+    }),
+  ],
+};
+
+const SCALE_MATRIX_REPAIR: PromptAgentCatalogEntry = {
+  slug: QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG,
+  name: 'Scales & Matrix Repair Specialist',
+  stage: 'authoring',
+  summary:
+    'Re-extracts only the flagged questions correctly — fixing a mis-typed scale, restoring likert anchors, or turning a flattened / mis-split rating grid into one matrix question with rows + a shared scale.',
+  dispatch:
+    'After the verifier flags questions, over the flagged subset only, on the streaming ingest route.',
+  builderModule: 'lib/app/questionnaire/ingestion/repair-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: 'repair.default',
+      label: 'Repair flagged questions',
+      description:
+        'The prompt sent to re-extract the flagged rating-scale / rating-grid questions.',
+      build: () =>
+        norm(
+          buildRepairPrompt({
+            targets: [
+              {
+                sectionOrdinal: 0,
+                key: 'q1',
+                prompt: '{{ the flagged question prompt }}',
+                suggestedType: 'multi_choice',
+                suggestedTypeConfig: {
+                  choices: [{ value: 'fuel_efficiency', label: 'Fuel efficiency' }],
+                },
+                extractionConfidence: 0.5,
+              },
+            ],
+            matrixGroups: [
+              {
+                label: '{{ the grid heading, e.g. "How important are the following?" }}',
+                sourceSpanQuote: '{{ the full grid block from the source — rows + shared scale }}',
+                memberKeys: [],
+              },
+            ],
+            issueByKey: {
+              q1: 'matrix_flattened: a rating grid was collapsed into one multi_choice',
+            },
+            documentText: '{{ text extracted from the uploaded document }}',
+            fileName: '{{ uploaded-file.pdf }}',
           })
         ),
     }),
@@ -936,6 +1026,8 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
   return [
     // Authoring
     STRUCTURE_EXTRACTOR,
+    EXTRACTION_VERIFIER,
+    SCALE_MATRIX_REPAIR,
     COMPOSER,
     DATA_SLOT_GENERATOR,
     // Live conversation

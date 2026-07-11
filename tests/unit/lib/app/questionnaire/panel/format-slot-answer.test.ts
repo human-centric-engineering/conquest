@@ -122,4 +122,38 @@ describe('formatSlotAnswer', () => {
   it('renders an em-dash for a blank free-text string', () => {
     expect(formatSlotAnswer('free_text', null, '   ')).toBe('—');
   });
+
+  it('formats a matrix answer as per-row scale points (not raw JSON)', () => {
+    const config = {
+      rows: [
+        { key: 'fuel', label: 'Fuel efficiency' },
+        { key: 'comfort', label: 'Comfort' },
+      ],
+      scale: {
+        min: 1,
+        max: 5,
+        labels: ['Not important', 'Slight', 'Moderate', 'High', 'Essential'],
+      },
+    };
+    const out = formatSlotAnswer('matrix', config, { fuel: 5, comfort: 2 });
+    expect(out).toBe('Fuel efficiency: Essential; Comfort: Slight');
+  });
+
+  it('formats a matrix on an endpoint-anchored scale with the point over its range', () => {
+    const config = {
+      rows: [{ key: 'fuel', label: 'Fuel efficiency' }],
+      scale: { min: 1, max: 5, minLabel: 'Not important', maxLabel: 'Essential' },
+    };
+    expect(formatSlotAnswer('matrix', config, { fuel: 4 })).toBe(
+      'Fuel efficiency: 4/5 — Not important → Essential'
+    );
+  });
+
+  it('renders an em-dash for a matrix that rated nothing', () => {
+    const config = {
+      rows: [{ key: 'fuel', label: 'Fuel efficiency' }],
+      scale: { min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' },
+    };
+    expect(formatSlotAnswer('matrix', config, {})).toBe('—');
+  });
 });

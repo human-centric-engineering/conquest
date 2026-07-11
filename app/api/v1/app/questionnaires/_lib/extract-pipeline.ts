@@ -83,7 +83,7 @@ export interface ExtractedDocument {
   parsed: Awaited<ReturnType<typeof parseDocument>>;
 }
 
-type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
+export type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
 
 /** Title for the new questionnaire — the parsed document title, else the filename. */
 export function deriveTitle(parsedTitle: string, fileName: string): string {

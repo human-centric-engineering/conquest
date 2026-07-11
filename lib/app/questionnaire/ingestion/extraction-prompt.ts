@@ -160,11 +160,14 @@ that option from "choices" — the tool renders its own "Other…" free-text inp
 real selectable answers.
 - A RATING GRID / MATRIX — a table where several row items (factors, statements, sub-questions) are \
 each rated on ONE shared scale (a "Factor" column beside rating columns "1 2 3 4 5", or a "Rate \
-each: 1 = … 5 = …" instruction above a list of items) — is NOT a single "multi_choice" and its rows \
-are NOT choice options. Emit ONE question per ROW, each a "likert" carrying the shared "min"/"max" \
-and the shared anchor labels (endpoint anchors per the likert rule), and fold the row item into a \
-self-contained prompt (e.g. the row "Fuel efficiency" under "How important are the following?" → \
-"How important is fuel efficiency to you?"). Record ONE "split_question" change for the grid.
+each: 1 = … 5 = …" instruction above a list of items) — is a SINGLE question of suggestedType \
+"matrix". It is NOT a "multi_choice", and its rows are NOT choice options; do NOT split it into one \
+question per row. Keep the grid's overall wording as the "prompt" (e.g. "How important are the \
+following factors to you?"). Set "suggestedTypeConfig.rows" to an ARRAY OF OBJECTS, one per row \
+item in document order (≥1 row, distinct keys), each {"key":"<stable snake_case slug>", \
+"label":"<the row item text, verbatim>"}; and set "suggestedTypeConfig.scale" to the shared scale \
+as a likert config — {"min","max"} plus EITHER a full "labels" array OR "minLabel"/"maxLabel" \
+endpoint anchors, per the likert rule above — the SAME scale applies to every row.
 - For a "free_text" question, set "suggestedTypeConfig.commentAggregation": "section" when the \
 question is a SECTION-WIDE comment that should reflect the whole section's discussion (e.g. "Please \
 provide comments to support your scores", "Any other comments on this section?", "Anything else \
@@ -206,7 +209,7 @@ these top-level keys, using EXACTLY these field names:
       "key": "<stable unique slug>",
       "prompt": "<the question text shown to the respondent — REQUIRED>",
       "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}], "allowOther": true (only if an "Other" escape hatch was present)} — required, ≥2 objects; likert with full labels: {"min":1,"max":5,"labels":["…","…","…","…","…"]}, OR endpoint-anchored likert: {"min":1,"max":5,"minLabel":"Not at all","maxLabel":"Very much"} — one of the two is required for likert> },
+      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}], "allowOther": true (only if an "Other" escape hatch was present)} — required, ≥2 objects; likert with full labels: {"min":1,"max":5,"labels":["…","…","…","…","…"]}, OR endpoint-anchored likert: {"min":1,"max":5,"minLabel":"Not at all","maxLabel":"Very much"} — one of the two is required for likert; matrix: {"rows":[{"key":"fuel_efficiency","label":"Fuel efficiency"},{"key":"reliability","label":"Reliability"}],"scale":{"min":1,"max":5,"minLabel":"Not important","maxLabel":"Essential"}} — rows (≥1, distinct keys) + a shared likert-style scale> },
       "guidelines": "<optional answering guidance>",
       "rationale": "<optional why-this-question>",
       "extractionConfidence": <number between 0 and 1>,

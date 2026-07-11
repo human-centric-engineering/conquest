@@ -68,6 +68,37 @@ function asChoices(config: unknown): Choice[] {
   return Array.isArray(choices) ? (choices as Choice[]) : [];
 }
 
+/** One matrix row: its stable key + display label. */
+interface MatrixRow {
+  key: string;
+  label: string;
+}
+
+function asMatrixRows(config: unknown): MatrixRow[] {
+  const rows = asRecord(config).rows;
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter(
+      (r): r is Record<string, unknown> =>
+        r !== null &&
+        typeof r === 'object' &&
+        typeof (r as Record<string, unknown>).key === 'string'
+    )
+    .map((r) => ({ key: r.key as string, label: typeof r.label === 'string' ? r.label : '' }));
+}
+
+/** The matrix's shared scale sub-object (`{ min, max, minLabel, maxLabel, labels }`). */
+function asScale(config: unknown): {
+  min?: number;
+  max?: number;
+  minLabel?: string;
+  maxLabel?: string;
+  labels?: string[];
+} {
+  const s = asRecord(config).scale;
+  return s && typeof s === 'object' ? s : {};
+}
+
 function asBounds(config: unknown): { min?: number; max?: number } {
   const r = asRecord(config);
   return { min: r.min as number | undefined, max: r.max as number | undefined };
@@ -254,6 +285,9 @@ export function QuestionEditor({
               busy={busy}
               onSave={saveTypeConfig}
             />
+          )}
+          {question.type === 'matrix' && (
+            <MatrixEditor config={question.typeConfig} busy={busy} onSave={saveTypeConfig} />
           )}
 
           {/* Tag assignment */}
@@ -540,6 +574,168 @@ function BoundsEditor({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Rating-grid editor for the `matrix` type: one shared scale (range + endpoint anchor
+ * labels) plus a list of row items, each answered on that scale. Holds the scale + rows
+ * as local draft state, re-syncs from props on a server refetch, and only saves a config
+ * that passes the shared `validateTypeConfig` (distinct row keys + a labelled/anchored
+ * scale) — so a half-finished grid never fires a doomed 400. Any existing per-point
+ * `scale.labels` (from an extracted grid) are preserved untouched.
+ */
+function MatrixEditor({
+  config,
+  busy,
+  onSave,
+}: {
+  config: unknown;
+  busy: boolean;
+  onSave: (config: unknown) => void;
+}) {
+  const scale0 = asScale(config);
+  const toStr = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const [min, setMin] = useState(toStr(scale0.min));
+  const [max, setMax] = useState(toStr(scale0.max));
+  const [minLabel, setMinLabel] = useState(scale0.minLabel ?? '');
+  const [maxLabel, setMaxLabel] = useState(scale0.maxLabel ?? '');
+  const [rows, setRows] = useState<MatrixRow[]>(asMatrixRows(config));
+
+  useEffect(() => {
+    const s = asScale(config);
+    setMin(toStr(s.min));
+    setMax(toStr(s.max));
+    setMinLabel(s.minLabel ?? '');
+    setMaxLabel(s.maxLabel ?? '');
+    setRows(asMatrixRows(config));
+  }, [config]);
+
+  const save = (nextRows: MatrixRow[]) => {
+    const scaleOut: Record<string, unknown> = { ...asScale(config) };
+    if (min === '') delete scaleOut.min;
+    else scaleOut.min = Number(min);
+    if (max === '') delete scaleOut.max;
+    else scaleOut.max = Number(max);
+    if (minLabel.trim()) scaleOut.minLabel = minLabel.trim();
+    else delete scaleOut.minLabel;
+    if (maxLabel.trim()) scaleOut.maxLabel = maxLabel.trim();
+    else delete scaleOut.maxLabel;
+    const candidate = { ...asRecord(config), rows: nextRows, scale: scaleOut };
+    const result = validateTypeConfig('matrix', candidate);
+    if (result.ok) onSave(result.value);
+    // Invalid intermediate (blank label, duplicate/blank row key, min ≥ max) → keep editing.
+  };
+
+  return (
+    <div className="bg-muted/40 space-y-3 rounded-md p-2">
+      {/* Shared scale */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Min</Label>
+          <Input
+            type="number"
+            value={min}
+            className="h-7 w-16 text-xs"
+            disabled={busy}
+            onChange={(e) => setMin(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Max</Label>
+          <Input
+            type="number"
+            value={max}
+            className="h-7 w-16 text-xs"
+            disabled={busy}
+            onChange={(e) => setMax(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <div className="min-w-32 flex-1 space-y-1">
+          <Label className="text-xs">Low label</Label>
+          <Input
+            value={minLabel}
+            placeholder="e.g. Not important"
+            className="h-7 text-xs"
+            disabled={busy}
+            onChange={(e) => setMinLabel(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <div className="min-w-32 flex-1 space-y-1">
+          <Label className="text-xs">High label</Label>
+          <Input
+            value={maxLabel}
+            placeholder="e.g. Essential"
+            className="h-7 text-xs"
+            disabled={busy}
+            onChange={(e) => setMaxLabel(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <FieldHelp title="Rating grid (matrix)">
+          A rating grid rates several row items on ONE shared scale. Set the scale’s range and label
+          its ends (e.g. <code>1</code> = “Not important”, <code>5</code> = “Essential”), then add a
+          row per item. Every row is answered on the same scale.
+        </FieldHelp>
+      </div>
+
+      {/* Rows */}
+      <div className="space-y-2">
+        <Label className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+          Rows
+        </Label>
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Input
+              value={r.label}
+              placeholder="Row label"
+              className="h-7 text-xs"
+              disabled={busy}
+              onChange={(e) =>
+                setRows(rows.map((d, j) => (j === i ? { ...d, label: e.target.value } : d)))
+              }
+              onBlur={() => save(rows)}
+            />
+            <Input
+              value={r.key}
+              placeholder="key"
+              className="h-7 w-32 font-mono text-xs"
+              disabled={busy}
+              onChange={(e) =>
+                setRows(rows.map((d, j) => (j === i ? { ...d, key: e.target.value } : d)))
+              }
+              onBlur={() => save(rows)}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              disabled={busy || rows.length <= 1}
+              aria-label="Remove row"
+              onClick={() => {
+                const next = rows.filter((_, j) => j !== i);
+                setRows(next);
+                save(next);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          disabled={busy}
+          onClick={() => setRows([...rows, { key: `row_${rows.length + 1}`, label: '' }])}
+        >
+          Add row
+        </Button>
+      </div>
     </div>
   );
 }

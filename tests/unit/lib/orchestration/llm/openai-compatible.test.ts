@@ -887,6 +887,30 @@ describe('embed', () => {
 // Mapping helpers (exercised indirectly via chat / chatStream)
 // ---------------------------------------------------------------------------
 
+describe('per-request timeout forwarding', () => {
+  it('forwards a caller-supplied timeoutMs as the SDK per-request `timeout`', async () => {
+    chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+    const provider = makeProvider();
+
+    await provider.chat([{ role: 'user', content: 'x' }], { model: 'gpt-4o', timeoutMs: 300_000 });
+
+    // Second arg is the SDK RequestOptions — the long-job override that lets a call
+    // outrun the client's construction-time default.
+    const requestOptions = chatCreateMock.mock.calls[0]?.[1] as { timeout?: number } | undefined;
+    expect(requestOptions?.timeout).toBe(300_000);
+  });
+
+  it('omits the per-request timeout when the caller supplies none (client default applies)', async () => {
+    chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+    const provider = makeProvider();
+
+    await provider.chat([{ role: 'user', content: 'x' }], { model: 'gpt-4o' });
+
+    const requestOptions = chatCreateMock.mock.calls[0]?.[1] as { timeout?: number } | undefined;
+    expect(requestOptions?.timeout).toBeUndefined();
+  });
+});
+
 describe('toSdkMessage mapping', () => {
   it('maps system message correctly', async () => {
     // Arrange

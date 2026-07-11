@@ -131,7 +131,11 @@ export function AnswerSlotItem({
           ) : (
             <>
               {slot.rationale && <p className="text-muted-foreground text-xs">{slot.rationale}</p>}
-              <RefinementHistory entries={slot.refinementHistory} />
+              <RefinementHistory
+                entries={slot.refinementHistory}
+                type={slot.type}
+                typeConfig={slot.typeConfig}
+              />
 
               <div className="flex flex-wrap items-center gap-2">
                 {canEdit && !confirming && (

@@ -121,15 +121,71 @@ function normalizeChoices(rawChoices: unknown): NormalizedChoice[] | null {
   return out;
 }
 
+/** One canonical matrix row (see the matrix `typeConfig` shape). */
+interface NormalizedRow {
+  key: string;
+  label: string;
+}
+
+/**
+ * Coerce a raw `rows` entry into `{ key, label }`, or `null` when unusable. Accepts a
+ * bare string (the label is the row text) or a `{ key?, label? }` object — mirroring
+ * {@link coerceChoice} but keyed on `key` rather than `value`.
+ */
+function coerceRow(raw: unknown, index: number): NormalizedRow | null {
+  if (typeof raw === 'string') {
+    const label = raw.trim();
+    if (!label) return null;
+    return { key: slugifyChoiceValue(label) || `row_${index + 1}`, label };
+  }
+  if (isRecord(raw)) {
+    const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+    const rawKey = typeof raw.key === 'string' ? raw.key.trim() : '';
+    const effectiveLabel = label || rawKey;
+    if (!effectiveLabel) return null;
+    const key = rawKey || slugifyChoiceValue(effectiveLabel) || `row_${index + 1}`;
+    return { key, label: effectiveLabel };
+  }
+  return null;
+}
+
+/**
+ * Normalise a raw matrix `rows` value into a distinct-keyed row list, or `null` when it
+ * is not an array. Colliding keys get a `_2`, `_3`, … suffix via {@link nextAvailableKey}
+ * (the answer map is keyed on these, so they must be unique); empty entries are dropped.
+ */
+function normalizeRows(rawRows: unknown): NormalizedRow[] | null {
+  if (!Array.isArray(rawRows)) return null;
+  const taken = new Set<string>();
+  const out: NormalizedRow[] = [];
+  rawRows.forEach((entry, index) => {
+    const row = coerceRow(entry, index);
+    if (!row) return;
+    const key = nextAvailableKey(row.key, taken);
+    taken.add(key);
+    out.push({ key, label: row.label });
+  });
+  return out;
+}
+
 /**
  * Normalise an extractor/composer `suggestedTypeConfig` for persistence. For
  * `single_choice`/`multi_choice`, rewrites `choices` into the canonical
- * `{ value, label }[]` shape. Everything else — non-choice types, non-object
- * configs, or a choice config that yields fewer than 2 usable options — is
- * returned unchanged (there is nothing to safely invent; the admin corrects a
- * degenerate list in the Structure editor).
+ * `{ value, label }[]` shape; for `matrix`, canonicalises `rows` into distinct-keyed
+ * `{ key, label }[]` and passes the shared `scale` through. Everything else — other
+ * types, non-object configs, or a degenerate list (choices < 2, no matrix rows / scale)
+ * — is returned unchanged (there is nothing to safely invent; the admin corrects it in
+ * the Structure editor).
  */
 export function normalizeSuggestedTypeConfig(type: QuestionType, raw: unknown): unknown {
+  if (type === 'matrix') {
+    if (!isRecord(raw)) return raw;
+    const rows = normalizeRows(raw.rows);
+    // Only the row keys need canonicalising; the tight matrix schema validates the scale
+    // on read. Leave a degenerate grid (no usable rows or no scale object) untouched.
+    if (!rows || rows.length < 1 || !isRecord(raw.scale)) return raw;
+    return { rows, scale: raw.scale };
+  }
   if (!CHOICE_TYPES.has(type)) return raw;
   if (!isRecord(raw)) return raw;
   const choices = normalizeChoices(raw.choices);

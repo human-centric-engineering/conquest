@@ -76,6 +76,22 @@ export function questionConfigIssue(
           'Label every point on this rating scale (e.g. 1 = “Very dissatisfied”), or switch the type to Numeric for an unlabelled rating.',
       };
     }
+    case 'matrix': {
+      const cfg = asRecord(config);
+      const rowCount = Array.isArray(cfg.rows) ? cfg.rows.length : 0;
+      // Rows first: you can't label a scale for a grid that has nothing to rate.
+      if (rowCount < 1) {
+        return {
+          label: 'Add rows',
+          detail: 'A rating grid needs at least one row item to rate.',
+        };
+      }
+      return {
+        label: 'Add scale labels',
+        detail:
+          'Label the grid’s shared rating scale — every point, or both endpoints (e.g. 1 = “Not important”, 5 = “Essential”).',
+      };
+    }
     case 'single_choice':
     case 'multi_choice': {
       const choices = asRecord(config).choices;

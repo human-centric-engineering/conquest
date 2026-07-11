@@ -88,6 +88,20 @@ function readLikertBounds(typeConfig: unknown): { min: number; max: number } | n
   return { min: cfg.min, max: cfg.max };
 }
 
+/** Read a matrix's shared scale bounds + the set of legal row keys from its (write-validated) config. */
+function readMatrixBounds(
+  typeConfig: unknown
+): { rowKeys: Set<string>; min: number; max: number } | null {
+  const parsed = typeConfigSchemaFor('matrix').safeParse(typeConfig);
+  if (!parsed.success) return null;
+  const cfg = parsed.data as { rows: Array<{ key: string }>; scale: { min: number; max: number } };
+  return {
+    rowKeys: new Set(cfg.rows.map((r) => r.key)),
+    min: cfg.scale.min,
+    max: cfg.scale.max,
+  };
+}
+
 /** Read a numeric question's optional bounds. Absent config → no bounds. */
 function readNumericBounds(typeConfig: unknown): { min?: number; max?: number } {
   const parsed = typeConfigSchemaFor('numeric').safeParse(typeConfig ?? {});
@@ -172,6 +186,32 @@ function validateLikert(value: unknown, typeConfig: unknown): AnswerValueValidat
   return ok(n);
 }
 
+function validateMatrix(value: unknown, typeConfig: unknown): AnswerValueValidation {
+  // A matrix answer is a composite: an object mapping each answered row's key to an integer
+  // point on the shared scale. Partial answers are allowed (a respondent may rate only some
+  // rows), but an unknown row key or an out-of-range point rejects the whole answer.
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return fail('matrix value must be an object mapping row keys to scale points');
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return fail('matrix value must rate at least one row');
+  const cfg = readMatrixBounds(typeConfig);
+  const normalised: Record<string, number> = {};
+  for (const [rowKey, raw] of entries) {
+    if (cfg && !cfg.rowKeys.has(rowKey)) {
+      return fail(`matrix row "${rowKey}" is not one of the grid's rows`);
+    }
+    const n = toFiniteNumber(raw);
+    if (n === null) return fail(`matrix row "${rowKey}" value must be a number`);
+    if (!Number.isInteger(n)) return fail(`matrix row "${rowKey}" value must be an integer`);
+    if (cfg && (n < cfg.min || n > cfg.max)) {
+      return fail(`matrix row "${rowKey}" value ${n} is outside the scale ${cfg.min}–${cfg.max}`);
+    }
+    normalised[rowKey] = n;
+  }
+  return ok(normalised);
+}
+
 function validateNumeric(value: unknown, typeConfig: unknown): AnswerValueValidation {
   const n = toFiniteNumber(value);
   if (n === null) return fail('numeric value must be a number');
@@ -225,6 +265,8 @@ export function validateAnswerValue(
       return validateMultiChoice(value, typeConfig);
     case 'likert':
       return validateLikert(value, typeConfig);
+    case 'matrix':
+      return validateMatrix(value, typeConfig);
     case 'numeric':
       return validateNumeric(value, typeConfig);
     case 'date':

@@ -42,10 +42,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
-import {
-  StatusTicker,
-  estimateExtractionMs,
-} from '@/components/admin/questionnaires/status-ticker';
+import { ExtractionProgress } from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { parseSseBlock } from '@/lib/api/sse-parser';
@@ -146,7 +143,9 @@ export function UploadQuestionnaireDialog({
   // table pass self-detects (merges only when tables are found). The checkbox is an override.
   const [extractTables, setExtractTables] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [estimatedMs, setEstimatedMs] = useState<number | undefined>(undefined);
+  // The latest REAL phase message streamed from the ingest route (extracting → verifying →
+  // repairing → saving). Rendered live during the upload — no scripted ticker.
+  const [phase, setPhase] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
@@ -165,7 +164,7 @@ export function UploadQuestionnaireDialog({
     setExtractTables(true);
     setError(null);
     setBusy(false);
-    setEstimatedMs(undefined);
+    setPhase('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -177,7 +176,7 @@ export function UploadQuestionnaireDialog({
       return;
     }
 
-    setEstimatedMs(estimateExtractionMs(file.size, file.name));
+    setPhase('');
     setBusy(true);
     setError(null);
 
@@ -249,7 +248,10 @@ export function UploadQuestionnaireDialog({
           buffer = buffer.slice(boundary + 2);
           const parsed = parseSseBlock(block);
           if (parsed) {
-            if (parsed.type === 'done' && typeof parsed.data.questionnaireId === 'string') {
+            if (parsed.type === 'phase' && typeof parsed.data.message === 'string') {
+              // Real progress — render the actual phase (extracting / verifying / repairing / saving).
+              setPhase(parsed.data.message);
+            } else if (parsed.type === 'done' && typeof parsed.data.questionnaireId === 'string') {
               questionnaireId = parsed.data.questionnaireId;
             } else if (parsed.type === 'error') {
               streamError =
@@ -609,7 +611,7 @@ export function UploadQuestionnaireDialog({
             </FieldHelp>
           </div>
 
-          {busy && <StatusTicker estimatedMs={estimatedMs} />}
+          {busy && <ExtractionProgress message={phase} />}
           {error && <p className="text-destructive text-sm">{error}</p>}
 
           <DialogFooter>

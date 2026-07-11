@@ -163,6 +163,10 @@ function summariseQuestion(q: QuestionDistribution): string {
       const mean = d.mean === null ? 'n/a' : d.mean.toFixed(2);
       return `${head}: mean ${mean} (${d.min}–${d.max})`;
     }
+    case 'matrix': {
+      const parts = d.rows.map((r) => `${r.label}=${r.mean === null ? 'n/a' : r.mean.toFixed(2)}`);
+      return `${head}: mean by row (${d.min}–${d.max}) ${parts.join(', ')}`;
+    }
     case 'numeric':
       return `${head}: ${d.summary ? `mean ${d.summary.mean.toFixed(1)}, range ${d.summary.min}–${d.summary.max}` : 'no numeric answers'}`;
     case 'boolean':

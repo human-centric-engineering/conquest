@@ -10,14 +10,20 @@
  * client dialog, so it must stay free of any server-only import.
  */
 
-/** Coarse progress phases surfaced to the admin while the draft builds. */
-export type ExtractionPhase = 'extracting' | 'verifying' | 'saving';
+/**
+ * Progress phases surfaced to the admin while the draft builds. Unlike the old scripted
+ * ticker these are REAL: each is emitted by the orchestrator as it reaches that stage.
+ * `verifying`/`repairing` fire only when the ingest verify+repair pass is enabled.
+ */
+export type ExtractionPhase = 'extracting' | 'verifying' | 'repairing' | 'saving';
 
-/** A progress ping — cosmetic; the keepalive frames keep the socket open regardless. */
+/** A real progress event — the client renders `message` and, on `repairing`, the `progress` counts. */
 export interface ExtractionPhaseEvent {
   type: 'phase';
   phase: ExtractionPhase;
   message: string;
+  /** Populated on `repairing` — how many of the flagged questions are being repaired. */
+  progress?: { done: number; total: number };
 }
 
 /** A terminal failure. The response is already streaming, so a failure can't be a 5xx. */

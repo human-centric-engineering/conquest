@@ -327,14 +327,14 @@ describe('VersionGraph — sections', () => {
           sections: [
             makeSection({
               // Force an unexpected type through via type assertion (simulates schema drift).
-              questions: [makeQuestion({ type: 'matrix' as never })],
+              questions: [makeQuestion({ type: 'legacy_unknown' as never })],
             }),
           ],
         })}
       />
     );
-    // QUESTION_TYPE_LABELS['matrix'] is undefined → the component renders q.type.
-    expect(screen.getByText('matrix')).toBeInTheDocument();
+    // QUESTION_TYPE_LABELS['legacy_unknown'] is undefined → the component renders q.type.
+    expect(screen.getByText('legacy_unknown')).toBeInTheDocument();
   });
 
   it('renders the "required" badge when q.required is true', () => {
