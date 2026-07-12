@@ -478,8 +478,7 @@ describe('chatStream', () => {
 
     // Assert — done chunk has the usage from the trailing chunk
     const done = collected.find((c) => (c as { type: string }).type === 'done') as
-      | { type: 'done'; usage: { inputTokens: number; outputTokens: number } }
-      | undefined;
+      { type: 'done'; usage: { inputTokens: number; outputTokens: number } } | undefined;
     expect(done?.usage).toEqual({ inputTokens: 20, outputTokens: 10 });
   });
 
@@ -722,8 +721,7 @@ describe('chatStream', () => {
     }
 
     const requestOptions = chatCreateMock.mock.calls[0]?.[1] as
-      | { timeout?: number; signal?: AbortSignal }
-      | undefined;
+      { timeout?: number; signal?: AbortSignal } | undefined;
     expect(requestOptions?.timeout).toBe(300_000);
     expect(requestOptions?.signal).toBe(controller.signal);
   });

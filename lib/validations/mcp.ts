@@ -6,7 +6,12 @@
  */
 
 import { z } from 'zod';
-import { paginationQuerySchema, cuidSchema, queryBooleanSchema } from '@/lib/validations/common';
+import {
+  paginationQuerySchema,
+  cuidSchema,
+  queryBooleanSchema,
+  capabilityScopeSchema,
+} from '@/lib/validations/common';
 import { McpScope, ALL_MCP_SCOPES, McpResourceType } from '@/types/mcp';
 
 // ============================================================================
@@ -29,6 +34,16 @@ const mcpScopeSchema = z.enum([
   McpScope.RESOURCES_READ,
   McpScope.PROMPTS_READ,
 ]);
+
+/**
+ * Application-level scope carrier stored on an MCP key (`McpApiKey.scope`).
+ * The shared `capabilityScopeSchema` contract (flat string→string map mirroring
+ * `CapabilityContext.scope`), aliased for MCP call sites. Distinct from
+ * `mcpScopeSchema` above (the coarse protocol-scope enum). Validates the
+ * admin-supplied value on create/update and re-validates the persisted JSON
+ * column when read back at auth time — the stored value is never trusted raw.
+ */
+export const mcpKeyScopeSchema = capabilityScopeSchema;
 
 // ============================================================================
 // MCP Server Config (Singleton Settings)
@@ -267,6 +282,7 @@ export const createApiKeySchema = z.object({
     .nullable()
     .optional(),
   rateLimitOverride: z.number().int().min(1).max(10000).nullable().optional(),
+  scope: mcpKeyScopeSchema.nullable().optional(),
 });
 
 export type CreateApiKey = z.infer<typeof createApiKeySchema>;
@@ -280,6 +296,7 @@ export const updateApiKeySchema = z
     isActive: z.boolean().optional(),
     expiresAt: z.coerce.date().nullable().optional(),
     rateLimitOverride: z.number().int().min(1).max(10000).nullable().optional(),
+    scope: mcpKeyScopeSchema.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: 'At least one field must be provided',

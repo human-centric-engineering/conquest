@@ -36,6 +36,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { WorkflowStatus } from '@/types/orchestration';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 import { drainEngine } from '@/lib/orchestration/scheduling/scheduler';
+import { resolvePersistedScope } from '@/lib/orchestration/scope';
 import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
 import { bootstrapInboundAdapters } from '@/lib/orchestration/inbound/bootstrap';
 import { getInboundAdapter } from '@/lib/orchestration/inbound/registry';
@@ -326,6 +327,27 @@ export async function POST(
     settingsDefault: orgSettings?.defaultMaxCostPerExecutionUsd ?? null,
   });
 
+  // Resolve the run's scope from two sources, both run through the shared
+  // validate-on-read guard (drop-to-unscoped + warn on malformed):
+  //   - `trigger.scope`   — operator-configured static scope (higher trust).
+  //   - `normalised.scope` — adapter-derived from the verified payload (lower
+  //     trust: adapters aren't trusted to return well-formed data). Tagged
+  //     `source: 'adapter'` so a dropped-scope warning is attributable.
+  // Shallow-merge with the static scope last so the operator's config wins on
+  // key conflicts — an adapter may fill in keys the operator didn't pin, but
+  // cannot override one they did.
+  const triggerScope = resolvePersistedScope(trigger.scope, { triggerId: trigger.id });
+  const adapterScope = resolvePersistedScope(normalised.scope, {
+    triggerId: trigger.id,
+    channel,
+    slug,
+    source: 'adapter',
+  });
+  const scope =
+    adapterScope !== undefined || triggerScope !== undefined
+      ? { ...adapterScope, ...triggerScope }
+      : undefined;
+
   let executionId: string;
   try {
     const execution = await prisma.aiWorkflowExecution.create({
@@ -339,6 +361,7 @@ export async function POST(
         triggerSource,
         triggerExternalId: externalId,
         dedupKey,
+        ...(scope ? { scope } : {}),
         ...(effectiveBudgetLimitUsd !== undefined
           ? { budgetLimitUsd: effectiveBudgetLimitUsd }
           : {}),

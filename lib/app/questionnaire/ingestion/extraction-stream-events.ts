@@ -52,6 +52,4 @@ export interface ExtractionDoneEvent {
 }
 
 export type ExtractionStreamEvent =
-  | ExtractionPhaseEvent
-  | ExtractionErrorEvent
-  | ExtractionDoneEvent;
+  ExtractionPhaseEvent | ExtractionErrorEvent | ExtractionDoneEvent;

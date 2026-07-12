@@ -282,6 +282,13 @@ export class RunWorkflowCapability extends BaseCapability<Args, Data> {
           ...(effectiveBudgetLimitUsd !== undefined
             ? { budgetLimitUsd: effectiveBudgetLimitUsd }
             : {}),
+          // Inherit the parent's scope so a sub-workflow (and every capability
+          // inside it) runs under the same scope as the parent — without this
+          // the scope seam has a hole one level down. Scope is a restriction
+          // ("refuse to run outside scope"), so inherit-by-default is the safe
+          // choice; an explicit different-scope override can be added later if a
+          // real case appears.
+          ...(context.scope ? { scope: context.scope } : {}),
         }
       )) {
         if (event.type === 'workflow_started') {

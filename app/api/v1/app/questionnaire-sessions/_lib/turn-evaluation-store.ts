@@ -160,8 +160,7 @@ export interface TurnEvaluationReviewRow {
 
 /** Discriminated outcome so the route can map cleanly to 404 / 409 / 200. */
 export type UpdateTurnEvaluationReviewResult =
-  | { ok: true; row: TurnEvaluationReviewRow }
-  | { ok: false; reason: 'not_found' | 'locked' };
+  { ok: true; row: TurnEvaluationReviewRow } | { ok: false; reason: 'not_found' | 'locked' };
 
 /**
  * Apply a human-review patch to one evaluation. Verifies the row belongs to `sessionId` (a
@@ -272,11 +271,7 @@ export type ActionLearningResult =
   | {
       ok: false;
       reason:
-        | 'not_found'
-        | 'already_actioned'
-        | 'dataset_not_found'
-        | 'dataset_full'
-        | 'no_content';
+        'not_found' | 'already_actioned' | 'dataset_not_found' | 'dataset_full' | 'no_content';
     };
 
 /**

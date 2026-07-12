@@ -1131,10 +1131,7 @@ Indexes: unique on `slug`. No FK to `User` for any "owner" field — this is a g
 
     **No seed loads these in Phase 2.5.** The seed that loads the fixtures into the database lives in Phase 9 (after every dependent feature exists) as `010-demo-content.ts` — see Phase 9's seed-extension item for details.
 
-12. **Unit tests at `tests/unit/lib/app/questionnaire/theming/`**:
-    - `resolveTheme.test.ts` — every field-null permutation falls back to the documented Sunrise default; a fully-populated client returns its own values; a partially-populated client mixes its values with Sunrise fallbacks correctly.
-    - `themeToCssVariables.test.ts` — output matches expected CSS string exactly (snapshot-friendly); injection-safe (theme values containing CSS special characters or HTML are escaped — important since theme values eventually land in user-visible HTML).
-    - `loadClientFonts.test.ts` — only whitelisted families are returned; non-whitelisted family in the client row is silently dropped; the function is type-safe with `next/font/google`'s expected family names.
+12. **Unit tests at `tests/unit/lib/app/questionnaire/theming/`**: - `resolveTheme.test.ts` — every field-null permutation falls back to the documented Sunrise default; a fully-populated client returns its own values; a partially-populated client mixes its values with Sunrise fallbacks correctly. - `themeToCssVariables.test.ts` — output matches expected CSS string exactly (snapshot-friendly); injection-safe (theme values containing CSS special characters or HTML are escaped — important since theme values eventually land in user-visible HTML). - `loadClientFonts.test.ts` — only whitelisted families are returned; non-whitelisted family in the client row is silently dropped; the function is type-safe with `next/font/google`'s expected family names.
 
 13. **Integration tests at `tests/integration/api/v1/app/demo-clients/`**:
     - `crud.test.ts` — list, create, get, patch, delete (including the 409-when-attached refusal).

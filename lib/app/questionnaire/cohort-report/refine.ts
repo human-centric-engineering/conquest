@@ -10,10 +10,8 @@
 import { prisma } from '@/lib/db/client';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { isRecord } from '@/lib/utils';
 

@@ -67,13 +67,7 @@ export interface SessionWarning {
  *   error). The composer stays enabled so the respondent can retry.
  */
 export type QuestionnaireChatStatus =
-  | 'idle'
-  | 'streaming'
-  | 'cost_capped'
-  | 'not_active'
-  | 'completed'
-  | 'expired'
-  | 'error';
+  'idle' | 'streaming' | 'cost_capped' | 'not_active' | 'completed' | 'expired' | 'error';
 
 /** A respondent-facing error with a friendly title + body and optional retry hint. */
 export interface ChatErrorState {

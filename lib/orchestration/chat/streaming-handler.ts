@@ -71,6 +71,12 @@ import {
   registerBuiltInCapabilities,
 } from '@/lib/orchestration/capabilities/registry';
 import { buildContext, invalidateContext } from '@/lib/orchestration/chat/context-builder';
+import {
+  collectGuardFloors,
+  applyGuardFloor,
+  type GuardFloors,
+} from '@/lib/orchestration/chat/guard-floor';
+import { emitGuardEvent, type GuardEventContext } from '@/lib/orchestration/chat/guard-events';
 import { buildMessagesAndBreakdown } from '@/lib/orchestration/chat/message-builder';
 import { estimateTokens } from '@/lib/orchestration/chat/token-estimator';
 import {
@@ -669,6 +675,29 @@ export class StreamingChatHandler {
         role: 'user',
       });
 
+      // Guard-floor seam: a fork can RAISE any of the three inline guards
+      // (input / output / citation) to a minimum mode for this turn, keyed on
+      // the turn's (contextType, contextId, agentId). Collected once here and
+      // applied at each guard below. Empty registry → `{}` → guard modes
+      // resolve exactly as before (inert in vanilla Sunrise).
+      const guardFloors: GuardFloors = await collectGuardFloors({
+        contextType: request.contextType,
+        contextId: request.contextId,
+        agentId: agent.id,
+      });
+
+      // Guard-events seam: when an inline guard flags below, the handler emits
+      // a fire-and-forget event so a fork can OBSERVE the firing and react
+      // (notify / log / escalate). Built once here and reused at each guard.
+      // Empty registry → no-op (inert in vanilla Sunrise).
+      const guardEventContext: GuardEventContext = {
+        contextType: request.contextType,
+        contextId: request.contextId,
+        agentId: agent.id,
+        userId: request.userId,
+        conversationId: conversation.id,
+      };
+
       // Input guard — mode-dependent behaviour
       const scanResult = scanForInjection(request.message);
       if (scanResult.flagged) {
@@ -691,6 +720,13 @@ export class StreamingChatHandler {
             );
           }
         }
+
+        // Raise to the strictest registered floor for this turn (no-op when none).
+        guardMode = applyGuardFloor('input', guardMode, guardFloors);
+
+        // Post-detection observation (fire-and-forget; emitted before the block
+        // short-circuit so a `block` outcome is still observed).
+        emitGuardEvent(guardEventContext, 'input', guardMode);
 
         if (guardMode === 'block') {
           yield errorEvent('input_blocked', 'Message blocked by security policy.');
@@ -785,7 +821,9 @@ export class StreamingChatHandler {
       // bulk of the pre-token latency win.
       const [contextBlock, memoryRows, capabilityDefinitions] = await Promise.all([
         request.contextType && request.contextId
-          ? buildContext(request.contextType, request.contextId)
+          ? buildContext(request.contextType, request.contextId, {
+              userId: request.userId,
+            })
           : Promise.resolve(null),
         // Load per-user-per-agent memories for context injection
         prisma.aiUserMemory.findMany({
@@ -910,8 +948,7 @@ export class StreamingChatHandler {
           ? (agent.metadata as Record<string, unknown>)
           : null;
       const responseFormat = agentMetadata?.responseFormat as
-        | import('@/lib/orchestration/llm/types').LlmResponseFormat
-        | undefined;
+        import('@/lib/orchestration/llm/types').LlmResponseFormat | undefined;
 
       // Remaining fallback providers for mid-stream retry
       const remainingFallbacks = [...resolvedFallbackProviders];
@@ -1195,6 +1232,13 @@ export class StreamingChatHandler {
                 }
               }
 
+              // Raise to the strictest registered floor for this turn (no-op when none).
+              outputMode = applyGuardFloor('output', outputMode, guardFloors);
+
+              // Post-detection observation (fire-and-forget; before the block
+              // short-circuit so a `block` outcome is still observed).
+              emitGuardEvent(guardEventContext, 'output', outputMode);
+
               if (outputMode === 'block') {
                 yield errorEvent(
                   'output_blocked',
@@ -1237,6 +1281,13 @@ export class StreamingChatHandler {
                   );
                 }
               }
+
+              // Raise to the strictest registered floor for this turn (no-op when none).
+              citationMode = applyGuardFloor('citation', citationMode, guardFloors);
+
+              // Post-detection observation (fire-and-forget; before the block
+              // short-circuit so a `block` outcome is still observed).
+              emitGuardEvent(guardEventContext, 'citation', citationMode);
 
               if (citationMode === 'block') {
                 yield errorEvent(
@@ -1614,6 +1665,7 @@ export class StreamingChatHandler {
           agentId: agent.id,
           conversationId: conversation.id,
           ...(request.entityContext ? { entityContext: request.entityContext } : {}),
+          ...(request.scope ? { scope: request.scope } : {}),
         };
 
         if (toolCallArray.length === 1) {
@@ -1762,7 +1814,9 @@ export class StreamingChatHandler {
           });
 
           if (request.contextType && request.contextId) {
-            invalidateContext(request.contextType, request.contextId);
+            invalidateContext(request.contextType, request.contextId, {
+              userId: request.userId,
+            });
           }
 
           // run_workflow → pending approval: surface a card, persist a
@@ -2012,7 +2066,9 @@ export class StreamingChatHandler {
           yield { type: 'capability_results', results };
 
           if (request.contextType && request.contextId) {
-            invalidateContext(request.contextType, request.contextId);
+            invalidateContext(request.contextType, request.contextId, {
+              userId: request.userId,
+            });
           }
 
           // Scan parallel results for any run_workflow pause. Each

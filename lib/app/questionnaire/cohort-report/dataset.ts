@@ -243,26 +243,24 @@ async function buildScoring(
   const byDimension = groupings.map((g) => ({
     dimensionKey: g.dimension.key,
     dimensionLabel: g.dimension.label,
-    scales: schema.scales.map(
-      (scale): CohortScaleBySegment => ({
-        scaleKey: scale.key,
-        scaleName: scale.name,
-        segments: g.buckets.map((b) => {
-          const { raws } = collect(
-            scale.key,
-            b.sessions.map((s) => s.id)
-          );
-          const suppressed = isCohortSuppressed(raws.length);
-          return {
-            value: b.value,
-            label: b.label,
-            respondents: raws.length,
-            mean: suppressed ? null : meanOf(raws),
-            suppressed,
-          };
-        }),
-      })
-    ),
+    scales: schema.scales.map((scale): CohortScaleBySegment => ({
+      scaleKey: scale.key,
+      scaleName: scale.name,
+      segments: g.buckets.map((b) => {
+        const { raws } = collect(
+          scale.key,
+          b.sessions.map((s) => s.id)
+        );
+        const suppressed = isCohortSuppressed(raws.length);
+        return {
+          value: b.value,
+          label: b.label,
+          respondents: raws.length,
+          mean: suppressed ? null : meanOf(raws),
+          suppressed,
+        };
+      }),
+    })),
   }));
 
   return { scales, byDimension };

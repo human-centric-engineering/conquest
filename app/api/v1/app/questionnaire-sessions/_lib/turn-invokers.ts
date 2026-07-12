@@ -19,10 +19,8 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import {
   DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,

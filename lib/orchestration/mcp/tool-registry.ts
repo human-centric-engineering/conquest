@@ -30,10 +30,37 @@ let cachedAt = 0;
 let mcpSystemAgentId: string | null = null;
 
 /**
- * List all MCP-exposed tools that are both enabled in McpExposedTool
- * and active in AiCapability.
+ * List MCP-exposed tools that are both enabled in McpExposedTool and active
+ * in AiCapability.
+ *
+ * When `scopedAgentId` is set (the caller's API key is bound to an agent), the
+ * list is filtered so it reflects what that key can actually invoke: tools
+ * whose capability is **explicitly disabled** for the agent (an
+ * `AiAgentCapability` row with `isEnabled = false`) are dropped, giving
+ * list/call parity — `tools/call` already refuses those under the scoped agent
+ * (see `callMcpTool` → dispatcher). Scoping is **default-allow**: a capability
+ * with no binding row for the agent stays callable, so it stays listed;
+ * scoping only honours explicit *disable* bindings, mirroring the dispatcher's
+ * opt-out semantics. Unscoped keys (`scopedAgentId` null/undefined) get the
+ * full global list, unchanged.
+ *
+ * The global list is cached (5-min TTL); the per-agent disable filter is a
+ * small live query (`tools/list` is low-frequency and this keeps the filter
+ * coherent with admin binding changes without a second cache to invalidate).
  */
-export async function listMcpTools(): Promise<McpToolDefinition[]> {
+export async function listMcpTools(scopedAgentId?: string | null): Promise<McpToolDefinition[]> {
+  const tools = await loadGlobalTools();
+
+  if (!scopedAgentId) return tools;
+
+  const disabledSlugs = await getDisabledCapabilitySlugs(scopedAgentId);
+  if (disabledSlugs.size === 0) return tools;
+
+  return tools.filter((t) => !disabledSlugs.has(t.slug));
+}
+
+/** Build (or return the cached) global list of MCP-exposed, active tools. */
+async function loadGlobalTools(): Promise<McpToolDefinition[]> {
   const now = Date.now();
   if (cachedTools && now - cachedAt < CACHE_TTL_MS) {
     return cachedTools;
@@ -76,6 +103,19 @@ export async function listMcpTools(): Promise<McpToolDefinition[]> {
 }
 
 /**
+ * Capability slugs an agent has an **explicit** `isEnabled = false` binding
+ * for. Missing rows are default-allow (not returned), matching the dispatcher's
+ * opt-out `getAgentBinding` semantics.
+ */
+async function getDisabledCapabilitySlugs(agentId: string): Promise<Set<string>> {
+  const rows = await prisma.aiAgentCapability.findMany({
+    where: { agentId, isEnabled: false },
+    select: { capability: { select: { slug: true } } },
+  });
+  return new Set(rows.map((r) => r.capability.slug));
+}
+
+/**
  * Resolve the MCP system agent ID (created by seed).
  * Returns null if the agent doesn't exist yet.
  */
@@ -96,16 +136,25 @@ async function getMcpSystemAgentId(): Promise<string | null> {
 /**
  * Call an MCP tool by delegating to the capability dispatcher.
  *
- * Creates a synthetic CapabilityContext with the mcp-system agent
- * and translates the CapabilityResult to MCP content blocks.
+ * Resolves the executing agent from the key's `scopedAgentId` when set —
+ * so a scoped key's tool calls attribute cost/budget and scope knowledge-base
+ * retrieval (`resolveAgentDocumentAccess`) to that agent, matching the MCP
+ * resources path (`handleResourcesRead`). Falls back to the `mcp-system`
+ * agent for unscoped keys, preserving prior behaviour. An optional `scope`
+ * carrier is threaded through to `execute()` (see `CapabilityContext.scope`);
+ * it is undefined until a caller supplies it.
  */
 export async function callMcpTool(
   toolName: string,
   args: Record<string, unknown> | undefined,
-  userId: string | null
+  caller: { userId: string | null; scopedAgentId?: string | null; scope?: Record<string, string> }
 ): Promise<McpToolCallResult> {
-  // Resolve the actual capability slug from tool name
-  // (custom names are supported, so we need to look up by either)
+  // Resolve the actual capability slug from tool name (custom names are
+  // supported, so we look up by either). Resolve against the UNSCOPED global
+  // list on purpose: a direct call to a tool disabled for the scoped agent
+  // should reach the dispatcher and return `capability_disabled_for_agent`, not
+  // a misleading "Unknown tool". `tools/list` hides it from discovery; dispatch
+  // still enforces the disable.
   const tools = await listMcpTools();
   const tool = tools.find((t) => t.name === toolName);
 
@@ -116,7 +165,9 @@ export async function callMcpTool(
     };
   }
 
-  const agentId = await getMcpSystemAgentId();
+  // Honour the key's scoped agent when bound; otherwise fall back to the
+  // shared mcp-system agent (which every backend caller can dispatch under).
+  const agentId = caller.scopedAgentId ?? (await getMcpSystemAgentId());
   if (!agentId) {
     logger.error('MCP tool call: mcp-system agent not found — run db:seed');
     return {
@@ -126,8 +177,9 @@ export async function callMcpTool(
   }
 
   const context: CapabilityContext = {
-    userId,
+    userId: caller.userId,
     agentId,
+    ...(caller.scope ? { scope: caller.scope } : {}),
   };
 
   let result;

@@ -44,11 +44,11 @@ import {
 import { ProviderError } from '@/lib/orchestration/llm/provider';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import {
   runStructuredCompletion,
-  tryParseJson,
   type StructuredCompletionResult,
-} from '@/lib/orchestration/evaluations/parse-structured';
+} from '@/lib/orchestration/llm/structured-completion';
 
 import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,

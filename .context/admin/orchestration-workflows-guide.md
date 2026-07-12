@@ -12,7 +12,7 @@ Workflows are DAGs (directed acyclic graphs) of steps executed by the `Orchestra
 | Validator              | `validateWorkflow()` — pure function, no DB, no I/O                                                                                                                                                                                                        |
 | Semantic validator     | `semanticValidateWorkflow()` — DB-backed checks for model overrides, capability slugs, agent slugs                                                                                                                                                         |
 | Engine                 | `OrchestrationEngine.execute()` — returns `AsyncIterable<ExecutionEvent>`                                                                                                                                                                                  |
-| Template interpolation | `{{input}}`, `{{input.key}}`, `{{previous.output}}`, `{{<stepId>.output}}`                                                                                                                                                                                 |
+| Template interpolation | `{{input}}`, `{{input.key}}`, `{{previous.output}}`, `{{<stepId>.output}}`, `{{vars.<path>}}`, `{{trigger.<path>}}`                                                                                                                                        |
 
 ## Workflow Definition Structure
 
@@ -80,6 +80,8 @@ interface ConditionalEdge {
 
 > **Note:** `send_notification` config is discriminated by `channel`: email mode requires `to` and `subject`; webhook mode requires `webhookUrl`. The UI editor switches fields dynamically based on the selected channel.
 
+> **Templated recipient:** In email mode, `to` supports the same `{{…}}` interpolation as `subject` and `bodyTemplate` — e.g. `to: '{{input.userEmail}}'` for a per-user scheduled workflow (whose per-run `inputData` carries the recipient). A plain literal is validated as an email when the step config is parsed at execution start (unchanged — a mistyped literal fails with `INVALID_CONFIG`); a template is validated after it resolves, and a template that resolves to a non-email fails the step non-retriably (`INVALID_RECIPIENT`). This lets a fanned-out per-user workflow (e.g. a morning brief) deliver with the built-in step instead of a bespoke `sendEmail` capability.
+
 ### Orchestration Steps
 
 | Type           | Label        | Purpose                                                                  | Key Config                                                           | Default Config                                                                                                                      |
@@ -133,12 +135,14 @@ If no `budgetLimitUsd` is supplied, the check is skipped entirely.
 
 Prompts in `llm_call`, `route`, `reflect`, `plan`, `agent_call`, and `send_notification` steps support template variables resolved by `llm-runner.ts`:
 
-| Variable              | Resolves to                                |
-| --------------------- | ------------------------------------------ |
-| `{{input}}`           | The workflow's `inputData` (stringified)   |
-| `{{input.key}}`       | A specific key from `inputData`            |
-| `{{previous.output}}` | Output of the most recently completed step |
-| `{{<stepId>.output}}` | Output of a specific earlier step, by ID   |
+| Variable              | Resolves to                                                                                                                                                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{{input}}`           | The workflow's `inputData` (stringified)                                                                                                                                                                                                                                                                             |
+| `{{input.key}}`       | A specific key from `inputData` (single level — not a nested path)                                                                                                                                                                                                                                                   |
+| `{{previous.output}}` | Output of the most recently completed step                                                                                                                                                                                                                                                                           |
+| `{{<stepId>.output}}` | Output of a specific earlier step, by ID                                                                                                                                                                                                                                                                             |
+| `{{vars.<path>}}`     | Drills `ctx.variables` along a dotted path (e.g. `vars.__retryContext.attempt`)                                                                                                                                                                                                                                      |
+| `{{trigger.<path>}}`  | An inbound run's data — the verified adapter payload (`inputData.trigger`), falling back to the resolved envelope (`inputData.triggerMeta`: channel, conversationId, …). So `{{trigger.text}}` reads the payload and `{{trigger.conversationId}}` the envelope. Empty for non-inbound runs. Works in `{{#if …}}` too |
 
 Variables read from a frozen snapshot of `ExecutionContext`, so any step that completed earlier in the DAG walk is addressable by its `id`.
 

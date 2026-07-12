@@ -27,11 +27,11 @@ import {
 } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import {
   runStructuredCompletion,
-  tryParseJson,
   type StructuredCompletionResult,
-} from '@/lib/orchestration/evaluations/parse-structured';
+} from '@/lib/orchestration/llm/structured-completion';
 
 import { AUTHOR_INTRO_BACKGROUND_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
 import { AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';

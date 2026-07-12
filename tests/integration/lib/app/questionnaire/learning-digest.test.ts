@@ -24,8 +24,10 @@ vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
 }));
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
 vi.mock('@/lib/orchestration/evaluations/parse-structured', () => ({
-  runStructuredCompletion: vi.fn(),
   tryParseJson: vi.fn(),
+}));
+vi.mock('@/lib/orchestration/llm/structured-completion', () => ({
+  runStructuredCompletion: vi.fn(),
 }));
 vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
   logCost: vi.fn().mockResolvedValue(undefined),
@@ -40,7 +42,7 @@ import {
 } from '@/lib/app/questionnaire/learning/digest';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
-import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 
 type Mock = ReturnType<typeof vi.fn>;
 

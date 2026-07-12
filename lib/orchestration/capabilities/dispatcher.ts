@@ -35,6 +35,9 @@ import type {
   AgentCapabilityBinding,
   CapabilityContext,
   CapabilityFunctionDefinition,
+  CapabilityGuard,
+  CapabilityGuardDecision,
+  CapabilityRegisterOptions,
   CapabilityRegistryEntry,
   CapabilityResult,
   QuarantineState,
@@ -73,12 +76,27 @@ function parseFunctionDefinition(
   return parsed.data;
 }
 
+/**
+ * Normalise a pivot row's `customConfig` JSON to a plain object or `null`.
+ * The column is `Json?`, so it may be null, a scalar, or an array — none of
+ * which a per-binding config consumer expects — so anything that isn't a
+ * plain object collapses to `null`. The `as` cast is guarded by the runtime
+ * `typeof`/`Array.isArray` checks; the value stays opaque (consumers validate
+ * it, e.g. with Zod, before reading keys).
+ */
+function normalizeCustomConfig(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 /** Cache lifetime for both the registry and per-agent bindings. */
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 class CapabilityDispatcher {
   private handlers = new Map<string, BaseCapability>();
+  private guards = new Map<string, CapabilityGuard>();
   private registry = new Map<string, CapabilityRegistryEntry>();
   private rateLimiters = new Map<string, RateLimiter>();
   private agentBindings = new Map<string, Map<string, AgentCapabilityBinding>>();
@@ -90,15 +108,28 @@ class CapabilityDispatcher {
 
   /**
    * Register an in-memory capability handler. Idempotent: re-registering
-   * the same slug replaces the previous handler.
+   * the same key replaces the previous handler *and* its guard together.
    *
    * Throws if a capability declares `processesPii = true` but does not
    * override `redactProvenance()`. Forces capability authors to make an
    * explicit decision about what gets persisted onto durable audit
    * rows — silent passthrough for PII-handling capabilities is a
    * footgun, not a feature.
+   *
+   * `options` is a fork seam (both fields opt-in; the no-options call is
+   * unchanged):
+   * - `slug` overrides the handler key (defaults to `capability.slug`). See
+   *   the ⚠️ contract on {@link CapabilityRegisterOptions.slug}: the override
+   *   must map to an active `AiCapability` row or dispatch dies at
+   *   `capability_inactive`.
+   * - `guard` attaches a pre-execute predicate run as a dispatch gate.
+   *
+   * The PII check inspects the real (unwrapped) `capability` instance, so
+   * `isRedactorOverridden` sees the true subclass prototype regardless of a
+   * slug override — this seam is exactly what lets a fork avoid wrapping a
+   * capability (which would have defeated that own-property check).
    */
-  register(capability: BaseCapability): void {
+  register(capability: BaseCapability, options?: CapabilityRegisterOptions): void {
     if (capability.processesPii && !isRedactorOverridden(capability)) {
       throw new Error(
         `Capability "${capability.slug}" declares processesPii=true but does not ` +
@@ -106,7 +137,15 @@ class CapabilityDispatcher {
           `explicit redaction. See .context/security/pii-redaction.md`
       );
     }
-    this.handlers.set(capability.slug, capability);
+    const key = options?.slug ?? capability.slug;
+    this.handlers.set(key, capability);
+    // Replace the guard atomically with the handler: a re-registration without
+    // a guard must drop any guard a prior registration left under this key.
+    if (options?.guard) {
+      this.guards.set(key, options.guard);
+    } else {
+      this.guards.delete(key);
+    }
   }
 
   has(slug: string): boolean {
@@ -263,9 +302,73 @@ class CapabilityDispatcher {
         success: false,
         error: {
           code: 'capability_disabled_for_agent',
-          message: `Capability ${slug} is disabled for agent ${context.agentId}`,
+          // No agent id in the message: it's surfaced verbatim to clients (e.g.
+          // the MCP tool-registry passes `result.error.message` through), and
+          // the internal cuid adds nothing a scoped caller can act on. The
+          // agentId stays in the structured `logger.warn` above for operators.
+          message: `Capability ${slug} is disabled for this agent`,
         },
       };
+    }
+
+    // Surface the resolved binding onto the execution context so a capability
+    // can read its own per-binding `customConfig` / enablement inside
+    // `execute()` without re-querying `AiAgentCapability` — the binding was
+    // just resolved above. A shallow copy leaves the caller's context object
+    // untouched. `customConfig` stays an opaque carrier (consumers validate);
+    // `isEnabled` is always `true` here (a disabled binding returned above).
+    const executionContext: CapabilityContext = {
+      ...context,
+      customConfig: binding?.customConfig ?? null,
+      isEnabled: binding?.isEnabled ?? true,
+    };
+
+    // 4a. Capability guard. A fork-attached pre-execute predicate gating on
+    //     the generic `context.scope` carrier (e.g. refuse a tool outside its
+    //     module/tenant). Runs after enablement, before the rate limiter, so a
+    //     denied call consumes no rate token. Inert unless a fork passed
+    //     `{ guard }` to `register()` — core registers none.
+    const guard = this.guards.get(slug);
+    if (guard) {
+      let decision: CapabilityGuardDecision;
+      try {
+        decision = await guard(context);
+      } catch (err) {
+        // Fail closed: a guard whose purpose is to restrict must not be
+        // bypassed by its own bug. Deny and log; the reason is withheld from
+        // the client since it's an internal error, not a policy decision.
+        logger.error('Capability dispatch: guard threw — denying', {
+          slug,
+          agentId: context.agentId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return {
+          success: false,
+          error: {
+            code: 'capability_guard_denied',
+            message: `Capability ${slug} was blocked by a guard`,
+          },
+        };
+      }
+      if (!decision.allow) {
+        logger.warn('Capability dispatch: guard denied', {
+          slug,
+          agentId: context.agentId,
+          reason: decision.reason,
+        });
+        return {
+          success: false,
+          error: {
+            code: 'capability_guard_denied',
+            // `reason` folded in when the guard supplied one; no internal ids —
+            // this message is surfaced verbatim to clients (mirrors the
+            // binding-gate contract above).
+            message: decision.reason
+              ? `Capability ${slug} was blocked: ${decision.reason}`
+              : `Capability ${slug} was blocked by a guard`,
+          },
+        };
+      }
     }
 
     // 5. Rate limit. Effective limit is the binding override, else the
@@ -362,9 +465,10 @@ class CapabilityDispatcher {
         }
 
         // 8. Execute. Any unexpected throw is normalised to execution_error.
+        //    Uses the binding-enriched context (customConfig / isEnabled).
         let result: CapabilityResult;
         try {
-          result = await handler.execute(validated, context);
+          result = await handler.execute(validated, executionContext);
         } catch (err) {
           logger.error('Capability dispatch: execution threw', {
             slug,
@@ -453,6 +557,7 @@ class CapabilityDispatcher {
                 slug: row.capability.slug,
                 isEnabled: row.isEnabled,
                 effectiveRateLimit: row.customRateLimit ?? row.capability.rateLimit ?? null,
+                customConfig: normalizeCustomConfig(row.customConfig),
                 functionDefinition,
                 requiresApproval: row.capability.requiresApproval,
               });
@@ -473,11 +578,12 @@ class CapabilityDispatcher {
     if (binding) return binding;
 
     // No explicit row → synthesize a default-allow binding from the
-    // base capability entry.
+    // base capability entry. No pivot row means no per-binding config.
     return {
       slug,
       isEnabled: true,
       effectiveRateLimit: entry.rateLimit,
+      customConfig: null,
       functionDefinition: entry.functionDefinition,
       requiresApproval: entry.requiresApproval,
     };

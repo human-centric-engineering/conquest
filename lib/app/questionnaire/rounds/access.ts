@@ -55,8 +55,7 @@ export interface RoundAccessSubject {
 }
 
 export type RoundAccessVerdict =
-  | { ok: true }
-  | { ok: false; status: number; code: RoundAccessDenialCode; message: string };
+  { ok: true } | { ok: false; status: number; code: RoundAccessDenialCode; message: string };
 
 /**
  * Decide whether a respondent may start/continue a session within a round.

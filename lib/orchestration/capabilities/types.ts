@@ -41,6 +41,36 @@ export interface CapabilityContext {
    * it.
    */
   entityContext?: Record<string, unknown>;
+  /**
+   * Optional free-form scope map populated by the dispatcher's caller.
+   * Generic by design — core names no keys and no core capability reads
+   * it; it is purely a carrier threaded through to `execute()`.
+   * Downstream consumers read well-known keys (e.g. a module slug) so a
+   * capability can refuse to run outside its intended scope. Vanilla
+   * behaviour is unchanged when `scope` is undefined.
+   */
+  scope?: Record<string, string>;
+  /**
+   * The resolved per-agent binding's `customConfig` JSON, surfaced by the
+   * dispatcher so a capability can read its own per-binding configuration
+   * (e.g. a per-agent allowlist) inside `execute()` without re-querying
+   * `AiAgentCapability` — the dispatcher already resolved that binding a
+   * moment earlier. Opaque carrier like `scope`: core sets it from the
+   * binding but reads no keys, so a consumer must validate it (e.g. Zod)
+   * before use. `null` when the binding carries no config, including the
+   * synthesized default-allow binding for an agent with no explicit pivot
+   * row. Populated only by the dispatcher; absent when a caller constructs
+   * a context directly.
+   */
+  customConfig?: Record<string, unknown> | null;
+  /**
+   * The resolved binding's `isEnabled` flag, surfaced alongside
+   * `customConfig`. On the normal dispatch path this is always `true` at
+   * execute time (a disabled binding is rejected before execution); it is
+   * carried for parity with the resolved binding. Populated only by the
+   * dispatcher; absent when a caller constructs a context directly.
+   */
+  isEnabled?: boolean;
 }
 
 /**
@@ -101,9 +131,61 @@ export interface AgentCapabilityBinding {
   isEnabled: boolean;
   /** `customRateLimit ?? rateLimit` from the underlying capability. */
   effectiveRateLimit: number | null;
+  /**
+   * The pivot row's `customConfig` JSON (`AiAgentCapability.customConfig`),
+   * normalised to a plain object or `null` (a non-object JSON value or a
+   * missing config becomes `null`). `null` for the synthesized default-allow
+   * binding an agent with no explicit pivot row falls back to.
+   */
+  customConfig: Record<string, unknown> | null;
   functionDefinition: CapabilityFunctionDefinition;
   requiresApproval: boolean;
 }
 
 /** Convenience alias for the Zod schema a capability uses to validate its args. */
 export type CapabilitySchema<TArgs> = ZodType<TArgs>;
+
+/**
+ * Decision returned by a {@link CapabilityGuard}. `allow: false` blocks the
+ * dispatch with a `capability_guard_denied` result; the optional `reason` is
+ * folded into the (client-surfaced) message, so keep it free of internal ids.
+ */
+export interface CapabilityGuardDecision {
+  allow: boolean;
+  reason?: string;
+}
+
+/**
+ * A pre-execute predicate a fork can attach to a capability registration to
+ * gate a dispatch on the generic {@link CapabilityContext} — typically its
+ * `scope` carrier, so a tool can refuse to run outside its intended
+ * module/tenant. Runs after the per-agent binding gate and *before* the
+ * rate-limit gate, so a denied call consumes no rate token. Async-capable.
+ *
+ * Core ships no guards; this is purely a fork seam. A guard that throws fails
+ * **closed** (the dispatch is denied) — a guard whose purpose is to restrict
+ * must not be bypassed by its own bug.
+ */
+export type CapabilityGuard = (
+  context: CapabilityContext
+) => CapabilityGuardDecision | Promise<CapabilityGuardDecision>;
+
+/**
+ * Options for `CapabilityDispatcher.register`. Both fields are opt-in; the
+ * no-options call behaves exactly as before.
+ */
+export interface CapabilityRegisterOptions {
+  /**
+   * Override the in-memory handler key (defaults to `capability.slug`). Lets a
+   * fork register one capability class under a namespaced slug.
+   *
+   * ⚠️ The override slug MUST correspond to an **active** `AiCapability` row:
+   * the dispatcher's registry / quarantine / binding / rate-limit gates all
+   * look the DB up by this same slug, so an override with no active row dies at
+   * `capability_inactive` before the handler ever runs. Forks whose module
+   * system creates the namespaced rows satisfy this automatically.
+   */
+  slug?: string;
+  /** Pre-execute guard for this registration; see {@link CapabilityGuard}. */
+  guard?: CapabilityGuard;
+}

@@ -151,8 +151,7 @@ describe('persistDefinitionImport', () => {
     // The per-row variant timed out on prod (P2028); the persister now asks for more than the
     // 5000ms interactive-transaction default so a large import has headroom under prod latency.
     const options = (executeTransaction as unknown as Mock).mock.calls[0][1] as
-      | { timeout?: number; maxWait?: number }
-      | undefined;
+      { timeout?: number; maxWait?: number } | undefined;
     expect(options?.timeout).toBeGreaterThan(5000);
     expect(options?.maxWait).toBeGreaterThan(2000);
   });

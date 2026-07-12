@@ -26,8 +26,7 @@ export type ProfileValues = Record<string, string | number>;
 
 /** Outcome of validating a raw submission against a version's `profileFields`. */
 export type ProfileValuesResult =
-  | { ok: true; values: ProfileValues }
-  | { ok: false; message: string };
+  { ok: true; values: ProfileValues } | { ok: false; message: string };
 
 /**
  * Cast a stored `AppRespondentProfileSnapshot.values` Json column back to

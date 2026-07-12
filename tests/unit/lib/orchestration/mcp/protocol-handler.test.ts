@@ -409,6 +409,27 @@ describe('handleMcpRequest', () => {
       expect((data.tools[0] as Record<string, unknown>).name).toBe('search_kb');
     });
 
+    it('scopes the listing to the key’s agent (passes scopedAgentId to listMcpTools) (#381)', async () => {
+      vi.mocked(listMcpTools).mockResolvedValue([]);
+      const scopedAuth = makeAuth({ scopedAgentId: 'agent-42' });
+
+      const req = makeRequest({ method: 'tools/list' });
+      await handleMcpRequest(req, { auth: scopedAuth, session, serverState, rateLimiter });
+
+      // discovery must match dispatch — the list is filtered for the bound agent
+      expect(listMcpTools).toHaveBeenCalledWith('agent-42');
+    });
+
+    it('passes null to listMcpTools for an unscoped key (full global list)', async () => {
+      vi.mocked(listMcpTools).mockResolvedValue([]);
+      const unscopedAuth = makeAuth({ scopedAgentId: null });
+
+      const req = makeRequest({ method: 'tools/list' });
+      await handleMcpRequest(req, { auth: unscopedAuth, session, serverState, rateLimiter });
+
+      expect(listMcpTools).toHaveBeenCalledWith(null);
+    });
+
     it('wraps inputSchema with type: object', async () => {
       vi.mocked(listMcpTools).mockResolvedValue([
         {
@@ -506,7 +527,59 @@ describe('handleMcpRequest', () => {
       });
       const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
       expect(result?.error).toBeUndefined();
-      expect(callMcpTool).toHaveBeenCalledWith('search_kb', { q: 'test' }, 'user-1');
+      expect(callMcpTool).toHaveBeenCalledWith(
+        'search_kb',
+        { q: 'test' },
+        {
+          userId: 'user-1',
+          scopedAgentId: null,
+        }
+      );
+    });
+
+    it("forwards the key's scopedAgentId to callMcpTool so tool calls run under the scoped agent", async () => {
+      vi.mocked(callMcpTool).mockResolvedValue({
+        content: [{ type: 'text', text: 'result text' }],
+      });
+
+      const scopedAuth = makeAuth({ scopedAgentId: 'agent-scoped' });
+      const req = makeRequest({
+        method: 'tools/call',
+        params: { name: 'search_kb', arguments: { q: 'test' } },
+      });
+      await handleMcpRequest(req, { auth: scopedAuth, session, serverState, rateLimiter });
+
+      expect(callMcpTool).toHaveBeenCalledWith(
+        'search_kb',
+        { q: 'test' },
+        {
+          userId: 'user-1',
+          scopedAgentId: 'agent-scoped',
+        }
+      );
+    });
+
+    it("forwards the key's scope to callMcpTool so tool calls carry the app scope", async () => {
+      vi.mocked(callMcpTool).mockResolvedValue({
+        content: [{ type: 'text', text: 'result text' }],
+      });
+
+      const scopedAuth = makeAuth({ scope: { projectId: 'proj-42' } });
+      const req = makeRequest({
+        method: 'tools/call',
+        params: { name: 'search_kb', arguments: { q: 'test' } },
+      });
+      await handleMcpRequest(req, { auth: scopedAuth, session, serverState, rateLimiter });
+
+      expect(callMcpTool).toHaveBeenCalledWith(
+        'search_kb',
+        { q: 'test' },
+        {
+          userId: 'user-1',
+          scopedAgentId: null,
+          scope: { projectId: 'proj-42' },
+        }
+      );
     });
 
     it('returns INVALID_PARAMS error when params are missing name', async () => {

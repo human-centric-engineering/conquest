@@ -17,10 +17,8 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { prisma } from '@/lib/db/client';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 
 import { evaluateAgentSettings } from '@/lib/app/questionnaire/agent-advisory/evaluate';
 import {
@@ -37,8 +35,7 @@ const EXPLAIN_MAX_TOKENS = 3_072;
 const EXPLAIN_TIMEOUT_MS = 60_000;
 
 export type ExplainResult =
-  | { ok: true; value: AgentSettingsExplanation }
-  | { ok: false; code: string; message: string };
+  { ok: true; value: AgentSettingsExplanation } | { ok: false; code: string; message: string };
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

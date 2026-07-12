@@ -23,8 +23,10 @@ vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
   logCost: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@/lib/orchestration/evaluations/parse-structured', () => ({
-  runStructuredCompletion: vi.fn(),
   tryParseJson: vi.fn(),
+}));
+vi.mock('@/lib/orchestration/llm/structured-completion', () => ({
+  runStructuredCompletion: vi.fn(),
 }));
 
 import { CostOperation } from '@/types/orchestration';
@@ -33,10 +35,8 @@ import { prisma } from '@/lib/db/client';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { explainAgentSettings } from '@/lib/app/questionnaire/agent-advisory/explain';
 
 type Mock = ReturnType<typeof vi.fn>;

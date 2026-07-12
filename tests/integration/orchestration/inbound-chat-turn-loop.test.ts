@@ -170,15 +170,14 @@ vi.mock('@/lib/orchestration/agents/resolve-effective-prompt', () => ({
   composeSystemPromptString: vi.fn(() => 'You answer concisely.'),
 }));
 
-vi.mock('@/lib/orchestration/engine/llm-runner', () => ({
-  interpolatePrompt: vi.fn((s: string, ctx: { inputData: Record<string, unknown> }) =>
-    s.replace(/\{\{trigger\.(\w+)\}\}/g, (_m: string, key: string) => {
-      const trigger = (ctx.inputData as { trigger?: Record<string, unknown> }).trigger ?? {};
-      const v = trigger[key];
-      return typeof v === 'string' ? v : '';
-    })
-  ),
-}));
+vi.mock('@/lib/orchestration/engine/llm-runner', async () => {
+  // Real interpolator (the pure `interpolate-prompt` module has no heavy deps),
+  // not a stub — so this end-to-end loop actually resolves the `{{trigger.*}}`
+  // tokens the way production does. Faking the `trigger.` namespace here is what
+  // hid the missing-branch bug (#394).
+  const { interpolatePrompt } = await import('@/lib/orchestration/engine/interpolate-prompt');
+  return { interpolatePrompt };
+});
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
@@ -223,10 +222,18 @@ function makeCtxFor(inbound: {
     executionId: `exec_${Math.random().toString(36).slice(2, 9)}`,
     workflowId: 'wf_inbound',
     userId: 'system',
+    // Mirror the real inbound route's shape: the raw adapter payload sits at
+    // `trigger` (text/from, NO conversationId), and the RESOLVED conversationId
+    // at `triggerMeta`. `{{trigger.conversationId}}` must resolve via the
+    // payload→envelope fallback — a fabricated `trigger.conversationId` would
+    // pass while production (which emits it in triggerMeta) fails.
     inputData: {
       trigger: {
         text: inbound.text,
         from: inbound.from,
+        subChannel: 'whatsapp',
+      },
+      triggerMeta: {
         channel: 'whatsapp_cloud',
         conversationId: inbound.conversationId,
       },

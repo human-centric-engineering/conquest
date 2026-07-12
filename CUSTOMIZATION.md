@@ -54,6 +54,29 @@ Two principles keep an upgrade from upstream a clean merge instead of a fight:
 | Environment variables      | `lib/app/env.ts` (`appEnvSchema`) — see [§4](#4-configuration--environment--the-libapp-surface)                     |
 | App rate-limit tier / rule | `registerRateLimitTier()` / `registerRateLimitRule()` — see [§4](#4-configuration--environment--the-libapp-surface) |
 | Dependencies & scripts     | `package.json` — see [§7](#7-adding-dependencies--scripts)                                                          |
+| Your own documentation     | `.context/app/` — the fork-owned docs folder (see below)                                                            |
+
+**Where your documentation goes — the `.context/app/` convention.** Sunrise's
+platform docs live under `.context/<domain>/` (e.g. `.context/auth/`,
+`.context/orchestration/`); those are Sunrise-owned and merge from upstream, so
+don't edit them. Put **your fork's own documentation in `.context/app/`** —
+Sunrise never creates or writes to that folder, so, like your other new files,
+nothing you add there ever conflicts on an upstream merge. Treat `.context/app/`
+as the fork-owned mirror of the platform substrate: add
+`.context/app/<feature>.md` files and, if you like, a `.context/app/README.md`
+index. (This convention is used across Sunrise forks; adopting it keeps app docs
+findable in the same place in every fork.)
+
+**Two reserved fork tiers — `/app` (leaf) and `/framework`.** The `/app` surface
+above is the **leaf-fork** tier: fork Sunrise directly and build your product in
+`lib/app/**` + `.context/app/`. Some forks instead build a reusable
+**framework layer** that sits _between_ Sunrise and their own leaf forks (e.g.
+Daybreak). For those, Sunrise reserves a second tier one level up —
+`lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`, and
+the `framework_` table prefix. **Sunrise core never creates files or tables
+under either tier**, so both merge cleanly on upgrade. A framework fork owns
+`/framework` and re-exposes `/app` to _its_ leaf forks; boot both through the
+`lib/app/bootstrap.ts` seam ([§4](#4-configuration--environment--the-libapp-surface)).
 
 ---
 
@@ -224,15 +247,22 @@ the body, which is yours. Keep the export name and signature;
 everything inside is free to change. (Detailed examples live here in this guide,
 not in the files, precisely so the files stay small and conflict-free.)
 
-| Edit this file            | To register                      | Auto-wired by (runtime)                        |
-| ------------------------- | -------------------------------- | ---------------------------------------------- |
-| `lib/app/env.ts`          | server env vars (`appEnvSchema`) | `lib/env.ts` startup parse (server)            |
-| `lib/app/rate-limit.ts`   | rate-limit tiers / rules         | rate-limit middleware (middleware runtime)     |
-| `lib/app/capabilities.ts` | agent capabilities (tools)       | the capability registry (server route-handler) |
-| `lib/app/admin-nav.ts`    | admin sidebar sections           | `admin-sidebar.tsx` (client)                   |
-| `lib/app/db-drift.ts`     | Prisma-unmodelled DB objects     | `scripts/db/check-drift.ts` (CI / `/pre-pr`)   |
-| `lib/app/public-nav.ts`   | public nav / footer link lists   | `public-nav.tsx`, `public-footer.tsx` (client) |
-| `lib/app/emails.ts`       | auth email template overrides    | `lib/email/registry.ts` (server)               |
+| Edit this file                             | To register                                   | Auto-wired by (runtime)                                          |
+| ------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------------- |
+| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)              | `lib/env.ts` startup parse (server)                              |
+| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                      | rate-limit middleware (middleware runtime)                       |
+| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)          | `proxy.ts` edge redirect-to-login (proxy runtime)                |
+| `lib/app/capabilities.ts`                  | agent capabilities (tools)                    | the capability registry (server route-handler)                   |
+| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types) | the chat context builder (server route-handler)                  |
+| `lib/app/admin-nav.ts`                     | admin sidebar sections                        | `admin-sidebar.tsx` (client)                                     |
+| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                  | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                     |
+| `lib/app/public-nav.ts`                    | public nav / footer link lists                | `public-nav.tsx`, `public-footer.tsx` (client)                   |
+| `lib/app/emails.ts`                        | auth email template overrides                 | `lib/email/registry.ts` (server)                                 |
+| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)         | `instrumentation.ts` `register()` (server, all envs)             |
+| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)    | root `eslint.config.mjs` spread (lint)                           |
+| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent             | `resolveAgentDocumentAccess()` (server route-handler)            |
+| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards       | the chat handler's `collectGuardFloors()` (server route-handler) |
+| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing           | the chat handler's `emitGuardEvent()` (server route-handler)     |
 
 **Why four files and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -242,6 +272,36 @@ the lean middleware bundle free of capability/Prisma code.) An ESLint boundary
 keeps `lib/app/` portable: no runtime `next/*` imports (type-only is fine), `@/`
 alias only; framework glue goes in `app/` or `lib/app/<name>/server/`. See
 [`.context/architecture/lint-toolchain.md`](./.context/architecture/lint-toolchain.md#app-boundary--libapp).
+
+**Server boot work — `lib/app/bootstrap.ts`.** For one-time startup work (warm a
+cache, register a background worker, boot a framework tier), fill the empty
+`initApp()`. `instrumentation.ts` `register()` calls it once per server process
+in **every** environment (it sits above the dev-only maintenance-ticker guards),
+isolated in a try/catch so a boot error is logged but never crashes
+instrumentation. **Import your framework tier _dynamically_** from here
+(`await import('@/lib/framework')`) — a _static_ framework specifier is resolved
+at `next build` and breaks the build in vanilla Sunrise or any fork without that
+folder, which is exactly why core references only `@/lib/app/bootstrap` and
+carries zero framework vocabulary. A **framework-layer fork** (see the two-tier
+model below) boots its tier in `bootstrap.ts` and then delegates to a fresh
+reserved leaf hook (e.g. `lib/app/leaf-bootstrap.ts`), so a leaf-on-framework
+fork can still hook boot without colliding on `bootstrap.ts`.
+
+**ESLint boundary rules + CI checks — `lib/app/eslint.config.mjs`.** To enforce
+your tier's own import boundary (e.g. a `framework ↔ core` rule), add flat-config
+blocks to `lib/app/eslint.config.mjs` (ships `export default []`) instead of
+editing the root config. The root `eslint.config.mjs` spreads your array **last**
+— after every Sunrise block — so a block of yours **wins for its own `files`**.
+Two things to know: (1) a framework-tier fork spreads its
+`lib/framework/eslint.config.mjs` first and keeps this leaf seam last; (2)
+flat-config **`no-restricted-imports` replaces, it does not merge** — a block
+that restricts imports for a glob must **restate the base `@/`-alias ban** for
+that glob or relative-import enforcement silently drops there (see
+[`.context/architecture/lint-toolchain.md`](./.context/architecture/lint-toolchain.md#app-boundary--libapp)
+for the worked example). For **CI**, add an `app:ci-checks` script to
+`package.json` (a boundary check, migration-hygiene lint, etc.) — Sunrise's
+`lint` job already runs `npm run app:ci-checks --if-present`, so it executes with
+**no `ci.yml` edit** (and no-ops in vanilla Sunrise, which ships no such script).
 
 **Environment variables — `lib/app/env.ts`.** Declare your own server-side env
 vars in `appEnvSchema`; the core validator merges them into the **same fail-fast
@@ -295,11 +355,52 @@ also env-tunable via `RATE_LIMIT_*` overrides. Full reference:
 > the 100/min `api` cap automatically. Reach for this only when a route needs a
 > genuinely different cap or keying.
 
+**Protected route prefixes — `lib/app/protected-routes.ts`.** When your fork adds
+a new authenticated top-level section (its own route group under a fresh path,
+e.g. `/projects`), list the prefix here to get the cheap edge redirect-to-login
+for signed-out visitors — without editing `proxy.ts`:
+
+```typescript
+// lib/app/protected-routes.ts — yours to edit (ships empty)
+export const appProtectedRoutes: string[] = ['/projects'];
+```
+
+The proxy **merges** these with the core prefixes (`/dashboard`, `/settings`,
+`/profile`) — the model is _append_, not replacement. This is only the
+"is-logged-in-at-all" edge gate; per-resource ownership/membership checks stay in
+the `withAuth` / `withAdminAuth` guards. Malformed entries (anything not starting
+with `/`, including an empty string that would otherwise match every path) are
+dropped, so a typo can't lock the whole app behind the login redirect.
+
 **Agent capabilities — `lib/app/capabilities.ts`.** Fill in the auto-wired
 `initAppCapabilities()` with `registerAppCapability(new YourTool())` calls (your
 tools extend `BaseCapability`). The capability registry runs it once before the
 first agent dispatch. See
 [`.context/orchestration/capabilities.md`](./.context/orchestration/capabilities.md).
+
+**Prompt-context loaders — `lib/app/context-contributors.ts`.** Fill in the
+auto-wired `initAppContextContributors()` with
+`registerContextContributor(type, loader)` calls to inject your own
+`LOCKED CONTEXT` block per chat turn for a given `contextType`, without editing
+the core `buildContext` switch. The chat context builder runs it once before its
+first lookup; built-in types (e.g. `pattern`) take precedence. See
+[`.context/orchestration/chat.md`](./.context/orchestration/chat.md).
+
+**Knowledge access contributors — `lib/app/knowledge-access-contributors.ts`.**
+To widen a **restricted** agent's searchable document set from a relationship
+your layer owns (module membership, team ACL, per-tenant grant), fill in the
+auto-wired `initAppKnowledgeAccessContributors()` with
+`registerAgentAccessContributor(key, contributor)` calls. Your contributor
+`(agentId) => Promise<{ documentIds?, tagIds? }>` is composed **live** at resolve
+time and its docs/tags are **unioned** into the agent's set (contributed `tagIds`
+expand to their documents like a tag grant) — so you never materialise derived
+grants onto the per-agent pivot (which has no provenance column, making any
+copy-down scheme clobber-or-leak). Rules: it runs **only** for `restricted`
+agents (a `full` agent is untouched) and can only **widen** access; a contributor
+that throws is logged and ignored; and when the data it reads changes you must
+call `invalidateAgentAccess(agentId)` for the affected agents (the same contract
+direct grants follow) so the cached decision re-composes. See
+[`.context/orchestration/knowledge.md`](./.context/orchestration/knowledge.md).
 
 **Admin sidebar sections — `lib/app/admin-nav.ts`.** Fill in the auto-wired
 `initAppNav()` with `registerNavSection({ … })` calls; the admin sidebar renders
@@ -471,13 +572,65 @@ Functional app pages have no platform copy to conflict with — edit them direct
 **Adding new pages:**
 
 - **Public page:** Create `app/(public)/pricing/page.tsx` (uses public layout)
-- **Protected page:** Create `app/(protected)/analytics/page.tsx` (uses protected layout)
+- **Protected page:** Create `app/(protected)/analytics/page.tsx` (uses protected
+  layout) **and** register its prefix in `lib/app/protected-routes.ts`
+  (`appProtectedRoutes`) so the proxy edge-redirects signed-out visitors — see
+  [§4](#4-configuration--environment--the-libapp-surface). The `(protected)`
+  folder supplies the chrome; the registered prefix supplies the auth gate. (Route
+  groups like `(protected)` are invisible to the URL and to the proxy, so the
+  folder alone does not gate auth.)
 - **Different layout:** Create a new route group, e.g. `app/(marketing)/layout.tsx`
 
 **Navigation:**
 
 - Update layouts in route groups: `app/(public)/layout.tsx`, `app/(protected)/layout.tsx`
 - Update navigation components as needed
+
+### Removing default public pages
+
+Sunrise ships public pages a given fork may not want: `/about`, `/contact`,
+`/privacy`, `/terms` (alongside the `/` landing). Because the App Router derives
+routes from the folder tree, you remove one by **deleting its folder** under
+`app/(public)/` and dropping its link from the fork-owned nav lists in
+`lib/app/public-nav.ts` (`footerNavItems` / `footerLegalItems` — see
+[§4](#4-configuration--environment--the-libapp-surface)). Adding a public page is
+the same in reverse — create `app/(public)/pricing/page.tsx`. Deleting a leaf page
+folder is a clean, Next-native operation; the only upstream-sync cost is the same
+as for any removed core file — if Sunrise later edits that exact page you get a
+routine delete/modify conflict, resolved with "keep mine (deleted)".
+
+**Legal-page caveat.** Two of these pages are linked from surfaces that always
+render, beyond the footer: the cookie-consent banner links `/privacy`, and the
+error pages (`app/error.tsx`, `app/global-error.tsx`) link `/contact`. The
+footer's legal links are overridable via `public-nav.ts`'s `footerLegalItems`, but
+if you remove `/privacy` or `/contact` outright, repoint (or keep) the banner /
+error link so it doesn't 404 — point it at your own equivalent, or leave the page
+in place.
+
+### Making it an auth-only app
+
+For an internal tool where **every** route requires a login, you don't need a
+proxy change or a config flag — it's folder placement plus the existing seams:
+
+- **New authenticated sections** go under `app/(protected)/` (for the shared
+  chrome) **and** get their prefix registered in `lib/app/protected-routes.ts`, as
+  above. Protected pages also self-guard server-side with `getServerSession()` (as
+  `app/(protected)/dashboard/page.tsx` does) for defense-in-depth.
+- **The homepage `/`** is the one route the proxy can't prefix-protect (a `/`
+  prefix would match every path, including `/login`). Two clean options:
+  - **Redirect it to the app** — reduce `app/(public)/page.tsx` to
+    `export default function Page() { redirect('/dashboard'); }`. `/dashboard` is
+    already proxy-protected, so a signed-out visitor to `/` bounces root →
+    dashboard → login. Simplest when there's no distinct public homepage.
+  - **Move it into the protected side** — `git mv app/(public)/page.tsx
+app/(protected)/page.tsx` and self-guard it (`getServerSession()` →
+    `redirect('/login')` when there's no session), when you want `/` to be an
+    authenticated landing with the protected chrome. The move is a delete-plus-add,
+    so its upstream-sync cost is the same as removing any core page.
+
+Either way there's no core proxy edit: the built-in `protectedRoutes` list stays
+as Sunrise ships it, and you extend behaviour through `lib/app/protected-routes.ts`
+and folder placement.
 
 ---
 
@@ -642,8 +795,8 @@ the database migration history — your app's migrations and Sunrise's share one
 directory.
 
 **What does _not_ conflict.** Your own new files (routes, components, `lib/`
-modules, `prisma/schema/app.prisma`) are invisible to upstream, so they never
-conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
+modules, `prisma/schema/app.prisma`, and your docs under `.context/app/`) are
+invisible to upstream, so they never conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
 are **fork-owned scaffold**: Sunrise ships them empty and doesn't re-edit them,
 so the registrations you add there merge cleanly too — no special handling. The
 files that _can_ conflict are the ones both you and upstream edit (the migration
@@ -705,6 +858,9 @@ extension requirement, and zero-downtime patterns — lives in
 - [ ] Delete route folders you don't need (e.g., `app/(protected)/profile/`)
 - [ ] Remove corresponding API endpoints: `app/api/v1/[resource]/`
 - [ ] Clean up navigation references
+- [ ] For the default **public** pages (marketing / legal) and making an
+      **auth-only** app, see [§6](#6-landing-page--routes) — it covers the
+      cookie-banner/error legal-link caveat and protecting the homepage.
 
 ---
 

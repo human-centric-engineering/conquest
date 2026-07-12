@@ -26,10 +26,8 @@ import { CostOperation } from '@/types/orchestration';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { QUESTIONNAIRE_COMPOSER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { resolveLearningConfig } from '@/lib/app/questionnaire/rounds/types';

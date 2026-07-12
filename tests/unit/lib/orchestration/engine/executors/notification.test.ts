@@ -60,6 +60,10 @@ import { registerStepType } from '@/lib/orchestration/engine/executor-registry';
 import { sendEmail } from '@/lib/email/send';
 import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 import { interpolatePrompt } from '@/lib/orchestration/engine/llm-runner';
+// The REAL interpolator (this module is NOT mocked — the mock above is on
+// `llm-runner`, which merely re-exports this). Used below to prove the executor
+// against the actual `{{…}}` resolution semantics, not a stub that fakes them.
+import { interpolatePrompt as realInterpolatePrompt } from '@/lib/orchestration/engine/interpolate-prompt';
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
 import { lookupDispatch, recordDispatch } from '@/lib/orchestration/engine/dispatch-cache';
 import { logger } from '@/lib/logging';
@@ -187,6 +191,121 @@ describe('executeNotification', () => {
       await executor(makeEmailStep({ to }), makeCtx());
 
       expect(vi.mocked(sendEmail)).toHaveBeenCalledWith(expect.objectContaining({ to }));
+    });
+
+    // ── Templated recipient (#379) ────────────────────────────────────────────
+    // The `to` field is interpolated per run like subject/body, then the
+    // resolved value is validated as an email. Lets a per-user scheduled
+    // workflow template the recipient (`to: '{{input.userEmail}}'`).
+    describe('templated `to` (#379)', () => {
+      it('interpolates a templated recipient and sends to the resolved address', async () => {
+        vi.mocked(interpolatePrompt).mockImplementation((template: string) =>
+          template === '{{input.userEmail}}' ? 'brief@example.com' : template
+        );
+
+        await executor(makeEmailStep({ to: '{{input.userEmail}}' }), makeCtx());
+
+        expect(vi.mocked(sendEmail)).toHaveBeenCalledWith(
+          expect.objectContaining({ to: 'brief@example.com' })
+        );
+      });
+
+      it('interpolates each recipient in a templated array, preserving the array shape', async () => {
+        vi.mocked(interpolatePrompt).mockImplementation((template: string) => {
+          if (template === '{{input.a}}') return 'a@example.com';
+          if (template === '{{input.b}}') return 'b@example.com';
+          return template;
+        });
+
+        await executor(makeEmailStep({ to: ['{{input.a}}', '{{input.b}}'] }), makeCtx());
+
+        expect(vi.mocked(sendEmail)).toHaveBeenCalledWith(
+          expect.objectContaining({ to: ['a@example.com', 'b@example.com'] })
+        );
+      });
+
+      it('trims surrounding whitespace from a resolved recipient', async () => {
+        vi.mocked(interpolatePrompt).mockImplementation((template: string) =>
+          template === '{{input.userEmail}}' ? '  spaced@example.com  ' : template
+        );
+
+        await executor(makeEmailStep({ to: '{{input.userEmail}}' }), makeCtx());
+
+        expect(vi.mocked(sendEmail)).toHaveBeenCalledWith(
+          expect.objectContaining({ to: 'spaced@example.com' })
+        );
+      });
+
+      it('throws ExecutorError(INVALID_RECIPIENT, non-retriable) when a template resolves to a non-email, and does not send', async () => {
+        // A missing template variable expands to '' — not a valid email. This
+        // must fail before any send, and non-retriably (a bad address won't fix
+        // itself on retry).
+        vi.mocked(interpolatePrompt).mockImplementation((template: string) =>
+          template === '{{input.userEmail}}' ? '' : template
+        );
+
+        await expect(
+          executor(makeEmailStep({ to: '{{input.userEmail}}' }), makeCtx())
+        ).rejects.toMatchObject({
+          name: 'ExecutorError',
+          code: 'INVALID_RECIPIENT',
+          retriable: false,
+        });
+
+        expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+      });
+
+      it('throws INVALID_RECIPIENT when one recipient in a templated array is invalid', async () => {
+        vi.mocked(interpolatePrompt).mockImplementation((template: string) => {
+          if (template === '{{input.a}}') return 'a@example.com';
+          if (template === '{{input.b}}') return 'nope';
+          return template;
+        });
+
+        await expect(
+          executor(makeEmailStep({ to: ['{{input.a}}', '{{input.b}}'] }), makeCtx())
+        ).rejects.toMatchObject({ name: 'ExecutorError', code: 'INVALID_RECIPIENT' });
+
+        expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+      });
+
+      // Guard the doc-vs-implementation contract with the REAL interpolator, not
+      // the per-test stub. `interpolatePrompt` resolves a top-level `{{input.x}}`
+      // key but has NO `{{trigger.*}}` namespace, so the documented example must
+      // be `{{input.userEmail}}`. These two tests would fail if the docs (or a
+      // fork) reverted to `{{trigger.userEmail}}`, which silently resolves to ''.
+      describe('against the real interpolatePrompt', () => {
+        beforeEach(() => {
+          vi.mocked(interpolatePrompt).mockImplementation((template, ctx, prev) =>
+            realInterpolatePrompt(template, ctx, prev)
+          );
+        });
+
+        it('resolves a top-level {{input.userEmail}} to the run’s inputData value', async () => {
+          await executor(
+            makeEmailStep({ to: '{{input.userEmail}}' }),
+            makeCtx({ inputData: { userEmail: 'brief@example.com' } })
+          );
+
+          expect(vi.mocked(sendEmail)).toHaveBeenCalledWith(
+            expect.objectContaining({ to: 'brief@example.com' })
+          );
+        });
+
+        it('rejects {{trigger.userEmail}} — no such namespace, so it resolves to "" and fails', async () => {
+          // The real interpolator has no `trigger.` branch; the token expands to
+          // '' and the runtime email check throws. This pins that the flagship
+          // example uses `input.`, not the non-functional `trigger.` convention.
+          await expect(
+            executor(
+              makeEmailStep({ to: '{{trigger.userEmail}}' }),
+              makeCtx({ inputData: { userEmail: 'brief@example.com' } })
+            )
+          ).rejects.toMatchObject({ name: 'ExecutorError', code: 'INVALID_RECIPIENT' });
+
+          expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+        });
+      });
     });
 
     it('throws ExecutorError(EMAIL_SEND_FAILED, retriable) when sendEmail returns status "failed"', async () => {

@@ -12,6 +12,7 @@ import {
   cuidSchema,
   slugSchema,
   queryBooleanSchema,
+  capabilityScopeSchema,
 } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
 import { checkSafeProviderUrl, isSafeProviderUrl } from '@/lib/security/safe-url';
@@ -2220,6 +2221,10 @@ export const executeWorkflowBodySchema = z.object({
     .positive('Budget limit must be positive')
     .max(1000, 'Budget limit must be at most $1,000')
     .optional(),
+  // Optional scope carrier for this manual run — a trusted admin explicitly
+  // choosing the scope capabilities inside the run should enforce. Threaded
+  // into `ExecuteOptions.scope`; absent = unscoped (unchanged behaviour).
+  scope: capabilityScopeSchema.optional(),
 });
 
 /**
@@ -2968,6 +2973,16 @@ export const turnEntrySchema = z.union([
 
 export const turnEntriesSchema = z.array(turnEntrySchema);
 
+/**
+ * Shape of the persisted `AiWorkflowExecution.scope` carrier — the shared
+ * `capabilityScopeSchema` contract (a flat string→string map mirroring
+ * `CapabilityContext.scope`), aliased for workflow call sites. Parsed on the
+ * crash-resume path before the value is rethreaded into the rebuilt
+ * `ExecutionContext`; a malformed payload is dropped (run continues unscoped)
+ * rather than failing the resume.
+ */
+export const workflowScopeSchema = capabilityScopeSchema;
+
 export const executionTraceEntrySchema = z
   .object({
     stepId: z.string(),
@@ -3637,10 +3652,34 @@ export const parallelConfigSchema = stepErrorConfigSchema.extend({
   stragglerStrategy: z.enum(['wait-all', 'first-success']).optional(),
 });
 
+/**
+ * A `send_notification` email recipient. Either a literal address (validated
+ * as an email when the step config is parsed at execution start — unchanged
+ * behaviour) or a template containing `{{…}}` whose resolved value is validated
+ * at runtime by the executor. This lets a per-user scheduled workflow template the recipient
+ * (`to: '{{input.userEmail}}'`) while still catching a mistyped literal
+ * (e.g. `simon@`) early. Shared with the executor's runtime schema so the
+ * two can't drift. See `lib/orchestration/engine/executors/notification.ts`.
+ */
+const RECIPIENT_TEMPLATE_TOKEN = /\{\{/;
+const notificationRecipientSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => RECIPIENT_TEMPLATE_TOKEN.test(value) || z.string().email().safeParse(value).success,
+    { message: 'must be a valid email address or a template (e.g. {{input.userEmail}})' }
+  );
+
+/** `to` accepts a single recipient or a non-empty list of them. */
+export const notificationToSchema = z.union([
+  notificationRecipientSchema,
+  z.array(notificationRecipientSchema).min(1),
+]);
+
 export const sendNotificationConfigSchema = z.discriminatedUnion('channel', [
   stepErrorConfigSchema.extend({
     channel: z.literal('email'),
-    to: z.union([z.string().email(), z.array(z.string().email()).min(1)]),
+    to: notificationToSchema,
     subject: z.string().min(1).max(200),
     bodyTemplate: z.string().min(1).max(10_000),
     // Opt-in: 'failed' tells the engine to finalise the workflow as
@@ -3666,6 +3705,8 @@ export const createScheduleSchema = z.object({
   cronExpression: z.string().min(1).max(100),
   inputTemplate: z.record(z.string(), z.unknown()).optional(),
   isEnabled: z.boolean().optional(),
+  // Static scope carrier stamped onto every run this schedule fires.
+  scope: capabilityScopeSchema.optional(),
 });
 
 export const updateScheduleSchema = z.object({
@@ -3673,6 +3714,8 @@ export const updateScheduleSchema = z.object({
   cronExpression: z.string().min(1).max(100).optional(),
   inputTemplate: z.record(z.string(), z.unknown()).optional(),
   isEnabled: z.boolean().optional(),
+  // `null` clears the scope (unscoped); omit to leave unchanged.
+  scope: capabilityScopeSchema.nullable().optional(),
 });
 
 // ---------- Analytics Query ─────────────────────────────────────────────────
@@ -3920,6 +3963,21 @@ export type UpdateOrchestrationSettingsInput = z.infer<typeof updateOrchestratio
 // ---------------------------------------------------------------------------
 
 /**
+ * Bounded variant of the shared `scope` carrier (`capabilityScopeSchema`) for
+ * the PUBLIC consumer chat route. Same runtime shape — `Record<string, string>`
+ * threaded verbatim into `CapabilityContext.scope` — but this value arrives on
+ * an untrusted end-user request, so unlike the admin/persisted carrier it is
+ * bounded: at most 32 entries, keys ≤ 100 chars, values ≤ 500 chars. Keeps an
+ * unbounded map out of a public body while accepting any realistic scope
+ * (a handful of dimensions such as `{ module, role }`).
+ */
+const consumerScopeSchema = z
+  .record(z.string().max(100), z.string().max(500))
+  .refine((map) => Object.keys(map).length <= 32, {
+    message: 'scope may contain at most 32 entries',
+  });
+
+/**
  * Consumer chat request schema (POST /api/v1/chat/stream).
  * Simpler than admin — no contextType/contextId/entityContext.
  */
@@ -3939,6 +3997,20 @@ export const consumerChatRequestSchema = z.object({
 
   /** File attachments (images, documents) — max 10 per message, ~25 MB combined. */
   attachments: chatAttachmentsArraySchema.optional(),
+
+  /**
+   * Optional opaque scope carrier (see `CapabilityContext.scope`), threaded
+   * verbatim into every capability dispatch for this turn. Core names no keys
+   * and no built-in reads it, so it is inert in vanilla Sunrise; a fork uses it
+   * to surface-scope a conversation (e.g. `{ module, role }`) without having to
+   * shadow this route.
+   *
+   * SECURITY: this arrives from an untrusted end-user request. A fork that
+   * reads `scope` to make an ACCESS decision MUST re-validate it against the
+   * user's real entitlements server-side — a consumer-supplied scope is a
+   * routing/context hint, never proof of authorization.
+   */
+  scope: consumerScopeSchema.optional(),
 });
 
 /** Consumer conversations list query (GET /api/v1/chat/conversations). */

@@ -38,8 +38,10 @@ concurrency:
 # Raise Node's heap cap globally. It is a ceiling, not a reservation: on a 16GB
 # public runner it is never approached; on a 7GB private-fork runner it stops
 # `tsc` / `next build` OOMing (exit 134) when Node's default heap caps near ~2GB.
+# ConQuest override: base Sunrise fits in 5120, but this fork's added code pushes
+# type-aware ESLint past 5GB (exit 134 in CI), so we raise the ceiling to 8192.
 env:
-  NODE_OPTIONS: '--max-old-space-size=5120'
+  NODE_OPTIONS: '--max-old-space-size=8192'
 
 jobs:
   config:
@@ -154,6 +156,14 @@ jobs:
         if: needs.config.outputs.code == 'true'
         run: npm run lint
       - run: npm run format:check
+      # Fork-owned CI checks seam. A fork adds an `app:ci-checks` script to
+      # package.json (a boundary check, migration-hygiene lint, etc.); vanilla
+      # Sunrise ships no such script, so `--if-present` makes this a no-op here
+      # — no ci.yml edit required downstream. Gated on the code filter like
+      # ESLint above (skip on docs-only PRs). See CUSTOMIZATION.md §4.
+      - name: Fork checks (if present)
+        if: needs.config.outputs.code == 'true'
+        run: npm run app:ci-checks --if-present
 
   build:
     name: Build

@@ -113,8 +113,7 @@ export const answerExtractionJsonSchema: Record<string, unknown> = z.toJSONSchem
 
 /** Discriminated result of validating a parsed candidate against the contract. */
 export type AnswerExtractionValidation =
-  | { ok: true; value: AnswerExtraction }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: AnswerExtraction } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /**
  * Validate an already-JSON-parsed value against {@link answerExtractionSchema}.

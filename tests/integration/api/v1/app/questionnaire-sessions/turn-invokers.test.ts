@@ -38,6 +38,11 @@ const structuredMock = vi.hoisted(() => ({
   tryParseJson: vi.fn(),
 }));
 vi.mock('@/lib/orchestration/evaluations/parse-structured', () => structuredMock);
+// runStructuredCompletion moved to its own module (Sunrise #417); mock it there
+// with the same hoisted fn so the assertions below keep observing calls.
+vi.mock('@/lib/orchestration/llm/structured-completion', () => ({
+  runStructuredCompletion: structuredMock.runStructuredCompletion,
+}));
 
 const logCostMock = vi.hoisted(() => ({
   logCost: vi.fn().mockResolvedValue(null),

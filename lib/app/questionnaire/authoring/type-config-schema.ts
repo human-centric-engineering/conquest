@@ -272,8 +272,7 @@ export function isMatrixLabelled(typeConfig: unknown): boolean {
 
 /** Discriminated result of validating a `typeConfig` against its question type. */
 export type TypeConfigValidation =
-  | { ok: true; value: unknown }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: unknown } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /**
  * Validate a raw `typeConfig` against `type`. On success, `value` is the parsed

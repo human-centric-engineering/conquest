@@ -157,6 +157,7 @@ interface ExecutionContext {
   workflowId: string;
   userId: string;
   inputData: Record<string, unknown>;
+  scope?: Record<string, string>; // free-form scope carrier — see below
   stepOutputs: Record<string, unknown>; // keyed by step.id
   variables: Record<string, unknown>; // planner scratchpad
   totalTokensUsed: number;
@@ -167,6 +168,10 @@ interface ExecutionContext {
   stepTelemetry?: LlmTelemetryEntry[]; // see "LLM telemetry capture" below
 }
 ```
+
+**Scope carrier.** `scope` mirrors `CapabilityContext.scope` — an optional, free-form string map the engine forwards verbatim into the `CapabilityContext` for every capability dispatch: the `tool_call` executor and the `agent_call` tool-use loop (and therefore `orchestrator`, which delegates through `agent_call`), so a capability can refuse to run outside its intended scope. Set it via `ExecuteOptions.scope`; the engine persists it on `AiWorkflowExecution.scope` so it survives crash-resume (the resume path reads it back via the shared `resolvePersistedScope` helper in `lib/orchestration/scope.ts`, validated against `workflowScopeSchema`, and rethreads it — a malformed payload is dropped and the run continues unscoped). Core names no keys and no built-in capability reads it; `NULL`/unset leaves behaviour unchanged.
+
+Scope flows through the whole execution graph: `OrchestrationEngine.execute` (fresh-run) and crash-resume carry it, the **rerun** endpoint inherits the original run's scope, and the `run_workflow` capability inherits the parent's scope into a sub-workflow — so a capability at any depth sees the run's scope. **Populators** stamp a scope at the entry points that create execution rows: the MCP key (`McpApiKey.scope`), the scheduler (`AiWorkflowSchedule.scope`) and inbound triggers (`AiWorkflowTrigger.scope`) — each validated on read via `resolvePersistedScope` — plus the admin execute / execute-stream routes (a trusted admin passing a `scope` for a manual run). The generic webhook trigger stays deliberately unscoped: a scoped event trigger is expressed through the inbound-adapter seam. Inbound triggers additionally accept a **payload-derived** scope — an adapter's `normalise()` may return a `scope` computed from the verified request body, which the route validates and shallow-merges under the static `AiWorkflowTrigger.scope` (operator config wins on key conflicts). None of this touches the engine: the row already supports a persisted `scope`, so populated values flow through unchanged.
 
 Executors receive a **frozen snapshot** (via `snapshotContext()`) so they cannot silently mutate totals or sibling outputs. They return a `StepResult { output, tokensUsed, costUsd, nextStepIds?, skipped?, skipError? }`; the engine merges that back into the live context via `mergeStepResult()` and checkpoints. When `skipped` is true (set by the `skip` error strategy), the engine records a `'skipped'` trace entry and `skipError` carries the sanitised error message for SSE event emission.
 
@@ -191,9 +196,9 @@ Every step + LLM call + capability dispatch is wrapped in an OTEL span via the h
 
 See [`tracing.md`](tracing.md) for the full guide — span tree, attribute reference, sampling, bootstrap recipes (Datadog / Honeycomb / Tempo / Langfuse), span-status semantics, and anti-patterns.
 
-Template interpolation (`{{input}}`, `{{input.key}}`, `{{previous.output}}`, `{{<stepId>.output}}`) is applied inside `llm-runner.ts` and reads from the snapshot — so any step that ran earlier in the walk is addressable by id.
+Template interpolation (`{{input}}`, `{{input.key}}`, `{{previous.output}}`, `{{<stepId>.output}}`, `{{vars.<path>}}`, `{{trigger.<path>}}`) is applied inside `llm-runner.ts` and reads from the snapshot — so any step that ran earlier in the walk is addressable by id. `{{trigger.<path>}}` reads an inbound-triggered run's data — the verified adapter payload at `inputData.trigger`, falling back to the resolved envelope at `inputData.triggerMeta` (channel, conversationId, …). So `{{trigger.text}}` reads the payload and `{{trigger.conversationId}}` the envelope (the payload never carries the conversation id). Empty for non-inbound runs, and it works inside `{{#if …}}` conditionals too.
 
-**Template limitations:** Interpolation supports one level of property access (`{{input.key}}`) but not deeper paths (`{{input.key.nested}}`). For nested data, flatten in an intermediate step or use an LLM step to extract the needed value. Interpolated values have no per-value size limit — very large objects will be serialised in full and sent to the LLM provider, relying on the provider's token limit to reject oversized prompts. The workflow execution body is capped at 256 KB for `inputData` to prevent oversized payloads.
+**Template limitations:** `{{input.key}}` supports one level of property access, not deeper paths (`{{input.key.nested}}`) — for nested `input` data, flatten in an intermediate step or use an LLM step to extract the value. (`{{vars.<path>}}` and `{{trigger.<path>}}` **do** walk dotted paths.) Interpolated values have no per-value size limit — very large objects will be serialised in full and sent to the LLM provider, relying on the provider's token limit to reject oversized prompts. The workflow execution body is capped at 256 KB for `inputData` to prevent oversized payloads.
 
 ## Executor registry
 

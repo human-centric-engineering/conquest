@@ -28,9 +28,9 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import {
   runStructuredCompletion,
-  tryParseJson,
   type StructuredCompletionResult,
-} from '@/lib/orchestration/evaluations/parse-structured';
+} from '@/lib/orchestration/llm/structured-completion';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 
 import { REPAIR_QUESTIONS_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
 import type { ExtractedQuestion } from '@/lib/app/questionnaire/ingestion/extraction-schema';

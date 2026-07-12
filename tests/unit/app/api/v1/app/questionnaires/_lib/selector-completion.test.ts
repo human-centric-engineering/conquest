@@ -17,9 +17,9 @@ vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
 }));
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
 vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({ logCost: vi.fn() }));
-// Keep the real `tryParseJson` (parseSelectorOutput depends on it); only stub the completion runner.
-vi.mock('@/lib/orchestration/evaluations/parse-structured', async (importOriginal) => ({
-  ...(await importOriginal<object>()),
+// parseSelectorOutput depends on the real `tryParseJson`, so leave that module
+// unmocked; only stub the completion runner (now in its own module).
+vi.mock('@/lib/orchestration/llm/structured-completion', () => ({
   runStructuredCompletion: vi.fn(),
 }));
 const loggerMock = vi.hoisted(() => ({
@@ -41,7 +41,7 @@ import { prisma } from '@/lib/db/client';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
-import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 
 type Mock = ReturnType<typeof vi.fn>;
 

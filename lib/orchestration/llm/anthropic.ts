@@ -563,10 +563,7 @@ function toAnthropicBlocks(parts: ContentPart[]): ContentBlockParam[] {
           source: {
             type: 'base64',
             media_type: part.source.mediaType as
-              | 'image/jpeg'
-              | 'image/png'
-              | 'image/gif'
-              | 'image/webp',
+              'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
             data: part.source.data,
           },
         });

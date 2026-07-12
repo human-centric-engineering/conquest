@@ -25,8 +25,7 @@ export type InviteeProfile = Partial<Record<InviteeFieldKey, string>>;
 
 /** Outcome of validating a raw invitee submission against a version's `inviteeFields`. */
 export type InviteeProfileResult =
-  | { ok: true; values: InviteeProfile }
-  | { ok: false; message: string };
+  { ok: true; values: InviteeProfile } | { ok: false; message: string };
 
 /** Zod shape for one stored field-config entry. */
 const inviteeFieldConfigSchema = z.object({

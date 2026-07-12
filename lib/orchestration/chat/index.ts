@@ -17,4 +17,22 @@ export {
   buildContext,
   invalidateContext,
   clearContextCache,
+  registerContextContributor,
 } from '@/lib/orchestration/chat/context-builder';
+export type { ContextRequest } from '@/lib/orchestration/chat/context-builder';
+export { registerGuardFloorContributor } from '@/lib/orchestration/chat/guard-floor';
+export type {
+  GuardKind,
+  GuardMode,
+  GuardFloors,
+  GuardFloorRequest,
+  GuardFloorContributor,
+} from '@/lib/orchestration/chat/guard-floor';
+export { registerGuardEventContributor } from '@/lib/orchestration/chat/guard-events';
+export type {
+  GuardEventContext,
+  GuardEvent,
+  GuardEventContributor,
+} from '@/lib/orchestration/chat/guard-events';
+export { findResumableConversation } from '@/lib/orchestration/chat/resume-conversation';
+export type { ResumableConversationQuery } from '@/lib/orchestration/chat/resume-conversation';

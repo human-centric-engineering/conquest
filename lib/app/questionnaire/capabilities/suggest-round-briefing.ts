@@ -29,11 +29,11 @@ import {
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import {
   runStructuredCompletion,
-  tryParseJson,
   type StructuredCompletionResult,
-} from '@/lib/orchestration/evaluations/parse-structured';
+} from '@/lib/orchestration/llm/structured-completion';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { SUGGEST_ROUND_BRIEFING_FUNCTION_DEFINITION } from '@/lib/app/questionnaire/constants';
 import { SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
