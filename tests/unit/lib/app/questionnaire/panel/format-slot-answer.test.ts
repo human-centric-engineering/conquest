@@ -82,6 +82,23 @@ describe('formatSlotAnswer', () => {
       expect(formatSlotAnswer('likert', { min: 1, max: 5 }, 3)).toBe('3');
       expect(formatSlotAnswer('likert', LIKERT, 9)).toBe('9');
     });
+
+    it('renders the point over its range with the anchor wording for an endpoint-anchored scale', () => {
+      const ANCHORED = { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' };
+      expect(formatSlotAnswer('likert', ANCHORED, 4)).toBe('4/5 — Not at all → Very much');
+    });
+
+    it('falls back to the bare number for an endpoint-anchored scale when the value is out of range', () => {
+      const ANCHORED = { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Very much' };
+      expect(formatSlotAnswer('likert', ANCHORED, 9)).toBe('9');
+    });
+
+    it('falls back to the bare number for a half-anchored scale (only one endpoint label)', () => {
+      // The read schema is lenient, so a legacy row may carry just one endpoint. The anchor
+      // renderer needs BOTH ends to be meaningful, so it degrades to the plain value.
+      expect(formatSlotAnswer('likert', { min: 1, max: 5, minLabel: 'Not at all' }, 4)).toBe('4');
+      expect(formatSlotAnswer('likert', { min: 1, max: 5, maxLabel: 'Very much' }, 4)).toBe('4');
+    });
   });
 
   it('renders an em-dash for a nullish answer regardless of type', () => {
@@ -104,5 +121,48 @@ describe('formatSlotAnswer', () => {
 
   it('renders an em-dash for a blank free-text string', () => {
     expect(formatSlotAnswer('free_text', null, '   ')).toBe('—');
+  });
+
+  it('formats a matrix answer as per-row scale points (not raw JSON)', () => {
+    const config = {
+      rows: [
+        { key: 'fuel', label: 'Fuel efficiency' },
+        { key: 'comfort', label: 'Comfort' },
+      ],
+      scale: {
+        min: 1,
+        max: 5,
+        labels: ['Not important', 'Slight', 'Moderate', 'High', 'Essential'],
+      },
+    };
+    const out = formatSlotAnswer('matrix', config, { fuel: 5, comfort: 2 });
+    expect(out).toBe('Fuel efficiency: Essential; Comfort: Slight');
+  });
+
+  it('formats a matrix on an endpoint-anchored scale with the point over its range', () => {
+    const config = {
+      rows: [{ key: 'fuel', label: 'Fuel efficiency' }],
+      scale: { min: 1, max: 5, minLabel: 'Not important', maxLabel: 'Essential' },
+    };
+    expect(formatSlotAnswer('matrix', config, { fuel: 4 })).toBe(
+      'Fuel efficiency: 4/5 — Not important → Essential'
+    );
+  });
+
+  it('renders an em-dash for a matrix that rated nothing', () => {
+    const config = {
+      rows: [{ key: 'fuel', label: 'Fuel efficiency' }],
+      scale: { min: 1, max: 5, minLabel: 'Low', maxLabel: 'High' },
+    };
+    expect(formatSlotAnswer('matrix', config, {})).toBe('—');
+  });
+
+  it('falls back to raw value formatting when the matrix config is unreadable', () => {
+    // readMatrixConfig returns null (no scale) → the row-label prose path is skipped and
+    // the stored map is rendered verbatim, never blank and never a thrown error.
+    expect(formatSlotAnswer('matrix', null, { fuel: 5 })).toBe('{"fuel":5}');
+    expect(
+      formatSlotAnswer('matrix', { rows: [{ key: 'fuel', label: 'Fuel' }] }, { fuel: 5 })
+    ).toBe('{"fuel":5}');
   });
 });

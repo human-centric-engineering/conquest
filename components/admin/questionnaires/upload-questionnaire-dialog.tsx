@@ -3,16 +3,17 @@
 /**
  * UploadQuestionnaireDialog — the admin trigger for ingesting a *new* questionnaire.
  *
- * Uploads a source document to `POST /api/v1/app/questionnaires`, which extracts
- * its structure and creates a draft questionnaire. Optional admin metadata (goal +
- * audience) overrides what the extractor would otherwise infer — every override
- * field left blank is inferred. On success the dialog routes to the new
- * questionnaire's detail page so the admin lands on the freshly extracted draft.
+ * Uploads a source document to `POST /api/v1/app/questionnaires/stream`, which
+ * extracts its structure and creates a draft questionnaire, streaming progress over
+ * SSE so a multi-page PDF never trips a synchronous request timeout. Optional admin
+ * metadata (goal + audience) overrides what the extractor would otherwise infer —
+ * every override field left blank is inferred. On the terminal `done` event the dialog
+ * routes to the new questionnaire's detail page so the admin lands on the fresh draft.
  *
- * Multipart, so it `fetch`es a `FormData` body directly (the JSON authoring runner
- * doesn't fit). Mirrors the structure of {@link file://./reingest-dialog.tsx} but
- * creates rather than replaces — so no destructive warning, and it captures full
- * metadata up front.
+ * Multipart request / SSE response, so it `fetch`es a `FormData` body and reads the
+ * stream directly (the JSON authoring runner doesn't fit). Mirrors the structure of
+ * {@link file://./reingest-dialog.tsx} but creates rather than replaces — so no
+ * destructive warning, and it captures full metadata up front.
  */
 
 import { useId, useRef, useState } from 'react';
@@ -41,12 +42,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
-import {
-  StatusTicker,
-  estimateExtractionMs,
-} from '@/components/admin/questionnaires/status-ticker';
+import { ExtractionProgress } from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
+import { parseSseBlock } from '@/lib/api/sse-parser';
 import {
   AUDIENCE_EXPERTISE_LEVELS,
   AUDIENCE_SENSITIVITY_LEVELS,
@@ -140,9 +139,13 @@ export function UploadQuestionnaireDialog({
   const [sensitivity, setSensitivity] = useState<string>(INFER);
   const [notes, setNotes] = useState('');
   const [requiredMode, setRequiredMode] = useState<'all' | 'source'>('all');
-  const [extractTables, setExtractTables] = useState(false);
+  // On by default — questionnaires are table-dense (rating grids, scales, option lists) and the
+  // table pass self-detects (merges only when tables are found). The checkbox is an override.
+  const [extractTables, setExtractTables] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [estimatedMs, setEstimatedMs] = useState<number | undefined>(undefined);
+  // The latest REAL phase message streamed from the ingest route (extracting → verifying →
+  // repairing → saving). Rendered live during the upload — no scripted ticker.
+  const [phase, setPhase] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
@@ -158,10 +161,10 @@ export function UploadQuestionnaireDialog({
     setSensitivity(INFER);
     setNotes('');
     setRequiredMode('all');
-    setExtractTables(false);
+    setExtractTables(true);
     setError(null);
     setBusy(false);
-    setEstimatedMs(undefined);
+    setPhase('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -173,7 +176,7 @@ export function UploadQuestionnaireDialog({
       return;
     }
 
-    setEstimatedMs(estimateExtractionMs(file.size, file.name));
+    setPhase('');
     setBusy(true);
     setError(null);
 
@@ -199,24 +202,79 @@ export function UploadQuestionnaireDialog({
       if (sensitivity !== INFER) body.set('audience.sensitivity', sensitivity);
       setIfPresent('audience.notes', notes);
       body.set('requiredMode', requiredMode);
-      if (extractTables) body.set('extractTables', 'true');
+      // Always send the explicit value — the server defaults to on, so unchecking must
+      // send 'false' to override rather than just omitting the field.
+      body.set('extractTables', String(extractTables));
 
-      // Multipart — do NOT set Content-Type; the browser adds the boundary.
-      const res = await fetch(API.APP.QUESTIONNAIRES.ROOT, {
+      // Multipart request, SSE response — extraction can outrun a synchronous request's
+      // idle timeout on a multi-page PDF, so the server streams the work and hands back
+      // the new draft's ids on a terminal `done` event. Do NOT set Content-Type; the
+      // browser adds the multipart boundary.
+      const res = await fetch(API.APP.QUESTIONNAIRES.ingestStream, {
         method: 'POST',
         credentials: 'same-origin',
         body,
       });
-      const parsed = await parseApiResponse<UploadResult>(res);
-      if (!parsed.success) {
-        setError(parsed.error.message);
+
+      // A non-2xx (rate limit, flag off, validation, missing demo client) returns the
+      // JSON error envelope, not a stream — surface its message.
+      if (!res.ok || !res.body) {
+        let message = 'Upload failed. Please try again.';
+        try {
+          const parsed = await parseApiResponse<UploadResult>(res);
+          if (!parsed.success) message = parsed.error.message;
+        } catch {
+          // Non-JSON body — keep the default message.
+        }
+        setError(message);
         setBusy(false);
         return;
       }
+
+      // Consume the event stream: `done` carries the ids to open, `error` a message.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let questionnaireId: string | null = null;
+      let streamError: string | null = null;
+
+      streamLoop: while (true) {
+        const { value, done: finished } = await reader.read();
+        if (finished) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseBlock(block);
+          if (parsed) {
+            if (parsed.type === 'phase' && typeof parsed.data.message === 'string') {
+              // Real progress — render the actual phase (extracting / verifying / repairing / saving).
+              setPhase(parsed.data.message);
+            } else if (parsed.type === 'done' && typeof parsed.data.questionnaireId === 'string') {
+              questionnaireId = parsed.data.questionnaireId;
+            } else if (parsed.type === 'error') {
+              streamError =
+                typeof parsed.data.message === 'string'
+                  ? parsed.data.message
+                  : 'Extraction failed. Please try again.';
+              break streamLoop;
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+
+      if (streamError || !questionnaireId) {
+        setError(streamError ?? 'Upload failed. Please try again.');
+        setBusy(false);
+        return;
+      }
+
       // Land on the freshly extracted draft. Keep busy=true so the form stays
       // disabled during navigation rather than flashing re-enabled.
       setOpen(false);
-      router.push(`/admin/questionnaires/${parsed.data.questionnaireId}`);
+      router.push(`/admin/questionnaires/${questionnaireId}`);
     } catch {
       setError('Upload failed. Please try again.');
       setBusy(false);
@@ -546,12 +604,14 @@ export function UploadQuestionnaireDialog({
               Extract tables from PDF
             </Label>
             <FieldHelp title="Extract tables from PDF">
-              Parse tabular layout in PDFs into text rows before extraction. Slower; only helps when
-              the document’s questions live in tables.
+              On by default. Rating grids, 1–5 scales, and option lists are usually tables in a PDF,
+              so parsing tabular layout into text rows lets the extractor read them correctly. It
+              only affects PDFs and is applied only where tables are actually found — untick it to
+              force it off.
             </FieldHelp>
           </div>
 
-          {busy && <StatusTicker estimatedMs={estimatedMs} />}
+          {busy && <ExtractionProgress message={phase} />}
           {error && <p className="text-destructive text-sm">{error}</p>}
 
           <DialogFooter>

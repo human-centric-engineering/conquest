@@ -38,8 +38,10 @@ concurrency:
 # Raise Node's heap cap globally. It is a ceiling, not a reservation: on a 16GB
 # public runner it is never approached; on a 7GB private-fork runner it stops
 # `tsc` / `next build` OOMing (exit 134) when Node's default heap caps near ~2GB.
+# ConQuest override: base Sunrise fits in 5120, but this fork's added code pushes
+# type-aware ESLint past 5GB (exit 134 in CI), so we raise the ceiling to 8192.
 env:
-  NODE_OPTIONS: '--max-old-space-size=5120'
+  NODE_OPTIONS: '--max-old-space-size=8192'
 
 jobs:
   config:

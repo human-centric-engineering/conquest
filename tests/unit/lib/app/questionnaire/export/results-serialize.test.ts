@@ -115,7 +115,11 @@ describe('renderAnswerValue', () => {
     expect(renderAnswerValue(true)).toBe('true');
     expect(renderAnswerValue(false)).toBe('false');
     expect(renderAnswerValue(['a', 'b', 'c'])).toBe('a, b, c');
-    expect(renderAnswerValue({ city: 'London' })).toBe('{"city":"London"}');
+    // Composite answers (a matrix's `{ rowKey: point }` map) render as flat key=value pairs —
+    // spreadsheet-friendly and faithful — not raw JSON.
+    expect(renderAnswerValue({ fuel_efficiency: 5, reliability: 3 })).toBe(
+      'fuel_efficiency=5; reliability=3'
+    );
   });
 });
 

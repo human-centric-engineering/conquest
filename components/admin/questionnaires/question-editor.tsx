@@ -68,6 +68,37 @@ function asChoices(config: unknown): Choice[] {
   return Array.isArray(choices) ? (choices as Choice[]) : [];
 }
 
+/** One matrix row: its stable key + display label. */
+interface MatrixRow {
+  key: string;
+  label: string;
+}
+
+function asMatrixRows(config: unknown): MatrixRow[] {
+  const rows = asRecord(config).rows;
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter(
+      (r): r is Record<string, unknown> =>
+        r !== null &&
+        typeof r === 'object' &&
+        typeof (r as Record<string, unknown>).key === 'string'
+    )
+    .map((r) => ({ key: r.key as string, label: typeof r.label === 'string' ? r.label : '' }));
+}
+
+/** The matrix's shared scale sub-object (`{ min, max, minLabel, maxLabel, labels }`). */
+function asScale(config: unknown): {
+  min?: number;
+  max?: number;
+  minLabel?: string;
+  maxLabel?: string;
+  labels?: string[];
+} {
+  const s = asRecord(config).scale;
+  return s && typeof s === 'object' ? s : {};
+}
+
 function asBounds(config: unknown): { min?: number; max?: number } {
   const r = asRecord(config);
   return { min: r.min as number | undefined, max: r.max as number | undefined };
@@ -254,6 +285,9 @@ export function QuestionEditor({
               busy={busy}
               onSave={saveTypeConfig}
             />
+          )}
+          {question.type === 'matrix' && (
+            <MatrixEditor config={question.typeConfig} busy={busy} onSave={saveTypeConfig} />
           )}
 
           {/* Tag assignment */}
@@ -445,14 +479,22 @@ function BoundsEditor({
   const isLikert = type === 'likert';
   const bounds = asBounds(config);
   const toStr = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const asStr = (v: unknown) => (typeof v === 'string' ? v : '');
   const [min, setMin] = useState(toStr(bounds.min));
   const [max, setMax] = useState(toStr(bounds.max));
+  // Endpoint anchor labels — the faithful shape for a scale the source anchors only at its ends
+  // ("1 — Not at all … 5 — Very much"). The extractor and repair specialist store these; the
+  // report + respondent form render them; this editor authors them.
+  const [minLabel, setMinLabel] = useState(asStr(asRecord(config).minLabel));
+  const [maxLabel, setMaxLabel] = useState(asStr(asRecord(config).maxLabel));
   const [labels, setLabels] = useState<string[]>(asLabels(config));
 
   useEffect(() => {
     const b = asBounds(config);
     setMin(toStr(b.min));
     setMax(toStr(b.max));
+    setMinLabel(asStr(asRecord(config).minLabel));
+    setMaxLabel(asStr(asRecord(config).maxLabel));
     setLabels(asLabels(config));
   }, [config]);
 
@@ -466,17 +508,32 @@ function BoundsEditor({
       : 0;
   const pointLabels = Array.from({ length: pointCount }, (_, i) => labels[i] ?? '');
 
-  const saveWith = (nextLabels: string[]) => {
+  // A likert is labelled one of two faithful ways (see likertWriteConfigSchema): BOTH endpoint
+  // anchors, OR a complete per-point labels array. We write whichever the admin filled — endpoint
+  // anchors when present, and a per-point labels array only when EVERY point is named (an
+  // incomplete grid is dropped so it can't invalidate an otherwise endpoint-anchored scale).
+  const commit = (nextPointLabels: string[]) => {
     const next: Record<string, unknown> = { ...asRecord(config) };
     if (min === '') delete next.min;
     else next.min = Number(min);
     if (max === '') delete next.max;
     else next.max = Number(max);
-    if (isLikert) next.labels = nextLabels;
-    else delete next.labels;
+    if (isLikert) {
+      if (minLabel.trim()) next.minLabel = minLabel.trim();
+      else delete next.minLabel;
+      if (maxLabel.trim()) next.maxLabel = maxLabel.trim();
+      else delete next.maxLabel;
+      const allNamed = pointCount > 0 && nextPointLabels.every((l) => l.trim().length > 0);
+      if (allNamed) next.labels = nextPointLabels;
+      else delete next.labels;
+    } else {
+      delete next.labels;
+      delete next.minLabel;
+      delete next.maxLabel;
+    }
     const result = validateTypeConfig(type, next);
     if (result.ok) onSave(result.value);
-    // Invalid intermediate (min > max, a blank label) → keep editing, no doomed request.
+    // Invalid intermediate (min ≥ max, no labels at all yet) → keep editing, no doomed request.
   };
 
   return (
@@ -490,7 +547,7 @@ function BoundsEditor({
             className="h-7 w-20 text-xs"
             disabled={busy}
             onChange={(e) => setMin(e.target.value)}
-            onBlur={() => saveWith(pointLabels)}
+            onBlur={() => commit(pointLabels)}
           />
         </div>
         <div className="space-y-1">
@@ -501,45 +558,249 @@ function BoundsEditor({
             className="h-7 w-20 text-xs"
             disabled={busy}
             onChange={(e) => setMax(e.target.value)}
-            onBlur={() => saveWith(pointLabels)}
+            onBlur={() => commit(pointLabels)}
           />
         </div>
         {isLikert && (
           <FieldHelp title="Scale labels">
-            Label what each point on the scale <em>means</em> (e.g. <code>1</code> = “Very
-            dissatisfied”, <code>5</code> = “Very satisfied”). These labels appear in the
-            downloadable report instead of a bare number. Every point must be labelled — if the
-            question is a purely numeric rating with no qualitative meaning, switch its type to{' '}
-            <strong>Numeric</strong> instead.
+            A rating scale needs labels one of two ways: name just the <strong>two ends</strong>{' '}
+            (e.g. <code>1</code> = “I dislike it”, <code>5</code> = “I love it”) — the faithful
+            choice when the source anchors only its ends — <em>or</em> name{' '}
+            <strong>every point</strong> below. Either appears in the report and the respondent’s
+            scale instead of a bare number. A purely numeric rating with no qualitative meaning
+            should use the <strong>Numeric</strong> type instead.
           </FieldHelp>
         )}
       </div>
-      {isLikert && pointCount > 0 && (
-        <div className="bg-muted/40 grid gap-2 rounded-md p-2 sm:grid-cols-2">
-          {pointLabels.map((label, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="text-muted-foreground w-6 text-right font-mono text-xs tabular-nums">
-                {minNum + i}
-              </span>
+      {isLikert && (
+        <div className="bg-muted/40 space-y-3 rounded-md p-2">
+          {/* Endpoint anchors — the primary, faithful labelling for source-anchored scales. */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-muted-foreground text-[11px]">
+                Label for the lowest point{Number.isInteger(minNum) ? ` (${minNum})` : ''}
+              </Label>
               <Input
-                value={label}
-                placeholder={`Label for ${minNum + i}`}
+                value={minLabel}
+                placeholder="e.g. Not at all"
                 className="h-7 text-xs"
                 disabled={busy}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  // Reconcile against the latest committed labels (functional updater) rather than
-                  // a render-time snapshot, so a fast edit in another point can't clobber this one.
-                  setLabels((prev) =>
-                    Array.from({ length: pointCount }, (_, j) => (j === i ? next : (prev[j] ?? '')))
-                  );
-                }}
-                onBlur={() => saveWith(pointLabels)}
+                onChange={(e) => setMinLabel(e.target.value)}
+                onBlur={() => commit(pointLabels)}
               />
             </div>
-          ))}
+            <div className="space-y-1">
+              <Label className="text-muted-foreground text-[11px]">
+                Label for the highest point{Number.isInteger(maxNum) ? ` (${maxNum})` : ''}
+              </Label>
+              <Input
+                value={maxLabel}
+                placeholder="e.g. Very much"
+                className="h-7 text-xs"
+                disabled={busy}
+                onChange={(e) => setMaxLabel(e.target.value)}
+                onBlur={() => commit(pointLabels)}
+              />
+            </div>
+          </div>
+
+          {/* Optional: name every point (an alternative to endpoint anchors, for fully-named scales). */}
+          {pointCount > 0 && (
+            <details className="group" open={pointLabels.some((l) => l.trim().length > 0)}>
+              <summary className="text-muted-foreground cursor-pointer text-[11px] select-none">
+                Or name every point (optional)
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {pointLabels.map((label, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-6 text-right font-mono text-xs tabular-nums">
+                      {minNum + i}
+                    </span>
+                    <Input
+                      value={label}
+                      placeholder={`Label for ${minNum + i}`}
+                      className="h-7 text-xs"
+                      disabled={busy}
+                      onChange={(e) => {
+                        const nextVal = e.target.value;
+                        // Functional updater so a fast edit in another point can't clobber this one.
+                        setLabels((prev) =>
+                          Array.from({ length: pointCount }, (_, j) =>
+                            j === i ? nextVal : (prev[j] ?? '')
+                          )
+                        );
+                      }}
+                      onBlur={() => commit(pointLabels)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Rating-grid editor for the `matrix` type: one shared scale (range + endpoint anchor
+ * labels) plus a list of row items, each answered on that scale. Holds the scale + rows
+ * as local draft state, re-syncs from props on a server refetch, and only saves a config
+ * that passes the shared `validateTypeConfig` (distinct row keys + a labelled/anchored
+ * scale) — so a half-finished grid never fires a doomed 400. Any existing per-point
+ * `scale.labels` (from an extracted grid) are preserved untouched.
+ */
+function MatrixEditor({
+  config,
+  busy,
+  onSave,
+}: {
+  config: unknown;
+  busy: boolean;
+  onSave: (config: unknown) => void;
+}) {
+  const scale0 = asScale(config);
+  const toStr = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const [min, setMin] = useState(toStr(scale0.min));
+  const [max, setMax] = useState(toStr(scale0.max));
+  const [minLabel, setMinLabel] = useState(scale0.minLabel ?? '');
+  const [maxLabel, setMaxLabel] = useState(scale0.maxLabel ?? '');
+  const [rows, setRows] = useState<MatrixRow[]>(asMatrixRows(config));
+
+  useEffect(() => {
+    const s = asScale(config);
+    setMin(toStr(s.min));
+    setMax(toStr(s.max));
+    setMinLabel(s.minLabel ?? '');
+    setMaxLabel(s.maxLabel ?? '');
+    setRows(asMatrixRows(config));
+  }, [config]);
+
+  const save = (nextRows: MatrixRow[]) => {
+    const scaleOut: Record<string, unknown> = { ...asScale(config) };
+    if (min === '') delete scaleOut.min;
+    else scaleOut.min = Number(min);
+    if (max === '') delete scaleOut.max;
+    else scaleOut.max = Number(max);
+    if (minLabel.trim()) scaleOut.minLabel = minLabel.trim();
+    else delete scaleOut.minLabel;
+    if (maxLabel.trim()) scaleOut.maxLabel = maxLabel.trim();
+    else delete scaleOut.maxLabel;
+    const candidate = { ...asRecord(config), rows: nextRows, scale: scaleOut };
+    const result = validateTypeConfig('matrix', candidate);
+    if (result.ok) onSave(result.value);
+    // Invalid intermediate (blank label, duplicate/blank row key, min ≥ max) → keep editing.
+  };
+
+  return (
+    <div className="bg-muted/40 space-y-3 rounded-md p-2">
+      {/* Shared scale */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Min</Label>
+          <Input
+            type="number"
+            value={min}
+            className="h-7 w-16 text-xs"
+            disabled={busy}
+            onChange={(e) => setMin(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Max</Label>
+          <Input
+            type="number"
+            value={max}
+            className="h-7 w-16 text-xs"
+            disabled={busy}
+            onChange={(e) => setMax(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <div className="min-w-32 flex-1 space-y-1">
+          <Label className="text-xs">Low label</Label>
+          <Input
+            value={minLabel}
+            placeholder="e.g. Not important"
+            className="h-7 text-xs"
+            disabled={busy}
+            onChange={(e) => setMinLabel(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <div className="min-w-32 flex-1 space-y-1">
+          <Label className="text-xs">High label</Label>
+          <Input
+            value={maxLabel}
+            placeholder="e.g. Essential"
+            className="h-7 text-xs"
+            disabled={busy}
+            onChange={(e) => setMaxLabel(e.target.value)}
+            onBlur={() => save(rows)}
+          />
+        </div>
+        <FieldHelp title="Rating grid (matrix)">
+          A rating grid rates several row items on ONE shared scale. Set the scale’s range and label
+          its ends (e.g. <code>1</code> = “Not important”, <code>5</code> = “Essential”), then add a
+          row per item. Every row is answered on the same scale.
+        </FieldHelp>
+      </div>
+
+      {/* Rows */}
+      <div className="space-y-2">
+        <Label className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+          Rows
+        </Label>
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Input
+              value={r.label}
+              placeholder="Row label"
+              className="h-7 text-xs"
+              disabled={busy}
+              onChange={(e) =>
+                setRows(rows.map((d, j) => (j === i ? { ...d, label: e.target.value } : d)))
+              }
+              onBlur={() => save(rows)}
+            />
+            <Input
+              value={r.key}
+              placeholder="key"
+              className="h-7 w-32 font-mono text-xs"
+              disabled={busy}
+              onChange={(e) =>
+                setRows(rows.map((d, j) => (j === i ? { ...d, key: e.target.value } : d)))
+              }
+              onBlur={() => save(rows)}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              disabled={busy || rows.length <= 1}
+              aria-label="Remove row"
+              onClick={() => {
+                const next = rows.filter((_, j) => j !== i);
+                setRows(next);
+                save(next);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          disabled={busy}
+          onClick={() => setRows([...rows, { key: `row_${rows.length + 1}`, label: '' }])}
+        >
+          Add row
+        </Button>
+      </div>
     </div>
   );
 }

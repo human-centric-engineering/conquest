@@ -119,26 +119,31 @@ Editorial decisions you SHOULD make:
 - Correct spelling and grammar in prompts.
 - Rewrite terse or ambiguous prompts into clear, self-contained questions.
 - Infer each question's answer type from one of: ${QUESTION_TYPES.join(', ')}.
-- For a "likert" scale, ALWAYS include in "suggestedTypeConfig": integer "min" and "max", \
-and a "labels" array with one short human-readable label per point — in order from "min" to \
-"max", length exactly (max − min + 1). These labels are what the respondent picks from and what \
-the final report shows instead of a bare number, so they MUST read naturally as an answer to THIS \
-question's wording. Choose the label family that fits the question's stem — do NOT default to \
-agree/disagree:
-  · agreement ("…it is true that…", a statement to endorse) → "Strongly disagree → Strongly agree"
-  · extent / degree ("to what extent…", "how much…") → "Not at all","To a small extent","To a moderate extent","To a great extent","To a very great extent"
-  · frequency ("how often…", "how regularly…") → "Never","Rarely","Sometimes","Often","Always"
-  · satisfaction ("how satisfied…") → "Very dissatisfied → Very satisfied"
-  · quality / performance ("how would you rate…") → "Very poor → Excellent"
-  · likelihood ("how likely…") → "Very unlikely → Very likely"
-  · importance ("how important…") → "Not at all important → Extremely important"
-These are illustrative ramps for a 1–5 scale — adapt the wording to the question and interpolate \
-evenly for other lengths. If the source already gives anchor wording, follow it and infer sensible \
-in-between points. When no family clearly fits, use a neutral intensity ramp ("Very low → Very high") \
-rather than forcing agreement.
-- Use "likert" ONLY when each point carries a qualitative meaning. If a question asks for a \
-purely numeric rating with no qualitative scale (e.g. "rate 0–10", a count, an age, a percentage), \
-use "numeric" instead — numeric questions need no labels.
+- For a "likert" scale, ALWAYS include in "suggestedTypeConfig" integer "min" and "max". Then label \
+the scale ONE of two faithful ways, matching what the SOURCE actually provides — never invent \
+wording the source doesn't support:
+  (a) FULL labels — a "labels" array with one short human-readable label per point (in order from \
+"min" to "max", length exactly (max − min + 1)), when the source names every point OR clearly \
+implies a full ramp. These are what the respondent picks from and what the report shows instead of a \
+bare number, so they MUST read naturally as an answer to THIS question's wording. Choose the label \
+family that fits the stem — do NOT default to agree/disagree:
+    · agreement ("…it is true that…", a statement to endorse) → "Strongly disagree → Strongly agree"
+    · extent / degree ("to what extent…", "how much…") → "Not at all","To a small extent","To a moderate extent","To a great extent","To a very great extent"
+    · frequency ("how often…", "how regularly…") → "Never","Rarely","Sometimes","Often","Always"
+    · satisfaction ("how satisfied…") → "Very dissatisfied → Very satisfied"
+    · quality / performance ("how would you rate…") → "Very poor → Excellent"
+    · likelihood ("how likely…") → "Very unlikely → Very likely"
+    · importance ("how important…") → "Not at all important → Extremely important"
+  (b) ENDPOINT anchors — when the source anchors ONLY the ends (e.g. "1 — Not at all … 5 — Very \
+much", optionally a midpoint), set "minLabel" and "maxLabel" to the source's endpoint wording \
+VERBATIM and DO NOT fabricate the in-between points. Omit "labels" entirely in this case.
+  PREFER (b) whenever the source gives only endpoint (± midpoint) anchors — faithful anchors beat \
+invented middle labels. Use (a) only when the source genuinely names each point or a full ramp is \
+unambiguous. When no family fits and you must ramp, use a neutral intensity ramp ("Very low → Very \
+high") rather than forcing agreement.
+- Use "likert" ONLY when the scale carries qualitative meaning — named points OR endpoint anchors. \
+If a question asks for a purely numeric rating with NO qualitative anchors at all (e.g. "rate 0–10", \
+a count, an age, a percentage), use "numeric" instead — numeric questions need no labels.
 - When a question offers a fixed list of answer options — radio buttons, checkboxes (☐ / ☑ / □), \
 "select one" / "select all that apply", a lettered or numbered answer list, or a named-level \
 rubric — classify it as "single_choice" (pick exactly one) or "multi_choice" (pick several) and \
@@ -147,7 +152,22 @@ populate EVERY option. Set "suggestedTypeConfig.choices" to an ARRAY OF OBJECTS,
 with at least 2 options and distinct "value"s. Never emit choices as a bare array of strings. \
 Prefer "likert" over "single_choice" ONLY when the options form a symmetric agree/rate scale (see \
 the likert rule); an asymmetric or unordered option list (e.g. "No / Yes, one / Yes, several", \
-"Days / Weeks / Months / Until a customer tells us") is "single_choice".
+"Days / Weeks / Months / Until a customer tells us") is "single_choice". \
+If the option list ends with an open-ended escape hatch ("Other", "Other (please specify)", \
+"Prefer to self-describe", "Something else"), set "suggestedTypeConfig.allowOther": true and OMIT \
+that option from "choices" — the tool renders its own "Other…" free-text input. Do NOT treat \
+"Prefer not to say", "None"/"None of the above", or "No preference" as an escape hatch; those are \
+real selectable answers.
+- A RATING GRID / MATRIX — a table where several row items (factors, statements, sub-questions) are \
+each rated on ONE shared scale (a "Factor" column beside rating columns "1 2 3 4 5", or a "Rate \
+each: 1 = … 5 = …" instruction above a list of items) — is a SINGLE question of suggestedType \
+"matrix". It is NOT a "multi_choice", and its rows are NOT choice options; do NOT split it into one \
+question per row. Keep the grid's overall wording as the "prompt" (e.g. "How important are the \
+following factors to you?"). Set "suggestedTypeConfig.rows" to an ARRAY OF OBJECTS, one per row \
+item in document order (≥1 row, distinct keys), each {"key":"<stable snake_case slug>", \
+"label":"<the row item text, verbatim>"}; and set "suggestedTypeConfig.scale" to the shared scale \
+as a likert config — {"min","max"} plus EITHER a full "labels" array OR "minLabel"/"maxLabel" \
+endpoint anchors, per the likert rule above — the SAME scale applies to every row.
 - For a "free_text" question, set "suggestedTypeConfig.commentAggregation": "section" when the \
 question is a SECTION-WIDE comment that should reflect the whole section's discussion (e.g. "Please \
 provide comments to support your scores", "Any other comments on this section?", "Anything else \
@@ -189,7 +209,7 @@ these top-level keys, using EXACTLY these field names:
       "key": "<stable unique slug>",
       "prompt": "<the question text shown to the respondent — REQUIRED>",
       "suggestedType": "<one of: ${QUESTION_TYPES.join(' | ')}>",
-      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}]} — required, ≥2 objects; likert: {"min":1,"max":5,"labels":["…","…","…","…","…"]} — required for likert> },
+      "suggestedTypeConfig": { <single_choice/multi_choice: {"choices":[{"value":"never","label":"Never"},{"value":"once_or_twice","label":"Once or twice"}], "allowOther": true (only if an "Other" escape hatch was present)} — required, ≥2 objects; likert with full labels: {"min":1,"max":5,"labels":["…","…","…","…","…"]}, OR endpoint-anchored likert: {"min":1,"max":5,"minLabel":"Not at all","maxLabel":"Very much"} — one of the two is required for likert; matrix: {"rows":[{"key":"fuel_efficiency","label":"Fuel efficiency"},{"key":"reliability","label":"Reliability"}],"scale":{"min":1,"max":5,"minLabel":"Not important","maxLabel":"Essential"}} — rows (≥1, distinct keys) + a shared likert-style scale> },
       "guidelines": "<optional answering guidance>",
       "rationale": "<optional why-this-question>",
       "extractionConfidence": <number between 0 and 1>,

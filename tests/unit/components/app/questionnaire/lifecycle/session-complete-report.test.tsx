@@ -447,6 +447,36 @@ describe('SessionComplete — respondent report', () => {
     }
   });
 
+  it('clamps a long cycler snippet so it cannot overflow the fixed-height slot', () => {
+    // Regression: a long, multi-line paraphrase in the cross-fade slot used to overflow the fixed
+    // height and overlap the "Preparing…" caption above it. The cross-fade body is now line-clamped.
+    const longParaphrase =
+      'They were told their management style is overly paternalistic and that they should stop ' +
+      'being a union rep and be more of a boss, which they partly accept.';
+    mockView({
+      enabled: true,
+      mode: 'raw_plus_insights',
+      onScreen: true,
+      download: true,
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        generatedAt: null,
+        error: null,
+        notifyRequested: false,
+      },
+    });
+    render(
+      <SessionComplete
+        sessionId="s1"
+        answeredCount={1}
+        captured={dataSlotPanelMany([longParaphrase])}
+      />
+    );
+    expect(screen.getByText(longParaphrase)).toHaveClass('line-clamp-3');
+  });
+
   it('shows a static list (no cycler) under prefers-reduced-motion', () => {
     setReducedMotion(true);
     mockView({

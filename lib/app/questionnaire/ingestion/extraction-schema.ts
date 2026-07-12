@@ -43,7 +43,7 @@ const extractedSectionSchema = z.object({
   description: z.string().optional(),
 });
 
-const extractedQuestionSchema = z.object({
+export const extractedQuestionSchema = z.object({
   /** Links the question to its section by `ordinal` (no IDs exist pre-persist). */
   sectionOrdinal: z.number().int().nonnegative(),
   /** Stable per-version slug (answers/re-ingest reference this, not the cuid). */

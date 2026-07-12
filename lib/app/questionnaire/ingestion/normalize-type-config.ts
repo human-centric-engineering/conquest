@@ -38,6 +38,32 @@ interface NormalizedChoice {
 const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(CHOICE_QUESTION_TYPES);
 
 /**
+ * A choice option that is really a free-text escape hatch ("Other", "Other
+ * (please specify)", "Prefer to self-describe", "Something else") rather than a
+ * fixed selectable value. Such an option should become `allowOther: true` (the
+ * widget renders its own "Other…" free-text input) and be dropped from the fixed
+ * list — otherwise the respondent gets a dead "Other" radio with nowhere to type.
+ *
+ * Deliberately CONSERVATIVE: it must NOT match legitimate terminal options that
+ * only *look* open-ended — "Prefer not to say", "None"/"None of the above", "No
+ * preference / open to advice", "I'm open to not owning a car at all". Those are
+ * real, selectable answers, not a request to elaborate. Anchored with `^`/`$`
+ * (allowing a trailing "(please specify)"/":" note) so a substring like the "other"
+ * in "another" or "brother" can't trip it.
+ */
+const OTHER_ESCAPE_HATCH =
+  /^(other|something else|prefer to (self[-\s]?describe|describe)|self[-\s]?describe)\b[\s:(–—-]*(please\s+specify)?\)?\.?$/i;
+
+/** True when a normalised option label is a free-text escape hatch (see {@link OTHER_ESCAPE_HATCH}). */
+function isOtherEscapeHatch(label: string): boolean {
+  const trimmed = label.trim();
+  // "Other (please specify)" and "Please specify" both count; the anchored regex
+  // handles the former, this handles a bare "(please specify)" / "please specify".
+  if (/^\(?please\s+specify\)?\.?$/i.test(trimmed)) return true;
+  return OTHER_ESCAPE_HATCH.test(trimmed);
+}
+
+/**
  * Snake_case slug for a choice `value`, matching the prompt's `snake_case`
  * instruction and the `defaultTypeConfig` convention (`option_1`, …). Reuses the
  * shared `slugify` (which lowercases + collapses non-alphanumerics), converting its
@@ -95,23 +121,93 @@ function normalizeChoices(rawChoices: unknown): NormalizedChoice[] | null {
   return out;
 }
 
+/** One canonical matrix row (see the matrix `typeConfig` shape). */
+interface NormalizedRow {
+  key: string;
+  label: string;
+}
+
+/**
+ * Coerce a raw `rows` entry into `{ key, label }`, or `null` when unusable. Accepts a
+ * bare string (the label is the row text) or a `{ key?, label? }` object — mirroring
+ * {@link coerceChoice} but keyed on `key` rather than `value`.
+ */
+function coerceRow(raw: unknown, index: number): NormalizedRow | null {
+  if (typeof raw === 'string') {
+    const label = raw.trim();
+    if (!label) return null;
+    return { key: slugifyChoiceValue(label) || `row_${index + 1}`, label };
+  }
+  if (isRecord(raw)) {
+    const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+    const rawKey = typeof raw.key === 'string' ? raw.key.trim() : '';
+    const effectiveLabel = label || rawKey;
+    if (!effectiveLabel) return null;
+    const key = rawKey || slugifyChoiceValue(effectiveLabel) || `row_${index + 1}`;
+    return { key, label: effectiveLabel };
+  }
+  return null;
+}
+
+/**
+ * Normalise a raw matrix `rows` value into a distinct-keyed row list, or `null` when it
+ * is not an array. Colliding keys get a `_2`, `_3`, … suffix via {@link nextAvailableKey}
+ * (the answer map is keyed on these, so they must be unique); empty entries are dropped.
+ */
+function normalizeRows(rawRows: unknown): NormalizedRow[] | null {
+  if (!Array.isArray(rawRows)) return null;
+  const taken = new Set<string>();
+  const out: NormalizedRow[] = [];
+  rawRows.forEach((entry, index) => {
+    const row = coerceRow(entry, index);
+    if (!row) return;
+    const key = nextAvailableKey(row.key, taken);
+    taken.add(key);
+    out.push({ key, label: row.label });
+  });
+  return out;
+}
+
 /**
  * Normalise an extractor/composer `suggestedTypeConfig` for persistence. For
  * `single_choice`/`multi_choice`, rewrites `choices` into the canonical
- * `{ value, label }[]` shape. Everything else — non-choice types, non-object
- * configs, or a choice config that yields fewer than 2 usable options — is
- * returned unchanged (there is nothing to safely invent; the admin corrects a
- * degenerate list in the Structure editor).
+ * `{ value, label }[]` shape; for `matrix`, canonicalises `rows` into distinct-keyed
+ * `{ key, label }[]` and passes the shared `scale` through. Everything else — other
+ * types, non-object configs, or a degenerate list (choices < 2, no matrix rows / scale)
+ * — is returned unchanged (there is nothing to safely invent; the admin corrects it in
+ * the Structure editor).
  */
 export function normalizeSuggestedTypeConfig(type: QuestionType, raw: unknown): unknown {
+  if (type === 'matrix') {
+    if (!isRecord(raw)) return raw;
+    const rows = normalizeRows(raw.rows);
+    // Only the row keys need canonicalising; the tight matrix schema validates the scale
+    // on read. Leave a degenerate grid (no usable rows or no scale object) untouched.
+    if (!rows || rows.length < 1 || !isRecord(raw.scale)) return raw;
+    return { rows, scale: raw.scale };
+  }
   if (!CHOICE_TYPES.has(type)) return raw;
   if (!isRecord(raw)) return raw;
   const choices = normalizeChoices(raw.choices);
   if (!choices || choices.length < 2) return raw;
+
+  // Deterministic "Other/please specify" → allowOther backstop. The prompt asks
+  // the model to do this, but a probabilistic model often keeps the literal
+  // "Other" as a dead radio; here we make it reliable. Drop any escape-hatch
+  // option and flag `allowOther`, but only when ≥2 real options survive (the tight
+  // schema's floor) — a 2-option list where one is "Other" is left untouched
+  // rather than collapsed to a single selectable choice.
+  const kept = choices.filter((c) => !isOtherEscapeHatch(c.label));
+  const droppedEscapeHatch = kept.length < choices.length && kept.length >= 2;
+  const effectiveChoices = droppedEscapeHatch ? kept : choices;
+  const allowOther = raw.allowOther === true || droppedEscapeHatch;
+
   // Emit ONLY the keys the tight choice schema recognises. Carrying a stray or
   // wrongly-typed sibling through (e.g. a model emitting `allowOther: "true"`)
   // would fail `choicesConfigSchema` and re-introduce the very "nothing
   // selectable" bug this normaliser exists to prevent. `allowOther` defaults to
   // false, so we only keep it when it's genuinely `true`.
-  return raw.allowOther === true ? { choices, allowOther: true } : { choices };
+  return allowOther
+    ? { choices: effectiveChoices, allowOther: true }
+    : { choices: effectiveChoices };
 }

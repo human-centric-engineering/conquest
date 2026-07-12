@@ -69,7 +69,8 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   const [open, setOpen] = useState(false);
   const [goal, setGoal] = useState('');
   const [instructions, setInstructions] = useState('');
-  const [extractTables, setExtractTables] = useState(false);
+  // On by default — the table pass self-detects (merges only when tables are found). Override.
+  const [extractTables, setExtractTables] = useState(true);
   const [busy, setBusy] = useState(false);
   const [estimatedMs, setEstimatedMs] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +79,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   function reset() {
     setGoal('');
     setInstructions('');
-    setExtractTables(false);
+    setExtractTables(true);
     setError(null);
     setResult(null);
     setBusy(false);
@@ -106,7 +107,9 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
       if (trimmedGoal.length > 0) body.set('goal', trimmedGoal);
       const trimmedInstructions = instructions.trim();
       if (trimmedInstructions.length > 0) body.set('instructions', trimmedInstructions);
-      if (extractTables) body.set('extractTables', 'true');
+      // Always send the explicit value — the server defaults to on, so unchecking must
+      // send 'false' to override rather than just omitting the field.
+      body.set('extractTables', String(extractTables));
 
       // Multipart — do NOT set Content-Type; the browser adds the boundary.
       const res = await fetch(API.APP.QUESTIONNAIRES.versionReingest(questionnaireId, versionId), {
@@ -249,8 +252,10 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
                 Extract tables from PDF
               </Label>
               <FieldHelp title="Extract tables from PDF">
-                Parse tabular layout in PDFs into text rows before extraction. Slower; only helps
-                when the document’s questions live in tables.
+                On by default. Rating grids, 1–5 scales, and option lists are usually tables in a
+                PDF, so parsing tabular layout into text rows lets the extractor read them
+                correctly. It only affects PDFs and is applied only where tables are actually found
+                — untick it to force it off.
               </FieldHelp>
             </div>
 

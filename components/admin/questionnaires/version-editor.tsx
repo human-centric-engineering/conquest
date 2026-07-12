@@ -237,9 +237,9 @@ export function VersionEditor({
       {/* Editing band — an architect's drafting sheet. Names the mode, explains the
           (otherwise invisible) autosave, and carries the status + lifecycle actions. */}
       <div className="cq-blueprint relative overflow-hidden rounded-xl border">
-        <div className="bg-card/70 flex flex-wrap items-center gap-x-4 gap-y-3 p-4 backdrop-blur-sm">
+        <div className="bg-card/70 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 p-4 backdrop-blur-sm">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
               <PenLine className="h-4 w-4" />
             </span>
             <div>
@@ -252,33 +252,37 @@ export function VersionEditor({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox
-              ref={requiredRef}
-              id="all-questions-required"
-              checked={allRequired}
-              onCheckedChange={setAllRequired}
-              disabled={busy || questionCount === 0}
-            />
-            <Label
-              htmlFor="all-questions-required"
-              className="flex items-center gap-1 text-xs font-normal"
-            >
-              All questions required
-              <FieldHelp title="All questions required">
-                <p>
-                  Bulk-set every question in this version. Checking it marks them all required;
-                  unchecking marks them all optional. The box shows a dash when some are required
-                  and some aren’t. You can still flip any single question with its own Required
-                  switch.
-                </p>
-              </FieldHelp>
-            </Label>
-          </div>
+          {/* All controls travel together as one cluster so they stay vertically centred and
+              wrap as a unit instead of stranding the actions on a second line. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                ref={requiredRef}
+                id="all-questions-required"
+                checked={allRequired}
+                onCheckedChange={setAllRequired}
+                disabled={busy || questionCount === 0}
+              />
+              <Label
+                htmlFor="all-questions-required"
+                className="flex items-center gap-1 text-xs font-normal"
+              >
+                All questions required
+                <FieldHelp title="All questions required">
+                  <p>
+                    Bulk-set every question in this version. Checking it marks them all required;
+                    unchecking marks them all optional. The box shows a dash when some are required
+                    and some aren’t. You can still flip any single question with its own Required
+                    switch.
+                  </p>
+                </FieldHelp>
+              </Label>
+            </div>
 
-          <div className="ml-auto flex items-center gap-3">
+            <span className="bg-border h-6 w-px" aria-hidden />
             <SaveStatus state={saveState} lastSavedAt={lastSavedAt} />
             <span className="bg-border h-6 w-px" aria-hidden />
+
             <div className="flex items-center gap-1.5">
               <span className="text-muted-foreground text-xs">
                 Status <span className="text-foreground font-medium">{version.status}</span>

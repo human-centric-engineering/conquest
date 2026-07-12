@@ -724,14 +724,16 @@ function PreparingReport({
             ))}
           </ul>
         ) : (
-          // Fixed height so each cross-fade swaps in place without nudging the layout. The modulo
-          // clamps `index` into range even if `snippets` shrank since the interval last advanced.
-          <div className="relative mx-auto flex h-16 max-w-md items-center justify-center">
+          // Fixed height so each cross-fade swaps in place without nudging the layout; `overflow-hidden`
+          // plus the clamped body keep a long paraphrase inside the box rather than spilling over the
+          // caption above. The modulo clamps `index` into range even if `snippets` shrank since the
+          // interval last advanced.
+          <div className="relative mx-auto flex h-24 max-w-md items-center justify-center overflow-hidden">
             <div
               key={index}
               className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-700"
             >
-              <SharedSnippetBody snippet={snippets[index % snippets.length]} />
+              <SharedSnippetBody snippet={snippets[index % snippets.length]} clamp />
             </div>
           </div>
         )}
@@ -740,14 +742,29 @@ function PreparingReport({
   );
 }
 
-/** One shared-position line: a small accent label over the respondent's paraphrased position. */
-function SharedSnippetBody({ snippet }: { snippet: SharedSnippet }) {
+/**
+ * One shared-position line: a small accent label over the respondent's paraphrased position. In the
+ * cross-fade cycler the body is `clamp`ed to a few lines so a long paraphrase can't outgrow the
+ * fixed-height slot and overlap the caption; the reduced-motion list leaves it unclamped (it flows).
+ */
+function SharedSnippetBody({
+  snippet,
+  clamp = false,
+}: {
+  snippet: SharedSnippet;
+  clamp?: boolean;
+}) {
   return (
     <>
       <p className="text-[11px] font-semibold tracking-wide uppercase" style={{ color: ACCENT }}>
         {snippet.label}
       </p>
-      <p className="text-foreground/90 mt-0.5 text-sm leading-relaxed text-balance">
+      <p
+        className={cn(
+          'text-foreground/90 mt-0.5 text-sm leading-relaxed text-balance',
+          clamp && 'line-clamp-3'
+        )}
+      >
         {snippet.text}
       </p>
     </>

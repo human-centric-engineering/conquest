@@ -97,7 +97,7 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
   },
   type_fit: {
     focus:
-      "Judge whether each question's answer type fits what it asks. The available types are free_text, single_choice, multi_choice, likert, numeric, date, boolean. Flag mismatches — e.g. a rating question typed free_text, a yes/no typed free_text, a 'select all that apply' typed single_choice, a date typed free_text. Target each by its `key` and propose the better type.",
+      "Judge whether each question's answer type fits what it asks. The available types are free_text, single_choice, multi_choice, likert, matrix, numeric, date, boolean. Use `matrix` for a battery of items rated on ONE shared scale (a rating grid). Flag mismatches — e.g. a rating question typed free_text, a yes/no typed free_text, a 'select all that apply' typed single_choice, a date typed free_text, or a rating grid split into many separate likerts (should be one `matrix`). Target each by its `key` and propose the better type.",
     scale: `- 1.0 — Every question's type fits.
 - 0.7 — One mild mismatch.
 - 0.5 — Several questions would be better with a different type.

@@ -218,9 +218,20 @@ export class AnthropicProvider implements LlmProvider {
       hasTools: Boolean(options.tools?.length),
     });
 
+    // Forward a per-request `timeout`/`signal` when supplied so a long streaming
+    // job (e.g. live document extraction) can override the client's
+    // construction-time default rather than being silently capped by it — the
+    // streaming analogue of the per-request timeout the non-streaming `chat` uses.
+    const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
+    if (options.timeoutMs != null) requestOptions.timeout = options.timeoutMs;
+    if (options.signal !== undefined) requestOptions.signal = options.signal;
+
     let stream: Stream<RawMessageStreamEvent>;
     try {
-      stream = await this.client.messages.create(params);
+      stream = await this.client.messages.create(
+        params,
+        Object.keys(requestOptions).length > 0 ? requestOptions : undefined
+      );
     } catch (err) {
       throw toProviderError(err, 'Anthropic chat stream failed');
     }

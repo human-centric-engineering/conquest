@@ -88,6 +88,18 @@ function readOptions(type: QuestionType, config: unknown): string[] {
     return [];
   }
 
+  // A matrix's "options" are its shared scale points (each row is rated on them); the rows
+  // themselves are listed in the constraint line.
+  if (type === 'matrix') {
+    const scale = field(config, 'scale');
+    const labels = field(scale, 'labels');
+    const min = field(scale, 'min');
+    if (Array.isArray(labels) && typeof min === 'number') {
+      return labels.map((l, i) => `${min + i} — ${typeof l === 'string' ? l : ''}`.trimEnd());
+    }
+    return [];
+  }
+
   return [];
 }
 
@@ -104,6 +116,22 @@ function readConstraint(type: QuestionType, config: unknown): string | null {
       return `Scale ${lo} to ${hi}`;
     }
     return null;
+  }
+
+  if (type === 'matrix') {
+    const scale = field(config, 'scale');
+    const min = field(scale, 'min');
+    const max = field(scale, 'max');
+    const rows = field(config, 'rows');
+    const rowCount = Array.isArray(rows) ? rows.length : 0;
+    if (typeof min === 'number' && typeof max === 'number') {
+      const minLabel = field(scale, 'minLabel');
+      const maxLabel = field(scale, 'maxLabel');
+      const lo = typeof minLabel === 'string' ? `${min} (${minLabel})` : String(min);
+      const hi = typeof maxLabel === 'string' ? `${max} (${maxLabel})` : String(max);
+      return `Rating grid — ${rowCount} row${rowCount === 1 ? '' : 's'} on scale ${lo} to ${hi}`;
+    }
+    return rowCount > 0 ? `Rating grid — ${rowCount} rows` : null;
   }
 
   if (type === 'numeric') {

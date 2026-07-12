@@ -189,11 +189,19 @@ export function parseRequiredMode(formData: FormData): RequiredMode {
   return raw as RequiredMode;
 }
 
-/** Truthy-string form values that turn the PDF table extraction on. */
+/** Truthy-string form values that keep PDF table extraction on. */
 const TRUTHY_FLAG_VALUES = new Set(['true', '1', 'on', 'yes']);
 
-/** Read the optional PDF `extractTables` flag from the form. */
+/**
+ * Read the PDF `extractTables` flag from the form. Defaults to **on** when the field
+ * is absent: questionnaires are table-dense (rating grids, scales, option lists render
+ * as tables), and the table pass self-detects — it merges only when tables are actually
+ * found (`applyPageTables`), so it's harmless on prose-only PDFs. An admin can still
+ * force it off by sending an explicit falsy value; that's the override, not a
+ * prerequisite for correct extraction.
+ */
 export function parseExtractTablesFlag(formData: FormData): boolean {
   const raw = formData.get('extractTables');
-  return typeof raw === 'string' && TRUTHY_FLAG_VALUES.has(raw.toLowerCase());
+  if (typeof raw !== 'string' || raw.trim() === '') return true;
+  return TRUTHY_FLAG_VALUES.has(raw.toLowerCase());
 }

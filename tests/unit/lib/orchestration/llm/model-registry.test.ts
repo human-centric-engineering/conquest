@@ -35,6 +35,16 @@ describe('fallback map', () => {
     expect(registry.getModel('local:generic')?.tier).toBe('local');
   });
 
+  it('prices the seeded default models so cost tracking is non-zero', () => {
+    // reasoning + routing defaults (AiOrchestrationSettings.defaultModels) must be
+    // in the registry, else calculateCost logs "unknown model" and records $0.
+    const reasoning = registry.getModel('gpt-5.4');
+    expect(reasoning?.tier).toBe('frontier');
+    expect(reasoning?.inputCostPerMillion).toBeGreaterThan(0);
+    expect(reasoning?.outputCostPerMillion).toBeGreaterThan(0);
+    expect(registry.getModel('gpt-4.1-nano')?.inputCostPerMillion).toBeGreaterThan(0);
+  });
+
   it('is used when OpenRouter refresh rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
     await registry.refreshFromOpenRouter({ force: true });

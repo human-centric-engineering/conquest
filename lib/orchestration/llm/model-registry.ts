@@ -550,6 +550,31 @@ function buildFallbackMap(): Map<string, ModelInfo> {
       maxContext: 400_000,
       supportsTools: true,
     },
+    // ConQuest's seeded defaults (AiOrchestrationSettings.defaultModels): reasoning
+    // `gpt-5.4`, routing `gpt-4.1-nano`. Without these entries `calculateCost` returns
+    // zero for them and the cost strip / questionnaire-extraction spend read $0.00.
+    // Prices are approximate (for accounting/display, not billing) — OpenRouter
+    // overrides them live when reachable.
+    {
+      id: 'gpt-5.4',
+      name: 'GPT-5.4',
+      provider: 'openai',
+      tier: 'frontier',
+      inputCostPerMillion: 1.25,
+      outputCostPerMillion: 10,
+      maxContext: 400_000,
+      supportsTools: true,
+    },
+    {
+      id: 'gpt-4.1-nano',
+      name: 'GPT-4.1 Nano',
+      provider: 'openai',
+      tier: 'budget',
+      inputCostPerMillion: 0.1,
+      outputCostPerMillion: 0.4,
+      maxContext: 1_000_000,
+      supportsTools: true,
+    },
     {
       id: 'o3',
       name: 'o3',

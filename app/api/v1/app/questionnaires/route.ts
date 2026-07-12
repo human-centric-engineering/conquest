@@ -42,6 +42,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
+  deriveTitle,
   extractFromDocument,
   parseAndGuardUpload,
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
@@ -50,14 +51,6 @@ import {
   listQuestionnaires,
   listQuestionnairesQuerySchema,
 } from '@/app/api/v1/app/questionnaires/_lib/list';
-
-/** Title for the new questionnaire — the parsed document title, else the filename. */
-function deriveTitle(parsedTitle: string, fileName: string): string {
-  const trimmed = parsedTitle.trim();
-  if (trimmed.length > 0) return trimmed;
-  const withoutExt = fileName.replace(/\.[^./\\]+$/, '').trim();
-  return withoutExt.length > 0 ? withoutExt : fileName;
-}
 
 const handleIngest = withAdminAuth(async (request: NextRequest, session) => {
   const log = await getRouteLogger(request);

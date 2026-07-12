@@ -37,6 +37,23 @@ export interface FormLikertConfig {
   maxLabel: string | null;
 }
 
+/** One row of a matrix: its stable key + display label. */
+export interface FormMatrixRow {
+  key: string;
+  label: string;
+}
+
+/** A matrix's rows plus the shared scale (same bounds/labels shape as a likert). */
+export interface FormMatrixConfig {
+  rows: FormMatrixRow[];
+  min: number;
+  max: number;
+  /** One label per scale point, or `null` for an unlabelled/endpoint-anchored scale. */
+  labels: string[] | null;
+  minLabel: string | null;
+  maxLabel: string | null;
+}
+
 /** A numeric question's optional bounds, step, and unit. */
 export interface FormNumericConfig {
   min: number | null;
@@ -99,6 +116,37 @@ export function readLikertConfig(typeConfig: unknown): FormLikertConfig | null {
     labels,
     minLabel: cfg.minLabel ?? labels?.[0] ?? null,
     maxLabel: cfg.maxLabel ?? labels?.[labels.length - 1] ?? null,
+  };
+}
+
+/**
+ * Parse a matrix `typeConfig` into its rows + shared scale (bounds + endpoint labels).
+ * Returns `null` when unreadable or row-less (the caller treats it as a misconfigured
+ * question). The scale labelling logic mirrors {@link readLikertConfig} so each row
+ * renders exactly like a standalone likert.
+ */
+export function readMatrixConfig(typeConfig: unknown): FormMatrixConfig | null {
+  const parsed = typeConfigSchemaFor('matrix').safeParse(typeConfig);
+  if (!parsed.success) return null;
+  const cfg = parsed.data as {
+    rows?: Array<{ key: string; label: string }>;
+    scale?: { min: number; max: number; minLabel?: string; maxLabel?: string; labels?: string[] };
+  };
+  if (!Array.isArray(cfg.rows) || cfg.rows.length === 0 || !cfg.scale) return null;
+  const s = cfg.scale;
+  const labels =
+    Array.isArray(s.labels) &&
+    s.labels.length === s.max - s.min + 1 &&
+    s.labels.every((l) => l.trim().length > 0)
+      ? s.labels
+      : null;
+  return {
+    rows: cfg.rows,
+    min: s.min,
+    max: s.max,
+    labels,
+    minLabel: s.minLabel ?? labels?.[0] ?? null,
+    maxLabel: s.maxLabel ?? labels?.[labels.length - 1] ?? null,
   };
 }
 

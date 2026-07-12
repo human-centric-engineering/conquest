@@ -31,6 +31,20 @@ describe('questionConfigIssue — clean configs surface nothing', () => {
     expect(questionConfigIssue('numeric', { min: 0, max: 10 })).toBeNull();
   });
 
+  // Endpoint-anchored likert: the write schema accepts a scale that only anchors
+  // its ends (no per-point labels) as a faithful, launchable representation of a
+  // source that never named the middle points.
+  it('returns null for an endpoint-anchored likert (minLabel/maxLabel, no per-point labels)', () => {
+    expect(
+      questionConfigIssue('likert', {
+        min: 1,
+        max: 5,
+        minLabel: 'Not at all',
+        maxLabel: 'Very much',
+      })
+    ).toBeNull();
+  });
+
   // The DB stores config-less / config-optional types as JSON null — these need no
   // setup and must not be flagged (regression: a null boolean read as "Needs setup").
   it.each(['boolean', 'numeric', 'free_text', 'date'] as const)(
@@ -84,6 +98,13 @@ describe('questionConfigIssue — likert gaps', () => {
 
   it('flags an incomplete label set (one per point required)', () => {
     const issue = questionConfigIssue('likert', { min: 1, max: 3, labels: ['low', '', 'high'] });
+    expect(issue?.label).toBe('Add scale labels');
+  });
+
+  // A half-anchored scale (only one endpoint labelled) is neither a full per-point
+  // set nor a complete endpoint anchoring, so it must still be flagged.
+  it('still flags a half-anchored likert (only minLabel set)', () => {
+    const issue = questionConfigIssue('likert', { min: 1, max: 5, minLabel: 'Not at all' });
     expect(issue?.label).toBe('Add scale labels');
   });
 });
@@ -140,14 +161,35 @@ describe('questionConfigIssue — other types', () => {
     );
   });
 
+  // Matrix (rating grid): rows come first — a grid with nothing to rate can't have a
+  // labelled scale yet, so an empty/absent rows array reports "Add rows".
+  it('flags a matrix with no rows as needing rows', () => {
+    const issue = questionConfigIssue('matrix', { rows: [], scale: { min: 1, max: 5 } });
+    expect(issue?.label).toBe('Add rows');
+    expect(issue?.detail).toBe('A rating grid needs at least one row item to rate.');
+  });
+
+  // Matrix with rows but an unlabelled shared scale reports "Add scale labels" — the
+  // same launch bar as a bare likert.
+  it('flags a matrix whose shared scale is unlabelled as needing scale labels', () => {
+    const issue = questionConfigIssue('matrix', {
+      rows: [{ key: 'speed', label: 'Speed' }],
+      scale: { min: 1, max: 5 },
+    });
+    expect(issue?.label).toBe('Add scale labels');
+    expect(issue?.detail).toBe(
+      'Label the grid’s shared rating scale — every point, or both endpoints (e.g. 1 = “Not important”, 5 = “Essential”).'
+    );
+  });
+
   // Schema drift: a stored type outside the current union has no config contract
   // to check — return null rather than throwing on its absent write schema.
   it('returns null (does not throw) for an unrecognised type', () => {
     expect(() =>
       // @ts-expect-error — simulating a legacy/unknown stored type value.
-      questionConfigIssue('matrix', { some: 'config' })
+      questionConfigIssue('legacy_unknown_type', { some: 'config' })
     ).not.toThrow();
     // @ts-expect-error — same unknown type, assert the null result.
-    expect(questionConfigIssue('matrix', { some: 'config' })).toBeNull();
+    expect(questionConfigIssue('legacy_unknown_type', { some: 'config' })).toBeNull();
   });
 });

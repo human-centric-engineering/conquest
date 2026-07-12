@@ -90,6 +90,34 @@ function DetailBody({ detail }: { detail: DistributionDetail }) {
       );
     }
 
+    case 'matrix': {
+      if (detail.rows.length === 0) {
+        return <p className="text-muted-foreground text-sm italic">No matrix rows configured.</p>;
+      }
+      return (
+        <div className="space-y-3">
+          {detail.rows.map((row) => {
+            const max = Math.max(1, ...row.buckets.map((b) => b.count));
+            return (
+              <div key={row.key} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">{row.label}</p>
+                  {row.mean != null && (
+                    <span className="text-muted-foreground text-xs">
+                      Mean: {row.mean.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                {row.buckets.map((b) => (
+                  <BarRow key={b.value} label={b.label} count={b.count} max={max} />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     case 'numeric': {
       if (!detail.summary) {
         return <p className="text-muted-foreground text-sm italic">No numeric answers yet.</p>;

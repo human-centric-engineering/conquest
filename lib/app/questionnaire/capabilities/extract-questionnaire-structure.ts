@@ -38,10 +38,7 @@ import {
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
-import {
-  runStructuredCompletion,
-  type StructuredCompletionResult,
-} from '@/lib/orchestration/llm/structured-completion';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 
 import {
   EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
@@ -61,6 +58,9 @@ import {
   buildExtractionRetryMessage,
 } from '@/lib/app/questionnaire/ingestion/extraction-prompt';
 import { normalizeChangeRecords } from '@/lib/app/questionnaire/ingestion/change-records';
+import { createQuestionCountScanner } from '@/lib/app/questionnaire/ingestion/question-count-scanner';
+import { runStreamingStructuredExtraction } from '@/lib/app/questionnaire/ingestion/stream-structured-extraction';
+import { readExtractionProgressSink } from '@/lib/app/questionnaire/ingestion/extraction-progress-context';
 import type {
   AdminSuppliedMetadata,
   ChangeRecordIntent,
@@ -69,9 +69,16 @@ import type {
 const SLUG = EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG;
 
 /**
- * Reasoning models split this cap between internal reasoning and visible
- * output; a full questionnaire's sections + questions + change log is verbose,
- * so we leave generous headroom (mirrors `010-model-auditor`'s 16384 rationale).
+ * Reasoning models (gpt-5 / o-series) split this cap between INTERNAL reasoning
+ * and visible output. A full questionnaire's sections + questions + change log is
+ * already verbose, and faithful table/scale/"Other" extraction grew it further —
+ * at 16k the reasoning burn left too little for the JSON, and the response
+ * truncated mid-object. A truncation that still emitted *some* visible text
+ * doesn't trip the provider's empty-output guard: it returns partial JSON that
+ * fails `JSON.parse`, surfacing as the misleading "not valid against the schema"
+ * error (with no Zod issue paths, since parsing never got far enough to validate).
+ * 32k gives the output real headroom over the reasoning overhead; if a future
+ * document still truncates, the diagnostic below names it as unparseable output.
  *
  * DEFERRED (F1.1, /code-review #1): extraction currently uses fixed sampling
  * params here, so the extractor agent's seeded `temperature`/`maxTokens` do not
@@ -80,15 +87,19 @@ const SLUG = EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG;
  * the agent's values in) or whether fixed determinism is the right default (drop
  * the unused fields from the seed). Not actionable until we can see it in use.
  */
-const EXTRACTION_MAX_TOKENS = 16_000;
+const EXTRACTION_MAX_TOKENS = 32_000;
 
 /**
- * Extraction reads an entire document and emits a large structured payload —
- * far longer than the 10s evaluation default. 120s covers a multi-page doc on a
- * reasoning model without hanging the (synchronous, admin-triggered) request
- * indefinitely.
+ * Extraction reads an entire document and emits a large structured payload (up to
+ * `EXTRACTION_MAX_TOKENS` of JSON) — a reasoning model generating that can run well
+ * past a minute, and 120s proved too tight once matrix-splitting and richer configs
+ * grew the output. Ingest now runs over SSE (the request no longer blocks
+ * synchronously and keepalives hold the socket open), so we give the call real
+ * headroom. Note: this only takes effect because the provider now honours a
+ * per-request `timeoutMs` (see `openai-compatible.ts` / `parse-structured.ts`);
+ * previously the OpenAI client's 120s construction default silently capped it.
  */
-const EXTRACTION_TIMEOUT_MS = 120_000;
+const EXTRACTION_TIMEOUT_MS = 300_000;
 
 /** Provenance preview cap (chars). The plan asks for a short, PII-safe preview. */
 const PROVENANCE_PREVIEW_CAP = 200;
@@ -287,39 +298,92 @@ export class AppExtractQuestionnaireStructureCapability extends BaseCapability<
     // that's a platform enhancement for upstream Sunrise, deliberately not
     // forked here. So we surface the paths in the final error + logs only.
     let lastIssuePaths: string[] = [];
-    let completion: StructuredCompletionResult<ExtractionResult>;
-    try {
-      completion = await runStructuredCompletion<ExtractionResult>({
-        provider,
-        model,
-        messages,
-        maxTokens: EXTRACTION_MAX_TOKENS,
-        timeoutMs: EXTRACTION_TIMEOUT_MS,
-        parse: (raw) =>
-          tryParseJson(raw, (parsed) => {
-            const validation = validateExtraction(parsed);
-            if (validation.ok) return validation.value;
-            lastIssuePaths = validation.issues.map((issue) =>
-              issue.path.length > 0 ? issue.path.join('.') : '(root)'
-            );
-            return null;
-          }),
-        // Generic: lastIssuePaths is still empty here (the parse callback that
-        // populates it runs later), and runStructuredCompletion fixes this
-        // string before the first attempt — so it can't carry runtime issues.
-        retryUserMessage: buildExtractionRetryMessage([]),
-        onFinalFailure: () =>
-          new Error(
-            'Extraction response was not valid against the schema after one retry' +
-              (lastIssuePaths.length > 0 ? ` (invalid at: ${lastIssuePaths.join(', ')})` : '')
-          ),
+    // Chars of the most recent raw response. When both attempts fail with NO
+    // issue paths, the model never emitted parseable JSON — for a reasoning model
+    // that almost always means the output was truncated at the token cap (see
+    // EXTRACTION_MAX_TOKENS). Recording the length lets the failure say so instead
+    // of blaming the schema for what is really an "output too large / raise the
+    // cap" problem.
+    let lastResponseChars = 0;
+
+    // Parse + failure-diagnostic policy is identical for the streamed and
+    // blocking paths — build it once so the two branches can't drift.
+    const parse = (raw: string): ExtractionResult | null => {
+      lastResponseChars = raw.length;
+      return tryParseJson(raw, (parsed) => {
+        const validation = validateExtraction(parsed);
+        if (validation.ok) return validation.value;
+        lastIssuePaths = validation.issues.map((issue) =>
+          issue.path.length > 0 ? issue.path.join('.') : '(root)'
+        );
+        return null;
       });
+    };
+    const onFinalFailure = (): Error => {
+      if (lastIssuePaths.length > 0) {
+        return new Error(
+          `Extraction response was not valid against the schema after one retry (invalid at: ${lastIssuePaths.join(', ')})`
+        );
+      }
+      // No issue paths ⇒ JSON.parse itself failed on both attempts. On a
+      // reasoning model this is overwhelmingly truncated output, not a
+      // schema mismatch — say so, and point at the token cap.
+      return new Error(
+        `Extraction response was not parseable JSON after one retry (${lastResponseChars} chars) — likely truncated at the ${EXTRACTION_MAX_TOKENS}-token output cap; try a smaller document or raise the cap`
+      );
+    };
+    // Generic retry text: lastIssuePaths is still empty at build time (the parse
+    // callback that populates it runs later), so this can't carry runtime issues.
+    const retryUserMessage = buildExtractionRetryMessage([]);
+
+    // When the caller (the streaming ingest route) supplies a progress sink, run
+    // the first attempt STREAMED and count complete `questions` entries as the
+    // JSON arrives, reporting a rising count. Absent a sink (non-streaming ingest
+    // / re-ingest), keep the single blocking call — identical behaviour to before.
+    const onProgress = readExtractionProgressSink(context.entityContext);
+
+    // Shared call options — the streamed and blocking helpers take the same
+    // provider/model/messages/limits/parse/retry/failure wiring; only the
+    // streamed path adds `onTextDelta`. Build once so the two branches can't drift.
+    const baseOptions = {
+      provider,
+      model,
+      messages,
+      maxTokens: EXTRACTION_MAX_TOKENS,
+      timeoutMs: EXTRACTION_TIMEOUT_MS,
+      parse,
+      retryUserMessage,
+      onFinalFailure,
+    };
+
+    let completion: { value: ExtractionResult; tokenUsage: { input: number; output: number } };
+    try {
+      if (onProgress) {
+        const scanner = createQuestionCountScanner();
+        let lastReported = 0;
+        completion = await runStreamingStructuredExtraction<ExtractionResult>({
+          ...baseOptions,
+          onTextDelta: (delta) => {
+            const count = scanner.push(delta);
+            // Report only on a strict increase — a single SSE event per newly
+            // completed question, never a flood of same-count repeats.
+            if (count > lastReported) {
+              lastReported = count;
+              onProgress(count);
+            }
+          },
+        });
+      } else {
+        completion = await runStructuredCompletion<ExtractionResult>(baseOptions);
+      }
     } catch (err) {
       logger.error('extract_questionnaire_structure: structured completion failed', {
         agentId: context.agentId,
         model,
         provider: providerSlug,
         issuePaths: lastIssuePaths,
+        responseChars: lastResponseChars,
+        streamed: onProgress !== undefined,
         error: errorMessage(err),
       });
       return this.error(errorMessage(err), 'extraction_failed');

@@ -36,6 +36,10 @@ import {
   EXTRACT_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
+import {
+  EXTRACTION_PROGRESS_CONTEXT_KEY,
+  type ExtractionProgressSink,
+} from '@/lib/app/questionnaire/ingestion/extraction-progress-context';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import {
   ALLOWED_EXTENSIONS,
@@ -83,7 +87,15 @@ export interface ExtractedDocument {
   parsed: Awaited<ReturnType<typeof parseDocument>>;
 }
 
-type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
+export type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
+
+/** Title for the new questionnaire — the parsed document title, else the filename. */
+export function deriveTitle(parsedTitle: string, fileName: string): string {
+  const trimmed = parsedTitle.trim();
+  if (trimmed.length > 0) return trimmed;
+  const withoutExt = fileName.replace(/\.[^./\\]+$/, '').trim();
+  return withoutExt.length > 0 ? withoutExt : fileName;
+}
 
 /** Map a capability dispatch error code to an HTTP status. */
 function dispatchErrorStatus(code: string | undefined): number {
@@ -198,10 +210,21 @@ export async function parseAndGuardUpload(
  */
 export async function extractFromDocument(
   upload: GuardedUpload,
-  ctx: { adminId: string; log: RouteLogger }
+  ctx: {
+    adminId: string;
+    log: RouteLogger;
+    /**
+     * Optional live "questions so far" sink. When present (the streaming ingest
+     * route), the extractor runs its first pass STREAMED and reports a rising
+     * count through this callback; absent (non-streaming ingest / re-ingest), the
+     * extractor keeps its single blocking call. Rides the dispatcher's
+     * `entityContext` seam — see {@link ExtractionProgressSink}.
+     */
+    onExtractionProgress?: ExtractionProgressSink;
+  }
 ): Promise<PipelineResult<ExtractedDocument>> {
   const { file, buffer, adminMeta, extractTables } = upload;
-  const { adminId, log } = ctx;
+  const { adminId, log, onExtractionProgress } = ctx;
   const fileExt = getExtension(file.name);
 
   let parsed: Awaited<ReturnType<typeof parseDocument>>;
@@ -304,6 +327,11 @@ export async function extractFromDocument(
           model: agent.model,
           fallbackProviders: agent.fallbackProviders,
         },
+        // Only present for the streaming route — its presence is what flips the
+        // capability onto the streamed, count-reporting extraction path.
+        ...(onExtractionProgress
+          ? { [EXTRACTION_PROGRESS_CONTEXT_KEY]: onExtractionProgress }
+          : {}),
       },
     }
   );

@@ -11,7 +11,26 @@
 
 `POST /api/v1/app/questionnaires` — multipart upload of one questionnaire
 document. Admin-only. Synchronous: the request blocks through parse → LLM
-extraction → transactional write, then returns the new ids.
+extraction → transactional write, then returns the new ids. **Still supported and
+tested** (API clients, the F1.1 regression net), but the UI no longer uses it — see
+the streaming variant below.
+
+**`POST /api/v1/app/questionnaires/stream`** (the surface the `UploadQuestionnaireDialog`
+now uses) runs the identical pipeline over **SSE**. A multi-page PDF's extractor call is
+bounded at 120s and the table pass adds to it, which can outrun a synchronous request's
+idle timeout; streaming keeps the socket alive (the `sseResponse` bridge emits keepalive
+frames on an independent timer) and hands back the draft's ids on a terminal `done` event.
+Pre-stream validation (rate-limit, upload guard, demo-client check) still returns a normal
+JSON error envelope; once the stream opens, a failure is a terminal `error` event (never a
+5xx). Events: `phase` (`extracting` → `verifying` → `repairing` → `saving` — the middle two
+only when the verify+repair sub-flag is on), then `done { questionnaireId, versionId, counts }`
+or `error { code, message }`. Mirrors `compose/stream`'s `drive()` pattern; the route drives
+`orchestrateExtraction` (which wraps the shared `extractFromDocument` + the optional
+verify/repair pass) and reuses `parseAndGuardUpload` / `persistIngestion`, so the streaming and
+non-streaming endpoints can't drift on the core pipeline. The phase messages the admin sees are
+the **real** ones the orchestrator emits (no scripted ticker — `ExtractionProgress`). Event
+contract: `lib/app/questionnaire/ingestion/extraction-stream-events.ts`. See
+[Streaming ingest + the verify / repair pass](#streaming-ingest--the-verify--repair-pass).
 
 | Field              | In       | Notes                                                                              |
 | ------------------ | -------- | ---------------------------------------------------------------------------------- |
@@ -22,7 +41,7 @@ extraction → transactional write, then returns the new ids.
 | `instructions`     | optional | Free-text steering for the extractor (≤4 000 char). **Guidance, not suppression.** |
 | `audience.<field>` | optional | Dotted keys (`audience.role`, `audience.expertiseLevel`, …). Per-field.            |
 | `requiredMode`     | optional | `all` (default) or `source` — how imported questions are marked required.          |
-| `extractTables`    | optional | PDF only — truthy string turns on table extraction.                                |
+| `extractTables`    | optional | PDF only — **defaults to on**; send an explicit falsy string to force it off.      |
 
 Empty / whitespace-only `title`, `goal`, and `audience.*` form values are treated
 as **absent** (an un-filled field, not an intentional override). A `title` over the
@@ -93,7 +112,15 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
    `parseDocument(buffer, fileName, { extractTables })` directly (not the knowledge
    KB's `previewDocument`/`confirmPreview`, which chunk + embed into RAG). Either
    path yields the same `ParsedDocument` shape. `422 PARSE_FAILED` on a throw. See
-   [Spreadsheet ingestion](#spreadsheet-ingestion-xlsx).
+   [Spreadsheet ingestion](#spreadsheet-ingestion-xlsx). **Table extraction is on by
+   default** (`parseExtractTablesFlag` defaults `true`): a questionnaire's rating
+   grids, 1–5 scales, and option lists are usually PDF _tables_, and with table
+   parsing off they reach the extractor as scrambled loose text — the classic cause
+   of a matrix collapsing into one `multi_choice` or a scale losing its bounds. The
+   pass is self-detecting: `applyPageTables` merges rendered tables only where the
+   parser actually finds them (`tablesRendered > 0`), so it's a no-op on prose PDFs.
+   The dialog checkbox is an **override** (default checked), not a prerequisite the
+   admin must know to tick.
 10. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
     report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
 11. **Dispatch** — load the seeded extractor agent, then
@@ -114,6 +141,87 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
     `AppQuestionnaire` row.
 14. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
 'questionnaire', entityId: versionId, metadata: { counts, fileName, fileHash, demoClientId } })`.
+
+## Streaming ingest + the verify / repair pass
+
+The **streaming** ingest surface (`POST …/questionnaires/stream`, the "watch it extract"
+dialog) does not call `extractFromDocument` directly — it drives
+`orchestrateExtraction` (`_lib/orchestrate-extraction.ts`), an async generator that yields
+**real** phase events (`extracting → verifying → repairing → saving`) and returns the same
+`PipelineResult` the non-streaming route uses. The non-streaming `POST /questionnaires` and
+`reingest` routes keep the single synchronous extractor pass unchanged.
+
+When the **`APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_ENABLED`** sub-flag is on
+(`isIngestVerifyRepairEnabled()`, AND-ed with the master flag), the orchestrator inserts a
+critic + repair pass between extract and coherence:
+
+1. **Verify** — dispatch `app_verify_extraction_structure` (the Extraction Verifier agent)
+   once over all questions + the source. It returns per-question verdicts (`ok` / `suspect`
+   - an `issue`) and any detected rating-grid spans. Flags only; never rewrites. Small
+     (flags-only) output, so one call stays cheap even for a long questionnaire.
+2. **Repair** — only when questions are flagged (and ≤ `REPAIR_FLAG_CEILING = 20`), dispatch
+   `app_repair_questions` (the Scales & Matrix Repair Specialist) over the **flagged subset
+   only**. It re-reads each source span and returns corrected questions (`action: 'correct'`
+   replaces in place; `action: 'merge'` collapses mis-split rows into one matrix).
+3. **Merge guard (`mergeRepairs`)** — the "never worse" core: a `correct` is accepted only
+   if it keeps the key and its config passes the **tight write schema**; a `merge` only if
+   it yields a valid `matrix` from ≥2 originals. Rejected repairs leave the original
+   untouched. Accepted repairs append revertible `infer_type` / `augment_question` /
+   `merge_questions` change intents. Coherence is then re-checked after the merge.
+
+**Fail-soft throughout:** a missing/failing verifier or repair agent, a repair that doesn't
+validate, or > 20 flags (systemic) all fall back to persisting the raw extraction — the
+draft is never worse than the single-extractor pass. Both agents seed **disabled** with the
+sub-flag; when off, ingestion is exactly today's behaviour. The agents/capabilities are
+seeded by `065`–`068`; the flag by `064`. The verifier + repair prompts (load-bearing) live
+in `ingestion/verify-prompt.ts` and `ingestion/repair-prompt.ts`; both appear in the Prompt
+Library and the "Questionnaire ingestion" workflow diagram (a "Fidelity check & repair"
+group). **Scoring of matrix rows is out of scope for v1** — a composite answer contributes
+nothing to the numeric `scoring/compute.ts` aggregate (non-crashing); per-row scoring is a
+follow-up.
+
+## Live "questions so far" count (extract phase)
+
+Extraction is the longest wait. On the **streaming** surface the extractor's first pass is
+run **streamed** so the admin sees a rising count — "…12 questions so far" — instead of one
+opaque spinner. The count is real, parsed out of the JSON as it arrives; it is not scripted.
+
+The signal path, outermost to innermost:
+
+1. **Route → pipeline.** `orchestrateExtraction` passes an `onExtractionProgress(count)` sink
+   into `extractFromDocument`, which forwards it onto the capability dispatch's
+   `entityContext` under the `onExtractionProgress` key (the one documented free-form seam
+   from caller to capability). Producer/consumer share the key + narrowing via
+   `ingestion/extraction-progress-context.ts` so they can't drift. The non-streaming ingest /
+   re-ingest routes pass **no** sink — the presence of the sink is exactly what flips the
+   extractor onto the streamed path, so those routes keep their single blocking call.
+2. **Capability.** When the sink is present, `extract-questionnaire-structure` runs
+   `runStreamingStructuredExtraction` (`ingestion/stream-structured-extraction.ts`) instead
+   of the blocking `runStructuredCompletion`: it drives attempt 1 through
+   `provider.chatStream`, feeding each text delta to a `createQuestionCountScanner`
+   (`ingestion/question-count-scanner.ts`) and calling the sink on each **strict increase**.
+   The retry policy is unchanged — one non-streaming temp-0 retry, no echo of malformed
+   output, tokens summed across attempts. The scanner is a minimal forward-only JSON state
+   machine that counts objects closing directly inside the top-level `questions` array; it is
+   **key-anchored** (order-independent) and split-safe (a chunk boundary can fall mid-string
+   or mid-escape). It counts, it does not validate — the authoritative parse still runs once
+   on the assembled text.
+3. **Back out to SSE.** `orchestrateExtraction` bridges the push-based sink into its
+   pull-based generator with a tiny queue + one-shot notifier, coalescing a burst of
+   callbacks to the latest count, and yields `phase: 'extracting'` events whose `message`
+   states the count in prose and whose `progress: { done }` carries it structurally
+   (`total` is omitted — the model doesn't know its own count up front). The upload dialog
+   already renders `message` verbatim, so the count shows with no client change.
+
+**Requires provider streaming that honours the request timeout.** The extractor bounds its
+call at 300 s (`EXTRACTION_TIMEOUT_MS`); the platform `chatStream` now forwards a per-request
+`timeoutMs`/`signal` to the SDK create call (mirroring non-streaming `chat`) so a long stream
+isn't silently capped at the client's 120 s construction default. That fix is in both
+`openai-compatible.ts` and `anthropic.ts` and should be upstreamed to Sunrise.
+
+**Graceful when there's nothing to stream.** A zero-question document, a blocking fallback,
+or tool-based (Anthropic json-schema) extraction that streams no countable text simply yields
+no progress events — the admin still sees the opener message and the live elapsed timer.
 
 ## The extractor capability (the LLM step)
 
@@ -273,6 +381,41 @@ compose-stream) and `replaceVersionStructure` (re-ingest) go through
 (`extraction-prompt.ts`, `compose-prompt.ts`) also instruct the model to emit the
 object shape directly; the normaliser is the belt-and-braces defence since
 prompts are probabilistic.
+
+`normalizeSuggestedTypeConfig` also turns a trailing **"Other" escape hatch** into
+`allowOther`: an option whose label is "Other", "Other (please specify)", "Prefer to
+self-describe", or "Something else" is dropped from the fixed list and the config gets
+`allowOther: true` (the form renders its own "Other…" free-text input). It is
+deliberately conservative — "Prefer not to say", "None"/"None of the above", and "No
+preference" are **real** selectable answers, not escape hatches, and are never touched —
+and it never drops below the ≥2-option floor. The prompt asks the model to do this too;
+the normaliser makes it reliable.
+
+### Question-type fidelity (matrix, scales)
+
+Two extraction rules in `extraction-prompt.ts` keep the model faithful to richer source
+layouts:
+
+- **Rating grid / matrix → one `matrix` question.** A table where several row items share
+  one rating scale (a "Factor" column beside `1 2 3 4 5`, or a "Rate each: 1 = … 5 = …"
+  instruction over a list) is a **single question of type `matrix`** — its rows are not
+  choice options, and it is **not** split into one question per row. The model sets
+  `suggestedTypeConfig.rows` to `[{key,label}, …]` (distinct keys) and
+  `suggestedTypeConfig.scale` to the shared scale (a likert config — bounds + a `labels`
+  array OR `minLabel`/`maxLabel` anchors). The answer is a composite `{ rowKey: point }`
+  map in the single `AppAnswerSlot`. `matrix` is a first-class type end to end (form grid,
+  admin grid editor, per-row report formatting, per-row analytics distributions); only the
+  conversational surface asks it row-by-row. This relies on table extraction (above)
+  surfacing the grid as a Markdown table in the first place. Row keys are canonicalised at
+  persist by `normalizeSuggestedTypeConfig` (slugify + de-dupe, mirroring choices).
+- **Endpoint-anchored scales.** When a 1–5 scale anchors only its ends ("1 — Not at all …
+  5 — Very much"), the model stores `min`/`max` + `minLabel`/`maxLabel` **verbatim** and
+  does not fabricate middle labels. This is now a first-class, launchable `likert` shape:
+  `likertWriteConfigSchema` accepts a scale labelled **either** with a complete per-point
+  `labels` array **or** both endpoint labels (`isLikertLabelled`). A fully _unlabelled_
+  scale is still rejected (use `numeric`). `hasCompleteLikertLabels` stays stricter — the
+  report maps every value to a per-point word — so an endpoint-anchored answer renders as
+  `"4/5 — Not at all → Very much"` (`formatSlotAnswer`) rather than a bare number.
 
 ### Goal / audience merge (admin-wins-per-field)
 

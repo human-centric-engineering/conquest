@@ -484,6 +484,19 @@ export const APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG =
   'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED';
 
 /**
+ * Sub-flag gating the **ingest verify + repair** pass (the extraction critic that scores
+ * each extracted question's type/config fidelity against the source, and the scales-&-matrix
+ * repair specialist that re-extracts only the flagged ones). Disabled by default: it spends
+ * one extra reasoning call to verify, and a second only when questions are flagged, so an
+ * operator opts in deliberately. Independent of {@link APP_QUESTIONNAIRES_FLAG} (the master
+ * gate); both must be on for the streaming ingest route to run it. When off, ingestion is
+ * exactly today's single-extractor behaviour. Seeded disabled by
+ * `prisma/seeds/app-questionnaire/037-ingest-verify-repair-flag.ts`.
+ */
+export const APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_FLAG =
+  'APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_ENABLED';
+
+/**
  * Sub-flag gating the **turn evaluation** agent — the admin-only "interview-quality
  * evaluator" the Preview Turn Inspector runs over a single completed turn, judging
  * instruction compliance, interviewing/extraction/selection quality, information gain,
@@ -816,6 +829,100 @@ export const EVALUATE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinitio
       },
     },
     required: ['dimension', 'structure'],
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Ingest verify + repair — the extraction critic + scales/matrix repair specialist
+// that run between extract and persist on the streaming ingest surface. Both are
+// dispatched by the orchestrator (`_lib/orchestrate-extraction.ts`) behind the
+// APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR sub-flag; both persist nothing.
+// ---------------------------------------------------------------------------
+
+/** Slug of the extraction-verifier capability — the critic that flags mis-typed / mis-scaled questions. */
+export const VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG = 'app_verify_extraction_structure';
+
+/** `AiCapability.executionHandler` for the verifier — the class name the dispatcher resolves. */
+export const VERIFY_EXTRACTION_STRUCTURE_HANDLER = 'AppVerifyExtractionStructureCapability';
+
+/** Slug of the seeded extraction-verifier `AiAgent` (empty provider/model → dynamic resolution). */
+export const QUESTIONNAIRE_EXTRACTION_VERIFIER_AGENT_SLUG = 'app-questionnaire-extraction-verifier';
+
+/**
+ * The verifier capability's OpenAI-compatible function definition — one source of truth shared by
+ * the `BaseCapability` subclass and the `AiCapability` seed, so they can't drift. Dispatched
+ * programmatically by the ingest orchestrator; persists nothing.
+ */
+export const VERIFY_EXTRACTION_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG,
+  description:
+    "Verify an extracted questionnaire's questions against the source document text: flag each question whose answer type or config doesn't faithfully match the source (a rating scale mis-typed, a likert missing its endpoint anchors, a rating grid flattened or with rows lost). Returns per-question verdicts plus any detected rating-grid spans; fixes nothing. Dispatched programmatically by the ingest orchestrator.",
+  parameters: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        description:
+          'The extracted questions to verify — each { key, prompt, suggestedType, suggestedTypeConfig, sourceQuote, extractionConfidence }.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      documentText: {
+        type: 'string',
+        description: 'The parsed source document text the extraction was produced from.',
+      },
+      fileName: {
+        type: 'string',
+        description: 'Original file name (prompt context / cost metadata).',
+      },
+      versionId: { type: 'string', description: 'Optional stable identity for cost-log metadata.' },
+    },
+    required: ['questions', 'documentText'],
+  },
+};
+
+/** Slug of the question-repair capability — the scales/matrix specialist that re-extracts flagged questions. */
+export const REPAIR_QUESTIONS_CAPABILITY_SLUG = 'app_repair_questions';
+
+/** `AiCapability.executionHandler` for the repair capability — the class name the dispatcher resolves. */
+export const REPAIR_QUESTIONS_HANDLER = 'AppRepairQuestionsCapability';
+
+/** Slug of the seeded scales/matrix repair `AiAgent` (empty provider/model → dynamic resolution). */
+export const QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG = 'app-questionnaire-scale-matrix-repair';
+
+/**
+ * The repair capability's OpenAI-compatible function definition — one source of truth shared by the
+ * `BaseCapability` subclass and the `AiCapability` seed. Dispatched programmatically by the ingest
+ * orchestrator over the flagged subset only; persists nothing.
+ */
+export const REPAIR_QUESTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: REPAIR_QUESTIONS_CAPABILITY_SLUG,
+  description:
+    'Re-extract a small set of flagged questions from a questionnaire, correcting their answer type and config against the source (fixing a mis-typed scale, restoring missing likert anchors, or turning a flattened / mis-split rating grid into one matrix question with rows + a shared scale). Returns corrected questions keyed to the originals; persists nothing.',
+  parameters: {
+    type: 'object',
+    properties: {
+      targets: {
+        type: 'array',
+        description: 'The flagged questions to repair — each the full extracted question object.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      matrixGroups: {
+        type: 'array',
+        description:
+          'Detected rating-grid spans from the verifier — each { label, sourceSpanQuote, memberKeys } so a grid can be re-read whole.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      documentText: {
+        type: 'string',
+        description: 'The parsed source document text, so a grid span can be re-read in context.',
+      },
+      fileName: {
+        type: 'string',
+        description: 'Original file name (prompt context / cost metadata).',
+      },
+      versionId: { type: 'string', description: 'Optional stable identity for cost-log metadata.' },
+    },
+    required: ['targets', 'documentText'],
   },
 };
 

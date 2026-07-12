@@ -154,6 +154,46 @@ export interface StatusTickerProps {
   className?: string;
 }
 
+export interface ExtractionProgressProps {
+  /**
+   * The latest REAL phase message from the ingest stream (`extracting` → `verifying` →
+   * `repairing …` → `saving`). Falls back to a neutral opener before the first event lands.
+   */
+  message?: string;
+  className?: string;
+}
+
+/**
+ * ExtractionProgress — the honest counterpart to {@link StatusTicker} for the document-upload
+ * flow, which streams REAL phase events. It renders the actual current phase message (not a
+ * scripted script) plus the same live elapsed mm:ss counter. Use this wherever a genuine
+ * progress signal exists; keep {@link StatusTicker} only for the long single-request waits that
+ * have none (data slots, design evaluation, re-ingest).
+ */
+export function ExtractionProgress({ message, className }: ExtractionProgressProps) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setElapsedSeconds((s) => s + 1), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const text = message && message.trim().length > 0 ? message : 'Reading the document…';
+
+  return (
+    <p role="status" className={cn('text-muted-foreground text-sm italic', className)}>
+      <span>{text}</span>
+      <span
+        aria-hidden="true"
+        data-testid="elapsed"
+        className="ml-2 text-xs not-italic tabular-nums opacity-70"
+      >
+        {formatElapsed(elapsedSeconds)}
+      </span>
+    </p>
+  );
+}
+
 export function StatusTicker({
   messages = EXTRACTION_MESSAGES,
   estimatedMs,

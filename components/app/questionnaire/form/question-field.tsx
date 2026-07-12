@@ -25,6 +25,7 @@ import {
 } from '@/lib/app/questionnaire/form/type-config';
 import { RadioGroup } from '@/components/app/questionnaire/form/radio-group';
 import { LikertScale } from '@/components/app/questionnaire/form/likert-scale';
+import { MatrixField } from '@/components/app/questionnaire/form/matrix-field';
 import type { EditableSlot } from '@/lib/app/questionnaire/panel/types';
 
 export interface QuestionFieldProps {
@@ -121,6 +122,18 @@ export function QuestionField({ slot, value, onChange, onBlur, disabled }: Quest
         />
       );
     }
+
+    case 'matrix':
+      return (
+        <MatrixField
+          typeConfig={slot.typeConfig}
+          value={value}
+          onChange={onChange}
+          onBlur={onBlur}
+          disabled={disabled}
+          ariaLabel={slot.prompt}
+        />
+      );
 
     case 'numeric': {
       const cfg = readNumericConfig(slot.typeConfig);

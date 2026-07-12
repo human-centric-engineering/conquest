@@ -18,7 +18,10 @@ import {
   launchReadinessChecks,
   type LaunchReadinessCheck,
 } from '@/lib/app/questionnaire/launch/readiness';
-import { hasCompleteLikertLabels } from '@/lib/app/questionnaire/authoring/type-config-schema';
+import {
+  isLikertLabelled,
+  isMatrixLabelled,
+} from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { slotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { dataSlotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 
@@ -52,7 +55,7 @@ export async function loadLaunchReadiness(
     version,
     sectionCount,
     questionCount,
-    likertSlots,
+    scaleSlots,
     config,
     dataSlotsEnabled,
     dataSlotCount,
@@ -65,10 +68,12 @@ export async function loadLaunchReadiness(
     }),
     prisma.appQuestionnaireSection.count({ where: { versionId } }),
     prisma.appQuestionSlot.count({ where: { versionId } }),
-    // Likert configs, to enforce "every scale is labelled" before launch.
+    // Likert + matrix configs, to enforce "every rating scale is labelled" before launch (a
+    // complete per-point labels array OR both endpoint labels — see isLikertLabelled /
+    // isMatrixLabelled; a matrix also needs ≥1 row).
     prisma.appQuestionSlot.findMany({
-      where: { versionId, type: 'likert' },
-      select: { typeConfig: true },
+      where: { versionId, type: { in: ['likert', 'matrix'] } },
+      select: { type: true, typeConfig: true },
     }),
     prisma.appQuestionnaireConfig.findUnique({
       where: { versionId },
@@ -94,8 +99,11 @@ export async function loadLaunchReadiness(
     dataSlotEmbeddingsRequired ? dataSlotEmbeddingCoverage(versionId) : Promise.resolve(null),
   ]);
 
-  const unlabelledLikertCount = likertSlots.filter(
-    (s) => !hasCompleteLikertLabels(s.typeConfig)
+  const likertSlots = scaleSlots.filter((s) => s.type === 'likert');
+  const matrixSlots = scaleSlots.filter((s) => s.type === 'matrix');
+  const unlabelledLikertCount = likertSlots.filter((s) => !isLikertLabelled(s.typeConfig)).length;
+  const misconfiguredMatrixCount = matrixSlots.filter(
+    (s) => !isMatrixLabelled(s.typeConfig)
   ).length;
 
   const checks = launchReadinessChecks({
@@ -105,6 +113,8 @@ export async function loadLaunchReadiness(
     questionCount,
     likertCount: likertSlots.length,
     unlabelledLikertCount,
+    matrixCount: matrixSlots.length,
+    misconfiguredMatrixCount,
     configSaved: config !== null,
     dataSlotsRequired: dataSlotsEnabled,
     dataSlotsReady: dataSlotCount >= 1,

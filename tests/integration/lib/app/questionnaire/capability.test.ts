@@ -319,6 +319,44 @@ describe('AppExtractQuestionnaireStructureCapability — dispatch', () => {
     expect(result.error?.code).toBe('extraction_failed');
     expect(result.data).toBeUndefined();
     expect(provider.chat).toHaveBeenCalledTimes(2);
+    // No Zod issue paths (JSON.parse itself failed) ⇒ the message must name the
+    // real cause — an unparseable/truncated response — not blame the schema.
+    // This is the exact production failure mode for a reasoning model whose
+    // output overruns the token cap and comes back as cut-off JSON.
+    expect(result.error?.message).toMatch(/not parseable JSON/i);
+    expect(result.error?.message).toMatch(/truncat/i);
+    expect(result.error?.message).not.toMatch(/not valid against the schema/i);
+  });
+
+  it('names the schema fields (not truncation) when the JSON parses but violates the schema on both attempts', async () => {
+    // Parses as JSON on both attempts but `questions` is the wrong type — the Zod
+    // arm populates issue paths, so the error must cite the invalid field rather
+    // than the truncation message. Guards against the two failure modes bleeding
+    // into one another.
+    const schemaInvalid = JSON.stringify({ sections: [], questions: 'nope', changes: [] });
+    const provider = makeProvider([{ content: schemaInvalid }, { content: schemaInvalid }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('extraction_failed');
+    expect(result.error?.message).toMatch(/not valid against the schema/i);
+    expect(result.error?.message).toMatch(/invalid at:/i);
+    expect(result.error?.message).not.toMatch(/truncat/i);
+  });
+
+  it('gives the extraction call generous token headroom for reasoning-model output', async () => {
+    // Regression guard: 16k truncated real questionnaires mid-JSON on gpt-5.4
+    // (reasoning + faithful table/scale output overran the cap). The extraction
+    // call must request a budget comfortably above that.
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    const firstCall = provider.chat.mock.calls[0] as unknown as [unknown, { maxTokens?: number }];
+    expect(firstCall?.[1]?.maxTokens).toBeGreaterThanOrEqual(32_000);
   });
 
   it('suppresses infer_goal when the admin supplied the goal', async () => {
@@ -488,6 +526,143 @@ describe('AppExtractQuestionnaireStructureCapability — dispatch', () => {
     );
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe('AppExtractQuestionnaireStructureCapability — streaming progress', () => {
+  /** A schema-valid payload with THREE questions, to observe a rising count. */
+  const MULTI_EXTRACTION = {
+    sections: [{ ordinal: 0, title: 'S' }],
+    questions: [
+      {
+        sectionOrdinal: 0,
+        key: 'q1',
+        prompt: 'First?',
+        suggestedType: 'free_text',
+        extractionConfidence: 0.9,
+      },
+      {
+        sectionOrdinal: 0,
+        key: 'q2',
+        prompt: 'Second?',
+        suggestedType: 'free_text',
+        extractionConfidence: 0.9,
+      },
+      {
+        sectionOrdinal: 0,
+        key: 'q3',
+        prompt: 'Third?',
+        suggestedType: 'free_text',
+        extractionConfidence: 0.9,
+      },
+    ],
+    changes: [],
+  };
+  const MULTI_JSON = JSON.stringify(MULTI_EXTRACTION);
+
+  /** Provider whose `chatStream` yields `content` in fixed-size text chunks + a done chunk. */
+  function makeStreamingProvider(
+    content: string,
+    opts: { chunkSize?: number; retryContent?: string } = {}
+  ) {
+    const chunkSize = opts.chunkSize ?? 8;
+    const chatStream = vi.fn(async function* () {
+      for (let i = 0; i < content.length; i += chunkSize) {
+        yield { type: 'text', content: content.slice(i, i + chunkSize) };
+      }
+      yield { type: 'done', usage: { inputTokens: 200, outputTokens: 80 }, finishReason: 'stop' };
+    });
+    const chat = vi.fn(async () => ({
+      content: opts.retryContent ?? '',
+      usage: { inputTokens: 50, outputTokens: 20 },
+      model: 'test-model',
+      finishReason: 'stop' as const,
+    }));
+    return { chatStream, chat };
+  }
+
+  /** Context carrying the live progress sink on `entityContext` (the streaming route's seam). */
+  function streamingContext(sink: (n: number) => void) {
+    return {
+      userId: 'user-1',
+      agentId: 'agent-1',
+      entityContext: {
+        extractorAgent: { provider: '', model: '', fallbackProviders: [] },
+        onExtractionProgress: sink,
+      },
+    };
+  }
+
+  it('streams the first attempt and reports a rising question count', async () => {
+    const provider = makeStreamingProvider(MULTI_JSON, { chunkSize: 6 });
+    (getProvider as Mock).mockResolvedValue(provider);
+    const counts: number[] = [];
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      streamingContext((n) => counts.push(n))
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { questions: unknown[] };
+    expect(data.questions).toHaveLength(3);
+    // Streamed, not blocking: chatStream drove the first attempt; chat never ran.
+    expect(provider.chatStream).toHaveBeenCalledTimes(1);
+    expect(provider.chat).not.toHaveBeenCalled();
+    // The sink saw each question close exactly once, strictly increasing to 3.
+    expect(counts).toEqual([1, 2, 3]);
+  });
+
+  it('reports each count once even when the JSON arrives one character at a time', async () => {
+    const provider = makeStreamingProvider(MULTI_JSON, { chunkSize: 1 });
+    (getProvider as Mock).mockResolvedValue(provider);
+    const counts: number[] = [];
+
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      streamingContext((n) => counts.push(n))
+    );
+
+    expect(counts).toEqual([1, 2, 3]);
+  });
+
+  it('logs cost from the streamed done-chunk usage', async () => {
+    const provider = makeStreamingProvider(MULTI_JSON, { chunkSize: 6 });
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      streamingContext(() => {})
+    );
+
+    expect(logCost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: CostOperation.CHAT,
+        inputTokens: 200,
+        outputTokens: 80,
+      })
+    );
+  });
+
+  it('falls back to a non-streaming temp-0 retry when the streamed JSON is malformed', async () => {
+    const provider = makeStreamingProvider('not json at all', { retryContent: MULTI_JSON });
+    (getProvider as Mock).mockResolvedValue(provider);
+    const counts: number[] = [];
+
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      streamingContext((n) => counts.push(n))
+    );
+
+    expect(result.success).toBe(true);
+    expect(provider.chatStream).toHaveBeenCalledTimes(1);
+    expect(provider.chat).toHaveBeenCalledTimes(1);
+    // The malformed stream produced no complete questions → nothing to report.
+    expect(counts).toEqual([]);
   });
 });
 
