@@ -40,8 +40,7 @@ export const repairJsonSchema: Record<string, unknown> = z.toJSONSchema(repairRe
 
 /** Discriminated result of validating a parsed candidate against the contract. */
 export type RepairValidation =
-  | { ok: true; value: RepairResult }
-  | { ok: false; issues: z.core.$ZodIssue[] };
+  { ok: true; value: RepairResult } | { ok: false; issues: z.core.$ZodIssue[] };
 
 /** Validate an already-JSON-parsed value against {@link repairResultSchema}. */
 export function validateRepairResult(parsed: unknown): RepairValidation {

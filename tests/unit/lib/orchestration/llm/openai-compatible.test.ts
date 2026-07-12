@@ -721,8 +721,7 @@ describe('chatStream', () => {
     }
 
     const requestOptions = chatCreateMock.mock.calls[0]?.[1] as
-      | { timeout?: number; signal?: AbortSignal }
-      | undefined;
+      { timeout?: number; signal?: AbortSignal } | undefined;
     expect(requestOptions?.timeout).toBe(300_000);
     expect(requestOptions?.signal).toBe(controller.signal);
   });
