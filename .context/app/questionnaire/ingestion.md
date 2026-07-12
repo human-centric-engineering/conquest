@@ -180,6 +180,49 @@ group). **Scoring of matrix rows is out of scope for v1** — a composite answer
 nothing to the numeric `scoring/compute.ts` aggregate (non-crashing); per-row scoring is a
 follow-up.
 
+## Live "questions so far" count (extract phase)
+
+Extraction is the longest wait. On the **streaming** surface the extractor's first pass is
+run **streamed** so the admin sees a rising count — "…12 questions so far" — instead of one
+opaque spinner. The count is real, parsed out of the JSON as it arrives; it is not scripted.
+
+The signal path, outermost to innermost:
+
+1. **Route → pipeline.** `orchestrateExtraction` passes an `onExtractionProgress(count)` sink
+   into `extractFromDocument`, which forwards it onto the capability dispatch's
+   `entityContext` under the `onExtractionProgress` key (the one documented free-form seam
+   from caller to capability). Producer/consumer share the key + narrowing via
+   `ingestion/extraction-progress-context.ts` so they can't drift. The non-streaming ingest /
+   re-ingest routes pass **no** sink — the presence of the sink is exactly what flips the
+   extractor onto the streamed path, so those routes keep their single blocking call.
+2. **Capability.** When the sink is present, `extract-questionnaire-structure` runs
+   `runStreamingStructuredExtraction` (`ingestion/stream-structured-extraction.ts`) instead
+   of the blocking `runStructuredCompletion`: it drives attempt 1 through
+   `provider.chatStream`, feeding each text delta to a `createQuestionCountScanner`
+   (`ingestion/question-count-scanner.ts`) and calling the sink on each **strict increase**.
+   The retry policy is unchanged — one non-streaming temp-0 retry, no echo of malformed
+   output, tokens summed across attempts. The scanner is a minimal forward-only JSON state
+   machine that counts objects closing directly inside the top-level `questions` array; it is
+   **key-anchored** (order-independent) and split-safe (a chunk boundary can fall mid-string
+   or mid-escape). It counts, it does not validate — the authoritative parse still runs once
+   on the assembled text.
+3. **Back out to SSE.** `orchestrateExtraction` bridges the push-based sink into its
+   pull-based generator with a tiny queue + one-shot notifier, coalescing a burst of
+   callbacks to the latest count, and yields `phase: 'extracting'` events whose `message`
+   states the count in prose and whose `progress: { done }` carries it structurally
+   (`total` is omitted — the model doesn't know its own count up front). The upload dialog
+   already renders `message` verbatim, so the count shows with no client change.
+
+**Requires provider streaming that honours the request timeout.** The extractor bounds its
+call at 300 s (`EXTRACTION_TIMEOUT_MS`); the platform `chatStream` now forwards a per-request
+`timeoutMs`/`signal` to the SDK create call (mirroring non-streaming `chat`) so a long stream
+isn't silently capped at the client's 120 s construction default. That fix is in both
+`openai-compatible.ts` and `anthropic.ts` and should be upstreamed to Sunrise.
+
+**Graceful when there's nothing to stream.** A zero-question document, a blocking fallback,
+or tool-based (Anthropic json-schema) extraction that streams no countable text simply yields
+no progress events — the admin still sees the opener message and the live elapsed timer.
+
 ## The extractor capability (the LLM step)
 
 Extraction is a Sunrise **capability** dispatched **programmatically** from the

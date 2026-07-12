@@ -72,6 +72,18 @@ type FindUniqueMock = Mock & {
 type DispatchMock = Mock & {
   mockImplementation: (fn: (slug: string) => Promise<unknown>) => DispatchMock;
 };
+type ExtractMock = Mock & {
+  mockImplementation: (
+    fn: (
+      upload: GuardedUpload,
+      ctx: {
+        adminId: string;
+        log: never;
+        onExtractionProgress?: (questionsSoFar: number) => void;
+      }
+    ) => Promise<PipelineResult<ExtractedDocument>>
+  ) => ExtractMock;
+};
 
 // ─── Fixtures / helpers ───────────────────────────────────────────────────────
 
@@ -181,6 +193,55 @@ describe('orchestrateExtraction — sub-flag off', () => {
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
     expect(prisma.aiAgent.findUnique).not.toHaveBeenCalled();
     // Only the initial "extracting" phase — no verifying/repairing phase ever yielded.
+    expect(phases.map((p) => p.phase)).toEqual(['extracting']);
+  });
+});
+
+// ─── Live extraction progress bridge ────────────────────────────────────────
+
+describe('orchestrateExtraction — live extraction progress', () => {
+  it('re-yields the extractor question counts as extracting-progress phase events', async () => {
+    // Isolate the extract phase — verify/repair off so nothing else emits events.
+    (isIngestVerifyRepairEnabled as Mock).mockResolvedValue(false);
+    (extractFromDocument as ExtractMock).mockImplementation(async (_upload, ctx) => {
+      // The real extractor fires these from inside the streamed capability call.
+      ctx.onExtractionProgress?.(1);
+      ctx.onExtractionProgress?.(2);
+      ctx.onExtractionProgress?.(5);
+      return {
+        ok: true,
+        value: { extraction: structuredClone(COHERENT_EXTRACTION), parsed: PARSED_DOC },
+      };
+    });
+    const { ctx } = makeCtx();
+
+    const { phases, result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    const progressCounts = phases
+      .filter((p) => p.phase === 'extracting' && p.progress)
+      .map((p) => p.progress?.done);
+    // At least one progress event; counts strictly increase and reach the latest.
+    expect(progressCounts.length).toBeGreaterThanOrEqual(1);
+    for (let i = 1; i < progressCounts.length; i += 1) {
+      expect(progressCounts[i]!).toBeGreaterThan(progressCounts[i - 1]!);
+    }
+    expect(progressCounts.at(-1)).toBe(5);
+    // The client renders `message` verbatim, so the count must be stated in prose.
+    const latest = phases.find((p) => p.progress?.done === 5);
+    expect(latest?.message).toMatch(/5 questions so far/);
+  });
+
+  it('completes cleanly when the extractor reports no counts (blocking fallback)', async () => {
+    (isIngestVerifyRepairEnabled as Mock).mockResolvedValue(false);
+    // The default beforeEach mock resolves without calling onExtractionProgress.
+    const { ctx } = makeCtx();
+
+    const { phases, result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    // Just the opener extracting event — no progress events fabricated.
+    expect(phases.filter((p) => p.progress).length).toBe(0);
     expect(phases.map((p) => p.phase)).toEqual(['extracting']);
   });
 });

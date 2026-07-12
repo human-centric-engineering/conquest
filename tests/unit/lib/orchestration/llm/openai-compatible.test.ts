@@ -705,6 +705,43 @@ describe('chatStream', () => {
     // test-review:accept tobe_true — include_usage is a boolean field in stream_options; true is the exact required value to get token usage in streaming responses
     expect((calledParams?.stream_options as Record<string, unknown>)?.include_usage).toBe(true);
   });
+
+  it('forwards a per-request timeout and signal to the SDK create call', async () => {
+    // A long streaming job (live document extraction) must be able to override the
+    // client's construction-time timeout default, exactly as non-streaming chat does.
+    chatCreateMock.mockResolvedValue(toAsyncIterable([makeChunk({ finishReason: 'stop' })]));
+    const controller = new AbortController();
+
+    const provider = makeProvider();
+    for await (const _chunk of provider.chatStream([{ role: 'user', content: 'x' }], {
+      model: 'gpt-4o',
+      timeoutMs: 300_000,
+      signal: controller.signal,
+    })) {
+      // consume
+    }
+
+    const requestOptions = chatCreateMock.mock.calls[0]?.[1] as
+      | { timeout?: number; signal?: AbortSignal }
+      | undefined;
+    expect(requestOptions?.timeout).toBe(300_000);
+    expect(requestOptions?.signal).toBe(controller.signal);
+  });
+
+  it('passes no request options when neither timeout nor signal is supplied', async () => {
+    // Backward-compatible: without an override the SDK create call is single-arg,
+    // so the client's construction default applies unchanged.
+    chatCreateMock.mockResolvedValue(toAsyncIterable([makeChunk({ finishReason: 'stop' })]));
+
+    const provider = makeProvider();
+    for await (const _chunk of provider.chatStream([{ role: 'user', content: 'x' }], {
+      model: 'gpt-4o',
+    })) {
+      // consume
+    }
+
+    expect(chatCreateMock.mock.calls[0]?.[1]).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
