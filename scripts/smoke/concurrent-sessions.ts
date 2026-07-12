@@ -99,8 +99,12 @@ async function seed(): Promise<SeededVersion> {
         create: {
           versionNumber: 1,
           status: 'launched',
-          // anonymousMode = true so createAnonymousSession is permitted (no-login surface).
-          config: { create: { anonymousMode: true, selectionStrategy: 'sequential' } },
+          // accessMode 'public' permits the no-login walk-up start `createAnonymousSession`
+          // drives (an unset accessMode defaults to 'invitation_only', which rejects it);
+          // anonymousMode governs identity capture, not access.
+          config: {
+            create: { anonymousMode: true, accessMode: 'public', selectionStrategy: 'sequential' },
+          },
           sections: {
             create: {
               ordinal: 1,
