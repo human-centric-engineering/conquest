@@ -144,3 +144,30 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
     },
   };
 }
+
+/**
+ * Effective questionnaire-data includes for the RESPONDENT-facing report surfaces (the completion
+ * screen and the respondent PDF), derived from `rawIncludes` + the report `mode`.
+ *
+ * A `narrative` report is a standalone woven deliverable, so it NEVER appends the raw questions-&-answers
+ * recap beneath the prose — this restores the pre-F10.6 `narrativeOnly` invariant. It is enforced here
+ * (rather than trusting the stored flag) on purpose: versions configured as `narrative` before F10.6
+ * carry `rawIncludes.questionsAsPresented: true` (the field's default, which the old narrative flow
+ * ignored), so honouring it verbatim would silently start surfacing a full Q&A recap on those existing
+ * reports. Suppressing it at read time keeps them woven-only with no data backfill.
+ *
+ * The captured data-slot appendix stays config-driven in every mode: it is new in F10.6 and defaults
+ * OFF, so no pre-existing version can regress into showing it, and a narrative report may still opt in.
+ *
+ * Single source of truth for both the render (`view.ts`) and the writer prompt's `includesAppendedData`
+ * hint (`generate.ts`), so the two can never drift.
+ */
+export function resolveReportRawIncludes(settings: RespondentReportSettings): {
+  questions: boolean;
+  dataSlots: boolean;
+} {
+  return {
+    questions: settings.mode === 'narrative' ? false : settings.rawIncludes.questionsAsPresented,
+    dataSlots: settings.rawIncludes.dataSlots,
+  };
+}

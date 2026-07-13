@@ -950,7 +950,12 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
         adaptive: true,
         adaptiveDataSlots: true,
         respondentReport: true,
+        cohortReport: true,
+        reportWebSearch: true,
         introScreen: true,
+        personaSelection: true,
+        advisor: true,
+        editAgent: true,
       });
     });
 
@@ -1045,6 +1050,29 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
       expect(flags.designEval).toBe(false); // DB=false AND master=true → false
       expect(flags.liveSessions).toBe(true); // DB=true AND master=true → true
       expect(flags.adaptive).toBe(false); // DB=false AND master=true → false
+    });
+
+    it('gates cohortReport on the cohorts flag, not just its own sub-flag', async () => {
+      // Arrange: master + the cohort-report sub-flag are on, but the cohorts flag is OFF.
+      // cohortReport = master && cohorts && cohortReport, so it must resolve false — this guards
+      // against a silent regression if the `&& cohorts` term is ever dropped.
+      const flagValues: Record<string, boolean> = {
+        APP_QUESTIONNAIRES_ENABLED: true,
+        APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED: true,
+        APP_QUESTIONNAIRES_COHORTS_ENABLED: false,
+        APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED: true,
+      };
+      mockIsFeatureEnabled.mockImplementation(
+        async (flagName: string) => flagValues[flagName] ?? false
+      );
+
+      // Act
+      const flags = await resolveQuestionnaireWorkspaceFlags();
+
+      // Assert: cohortReport is false despite its own sub-flag being true (cohorts gate wins);
+      // reportWebSearch mirrors its own flag now that master is on.
+      expect(flags.cohortReport).toBe(false);
+      expect(flags.reportWebSearch).toBe(true);
     });
 
     it('returns a QuestionnaireWorkspaceFlags-shaped object with the expected keys', async () => {

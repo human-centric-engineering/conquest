@@ -19,7 +19,10 @@ import {
   type RespondentReportMode,
   type RespondentReportStatus,
 } from '@/lib/app/questionnaire/types';
-import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import {
+  narrowRespondentReportSettings,
+  resolveReportRawIncludes,
+} from '@/lib/app/questionnaire/report/settings';
 import {
   validateRespondentReportContent,
   type RespondentReportContent,
@@ -166,10 +169,9 @@ export async function buildRespondentReportClientView(
     onScreen: settings.delivery.onScreen,
     download: settings.delivery.download,
     questionnaireTitle: session.version?.questionnaire?.title ?? 'questionnaire',
-    includeData: {
-      questions: settings.rawIncludes.questionsAsPresented,
-      dataSlots: settings.rawIncludes.dataSlots,
-    },
+    // Narrative reports render woven-only (no appended Q&A recap) regardless of the stored flag; see
+    // `resolveReportRawIncludes`. This is the single chokepoint feeding both respondent-facing surfaces.
+    includeData: resolveReportRawIncludes(settings),
   };
 
   if (!enabled || !isAiRespondentReportMode(settings.mode)) {

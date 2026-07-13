@@ -30,7 +30,10 @@ import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import { buildAnswerPanelView } from '@/lib/app/questionnaire/panel/answer-panel';
-import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import {
+  narrowRespondentReportSettings,
+  resolveReportRawIncludes,
+} from '@/lib/app/questionnaire/report/settings';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import {
   runReportResearch,
@@ -389,8 +392,12 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
     research:
       beforeResearch && researchCfg.informNarrative ? researchToPromptBlock(beforeResearch) : '',
     formatterEnabled,
-    includesAppendedData:
-      settings.rawIncludes.questionsAsPresented || settings.rawIncludes.dataSlots,
+    // Match what actually renders — narrative reports never append the Q&A recap (see
+    // `resolveReportRawIncludes`), so don't tell the writer data is appended when it isn't.
+    includesAppendedData: (() => {
+      const includes = resolveReportRawIncludes(settings);
+      return includes.questions || includes.dataSlots;
+    })(),
   });
   const result = await runStructuredCompletion<RespondentReportContent>({
     provider,

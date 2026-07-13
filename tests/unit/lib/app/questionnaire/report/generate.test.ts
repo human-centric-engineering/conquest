@@ -393,8 +393,10 @@ describe('generateRespondentReport', () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
       sessionMeta({
         respondentReport: {
+          // raw + insights: the Q&A recap really is appended, so the hint applies. (A narrative
+          // report never appends the recap — see `resolveReportRawIncludes` — so it wouldn't here.)
           enabled: true,
-          mode: 'narrative',
+          mode: 'raw_plus_insights',
           rawIncludes: { questionsAsPresented: true, dataSlots: false },
         },
       })

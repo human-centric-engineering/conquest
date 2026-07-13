@@ -120,9 +120,11 @@ export function RespondentReportEditor({
     setSavedOk(false);
   }
   /**
-   * Switch report mode, defaulting the questionnaire-data appendix per mode. A `narrative` report is
-   * woven prose, so selecting it defaults to woven-only (both include toggles OFF — appending the raw
-   * data is opt-in). Leaving narrative restores the answer listing the other modes surface by default.
+   * Switch report mode, resetting the questionnaire-data appendix per mode. A `narrative` report is
+   * woven prose: its Q&A recap is suppressed at read time regardless of the stored flag (see
+   * `resolveReportRawIncludes`) and the Q&A toggle is hidden, so selecting narrative clears both
+   * include flags (the data-slot appendix stays opt-in). Leaving narrative restores the answer listing
+   * the other modes surface by default.
    */
   function changeMode(nextMode: RespondentReportMode) {
     const next: Partial<RespondentReportSettings> = { mode: nextMode };
@@ -221,8 +223,9 @@ export function RespondentReportEditor({
           </div>
 
           {/* Which of the respondent's own questionnaire data accompanies the report. In `raw` mode
-              this IS the report; in the AI modes (raw + insights, narrative) it is appended below the
-              generated report — including for a narrative report, which is woven prose on its own. */}
+              this IS the report; in `raw + insights` it is appended below the generated report. A
+              `narrative` report is a standalone woven deliverable, so it never appends the raw Q&A
+              recap (only the optional captured-information appendix). */}
           <div className="space-y-2">
             <Label className="flex items-center gap-1">
               {value.mode === 'raw' ? 'Report content' : 'Include questionnaire data'}
@@ -237,7 +240,7 @@ export function RespondentReportEditor({
                   {value.mode === 'raw'
                     ? 'In this mode the report is made up of this data.'
                     : narrative
-                      ? 'It appears beneath the woven narrative report — leave both off for prose only.'
+                      ? 'A narrative report renders as woven prose on its own; the questions & answers recap is never appended to it.'
                       : 'It appears beneath the AI insights.'}{' '}
                   Included data shows on the completion screen and in the downloadable PDF.
                 </p>
@@ -245,24 +248,28 @@ export function RespondentReportEditor({
             </Label>
             {narrative && (
               <p className="text-muted-foreground text-sm">
-                A narrative report is woven prose. Turn these on to also append the
-                respondent&rsquo;s questions &amp; answers and/or the information captured from them
-                beneath the report.
+                A narrative report is woven prose on its own — the questions &amp; answers recap is
+                not appended.
+                {dataSlotsEnabled ? ' You may still append the captured information below.' : ''}
               </p>
             )}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={value.rawIncludes.questionsAsPresented}
-                onCheckedChange={(v) =>
-                  patch({ rawIncludes: { ...value.rawIncludes, questionsAsPresented: v } })
-                }
-                disabled={isSaving}
-                id="rr-questions"
-              />
-              <Label htmlFor="rr-questions" className="text-sm font-normal">
-                Questions &amp; answers as presented
-              </Label>
-            </div>
+            {/* The Q&A recap never accompanies a narrative report, so only offer the toggle in the
+                raw / raw + insights modes. */}
+            {!narrative && (
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={value.rawIncludes.questionsAsPresented}
+                  onCheckedChange={(v) =>
+                    patch({ rawIncludes: { ...value.rawIncludes, questionsAsPresented: v } })
+                  }
+                  disabled={isSaving}
+                  id="rr-questions"
+                />
+                <Label htmlFor="rr-questions" className="text-sm font-normal">
+                  Questions &amp; answers as presented
+                </Label>
+              </div>
+            )}
             {dataSlotsEnabled && (
               <div className="flex items-center gap-2">
                 <Switch

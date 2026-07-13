@@ -214,14 +214,15 @@ export const respondentReportWorkflow = diagram({
       x: 1760,
       y: 0,
       description:
-        'Persist and deliver the finished report to the respondent and admin surfaces. Per config, the respondent’s own questionnaire data can be appended beneath the report — a questions-and-answers recap and/or the captured data-slot values — shown on the completion screen and in the downloadable PDF alike.',
+        'Persist and deliver the finished report to the respondent and admin surfaces. Per config, the respondent’s own questionnaire data can be appended beneath the report — a questions-and-answers recap and/or the captured data-slot values — shown on the completion screen and in the downloadable PDF alike. A narrative report is a standalone woven deliverable, so the Q&A recap is never appended to it (the captured data-slot appendix stays available); the recap applies to the raw + insights mode.',
       meta: {
-        note: 'Persist and deliver; optionally append the respondent’s questionnaire data.',
+        note: 'Persist and deliver; optionally append the respondent’s questionnaire data (never the Q&A recap for a narrative report).',
         settings: [
           {
             key: 'respondentReport.rawIncludes.questionsAsPresented',
             label: 'Include questions & answers',
-            effect: 'Appends the question-by-question answer record beneath the report.',
+            effect:
+              'Appends the question-by-question answer record beneath the report in the raw + insights mode. A narrative report is always woven-only and never appends the recap.',
           },
           {
             key: 'respondentReport.rawIncludes.dataSlots',

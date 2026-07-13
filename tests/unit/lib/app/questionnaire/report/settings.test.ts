@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import {
+  narrowRespondentReportSettings,
+  resolveReportRawIncludes,
+} from '@/lib/app/questionnaire/report/settings';
 import {
   DEFAULT_RESPONDENT_REPORT_SETTINGS,
   REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH,
@@ -163,5 +166,42 @@ describe('narrowRespondentReportSettings', () => {
     const result = narrowRespondentReportSettings({ bogus: 'x', enabled: true });
     expect(result).not.toHaveProperty('bogus');
     expect(result.enabled).toBe(true);
+  });
+});
+
+describe('resolveReportRawIncludes', () => {
+  function settings(over: Partial<typeof DEFAULT_RESPONDENT_REPORT_SETTINGS>) {
+    return { ...DEFAULT_RESPONDENT_REPORT_SETTINGS, ...over };
+  }
+
+  it('passes rawIncludes through verbatim for the raw + insights mode', () => {
+    const result = resolveReportRawIncludes(
+      settings({
+        mode: 'raw_plus_insights',
+        rawIncludes: { questionsAsPresented: true, dataSlots: true },
+      })
+    );
+    expect(result).toEqual({ questions: true, dataSlots: true });
+  });
+
+  it('passes rawIncludes through verbatim for the raw mode', () => {
+    const result = resolveReportRawIncludes(
+      settings({ mode: 'raw', rawIncludes: { questionsAsPresented: true, dataSlots: false } })
+    );
+    expect(result).toEqual({ questions: true, dataSlots: false });
+  });
+
+  it('forces questions off for narrative mode even when the stored flag is true (no-backfill guard)', () => {
+    const result = resolveReportRawIncludes(
+      settings({ mode: 'narrative', rawIncludes: { questionsAsPresented: true, dataSlots: false } })
+    );
+    expect(result.questions).toBe(false);
+  });
+
+  it('keeps the data-slot appendix config-driven in narrative mode', () => {
+    const result = resolveReportRawIncludes(
+      settings({ mode: 'narrative', rawIncludes: { questionsAsPresented: true, dataSlots: true } })
+    );
+    expect(result).toEqual({ questions: false, dataSlots: true });
   });
 });

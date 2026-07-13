@@ -171,12 +171,13 @@ describe('RespondentReportEditor', () => {
     expect(screen.getByPlaceholderText(/Warm and encouraging/i)).not.toBeDisabled();
   });
 
-  it('offers the include-questionnaire-data toggles in narrative mode (append below the woven report)', () => {
+  it('hides the Q&A toggle in narrative mode (woven-only) but keeps the captured-data toggle', () => {
     const { container } = renderEditor({ mode: 'narrative' });
-    // The toggles are now available for narrative too — the admin can append the Q&A / data slots.
-    expect(container.querySelector('#rr-questions')).not.toBeNull();
+    // A narrative report never appends the Q&A recap (restores the pre-F10.6 woven-only invariant),
+    // so the questions toggle is not offered; the captured data-slot appendix stays opt-in.
+    expect(container.querySelector('#rr-questions')).toBeNull();
     expect(container.querySelector('#rr-dataslots')).not.toBeNull();
-    expect(screen.getByText(/append the/i)).toBeInTheDocument();
+    expect(screen.getByText(/is not appended/i)).toBeInTheDocument();
   });
 
   it('keeps the raw-content toggles for raw + insights modes', () => {
@@ -184,13 +185,13 @@ describe('RespondentReportEditor', () => {
     expect(container.querySelector('#rr-questions')).not.toBeNull();
   });
 
-  it('defaults narrative mode to woven-only — selecting it turns the include toggles off', () => {
+  it('hides the Q&A toggle and clears the data-slot toggle when switching to narrative', () => {
     const { container } = renderEditor({ mode: 'raw_plus_insights' });
     // The non-narrative default surfaces the answers.
     expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(true);
     fireEvent.change(screen.getByTestId('mode-select'), { target: { value: 'narrative' } });
-    // Selecting narrative resets the appendix toggles off (appending the raw data is opt-in).
-    expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(false);
+    // Narrative is woven-only: the Q&A toggle disappears entirely and the data-slot appendix resets off.
+    expect(container.querySelector('#rr-questions')).toBeNull();
     expect(container.querySelector<HTMLInputElement>('#rr-dataslots')?.checked).toBe(false);
   });
 
@@ -199,8 +200,10 @@ describe('RespondentReportEditor', () => {
       mode: 'narrative',
       rawIncludes: { questionsAsPresented: false, dataSlots: false },
     });
-    expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(false);
+    // No Q&A toggle while in narrative mode.
+    expect(container.querySelector('#rr-questions')).toBeNull();
     fireEvent.change(screen.getByTestId('mode-select'), { target: { value: 'raw_plus_insights' } });
+    // Switching back surfaces the toggle again, defaulted on.
     expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(true);
   });
 

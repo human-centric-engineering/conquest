@@ -99,6 +99,59 @@ describe('synthesiseReportAppendix', () => {
     expect(logger.warn as Mock).toHaveBeenCalled();
   });
 
+  it('degrades gracefully when a non-Error value is thrown', async () => {
+    runStructuredCompletion.mockRejectedValue('string failure');
+    const result = await synthesiseReportAppendix(baseOpts());
+    expect(result).toEqual({ appendix: null, costUsd: 0 });
+    expect(logger.warn as Mock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ error: 'string failure' })
+    );
+  });
+
+  it('dedups findings by URL across phases, drops empty snippets, and falls back to the after-note', async () => {
+    runStructuredCompletion.mockResolvedValue({ value: { appendix: null }, costUsd: 0 });
+    await synthesiseReportAppendix(
+      baseOpts({
+        // before has no note and shares a URL with after (dedup); after supplies the note.
+        before: {
+          findings: [{ title: 'Shared', url: 'https://dup.test', snippet: 's' }],
+          costUsd: 0,
+        },
+        after: {
+          findings: [
+            { title: 'Shared', url: 'https://dup.test', snippet: 's' }, // duplicate URL
+            { title: 'NoSnippet', url: 'https://nosnip.test', snippet: '' }, // empty snippet branch
+          ],
+          note: 'after only note',
+          costUsd: 0,
+        },
+      })
+    );
+    const opts = runStructuredCompletion.mock.calls[0][0] as { messages: LlmMessage[] };
+    const system = opts.messages.find((m) => m.role === 'system')?.content as string;
+    expect(system).toContain('after only note'); // after-note fallback used
+    expect(system).toContain('https://nosnip.test');
+    // The shared URL appears exactly once (deduped).
+    expect(system.match(/https:\/\/dup\.test/g)).toHaveLength(1);
+  });
+
+  it('tolerates a null before-phase and absent notes when building the findings block', async () => {
+    runStructuredCompletion.mockResolvedValue({ value: { appendix: null }, costUsd: 0 });
+    await synthesiseReportAppendix(
+      baseOpts({
+        before: null, // null source → `?? []` branch in the loop
+        after: {
+          findings: [{ title: 'Solo', url: 'https://solo.test', snippet: 'x' }],
+          costUsd: 0,
+        },
+      })
+    );
+    const opts = runStructuredCompletion.mock.calls[0][0] as { messages: LlmMessage[] };
+    const system = opts.messages.find((m) => m.role === 'system')?.content as string;
+    expect(system).toContain('https://solo.test');
+  });
+
   it('builds a prompt with the persona, appendix directive, and fenced findings', async () => {
     runStructuredCompletion.mockResolvedValue({ value: { appendix: null }, costUsd: 0 });
     await synthesiseReportAppendix(baseOpts({ guidance: 'Look for benchmarks.' }));
@@ -132,5 +185,8 @@ describe('synthesiseReportAppendix', () => {
     expect(parse('{"appendix": {"body": "   "}}')).toEqual({ appendix: null });
     // Genuinely malformed → null (triggers the runner's retry).
     expect(parse('not json')).toBeNull();
+    // Valid JSON that isn't an object (array / primitive) is also treated as malformed.
+    expect(parse('[1, 2]')).toBeNull();
+    expect(parse('42')).toBeNull();
   });
 });

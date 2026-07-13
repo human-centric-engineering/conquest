@@ -37,15 +37,21 @@ report, in **every** mode:
   slot, grouped by theme). Only meaningful for a version running in a data-slot mode; the toggle is
   hidden unless the data-slots feature is on.
 
-In `raw` mode this data **is** the report. In the AI modes it is **appended beneath** the generated
-report — including a `narrative` report, which is woven prose on its own and appends the data only
-when a toggle is on (both off ⇒ woven-only, the classic narrative). **Selecting `narrative` in the
-editor resets both toggles OFF** (woven-only is the narrative default; appending is opt-in) — the
-`changeMode` handler in `respondent-report-editor.tsx`; switching back to a non-narrative mode
-restores `questionsAsPresented`. The same config drives both the on-screen completion card (and its A4
-preview) and the downloadable PDF, so the two artifacts match.
-When either toggle is on, the report agent is told the respondent can already see their answers in
-full alongside the report, so it should analyse/synthesise rather than restate them (see
+In `raw` mode this data **is** the report. In `raw_plus_insights` it is **appended beneath** the
+generated report per the toggles. A **`narrative`** report is a standalone woven deliverable, so it
+**never appends the Q&A recap** — the respondent-facing `questions` include is always suppressed for
+narrative, regardless of the stored `questionsAsPresented` flag (`resolveReportRawIncludes` in
+`report/settings.ts`, the single source of truth used by both the render in `report/view.ts` and the
+writer-prompt hint in `report/generate.ts`). This restores the pre-F10.6 `narrativeOnly` invariant
+**without a data backfill**: versions configured as `narrative` before F10.6 carry the field's default
+`questionsAsPresented: true`, which would otherwise start surfacing a full Q&A recap on existing
+reports. The optional **captured-information (data-slot) appendix stays config-driven in every mode**
+(new in F10.6, defaults off, so no existing version can regress into showing it) — a narrative report
+may still opt into it. The editor hides the Q&A toggle in narrative mode accordingly; switching away
+restores `questionsAsPresented` (`changeMode` in `respondent-report-editor.tsx`). The same config
+drives both the on-screen completion card (and its A4 preview) and the downloadable PDF, so the two
+artifacts match. When data is appended, the report agent is told the respondent can already see it in
+full alongside the report, so it should analyse/synthesise rather than restate it (see
 `APPENDED_DATA_RULES` in `report/generate.ts`).
 
 ## Configuration
