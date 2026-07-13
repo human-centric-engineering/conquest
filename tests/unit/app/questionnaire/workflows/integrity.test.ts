@@ -174,6 +174,7 @@ describe('workflow category grouping', () => {
     expect(categoryForSlug('config-advisor')).toBe('config');
     expect(categoryForSlug('agent-settings-advisor')).toBe('config');
     expect(categoryForSlug('respondent-report')).toBe('reporting');
+    expect(categoryForSlug('report-config-assistant')).toBe('reporting');
     expect(categoryForSlug('design-evaluation')).toBe('creation');
     expect(categoryForSlug('document-ingestion')).toBe('creation');
     expect(categoryForSlug('conversation-turn')).toBe('conversation');
