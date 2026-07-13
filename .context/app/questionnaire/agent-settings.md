@@ -37,7 +37,7 @@ Settings → Default models (their PATCH carries extra known-model validation).
 
 - **`recommendations.ts`** — the curated table (pure data). `TASK_TIER_RECOMMENDATIONS`
   (reasoning→`gpt-5.4`, chat→`gpt-5.4-mini`, routing→`gpt-4.1-nano`) and
-  `AGENT_RECOMMENDATIONS` (14 agents: slug → tier, temperature, maxTokens, effort,
+  `AGENT_RECOMMENDATIONS` (16 agents: slug → tier, temperature, maxTokens, effort,
   rationale). Only the three trivial hot-path outliers (selector, interviewer,
   completion) carry an `overrideModel` (`gpt-5.4-nano`) — a per-agent pin, not a
   tier change.

@@ -48,6 +48,7 @@ import {
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
   RESPONDENT_REPORT_AGENT_SLUG,
   RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG,
+  REPORT_RESEARCHER_AGENT_SLUG,
   COHORT_REPORT_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
   QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
@@ -141,7 +142,7 @@ export interface AgentRecommendation {
 }
 
 /**
- * The 14 ConQuest questionnaire agents covered by the advisor, ordered by tier
+ * The 16 ConQuest questionnaire agents covered by the advisor, ordered by tier
  * (reasoning first) then by role prominence.
  */
 export const AGENT_RECOMMENDATIONS: readonly AgentRecommendation[] = [
@@ -249,6 +250,18 @@ export const AGENT_RECOMMENDATIONS: readonly AgentRecommendation[] = [
     overrideModel: null,
     rationale:
       'Aggregated analysis across many respondents — the hardest reasoning task; high effort.',
+  },
+  {
+    slug: REPORT_RESEARCHER_AGENT_SLUG,
+    label: 'Report Research Agent',
+    role: 'Runs web-search rounds to gather external context for reports',
+    taskTier: 'reasoning',
+    recommendedTemperature: 0.3,
+    recommendedMaxTokens: 2048,
+    recommendedReasoningEffort: 'medium',
+    overrideModel: null,
+    rationale:
+      'Iterative query refinement + a short synthesis over the results — bounded reasoning, not per-turn, so a reasoning model at medium effort fits. Low temperature keeps queries focused; the small token cap suits short queries and a brief synthesis note.',
   },
 
   // ---- chat tier (inherit defaultModels.chat) ----------------------------
