@@ -33,6 +33,7 @@ import {
 import { renderSessionPdf } from '@/app/api/v1/app/questionnaire-sessions/_lib/render-session-pdf';
 import { sessionPdfResponse } from '@/app/api/v1/app/questionnaire-sessions/_lib/pdf-response';
 import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
+import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 
 export const runtime = 'nodejs';
 
@@ -54,16 +55,24 @@ async function handleExportPdf(
     }
 
     // Include the AI report in the PDF when ready (the on-screen and PDF artifacts should match).
-    // Raw-only / not-yet-ready → null (answers only). For the woven `narrative` mode the report IS
-    // the deliverable: render it alone and omit the raw answer listing (`narrativeOnly`).
+    // Raw-only / not-yet-ready → null (answers only). The config's `rawIncludes` chooses which
+    // questionnaire data accompanies the report — the Q&A listing and/or the captured data slots.
     const reportView = await buildRespondentReportClientView(sessionId);
     const ready = reportView?.insights?.status === 'ready' ? reportView.insights : null;
     const insights = ready ? ready.content : null;
-    const narrativeOnly = insights !== null && reportView?.mode === 'narrative';
+    const narrative = reportView?.mode === 'narrative';
+    const cfg = reportView?.includeData ?? { questions: true, dataSlots: false };
+    // Honour the config, EXCEPT when an AI report was expected but isn't embedded yet (still
+    // generating): fall back to the full answers so the download is never an empty document. Raw
+    // mode (no AI report) and a ready AI report both honour `rawIncludes` exactly.
+    const aiPending = reportView != null && isAiRespondentReportMode(reportView.mode) && !insights;
+    const includeQuestions = aiPending ? true : cfg.questions;
 
     const model = await buildSessionExportPdfModel(loaded, {
       insights,
-      narrativeOnly,
+      narrative,
+      includeQuestions,
+      includeDataSlots: cfg.dataSlots,
       // Trust the formatter's layout in the PDF too, so it matches the on-screen render.
       formatted: ready?.formatted ?? false,
       completionPct: ready?.completionPct ?? null,

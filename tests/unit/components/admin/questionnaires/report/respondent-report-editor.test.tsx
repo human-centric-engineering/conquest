@@ -171,16 +171,37 @@ describe('RespondentReportEditor', () => {
     expect(screen.getByPlaceholderText(/Warm and encouraging/i)).not.toBeDisabled();
   });
 
-  it('hides the raw-content toggles in narrative mode (woven, no separate raw section)', () => {
+  it('offers the include-questionnaire-data toggles in narrative mode (append below the woven report)', () => {
     const { container } = renderEditor({ mode: 'narrative' });
-    expect(container.querySelector('#rr-questions')).toBeNull();
-    expect(container.querySelector('#rr-dataslots')).toBeNull();
-    expect(screen.getByText(/no separate raw answer section/i)).toBeInTheDocument();
+    // The toggles are now available for narrative too — the admin can append the Q&A / data slots.
+    expect(container.querySelector('#rr-questions')).not.toBeNull();
+    expect(container.querySelector('#rr-dataslots')).not.toBeNull();
+    expect(screen.getByText(/append the/i)).toBeInTheDocument();
   });
 
   it('keeps the raw-content toggles for raw + insights modes', () => {
     const { container } = renderEditor({ mode: 'raw_plus_insights' });
     expect(container.querySelector('#rr-questions')).not.toBeNull();
+  });
+
+  it('defaults narrative mode to woven-only — selecting it turns the include toggles off', () => {
+    const { container } = renderEditor({ mode: 'raw_plus_insights' });
+    // The non-narrative default surfaces the answers.
+    expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(true);
+    fireEvent.change(screen.getByTestId('mode-select'), { target: { value: 'narrative' } });
+    // Selecting narrative resets the appendix toggles off (appending the raw data is opt-in).
+    expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(false);
+    expect(container.querySelector<HTMLInputElement>('#rr-dataslots')?.checked).toBe(false);
+  });
+
+  it('restores the answer listing when switching away from narrative', () => {
+    const { container } = renderEditor({
+      mode: 'narrative',
+      rawIncludes: { questionsAsPresented: false, dataSlots: false },
+    });
+    expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(false);
+    fireEvent.change(screen.getByTestId('mode-select'), { target: { value: 'raw_plus_insights' } });
+    expect(container.querySelector<HTMLInputElement>('#rr-questions')?.checked).toBe(true);
   });
 
   it('links to the client KB page when grounding is on (insights or narrative)', () => {
@@ -324,6 +345,7 @@ describe('RespondentReportEditor', () => {
       expect(container.querySelector('#rr-research-results')).toBeDisabled();
       expect(screen.getByTestId('display-select')).toBeDisabled();
       expect(sw('rr-research-inform')).toBeDisabled();
+      expect(sw('rr-research-appendix')).toBeDisabled();
     });
 
     it('enables the research-enabled switch in an AI mode but keeps dependent controls disabled until research is turned on', () => {
@@ -337,6 +359,7 @@ describe('RespondentReportEditor', () => {
       expect(container.querySelector('#rr-research-results')).toBeDisabled();
       expect(screen.getByTestId('display-select')).toBeDisabled();
       expect(sw('rr-research-inform')).toBeDisabled();
+      expect(sw('rr-research-appendix')).toBeDisabled();
     });
 
     it('enables the timing/rounds/results/display controls once research is on in an AI mode', () => {
@@ -354,6 +377,8 @@ describe('RespondentReportEditor', () => {
       expect(screen.getByTestId('display-select')).not.toBeDisabled();
       // Default timing is 'before', so showsBefore is true and the inform switch is enabled too.
       expect(container.querySelector('#rr-research-inform')).not.toBeDisabled();
+      // The appendix switch is enabled whenever research is on (it works at any timing).
+      expect(container.querySelector('#rr-research-appendix')).not.toBeDisabled();
     });
 
     it('disables the inform-narrative switch when timing does not include a before phase', () => {
@@ -370,6 +395,8 @@ describe('RespondentReportEditor', () => {
         true
       );
       expect(container.querySelector('#rr-research-inform')).toBeDisabled();
+      // ...but the appendix switch stays enabled — it can draw on after-search findings.
+      expect(container.querySelector('#rr-research-appendix')).not.toBeDisabled();
     });
 
     it('shows only the before-search instructions when timing is "before"', () => {
@@ -476,6 +503,23 @@ describe('RespondentReportEditor', () => {
 
       const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
       expect(rr.research.timing).toBe('after');
+    });
+
+    it('propagates the appendix opt-in into the save payload', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      // Default is off; toggling it on must reach the payload.
+      fireEvent.click(container.querySelector('#rr-research-appendix') as HTMLElement);
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.appendix).toBe(true);
     });
 
     it('propagates edited rounds and maxResults into the save payload', () => {

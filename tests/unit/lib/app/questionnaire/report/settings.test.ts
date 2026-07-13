@@ -38,6 +38,7 @@ describe('narrowRespondentReportSettings', () => {
         after: { instructions: 'Find sources.' },
         display: 'table' as const,
         informNarrative: false,
+        appendix: true,
       },
     };
     expect(narrowRespondentReportSettings(full)).toEqual(full);
@@ -79,6 +80,16 @@ describe('narrowRespondentReportSettings', () => {
       }).research;
       expect(r.before.instructions).toBe('hello');
       expect(r.after.instructions).toHaveLength(REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH);
+    });
+
+    it('defaults appendix to false when missing and coerces a non-boolean', () => {
+      expect(narrowRespondentReportSettings({}).research.appendix).toBe(false);
+      expect(
+        narrowRespondentReportSettings({ research: { appendix: 'yes' } }).research.appendix
+      ).toBe(false);
+      expect(
+        narrowRespondentReportSettings({ research: { appendix: true } }).research.appendix
+      ).toBe(true);
     });
   });
 

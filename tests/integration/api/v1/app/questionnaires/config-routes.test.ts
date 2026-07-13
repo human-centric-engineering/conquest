@@ -288,6 +288,7 @@ describe('upsert + response', () => {
         after: { instructions: 'Verify any cited figures.' },
         display: 'list' as const,
         informNarrative: true,
+        appendix: false,
       },
     };
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ respondentReport }));

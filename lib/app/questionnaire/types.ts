@@ -723,10 +723,16 @@ export type RespondentReportSettings = {
     before: { instructions: string };
     /** Admin prompt for the `after` phase: what to enrich / verify in the finished report. */
     after: { instructions: string };
-    /** How findings render in the report (table / list / hidden). */
+    /** How the cited sources section renders in the report (table / list / hidden). */
     display: ReportResearchDisplay;
     /** Whether `before` findings may inform the grounded report prose (framed as general context). */
     informNarrative: boolean;
+    /**
+     * Whether the writer may add a synthesized supporting appendix drawn from the findings — only when
+     * it genuinely improves the report (per-report agent's choice; may be absent). Independent of
+     * `display`/`informNarrative`, and (unlike narrative weaving) may draw on `after` findings too.
+     */
+    appendix: boolean;
   };
 };
 
@@ -752,6 +758,7 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
     after: { instructions: '' },
     display: 'list',
     informNarrative: true,
+    appendix: false,
   },
 };
 

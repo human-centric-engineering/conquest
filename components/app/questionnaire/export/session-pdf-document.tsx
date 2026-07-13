@@ -283,8 +283,9 @@ function Paragraphs({ text, trustParagraphs }: { text: string; trustParagraphs?:
 }
 
 /**
- * The AI report section. For mode 2 it sits above the raw answers (title "Your insights"); for the
- * woven `narrative` mode it is the whole deliverable (title "Your personalised report").
+ * The AI report section. In `raw_plus_insights` it sits above the raw answers (title "Your
+ * insights"); in `narrative` mode it is the woven report (title "Your personalised report"), now
+ * optionally followed by the captured-information and/or Q&A appendix when the config includes them.
  */
 function InsightsSection({
   insights,
@@ -319,6 +320,12 @@ function InsightsSection({
               {`• ${action}`}
             </Text>
           ))}
+        </View>
+      )}
+      {insights.appendix && (
+        <View>
+          <Text style={styles.insightsHeading}>{insights.appendix.heading ?? 'Appendix'}</Text>
+          <Paragraphs text={insights.appendix.body} trustParagraphs={formatted} />
         </View>
       )}
       {insights.research && insights.research.findings.length > 0 && (
@@ -366,8 +373,11 @@ export interface SessionPdfDocumentProps {
 export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
   const accent = model.theme.accentColor;
   const respondentLabel = model.respondent ? model.respondent.name : 'Anonymous respondent';
-  // Narrative mode: the woven report is the whole document — no raw answer listing, no answered-count.
-  const narrativeOnly = model.narrativeOnly === true;
+  // The questions-and-answers listing (and its answered-count line) render only when the report
+  // config includes them — a woven narrative with no appended Q&A omits them.
+  const showQuestions = model.includeQuestions;
+  // The captured data-slot appendix renders when the config includes it and the version has slots.
+  const showDataSlots = model.includeDataSlots && model.dataSlots.length > 0;
 
   return (
     // The document Title is the questionnaire's own title — browsers derive the suggested save/print
@@ -418,7 +428,7 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             {formatDate(model.completedAt)}
           </Text>
 
-          {!narrativeOnly && (
+          {showQuestions && (
             <Text style={styles.progress}>
               {`${model.answeredCount} of ${model.totalCount} questions answered`}
             </Text>
@@ -428,14 +438,39 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
         {model.insights && (
           <InsightsSection
             insights={model.insights}
-            title={narrativeOnly ? 'Your personalised report' : 'Your insights'}
+            title={model.narrative ? 'Your personalised report' : 'Your insights'}
             formatted={model.insightsFormatted}
             completionPct={model.insightsCompletionPct}
           />
         )}
 
-        {/* Raw answer record — omitted for the woven narrative deliverable. */}
-        {!narrativeOnly &&
+        {/* Captured information — the respondent-facing data-slot values, when the config includes
+            them. Sits above the raw Q&A record (the abstraction layer before the detail). */}
+        {showDataSlots && (
+          <View>
+            <Text style={styles.sectionTitle}>Captured information</Text>
+            {model.dataSlots.map((group, gi) => (
+              <View key={gi}>
+                {group.theme.trim() !== '' && (
+                  <Text style={styles.insightsHeading}>{group.theme}</Text>
+                )}
+                {group.slots.map((slot, si) => (
+                  <View key={si} style={styles.slot} wrap={false}>
+                    <Text style={styles.prompt}>{slot.name}</Text>
+                    {slot.value ? (
+                      <Text style={styles.answer}>{slot.value}</Text>
+                    ) : (
+                      <Text style={styles.notAnswered}>Not captured</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Raw answer record — omitted when the report doesn't include the questions listing. */}
+        {showQuestions &&
           model.sections.map((section) => (
             <View key={section.sectionId}>
               <Text style={styles.sectionTitle}>{section.title}</Text>

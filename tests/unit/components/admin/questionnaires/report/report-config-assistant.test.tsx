@@ -39,7 +39,7 @@ beforeEach(() => {
 describe('ReportConfigAssistant', () => {
   it('opens the panel from the launcher button', () => {
     renderAssistant();
-    fireEvent.click(screen.getByRole('button', { name: /Craft with AI assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Draft these fields with AI/i }));
     expect(screen.getByText(/Report design assistant/i)).toBeInTheDocument();
   });
 
@@ -49,7 +49,7 @@ describe('ReportConfigAssistant', () => {
       suggestions: { structure: 'Summary, themes, actions.' },
     });
     renderAssistant();
-    fireEvent.click(screen.getByRole('button', { name: /Craft with AI assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Draft these fields with AI/i }));
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Help me' } });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
@@ -61,7 +61,7 @@ describe('ReportConfigAssistant', () => {
     expect(opts.body.messages).toEqual([{ role: 'user', content: 'Help me' }]);
     expect(opts.body.current.instructions).toBe('existing');
 
-    expect(screen.getByRole('button', { name: /Apply structure/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Apply to Structure/i })).toBeInTheDocument();
   });
 
   it('applies a suggestion back into the editor', async () => {
@@ -70,18 +70,18 @@ describe('ReportConfigAssistant', () => {
       suggestions: { instructions: 'Warm and concise.' },
     });
     const { onApply } = renderAssistant();
-    fireEvent.click(screen.getByRole('button', { name: /Craft with AI assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Draft these fields with AI/i }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'go' } });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Apply instructions/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Apply to Style & voice/i }));
     expect(onApply).toHaveBeenCalledWith({ instructions: 'Warm and concise.' });
   });
 
   it('shows an error when the turn fails', async () => {
     (apiClient.post as unknown as Mock).mockRejectedValue(new Error('boom'));
     renderAssistant();
-    fireEvent.click(screen.getByRole('button', { name: /Craft with AI assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Draft these fields with AI/i }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'go' } });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
 

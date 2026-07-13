@@ -71,6 +71,8 @@ function row(over: Record<string, unknown> = {}) {
           ],
         },
       ],
+      // Data slots (Data Slots feature) — default empty; grouping is exercised in its own test.
+      dataSlots: [],
     },
     answers: [
       {
@@ -87,6 +89,7 @@ function row(over: Record<string, unknown> = {}) {
       { id: 'turn-a', ordinal: 1 },
       { id: 'turn-b', ordinal: 2 },
     ],
+    dataSlotFills: [],
     events: [{ createdAt: new Date('2026-06-02T10:30:00.000Z') }],
     ...over,
   };
@@ -159,6 +162,47 @@ describe('loadSessionExport', () => {
       answeredAtTurnIndex: 2, // turn-b → ordinal 2
       refinementHistory: [],
     });
+  });
+
+  it('groups captured data slots by theme, in version order, using the fill paraphrase as the value', async () => {
+    // Only ds-1 is filled; ds-2/ds-3 have no fill → null value ("Not captured" at render).
+    findSession.mockResolvedValue(
+      row({
+        version: {
+          ...row().version,
+          dataSlots: [
+            {
+              id: 'ds-1',
+              name: 'Focus needs',
+              description: 'How they work',
+              theme: 'Working style',
+            },
+            { id: 'ds-2', name: 'Collaboration', description: null, theme: 'Working style' },
+            { id: 'ds-3', name: 'Tenure', description: null, theme: 'Background' },
+          ],
+        },
+        dataSlotFills: [{ dataSlotId: 'ds-1', paraphrase: 'Prefers deep, uninterrupted blocks.' }],
+      })
+    );
+    const loaded = await loadSessionExport('sess-1');
+
+    expect(loaded?.dataSlotGroups).toEqual([
+      {
+        theme: 'Working style',
+        slots: [
+          {
+            name: 'Focus needs',
+            description: 'How they work',
+            value: 'Prefers deep, uninterrupted blocks.',
+          },
+          { name: 'Collaboration', description: null, value: null },
+        ],
+      },
+      {
+        theme: 'Background',
+        slots: [{ name: 'Tenure', description: null, value: null }],
+      },
+    ]);
   });
 
   it('leaves answeredAtTurnIndex null when the turn id is absent', async () => {
@@ -364,6 +408,7 @@ describe('buildSessionExportPdfModel', () => {
           refinementHistory: [],
         },
       ],
+      dataSlotGroups: [],
       ...over,
     };
   }

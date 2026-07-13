@@ -14,16 +14,21 @@
 import { isRecord } from '@/lib/utils';
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { AudienceShape } from '@/lib/app/questionnaire/types';
 
 /**
- * The structural subset of {@link SessionExportModel} the transcript needs. A full
- * `SessionExportModel` satisfies it (Phase 5 passes one directly); generation builds a lighter
+ * What the report transcript needs to lead with the questionnaire context. Carries the FULL
+ * structured {@link AudienceShape} (not a one-line summary) so the report agent can ground on every
+ * audience facet the admin captured — role, expertise, sensitivity, etc. Generation builds a light
  * object so it never has to construct theme/identity it doesn't use.
  */
-export type AnswerTranscriptInput = Pick<
-  SessionExportModel,
-  'questionnaireTitle' | 'goal' | 'audienceSummary' | 'sections'
->;
+export interface AnswerTranscriptInput {
+  questionnaireTitle: string;
+  goal: string | null;
+  /** Full structured audience (or null) — every present field is rendered as a labelled line. */
+  audience: AudienceShape | null;
+  sections: SessionExportModel['sections'];
+}
 
 /** One titled section of the insights report. */
 export interface RespondentReportSection {
@@ -60,6 +65,19 @@ export interface RespondentReportResearch {
   display: RespondentReportResearchDisplay;
 }
 
+/**
+ * A synthesized supporting appendix drawn from the web-search findings, authored by a dedicated
+ * post-generation pass ONLY when it genuinely improves the report (per-report agent's choice; a report
+ * that warrants none simply carries no appendix). Optional and additive — legacy reports and reports
+ * generated without the appendix opt-in have none.
+ */
+export interface RespondentReportAppendix {
+  /** Section heading — renderers default to "Appendix" when the agent supplies none. */
+  heading?: string;
+  /** The appendix prose (general supporting context, never facts about the respondent). */
+  body: string;
+}
+
 /** The generated insights payload (the `content` column for a mode-2 report). */
 export interface RespondentReportContent {
   /** A short overview paragraph. */
@@ -73,6 +91,11 @@ export interface RespondentReportContent {
    * Optional and additive — legacy reports and reports generated without research have none.
    */
   research?: RespondentReportResearch;
+  /**
+   * A synthesized supporting appendix, when the appendix opt-in was on, findings were gathered, and the
+   * writer judged one worthwhile. Optional and additive — attached post-generation, like {@link research}.
+   */
+  appendix?: RespondentReportAppendix;
 }
 
 /**
@@ -112,6 +135,10 @@ export const REPORT_RESEARCH_URL_MAX = 2000;
 export const REPORT_RESEARCH_SNIPPET_MAX = 2000;
 export const REPORT_RESEARCH_SOURCE_MAX = 200;
 export const REPORT_RESEARCH_NOTE_MAX = 4000;
+
+/** Bounds on the synthesized supporting appendix. */
+export const REPORT_APPENDIX_HEADING_MAX = 200;
+export const REPORT_APPENDIX_BODY_MAX = 8000;
 
 /**
  * Paragraph size bounds for the deterministic sub-split. A display paragraph is closed when it
@@ -254,6 +281,20 @@ export function validateResearch(parsed: unknown): RespondentReportResearch | nu
 }
 
 /**
+ * Narrow arbitrary parsed JSON onto a valid {@link RespondentReportAppendix}, or `null` when there is
+ * no usable prose (the appendix pass returns `{ appendix: null }` when none is warranted, and the model
+ * may also return an empty body). Shared by the appendix pass (validating the agent's digest) and the
+ * read path (preserving the stored block through {@link validateRespondentReportContent}).
+ */
+export function validateAppendix(parsed: unknown): RespondentReportAppendix | null {
+  if (!isRecord(parsed)) return null;
+  const body = trimTo(parsed.body, REPORT_APPENDIX_BODY_MAX);
+  if (!body) return null; // an appendix with no prose is not useful
+  const heading = trimTo(parsed.heading, REPORT_APPENDIX_HEADING_MAX);
+  return { body, ...(heading ? { heading } : {}) };
+}
+
+/**
  * Narrow arbitrary parsed JSON onto a valid {@link RespondentReportContent}, or `null` when it
  * can't be salvaged (no usable summary). Malformed individual sections/actions are dropped rather
  * than failing the whole report.
@@ -282,24 +323,51 @@ export function validateRespondentReportContent(parsed: unknown): RespondentRepo
     if (action) actions.push(action);
   }
 
-  // Preserve a web-research block when the stored content carries one (attached post-generation in
-  // `generate.ts`; the report agent's own JSON never has it). Load-bearing on the read path — this
-  // validator re-narrows stored content in `view.ts`, so dropping it here would erase the section.
+  // Preserve the web-research block and the appendix when the stored content carries them (both attached
+  // post-generation in `generate.ts`; the report agent's own JSON never has either). Load-bearing on the
+  // read path — this validator re-narrows stored content in `view.ts`, so dropping them here would erase
+  // the section / appendix.
   const research = validateResearch(parsed.research);
+  const appendix = validateAppendix(parsed.appendix);
 
-  return { summary, sections, actions, ...(research ? { research } : {}) };
+  return {
+    summary,
+    sections,
+    actions,
+    ...(research ? { research } : {}),
+    ...(appendix ? { appendix } : {}),
+  };
+}
+
+/**
+ * Render the structured audience as labelled lines for the transcript header — one line per field the
+ * admin actually set, so the report agent grounds on the full audience (role, expertise, sensitivity,
+ * …), not just a one-line description. Empty/unset fields are omitted. Returns `[]` when no audience.
+ */
+function describeAudience(audience: AudienceShape | null): string[] {
+  if (!audience) return [];
+  const lines: string[] = [];
+  if (audience.description?.trim()) lines.push(`Audience: ${audience.description.trim()}`);
+  if (audience.role?.trim()) lines.push(`Audience role: ${audience.role.trim()}`);
+  if (audience.expertiseLevel) lines.push(`Audience expertise level: ${audience.expertiseLevel}`);
+  if (typeof audience.estimatedDurationMinutes === 'number')
+    lines.push(`Estimated completion time: ${audience.estimatedDurationMinutes} minutes`);
+  if (audience.locale?.trim()) lines.push(`Locale: ${audience.locale.trim()}`);
+  if (audience.sensitivity) lines.push(`Topic sensitivity: ${audience.sensitivity}`);
+  if (audience.notes?.trim()) lines.push(`Audience notes: ${audience.notes.trim()}`);
+  return lines;
 }
 
 /**
  * Flatten the export model into a plain-text Q&A transcript for the report agent. Only answered
  * slots are included (an unanswered slot adds noise, not signal); sections with no answers are
- * skipped. Leads with the questionnaire goal/audience for grounding.
+ * skipped. Leads with the questionnaire goal + the full structured audience for grounding.
  */
 export function buildAnswerTranscript(model: AnswerTranscriptInput): string {
   const lines: string[] = [];
   lines.push(`Questionnaire: ${model.questionnaireTitle}`);
   if (model.goal) lines.push(`Goal: ${model.goal}`);
-  if (model.audienceSummary) lines.push(`Audience: ${model.audienceSummary}`);
+  lines.push(...describeAudience(model.audience));
   lines.push('');
 
   for (const section of model.sections) {

@@ -12,11 +12,14 @@ import {
   splitReportParagraphs,
   validateRespondentReportContent,
   validateResearch,
+  validateAppendix,
   PARTIAL_REPORT_THRESHOLD_PCT,
   REPORT_SUMMARY_MAX,
   REPORT_MAX_SECTIONS,
   REPORT_MAX_ACTIONS,
   REPORT_MAX_RESEARCH_FINDINGS,
+  REPORT_APPENDIX_HEADING_MAX,
+  REPORT_APPENDIX_BODY_MAX,
   type AnswerTranscriptInput,
 } from '@/lib/app/questionnaire/report/content';
 import type { PanelSlotView, PanelSectionView } from '@/lib/app/questionnaire/panel/types';
@@ -95,9 +98,36 @@ describe('buildAnswerTranscript', () => {
   const base: AnswerTranscriptInput = {
     questionnaireTitle: 'Pulse',
     goal: 'Understand engagement',
-    audienceSummary: 'Employees',
+    audience: { description: 'Employees' },
     sections: [],
   };
+
+  it('renders every set structured-audience field as a labelled line', () => {
+    const text = buildAnswerTranscript({
+      ...base,
+      audience: {
+        description: 'Frontline managers',
+        role: 'Team lead',
+        expertiseLevel: 'intermediate',
+        estimatedDurationMinutes: 15,
+        locale: 'en-GB',
+        sensitivity: 'high',
+        notes: 'Recently reorganised.',
+      },
+    });
+    expect(text).toContain('Audience: Frontline managers');
+    expect(text).toContain('Audience role: Team lead');
+    expect(text).toContain('Audience expertise level: intermediate');
+    expect(text).toContain('Estimated completion time: 15 minutes');
+    expect(text).toContain('Locale: en-GB');
+    expect(text).toContain('Topic sensitivity: high');
+    expect(text).toContain('Audience notes: Recently reorganised.');
+  });
+
+  it('omits audience lines entirely when no audience is set', () => {
+    const text = buildAnswerTranscript({ ...base, audience: null });
+    expect(text).not.toContain('Audience');
+  });
 
   it('includes the goal/audience header and only answered slots', () => {
     const sections: PanelSectionView[] = [
@@ -235,7 +265,7 @@ describe('buildAnswerTranscript', () => {
     const text = buildAnswerTranscript({
       questionnaireTitle: 'T',
       goal: null,
-      audienceSummary: null,
+      audience: null,
       sections,
     });
     expect(text).not.toContain('Goal:');
@@ -507,5 +537,64 @@ describe('validateRespondentReportContent — research preservation', () => {
   it('omits research when the stored content has none', () => {
     const content = validateRespondentReportContent({ summary: 'Hi', sections: [], actions: [] });
     expect(content).not.toHaveProperty('research');
+  });
+});
+
+describe('validateAppendix', () => {
+  it('returns null for non-records, a null/empty body, and the "no appendix" decision', () => {
+    expect(validateAppendix(null)).toBeNull();
+    expect(validateAppendix('nope')).toBeNull();
+    expect(validateAppendix({})).toBeNull();
+    expect(validateAppendix({ body: '   ' })).toBeNull();
+    expect(validateAppendix({ heading: 'Appendix', body: '' })).toBeNull();
+  });
+
+  it('keeps a well-formed appendix and its optional heading', () => {
+    expect(validateAppendix({ heading: 'Further context', body: 'Some background.' })).toEqual({
+      heading: 'Further context',
+      body: 'Some background.',
+    });
+  });
+
+  it('keeps the body when the heading is missing or empty (renderers default it)', () => {
+    expect(validateAppendix({ body: 'Body only.' })).toEqual({ body: 'Body only.' });
+    expect(validateAppendix({ heading: '   ', body: 'Body only.' })).toEqual({
+      body: 'Body only.',
+    });
+  });
+
+  it('trims and length-caps the heading and body', () => {
+    const res = validateAppendix({
+      heading: `  ${'h'.repeat(REPORT_APPENDIX_HEADING_MAX + 20)}  `,
+      body: 'b'.repeat(REPORT_APPENDIX_BODY_MAX + 20),
+    });
+    expect(res?.heading).toHaveLength(REPORT_APPENDIX_HEADING_MAX);
+    expect(res?.body).toHaveLength(REPORT_APPENDIX_BODY_MAX);
+  });
+});
+
+describe('validateRespondentReportContent — appendix preservation', () => {
+  it('preserves a valid appendix through the content validator (read path)', () => {
+    const content = validateRespondentReportContent({
+      summary: 'Hi',
+      sections: [],
+      actions: [],
+      appendix: { heading: 'Appendix', body: 'Extra context.' },
+    });
+    expect(content?.appendix).toEqual({ heading: 'Appendix', body: 'Extra context.' });
+  });
+
+  it('omits the appendix when the stored content has none or it is empty', () => {
+    expect(
+      validateRespondentReportContent({ summary: 'Hi', sections: [], actions: [] })
+    ).not.toHaveProperty('appendix');
+    expect(
+      validateRespondentReportContent({
+        summary: 'Hi',
+        sections: [],
+        actions: [],
+        appendix: { body: '' },
+      })
+    ).not.toHaveProperty('appendix');
   });
 });

@@ -47,16 +47,19 @@ const handleAdminExportPdf = withAdminAuth<{ id: string; sessionId: string }>(
       }
 
       // Embed the AI report (mode 2 or narrative) when ready, so the admin's PDF reflects what the
-      // respondent received. Unlike the respondent route, the admin PDF keeps the full audit (raw
-      // answers) alongside the report — it never sets `narrativeOnly`.
+      // respondent received. Unlike the respondent route, the admin PDF keeps the full audit — the
+      // Q&A answer record is always included regardless of config; the captured data-slot appendix
+      // follows the config (admins see what respondents see for that abstraction layer).
       const reportView = await buildRespondentReportClientView(sessionId);
       const ready = reportView?.insights?.status === 'ready' ? reportView.insights : null;
       const insights = ready ? ready.content : null;
 
-      // Trust the formatter's layout here too, so the admin PDF matches the respondent's exactly (the
-      // admin never sets narrativeOnly, so the report layout + caveat are the only things to keep in sync).
+      // Trust the formatter's layout here too, so the admin PDF matches the respondent's exactly.
       const model = await buildSessionExportPdfModel(loaded, {
         insights,
+        narrative: reportView?.mode === 'narrative',
+        includeQuestions: true,
+        includeDataSlots: reportView?.includeData.dataSlots ?? false,
         formatted: ready?.formatted ?? false,
         completionPct: ready?.completionPct ?? null,
       });

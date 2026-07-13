@@ -32,6 +32,11 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-export', () => ({
   loadSessionExport: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/report/research', () => ({ runReportResearch: vi.fn() }));
+// Mock the appendix synthesis pass but keep `hasResearchFindings` real (it drives the gating in generate).
+vi.mock('@/lib/app/questionnaire/report/appendix', async (importActual) => ({
+  ...(await importActual<typeof import('@/lib/app/questionnaire/report/appendix')>()),
+  synthesiseReportAppendix: vi.fn(),
+}));
 
 import { prisma } from '@/lib/db/client';
 import { isFeatureEnabled } from '@/lib/feature-flags';
@@ -42,6 +47,7 @@ import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import { runReportResearch } from '@/lib/app/questionnaire/report/research';
+import { synthesiseReportAppendix } from '@/lib/app/questionnaire/report/appendix';
 import { APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG } from '@/lib/app/questionnaire/constants';
 import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
 
@@ -383,6 +389,46 @@ describe('generateRespondentReport', () => {
     expect(system?.content).not.toContain('single woven report');
   });
 
+  it('tells the model not to restate answers when the report appends the questionnaire data', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'narrative',
+          rawIncludes: { questionsAsPresented: true, dataSlots: false },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('shown to them in full alongside this report');
+  });
+
+  it('omits the appended-data instruction when the report includes no questionnaire data', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'narrative',
+          rawIncludes: { questionsAsPresented: false, dataSlots: false },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).not.toContain('shown to them in full alongside this report');
+  });
+
   it('instructs the model to stay grounded and avoid unsupported generalisations', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
     (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
@@ -439,10 +485,14 @@ describe('generateRespondentReport', () => {
     }
   );
 
-  it('falls back to the audience role when there is no description', async () => {
+  it('renders the full structured audience as labelled lines in the transcript', async () => {
     (loadSessionExport as Mock).mockResolvedValue({
       ...loadedExport(),
-      audience: { role: 'Line managers' },
+      audience: {
+        role: 'Line managers',
+        expertiseLevel: 'intermediate',
+        sensitivity: 'high',
+      },
     });
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
     (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
@@ -451,7 +501,12 @@ describe('generateRespondentReport', () => {
     const user = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
       (m) => m.role === 'user'
     );
-    expect(user?.content).toContain('Audience: Line managers');
+    // The role now surfaces on its own labelled line (not folded into a one-line "Audience:"),
+    // alongside every other set audience facet.
+    expect(user?.content).toContain('Audience role: Line managers');
+    expect(user?.content).toContain('Audience expertise level: intermediate');
+    expect(user?.content).toContain('Topic sensitivity: high');
+    expect(user?.content).not.toContain('Audience: Line managers');
   });
 
   it('does not run the formatter and returns formatted:false when the flag is off', async () => {
@@ -619,6 +674,8 @@ describe('generateRespondentReport — web-search research', () => {
     (isFeatureEnabled as Mock).mockImplementation(
       (flag: string) => flag === APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG
     );
+    // Appendix opt-in is off in most tests; default the pass to a no-op so cost sums stay clean.
+    (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: null, costUsd: 0 });
   });
 
   it('does not run research when the platform flag is off (even if config enables it)', async () => {
@@ -788,6 +845,129 @@ describe('generateRespondentReport — web-search research', () => {
       findings: [],
       note: 'Nothing conclusive surfaced.',
       display: 'list',
+    });
+  });
+
+  describe('appendix synthesis', () => {
+    const APPENDIX = { heading: 'Further context', body: 'General background.' };
+
+    it('does not run the appendix pass when the opt-in is off', async () => {
+      // Default config leaves `appendix` off; findings are gathered but only feed the section.
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).not.toHaveBeenCalled();
+      expect(result.content).not.toHaveProperty('appendix');
+    });
+
+    it('runs the appendix pass and attaches the appendix when the writer returns one', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: APPENDIX, costUsd: 0.03 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).toHaveBeenCalledTimes(1);
+      expect(result.content.appendix).toEqual(APPENDIX);
+      // Appendix cost is summed into the total alongside research.
+      expect(result.costUsd).toBeCloseTo(0.03, 5);
+    });
+
+    it('attaches no appendix when the writer declines (returns null), but still sums the cost', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: null, costUsd: 0.01 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).toHaveBeenCalledTimes(1);
+      expect(result.content).not.toHaveProperty('appendix');
+      expect(result.costUsd).toBeCloseTo(0.01, 5);
+    });
+
+    it('does not run the appendix pass when no findings were gathered', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [], costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).not.toHaveBeenCalled();
+      expect(result.content).not.toHaveProperty('appendix');
+    });
+
+    it('runs a before round for the appendix even when the section is hidden and narrative is off', async () => {
+      // The appendix is a third surface: it must force the before round on its own.
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({
+          appendix: true,
+          timing: 'before',
+          display: 'hidden',
+          informNarrative: false,
+        })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: APPENDIX, costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(runReportResearch).toHaveBeenCalledTimes(1);
+      expect(synthesiseReportAppendix).toHaveBeenCalledTimes(1);
+      // Section stays hidden, but the appendix surfaces.
+      expect(result.content).not.toHaveProperty('research');
+      expect(result.content.appendix).toEqual(APPENDIX);
+    });
+
+    it('feeds both before and after findings to the appendix pass', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true, timing: 'both' })
+      );
+      const before = { findings: [FINDING], note: 'before', costUsd: 0 };
+      const after = {
+        findings: [{ title: 'New', url: 'https://new.test', snippet: 's' }],
+        note: 'after',
+        costUsd: 0,
+      };
+      (runReportResearch as Mock).mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: APPENDIX, costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      await generateRespondentReport('sess-1');
+
+      expect((synthesiseReportAppendix as Mock).mock.calls[0][0]).toMatchObject({ before, after });
+    });
+
+    it('strips an appendix key the writer hallucinated (appendix can only come from the pass)', async () => {
+      // Appendix opt-in off + a model that invents its own `appendix` key: it must not leak through.
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      const { provider } = fakeProvider({
+        ...VALID_RESPONSE,
+        appendix: { heading: 'Fake', body: 'Invented by the model.' },
+      });
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(result.content).not.toHaveProperty('appendix');
     });
   });
 });

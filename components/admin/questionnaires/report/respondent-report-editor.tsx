@@ -38,7 +38,6 @@ import {
   isAiRespondentReportMode,
   MAX_REPORT_RESEARCH_RESULTS,
   MAX_REPORT_RESEARCH_ROUNDS,
-  REPORT_RESEARCH_DISPLAYS,
   REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH,
   REPORT_RESEARCH_TIMINGS,
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
@@ -70,10 +69,13 @@ const RESEARCH_TIMING_LABELS: Record<ReportResearchTiming, string> = {
 };
 
 const RESEARCH_DISPLAY_LABELS: Record<ReportResearchDisplay, string> = {
-  table: 'Table',
   list: 'List',
-  hidden: 'Hidden (informs the report only)',
+  table: 'Table',
+  hidden: "Don't show",
 };
+
+/** Presentation order for the sources-section select (List first, then Table, then off). */
+const RESEARCH_DISPLAY_ORDER: ReportResearchDisplay[] = ['list', 'table', 'hidden'];
 
 /** Parse a number input to a bounded integer, falling back to `fallback` on empty/NaN. */
 function clampInt(raw: string, min: number, max: number, fallback: number): number {
@@ -116,6 +118,20 @@ export function RespondentReportEditor({
   function patch(next: Partial<RespondentReportSettings>) {
     setValue((v) => ({ ...v, ...next }));
     setSavedOk(false);
+  }
+  /**
+   * Switch report mode, defaulting the questionnaire-data appendix per mode. A `narrative` report is
+   * woven prose, so selecting it defaults to woven-only (both include toggles OFF — appending the raw
+   * data is opt-in). Leaving narrative restores the answer listing the other modes surface by default.
+   */
+  function changeMode(nextMode: RespondentReportMode) {
+    const next: Partial<RespondentReportSettings> = { mode: nextMode };
+    if (nextMode === 'narrative' && value.mode !== 'narrative') {
+      next.rawIncludes = { questionsAsPresented: false, dataSlots: false };
+    } else if (nextMode !== 'narrative' && value.mode === 'narrative') {
+      next.rawIncludes = { ...value.rawIncludes, questionsAsPresented: true };
+    }
+    patch(next);
   }
   function patchGeneration(next: Partial<RespondentReportSettings['generation']>) {
     setValue((v) => ({ ...v, generation: { ...v.generation, ...next } }));
@@ -188,7 +204,7 @@ export function RespondentReportEditor({
             </Label>
             <Select
               value={value.mode}
-              onValueChange={(v) => patch({ mode: v as RespondentReportMode })}
+              onValueChange={(v) => changeMode(v as RespondentReportMode)}
               disabled={isSaving}
             >
               <SelectTrigger className="max-w-xs">
@@ -204,54 +220,65 @@ export function RespondentReportEditor({
             </Select>
           </div>
 
-          {/* Raw content is the separate answer section — narrative weaves answers in, so it has no
-              such section and these toggles don't apply. */}
-          {narrative ? (
-            <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
-              A narrative report weaves the respondent&rsquo;s answers into one woven report — there
-              is no separate raw answer section to configure. Shape it on the{' '}
-              <span className="text-foreground font-medium">Generation</span> tab.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1">
-                Raw content
-                <FieldHelp title="Raw content">
-                  Choose what the raw section shows the respondent.
-                </FieldHelp>
+          {/* Which of the respondent's own questionnaire data accompanies the report. In `raw` mode
+              this IS the report; in the AI modes (raw + insights, narrative) it is appended below the
+              generated report — including for a narrative report, which is woven prose on its own. */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1">
+              {value.mode === 'raw' ? 'Report content' : 'Include questionnaire data'}
+              <FieldHelp title="Questionnaire data in the report">
+                <p>
+                  Choose whether the respondent&rsquo;s own questionnaire data accompanies the
+                  report. <strong>Questions &amp; answers</strong> is the question-by-question
+                  record of what they answered; <strong>captured data-slot values</strong> is the
+                  higher-level information the agent captured about them.
+                </p>
+                <p className="mt-2">
+                  {value.mode === 'raw'
+                    ? 'In this mode the report is made up of this data.'
+                    : narrative
+                      ? 'It appears beneath the woven narrative report — leave both off for prose only.'
+                      : 'It appears beneath the AI insights.'}{' '}
+                  Included data shows on the completion screen and in the downloadable PDF.
+                </p>
+              </FieldHelp>
+            </Label>
+            {narrative && (
+              <p className="text-muted-foreground text-sm">
+                A narrative report is woven prose. Turn these on to also append the
+                respondent&rsquo;s questions &amp; answers and/or the information captured from them
+                beneath the report.
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={value.rawIncludes.questionsAsPresented}
+                onCheckedChange={(v) =>
+                  patch({ rawIncludes: { ...value.rawIncludes, questionsAsPresented: v } })
+                }
+                disabled={isSaving}
+                id="rr-questions"
+              />
+              <Label htmlFor="rr-questions" className="text-sm font-normal">
+                Questions &amp; answers as presented
               </Label>
+            </div>
+            {dataSlotsEnabled && (
               <div className="flex items-center gap-2">
                 <Switch
-                  checked={value.rawIncludes.questionsAsPresented}
+                  checked={value.rawIncludes.dataSlots}
                   onCheckedChange={(v) =>
-                    patch({
-                      rawIncludes: { ...value.rawIncludes, questionsAsPresented: v },
-                    })
+                    patch({ rawIncludes: { ...value.rawIncludes, dataSlots: v } })
                   }
                   disabled={isSaving}
-                  id="rr-questions"
+                  id="rr-dataslots"
                 />
-                <Label htmlFor="rr-questions" className="text-sm font-normal">
-                  Questions &amp; answers as presented
+                <Label htmlFor="rr-dataslots" className="text-sm font-normal">
+                  Captured data-slot values
                 </Label>
               </div>
-              {dataSlotsEnabled && (
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={value.rawIncludes.dataSlots}
-                    onCheckedChange={(v) =>
-                      patch({ rawIncludes: { ...value.rawIncludes, dataSlots: v } })
-                    }
-                    disabled={isSaving}
-                    id="rr-dataslots"
-                  />
-                  <Label htmlFor="rr-dataslots" className="text-sm font-normal">
-                    Captured data-slot values
-                  </Label>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </TabsContent>
 
         {/* ── Generation ────────────────────────────────────────────────────── */}
@@ -568,14 +595,15 @@ export function RespondentReportEditor({
               </div>
             )}
 
+            {/* ── Cited sources section ─────────────────────────────────────── */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1">
-                Show findings as
-                <FieldHelp title="Show findings">
-                  How the retrieved sources appear in the report. <strong>Table</strong> and{' '}
-                  <strong>List</strong> both show clickable links with details.{' '}
-                  <strong>Hidden</strong> keeps the findings out of the report but still lets them
-                  inform the writing (turn on &ldquo;inform the report&rdquo; below).
+                Show sources as
+                <FieldHelp title="Show sources">
+                  The cited list of pages the research found. <strong>List</strong> and{' '}
+                  <strong>Table</strong> both show clickable links with details;{' '}
+                  <strong>Don&rsquo;t show</strong> keeps the section out of the report (the
+                  findings can still improve the report via the options below).
                 </FieldHelp>
               </Label>
               <Select
@@ -587,7 +615,7 @@ export function RespondentReportEditor({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {REPORT_RESEARCH_DISPLAYS.map((d) => (
+                  {RESEARCH_DISPLAY_ORDER.map((d) => (
                     <SelectItem key={d} value={d}>
                       {RESEARCH_DISPLAY_LABELS[d]}
                     </SelectItem>
@@ -596,22 +624,44 @@ export function RespondentReportEditor({
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={research.informNarrative}
-                onCheckedChange={(v) => patchResearch({ informNarrative: v })}
-                disabled={isSaving || !usesAgent || !research.enabled || !showsBefore}
-                id="rr-research-inform"
-              />
-              <Label htmlFor="rr-research-inform" className="flex items-center gap-1">
-                Let before-search findings inform the report
-                <FieldHelp title="Inform the report">
-                  When on, the &ldquo;before&rdquo; findings are given to the report writer as
-                  general background (framed as context about the topic, never attributed to the
-                  respondent). When off, findings only appear in the Research section and never
-                  influence the report&rsquo;s prose. Applies to before-search only.
-                </FieldHelp>
-              </Label>
+            {/* ── Use the findings to improve the report ────────────────────── */}
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Use the findings to improve the report</p>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={research.informNarrative}
+                  onCheckedChange={(v) => patchResearch({ informNarrative: v })}
+                  disabled={isSaving || !usesAgent || !research.enabled || !showsBefore}
+                  id="rr-research-inform"
+                />
+                <Label htmlFor="rr-research-inform" className="flex items-center gap-1">
+                  Weave into the narrative where relevant
+                  <FieldHelp title="Weave into the narrative">
+                    When on, the &ldquo;before&rdquo; findings are given to the report writer as
+                    general background (framed as context about the topic, never attributed to the
+                    respondent), to weave in where they genuinely strengthen a point. When off,
+                    findings never influence the report&rsquo;s prose. Applies to before-search
+                    only.
+                  </FieldHelp>
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={research.appendix}
+                  onCheckedChange={(v) => patchResearch({ appendix: v })}
+                  disabled={isSaving || !usesAgent || !research.enabled}
+                  id="rr-research-appendix"
+                />
+                <Label htmlFor="rr-research-appendix" className="flex items-center gap-1">
+                  Add a supporting appendix when helpful
+                  <FieldHelp title="Supporting appendix">
+                    When on, the writer may add a short appendix of general supporting context drawn
+                    from the findings — but only when it genuinely improves the report, so many
+                    reports will have none (the agent decides per report). Draws on both before- and
+                    after-search findings.
+                  </FieldHelp>
+                </Label>
+              </div>
             </div>
           </TabsContent>
         )}

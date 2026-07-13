@@ -352,6 +352,84 @@ describe('SessionComplete — respondent report', () => {
     expect(screen.getByText('Try this next')).toBeInTheDocument();
   });
 
+  it('appends the questions-and-answers recap on-screen when the config includes it', () => {
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      includeData: { questions: true, dataSlots: false },
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: { summary: 'Woven prose.', sections: [], actions: [] },
+      },
+    });
+    render(
+      <SessionComplete
+        sessionId="s1"
+        answeredCount={2}
+        captured={questionPanel([
+          questionSlot('Favourite colour', 'Blue'),
+          questionSlot('Team size', 5, false), // unanswered → "Not answered"
+        ])}
+      />
+    );
+    expect(screen.getByRole('heading', { name: 'Your responses' })).toBeInTheDocument();
+    expect(screen.getByText('Favourite colour')).toBeInTheDocument();
+    expect(screen.getByText('Blue')).toBeInTheDocument();
+    expect(screen.getByText('Not answered')).toBeInTheDocument();
+  });
+
+  it('appends the captured data-slot values on-screen when the config includes them', () => {
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      includeData: { questions: false, dataSlots: true },
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: { summary: 'Woven prose.', sections: [], actions: [] },
+      },
+    });
+    render(<SessionComplete sessionId="s1" answeredCount={2} captured={dataSlotPanel()} />);
+    expect(screen.getByRole('heading', { name: 'Captured information' })).toBeInTheDocument();
+    expect(screen.getByText('Sleep quality')).toBeInTheDocument();
+    expect(screen.getByText('You sleep well most nights.')).toBeInTheDocument();
+    // The Q&A recap is not shown (config includes only the data slots).
+    expect(screen.queryByRole('heading', { name: 'Your responses' })).not.toBeInTheDocument();
+  });
+
+  it('omits the questionnaire-data appendix for a woven-only narrative report', () => {
+    mockView({
+      enabled: true,
+      mode: 'narrative',
+      onScreen: true,
+      download: true,
+      includeData: { questions: false, dataSlots: false },
+      insights: {
+        status: 'ready',
+        generatedAt: '2026-06-19T12:00:00.000Z',
+        error: null,
+        content: { summary: 'Woven prose only.', sections: [], actions: [] },
+      },
+    });
+    render(
+      <SessionComplete
+        sessionId="s1"
+        answeredCount={2}
+        captured={questionPanel([questionSlot('Favourite colour', 'Blue')])}
+      />
+    );
+    expect(screen.getByText('Woven prose only.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Your responses' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Captured information' })).not.toBeInTheDocument();
+  });
+
   it('shows the preparing state for a narrative report still generating', () => {
     mockView({
       enabled: true,
@@ -837,6 +915,69 @@ describe('SessionComplete — respondent report', () => {
       });
       render(<SessionComplete sessionId="s1" answeredCount={3} />);
       expect(screen.queryByText('Research & sources')).not.toBeInTheDocument();
+    });
+
+    it('renders a supporting appendix (with its heading) when the content carries one', () => {
+      mockView({
+        enabled: true,
+        mode: 'raw_plus_insights',
+        onScreen: true,
+        download: true,
+        insights: {
+          status: 'ready',
+          generatedAt: '2026-06-19T12:00:00.000Z',
+          error: null,
+          content: {
+            summary: 'Summary.',
+            sections: [],
+            actions: [],
+            appendix: { heading: 'Further context', body: 'General supporting background.' },
+          },
+        },
+      });
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+      expect(screen.getByText('Further context')).toBeInTheDocument();
+      expect(screen.getByText('General supporting background.')).toBeInTheDocument();
+    });
+
+    it('falls back to the "Appendix" heading when the appendix has none', () => {
+      mockView({
+        enabled: true,
+        mode: 'raw_plus_insights',
+        onScreen: true,
+        download: true,
+        insights: {
+          status: 'ready',
+          generatedAt: '2026-06-19T12:00:00.000Z',
+          error: null,
+          content: {
+            summary: 'Summary.',
+            sections: [],
+            actions: [],
+            appendix: { body: 'Body without a heading.' },
+          },
+        },
+      });
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+      expect(screen.getByText('Appendix')).toBeInTheDocument();
+      expect(screen.getByText('Body without a heading.')).toBeInTheDocument();
+    });
+
+    it('renders no appendix when the content has none', () => {
+      mockView({
+        enabled: true,
+        mode: 'raw_plus_insights',
+        onScreen: true,
+        download: true,
+        insights: {
+          status: 'ready',
+          generatedAt: '2026-06-19T12:00:00.000Z',
+          error: null,
+          content: { summary: 'Summary.', sections: [], actions: [] },
+        },
+      });
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+      expect(screen.queryByText('Appendix')).not.toBeInTheDocument();
     });
   });
 

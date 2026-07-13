@@ -93,10 +93,11 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders the woven narrative deliverable (narrativeOnly) without throwing', async () => {
+  it('renders the woven narrative deliverable (no appended Q&A) without throwing', async () => {
     const pdf = await renderSessionPdf(
       model({
-        narrativeOnly: true,
+        narrative: true,
+        includeQuestions: false,
         insights: {
           summary: 'Your story so far.',
           sections: [{ heading: 'Where you are now', body: 'Woven prose with your answers.' }],
@@ -107,10 +108,40 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders a narrative report with the captured data-slot appendix without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        narrative: true,
+        includeQuestions: false,
+        includeDataSlots: true,
+        dataSlotGroups: [
+          {
+            theme: 'Working style',
+            slots: [
+              {
+                name: 'Focus needs',
+                description: null,
+                value: 'Prefers deep, uninterrupted blocks.',
+              },
+              { name: 'Collaboration', description: null, value: null },
+            ],
+          },
+        ],
+        insights: {
+          summary: 'Your story so far.',
+          sections: [{ heading: 'Where you are now', body: 'Woven prose.' }],
+          actions: ['Try this next'],
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
   it('renders a multi-paragraph body + bullet block without throwing', async () => {
     const pdf = await renderSessionPdf(
       model({
-        narrativeOnly: true,
+        narrative: true,
+        includeQuestions: false,
         insights: {
           summary: 'Opening framing.\n\nA second paragraph that develops the point.',
           sections: [
@@ -126,9 +157,15 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('threads narrativeOnly through the model (default false)', () => {
-    expect(model().narrativeOnly).toBe(false);
-    expect(model({ narrativeOnly: true }).narrativeOnly).toBe(true);
+  it('threads the include flags through the model (Q&A on, data slots off, non-narrative by default)', () => {
+    const m = model();
+    expect(m.narrative).toBe(false);
+    expect(m.includeQuestions).toBe(true);
+    expect(m.includeDataSlots).toBe(false);
+    const woven = model({ narrative: true, includeQuestions: false, includeDataSlots: true });
+    expect(woven.narrative).toBe(true);
+    expect(woven.includeQuestions).toBe(false);
+    expect(woven.includeDataSlots).toBe(true);
   });
 
   it('renders an insights section with no sub-sections or actions', async () => {
@@ -196,6 +233,34 @@ describe('renderSessionPdf', () => {
               },
             ],
           },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a supporting appendix (with a heading) without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Report with an appendix.',
+          sections: [],
+          actions: [],
+          appendix: { heading: 'Further context', body: 'General supporting background.' },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders an appendix with no heading (falls back to "Appendix") without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Report with a heading-less appendix.',
+          sections: [],
+          actions: [],
+          appendix: { body: 'Body only.' },
         },
       })
     );

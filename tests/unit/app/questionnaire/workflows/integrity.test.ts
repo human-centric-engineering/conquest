@@ -93,6 +93,10 @@ describe('workflow diagram integrity', () => {
     constants.COHORT_REPORT_AGENT_SLUG,
     constants.QUESTIONNAIRE_EDIT_AGENT_SLUG,
     constants.QUESTIONNAIRE_ADVISOR_AGENT_SLUG,
+    // The Report Research + Report Design Assistant agents build their prompts in code (like the
+    // other report/editor support agents) and are not in the Prompt Library.
+    constants.REPORT_RESEARCHER_AGENT_SLUG,
+    constants.RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG,
     // The Agent Settings Advisor builds its prompt in code and is not in the Prompt Library.
     AGENT_SETTINGS_ADVISOR_SLUG,
   ]);
@@ -169,6 +173,7 @@ describe('workflow category grouping', () => {
   it('files the key workflows under their intended category', () => {
     expect(categoryForSlug('config-advisor')).toBe('config');
     expect(categoryForSlug('agent-settings-advisor')).toBe('config');
+    expect(categoryForSlug('respondent-report')).toBe('reporting');
     expect(categoryForSlug('design-evaluation')).toBe('creation');
     expect(categoryForSlug('document-ingestion')).toBe('creation');
     expect(categoryForSlug('conversation-turn')).toBe('conversation');

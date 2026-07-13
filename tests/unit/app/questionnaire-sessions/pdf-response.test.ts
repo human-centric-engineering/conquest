@@ -39,6 +39,10 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
     sections: [],
     answeredCount: 0,
     totalCount: 0,
+    narrative: false,
+    includeQuestions: true,
+    includeDataSlots: false,
+    dataSlots: [],
     ...over,
   };
 }

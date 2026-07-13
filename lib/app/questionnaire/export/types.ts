@@ -28,6 +28,27 @@ export interface ExportRespondent {
   name: string;
 }
 
+/** One captured data-slot value in the "Captured information" appendix (respondent-facing). */
+export interface ExportDataSlotEntry {
+  /** The slot's short name (the label shown to the respondent). */
+  name: string;
+  /** The slot's description, or null. */
+  description: string | null;
+  /**
+   * The captured position — the agent's respondent-facing paraphrase — or null when the slot was
+   * never filled (the document renders "Not captured"). Never the raw underlying question answers:
+   * the data-slot layer is the respondent's abstraction, mirroring the live panel.
+   */
+  value: string | null;
+}
+
+/** Data slots grouped by theme, as rendered in the PDF's "Captured information" appendix. */
+export interface ExportDataSlotGroup {
+  /** The theme heading (may be empty — the document then renders the slots without a sub-heading). */
+  theme: string;
+  slots: ExportDataSlotEntry[];
+}
+
 /** Everything the PDF document needs for one session, fully resolved. */
 export interface SessionExportModel {
   /** Questionnaire title (the document heading). */
@@ -86,10 +107,23 @@ export interface SessionExportModel {
    */
   insightsCompletionPct?: number | null;
   /**
-   * When true, the woven `narrative` report **is** the deliverable: the PDF renders the report
-   * content alone (titled "Your personalised report") and omits the raw section/slot listing. The
-   * respondent's PDF route sets this for a ready narrative report; the admin audit PDF never does
-   * (admins keep the full answer record alongside the report).
+   * True when the report mode is `narrative` — drives the report title ("Your personalised report"
+   * vs "Your insights"). Independent of whether the questionnaire-data appendix is included: a
+   * narrative report can now carry the appendix and still be titled as the personalised report.
    */
-  narrativeOnly?: boolean;
+  narrative: boolean;
+  /**
+   * Include the questions-and-answers listing (the per-section slot record). Driven by the config's
+   * `rawIncludes.questionsAsPresented`. When false the answer listing (and the answered-count line)
+   * is omitted — e.g. a woven narrative report with no appended Q&A. The admin audit PDF forces this
+   * on regardless of config (admins keep the full answer record).
+   */
+  includeQuestions: boolean;
+  /**
+   * Include the captured data-slot values as a "Captured information" appendix. Driven by the
+   * config's `rawIncludes.dataSlots` (and only meaningful when the version runs in a data-slot mode).
+   */
+  includeDataSlots: boolean;
+  /** The captured data-slot values, grouped by theme — rendered when {@link includeDataSlots}. */
+  dataSlots: ExportDataSlotGroup[];
 }

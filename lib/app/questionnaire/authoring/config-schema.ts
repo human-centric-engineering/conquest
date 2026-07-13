@@ -216,6 +216,7 @@ const respondentReportSettingsSchema = z
           .strict(),
         display: z.enum(REPORT_RESEARCH_DISPLAYS),
         informNarrative: z.boolean(),
+        appendix: z.boolean(),
       })
       .strict()
       // Optional for backward-compat: definition-import reuses this schema, and a questionnaire

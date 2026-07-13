@@ -56,6 +56,13 @@ export interface RespondentReportClientView {
   download: boolean;
   /** The questionnaire's title — so the completion screen can name the PDF download after it. */
   questionnaireTitle: string;
+  /**
+   * Which questionnaire data the report includes alongside the AI content (config `rawIncludes`).
+   * `questions` = the questions-and-answers recap; `dataSlots` = the captured data-slot values. The
+   * completion screen renders the matching appendix below the report when a flag is on; both the
+   * on-screen render and the downloadable PDF honour the same config.
+   */
+  includeData: { questions: boolean; dataSlots: boolean };
   /** Branded header for the on-screen preview (AI modes only); `null` for raw / disabled. */
   header: RespondentReportHeader | null;
   /** Insights state for the AI modes (`raw_plus_insights`, `narrative`); `null` for raw / disabled. */
@@ -159,6 +166,10 @@ export async function buildRespondentReportClientView(
     onScreen: settings.delivery.onScreen,
     download: settings.delivery.download,
     questionnaireTitle: session.version?.questionnaire?.title ?? 'questionnaire',
+    includeData: {
+      questions: settings.rawIncludes.questionsAsPresented,
+      dataSlots: settings.rawIncludes.dataSlots,
+    },
   };
 
   if (!enabled || !isAiRespondentReportMode(settings.mode)) {

@@ -140,6 +140,7 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
       },
       display: asResearchDisplay(research.display),
       informNarrative: asBool(research.informNarrative, d.research.informNarrative),
+      appendix: asBool(research.appendix, d.research.appendix),
     },
   };
 }

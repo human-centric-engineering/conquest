@@ -225,6 +225,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
         after: { instructions: '' },
         display: 'list',
         informNarrative: true,
+        appendix: false,
       },
     },
     cohortReport: {

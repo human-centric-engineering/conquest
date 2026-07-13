@@ -25,7 +25,7 @@ import {
 } from '@/lib/app/questionnaire/panel/answer-panel';
 import { resolveTheme, type DemoClientTheme } from '@/lib/app/questionnaire/theming';
 import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
-import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { ExportDataSlotGroup, SessionExportModel } from '@/lib/app/questionnaire/export/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 
 /** The plain inputs the DB seam hands the builder. */
@@ -58,8 +58,14 @@ export interface SessionExportInput {
   insightsFormatted?: boolean;
   /** Questionnaire completion % at generation — drives the partial-report caveat. Null = no caveat. */
   insightsCompletionPct?: number | null;
-  /** Woven-narrative deliverable: render the report alone, omit the raw answer listing. */
-  narrativeOnly?: boolean;
+  /** True when the report mode is `narrative` (drives the report title). */
+  narrative?: boolean;
+  /** Include the questions-and-answers listing (config `rawIncludes.questionsAsPresented`). */
+  includeQuestions?: boolean;
+  /** Include the captured data-slot appendix (config `rawIncludes.dataSlots`). */
+  includeDataSlots?: boolean;
+  /** Captured data-slot values grouped by theme (rendered when `includeDataSlots`). */
+  dataSlotGroups?: ExportDataSlotGroup[];
 }
 
 /**
@@ -109,6 +115,11 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     insights: input.insights ?? null,
     insightsFormatted: input.insightsFormatted ?? false,
     insightsCompletionPct: input.insightsCompletionPct ?? null,
-    narrativeOnly: input.narrativeOnly ?? false,
+    narrative: input.narrative ?? false,
+    // Default the answer listing ON (raw / raw+insights behaviour); a woven narrative with no
+    // appended Q&A passes false explicitly.
+    includeQuestions: input.includeQuestions ?? true,
+    includeDataSlots: input.includeDataSlots ?? false,
+    dataSlots: input.dataSlotGroups ?? [],
   };
 }

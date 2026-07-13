@@ -76,6 +76,10 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
     sections: [],
     answeredCount: 1,
     totalCount: 2,
+    narrative: false,
+    includeQuestions: true,
+    includeDataSlots: false,
+    dataSlots: [],
     ...over,
   };
 }
@@ -158,91 +162,109 @@ describe('authenticated access', () => {
 describe('respondent report embedding', () => {
   const readyContent = { summary: 'Your story.', sections: [], actions: ['Do X'] };
 
-  it('embeds a ready narrative report and renders it woven-only (narrativeOnly)', async () => {
-    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+  /** A ready report client view with the given mode + include-data config. */
+  function readyView(
+    mode: 'narrative' | 'raw_plus_insights',
+    includeData: { questions: boolean; dataSlots: boolean },
+    over: { formatted?: boolean; completionPct?: number } = {}
+  ) {
+    return {
       enabled: true,
-      mode: 'narrative',
+      mode,
       onScreen: true,
       download: true,
+      includeData,
       insights: {
         status: 'ready',
         content: readyContent,
-        formatted: true,
-        completionPct: 100,
+        formatted: over.formatted ?? true,
+        completionPct: over.completionPct ?? 100,
         generatedAt: null,
         error: null,
       },
-    });
+    };
+  }
+
+  it('embeds a ready narrative report woven-only when the config appends no data', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue(
+      readyView('narrative', { questions: false, dataSlots: false })
+    );
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
-    // The report-embed options object carries the formatter flag + completion %, threaded from the
-    // ready report so the PDF trusts its layout and can render the partial caveat.
+    // narrative flag drives the title; both include flags off → the woven report alone.
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
       insights: readyContent,
-      narrativeOnly: true,
+      narrative: true,
+      includeQuestions: false,
+      includeDataSlots: false,
       formatted: true,
       completionPct: 100,
     });
   });
 
-  it('threads a partial completion % so the PDF can render the caveat (mode-2, narrativeOnly false)', async () => {
-    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
-      enabled: true,
-      mode: 'raw_plus_insights',
-      onScreen: true,
-      download: true,
-      insights: {
-        status: 'ready',
-        content: readyContent,
-        formatted: false,
-        completionPct: 40, // below the caveat threshold — must reach the PDF builder
-        generatedAt: null,
-        error: null,
-      },
-    });
+  it('appends the Q&A + data-slot data to a narrative report when the config includes them', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue(
+      readyView('narrative', { questions: true, dataSlots: true })
+    );
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
       insights: readyContent,
-      narrativeOnly: false,
+      narrative: true,
+      includeQuestions: true,
+      includeDataSlots: true,
+      formatted: true,
+      completionPct: 100,
+    });
+  });
+
+  it('threads a partial completion % so the PDF can render the caveat (mode-2)', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue(
+      readyView(
+        'raw_plus_insights',
+        { questions: true, dataSlots: false },
+        {
+          formatted: false,
+          completionPct: 40, // below the caveat threshold — must reach the PDF builder
+        }
+      )
+    );
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
+      insights: readyContent,
+      narrative: false,
+      includeQuestions: true,
+      includeDataSlots: false,
       formatted: false,
       completionPct: 40,
     });
   });
 
-  it('trusts the formatter layout for a formatted mode-2 report (narrativeOnly false, formatted true)', async () => {
-    // narrativeOnly=false but formatted=true — an options object (not positional args) so a swap of
-    // the two flags is structurally impossible, but this still documents the divergent combination.
-    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
-      enabled: true,
-      mode: 'raw_plus_insights',
-      onScreen: true,
-      download: true,
-      insights: {
-        status: 'ready',
-        content: readyContent,
-        formatted: true,
-        completionPct: 100,
-        generatedAt: null,
-        error: null,
-      },
-    });
+  it('trusts the formatter layout for a formatted mode-2 report', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue(
+      readyView('raw_plus_insights', { questions: true, dataSlots: false })
+    );
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
       insights: readyContent,
-      narrativeOnly: false,
+      narrative: false,
+      includeQuestions: true,
+      includeDataSlots: false,
       formatted: true,
       completionPct: 100,
     });
   });
 
-  it('passes no insights and no narrative layout when the report is not ready', async () => {
+  it('falls back to the full answers (no insights) when a narrative report is not ready', async () => {
     reportViewMock.buildRespondentReportClientView.mockResolvedValue({
       enabled: true,
       mode: 'narrative',
       onScreen: true,
       download: true,
+      // Config would omit the Q&A for a woven narrative, but the report is not ready yet…
+      includeData: { questions: false, dataSlots: false },
       insights: {
         status: 'processing',
         content: null,
@@ -256,10 +278,13 @@ describe('respondent report embedding', () => {
     });
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);
-    // Not ready → no insights, no narrative layout, formatter flag false, no completion % (no caveat).
+    // …so the route forces the answers on rather than emitting an empty PDF, and threads no insights,
+    // formatter flag false, and no completion % (no caveat).
     expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(expect.anything(), {
       insights: null,
-      narrativeOnly: false,
+      narrative: true,
+      includeQuestions: true,
+      includeDataSlots: false,
       formatted: false,
       completionPct: null,
     });
