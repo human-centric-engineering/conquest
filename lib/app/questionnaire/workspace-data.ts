@@ -30,6 +30,7 @@ import {
   APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
   APP_QUESTIONNAIRES_COHORTS_FLAG,
   APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
+  APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG,
   APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
   APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
   APP_QUESTIONNAIRES_ADVISOR_FLAG,
@@ -221,6 +222,8 @@ export interface QuestionnaireWorkspaceFlags {
   adaptiveDataSlots: boolean;
   /** Respondent Report tab (report kind `respondent`) — per-respondent post-completion summary. */
   respondentReport: boolean;
+  /** Report web-search rounds — the Research tab on the report editors (respondent now, cohort later). */
+  reportWebSearch: boolean;
   /** Scoring tab (report kind `cohort`) — the deterministic scoring builder (needs cohorts too). */
   cohortReport: boolean;
   /** Respondent intro / splash screen — the Intro card in the config editor. */
@@ -253,6 +256,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       respondentReport,
       cohorts,
       cohortReport,
+      reportWebSearch,
       introScreen,
       personaSelection,
       advisor,
@@ -267,6 +271,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
+      isFeatureEnabled(APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG),
       isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
@@ -284,6 +289,7 @@ export const resolveQuestionnaireWorkspaceFlags = cache(
       respondentReport: master && respondentReport,
       // Cohort report (incl. the Scoring tab) is round-scoped, so it also requires the cohorts flag.
       cohortReport: master && cohorts && cohortReport,
+      reportWebSearch: master && reportWebSearch,
       introScreen: master && introScreen,
       personaSelection: master && personaSelection,
       advisor: master && advisor,

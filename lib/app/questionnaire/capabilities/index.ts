@@ -104,3 +104,9 @@ export {
   type SuggestRoundBriefingData,
   type SuggestedBriefingEntry,
 } from '@/lib/app/questionnaire/capabilities/suggest-round-briefing';
+
+export {
+  AppWebSearchCapability,
+  normalizeBraveResults,
+  type WebSearchResult,
+} from '@/lib/app/questionnaire/capabilities/web-search';

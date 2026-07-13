@@ -445,10 +445,25 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
       useClientKnowledge: true,
     },
     delivery: { onScreen: true, download: true },
+    research: {
+      enabled: true,
+      timing: 'before' as const,
+      rounds: 1,
+      maxResults: 5,
+      before: { instructions: 'Find recent industry benchmarks.' },
+      after: { instructions: 'Verify any cited figures.' },
+      display: 'list' as const,
+      informNarrative: true,
+    },
   };
 
   it('accepts a well-formed full report block', () => {
     expect(updateConfigSchema.safeParse({ respondentReport: fullReport }).success).toBe(true);
+  });
+
+  it('accepts a report block that omits the optional research field (pre-web-search import compat)', () => {
+    const { research: _omitted, ...withoutResearch } = fullReport;
+    expect(updateConfigSchema.safeParse({ respondentReport: withoutResearch }).success).toBe(true);
   });
 
   it('accepts each valid narrative style and rejects an unknown one', () => {

@@ -11,10 +11,12 @@ import {
   partialReportCaveat,
   splitReportParagraphs,
   validateRespondentReportContent,
+  validateResearch,
   PARTIAL_REPORT_THRESHOLD_PCT,
   REPORT_SUMMARY_MAX,
   REPORT_MAX_SECTIONS,
   REPORT_MAX_ACTIONS,
+  REPORT_MAX_RESEARCH_FINDINGS,
   type AnswerTranscriptInput,
 } from '@/lib/app/questionnaire/report/content';
 import type { PanelSlotView, PanelSectionView } from '@/lib/app/questionnaire/panel/types';
@@ -403,5 +405,107 @@ describe('partialReportCaveat', () => {
   it('treats the threshold as exclusive on the lower side (74 → caveat, 75 → none)', () => {
     expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT - 1)).toContain('74% complete');
     expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT)).toBeNull();
+  });
+});
+
+describe('validateResearch', () => {
+  it('returns null for non-records and for a block with no usable content', () => {
+    expect(validateResearch(null)).toBeNull();
+    expect(validateResearch('nope')).toBeNull();
+    expect(validateResearch({ findings: [] })).toBeNull();
+    expect(validateResearch({ findings: [{ title: '', url: '' }] })).toBeNull();
+  });
+
+  it('keeps well-formed findings and defaults the display to list', () => {
+    const res = validateResearch({
+      findings: [
+        {
+          title: 'A source',
+          url: 'https://example.com/a',
+          snippet: 'About A',
+          source: 'example.com',
+        },
+      ],
+      note: 'A short synthesis.',
+    });
+    expect(res).toEqual({
+      findings: [
+        {
+          title: 'A source',
+          url: 'https://example.com/a',
+          snippet: 'About A',
+          source: 'example.com',
+        },
+      ],
+      note: 'A short synthesis.',
+      display: 'list',
+    });
+  });
+
+  it('preserves an explicit table display', () => {
+    const res = validateResearch({
+      findings: [{ title: 'T', url: 'https://x.test' }],
+      display: 'table',
+    });
+    expect(res?.display).toBe('table');
+  });
+
+  it('drops findings without a valid http(s) URL (and non-web schemes)', () => {
+    const res = validateResearch({
+      findings: [
+        { title: 'Bad scheme', url: 'javascript:alert(1)' },
+        { title: 'No url', url: '' },
+        { title: 'Not a url', url: 'not a url' },
+        { title: 'Good', url: 'http://ok.test/path' },
+      ],
+    });
+    expect(res?.findings).toEqual([{ title: 'Good', url: 'http://ok.test/path', snippet: '' }]);
+  });
+
+  it('caps the number of findings', () => {
+    const many = Array.from({ length: REPORT_MAX_RESEARCH_FINDINGS + 5 }, (_, i) => ({
+      title: `T${i}`,
+      url: `https://example.com/${i}`,
+    }));
+    const res = validateResearch({ findings: many });
+    expect(res?.findings).toHaveLength(REPORT_MAX_RESEARCH_FINDINGS);
+  });
+
+  it('keeps a note-only block (findings may legitimately be empty)', () => {
+    const res = validateResearch({ findings: [], note: 'Nothing conclusive found.' });
+    expect(res).toEqual({ findings: [], note: 'Nothing conclusive found.', display: 'list' });
+  });
+
+  it('tolerates a missing findings key (non-array) and still keeps a note', () => {
+    // No `findings` key at all → the `Array.isArray(parsed.findings)` guard falls back to [].
+    const res = validateResearch({ note: 'Only a synthesis, no sources.' });
+    expect(res).toEqual({ findings: [], note: 'Only a synthesis, no sources.', display: 'list' });
+  });
+
+  it('skips non-object entries in the findings array without discarding the whole block', () => {
+    const res = validateResearch({
+      findings: ['not-an-object', null, { title: 'Good', url: 'https://ok.test' }],
+    });
+    expect(res?.findings).toEqual([{ title: 'Good', url: 'https://ok.test', snippet: '' }]);
+  });
+});
+
+describe('validateRespondentReportContent — research preservation', () => {
+  it('preserves a valid research block through the content validator (read path)', () => {
+    const content = validateRespondentReportContent({
+      summary: 'Hi',
+      sections: [],
+      actions: [],
+      research: { findings: [{ title: 'S', url: 'https://s.test' }], display: 'table' },
+    });
+    expect(content?.research).toEqual({
+      findings: [{ title: 'S', url: 'https://s.test', snippet: '' }],
+      display: 'table',
+    });
+  });
+
+  it('omits research when the stored content has none', () => {
+    const content = validateRespondentReportContent({ summary: 'Hi', sections: [], actions: [] });
+    expect(content).not.toHaveProperty('research');
   });
 });

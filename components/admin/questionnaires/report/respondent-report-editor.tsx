@@ -20,6 +20,7 @@ import { Loader2 } from 'lucide-react';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,9 +36,16 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { ReportConfigAssistant } from '@/components/admin/questionnaires/report/report-config-assistant';
 import {
   isAiRespondentReportMode,
+  MAX_REPORT_RESEARCH_RESULTS,
+  MAX_REPORT_RESEARCH_ROUNDS,
+  REPORT_RESEARCH_DISPLAYS,
+  REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH,
+  REPORT_RESEARCH_TIMINGS,
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   RESPONDENT_REPORT_NARRATIVE_STYLES,
+  type ReportResearchDisplay,
+  type ReportResearchTiming,
   type RespondentReportMode,
   type RespondentReportNarrativeStyle,
   type RespondentReportSettings,
@@ -55,6 +63,25 @@ const NARRATIVE_STYLE_LABELS: Record<RespondentReportNarrativeStyle, string> = {
   structured: 'Structured (headings + bullets)',
 };
 
+const RESEARCH_TIMING_LABELS: Record<ReportResearchTiming, string> = {
+  before: 'Before the report is written',
+  after: 'After the report is written',
+  both: 'Both before and after',
+};
+
+const RESEARCH_DISPLAY_LABELS: Record<ReportResearchDisplay, string> = {
+  table: 'Table',
+  list: 'List',
+  hidden: 'Hidden (informs the report only)',
+};
+
+/** Parse a number input to a bounded integer, falling back to `fallback` on empty/NaN. */
+function clampInt(raw: string, min: number, max: number, fallback: number): number {
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 export interface RespondentReportEditorProps {
   questionnaireId: string;
   versionId: string;
@@ -63,6 +90,8 @@ export interface RespondentReportEditorProps {
   dataSlotsEnabled: boolean;
   /** The questionnaire's attributed demo client (whose KB grounds reports), or null when generic. */
   client: { id: string; name: string } | null;
+  /** Whether the report web-search platform flag is on (gates the Research tab). */
+  webSearchEnabled: boolean;
 }
 
 export function RespondentReportEditor({
@@ -71,6 +100,7 @@ export function RespondentReportEditor({
   initial,
   dataSlotsEnabled,
   client,
+  webSearchEnabled,
 }: RespondentReportEditorProps) {
   const router = useRouter();
   const [value, setValue] = useState<RespondentReportSettings>(initial);
@@ -91,6 +121,13 @@ export function RespondentReportEditor({
     setValue((v) => ({ ...v, generation: { ...v.generation, ...next } }));
     setSavedOk(false);
   }
+  function patchResearch(next: Partial<RespondentReportSettings['research']>) {
+    setValue((v) => ({ ...v, research: { ...v.research, ...next } }));
+    setSavedOk(false);
+  }
+  const research = value.research;
+  const showsAfter = research.timing === 'after' || research.timing === 'both';
+  const showsBefore = research.timing === 'before' || research.timing === 'both';
 
   const save = async () => {
     setIsSaving(true);
@@ -115,6 +152,7 @@ export function RespondentReportEditor({
         <TabsList>
           <TabsTrigger value="content">Content</TabsTrigger>
           <TabsTrigger value="generation">Generation</TabsTrigger>
+          {webSearchEnabled && <TabsTrigger value="research">Research</TabsTrigger>}
           <TabsTrigger value="delivery">Delivery</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
         </TabsList>
@@ -370,6 +408,213 @@ export function RespondentReportEditor({
               ))}
           </div>
         </TabsContent>
+
+        {/* ── Research (web search) ─────────────────────────────────────────── */}
+        {webSearchEnabled && (
+          <TabsContent value="research" className="space-y-5 pt-4">
+            <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
+              Optional web-search rounds bring live external context into the report. A research
+              agent runs your instructions as web searches, refining each query from the last one,
+              and the findings can appear as a Research section and/or inform the report&rsquo;s
+              writing. Requires the search backend to be configured on the server.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={research.enabled}
+                onCheckedChange={(v) => patchResearch({ enabled: v })}
+                disabled={isSaving || !usesAgent}
+                id="rr-research-enabled"
+              />
+              <Label htmlFor="rr-research-enabled" className="flex items-center gap-1">
+                Enable web-search rounds
+                <FieldHelp title="Web-search rounds">
+                  When on, report generation runs one or more web searches to gather external
+                  context. Only applies to the AI report modes. Also requires the platform feature
+                  flag and a configured search backend; if the backend is unavailable, the report is
+                  still generated without research.
+                </FieldHelp>
+              </Label>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1">
+                When to search
+                <FieldHelp title="When to search">
+                  <strong>Before</strong> gathers context first and can inform how the report is
+                  written. <strong>After</strong> researches the finished report to enrich or
+                  fact-check it. <strong>Both</strong> runs a set of rounds on each side.
+                </FieldHelp>
+              </Label>
+              <Select
+                value={research.timing}
+                onValueChange={(v) => patchResearch({ timing: v as ReportResearchTiming })}
+                disabled={isSaving || !usesAgent || !research.enabled}
+              >
+                <SelectTrigger className="max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REPORT_RESEARCH_TIMINGS.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {RESEARCH_TIMING_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap gap-6">
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-research-rounds" className="flex items-center gap-1">
+                  Rounds per phase
+                  <FieldHelp title="Rounds">
+                    The maximum number of searches the agent may run in each phase. Each round
+                    builds on the previous results. More rounds means deeper research but higher
+                    cost and latency (1&ndash;{MAX_REPORT_RESEARCH_ROUNDS}).
+                  </FieldHelp>
+                </Label>
+                <Input
+                  id="rr-research-rounds"
+                  type="number"
+                  min={1}
+                  max={MAX_REPORT_RESEARCH_ROUNDS}
+                  className="w-28"
+                  value={research.rounds}
+                  disabled={isSaving || !usesAgent || !research.enabled}
+                  onChange={(e) =>
+                    patchResearch({
+                      rounds: clampInt(
+                        e.target.value,
+                        1,
+                        MAX_REPORT_RESEARCH_ROUNDS,
+                        research.rounds
+                      ),
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-research-results" className="flex items-center gap-1">
+                  Results per round
+                  <FieldHelp title="Results per round">
+                    How many search results to request each round (1&ndash;
+                    {MAX_REPORT_RESEARCH_RESULTS}).
+                  </FieldHelp>
+                </Label>
+                <Input
+                  id="rr-research-results"
+                  type="number"
+                  min={1}
+                  max={MAX_REPORT_RESEARCH_RESULTS}
+                  className="w-28"
+                  value={research.maxResults}
+                  disabled={isSaving || !usesAgent || !research.enabled}
+                  onChange={(e) =>
+                    patchResearch({
+                      maxResults: clampInt(
+                        e.target.value,
+                        1,
+                        MAX_REPORT_RESEARCH_RESULTS,
+                        research.maxResults
+                      ),
+                    })
+                  }
+                />
+              </div>
+            </div>
+
+            {showsBefore && (
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-research-before" className="flex items-center gap-1">
+                  Before-search instructions
+                  <FieldHelp title="Before-search instructions">
+                    Tell the research agent what to look for before the report is written and what
+                    to do with it — e.g. &ldquo;Find recent industry benchmarks for the topics
+                    covered and summarise how this respondent compares.&rdquo;
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  id="rr-research-before"
+                  value={research.before.instructions}
+                  maxLength={REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH}
+                  rows={3}
+                  disabled={isSaving || !usesAgent || !research.enabled}
+                  placeholder="e.g. Research current best-practice guidance on the themes raised, and note what should inform the report."
+                  onChange={(e) => patchResearch({ before: { instructions: e.target.value } })}
+                />
+              </div>
+            )}
+
+            {showsAfter && (
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-research-after" className="flex items-center gap-1">
+                  After-search instructions
+                  <FieldHelp title="After-search instructions">
+                    Tell the agent what to verify or enrich once the report is drafted — e.g.
+                    &ldquo;Find authoritative sources and links that support the
+                    recommendations.&rdquo;
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  id="rr-research-after"
+                  value={research.after.instructions}
+                  maxLength={REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH}
+                  rows={3}
+                  disabled={isSaving || !usesAgent || !research.enabled}
+                  placeholder="e.g. Find supporting sources and helpful links for the recommended next steps."
+                  onChange={(e) => patchResearch({ after: { instructions: e.target.value } })}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1">
+                Show findings as
+                <FieldHelp title="Show findings">
+                  How the retrieved sources appear in the report. <strong>Table</strong> and{' '}
+                  <strong>List</strong> both show clickable links with details.{' '}
+                  <strong>Hidden</strong> keeps the findings out of the report but still lets them
+                  inform the writing (turn on &ldquo;inform the report&rdquo; below).
+                </FieldHelp>
+              </Label>
+              <Select
+                value={research.display}
+                onValueChange={(v) => patchResearch({ display: v as ReportResearchDisplay })}
+                disabled={isSaving || !usesAgent || !research.enabled}
+              >
+                <SelectTrigger className="max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REPORT_RESEARCH_DISPLAYS.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {RESEARCH_DISPLAY_LABELS[d]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={research.informNarrative}
+                onCheckedChange={(v) => patchResearch({ informNarrative: v })}
+                disabled={isSaving || !usesAgent || !research.enabled || !showsBefore}
+                id="rr-research-inform"
+              />
+              <Label htmlFor="rr-research-inform" className="flex items-center gap-1">
+                Let before-search findings inform the report
+                <FieldHelp title="Inform the report">
+                  When on, the &ldquo;before&rdquo; findings are given to the report writer as
+                  general background (framed as context about the topic, never attributed to the
+                  respondent). When off, findings only appear in the Research section and never
+                  influence the report&rsquo;s prose. Applies to before-search only.
+                </FieldHelp>
+              </Label>
+            </div>
+          </TabsContent>
+        )}
 
         {/* ── Delivery ──────────────────────────────────────────────────────── */}
         <TabsContent value="delivery" className="space-y-4 pt-4">

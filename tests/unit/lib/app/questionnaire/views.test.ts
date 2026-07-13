@@ -216,6 +216,16 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
         useClientKnowledge: false,
       },
       delivery: { onScreen: true, download: true },
+      research: {
+        enabled: false,
+        timing: 'before',
+        rounds: 1,
+        maxResults: 5,
+        before: { instructions: '' },
+        after: { instructions: '' },
+        display: 'list',
+        informNarrative: true,
+      },
     },
     cohortReport: {
       enabled: false,

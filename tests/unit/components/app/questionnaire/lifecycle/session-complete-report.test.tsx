@@ -644,6 +644,20 @@ describe('SessionComplete — respondent report', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn.t save your email/i);
     });
+
+    it('surfaces an error when notify() rejects (network failure)', async () => {
+      notifySpy.mockRejectedValueOnce(new Error('network down'));
+      mockView(timedOutView(), { timedOut: true });
+      render(<SessionComplete sessionId="s1" answeredCount={2} />);
+
+      await userEvent.type(
+        screen.getByLabelText(/Email address for your report/i),
+        'me@example.com'
+      );
+      await userEvent.click(screen.getByRole('button', { name: /Email me/i }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn.t save your email/i);
+    });
   });
 
   describe('download filename', () => {
@@ -702,6 +716,127 @@ describe('SessionComplete — respondent report', () => {
         insights: null,
       });
       expect(name).toBe('responses.pdf');
+    });
+  });
+
+  describe('web research findings (report-web-search)', () => {
+    it('renders findings as a table, with source and link, when display is "table"', () => {
+      mockView({
+        enabled: true,
+        mode: 'raw_plus_insights',
+        onScreen: true,
+        download: true,
+        insights: {
+          status: 'ready',
+          generatedAt: '2026-06-19T12:00:00.000Z',
+          error: null,
+          content: {
+            summary: 'Summary.',
+            sections: [],
+            actions: [],
+            research: {
+              display: 'table',
+              note: 'Findings drawn from recent industry coverage.',
+              findings: [
+                {
+                  title: 'Study A',
+                  url: 'https://example.com/a',
+                  snippet: 'Snippet A text.',
+                  source: 'Example Journal',
+                },
+                {
+                  // No `source` — exercises the branch that omits the source line.
+                  title: 'Study B',
+                  url: 'https://example.com/b',
+                  snippet: 'Snippet B text.',
+                },
+              ],
+            },
+          },
+        },
+      });
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+
+      expect(screen.getByText('Research & sources')).toBeInTheDocument();
+      expect(screen.getByText('Findings drawn from recent industry coverage.')).toBeInTheDocument();
+
+      const table = screen.getByRole('table');
+      // `data-research-display` lives on the wrapping section, not the table itself.
+      expect(table.closest('[data-research-display]')).toHaveAttribute(
+        'data-research-display',
+        'table'
+      );
+      expect(screen.getByRole('columnheader', { name: 'Source' })).toBeInTheDocument();
+      expect(screen.getByRole('columnheader', { name: 'Details' })).toBeInTheDocument();
+
+      const linkA = screen.getByRole('link', { name: 'Study A' });
+      expect(linkA).toHaveAttribute('href', 'https://example.com/a');
+      expect(screen.getByText('Example Journal')).toBeInTheDocument();
+      expect(screen.getByText('Snippet A text.')).toBeInTheDocument();
+
+      const linkB = screen.getByRole('link', { name: 'Study B' });
+      expect(linkB).toHaveAttribute('href', 'https://example.com/b');
+      expect(screen.getByText('Snippet B text.')).toBeInTheDocument();
+      // Study B has no source — its row (2nd body row) carries no source label at all.
+      const rows = screen.getAllByRole('row');
+      const rowB = rows.find((r) => r.textContent?.includes('Study B'));
+      expect(rowB?.textContent).not.toContain('Example Journal');
+    });
+
+    it('renders findings as a list, without a note or source, when display is "list"', () => {
+      mockView({
+        enabled: true,
+        mode: 'raw_plus_insights',
+        onScreen: true,
+        download: true,
+        insights: {
+          status: 'ready',
+          generatedAt: '2026-06-19T12:00:00.000Z',
+          error: null,
+          content: {
+            summary: 'Summary.',
+            sections: [],
+            actions: [],
+            research: {
+              display: 'list',
+              // No `note` — exercises the branch that omits the synthesis paragraph.
+              findings: [{ title: 'Study C', url: 'https://example.com/c', snippet: '' }],
+            },
+          },
+        },
+      });
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+
+      expect(screen.getByText('Research & sources')).toBeInTheDocument();
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+
+      const link = screen.getByRole('link', { name: 'Study C' });
+      expect(link).toHaveAttribute('href', 'https://example.com/c');
+      // Empty snippet and absent source produce no extra text in this finding's list item.
+      const item = link.closest('li');
+      expect(item?.textContent?.trim()).toBe('Study C');
+    });
+
+    it('omits the research section entirely when there are no findings', () => {
+      mockView({
+        enabled: true,
+        mode: 'raw_plus_insights',
+        onScreen: true,
+        download: true,
+        insights: {
+          status: 'ready',
+          generatedAt: '2026-06-19T12:00:00.000Z',
+          error: null,
+          content: {
+            summary: 'Summary.',
+            sections: [],
+            actions: [],
+            research: { display: 'list', findings: [] },
+          },
+        },
+      });
+      render(<SessionComplete sessionId="s1" answeredCount={3} />);
+      expect(screen.queryByText('Research & sources')).not.toBeInTheDocument();
     });
   });
 

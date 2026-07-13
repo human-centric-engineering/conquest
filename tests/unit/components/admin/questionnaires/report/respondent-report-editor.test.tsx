@@ -50,9 +50,9 @@ vi.mock('@/components/ui/switch', () => ({
     />
   ),
 }));
-// The editor has two Selects (report mode + narrative style). Distinguish them by their value-space
-// so `getByTestId('mode-select')` stays unambiguous and the style select is separately addressable.
-// (Array inlined — a vi.mock factory is hoisted and can't close over an outer const.)
+// The editor has several Selects (report mode, narrative style, research timing, research
+// display). Distinguish them by their value-space so `getByTestId('mode-select')` etc. stay
+// unambiguous. (Arrays inlined — a vi.mock factory is hoisted and can't close over an outer const.)
 vi.mock('@/components/ui/select', () => ({
   Select: ({
     value,
@@ -64,18 +64,27 @@ vi.mock('@/components/ui/select', () => ({
     onValueChange: (v: string) => void;
     children: React.ReactNode;
     disabled?: boolean;
-  }) => (
-    <select
-      data-testid={
-        ['raw', 'raw_plus_insights', 'narrative'].includes(value) ? 'mode-select' : 'style-select'
-      }
-      value={value}
-      disabled={disabled}
-      onChange={(e) => onValueChange(e.target.value)}
-    >
-      {children}
-    </select>
-  ),
+  }) => {
+    const testId = ['raw', 'raw_plus_insights', 'narrative'].includes(value)
+      ? 'mode-select'
+      : ['flowing', 'concise', 'structured'].includes(value)
+        ? 'style-select'
+        : ['before', 'after', 'both'].includes(value)
+          ? 'timing-select'
+          : ['table', 'list', 'hidden'].includes(value)
+            ? 'display-select'
+            : 'unknown-select';
+    return (
+      <select
+        data-testid={testId}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onValueChange(e.target.value)}
+      >
+        {children}
+      </select>
+    );
+  },
   SelectTrigger: () => null,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -85,13 +94,18 @@ vi.mock('@/components/ui/select', () => ({
 }));
 import { apiClient } from '@/lib/api/client';
 import { RespondentReportEditor } from '@/components/admin/questionnaires/report/respondent-report-editor';
-import { DEFAULT_RESPONDENT_REPORT_SETTINGS } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  MAX_REPORT_RESEARCH_ROUNDS,
+  MAX_REPORT_RESEARCH_RESULTS,
+} from '@/lib/app/questionnaire/types';
 
 type Mock = ReturnType<typeof vi.fn>;
 
 function renderEditor(
   over: Partial<typeof DEFAULT_RESPONDENT_REPORT_SETTINGS> = {},
-  client: { id: string; name: string } | null = { id: 'clt-1', name: 'Acme' }
+  client: { id: string; name: string } | null = { id: 'clt-1', name: 'Acme' },
+  webSearchEnabled = false
 ) {
   return render(
     <RespondentReportEditor
@@ -100,6 +114,7 @@ function renderEditor(
       initial={{ ...DEFAULT_RESPONDENT_REPORT_SETTINGS, ...over }}
       dataSlotsEnabled
       client={client}
+      webSearchEnabled={webSearchEnabled}
     />
   );
 }
@@ -277,5 +292,321 @@ describe('RespondentReportEditor', () => {
     renderEditor({ enabled: true });
     fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
     expect(await screen.findByText(/^Saved\.$/)).toBeInTheDocument();
+  });
+
+  describe('Research tab (web search)', () => {
+    it('does not render the Research tab trigger when web search is disabled', () => {
+      renderEditor({}, undefined, false);
+      expect(screen.queryByRole('button', { name: 'Research' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Enable web-search rounds/i)).not.toBeInTheDocument();
+    });
+
+    it('renders the Research tab trigger and panel when web search is enabled', () => {
+      renderEditor({}, undefined, true);
+      expect(screen.getByRole('button', { name: 'Research' })).toBeInTheDocument();
+      expect(screen.getByText(/Enable web-search rounds/i)).toBeInTheDocument();
+    });
+
+    it('disables the research-enabled switch when the mode does not use an agent', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      const sw = (id: string) => container.querySelector(`#${id}`) as HTMLInputElement;
+      expect(sw('rr-research-enabled')).toBeDisabled();
+      // usesAgent=false overrides research.enabled=true — the rest stay disabled too.
+      expect(screen.getByTestId('timing-select')).toBeDisabled();
+      expect(container.querySelector('#rr-research-rounds')).toBeDisabled();
+      expect(container.querySelector('#rr-research-results')).toBeDisabled();
+      expect(screen.getByTestId('display-select')).toBeDisabled();
+      expect(sw('rr-research-inform')).toBeDisabled();
+    });
+
+    it('enables the research-enabled switch in an AI mode but keeps dependent controls disabled until research is turned on', () => {
+      const { container } = renderEditor({ mode: 'raw_plus_insights' }, undefined, true);
+      const sw = (id: string) => container.querySelector(`#${id}`) as HTMLInputElement;
+      // research.enabled defaults to false — the switch itself is enabled (usesAgent is true)...
+      expect(sw('rr-research-enabled')).not.toBeDisabled();
+      // ...but everything gated on research.enabled stays disabled.
+      expect(screen.getByTestId('timing-select')).toBeDisabled();
+      expect(container.querySelector('#rr-research-rounds')).toBeDisabled();
+      expect(container.querySelector('#rr-research-results')).toBeDisabled();
+      expect(screen.getByTestId('display-select')).toBeDisabled();
+      expect(sw('rr-research-inform')).toBeDisabled();
+    });
+
+    it('enables the timing/rounds/results/display controls once research is on in an AI mode', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      expect(screen.getByTestId('timing-select')).not.toBeDisabled();
+      expect(container.querySelector('#rr-research-rounds')).not.toBeDisabled();
+      expect(container.querySelector('#rr-research-results')).not.toBeDisabled();
+      expect(screen.getByTestId('display-select')).not.toBeDisabled();
+      // Default timing is 'before', so showsBefore is true and the inform switch is enabled too.
+      expect(container.querySelector('#rr-research-inform')).not.toBeDisabled();
+    });
+
+    it('disables the inform-narrative switch when timing does not include a before phase', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: {
+            ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research,
+            enabled: true,
+            timing: 'after',
+          },
+        },
+        undefined,
+        true
+      );
+      expect(container.querySelector('#rr-research-inform')).toBeDisabled();
+    });
+
+    it('shows only the before-search instructions when timing is "before"', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: {
+            ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research,
+            enabled: true,
+            timing: 'before',
+          },
+        },
+        undefined,
+        true
+      );
+      expect(
+        screen.getByPlaceholderText(/Research current best-practice guidance/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText(/Find supporting sources and helpful links/i)
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows only the after-search instructions when timing is "after"', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: {
+            ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research,
+            enabled: true,
+            timing: 'after',
+          },
+        },
+        undefined,
+        true
+      );
+      expect(
+        screen.queryByPlaceholderText(/Research current best-practice guidance/i)
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(/Find supporting sources and helpful links/i)
+      ).toBeInTheDocument();
+    });
+
+    it('shows both instructions sections when timing is "both"', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: {
+            ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research,
+            enabled: true,
+            timing: 'both',
+          },
+        },
+        undefined,
+        true
+      );
+      expect(
+        screen.getByPlaceholderText(/Research current best-practice guidance/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(/Find supporting sources and helpful links/i)
+      ).toBeInTheDocument();
+    });
+
+    it('switches the visible instructions section when timing is changed interactively', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      // Starts on the default 'before' timing.
+      expect(
+        screen.getByPlaceholderText(/Research current best-practice guidance/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText(/Find supporting sources and helpful links/i)
+      ).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId('timing-select'), { target: { value: 'both' } });
+
+      expect(
+        screen.getByPlaceholderText(/Research current best-practice guidance/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(/Find supporting sources and helpful links/i)
+      ).toBeInTheDocument();
+    });
+
+    it('propagates an edited timing into the save payload', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(screen.getByTestId('timing-select'), { target: { value: 'after' } });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.timing).toBe('after');
+    });
+
+    it('propagates edited rounds and maxResults into the save payload', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(container.querySelector('#rr-research-rounds') as HTMLInputElement, {
+        target: { value: '3' },
+      });
+      fireEvent.change(container.querySelector('#rr-research-results') as HTMLInputElement, {
+        target: { value: '8' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.rounds).toBe(3);
+      expect(rr.research.maxResults).toBe(8);
+    });
+
+    it('clamps an out-of-range rounds input to the maximum before saving', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(container.querySelector('#rr-research-rounds') as HTMLInputElement, {
+        target: { value: '999' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.rounds).toBe(MAX_REPORT_RESEARCH_ROUNDS);
+    });
+
+    it('clamps an out-of-range maxResults input to the maximum before saving', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(container.querySelector('#rr-research-results') as HTMLInputElement, {
+        target: { value: '999' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.maxResults).toBe(MAX_REPORT_RESEARCH_RESULTS);
+    });
+
+    it('clamps a below-range rounds input to the minimum (1) before saving', () => {
+      const { container } = renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(container.querySelector('#rr-research-rounds') as HTMLInputElement, {
+        target: { value: '0' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.rounds).toBe(1);
+    });
+
+    it('propagates edited before and after instructions independently into the save payload', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: {
+            ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research,
+            enabled: true,
+            timing: 'both',
+          },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(screen.getByPlaceholderText(/Research current best-practice guidance/i), {
+        target: { value: 'Check industry benchmarks.' },
+      });
+      fireEvent.change(screen.getByPlaceholderText(/Find supporting sources and helpful links/i), {
+        target: { value: 'Verify sources.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.before.instructions).toBe('Check industry benchmarks.');
+      expect(rr.research.after.instructions).toBe('Verify sources.');
+    });
+
+    it('propagates the display selection into the save payload', () => {
+      renderEditor(
+        {
+          mode: 'raw_plus_insights',
+          research: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.research, enabled: true },
+        },
+        undefined,
+        true
+      );
+      fireEvent.change(screen.getByTestId('display-select'), { target: { value: 'hidden' } });
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.display).toBe('hidden');
+    });
+
+    it('propagates the research-enabled and inform-narrative toggles into the save payload', () => {
+      const { container } = renderEditor({ mode: 'raw_plus_insights' }, undefined, true);
+      const sw = (id: string) => container.querySelector(`#${id}`) as HTMLInputElement;
+
+      fireEvent.click(sw('rr-research-enabled')); // false → true; unlocks the inform switch too
+      fireEvent.click(sw('rr-research-inform')); // true → false (default informNarrative is true)
+      fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+      const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
+      expect(rr.research.enabled).toBe(true);
+      expect(rr.research.informNarrative).toBe(false);
+    });
   });
 });

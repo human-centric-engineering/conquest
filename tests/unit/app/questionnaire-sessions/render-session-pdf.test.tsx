@@ -138,6 +138,93 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders a research section (list display) with a note and mixed source/snippet findings', async () => {
+    // Exercises the research block's list-mode map: a finding with both a source and a
+    // snippet, and a second with neither — covering the per-finding source/snippet
+    // conditionals' true and false sides, plus the research note line.
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Grounded findings follow.',
+          sections: [],
+          actions: [],
+          research: {
+            display: 'list',
+            note: 'Synthesised from three independent sources.',
+            findings: [
+              {
+                title: 'Industry benchmark report',
+                url: 'https://example.com/benchmark',
+                snippet: 'Average completion rates rose 12% year over year.',
+                source: 'Example Research Co.',
+              },
+              {
+                title: 'Unsourced, snippet-free finding',
+                url: 'https://example.com/other',
+                snippet: '',
+              },
+            ],
+          },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a research section (table display) with one sourced and one unsourced finding', async () => {
+    // Exercises the research block's table-mode map: the display==='table' branch, and
+    // the per-row source conditional's true/false sides.
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Data laid out for scanning.',
+          sections: [],
+          actions: [],
+          research: {
+            display: 'table',
+            findings: [
+              {
+                title: 'Sourced finding',
+                url: 'https://example.com/a',
+                snippet: 'Detail one.',
+                source: 'Source A',
+              },
+              {
+                title: 'Unsourced finding',
+                url: 'https://example.com/b',
+                snippet: 'Detail two.',
+              },
+            ],
+          },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the partial-report caveat below the completion threshold', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insightsCompletionPct: 40,
+        insights: { summary: 'Early signal only.', sections: [], actions: [] },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders collected profile fields, a null completed date, and a key that humanises to itself', async () => {
+    // Exercises the F8.3 profile-entries map (profile truthy), a completedAt of null
+    // (formatDate's "no date" dash), and humaniseKey's empty-after-cleanup edge case
+    // (a key of only underscores falls back to the raw key).
+    const pdf = await renderSessionPdf(
+      model({
+        completedAt: null,
+        profile: { job_title: 'Engineer', ___: 'value' },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
   it('renders the remaining header + slot branches without throwing', async () => {
     // Exercises: a branded logo, no goal/audience header rows, an unscored answer
     // (no confidence meta), a multi-entry refinement history, an unparseable

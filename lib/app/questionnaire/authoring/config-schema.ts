@@ -35,8 +35,13 @@ import {
   PERSONA_KEY_MAX_LENGTH,
   PERSONA_SWITCHERS,
   PRESENTATION_MODES,
+  MAX_REPORT_RESEARCH_RESULTS,
+  MAX_REPORT_RESEARCH_ROUNDS,
   PROFILE_FIELD_TYPES,
   REASONING_PLACEMENTS,
+  REPORT_RESEARCH_DISPLAYS,
+  REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH,
+  REPORT_RESEARCH_TIMINGS,
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   RESPONDENT_REPORT_MODES,
@@ -193,6 +198,31 @@ const respondentReportSettingsSchema = z
         download: z.boolean(),
       })
       .strict(),
+    research: z
+      .object({
+        enabled: z.boolean(),
+        timing: z.enum(REPORT_RESEARCH_TIMINGS),
+        rounds: z.number().int().min(1).max(MAX_REPORT_RESEARCH_ROUNDS),
+        maxResults: z.number().int().min(1).max(MAX_REPORT_RESEARCH_RESULTS),
+        before: z
+          .object({
+            instructions: z.string().trim().max(REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH),
+          })
+          .strict(),
+        after: z
+          .object({
+            instructions: z.string().trim().max(REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH),
+          })
+          .strict(),
+        display: z.enum(REPORT_RESEARCH_DISPLAYS),
+        informNarrative: z.boolean(),
+      })
+      .strict()
+      // Optional for backward-compat: definition-import reuses this schema, and a questionnaire
+      // exported after respondent-reports shipped but before web search has a full `respondentReport`
+      // block with no `research`. The read path (`narrowRespondentReportSettings`) defaults it; the
+      // editor always sends the whole block, so this only widens what import/PATCH will accept.
+      .optional(),
   })
   .strict();
 

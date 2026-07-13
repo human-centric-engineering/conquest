@@ -30,6 +30,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     adaptiveDataSlots: true,
     respondentReport: true,
     cohortReport: true,
+    reportWebSearch: true,
     introScreen: false,
     personaSelection: false,
     advisor: true,
@@ -129,6 +130,7 @@ describe('visibleWorkspaceTabs', () => {
         designEval: false,
         respondentReport: false,
         cohortReport: false,
+        reportWebSearch: false,
         liveSessions: false,
       })
     );

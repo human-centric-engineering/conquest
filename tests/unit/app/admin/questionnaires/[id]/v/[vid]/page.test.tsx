@@ -143,6 +143,7 @@ function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): Questionnai
     adaptiveDataSlots: false,
     respondentReport: false,
     cohortReport: false,
+    reportWebSearch: false,
     introScreen: false,
     personaSelection: false,
     advisor: false,

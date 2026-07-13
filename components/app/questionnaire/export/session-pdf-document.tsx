@@ -15,7 +15,7 @@
  * alongside the F7.2 panel.
  */
 
-import { Document, Page, Text, View, Image, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, Text, View, Image, Link, StyleSheet } from '@react-pdf/renderer';
 
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import { partialReportCaveat, splitReportParagraphs } from '@/lib/app/questionnaire/report/content';
@@ -103,6 +103,45 @@ const styles = StyleSheet.create({
   insightsAction: {
     marginBottom: 2,
     paddingLeft: 8,
+  },
+  // One research finding: a linked title line + a muted snippet/source line beneath it.
+  researchFinding: {
+    marginBottom: 6,
+  },
+  researchLink: {
+    fontFamily: 'Helvetica-Bold',
+    color: '#1d4ed8',
+    textDecoration: 'underline',
+  },
+  researchSnippet: {
+    fontSize: 9,
+    color: '#4b5563',
+    lineHeight: 1.35,
+    marginTop: 1,
+  },
+  researchSource: {
+    fontSize: 8,
+    color: '#6b7280',
+  },
+  researchNote: {
+    marginBottom: 6,
+    lineHeight: 1.4,
+  },
+  researchTableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 0.5,
+    borderBottomColor: COLORS.hairline,
+    paddingVertical: 3,
+  },
+  researchColSource: {
+    width: '40%',
+    paddingRight: 8,
+  },
+  researchColDetails: {
+    width: '60%',
+    fontSize: 9,
+    color: '#4b5563',
+    lineHeight: 1.35,
   },
   slot: {
     marginBottom: 12,
@@ -280,6 +319,39 @@ function InsightsSection({
               {`• ${action}`}
             </Text>
           ))}
+        </View>
+      )}
+      {insights.research && insights.research.findings.length > 0 && (
+        <View>
+          <Text style={styles.insightsHeading}>Research &amp; sources</Text>
+          {insights.research.note && (
+            <Text style={styles.researchNote}>{insights.research.note}</Text>
+          )}
+          {insights.research.display === 'table'
+            ? insights.research.findings.map((finding, i) => (
+                <View key={i} style={styles.researchTableRow} wrap={false}>
+                  <View style={styles.researchColSource}>
+                    <Link src={finding.url} style={styles.researchLink}>
+                      {finding.title}
+                    </Link>
+                    {finding.source && <Text style={styles.researchSource}>{finding.source}</Text>}
+                  </View>
+                  <Text style={styles.researchColDetails}>{finding.snippet}</Text>
+                </View>
+              ))
+            : insights.research.findings.map((finding, i) => (
+                <View key={i} style={styles.researchFinding} wrap={false}>
+                  <Text>
+                    <Link src={finding.url} style={styles.researchLink}>
+                      {finding.title}
+                    </Link>
+                    {finding.source ? (
+                      <Text style={styles.researchSource}>{` — ${finding.source}`}</Text>
+                    ) : null}
+                  </Text>
+                  {finding.snippet && <Text style={styles.researchSnippet}>{finding.snippet}</Text>}
+                </View>
+              ))}
         </View>
       )}
     </View>

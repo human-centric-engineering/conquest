@@ -31,6 +31,35 @@ export interface RespondentReportSection {
   body: string;
 }
 
+/** One web-search finding surfaced in the report's Research / Sources section. */
+export interface RespondentReportResearchFinding {
+  /** Human-readable title (linked to `url` in the renderers). */
+  title: string;
+  /** The source URL — always a validated `http(s)` link. */
+  url: string;
+  /** Short description / excerpt of what was found. */
+  snippet: string;
+  /** Optional source label (e.g. site name) when the agent supplies one. */
+  source?: string;
+}
+
+/**
+ * How the research findings render — frozen into the report at generation time (a snapshot; the config
+ * enum also has `hidden`, but a hidden report simply carries no research block). Renderers read this so
+ * they don't need the version config.
+ */
+export type RespondentReportResearchDisplay = 'table' | 'list';
+
+/** The web-research block folded into a report when web-search rounds ran (optional; legacy rows omit). */
+export interface RespondentReportResearch {
+  /** The retrieved findings, rendered as a table or list per {@link display}. */
+  findings: RespondentReportResearchFinding[];
+  /** Optional synthesis prose the research agent wrote about the findings. */
+  note?: string;
+  /** Table or list presentation, frozen from config at generation. Defaults to `list` on read. */
+  display: RespondentReportResearchDisplay;
+}
+
 /** The generated insights payload (the `content` column for a mode-2 report). */
 export interface RespondentReportContent {
   /** A short overview paragraph. */
@@ -39,6 +68,11 @@ export interface RespondentReportContent {
   sections: RespondentReportSection[];
   /** Concrete, actionable next steps the respondent can take. */
   actions: string[];
+  /**
+   * Web-search findings surfaced in the report, when web-search rounds ran and `display !== 'hidden'`.
+   * Optional and additive — legacy reports and reports generated without research have none.
+   */
+  research?: RespondentReportResearch;
 }
 
 /**
@@ -70,6 +104,14 @@ export const REPORT_SECTION_BODY_MAX = 6000;
 export const REPORT_ACTION_MAX = 1000;
 export const REPORT_MAX_SECTIONS = 12;
 export const REPORT_MAX_ACTIONS = 12;
+
+/** Bounds on the web-research block folded into a report. */
+export const REPORT_MAX_RESEARCH_FINDINGS = 25;
+export const REPORT_RESEARCH_TITLE_MAX = 300;
+export const REPORT_RESEARCH_URL_MAX = 2000;
+export const REPORT_RESEARCH_SNIPPET_MAX = 2000;
+export const REPORT_RESEARCH_SOURCE_MAX = 200;
+export const REPORT_RESEARCH_NOTE_MAX = 4000;
 
 /**
  * Paragraph size bounds for the deterministic sub-split. A display paragraph is closed when it
@@ -168,6 +210,50 @@ function trimTo(value: unknown, max: number): string | null {
 }
 
 /**
+ * A finding's URL must be a syntactically-valid `http`/`https` link — findings are rendered as
+ * clickable links, so a non-web scheme (`javascript:`, `data:`, `mailto:`) or garbage is dropped
+ * rather than surfaced. Length-capped defensively.
+ */
+function validHttpUrl(value: unknown): string | null {
+  const raw = trimTo(value, REPORT_RESEARCH_URL_MAX);
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Narrow arbitrary parsed JSON onto a valid {@link RespondentReportResearch}, or `null` when there
+ * is nothing usable (no finding with both a title and a valid URL). Malformed individual findings are
+ * dropped, not fatal. Shared by generation (validating the research agent's digest) and the read path
+ * (preserving the stored block through {@link validateRespondentReportContent}).
+ */
+export function validateResearch(parsed: unknown): RespondentReportResearch | null {
+  if (!isRecord(parsed)) return null;
+
+  const rawFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
+  const findings: RespondentReportResearchFinding[] = [];
+  for (const entry of rawFindings) {
+    if (findings.length >= REPORT_MAX_RESEARCH_FINDINGS) break;
+    if (!isRecord(entry)) continue;
+    const title = trimTo(entry.title, REPORT_RESEARCH_TITLE_MAX);
+    const url = validHttpUrl(entry.url);
+    if (!title || !url) continue;
+    const snippet = trimTo(entry.snippet, REPORT_RESEARCH_SNIPPET_MAX) ?? '';
+    const source = trimTo(entry.source, REPORT_RESEARCH_SOURCE_MAX);
+    findings.push({ title, url, snippet, ...(source ? { source } : {}) });
+  }
+
+  const note = trimTo(parsed.note, REPORT_RESEARCH_NOTE_MAX);
+  if (findings.length === 0 && !note) return null;
+  const display: RespondentReportResearchDisplay = parsed.display === 'table' ? 'table' : 'list';
+  return { findings, display, ...(note ? { note } : {}) };
+}
+
+/**
  * Narrow arbitrary parsed JSON onto a valid {@link RespondentReportContent}, or `null` when it
  * can't be salvaged (no usable summary). Malformed individual sections/actions are dropped rather
  * than failing the whole report.
@@ -196,7 +282,12 @@ export function validateRespondentReportContent(parsed: unknown): RespondentRepo
     if (action) actions.push(action);
   }
 
-  return { summary, sections, actions };
+  // Preserve a web-research block when the stored content carries one (attached post-generation in
+  // `generate.ts`; the report agent's own JSON never has it). Load-bearing on the read path — this
+  // validator re-narrows stored content in `view.ts`, so dropping it here would erase the section.
+  const research = validateResearch(parsed.research);
+
+  return { summary, sections, actions, ...(research ? { research } : {}) };
 }
 
 /**

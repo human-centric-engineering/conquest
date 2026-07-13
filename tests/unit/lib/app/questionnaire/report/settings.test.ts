@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import {
   DEFAULT_RESPONDENT_REPORT_SETTINGS,
+  REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH,
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
@@ -28,8 +29,57 @@ describe('narrowRespondentReportSettings', () => {
         useClientKnowledge: true,
       },
       delivery: { onScreen: false, download: true },
+      research: {
+        enabled: true,
+        timing: 'both' as const,
+        rounds: 3,
+        maxResults: 8,
+        before: { instructions: 'Find benchmarks.' },
+        after: { instructions: 'Find sources.' },
+        display: 'table' as const,
+        informNarrative: false,
+      },
     };
     expect(narrowRespondentReportSettings(full)).toEqual(full);
+  });
+
+  describe('research block', () => {
+    it('fills the research defaults when the key is missing', () => {
+      expect(narrowRespondentReportSettings({}).research).toEqual(
+        DEFAULT_RESPONDENT_REPORT_SETTINGS.research
+      );
+    });
+
+    it('clamps rounds and maxResults into their bounds and rounds fractions', () => {
+      const r = narrowRespondentReportSettings({
+        research: { rounds: 99, maxResults: 0 },
+      }).research;
+      expect(r.rounds).toBe(5); // MAX_REPORT_RESEARCH_ROUNDS
+      expect(r.maxResults).toBe(1); // clamped up to the floor
+      const r2 = narrowRespondentReportSettings({
+        research: { rounds: 2.7, maxResults: 4.2 },
+      }).research;
+      expect(r2.rounds).toBe(3);
+      expect(r2.maxResults).toBe(4);
+    });
+
+    it('defaults an invalid timing / display and coerces non-numeric rounds', () => {
+      const r = narrowRespondentReportSettings({
+        research: { timing: 'sideways', display: 'grid', rounds: 'lots' },
+      }).research;
+      expect(r.timing).toBe('before');
+      expect(r.display).toBe('list');
+      expect(r.rounds).toBe(DEFAULT_RESPONDENT_REPORT_SETTINGS.research.rounds);
+    });
+
+    it('trims + length-caps the per-phase instructions', () => {
+      const long = 'x'.repeat(REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH + 50);
+      const r = narrowRespondentReportSettings({
+        research: { before: { instructions: `  hello  ` }, after: { instructions: long } },
+      }).research;
+      expect(r.before.instructions).toBe('hello');
+      expect(r.after.instructions).toHaveLength(REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH);
+    });
   });
 
   it('narrows the narrative style: defaults when missing/invalid, preserves valid values', () => {

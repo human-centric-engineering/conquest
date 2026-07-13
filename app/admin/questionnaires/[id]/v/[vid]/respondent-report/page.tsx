@@ -61,6 +61,7 @@ export default async function RespondentReportTab({ params }: PageProps) {
         initial={settings}
         dataSlotsEnabled={flags.dataSlots}
         client={client}
+        webSearchEnabled={flags.reportWebSearch}
       />
     </div>
   );

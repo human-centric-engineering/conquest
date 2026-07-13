@@ -986,10 +986,13 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
       // Cohort report (incl. the Scoring tab) requires cohorts + its own sub-flag.
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORTS_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED');
+      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
+        'APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED'
+      );
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_ADVISOR_ENABLED');
       expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED');
-      // Also verify exactly 13 calls — prevents accidental re-resolution of the master flag
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(13);
+      // Also verify exactly 14 calls — prevents accidental re-resolution of the master flag
+      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(14);
     });
   });
 
@@ -1065,6 +1068,7 @@ describe('resolveQuestionnaireWorkspaceFlags', () => {
           'liveSessions',
           'master',
           'personaSelection',
+          'reportWebSearch',
           'respondentReport',
         ].sort()
       );

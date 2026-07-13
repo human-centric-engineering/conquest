@@ -60,6 +60,7 @@ const allFlagsOn: QuestionnaireWorkspaceFlags = {
   adaptiveDataSlots: true,
   respondentReport: true,
   cohortReport: true,
+  reportWebSearch: true,
   introScreen: true,
   personaSelection: true,
   advisor: true,

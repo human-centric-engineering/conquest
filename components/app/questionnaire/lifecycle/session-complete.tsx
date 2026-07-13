@@ -519,7 +519,7 @@ function ReportBody({
   variant?: 'screen' | 'paper';
   animate?: boolean;
 }) {
-  const { summary, sections, actions } = content;
+  const { summary, sections, actions, research } = content;
   const paper = variant === 'paper';
   // Formatter-produced reports are pre-laid-out — honour their paragraphs verbatim (skip the
   // deterministic sentence re-grouping, which would re-chop deliberate paragraphs).
@@ -597,6 +597,84 @@ function ReportBody({
               <li key={i}>{action}</li>
             ))}
           </ul>
+        </div>
+      )}
+      {research && research.findings.length > 0 && (
+        <div
+          className={cn(paper ? 'space-y-3' : 'space-y-2', reveal)}
+          style={delay()}
+          data-research-display={research.display}
+        >
+          <h2 className={heading}>Research &amp; sources</h2>
+          {research.note && <p className={bodyText}>{research.note}</p>}
+          {research.display === 'table' ? (
+            <div className="overflow-x-auto">
+              <table
+                className={cn(
+                  'w-full border-collapse text-left',
+                  paper ? 'text-[13px] text-neutral-700' : 'text-muted-foreground text-xs'
+                )}
+              >
+                <thead>
+                  <tr className={cn('border-b', paper ? 'border-neutral-300' : 'border-border')}>
+                    <th className="py-1.5 pr-3 font-semibold">Source</th>
+                    <th className="py-1.5 font-semibold">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {research.findings.map((finding, i) => (
+                    <tr
+                      key={i}
+                      className={cn('border-b', paper ? 'border-neutral-200' : 'border-border/60')}
+                    >
+                      <td className="py-1.5 pr-3 align-top">
+                        <a
+                          href={finding.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cn(
+                            'font-medium underline underline-offset-2',
+                            paper ? 'text-neutral-900' : 'text-foreground'
+                          )}
+                        >
+                          {finding.title}
+                        </a>
+                        {finding.source && (
+                          <span className="block text-[11px] opacity-70">{finding.source}</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 align-top">{finding.snippet}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <ul
+              className={cn(
+                'list-disc space-y-2 pl-5',
+                paper ? 'text-[13px] leading-6 text-neutral-700' : 'text-muted-foreground text-xs'
+              )}
+            >
+              {research.findings.map((finding, i) => (
+                <li key={i}>
+                  <a
+                    href={finding.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      'font-medium underline underline-offset-2',
+                      paper ? 'text-neutral-900' : 'text-foreground'
+                    )}
+                  >
+                    {finding.title}
+                  </a>
+                  {finding.source && <span className="opacity-70"> — {finding.source}</span>}
+                  {finding.snippet && <span className="block opacity-90">{finding.snippet}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
