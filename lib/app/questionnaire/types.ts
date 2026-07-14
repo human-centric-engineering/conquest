@@ -736,10 +736,18 @@ export type RespondentReportSettings = {
   };
 };
 
-/** Feature off, raw mode, sensible includes/delivery — today's behaviour (no report unless enabled). */
+/**
+ * Feature off, narrative mode, sensible includes/delivery. The feature is off by default (no report
+ * unless enabled), but when an admin turns it on the narrative report is the intended default
+ * deliverable. `questionsAsPresented` stays `true` — it is the field-level default that raw and
+ * raw+insights modes need, and also the fallback `narrowRespondentReportSettings` applies to partial
+ * or legacy stored configs. Narrative never appends the Q&A recap regardless, because
+ * `resolveReportRawIncludes` suppresses it at read time (see settings.ts); the data-slot appendix is
+ * new and defaults off so no existing report regresses into showing it.
+ */
 export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
   enabled: false,
-  mode: 'raw',
+  mode: 'narrative',
   rawIncludes: { dataSlots: false, questionsAsPresented: true },
   generation: {
     narrativeStyle: 'flowing',

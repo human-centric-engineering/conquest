@@ -7,9 +7,9 @@
  * this is a standalone tab): the four panels (Content / Generation / Delivery / Appearance) edit one
  * `RespondentReportSettings` block, and a single Save sends it through the shared config PATCH
  * (`respondentReport` slice). `<FieldHelp>` on every non-obvious control. The Generation panel applies
- * to the AI modes (`raw_plus_insights`, `narrative`) — hinted (not hidden) in raw mode so the admin
- * sees what enabling an AI report unlocks; narrative also hides the raw-content toggles (it has no
- * separate raw section).
+ * to the AI modes (`raw_plus_insights`, `narrative`): in raw mode its tab is greyed out and its inputs
+ * are replaced by a hint pointing back to the mode select. Narrative also hides the raw-content toggles
+ * (it has no separate raw section).
  */
 
 import { useState } from 'react';
@@ -55,6 +55,9 @@ const MODE_LABELS: Record<RespondentReportMode, string> = {
   raw_plus_insights: 'Raw answers + AI insights',
   narrative: 'Narrative report',
 };
+
+/** Presentation order for the mode select — Narrative (the default) first, raw last. */
+const MODE_ORDER: RespondentReportMode[] = ['narrative', 'raw_plus_insights', 'raw'];
 
 const NARRATIVE_STYLE_LABELS: Record<RespondentReportNarrativeStyle, string> = {
   flowing: 'Flowing prose',
@@ -169,7 +172,11 @@ export function RespondentReportEditor({
       <Tabs defaultValue="content" className="w-full">
         <TabsList>
           <TabsTrigger value="content">Content</TabsTrigger>
-          <TabsTrigger value="generation">Generation</TabsTrigger>
+          {/* The Generation panel only shapes the AI report modes; grey it out in raw mode
+              (the panel itself explains what to switch to). */}
+          <TabsTrigger value="generation" disabled={!usesAgent}>
+            Generation
+          </TabsTrigger>
           {webSearchEnabled && <TabsTrigger value="research">Research</TabsTrigger>}
           <TabsTrigger value="delivery">Delivery</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
@@ -213,7 +220,7 @@ export function RespondentReportEditor({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(MODE_LABELS) as RespondentReportMode[]).map((m) => (
+                {MODE_ORDER.map((m) => (
                   <SelectItem key={m} value={m}>
                     {MODE_LABELS[m]}
                   </SelectItem>
@@ -290,157 +297,159 @@ export function RespondentReportEditor({
 
         {/* ── Generation ────────────────────────────────────────────────────── */}
         <TabsContent value="generation" className="space-y-5 pt-4">
-          {!usesAgent && (
+          {!usesAgent ? (
             <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
               These settings shape the AI report. Switch the mode to{' '}
               <span className="text-foreground font-medium">Raw answers + AI insights</span> or{' '}
               <span className="text-foreground font-medium">Narrative report</span> (Content tab) to
               use them.
             </p>
-          )}
-
-          <ReportConfigAssistant
-            questionnaireId={questionnaireId}
-            versionId={versionId}
-            current={{
-              instructions: value.generation.instructions,
-              structure: value.generation.structure,
-              backgroundContext: value.generation.backgroundContext,
-            }}
-            onApply={patchGeneration}
-            disabled={isSaving || !usesAgent}
-          />
-
-          <div className="space-y-1.5">
-            <Label className="flex items-center gap-1">
-              Narrative style
-              <FieldHelp title="Narrative style">
-                Shapes how the AI report reads. <strong>Flowing prose</strong> is connected,
-                analysed paragraphs. <strong>Concise</strong> is tighter and shorter.{' '}
-                <strong>Structured</strong> is highly scannable — a brief framing per section, then
-                short paragraphs and bullet lists. All styles write in short, readable paragraphs
-                and stay grounded in the respondent&rsquo;s own answers. This is separate from the
-                free-text voice instructions below.
-              </FieldHelp>
-            </Label>
-            <Select
-              value={value.generation.narrativeStyle}
-              onValueChange={(v) =>
-                patchGeneration({ narrativeStyle: v as RespondentReportNarrativeStyle })
-              }
-              disabled={isSaving || !usesAgent}
-            >
-              <SelectTrigger className="max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {RESPONDENT_REPORT_NARRATIVE_STYLES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {NARRATIVE_STYLE_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="rr-instructions" className="flex items-center gap-1">
-              Style &amp; voice instructions
-              <FieldHelp title="Instructions">
-                Free-text guidance for how the report should sound — tone, reading level,
-                perspective. Layered on top of the report agent&rsquo;s default voice.
-              </FieldHelp>
-            </Label>
-            <Textarea
-              id="rr-instructions"
-              value={value.generation.instructions}
-              maxLength={RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH}
-              rows={3}
-              disabled={isSaving || !usesAgent}
-              placeholder="e.g. Warm and encouraging; plain language; address the respondent as 'you'."
-              onChange={(e) => patchGeneration({ instructions: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="rr-structure" className="flex items-center gap-1">
-              Desired structure
-              <FieldHelp title="Structure">
-                Describe the sections you want, in order — e.g. &ldquo;summary, three themes, then
-                next steps&rdquo;. In narrative mode these become the woven report&rsquo;s chapters.
-              </FieldHelp>
-            </Label>
-            <Textarea
-              id="rr-structure"
-              value={value.generation.structure}
-              maxLength={RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH}
-              rows={3}
-              disabled={isSaving || !usesAgent}
-              placeholder="e.g. A short summary, then strengths, then areas to develop, then recommended actions."
-              onChange={(e) => patchGeneration({ structure: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="rr-background" className="flex items-center gap-1">
-              Background context
-              <FieldHelp title="Background context">
-                What the agent should know about this questionnaire and how to interpret answers —
-                e.g. what a low score on a section implies, or domain background. Always supplied to
-                the agent.
-              </FieldHelp>
-            </Label>
-            <Textarea
-              id="rr-background"
-              value={value.generation.backgroundContext}
-              maxLength={RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH}
-              rows={5}
-              disabled={isSaving || !usesAgent}
-              placeholder="e.g. This is a quarterly engagement pulse. Low autonomy scores usually point to process friction; emphasise practical, low-effort actions."
-              onChange={(e) => patchGeneration({ backgroundContext: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={value.generation.useClientKnowledge}
-                onCheckedChange={(v) => patchGeneration({ useClientKnowledge: v })}
-                disabled={isSaving || !usesAgent}
-                id="rr-kb"
+          ) : (
+            <>
+              <ReportConfigAssistant
+                questionnaireId={questionnaireId}
+                versionId={versionId}
+                current={{
+                  instructions: value.generation.instructions,
+                  structure: value.generation.structure,
+                  backgroundContext: value.generation.backgroundContext,
+                }}
+                onApply={patchGeneration}
+                disabled={isSaving}
               />
-              <Label htmlFor="rr-kb" className="flex items-center gap-1">
-                Ground insights in the client knowledge base
-                <FieldHelp title="Client knowledge base">
-                  When on, the report agent retrieves relevant material from the attributed
-                  client&rsquo;s private knowledge base to substantiate its insights. Each
-                  client&rsquo;s documents are isolated.
-                </FieldHelp>
-              </Label>
-            </div>
-            {usesAgent &&
-              value.generation.useClientKnowledge &&
-              (client ? (
-                <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
-                  Documents are managed on the client&rsquo;s page (the corpus is shared across all{' '}
-                  {client.name}&rsquo;s questionnaires).{' '}
-                  <Link
-                    href={`/admin/demo-clients/${client.id}`}
-                    className="text-foreground font-medium underline underline-offset-2"
-                  >
-                    Manage {client.name}&rsquo;s knowledge base
-                  </Link>
-                  .
-                </p>
-              ) : (
-                <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
-                  No demo client is attributed to this questionnaire, so there is no private
-                  knowledge base to ground reports in. Attribute one on the{' '}
-                  <span className="text-foreground font-medium">Settings</span> tab, then manage its
-                  documents from the client&rsquo;s page.
-                </p>
-              ))}
-          </div>
+
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1">
+                  Narrative style
+                  <FieldHelp title="Narrative style">
+                    Shapes how the AI report reads. <strong>Flowing prose</strong> is connected,
+                    analysed paragraphs. <strong>Concise</strong> is tighter and shorter.{' '}
+                    <strong>Structured</strong> is highly scannable — a brief framing per section,
+                    then short paragraphs and bullet lists. All styles write in short, readable
+                    paragraphs and stay grounded in the respondent&rsquo;s own answers. This is
+                    separate from the free-text voice instructions below.
+                  </FieldHelp>
+                </Label>
+                <Select
+                  value={value.generation.narrativeStyle}
+                  onValueChange={(v) =>
+                    patchGeneration({ narrativeStyle: v as RespondentReportNarrativeStyle })
+                  }
+                  disabled={isSaving || !usesAgent}
+                >
+                  <SelectTrigger className="max-w-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RESPONDENT_REPORT_NARRATIVE_STYLES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {NARRATIVE_STYLE_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-instructions" className="flex items-center gap-1">
+                  Style &amp; voice instructions
+                  <FieldHelp title="Instructions">
+                    Free-text guidance for how the report should sound — tone, reading level,
+                    perspective. Layered on top of the report agent&rsquo;s default voice.
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  id="rr-instructions"
+                  value={value.generation.instructions}
+                  maxLength={RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH}
+                  rows={3}
+                  disabled={isSaving || !usesAgent}
+                  placeholder="e.g. Warm and encouraging; plain language; address the respondent as 'you'."
+                  onChange={(e) => patchGeneration({ instructions: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-structure" className="flex items-center gap-1">
+                  Desired structure
+                  <FieldHelp title="Structure">
+                    Describe the sections you want, in order — e.g. &ldquo;summary, three themes,
+                    then next steps&rdquo;. In narrative mode these become the woven report&rsquo;s
+                    chapters.
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  id="rr-structure"
+                  value={value.generation.structure}
+                  maxLength={RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH}
+                  rows={3}
+                  disabled={isSaving || !usesAgent}
+                  placeholder="e.g. A short summary, then strengths, then areas to develop, then recommended actions."
+                  onChange={(e) => patchGeneration({ structure: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="rr-background" className="flex items-center gap-1">
+                  Background context
+                  <FieldHelp title="Background context">
+                    What the agent should know about this questionnaire and how to interpret answers
+                    — e.g. what a low score on a section implies, or domain background. Always
+                    supplied to the agent.
+                  </FieldHelp>
+                </Label>
+                <Textarea
+                  id="rr-background"
+                  value={value.generation.backgroundContext}
+                  maxLength={RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH}
+                  rows={5}
+                  disabled={isSaving || !usesAgent}
+                  placeholder="e.g. This is a quarterly engagement pulse. Low autonomy scores usually point to process friction; emphasise practical, low-effort actions."
+                  onChange={(e) => patchGeneration({ backgroundContext: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={value.generation.useClientKnowledge}
+                    onCheckedChange={(v) => patchGeneration({ useClientKnowledge: v })}
+                    disabled={isSaving || !usesAgent}
+                    id="rr-kb"
+                  />
+                  <Label htmlFor="rr-kb" className="flex items-center gap-1">
+                    Ground insights in the client knowledge base
+                    <FieldHelp title="Client knowledge base">
+                      When on, the report agent retrieves relevant material from the attributed
+                      client&rsquo;s private knowledge base to substantiate its insights. Each
+                      client&rsquo;s documents are isolated.
+                    </FieldHelp>
+                  </Label>
+                </div>
+                {value.generation.useClientKnowledge &&
+                  (client ? (
+                    <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
+                      Documents are managed on the client&rsquo;s page (the corpus is shared across
+                      all {client.name}&rsquo;s questionnaires).{' '}
+                      <Link
+                        href={`/admin/demo-clients/${client.id}`}
+                        className="text-foreground font-medium underline underline-offset-2"
+                      >
+                        Manage {client.name}&rsquo;s knowledge base
+                      </Link>
+                      .
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
+                      No demo client is attributed to this questionnaire, so there is no private
+                      knowledge base to ground reports in. Attribute one on the{' '}
+                      <span className="text-foreground font-medium">Settings</span> tab, then manage
+                      its documents from the client&rsquo;s page.
+                    </p>
+                  ))}
+              </div>
+            </>
+          )}
         </TabsContent>
 
         {/* ── Research (web search) ─────────────────────────────────────────── */}

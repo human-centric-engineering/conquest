@@ -2,7 +2,7 @@
  * RespondentReportEditor — component tests.
  *
  * Verifies the controlled state → save payload (the whole respondentReport block), the master
- * enable toggle, the mode gating (Generation fields are disabled in raw mode), and the narrative-style
+ * enable toggle, the mode gating (Generation fields are hidden in raw mode), and the narrative-style
  * selector. UI primitives (Tabs/Switch/Select/FieldHelp) are mocked to plain elements so assertions
  * don't fight Radix/jsdom. The embedded `ReportConfigAssistant` is rendered live — it only calls the
  * craft API on user interaction, so it stays inert in these save/gating tests.
@@ -146,9 +146,10 @@ describe('RespondentReportEditor', () => {
     expect(opts.body.respondentReport.mode).toBe('raw_plus_insights');
   });
 
-  it('disables the generation fields in raw mode and enables them when switched to insights', () => {
+  it('hides the generation fields in raw mode and shows them when switched to insights', () => {
     renderEditor({ mode: 'raw' });
-    expect(screen.getByPlaceholderText(/Warm and encouraging/i)).toBeDisabled();
+    // Raw mode has no AI report: the Generation panel replaces its inputs with a hint.
+    expect(screen.queryByPlaceholderText(/Warm and encouraging/i)).toBeNull();
 
     // Switching the mode select to insights flips the gate (controlled state).
     fireEvent.change(screen.getByTestId('mode-select'), {
@@ -300,9 +301,10 @@ describe('RespondentReportEditor', () => {
     expect(rr.generation.narrativeStyle).toBe('structured');
   });
 
-  it('disables the narrative-style select in raw mode (no AI report)', () => {
+  it('hides the narrative-style select in raw mode (no AI report)', () => {
     renderEditor({ mode: 'raw' });
-    expect(screen.getByTestId('style-select')).toBeDisabled();
+    // The whole Generation panel is replaced by a hint in raw mode, so the style select is absent.
+    expect(screen.queryByTestId('style-select')).toBeNull();
   });
 
   it('shows an error message when saving fails', async () => {
