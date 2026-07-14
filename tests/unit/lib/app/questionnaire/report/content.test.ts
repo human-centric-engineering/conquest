@@ -11,10 +11,15 @@ import {
   partialReportCaveat,
   splitReportParagraphs,
   validateRespondentReportContent,
+  validateResearch,
+  validateAppendix,
   PARTIAL_REPORT_THRESHOLD_PCT,
   REPORT_SUMMARY_MAX,
   REPORT_MAX_SECTIONS,
   REPORT_MAX_ACTIONS,
+  REPORT_MAX_RESEARCH_FINDINGS,
+  REPORT_APPENDIX_HEADING_MAX,
+  REPORT_APPENDIX_BODY_MAX,
   type AnswerTranscriptInput,
 } from '@/lib/app/questionnaire/report/content';
 import type { PanelSlotView, PanelSectionView } from '@/lib/app/questionnaire/panel/types';
@@ -93,9 +98,36 @@ describe('buildAnswerTranscript', () => {
   const base: AnswerTranscriptInput = {
     questionnaireTitle: 'Pulse',
     goal: 'Understand engagement',
-    audienceSummary: 'Employees',
+    audience: { description: 'Employees' },
     sections: [],
   };
+
+  it('renders every set structured-audience field as a labelled line', () => {
+    const text = buildAnswerTranscript({
+      ...base,
+      audience: {
+        description: 'Frontline managers',
+        role: 'Team lead',
+        expertiseLevel: 'intermediate',
+        estimatedDurationMinutes: 15,
+        locale: 'en-GB',
+        sensitivity: 'high',
+        notes: 'Recently reorganised.',
+      },
+    });
+    expect(text).toContain('Audience: Frontline managers');
+    expect(text).toContain('Audience role: Team lead');
+    expect(text).toContain('Audience expertise level: intermediate');
+    expect(text).toContain('Estimated completion time: 15 minutes');
+    expect(text).toContain('Locale: en-GB');
+    expect(text).toContain('Topic sensitivity: high');
+    expect(text).toContain('Audience notes: Recently reorganised.');
+  });
+
+  it('omits audience lines entirely when no audience is set', () => {
+    const text = buildAnswerTranscript({ ...base, audience: null });
+    expect(text).not.toContain('Audience');
+  });
 
   it('includes the goal/audience header and only answered slots', () => {
     const sections: PanelSectionView[] = [
@@ -233,7 +265,7 @@ describe('buildAnswerTranscript', () => {
     const text = buildAnswerTranscript({
       questionnaireTitle: 'T',
       goal: null,
-      audienceSummary: null,
+      audience: null,
       sections,
     });
     expect(text).not.toContain('Goal:');
@@ -403,5 +435,166 @@ describe('partialReportCaveat', () => {
   it('treats the threshold as exclusive on the lower side (74 → caveat, 75 → none)', () => {
     expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT - 1)).toContain('74% complete');
     expect(partialReportCaveat(PARTIAL_REPORT_THRESHOLD_PCT)).toBeNull();
+  });
+});
+
+describe('validateResearch', () => {
+  it('returns null for non-records and for a block with no usable content', () => {
+    expect(validateResearch(null)).toBeNull();
+    expect(validateResearch('nope')).toBeNull();
+    expect(validateResearch({ findings: [] })).toBeNull();
+    expect(validateResearch({ findings: [{ title: '', url: '' }] })).toBeNull();
+  });
+
+  it('keeps well-formed findings and defaults the display to list', () => {
+    const res = validateResearch({
+      findings: [
+        {
+          title: 'A source',
+          url: 'https://example.com/a',
+          snippet: 'About A',
+          source: 'example.com',
+        },
+      ],
+      note: 'A short synthesis.',
+    });
+    expect(res).toEqual({
+      findings: [
+        {
+          title: 'A source',
+          url: 'https://example.com/a',
+          snippet: 'About A',
+          source: 'example.com',
+        },
+      ],
+      note: 'A short synthesis.',
+      display: 'list',
+    });
+  });
+
+  it('preserves an explicit table display', () => {
+    const res = validateResearch({
+      findings: [{ title: 'T', url: 'https://x.test' }],
+      display: 'table',
+    });
+    expect(res?.display).toBe('table');
+  });
+
+  it('drops findings without a valid http(s) URL (and non-web schemes)', () => {
+    const res = validateResearch({
+      findings: [
+        { title: 'Bad scheme', url: 'javascript:alert(1)' },
+        { title: 'No url', url: '' },
+        { title: 'Not a url', url: 'not a url' },
+        { title: 'Good', url: 'http://ok.test/path' },
+      ],
+    });
+    expect(res?.findings).toEqual([{ title: 'Good', url: 'http://ok.test/path', snippet: '' }]);
+  });
+
+  it('caps the number of findings', () => {
+    const many = Array.from({ length: REPORT_MAX_RESEARCH_FINDINGS + 5 }, (_, i) => ({
+      title: `T${i}`,
+      url: `https://example.com/${i}`,
+    }));
+    const res = validateResearch({ findings: many });
+    expect(res?.findings).toHaveLength(REPORT_MAX_RESEARCH_FINDINGS);
+  });
+
+  it('keeps a note-only block (findings may legitimately be empty)', () => {
+    const res = validateResearch({ findings: [], note: 'Nothing conclusive found.' });
+    expect(res).toEqual({ findings: [], note: 'Nothing conclusive found.', display: 'list' });
+  });
+
+  it('tolerates a missing findings key (non-array) and still keeps a note', () => {
+    // No `findings` key at all → the `Array.isArray(parsed.findings)` guard falls back to [].
+    const res = validateResearch({ note: 'Only a synthesis, no sources.' });
+    expect(res).toEqual({ findings: [], note: 'Only a synthesis, no sources.', display: 'list' });
+  });
+
+  it('skips non-object entries in the findings array without discarding the whole block', () => {
+    const res = validateResearch({
+      findings: ['not-an-object', null, { title: 'Good', url: 'https://ok.test' }],
+    });
+    expect(res?.findings).toEqual([{ title: 'Good', url: 'https://ok.test', snippet: '' }]);
+  });
+});
+
+describe('validateRespondentReportContent — research preservation', () => {
+  it('preserves a valid research block through the content validator (read path)', () => {
+    const content = validateRespondentReportContent({
+      summary: 'Hi',
+      sections: [],
+      actions: [],
+      research: { findings: [{ title: 'S', url: 'https://s.test' }], display: 'table' },
+    });
+    expect(content?.research).toEqual({
+      findings: [{ title: 'S', url: 'https://s.test', snippet: '' }],
+      display: 'table',
+    });
+  });
+
+  it('omits research when the stored content has none', () => {
+    const content = validateRespondentReportContent({ summary: 'Hi', sections: [], actions: [] });
+    expect(content).not.toHaveProperty('research');
+  });
+});
+
+describe('validateAppendix', () => {
+  it('returns null for non-records, a null/empty body, and the "no appendix" decision', () => {
+    expect(validateAppendix(null)).toBeNull();
+    expect(validateAppendix('nope')).toBeNull();
+    expect(validateAppendix({})).toBeNull();
+    expect(validateAppendix({ body: '   ' })).toBeNull();
+    expect(validateAppendix({ heading: 'Appendix', body: '' })).toBeNull();
+  });
+
+  it('keeps a well-formed appendix and its optional heading', () => {
+    expect(validateAppendix({ heading: 'Further context', body: 'Some background.' })).toEqual({
+      heading: 'Further context',
+      body: 'Some background.',
+    });
+  });
+
+  it('keeps the body when the heading is missing or empty (renderers default it)', () => {
+    expect(validateAppendix({ body: 'Body only.' })).toEqual({ body: 'Body only.' });
+    expect(validateAppendix({ heading: '   ', body: 'Body only.' })).toEqual({
+      body: 'Body only.',
+    });
+  });
+
+  it('trims and length-caps the heading and body', () => {
+    const res = validateAppendix({
+      heading: `  ${'h'.repeat(REPORT_APPENDIX_HEADING_MAX + 20)}  `,
+      body: 'b'.repeat(REPORT_APPENDIX_BODY_MAX + 20),
+    });
+    expect(res?.heading).toHaveLength(REPORT_APPENDIX_HEADING_MAX);
+    expect(res?.body).toHaveLength(REPORT_APPENDIX_BODY_MAX);
+  });
+});
+
+describe('validateRespondentReportContent — appendix preservation', () => {
+  it('preserves a valid appendix through the content validator (read path)', () => {
+    const content = validateRespondentReportContent({
+      summary: 'Hi',
+      sections: [],
+      actions: [],
+      appendix: { heading: 'Appendix', body: 'Extra context.' },
+    });
+    expect(content?.appendix).toEqual({ heading: 'Appendix', body: 'Extra context.' });
+  });
+
+  it('omits the appendix when the stored content has none or it is empty', () => {
+    expect(
+      validateRespondentReportContent({ summary: 'Hi', sections: [], actions: [] })
+    ).not.toHaveProperty('appendix');
+    expect(
+      validateRespondentReportContent({
+        summary: 'Hi',
+        sections: [],
+        actions: [],
+        appendix: { body: '' },
+      })
+    ).not.toHaveProperty('appendix');
   });
 });

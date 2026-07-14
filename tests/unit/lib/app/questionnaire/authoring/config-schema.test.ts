@@ -445,10 +445,43 @@ describe('updateConfigSchema — respondentReport (Respondent Report)', () => {
       useClientKnowledge: true,
     },
     delivery: { onScreen: true, download: true },
+    research: {
+      enabled: true,
+      timing: 'before' as const,
+      rounds: 1,
+      maxResults: 5,
+      before: { instructions: 'Find recent industry benchmarks.' },
+      after: { instructions: 'Verify any cited figures.' },
+      display: 'list' as const,
+      informNarrative: true,
+      appendix: false,
+    },
   };
 
   it('accepts a well-formed full report block', () => {
     expect(updateConfigSchema.safeParse({ respondentReport: fullReport }).success).toBe(true);
+  });
+
+  it('accepts the appendix opt-in on the research block', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        respondentReport: { ...fullReport, research: { ...fullReport.research, appendix: true } },
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects a research block missing the required appendix field', () => {
+    const { appendix: _omitted, ...researchWithoutAppendix } = fullReport.research;
+    expect(
+      updateConfigSchema.safeParse({
+        respondentReport: { ...fullReport, research: researchWithoutAppendix },
+      }).success
+    ).toBe(false);
+  });
+
+  it('accepts a report block that omits the optional research field (pre-web-search import compat)', () => {
+    const { research: _omitted, ...withoutResearch } = fullReport;
+    expect(updateConfigSchema.safeParse({ respondentReport: withoutResearch }).success).toBe(true);
   });
 
   it('accepts each valid narrative style and rejects an unknown one', () => {

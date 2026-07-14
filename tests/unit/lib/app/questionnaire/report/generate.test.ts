@@ -23,7 +23,7 @@ vi.mock('@/lib/app/questionnaire/report/format', () => ({ formatReportContent: v
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
   resolveAgentProviderAndModel: vi.fn(),
 }));
-vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProviderWithFallbacks: vi.fn() }));
 vi.mock('@/lib/orchestration/knowledge/search', () => ({ searchKnowledge: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/report/client-knowledge', () => ({
   resolveClientKnowledgeDocumentIds: vi.fn(),
@@ -31,15 +31,24 @@ vi.mock('@/lib/app/questionnaire/report/client-knowledge', () => ({
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-export', () => ({
   loadSessionExport: vi.fn(),
 }));
+vi.mock('@/lib/app/questionnaire/report/research', () => ({ runReportResearch: vi.fn() }));
+// Mock the appendix synthesis pass but keep `hasResearchFindings` real (it drives the gating in generate).
+vi.mock('@/lib/app/questionnaire/report/appendix', async (importActual) => ({
+  ...(await importActual<typeof import('@/lib/app/questionnaire/report/appendix')>()),
+  synthesiseReportAppendix: vi.fn(),
+}));
 
 import { prisma } from '@/lib/db/client';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
-import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manager';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
+import { runReportResearch } from '@/lib/app/questionnaire/report/research';
+import { synthesiseReportAppendix } from '@/lib/app/questionnaire/report/appendix';
+import { APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG } from '@/lib/app/questionnaire/constants';
 import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -126,17 +135,20 @@ beforeEach(() => {
     costUsd: 0,
     formatted: false,
   }));
+  // Research disabled by default (no research config); each research test opts in explicitly.
+  (runReportResearch as Mock).mockResolvedValue({ findings: [], costUsd: 0 });
 });
 
 describe('generateRespondentReport', () => {
   it('builds the transcript into the prompt and returns the parsed content + cost', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     const result = await generateRespondentReport('sess-1');
 
     expect(result.content).toEqual(VALID_RESPONSE);
-    expect(typeof result.costUsd).toBe('number');
+    // Deterministic: formatter + research are off and the fake model hits the zero-cost fallback.
+    expect(result.costUsd).toBe(0);
 
     // The user message carries the answer transcript.
     const messages = chat.mock.calls[0][0] as Array<{ role: string; content: string }>;
@@ -147,6 +159,38 @@ describe('generateRespondentReport', () => {
     const system = messages.find((m) => m.role === 'system');
     expect(system?.content).toContain('You are the report writer.');
     expect(system?.content.toLowerCase()).toContain('actionable');
+  });
+
+  it('strips a research block the writer hallucinated (research disabled → no fabricated sources)', async () => {
+    // Web search is off in this suite, so no real research round runs and nothing is attached below.
+    // A model that invents its own `research` key with plausible-but-fake links must not leak through.
+    const { provider } = fakeProvider({
+      ...VALID_RESPONSE,
+      research: {
+        findings: [{ title: 'Invented source', url: 'https://not-a-real-search.example' }],
+        display: 'list',
+      },
+    });
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(result.content).not.toHaveProperty('research');
+    expect(result.content).toEqual(VALID_RESPONSE);
+  });
+
+  it('resolves the report writer’s provider with the agent’s fallback providers', async () => {
+    (resolveAgentProviderAndModel as Mock).mockResolvedValue({
+      providerSlug: 'openai',
+      model: 'test-model',
+      fallbacks: ['anthropic', 'azure'],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+
+    expect(getProviderWithFallbacks).toHaveBeenCalledWith('openai', ['anthropic', 'azure']);
   });
 
   it('grounds insights in client KB snippets when enabled and documents exist', async () => {
@@ -170,7 +214,7 @@ describe('generateRespondentReport', () => {
       { chunk: { content: 'Engagement rises with autonomy.' }, similarity: 0.9 },
     ]);
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
 
@@ -185,7 +229,7 @@ describe('generateRespondentReport', () => {
 
   it('skips KB search when useClientKnowledge is off', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     expect(searchKnowledge).not.toHaveBeenCalled();
@@ -208,7 +252,7 @@ describe('generateRespondentReport', () => {
       })
     );
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     expect(resolveClientKnowledgeDocumentIds).not.toHaveBeenCalled();
@@ -223,14 +267,14 @@ describe('generateRespondentReport', () => {
   it('throws when the session export cannot be loaded', async () => {
     (loadSessionExport as Mock).mockResolvedValue(null);
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
     await expect(generateRespondentReport('sess-1')).rejects.toThrow(/export not found/i);
   });
 
   it('throws when the report agent is not seeded', async () => {
     (prisma.aiAgent.findUnique as Mock).mockResolvedValue(null);
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
     await expect(generateRespondentReport('sess-1')).rejects.toThrow(/not seeded/i);
   });
 
@@ -253,7 +297,7 @@ describe('generateRespondentReport', () => {
     (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue(['doc-a']);
     (searchKnowledge as Mock).mockRejectedValue(new Error('vector store down'));
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     // Does not throw — the report is still produced without grounding.
     const result = await generateRespondentReport('sess-1');
@@ -282,7 +326,7 @@ describe('generateRespondentReport', () => {
     );
     (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue([]); // no docs tagged
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     expect(searchKnowledge).not.toHaveBeenCalled();
@@ -304,7 +348,7 @@ describe('generateRespondentReport', () => {
       })
     );
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
@@ -320,7 +364,7 @@ describe('generateRespondentReport', () => {
       sessionMeta({ respondentReport: { enabled: true, mode: 'narrative' } })
     );
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
@@ -335,7 +379,7 @@ describe('generateRespondentReport', () => {
 
   it('keeps the insights framing (not the narrative framing) for mode `raw_plus_insights`', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
@@ -345,9 +389,51 @@ describe('generateRespondentReport', () => {
     expect(system?.content).not.toContain('single woven report');
   });
 
+  it('tells the model not to restate answers when the report appends the questionnaire data', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          // raw + insights: the Q&A recap really is appended, so the hint applies. (A narrative
+          // report never appends the recap — see `resolveReportRawIncludes` — so it wouldn't here.)
+          enabled: true,
+          mode: 'raw_plus_insights',
+          rawIncludes: { questionsAsPresented: true, dataSlots: false },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('shown to them in full alongside this report');
+  });
+
+  it('omits the appended-data instruction when the report includes no questionnaire data', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'narrative',
+          rawIncludes: { questionsAsPresented: false, dataSlots: false },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).not.toContain('shown to them in full alongside this report');
+  });
+
   it('instructs the model to stay grounded and avoid unsupported generalisations', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
@@ -360,7 +446,7 @@ describe('generateRespondentReport', () => {
 
   it('instructs the model to write in short, blank-line-separated paragraphs', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
@@ -391,7 +477,7 @@ describe('generateRespondentReport', () => {
         })
       );
       const { provider, chat } = fakeProvider(VALID_RESPONSE);
-      (getProvider as Mock).mockResolvedValue(provider);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
       await generateRespondentReport('sess-1');
       const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
@@ -401,24 +487,33 @@ describe('generateRespondentReport', () => {
     }
   );
 
-  it('falls back to the audience role when there is no description', async () => {
+  it('renders the full structured audience as labelled lines in the transcript', async () => {
     (loadSessionExport as Mock).mockResolvedValue({
       ...loadedExport(),
-      audience: { role: 'Line managers' },
+      audience: {
+        role: 'Line managers',
+        expertiseLevel: 'intermediate',
+        sensitivity: 'high',
+      },
     });
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     await generateRespondentReport('sess-1');
     const user = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
       (m) => m.role === 'user'
     );
-    expect(user?.content).toContain('Audience: Line managers');
+    // The role now surfaces on its own labelled line (not folded into a one-line "Audience:"),
+    // alongside every other set audience facet.
+    expect(user?.content).toContain('Audience role: Line managers');
+    expect(user?.content).toContain('Audience expertise level: intermediate');
+    expect(user?.content).toContain('Topic sensitivity: high');
+    expect(user?.content).not.toContain('Audience: Line managers');
   });
 
   it('does not run the formatter and returns formatted:false when the flag is off', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     const result = await generateRespondentReport('sess-1');
 
@@ -428,7 +523,7 @@ describe('generateRespondentReport', () => {
 
   it('reports 100% completion when every slot was answered', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     const result = await generateRespondentReport('sess-1');
     // The default export has one slot, answered → 1/1 = 100%.
@@ -451,7 +546,7 @@ describe('generateRespondentReport', () => {
       ],
     });
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
 
     const result = await generateRespondentReport('sess-1');
     expect(result.completionPct).toBe(50);
@@ -471,7 +566,7 @@ describe('generateRespondentReport with the Report Formatter enabled', () => {
 
   it('runs the formatter on the writer output and sums both costs', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
     (formatReportContent as Mock).mockResolvedValue({
       content: FORMATTED,
       costUsd: 0.02,
@@ -492,7 +587,7 @@ describe('generateRespondentReport with the Report Formatter enabled', () => {
 
   it('propagates a formatter fallback (formatted:false) without failing the report', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
     // Formatter fell back to the unformatted content (e.g. structural drift).
     (formatReportContent as Mock).mockResolvedValue({
       content: VALID_RESPONSE,
@@ -508,7 +603,7 @@ describe('generateRespondentReport with the Report Formatter enabled', () => {
 
   it('thins agent 1s paragraph discipline (formatter owns final layout)', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
     (formatReportContent as Mock).mockResolvedValue({
       content: FORMATTED,
       costUsd: 0,
@@ -535,7 +630,7 @@ describe('generateRespondentReport with the Report Formatter enabled', () => {
       })
     );
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProvider as Mock).mockResolvedValue(provider);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
     (formatReportContent as Mock).mockResolvedValue({
       content: FORMATTED,
       costUsd: 0,
@@ -549,5 +644,332 @@ describe('generateRespondentReport with the Report Formatter enabled', () => {
     // Still scannable/structured, but no "one point per line starting with -" instruction.
     expect(system?.content).toContain('Style: structured and scannable');
     expect(system?.content).not.toMatch(/each line starting with "- "/i);
+  });
+});
+
+describe('generateRespondentReport — web-search research', () => {
+  const FINDING = { title: 'Benchmark', url: 'https://bench.test', snippet: 'A stat' };
+
+  /** A respondentReport config with research enabled at a given timing/flags. */
+  function researchConfig(over: Record<string, unknown> = {}) {
+    return sessionMeta({
+      respondentReport: {
+        enabled: true,
+        mode: 'raw_plus_insights',
+        research: {
+          enabled: true,
+          timing: 'before',
+          rounds: 2,
+          maxResults: 5,
+          before: { instructions: 'Find benchmarks.' },
+          after: { instructions: 'Find sources.' },
+          display: 'list',
+          informNarrative: true,
+          ...over,
+        },
+      },
+    });
+  }
+
+  beforeEach(() => {
+    // Web-search platform flag on; formatter flag stays off.
+    (isFeatureEnabled as Mock).mockImplementation(
+      (flag: string) => flag === APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG
+    );
+    // Appendix opt-in is off in most tests; default the pass to a no-op so cost sums stay clean.
+    (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: null, costUsd: 0 });
+  });
+
+  it('does not run research when the platform flag is off (even if config enables it)', async () => {
+    (isFeatureEnabled as Mock).mockResolvedValue(false);
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+    expect(runReportResearch).not.toHaveBeenCalled();
+    expect(result.content).not.toHaveProperty('research');
+  });
+
+  it('runs a before round, folds it into the prompt, and attaches the research section', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+    (runReportResearch as Mock).mockResolvedValue({
+      findings: [FINDING],
+      note: 'Context note.',
+      costUsd: 0.02,
+    });
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(runReportResearch).toHaveBeenCalledTimes(1);
+    expect((runReportResearch as Mock).mock.calls[0][0]).toMatchObject({ phase: 'before' });
+    // The before findings inform the grounded prose (framed as general external context).
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toContain('External web research');
+    expect(system?.content).toContain('https://bench.test');
+    // The section is attached with the configured display and the research cost is summed.
+    expect(result.content.research).toEqual({
+      findings: [FINDING],
+      note: 'Context note.',
+      display: 'list',
+    });
+    // Base structured-completion cost is 0 (fake model); only the mocked research cost is summed in.
+    expect(result.costUsd).toBeCloseTo(0.02, 5);
+  });
+
+  it('does not fold findings into the prompt when informNarrative is off, but still attaches the section', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      researchConfig({ informNarrative: false })
+    );
+    (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).not.toContain('External web research');
+    expect(result.content.research?.findings).toEqual([FINDING]);
+  });
+
+  it('omits the research section when display is hidden', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      researchConfig({ display: 'hidden' })
+    );
+    (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+    expect(result.content).not.toHaveProperty('research');
+  });
+
+  it('runs an after round on the drafted report and merges/dedupes findings by URL', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      researchConfig({ timing: 'both' })
+    );
+    (runReportResearch as Mock)
+      .mockResolvedValueOnce({ findings: [FINDING], note: 'before', costUsd: 0 })
+      .mockResolvedValueOnce({
+        findings: [FINDING, { title: 'New', url: 'https://new.test', snippet: 's' }],
+        note: 'after',
+        costUsd: 0,
+      });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(runReportResearch).toHaveBeenCalledTimes(2);
+    expect((runReportResearch as Mock).mock.calls[1][0]).toMatchObject({ phase: 'after' });
+    // Deduped by URL (the shared finding appears once); the after note wins.
+    expect(result.content.research?.findings).toEqual([
+      FINDING,
+      { title: 'New', url: 'https://new.test', snippet: 's' },
+    ]);
+    expect(result.content.research?.note).toBe('after');
+  });
+
+  it('skips the after round entirely when the findings are hidden (output cannot surface)', async () => {
+    // after-research surfaces only via the displayed section; hidden ⇒ running it is pure waste.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      researchConfig({ timing: 'after', display: 'hidden' })
+    );
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(runReportResearch).not.toHaveBeenCalled();
+    expect(result.content).not.toHaveProperty('research');
+  });
+
+  it('skips the before round when findings are hidden and not folded into the narrative', async () => {
+    // before-research surfaces via the prose (informNarrative) or the displayed section; neither ⇒ skip.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      researchConfig({ timing: 'before', display: 'hidden', informNarrative: false })
+    );
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(runReportResearch).not.toHaveBeenCalled();
+    expect(result.content).not.toHaveProperty('research');
+  });
+
+  it('still runs the before round when hidden but folded into the narrative', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      researchConfig({ timing: 'before', display: 'hidden', informNarrative: true })
+    );
+    (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    // Ran (to inform the prose) but the section stays hidden.
+    expect(runReportResearch).toHaveBeenCalledTimes(1);
+    expect(result.content).not.toHaveProperty('research');
+  });
+
+  it('attaches no research section when the round returns no findings and no note', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+    (runReportResearch as Mock).mockResolvedValue({ findings: [], costUsd: 0 });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(runReportResearch).toHaveBeenCalledTimes(1);
+    expect(result.content).not.toHaveProperty('research');
+  });
+
+  it('attaches a note-only research block when the round yields a note but no findings', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+    (runReportResearch as Mock).mockResolvedValue({
+      findings: [],
+      note: 'Nothing conclusive surfaced.',
+      costUsd: 0,
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(result.content.research).toEqual({
+      findings: [],
+      note: 'Nothing conclusive surfaced.',
+      display: 'list',
+    });
+  });
+
+  describe('appendix synthesis', () => {
+    const APPENDIX = { heading: 'Further context', body: 'General background.' };
+
+    it('does not run the appendix pass when the opt-in is off', async () => {
+      // Default config leaves `appendix` off; findings are gathered but only feed the section.
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).not.toHaveBeenCalled();
+      expect(result.content).not.toHaveProperty('appendix');
+    });
+
+    it('runs the appendix pass and attaches the appendix when the writer returns one', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: APPENDIX, costUsd: 0.03 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).toHaveBeenCalledTimes(1);
+      expect(result.content.appendix).toEqual(APPENDIX);
+      // Appendix cost is summed into the total alongside research.
+      expect(result.costUsd).toBeCloseTo(0.03, 5);
+    });
+
+    it('attaches no appendix when the writer declines (returns null), but still sums the cost', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: null, costUsd: 0.01 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).toHaveBeenCalledTimes(1);
+      expect(result.content).not.toHaveProperty('appendix');
+      expect(result.costUsd).toBeCloseTo(0.01, 5);
+    });
+
+    it('does not run the appendix pass when no findings were gathered', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [], costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(synthesiseReportAppendix).not.toHaveBeenCalled();
+      expect(result.content).not.toHaveProperty('appendix');
+    });
+
+    it('runs a before round for the appendix even when the section is hidden and narrative is off', async () => {
+      // The appendix is a third surface: it must force the before round on its own.
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({
+          appendix: true,
+          timing: 'before',
+          display: 'hidden',
+          informNarrative: false,
+        })
+      );
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: APPENDIX, costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(runReportResearch).toHaveBeenCalledTimes(1);
+      expect(synthesiseReportAppendix).toHaveBeenCalledTimes(1);
+      // Section stays hidden, but the appendix surfaces.
+      expect(result.content).not.toHaveProperty('research');
+      expect(result.content.appendix).toEqual(APPENDIX);
+    });
+
+    it('feeds both before and after findings to the appendix pass', async () => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        researchConfig({ appendix: true, timing: 'both' })
+      );
+      const before = { findings: [FINDING], note: 'before', costUsd: 0 };
+      const after = {
+        findings: [{ title: 'New', url: 'https://new.test', snippet: 's' }],
+        note: 'after',
+        costUsd: 0,
+      };
+      (runReportResearch as Mock).mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: APPENDIX, costUsd: 0 });
+      const { provider } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      await generateRespondentReport('sess-1');
+
+      expect((synthesiseReportAppendix as Mock).mock.calls[0][0]).toMatchObject({ before, after });
+    });
+
+    it('strips an appendix key the writer hallucinated (appendix can only come from the pass)', async () => {
+      // Appendix opt-in off + a model that invents its own `appendix` key: it must not leak through.
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
+      (runReportResearch as Mock).mockResolvedValue({ findings: [FINDING], costUsd: 0 });
+      const { provider } = fakeProvider({
+        ...VALID_RESPONSE,
+        appendix: { heading: 'Fake', body: 'Invented by the model.' },
+      });
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      const result = await generateRespondentReport('sess-1');
+
+      expect(result.content).not.toHaveProperty('appendix');
+    });
   });
 });

@@ -30,6 +30,7 @@ import {
   AppRepairQuestionsCapability,
   AppSuggestRoundBriefingCapability,
   AppVerifyExtractionStructureCapability,
+  AppWebSearchCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
 export function initAppCapabilities(): void {
@@ -110,4 +111,11 @@ export function initAppCapabilities(): void {
   // + round-context flags are on (only the flag-gated suggest route dispatches it), so unconditional
   // registration here is safe.
   registerAppCapability(new AppSuggestRoundBriefingCapability());
+
+  // Report web search — the query-only search tool the Report Research agent calls in its tool loop.
+  // Inert until the APP_QUESTIONNAIRES_ENABLED master flag, a report-kind flag, and the
+  // APP_QUESTIONNAIRES_REPORT_WEB_SEARCH sub-flag are all on AND the search backend is configured
+  // (Brave key + allowlisted host) — only the report research loop dispatches it, and it returns a
+  // structured error (never throws) when unconfigured, so unconditional registration here is safe.
+  registerAppCapability(new AppWebSearchCapability());
 }

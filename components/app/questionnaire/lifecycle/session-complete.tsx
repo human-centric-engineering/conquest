@@ -51,7 +51,7 @@ import {
   type RespondentReportContent,
 } from '@/lib/app/questionnaire/report/content';
 import type { RespondentReportHeader } from '@/lib/app/questionnaire/report/view';
-import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
+import type { AnswerPanelView, PanelSlotView } from '@/lib/app/questionnaire/panel/types';
 
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 
@@ -118,13 +118,17 @@ export function SessionComplete({
       ? view!.download && (!reportIsAiMode || reportReady)
       : true
     : false;
-  // Both AI modes (raw_plus_insights, narrative) render their generated content here; the
-  // completion screen never lists raw answers, so a narrative report already shows woven-only.
+  // Both AI modes (raw_plus_insights, narrative) render their generated content here.
   const showInsights =
     reportEnabled &&
     view!.onScreen &&
     isAiRespondentReportMode(view!.mode) &&
     view!.insights !== null;
+  // Config can append the respondent's own questionnaire data beneath the report (a Q&A recap
+  // and/or the captured data-slot values). Shown once the report is ready, from the panel the
+  // respondent saw (`captured`) — the same data the downloadable PDF carries.
+  const includeData = view?.includeData ?? { questions: false, dataSlots: false };
+  const showData = showInsights && (includeData.questions || includeData.dataSlots);
 
   const sharedSnippets = useMemo(() => extractSharedSnippets(captured ?? null), [captured]);
 
@@ -257,6 +261,9 @@ export function SessionComplete({
                 onRetry={retry}
                 onNotify={notify}
               />
+              {showData && reportReady && (
+                <ReportDataAppendix captured={captured ?? null} include={includeData} />
+              )}
             </div>
           </div>
         )}
@@ -311,6 +318,8 @@ export function SessionComplete({
           content={view.insights.content}
           formatted={view.insights.formatted}
           completionPct={view.insights.completionPct}
+          captured={showData ? (captured ?? null) : null}
+          include={includeData}
         />
       )}
     </div>
@@ -331,6 +340,8 @@ function ReportPreviewDialog({
   content,
   formatted,
   completionPct,
+  captured,
+  include,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -339,6 +350,10 @@ function ReportPreviewDialog({
   content: RespondentReportContent;
   formatted: boolean;
   completionPct: number | null;
+  /** The panel the respondent saw — sources the appended questionnaire-data section. Null hides it. */
+  captured: AnswerPanelView | null;
+  /** Which questionnaire data to append below the report (config `rawIncludes`). */
+  include: { questions: boolean; dataSlots: boolean };
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -360,6 +375,7 @@ function ReportPreviewDialog({
               variant="paper"
               animate={false}
             />
+            <ReportDataAppendix captured={captured} include={include} variant="paper" />
           </div>
         </div>
       </DialogContent>
@@ -519,7 +535,7 @@ function ReportBody({
   variant?: 'screen' | 'paper';
   animate?: boolean;
 }) {
-  const { summary, sections, actions } = content;
+  const { summary, sections, actions, research, appendix } = content;
   const paper = variant === 'paper';
   // Formatter-produced reports are pre-laid-out — honour their paragraphs verbatim (skip the
   // deterministic sentence re-grouping, which would re-chop deliberate paragraphs).
@@ -598,6 +614,194 @@ function ReportBody({
             ))}
           </ul>
         </div>
+      )}
+      {appendix && (
+        <div
+          className={cn(paper ? 'space-y-2' : 'space-y-1.5', reveal)}
+          style={delay()}
+          data-report-appendix
+        >
+          <h2 className={heading}>{appendix.heading ?? 'Appendix'}</h2>
+          {splitReportParagraphs(appendix.body, trust).map((paragraph, i) => (
+            <p key={i} className={bodyText}>
+              {paragraph}
+            </p>
+          ))}
+        </div>
+      )}
+      {research && research.findings.length > 0 && (
+        <div
+          className={cn(paper ? 'space-y-3' : 'space-y-2', reveal)}
+          style={delay()}
+          data-research-display={research.display}
+        >
+          <h2 className={heading}>Research &amp; sources</h2>
+          {research.note && <p className={bodyText}>{research.note}</p>}
+          {research.display === 'table' ? (
+            <div className="overflow-x-auto">
+              <table
+                className={cn(
+                  'w-full border-collapse text-left',
+                  paper ? 'text-[13px] text-neutral-700' : 'text-muted-foreground text-xs'
+                )}
+              >
+                <thead>
+                  <tr className={cn('border-b', paper ? 'border-neutral-300' : 'border-border')}>
+                    <th className="py-1.5 pr-3 font-semibold">Source</th>
+                    <th className="py-1.5 font-semibold">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {research.findings.map((finding, i) => (
+                    <tr
+                      key={i}
+                      className={cn('border-b', paper ? 'border-neutral-200' : 'border-border/60')}
+                    >
+                      <td className="py-1.5 pr-3 align-top">
+                        <a
+                          href={finding.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cn(
+                            'font-medium underline underline-offset-2',
+                            paper ? 'text-neutral-900' : 'text-foreground'
+                          )}
+                        >
+                          {finding.title}
+                        </a>
+                        {finding.source && (
+                          <span className="block text-[11px] opacity-70">{finding.source}</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 align-top">{finding.snippet}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <ul
+              className={cn(
+                'list-disc space-y-2 pl-5',
+                paper ? 'text-[13px] leading-6 text-neutral-700' : 'text-muted-foreground text-xs'
+              )}
+            >
+              {research.findings.map((finding, i) => (
+                <li key={i}>
+                  <a
+                    href={finding.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      'font-medium underline underline-offset-2',
+                      paper ? 'text-neutral-900' : 'text-foreground'
+                    )}
+                  >
+                    {finding.title}
+                  </a>
+                  {finding.source && <span className="opacity-70"> — {finding.source}</span>}
+                  {finding.snippet && <span className="block opacity-90">{finding.snippet}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Render one captured answer for the appendix: prefer the free-text living paraphrase (the
+ * respondent-facing restatement) when present, else the formatted value. Falls back to a dash for an
+ * empty value so a row never renders blank.
+ */
+function answerText(slot: PanelSlotView): string {
+  if (slot.paraphrase && slot.paraphrase.trim() !== '') return slot.paraphrase;
+  const text = formatAnswerValue(slot.value).trim();
+  return text === '' ? '—' : text;
+}
+
+/**
+ * The optional questionnaire-data appendix shown beneath the report (both the on-screen card and the
+ * A4 preview) — the on-screen twin of the PDF's "Captured information" + Q&A sections. Driven by the
+ * config's `rawIncludes` (via `include`) and sourced from the panel the respondent saw (`captured`):
+ * `dataSlots` renders the captured data-slot values, `questions` the question-by-question recap.
+ * Data-slot mode suppresses the raw question rows (`captured.sections` is empty), so the Q&A recap
+ * only appears for question-mode versions — matching what the respondent actually saw.
+ */
+function ReportDataAppendix({
+  captured,
+  include,
+  variant = 'screen',
+}: {
+  captured: AnswerPanelView | null;
+  include: { questions: boolean; dataSlots: boolean };
+  variant?: 'screen' | 'paper';
+}) {
+  const paper = variant === 'paper';
+  if (!captured) return null;
+
+  const showQuestions = include.questions && captured.sections.length > 0;
+  const dataGroups = include.dataSlots ? (captured.dataSlotGroups ?? []) : [];
+  const showDataSlots = dataGroups.length > 0;
+  if (!showQuestions && !showDataSlots) return null;
+
+  const heading = paper
+    ? 'text-base font-semibold text-neutral-900'
+    : 'text-foreground text-sm font-semibold';
+  const subheading = paper
+    ? 'text-[13px] font-semibold text-neutral-700'
+    : 'text-foreground/90 text-xs font-semibold tracking-wide uppercase';
+  const label = paper ? 'text-[13px] font-medium text-neutral-800' : 'text-foreground text-sm';
+  const valueText = paper
+    ? 'text-[13px] leading-6 text-neutral-600'
+    : 'text-muted-foreground text-sm leading-relaxed';
+  const muted = paper
+    ? 'text-[13px] italic text-neutral-400'
+    : 'text-muted-foreground text-sm italic';
+
+  return (
+    <div className={cn('text-left', paper ? 'mt-8 space-y-6' : 'mt-6 space-y-5 border-t pt-5')}>
+      {showDataSlots && (
+        <section className={cn(paper ? 'space-y-3' : 'space-y-2.5')}>
+          <h2 className={heading}>Captured information</h2>
+          {dataGroups.map((group, gi) => (
+            <div key={gi} className="space-y-1.5">
+              {group.theme.trim() !== '' && <h3 className={subheading}>{group.theme}</h3>}
+              <dl className="space-y-1.5">
+                {group.slots.map((slot) => (
+                  <div key={slot.key} className="space-y-0.5">
+                    <dt className={label}>{slot.name}</dt>
+                    <dd className={slot.paraphrase ? valueText : muted}>
+                      {slot.paraphrase ?? 'Not captured'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
+        </section>
+      )}
+      {showQuestions && (
+        <section className={cn(paper ? 'space-y-4' : 'space-y-3')}>
+          <h2 className={heading}>Your responses</h2>
+          {captured.sections.map((section) => (
+            <div key={section.sectionId} className="space-y-2">
+              <h3 className={subheading}>{section.title}</h3>
+              <dl className="space-y-2">
+                {section.slots.map((slot) => (
+                  <div key={slot.slotKey} className="space-y-0.5">
+                    <dt className={label}>{slot.prompt}</dt>
+                    <dd className={slot.answered ? valueText : muted}>
+                      {slot.answered ? answerText(slot) : 'Not answered'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
+        </section>
       )}
     </div>
   );

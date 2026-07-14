@@ -21,14 +21,18 @@ const TIERS = ['reasoning', 'chat', 'routing'] as const;
 const EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
 
 describe('AGENT_RECOMMENDATIONS', () => {
-  it('covers the expected 15 questionnaire agents with unique slugs', () => {
-    expect(AGENT_RECOMMENDATIONS).toHaveLength(15);
+  it('covers the expected 16 questionnaire agents with unique slugs', () => {
+    expect(AGENT_RECOMMENDATIONS).toHaveLength(16);
     const slugs = AGENT_RECOMMENDATIONS.map((r) => r.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
   it('includes the turn-evaluator judge', () => {
     expect(AGENT_RECOMMENDATION_BY_SLUG.has(TURN_EVALUATOR_AGENT_SLUG)).toBe(true);
+  });
+
+  it('includes the report research agent (web-search rounds)', () => {
+    expect(AGENT_RECOMMENDATION_BY_SLUG.has('app-report-researcher')).toBe(true);
   });
 
   it('has well-formed values for every entry', () => {

@@ -63,8 +63,8 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
   {
     id: 'reporting',
     label: 'Reporting',
-    description: 'Turning completed responses into reports.',
-    slugs: ['respondent-report', 'cohort-report'],
+    description: 'Configuring and generating reports from completed responses.',
+    slugs: ['respondent-report', 'report-config-assistant', 'cohort-report'],
   },
   {
     id: 'evaluation',

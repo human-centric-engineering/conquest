@@ -17,13 +17,42 @@ The per-respondent report delivered after a respondent completes a questionnaire
   assembled by the report agent (optionally grounded in the client knowledge base). Generated once,
   asynchronously, after submit and stored in `AppRespondentReport`.
 - **`narrative`** — a single woven report: the respondent's answers are integrated into flowing,
-  analysed prose (analyses, insights, advice) rather than shown as a separate raw section. Same async
-  lifecycle, agent, and stored content shape as `raw_plus_insights`; the difference is the prompt
-  (woven framing) and the deliverable (the woven report **only** — no separate raw answer list).
+  analysed prose (analyses, insights, advice). Same async lifecycle, agent, and stored content shape
+  as `raw_plus_insights`; the difference is the prompt (woven framing). By default the woven report is
+  the whole deliverable, but the **include-questionnaire-data** toggles (below) can append the
+  respondent's own data beneath it.
 
 `raw_plus_insights` and `narrative` are the **AI modes** — both stand up the report agent, generate
 async, and persist an `AppRespondentReport` row. The shared predicate is `isAiRespondentReportMode`
 in `lib/app/questionnaire/types.ts`; `raw` renders deterministically with no row.
+
+### Including the questionnaire data (all modes)
+
+The `rawIncludes` config chooses which of the respondent's own questionnaire data accompanies the
+report, in **every** mode:
+
+- `rawIncludes.questionsAsPresented` — the question-by-question answer record (each answer rendered
+  slot-aware by `formatSlotAnswer`).
+- `rawIncludes.dataSlots` — the captured **data-slot** values (the respondent-facing paraphrase per
+  slot, grouped by theme). Only meaningful for a version running in a data-slot mode; the toggle is
+  hidden unless the data-slots feature is on.
+
+In `raw` mode this data **is** the report. In `raw_plus_insights` it is **appended beneath** the
+generated report per the toggles. A **`narrative`** report is a standalone woven deliverable, so it
+**never appends the Q&A recap** — the respondent-facing `questions` include is always suppressed for
+narrative, regardless of the stored `questionsAsPresented` flag (`resolveReportRawIncludes` in
+`report/settings.ts`, the single source of truth used by both the render in `report/view.ts` and the
+writer-prompt hint in `report/generate.ts`). This restores the pre-F10.6 `narrativeOnly` invariant
+**without a data backfill**: versions configured as `narrative` before F10.6 carry the field's default
+`questionsAsPresented: true`, which would otherwise start surfacing a full Q&A recap on existing
+reports. The optional **captured-information (data-slot) appendix stays config-driven in every mode**
+(new in F10.6, defaults off, so no existing version can regress into showing it) — a narrative report
+may still opt into it. The editor hides the Q&A toggle in narrative mode accordingly; switching away
+restores `questionsAsPresented` (`changeMode` in `respondent-report-editor.tsx`). The same config
+drives both the on-screen completion card (and its A4 preview) and the downloadable PDF, so the two
+artifacts match. When data is appended, the report agent is told the respondent can already see it in
+full alongside the report, so it should analyse/synthesise rather than restate it (see
+`APPENDED_DATA_RULES` in `report/generate.ts`).
 
 ## Configuration
 
@@ -40,8 +69,10 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
 — a self-contained controlled-state editor with four inner tabs that all edit one
 `RespondentReportSettings` block, saved whole through the config PATCH (`respondentReport` slice):
 
-- **Content** — enable toggle, mode selector, and the raw-content includes (questions-as-presented;
-  data-slot values when the data-slots feature is on).
+- **Content** — enable toggle, mode selector, and the **include-questionnaire-data** toggles
+  (questions-as-presented; captured data-slot values when the data-slots feature is on). The toggles
+  are shown for **all** modes, including `narrative` — turning one on appends that data beneath the
+  woven report (both off ⇒ woven-only prose).
 - **Generation** (effective in the AI modes `raw_plus_insights` / `narrative`) — a **narrative-style**
   preset selector (`generation.narrativeStyle`: `flowing` | `concise` | `structured`, default `flowing`),
   the instructions, structure, and background-context textareas, the `useClientKnowledge` toggle, and
@@ -144,6 +175,11 @@ batch worker). Raw-only mode never creates a row.
    sum). Returns validated `RespondentReportContent` (`{ summary, sections[], actions[] }`) + USD cost.
    Blank generation config falls back to the agent's default persona — generic insights, no KB.
 
+   The transcript leads with the questionnaire context for grounding: title, goal, and the **full
+   structured audience** — every field the admin set (`description`, `role`, `expertiseLevel`,
+   `estimatedDurationMinutes`, `locale`, `sensitivity`, `notes`), each rendered as its own labelled
+   line by `describeAudience` (`report/content.ts`), not a one-line summary.
+
    **Prose quality rules baked into the prompt** (`buildReportMessages`): every observation must be
    grounded in a specific answer the respondent gave — no broad/sweeping generalisations the answers
    don't support, and no trait/conclusion attributed to them unless their answers established it
@@ -206,8 +242,11 @@ formatting is largely mechanical.
   downloaded PDF's headline _is_ the report, so the button is held until generation finishes (raw /
   disabled modes still download the answers PDF immediately, preserving the F7.4 responses export). The
   conversation record downloads separately via the **Chat Transcript** menu (`TranscriptDownload`),
-  available regardless of report config. The completion screen never lists raw answers, so a narrative
-  report already shows woven-only on screen.
+  available regardless of report config. When the config includes questionnaire data (`includeData` on
+  the report view, from `rawIncludes`), `ReportDataAppendix` renders a **"Captured information"** and/or
+  **"Your responses"** section beneath the report — on the card and the A4 preview — sourced from the
+  panel the respondent saw (`captured`). In data-slot mode `captured.sections` is empty, so the Q&A
+  recap only appears for question-mode versions (matching what the respondent actually saw).
 - **Partial-report caveat** — a session can be submitted early (before 100% of slots are answered). At
   generation the pipeline records `completionPct` (answered / total slots, frozen); below
   `PARTIAL_REPORT_THRESHOLD_PCT` (75) both renderers show a caveat subtitle naming the exact %
@@ -215,20 +254,27 @@ formatting is largely mechanical.
   `partialReportCaveat` (`report/content.ts`), never generated by an agent: the exact figure and wording
   must not drift, and the Report Formatter's fidelity guard would in any case reject an injected caveat.
   Legacy rows (`completionPct` null) carry no caveat.
-- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF and
-  `SessionExportModel.narrativeOnly` selects the layout; `insightsFormatted` + `insightsCompletionPct`
-  carry the formatter-trust flag and completion % so the PDF matches the on-screen render (same trusted
-  paragraphs, same caveat). Both `export.pdf` routes pass these via a single `SessionReportEmbed` options
-  object to `buildSessionExportPdfModel(loaded, { insights, narrativeOnly, formatted, completionPct })` —
-  grouped (not trailing positional args) so the flags can't be transposed. The respondent route loads the
-  report via `buildRespondentReportClientView` (ready only):
-  - **`raw_plus_insights`** → a "Your insights" section above the full answer record (raw + insights).
-  - **`narrative`** → `narrativeOnly: true`: `SessionPdfDocument` renders the report alone under "Your
-    personalised report" and **omits** the raw section/slot listing and the answered-count — the woven
-    report is the whole deliverable.
-    The **admin** session PDF (`questionnaires/:id/sessions/:sessionId/export.pdf`) embeds the same ready
-    content but never sets `narrativeOnly`, so admins keep the full audit alongside the report. Anonymous
-    respondents download via the session token; raw / not-yet-ready → answers only.
+- **PDF** — `SessionExportModel.insights` carries the ready content into the PDF; `narrative`,
+  `includeQuestions`, and `includeDataSlots` select the layout; `insightsFormatted` +
+  `insightsCompletionPct` carry the formatter-trust flag and completion % so the PDF matches the
+  on-screen render (same trusted paragraphs, same caveat). The captured data-slot values ride along as
+  `SessionExportModel.dataSlots` (loaded by `loadSessionExport` from `AppDataSlot` + `AppDataSlotFill`,
+  grouped by theme). Both `export.pdf` routes pass these via a single `SessionReportEmbed` options object
+  to `buildSessionExportPdfModel(loaded, { insights, narrative, includeQuestions, includeDataSlots, formatted, completionPct })`
+  — grouped (not trailing positional args) so the flags can't be transposed. The respondent route loads
+  the report via `buildRespondentReportClientView` (ready only) and honours `rawIncludes`:
+  - **`raw_plus_insights`** → a "Your insights" section, then (per config) a "Captured information"
+    appendix and/or the full "Your responses" answer record.
+  - **`narrative`** → the woven report under "Your personalised report" (`narrative: true` drives the
+    title), followed by the same optional appendix. With both include flags off it is the woven report
+    alone; `SessionPdfDocument` omits the answer listing and the answered-count when `includeQuestions`
+    is false. Fallback: if the AI report isn't embedded yet (still generating), the respondent route
+    forces `includeQuestions` on so the download is never an empty document.
+
+  The **admin** session PDF (`questionnaires/:id/sessions/:sessionId/export.pdf`) always sets
+  `includeQuestions: true` (admins keep the full answer audit alongside the report) and follows the
+  config for the data-slot appendix. Anonymous respondents download via the session token; raw /
+  not-yet-ready → answers only.
   - **Download title** — the export reads as the questionnaire, not a generic "Questionnaire":
     `SessionPdfDocument`'s `<Document title>` is the questionnaire's own title (browsers derive the
     suggested save/print filename from it); the completion screen names the blob download after the

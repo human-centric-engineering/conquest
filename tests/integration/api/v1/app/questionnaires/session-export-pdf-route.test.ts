@@ -75,6 +75,10 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
     sections: [],
     answeredCount: 0,
     totalCount: 0,
+    narrative: false,
+    includeQuestions: true,
+    includeDataSlots: false,
+    dataSlots: [],
     ...over,
   };
 }
@@ -148,6 +152,59 @@ describe('error handling', () => {
     const body = await res.json();
     expect(body.success).toBe(false);
     expect(body.error.code).toBeDefined();
+  });
+});
+
+describe('report embedding', () => {
+  it('embeds a ready narrative report (content, narrative flag, data-slot config) into the model', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+      mode: 'narrative',
+      includeData: { questions: true, dataSlots: true },
+      insights: {
+        status: 'ready',
+        started: true,
+        content: { summary: 'Respondent-facing narrative.' },
+        formatted: true,
+        completionPct: 100,
+      },
+    });
+
+    const res = await GET(req(), ctx({ id: 'qn-1', sessionId: 'sess-1' }));
+
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        insights: { summary: 'Respondent-facing narrative.' },
+        narrative: true,
+        includeQuestions: true, // admin PDF always keeps the full Q&A audit
+        includeDataSlots: true,
+        formatted: true,
+        completionPct: 100,
+      })
+    );
+  });
+
+  it('embeds no insights when the report exists but is not ready yet', async () => {
+    reportViewMock.buildRespondentReportClientView.mockResolvedValue({
+      mode: 'insights',
+      includeData: { questions: true, dataSlots: false },
+      insights: {
+        status: 'queued',
+        started: true,
+        content: null,
+        formatted: false,
+        completionPct: null,
+      },
+    });
+
+    const res = await GET(req(), ctx({ id: 'qn-1', sessionId: 'sess-1' }));
+
+    expect(res.status).toBe(200);
+    expect(exportMock.buildSessionExportPdfModel).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ insights: null, narrative: false, includeDataSlots: false })
+    );
   });
 });
 

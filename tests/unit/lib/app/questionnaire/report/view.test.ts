@@ -93,6 +93,34 @@ describe('buildRespondentReportClientView', () => {
     expect(view?.enabled).toBe(true);
     expect(view?.mode).toBe('raw');
     expect(view?.insights).toBeNull();
+    // Default include-data config: the Q&A recap on, the data-slot appendix off.
+    expect(view?.includeData).toEqual({ questions: true, dataSlots: false });
+  });
+
+  it('surfaces the include-questionnaire-data config (rawIncludes) for the on-screen appendix', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({
+        enabled: true,
+        mode: 'narrative',
+        rawIncludes: { questionsAsPresented: false, dataSlots: true },
+      })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.includeData).toEqual({ questions: false, dataSlots: true });
+  });
+
+  it('never appends the Q&A recap to a narrative report, even when the stored flag is true', async () => {
+    // Guards the no-backfill fix: versions configured as narrative before F10.6 carry the default
+    // `questionsAsPresented: true`, which must NOT start surfacing a Q&A recap under the woven prose.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({
+        enabled: true,
+        mode: 'narrative',
+        rawIncludes: { questionsAsPresented: true, dataSlots: false },
+      })
+    );
+    const view = await buildRespondentReportClientView('s1');
+    expect(view?.includeData.questions).toBe(false);
   });
 
   it('exposes the insights object for narrative mode (an AI mode)', async () => {

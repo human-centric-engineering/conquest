@@ -64,6 +64,7 @@ function flags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWo
     adaptiveDataSlots: false,
     respondentReport: true,
     cohortReport: true,
+    reportWebSearch: true,
     introScreen: false,
     personaSelection: false,
     advisor: false,

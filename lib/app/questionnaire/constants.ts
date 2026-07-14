@@ -1096,6 +1096,75 @@ export const REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter';
 export const APP_REPORT_FORMATTER_FLAG = 'APP_REPORT_FORMATTER_ENABLED';
 
 /**
+ * Platform feature flag gating **report web-search rounds** — the optional pre/post-generation web
+ * research that brings live external context into a report (respondent now, cohort later). Opt-in on
+ * top of {@link APP_QUESTIONNAIRES_FLAG} and the per-report-kind flag, AND additionally requires the
+ * search backend to be configured (Brave key + allowlisted host) — inert and skipped otherwise, never
+ * failing a report. DB-backed, seeded disabled by `069-report-web-search-flag.ts`. When off, the
+ * Research config tab is hidden and generation never runs a search round.
+ */
+export const APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG =
+  'APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED';
+
+/**
+ * Slug of the seeded **Report Research** `AiAgent` — the web-research assistant that runs the report's
+ * search rounds: it plans a query, calls the `web_search` tool, refines across rounds (building on
+ * prior results), and returns a cited findings digest. Report-kind-agnostic (respondent + cohort).
+ * Ships with empty `model`/`provider` so it resolves dynamically via `agent-resolver.ts` (reasoning
+ * tier — query refinement + synthesis is reasoning-heavy). Seeded by `070-report-researcher-agent.ts`;
+ * bound to the `web_search` capability by `071-web-search-capability.ts`.
+ */
+export const REPORT_RESEARCHER_AGENT_SLUG = 'app-report-researcher';
+
+/**
+ * Slug of the **web_search** capability — a thin, provider-agnostic web-search tool (Brave backend
+ * today; Tavily is a drop-in second backend behind the same normalized result shape). Query-in /
+ * clean-results-out, with the query length-guarded under Brave's 400-char `q` cap. Registered via the
+ * app seam (`lib/app/capabilities.ts`); **promotable to a Sunrise built-in** later. Single source of
+ * truth shared by the `BaseCapability` subclass and its `AiCapability` seed row.
+ */
+export const WEB_SEARCH_CAPABILITY_SLUG = 'web_search';
+
+/** `AiCapability.executionHandler` for the web_search capability — the class name the dispatcher
+ * resolves the in-memory handler by. Must match `lib/app/capabilities.ts`. */
+export const WEB_SEARCH_HANDLER = 'AppWebSearchCapability';
+
+/** Env var (name, not value) holding the Brave Search API key. Resolved at call time; never logged,
+ * never exposed to the LLM. Matches the provider-model-audit workflow's `authSecret`. */
+export const BRAVE_SEARCH_API_KEY_ENV = 'BRAVE_SEARCH_API_KEY';
+
+/** Brave Search host — must be present in `ORCHESTRATION_ALLOWED_HOSTS` for searches to run. */
+export const BRAVE_SEARCH_HOST = 'api.search.brave.com';
+
+/**
+ * The web_search capability's OpenAI-compatible function definition — single source of truth shared by
+ * the `BaseCapability` subclass and the `AiCapability` seed row, so the two can never drift. Exposed
+ * to the research agent's tool loop (unlike the programmatically-dispatched app capabilities).
+ */
+export const WEB_SEARCH_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: WEB_SEARCH_CAPABILITY_SLUG,
+  description:
+    'Search the public web for up-to-date information and return ranked results (title, url, snippet). Use it to gather external context or verify facts. Issue one focused query per call; refine the query on the next call based on what the previous results returned. Keep queries short (under ~380 characters).',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'A focused web-search query. Keep it under ~380 characters.',
+        maxLength: 380,
+      },
+      count: {
+        type: 'number',
+        description: 'How many results to return (1–10). Defaults to 5.',
+        minimum: 1,
+        maximum: 10,
+      },
+    },
+    required: ['query'],
+  },
+};
+
+/**
  * Slug of the seeded composer `AiAgent` (generative authoring). A distinct agent
  * from the document extractor: composition and document extraction carry their
  * own budgets and personas. Ships with empty `model`/`provider` so it resolves

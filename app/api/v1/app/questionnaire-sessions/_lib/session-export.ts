@@ -37,7 +37,7 @@ import {
   asProfileValues,
   type ProfileValues,
 } from '@/lib/app/questionnaire/profile/profile-values';
-import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { ExportDataSlotGroup, SessionExportModel } from '@/lib/app/questionnaire/export/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 import { fetchLogoDataUri } from '@/app/api/v1/app/questionnaire-sessions/_lib/fetch-logo-data-uri';
 
@@ -70,6 +70,12 @@ export interface LoadedSessionExport {
   status: SessionStatus;
   sections: PanelSectionInput[];
   answers: PanelAnswerInput[];
+  /**
+   * Captured data-slot values grouped by theme (Data Slots feature), in version order. Empty when
+   * the version has no data slots. Rendered in the PDF's "Captured information" appendix only when
+   * the report config includes data slots; loaded unconditionally so the pure builder stays simple.
+   */
+  dataSlotGroups: ExportDataSlotGroup[];
 }
 
 /** Cast a stored `refinementHistory` Json column back to our entry array. */
@@ -121,6 +127,12 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
               },
             },
           },
+          // Data slots (Data Slots feature) — the respondent-facing abstraction layer. Loaded for the
+          // optional "Captured information" appendix; empty for versions not in a data-slot mode.
+          dataSlots: {
+            orderBy: { ordinal: 'asc' },
+            select: { id: true, name: true, description: true, theme: true },
+          },
         },
       },
       // Identifying — surfaced only when NOT anonymous (gated below); an anonymous
@@ -138,6 +150,8 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
         },
       },
       turns: { select: { id: true, ordinal: true } },
+      // Captured data-slot positions for the appendix (paraphrase = respondent-facing restatement).
+      dataSlotFills: { select: { dataSlotId: true, paraphrase: true } },
       // Latest completion event → the completion timestamp for the header.
       events: {
         where: { toStatus: 'completed' },
@@ -196,6 +210,27 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     refinementHistory: asRefinementHistory(a.refinementHistory),
   }));
 
+  // Captured data-slot values grouped by theme, in version (ordinal) order — the same grouping the
+  // live panel shows. `value` is the respondent-facing paraphrase, or null (rendered "Not captured").
+  const paraphraseBySlotId = new Map(
+    row.dataSlotFills.map((f) => [f.dataSlotId, f.paraphrase ?? null])
+  );
+  const dataSlotGroups: ExportDataSlotGroup[] = [];
+  const groupByTheme = new Map<string, ExportDataSlotGroup>();
+  for (const ds of row.version.dataSlots) {
+    let group = groupByTheme.get(ds.theme);
+    if (!group) {
+      group = { theme: ds.theme, slots: [] };
+      groupByTheme.set(ds.theme, group);
+      dataSlotGroups.push(group);
+    }
+    group.slots.push({
+      name: ds.name,
+      description: ds.description,
+      value: paraphraseBySlotId.get(ds.id) ?? null,
+    });
+  }
+
   const demoClient = row.version.questionnaire.demoClient;
 
   return {
@@ -219,6 +254,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     status,
     sections,
     answers,
+    dataSlotGroups,
   };
 }
 
@@ -230,8 +266,12 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
 export interface SessionReportEmbed {
   /** The AI report content, or null/absent for raw-only / not-yet-ready. */
   insights?: RespondentReportContent | null;
-  /** Render the woven report alone, omitting the raw answer listing (narrative deliverable). */
-  narrativeOnly?: boolean;
+  /** True when the report mode is `narrative` (drives the report title). */
+  narrative?: boolean;
+  /** Include the questions-and-answers listing (config `rawIncludes.questionsAsPresented`). */
+  includeQuestions?: boolean;
+  /** Include the captured data-slot appendix (config `rawIncludes.dataSlots`). */
+  includeDataSlots?: boolean;
   /** The report was laid out by the Report Formatter — trust its paragraphs verbatim. */
   formatted?: boolean;
   /** Questionnaire completion % at generation — drives the partial-report caveat. Null = no caveat. */
@@ -271,10 +311,13 @@ export async function buildSessionExportPdfModel(
     status: loaded.status,
     sections: loaded.sections,
     answers: loaded.answers,
+    dataSlotGroups: loaded.dataSlotGroups,
     insights: report.insights ?? null,
     insightsFormatted: report.formatted ?? false,
     insightsCompletionPct: report.completionPct ?? null,
-    narrativeOnly: report.narrativeOnly ?? false,
+    narrative: report.narrative ?? false,
+    includeQuestions: report.includeQuestions ?? true,
+    includeDataSlots: report.includeDataSlots ?? false,
   };
 
   return buildSessionExportModel(input);

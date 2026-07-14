@@ -93,10 +93,11 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('renders the woven narrative deliverable (narrativeOnly) without throwing', async () => {
+  it('renders the woven narrative deliverable (no appended Q&A) without throwing', async () => {
     const pdf = await renderSessionPdf(
       model({
-        narrativeOnly: true,
+        narrative: true,
+        includeQuestions: false,
         insights: {
           summary: 'Your story so far.',
           sections: [{ heading: 'Where you are now', body: 'Woven prose with your answers.' }],
@@ -107,10 +108,40 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders a narrative report with the captured data-slot appendix without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        narrative: true,
+        includeQuestions: false,
+        includeDataSlots: true,
+        dataSlotGroups: [
+          {
+            theme: 'Working style',
+            slots: [
+              {
+                name: 'Focus needs',
+                description: null,
+                value: 'Prefers deep, uninterrupted blocks.',
+              },
+              { name: 'Collaboration', description: null, value: null },
+            ],
+          },
+        ],
+        insights: {
+          summary: 'Your story so far.',
+          sections: [{ heading: 'Where you are now', body: 'Woven prose.' }],
+          actions: ['Try this next'],
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
   it('renders a multi-paragraph body + bullet block without throwing', async () => {
     const pdf = await renderSessionPdf(
       model({
-        narrativeOnly: true,
+        narrative: true,
+        includeQuestions: false,
         insights: {
           summary: 'Opening framing.\n\nA second paragraph that develops the point.',
           sections: [
@@ -126,14 +157,135 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
-  it('threads narrativeOnly through the model (default false)', () => {
-    expect(model().narrativeOnly).toBe(false);
-    expect(model({ narrativeOnly: true }).narrativeOnly).toBe(true);
+  it('threads the include flags through the model (Q&A on, data slots off, non-narrative by default)', () => {
+    const m = model();
+    expect(m.narrative).toBe(false);
+    expect(m.includeQuestions).toBe(true);
+    expect(m.includeDataSlots).toBe(false);
+    const woven = model({ narrative: true, includeQuestions: false, includeDataSlots: true });
+    expect(woven.narrative).toBe(true);
+    expect(woven.includeQuestions).toBe(false);
+    expect(woven.includeDataSlots).toBe(true);
   });
 
   it('renders an insights section with no sub-sections or actions', async () => {
     const pdf = await renderSessionPdf(
       model({ insights: { summary: 'Short and sweet.', sections: [], actions: [] } })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a research section (list display) with a note and mixed source/snippet findings', async () => {
+    // Exercises the research block's list-mode map: a finding with both a source and a
+    // snippet, and a second with neither — covering the per-finding source/snippet
+    // conditionals' true and false sides, plus the research note line.
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Grounded findings follow.',
+          sections: [],
+          actions: [],
+          research: {
+            display: 'list',
+            note: 'Synthesised from three independent sources.',
+            findings: [
+              {
+                title: 'Industry benchmark report',
+                url: 'https://example.com/benchmark',
+                snippet: 'Average completion rates rose 12% year over year.',
+                source: 'Example Research Co.',
+              },
+              {
+                title: 'Unsourced, snippet-free finding',
+                url: 'https://example.com/other',
+                snippet: '',
+              },
+            ],
+          },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a research section (table display) with one sourced and one unsourced finding', async () => {
+    // Exercises the research block's table-mode map: the display==='table' branch, and
+    // the per-row source conditional's true/false sides.
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Data laid out for scanning.',
+          sections: [],
+          actions: [],
+          research: {
+            display: 'table',
+            findings: [
+              {
+                title: 'Sourced finding',
+                url: 'https://example.com/a',
+                snippet: 'Detail one.',
+                source: 'Source A',
+              },
+              {
+                title: 'Unsourced finding',
+                url: 'https://example.com/b',
+                snippet: 'Detail two.',
+              },
+            ],
+          },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders a supporting appendix (with a heading) without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Report with an appendix.',
+          sections: [],
+          actions: [],
+          appendix: { heading: 'Further context', body: 'General supporting background.' },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders an appendix with no heading (falls back to "Appendix") without throwing', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insights: {
+          summary: 'Report with a heading-less appendix.',
+          sections: [],
+          actions: [],
+          appendix: { body: 'Body only.' },
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the partial-report caveat below the completion threshold', async () => {
+    const pdf = await renderSessionPdf(
+      model({
+        insightsCompletionPct: 40,
+        insights: { summary: 'Early signal only.', sections: [], actions: [] },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders collected profile fields, a null completed date, and a key that humanises to itself', async () => {
+    // Exercises the F8.3 profile-entries map (profile truthy), a completedAt of null
+    // (formatDate's "no date" dash), and humaniseKey's empty-after-cleanup edge case
+    // (a key of only underscores falls back to the raw key).
+    const pdf = await renderSessionPdf(
+      model({
+        completedAt: null,
+        profile: { job_title: 'Engineer', ___: 'value' },
+      })
     );
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);

@@ -279,6 +279,17 @@ describe('upsert + response', () => {
         useClientKnowledge: true,
       },
       delivery: { onScreen: true, download: true },
+      research: {
+        enabled: true,
+        timing: 'before' as const,
+        rounds: 1,
+        maxResults: 5,
+        before: { instructions: 'Find recent industry benchmarks.' },
+        after: { instructions: 'Verify any cited figures.' },
+        display: 'list' as const,
+        informNarrative: true,
+        appendix: false,
+      },
     };
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ respondentReport }));
 

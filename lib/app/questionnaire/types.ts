@@ -641,6 +641,34 @@ export const RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH = 4000;
 /** Max length of the flat background-context blob fed to the report agent (Zod bound). */
 export const RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH = 8000;
 
+/* ── Report web-search rounds (report kind `respondent`; reused by `cohort`) ── */
+
+/**
+ * When the report web-search rounds run, relative to report generation:
+ *   - `before` — gather external context first; it can inform the report prose (see `informNarrative`).
+ *   - `after` — research the finished report to enrich / fact-check; findings surface as a section.
+ *   - `both` — run a round set before AND after.
+ * (Feature-off is `research.enabled === false`, not a timing value.)
+ */
+export const REPORT_RESEARCH_TIMINGS = ['before', 'after', 'both'] as const;
+export type ReportResearchTiming = (typeof REPORT_RESEARCH_TIMINGS)[number];
+
+/**
+ * How retrieved findings are presented in the report:
+ *   - `table` — a Research / Sources table (title link + snippet).
+ *   - `list` — a bulleted list of the same.
+ *   - `hidden` — no standalone section (findings may still inform the prose when `informNarrative`).
+ */
+export const REPORT_RESEARCH_DISPLAYS = ['table', 'list', 'hidden'] as const;
+export type ReportResearchDisplay = (typeof REPORT_RESEARCH_DISPLAYS)[number];
+
+/** Max web-search rounds per phase — bounds latency + cost (each round is one LLM turn + one search). */
+export const MAX_REPORT_RESEARCH_ROUNDS = 5;
+/** Max results requested per search round (also the per-round tool `count` cap). */
+export const MAX_REPORT_RESEARCH_RESULTS = 10;
+/** Max length of a per-phase research instruction the admin writes for the search agent (Zod bound). */
+export const REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH = 4000;
+
 /**
  * The resolved respondent-report config block. `enabled` master-gates the feature for this version;
  * `mode` selects raw / raw+insights / narrative; `rawIncludes` chooses what the raw section shows
@@ -676,12 +704,50 @@ export type RespondentReportSettings = {
     /** Offer a downloadable PDF. */
     download: boolean;
   };
+  /**
+   * Optional web-search rounds that bring live external context into the report. Additionally gated
+   * by the platform flag `APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED` and by the search backend
+   * being configured (Brave key + allowlisted host) — inert and skipped otherwise, never failing a
+   * report. Consulted only by the AI modes (`raw_plus_insights`, `narrative`).
+   */
+  research: {
+    /** Master toggle for this version's report web-search rounds. */
+    enabled: boolean;
+    /** When the rounds run relative to generation. */
+    timing: ReportResearchTiming;
+    /** Rounds per phase (1..{@link MAX_REPORT_RESEARCH_ROUNDS}); each round can build on the prior. */
+    rounds: number;
+    /** Results requested per round (1..{@link MAX_REPORT_RESEARCH_RESULTS}). */
+    maxResults: number;
+    /** Admin prompt for the `before` phase: purpose of the search + what to do with the results. */
+    before: { instructions: string };
+    /** Admin prompt for the `after` phase: what to enrich / verify in the finished report. */
+    after: { instructions: string };
+    /** How the cited sources section renders in the report (table / list / hidden). */
+    display: ReportResearchDisplay;
+    /** Whether `before` findings may inform the grounded report prose (framed as general context). */
+    informNarrative: boolean;
+    /**
+     * Whether the writer may add a synthesized supporting appendix drawn from the findings — only when
+     * it genuinely improves the report (per-report agent's choice; may be absent). Independent of
+     * `display`/`informNarrative`, and (unlike narrative weaving) may draw on `after` findings too.
+     */
+    appendix: boolean;
+  };
 };
 
-/** Feature off, raw mode, sensible includes/delivery — today's behaviour (no report unless enabled). */
+/**
+ * Feature off, narrative mode, sensible includes/delivery. The feature is off by default (no report
+ * unless enabled), but when an admin turns it on the narrative report is the intended default
+ * deliverable. `questionsAsPresented` stays `true` — it is the field-level default that raw and
+ * raw+insights modes need, and also the fallback `narrowRespondentReportSettings` applies to partial
+ * or legacy stored configs. Narrative never appends the Q&A recap regardless, because
+ * `resolveReportRawIncludes` suppresses it at read time (see settings.ts); the data-slot appendix is
+ * new and defaults off so no existing report regresses into showing it.
+ */
 export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
   enabled: false,
-  mode: 'raw',
+  mode: 'narrative',
   rawIncludes: { dataSlots: false, questionsAsPresented: true },
   generation: {
     narrativeStyle: 'flowing',
@@ -691,6 +757,17 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
     useClientKnowledge: false,
   },
   delivery: { onScreen: true, download: true },
+  research: {
+    enabled: false,
+    timing: 'before',
+    rounds: 1,
+    maxResults: 5,
+    before: { instructions: '' },
+    after: { instructions: '' },
+    display: 'list',
+    informNarrative: true,
+    appendix: false,
+  },
 };
 
 /* ── Report kinds ─────────────────────────────────────────────────────────── */
