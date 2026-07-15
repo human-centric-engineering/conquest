@@ -30,6 +30,8 @@ describe('narrowRespondentReportSettings', () => {
         structure: 'Summary then actions.',
         backgroundContext: 'Quarterly pulse.',
         useClientKnowledge: true,
+        dataSlotInfluence: 70,
+        discountLowConfidence: false,
       },
       delivery: { onScreen: false, download: true },
       research: {
@@ -116,6 +118,35 @@ describe('narrowRespondentReportSettings', () => {
           .narrativeStyle
       ).toBe(style);
     }
+  });
+
+  it('defaults and bounds the data-slot influence + confidence knobs', () => {
+    // Missing → defaults (50 / true).
+    const d = narrowRespondentReportSettings({}).generation;
+    expect(d.dataSlotInfluence).toBe(50);
+    expect(d.discountLowConfidence).toBe(true);
+    // Clamped into 0..100 and rounded; non-boolean confidence coerced to the default.
+    expect(
+      narrowRespondentReportSettings({ generation: { dataSlotInfluence: 140 } }).generation
+        .dataSlotInfluence
+    ).toBe(100);
+    expect(
+      narrowRespondentReportSettings({ generation: { dataSlotInfluence: -20 } }).generation
+        .dataSlotInfluence
+    ).toBe(0);
+    expect(
+      narrowRespondentReportSettings({ generation: { dataSlotInfluence: 62.6 } }).generation
+        .dataSlotInfluence
+    ).toBe(63);
+    expect(
+      narrowRespondentReportSettings({ generation: { dataSlotInfluence: 'lots' } }).generation
+        .dataSlotInfluence
+    ).toBe(50);
+    // Confidence toggle preserves a real boolean.
+    expect(
+      narrowRespondentReportSettings({ generation: { discountLowConfidence: false } }).generation
+        .discountLowConfidence
+    ).toBe(false);
   });
 
   it('fills missing sub-objects and keys from the defaults', () => {

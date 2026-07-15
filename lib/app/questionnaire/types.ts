@@ -624,6 +624,14 @@ export const RESPONDENT_REPORT_NARRATIVE_STYLES = ['flowing', 'concise', 'struct
 export type RespondentReportNarrativeStyle = (typeof RESPONDENT_REPORT_NARRATIVE_STYLES)[number];
 
 /**
+ * Default data-slot influence (`generation.dataSlotInfluence`) — a 0–100 weight balancing how much the
+ * AI report is shaped by the contextual data-slot understanding vs the direct questionnaire answers.
+ * 50 = an even split; questionnaire weight is always `100 - dataSlotInfluence`. Soft: it becomes a
+ * weighting instruction in the writer prompt, and only bites when the version actually has data slots.
+ */
+export const DEFAULT_DATA_SLOT_INFLUENCE = 50;
+
+/**
  * The AI modes: both stand up the report agent, generate async, and persist an `AppRespondentReport`
  * row. `raw` is excluded (deterministic, on-demand, no row). Use this wherever the code must decide
  * "does this mode generate insights?" so the two modes never drift apart.
@@ -697,6 +705,18 @@ export type RespondentReportSettings = {
     backgroundContext: string;
     /** Ground insights in the attributed client's knowledge base when available. */
     useClientKnowledge: boolean;
+    /**
+     * 0–100 weight balancing how much the report is shaped by the contextual data-slot understanding
+     * vs the direct questionnaire answers (questionnaire weight = `100 - dataSlotInfluence`). A soft
+     * weighting instruction in the writer prompt; only bites when the version has data slots. See
+     * {@link DEFAULT_DATA_SLOT_INFLUENCE}.
+     */
+    dataSlotInfluence: number;
+    /**
+     * When true, each answer/data-slot's confidence (0–1) and rationale are surfaced to the report
+     * agent, which is instructed to give low-confidence items less weight and disregard the unreliable.
+     */
+    discountLowConfidence: boolean;
   };
   delivery: {
     /** Show the report on the completion screen. */
@@ -755,6 +775,8 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
     structure: '',
     backgroundContext: '',
     useClientKnowledge: false,
+    dataSlotInfluence: DEFAULT_DATA_SLOT_INFLUENCE,
+    discountLowConfidence: true,
   },
   delivery: { onScreen: true, download: true },
   research: {

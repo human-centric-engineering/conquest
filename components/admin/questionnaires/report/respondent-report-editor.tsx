@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -32,8 +33,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { FieldHelp } from '@/components/ui/field-help';
 import { ReportConfigAssistant } from '@/components/admin/questionnaires/report/report-config-assistant';
+import { ReportBody, ReportPaperHeader } from '@/components/app/questionnaire/report/report-body';
+import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 import {
   isAiRespondentReportMode,
   MAX_REPORT_RESEARCH_RESULTS,
@@ -85,6 +95,14 @@ function clampInt(raw: string, min: number, max: number, fallback: number): numb
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+/** The report-preview payload returned by the preview endpoint (AI modes only). */
+interface PreviewResult {
+  questionnaireTitle: string;
+  content: RespondentReportContent;
+  formatted: boolean;
+  completionPct: number | null;
 }
 
 export interface RespondentReportEditorProps {
@@ -164,6 +182,35 @@ export function RespondentReportEditor({
       setError(err instanceof APIClientError ? err.message : 'Could not save the report config.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Preview — generate an illustrative report from AI-synthesised sample answers using the CURRENT
+  // (possibly unsaved) config, so the admin sees the effect of their settings before going live.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
+
+  const runPreview = async () => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewData(null);
+    try {
+      const result = await apiClient.post<PreviewResult>(
+        API.APP.QUESTIONNAIRES.reportPreview(questionnaireId, versionId),
+        { body: { config: value } }
+      );
+      setPreviewData(result);
+    } catch (err) {
+      setPreviewError(
+        err instanceof APIClientError
+          ? err.message
+          : 'Could not generate a preview. Please try again.'
+      );
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -447,6 +494,71 @@ export function RespondentReportEditor({
                       its documents from the client&rsquo;s page.
                     </p>
                   ))}
+              </div>
+
+              {/* Data-slot influence — how much the report leans on the conversational data-slot
+                  understanding vs the direct answers. Only meaningful when the version has data
+                  slots, so it's gated on the feature (like the raw data-slot toggle). */}
+              {dataSlotsEnabled && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    Data-slot influence
+                    <FieldHelp title="Data-slot influence">
+                      Balances how much the report is shaped by the higher-level information the
+                      agent captured about the respondent (data slots) versus their direct
+                      question-by-question answers. 50% is an even split. This guides the
+                      writer&rsquo;s emphasis; it is not a hard rule.
+                    </FieldHelp>
+                  </Label>
+                  <Slider
+                    value={[value.generation.dataSlotInfluence]}
+                    min={0}
+                    max={100}
+                    step={5}
+                    disabled={isSaving}
+                    onValueChange={([v]) => patchGeneration({ dataSlotInfluence: v })}
+                    className="max-w-md"
+                    aria-label="Data-slot influence"
+                  />
+                  <div className="text-muted-foreground flex max-w-md justify-between text-xs">
+                    <span>{100 - value.generation.dataSlotInfluence}% questionnaire answers</span>
+                    <span>{value.generation.dataSlotInfluence}% data-slot context</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={value.generation.discountLowConfidence}
+                  onCheckedChange={(v) => patchGeneration({ discountLowConfidence: v })}
+                  disabled={isSaving}
+                  id="rr-confidence"
+                />
+                <Label htmlFor="rr-confidence" className="flex items-center gap-1">
+                  Discount low-confidence answers
+                  <FieldHelp title="Confidence handling">
+                    When on, each captured answer&rsquo;s confidence and the agent&rsquo;s reasoning
+                    are shown to the report writer, which is told to give less weight to
+                    low-confidence items and disregard any it judges too unreliable. Turn off to
+                    treat every captured answer equally.
+                  </FieldHelp>
+                </Label>
+              </div>
+
+              {/* Preview the report this config would produce, from AI-synthesised sample answers. */}
+              <div className="flex items-center gap-3 border-t pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void runPreview()}
+                  disabled={isSaving || previewLoading}
+                >
+                  {previewLoading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  Preview report
+                </Button>
+                <span className="text-muted-foreground text-xs">
+                  Generates a sample report from your current settings — no need to save first.
+                </span>
               </div>
             </>
           )}
@@ -736,6 +848,54 @@ export function RespondentReportEditor({
         {savedOk && <span className="text-muted-foreground text-sm">Saved.</span>}
         {error && <span className="text-destructive text-sm">{error}</span>}
       </div>
+
+      {/* Full-page report preview — the same paper renderer respondents see, from sample answers. */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="bg-muted/40 flex h-[calc(100dvh-3rem)] w-[calc(100vw-2rem)] max-w-[920px] flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
+          <DialogHeader className="bg-background flex-row items-center justify-between space-y-0 border-b px-5 py-3 text-left">
+            <DialogTitle className="text-sm font-semibold">Report preview</DialogTitle>
+            <DialogDescription className="sr-only">
+              A preview of the report generated from AI-synthesised sample answers using your
+              current configuration.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-8">
+            {previewLoading && (
+              <div className="text-muted-foreground flex h-full items-center justify-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating a sample report…
+              </div>
+            )}
+            {previewError && !previewLoading && (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                <p className="text-destructive text-sm">{previewError}</p>
+                <Button type="button" variant="outline" size="sm" onClick={() => void runPreview()}>
+                  Try again
+                </Button>
+              </div>
+            )}
+            {previewData && !previewLoading && (
+              <div className="mx-auto w-full max-w-[210mm] space-y-4">
+                <p className="text-muted-foreground rounded-md border border-dashed p-3 text-xs">
+                  This is a sample report generated from AI-invented answers, so you can see how
+                  your configuration reads. It is not a real respondent. Web research and
+                  knowledge-base grounding are skipped in previews.
+                </p>
+                <div className="rounded-sm bg-white px-[9%] py-[8%] text-neutral-900 shadow-xl ring-1 ring-black/5 sm:px-[12%] sm:py-[10%]">
+                  <ReportPaperHeader title={previewData.questionnaireTitle} header={null} />
+                  <ReportBody
+                    content={previewData.content}
+                    formatted={previewData.formatted}
+                    completionPct={previewData.completionPct}
+                    variant="paper"
+                    animate={false}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

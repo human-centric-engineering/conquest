@@ -150,8 +150,12 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
         },
       },
       turns: { select: { id: true, ordinal: true } },
-      // Captured data-slot positions for the appendix (paraphrase = respondent-facing restatement).
-      dataSlotFills: { select: { dataSlotId: true, paraphrase: true } },
+      // Captured data-slot positions (paraphrase = respondent-facing restatement). `rationale` +
+      // `confidence` feed the report writer's data-slot context block only — the respondent-facing
+      // "Captured information" appendix renders the paraphrase alone.
+      dataSlotFills: {
+        select: { dataSlotId: true, paraphrase: true, rationale: true, confidence: true },
+      },
       // Latest completion event → the completion timestamp for the header.
       events: {
         where: { toStatus: 'completed' },
@@ -212,9 +216,9 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
 
   // Captured data-slot values grouped by theme, in version (ordinal) order — the same grouping the
   // live panel shows. `value` is the respondent-facing paraphrase, or null (rendered "Not captured").
-  const paraphraseBySlotId = new Map(
-    row.dataSlotFills.map((f) => [f.dataSlotId, f.paraphrase ?? null])
-  );
+  // `rationale`/`confidence` ride along for the report writer's data-slot context block; the
+  // respondent-facing appendix ignores them.
+  const fillBySlotId = new Map(row.dataSlotFills.map((f) => [f.dataSlotId, f]));
   const dataSlotGroups: ExportDataSlotGroup[] = [];
   const groupByTheme = new Map<string, ExportDataSlotGroup>();
   for (const ds of row.version.dataSlots) {
@@ -224,10 +228,13 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
       groupByTheme.set(ds.theme, group);
       dataSlotGroups.push(group);
     }
+    const fill = fillBySlotId.get(ds.id);
     group.slots.push({
       name: ds.name,
       description: ds.description,
-      value: paraphraseBySlotId.get(ds.id) ?? null,
+      value: fill?.paraphrase ?? null,
+      rationale: fill?.rationale ?? null,
+      confidence: fill?.confidence ?? null,
     });
   }
 

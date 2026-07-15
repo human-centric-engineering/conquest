@@ -78,7 +78,9 @@ renders `RespondentReportEditor` (`components/admin/questionnaires/report/respon
   the instructions, structure, and background-context textareas, the `useClientKnowledge` toggle, and
   the embedded `ClientKnowledgePanel`. The style preset shapes prose density/format and is orthogonal
   to the free-text `instructions` (tone/voice); all styles obey the same paragraph + grounding rules
-  (below).
+  (below). Also here: the **data-slot influence** slider and the **discount low-confidence** toggle
+  (both under `generation` — see [Data-slot influence & confidence](#data-slot-influence--confidence)),
+  and a **Preview report** button (see [Config preview](#config-preview-ai-synthesised)).
 - **Delivery** — on-screen / download toggles (email deferred).
 - **Appearance** — note that branding inherits the demo client's theme.
 
@@ -180,6 +182,12 @@ batch worker). Raw-only mode never creates a row.
    `estimatedDurationMinutes`, `locale`, `sensitivity`, `notes`), each rendered as its own labelled
    line by `describeAudience` (`report/content.ts`), not a one-line summary.
 
+   The DB load (steps + transcript + data-slot block + completion %) is split from the generation core:
+   `generateRespondentReport(sessionId)` builds the inputs, then delegates to the exported
+   `generateReportFromInputs(inputs)` (KB → agent → research rounds → completion → formatter → appendix).
+   The [config preview](#config-preview-ai-synthesised) reuses that core with synthesised sample answers,
+   so a previewed and a live report share one generation path.
+
    **Prose quality rules baked into the prompt** (`buildReportMessages`): every observation must be
    grounded in a specific answer the respondent gave — no broad/sweeping generalisations the answers
    don't support, and no trait/conclusion attributed to them unless their answers established it
@@ -216,6 +224,51 @@ The agent (`RESPONDENT_REPORT_AGENT_SLUG = 'app-respondent-report'`) is seeded d
 budget cap; `visibility: 'internal'`. The formatter agent (`app-report-formatter`,
 `061-report-formatter-agent.ts`) is seeded the same way but resolves at the cheaper `chat` tier —
 formatting is largely mechanical.
+
+## Data-slot influence & confidence
+
+Two `generation` knobs shape how the AI report weighs the respondent's captured data (both AI modes):
+
+- **`generation.dataSlotInfluence`** (0–100, default 50) — a soft weighting between the **direct
+  questionnaire answers** and the conversational **data-slot** understanding. When the version has data
+  slots, `buildDataSlotContextBlock` (`report/content.ts`) flattens each filled slot (its captured
+  paraphrase + the agent's rationale) into a themed context block that `buildReportMessages` folds into
+  the system prompt, followed by an instruction to balance the report roughly `100 - dataSlotInfluence`%
+  on the answers and `dataSlotInfluence`% on the data-slot context. It is **emphasis guidance, not a
+  hard rule** — prose influence can't be enforced deterministically — and is inert when the version has
+  no data slots (the block is empty, the instruction is omitted, and the report behaves as before).
+  Independent of the [`rawIncludes`](#including-the-questionnaire-data-all-modes) display toggles:
+  influence feeds the prompt whether or not the data is _shown_ beneath the report.
+- **`generation.discountLowConfidence`** (default on) — surfaces each answer's and data-slot fill's
+  confidence (`0–1`, from the extractor) into the prompt (`(confidence 0.42)` suffixes, via
+  `buildAnswerTranscript` / `buildDataSlotContextBlock` `{ includeConfidence }`), plus an instruction to
+  give low-confidence items less weight and disregard the unreliable. Off ⇒ every captured answer is
+  treated equally and no confidence is shown.
+
+To feed the data-slot rationale + confidence, `loadSessionExport` loads them onto each
+`ExportDataSlotGroup` slot (`rationale` / `confidence`, additive — the respondent-facing "Captured
+information" appendix ignores them).
+
+## Config preview (AI-synthesised)
+
+The Generation tab's **Preview report** button lets an admin see how the configured report will read
+**before going live**, without a real respondent. It posts the current (possibly unsaved) config to
+`POST …/versions/:vid/report/preview` (`reportPreview` in `lib/api/endpoints.ts`; admin-only, master-flag
+gated, per-admin `reportPreviewLimiter` — two LLM calls per preview). The route:
+
+1. loads the version's structure (questions + data slots);
+2. `synthesiseSampleReportInputs` (`lib/app/questionnaire/report/preview-sample.ts`) invents a single
+   plausible sample respondent via one structured LLM call and maps it through the **same**
+   `buildAnswerTranscript` + `buildDataSlotContextBlock` builders production uses;
+3. forces `research.enabled = false` and `generation.useClientKnowledge = false` (previews are fast,
+   cheap, deterministic — no web search, no KB dependency), then runs `generateReportFromInputs`.
+
+Only the **AI modes** are previewable (a `raw` config is rejected — its output is just the answers,
+previewed via the respondent walkthrough). The editor renders the returned `RespondentReportContent`
+in a paper dialog using the shared `ReportBody` / `ReportPaperHeader`
+(`components/app/questionnaire/report/report-body.tsx`, extracted from `session-complete.tsx` so preview
+and the live respondent view can't drift), behind a caveat banner ("sample answers; research/KB skipped").
+Nothing is persisted.
 
 ## Respondent delivery
 

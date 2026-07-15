@@ -45,6 +45,7 @@ import {
 } from '@/lib/app/questionnaire/report/appendix';
 import {
   buildAnswerTranscript,
+  buildDataSlotContextBlock,
   validateRespondentReportContent,
   type RespondentReportContent,
   type RespondentReportResearch,
@@ -170,11 +171,22 @@ const APPENDED_DATA_RULES =
   'simply re-list or restate their answers: assume the reader can see them. Add value beyond the raw ' +
   'data — synthesis, interpretation, patterns across answers, and advice.';
 
+/** Clamp the stored data-slot influence to a whole 0–100 percent (defensive; the narrower bounds it). */
+function clampInfluence(value: number): number {
+  if (!Number.isFinite(value)) return 50;
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
 /** Assemble the report agent's system + user messages. */
 function buildReportMessages(opts: {
   agentInstructions: string;
   settings: RespondentReportSettings;
   transcript: string;
+  /**
+   * Themed data-slot context block (the conversational "understanding" layer), or '' when the version
+   * has no data slots. When present, a weighting instruction balances it against the direct answers.
+   */
+  dataSlotContext: string;
   knowledge: string;
   /** External web-research context (from a `before` round) folded in when `informNarrative`. */
   research: string;
@@ -191,6 +203,7 @@ function buildReportMessages(opts: {
     agentInstructions,
     settings,
     transcript,
+    dataSlotContext,
     knowledge,
     research,
     formatterEnabled,
@@ -213,6 +226,31 @@ function buildReportMessages(opts: {
           GROUNDING_RULES
   );
   if (includesAppendedData) system.push(APPENDED_DATA_RULES);
+  // Contextual data-slot understanding + the weighting that balances it against the direct answers.
+  // Only present when the version has data slots — otherwise the report is answers-only, as before.
+  if (dataSlotContext.trim()) {
+    system.push(
+      'Contextual understanding captured during the conversation (data slots) — background about ' +
+        'THIS respondent that complements their direct answers below. Unlike external web research, ' +
+        'this IS about the respondent, so you may attribute it to them:\n' +
+        dataSlotContext.trim()
+    );
+    const dataSlotPct = clampInfluence(gen.dataSlotInfluence);
+    const questionPct = 100 - dataSlotPct;
+    system.push(
+      `Balance the report roughly ${questionPct}% on the respondent's direct questionnaire answers ` +
+        `and ${dataSlotPct}% on the contextual data-slot understanding above — both are about this ` +
+        'respondent. This is a guide to emphasis, not a rule to enforce mechanically.'
+    );
+  }
+  // Confidence handling — surfaced on both the answers and the data-slot items above.
+  if (gen.discountLowConfidence) {
+    system.push(
+      'Some answers and data-slot items carry a confidence score (0–1) and a rationale. Give ' +
+        'low-confidence items proportionally less weight, and disregard any too unreliable to stand ' +
+        'behind; never present a low-confidence inference as an established fact about the respondent.'
+    );
+  }
   system.push(formatterEnabled ? PARAGRAPH_RULES_LIGHT : PARAGRAPH_RULES);
   system.push(
     formatterEnabled && gen.narrativeStyle === 'structured'
@@ -262,6 +300,28 @@ function buildReportMessages(opts: {
 }
 
 /**
+ * Pre-assembled, session-independent inputs for {@link generateReportFromInputs}. Splitting these out
+ * lets the preview flow synthesise sample answers and reuse the exact same generation core, so a
+ * previewed report and a live report can never drift. The `transcript` and `dataSlotContext` are
+ * already built (with confidence annotations when `settings.generation.discountLowConfidence`).
+ */
+export interface ReportGenerationInputs {
+  settings: RespondentReportSettings;
+  /** The questionnaire goal — folded into the KB grounding query alongside the transcript. */
+  goal: string | null;
+  /** Q&A transcript of the respondent's direct answers. */
+  transcript: string;
+  /** Themed data-slot context block, or '' when the version has no data slots. */
+  dataSlotContext: string;
+  /** Completion % at generation — drives the partial-report caveat. */
+  completionPct: number;
+  /** Attributed client for optional KB grounding; null disables it (e.g. preview). */
+  demoClientId: string | null;
+  /** The session id (or a `preview:<vid>` sentinel) — used for research logging + KB warnings. */
+  sessionId: string;
+}
+
+/**
  * Generate the insights content for a session's respondent report. Throws on unrecoverable problems
  * (missing session, no provider, malformed model output after retry) — the worker maps a throw to a
  * `failed` report row.
@@ -282,7 +342,7 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
   if (!meta?.version) throw new Error(`Session ${sessionId} not found for report generation`);
   const settings = narrowRespondentReportSettings(meta.version.config?.respondentReport);
 
-  // 2. Captured answers → Q&A transcript.
+  // 2. Captured answers → Q&A transcript + the contextual data-slot block.
   const loaded = await loadSessionExport(sessionId);
   if (!loaded) throw new Error(`Session export not found for ${sessionId}`);
   const panel = buildAnswerPanelView({
@@ -291,26 +351,54 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
     sections: loaded.sections,
     answers: loaded.answers,
   });
-  const transcript = buildAnswerTranscript({
-    questionnaireTitle: loaded.questionnaireTitle,
-    goal: loaded.goal,
-    // Full structured audience — the agent grounds on every facet the admin captured.
-    audience: loaded.audience,
-    sections: panel.sections,
-  });
+  // Surface confidence on both surfaces only when the admin opted into discounting low-confidence items.
+  const includeConfidence = settings.generation.discountLowConfidence;
+  const transcript = buildAnswerTranscript(
+    {
+      questionnaireTitle: loaded.questionnaireTitle,
+      goal: loaded.goal,
+      // Full structured audience — the agent grounds on every facet the admin captured.
+      audience: loaded.audience,
+      sections: panel.sections,
+    },
+    { includeConfidence }
+  );
+  const dataSlotContext = buildDataSlotContextBlock(loaded.dataSlotGroups, { includeConfidence });
   // Completion at submission (frozen — a completed session takes no more answers). Drives the
   // partial-report caveat when a session was submitted early. No slots → treat as fully complete.
   const completionPct =
     panel.totalCount > 0 ? Math.round((panel.answeredCount / panel.totalCount) * 100) : 100;
 
+  return generateReportFromInputs({
+    settings,
+    goal: loaded.goal,
+    transcript,
+    dataSlotContext,
+    completionPct,
+    demoClientId: meta.version.questionnaire?.demoClientId ?? null,
+    sessionId,
+  });
+}
+
+/**
+ * The generation core: given pre-assembled inputs, run KB grounding, the report agent, the optional
+ * web-search rounds, the formatter, and the appendix pass. Shared by {@link generateRespondentReport}
+ * (real session) and the admin preview (synthesised sample answers). Throws on no provider or malformed
+ * model output after retry.
+ */
+export async function generateReportFromInputs(
+  inputs: ReportGenerationInputs
+): Promise<GeneratedReport> {
+  const { settings, goal, transcript, dataSlotContext, completionPct, demoClientId, sessionId } =
+    inputs;
+
   // 3. Optional client-KB grounding — strictly scoped to the client's documents.
   let knowledge = '';
-  const demoClientId = meta.version.questionnaire?.demoClientId ?? null;
   if (settings.generation.useClientKnowledge && demoClientId) {
     const documentIds = await resolveClientKnowledgeDocumentIds(demoClientId);
     if (documentIds.length > 0) {
       try {
-        const query = [loaded.goal, transcript].filter(Boolean).join('\n').slice(0, 2000);
+        const query = [goal, transcript].filter(Boolean).join('\n').slice(0, 2000);
         const results = await searchKnowledge(query, { documentIds }, KB_SNIPPET_LIMIT);
         knowledge = results.map((r, i) => `[${i + 1}] ${r.chunk.content}`).join('\n\n');
       } catch (err) {
@@ -386,6 +474,7 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
     agentInstructions: agent.systemInstructions,
     settings,
     transcript,
+    dataSlotContext,
     knowledge,
     // Only feed research into the grounded prose when the admin opted in; otherwise it appears only
     // as the standalone Research section (attached below), never mixed into the narrative.

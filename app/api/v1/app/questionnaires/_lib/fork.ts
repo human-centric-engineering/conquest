@@ -150,56 +150,62 @@ export async function forkVersionIfLaunched(
     });
   }
 
-  const created = await executeTransaction(async (tx) => {
-    // Goal/audience live on the version row (copied here); the structural graph copy
-    // is single-sourced with clone-for-client via copyVersionGraph.
-    const source = await tx.appQuestionnaireVersion.findUniqueOrThrow({
-      where: { id: versionId },
-      select: {
-        goal: true,
-        audience: true,
-        goalProvenance: true,
-        audienceProvenance: true,
-      },
-    });
+  // Deep-copies the whole version graph (sections, slots, tags, data slots, embeddings) in one
+  // transaction; the default 5s interactive-transaction budget is too tight for a large version on a
+  // high-latency (serverless → managed Postgres) prod link, so raise it (matches import-definition).
+  const created = await executeTransaction(
+    async (tx) => {
+      // Goal/audience live on the version row (copied here); the structural graph copy
+      // is single-sourced with clone-for-client via copyVersionGraph.
+      const source = await tx.appQuestionnaireVersion.findUniqueOrThrow({
+        where: { id: versionId },
+        select: {
+          goal: true,
+          audience: true,
+          goalProvenance: true,
+          audienceProvenance: true,
+        },
+      });
 
-    // Next version number for this questionnaire (the version-service pattern).
-    // `@@unique([questionnaireId, versionNumber])` guards against a race.
-    const last = await tx.appQuestionnaireVersion.findFirst({
-      where: { questionnaireId },
-      orderBy: { versionNumber: 'desc' },
-      select: { versionNumber: true },
-    });
-    const versionNumber = (last?.versionNumber ?? 0) + 1;
+      // Next version number for this questionnaire (the version-service pattern).
+      // `@@unique([questionnaireId, versionNumber])` guards against a race.
+      const last = await tx.appQuestionnaireVersion.findFirst({
+        where: { questionnaireId },
+        orderBy: { versionNumber: 'desc' },
+        select: { versionNumber: true },
+      });
+      const versionNumber = (last?.versionNumber ?? 0) + 1;
 
-    const newVersion = await tx.appQuestionnaireVersion.create({
-      data: {
-        questionnaireId,
+      const newVersion = await tx.appQuestionnaireVersion.create({
+        data: {
+          questionnaireId,
+          versionNumber,
+          status: 'draft',
+          goal: source.goal,
+          audience: jsonInput(source.audience),
+          goalProvenance: source.goalProvenance,
+          audienceProvenance: jsonInput(source.audienceProvenance),
+        },
+        select: { id: true },
+      });
+
+      const { sectionIdMap, questionIdMap, tagIdMap, dataSlotIdMap } = await copyVersionGraph(
+        tx,
+        versionId,
+        newVersion.id
+      );
+
+      return {
+        id: newVersion.id,
         versionNumber,
-        status: 'draft',
-        goal: source.goal,
-        audience: jsonInput(source.audience),
-        goalProvenance: source.goalProvenance,
-        audienceProvenance: jsonInput(source.audienceProvenance),
-      },
-      select: { id: true },
-    });
-
-    const { sectionIdMap, questionIdMap, tagIdMap, dataSlotIdMap } = await copyVersionGraph(
-      tx,
-      versionId,
-      newVersion.id
-    );
-
-    return {
-      id: newVersion.id,
-      versionNumber,
-      sectionIdMap,
-      questionIdMap,
-      tagIdMap,
-      dataSlotIdMap,
-    };
-  });
+        sectionIdMap,
+        questionIdMap,
+        tagIdMap,
+        dataSlotIdMap,
+      };
+    },
+    { timeout: 20_000 }
+  );
 
   // Audit outside the transaction (fire-and-forget), once per fork.
   logAdminAction({

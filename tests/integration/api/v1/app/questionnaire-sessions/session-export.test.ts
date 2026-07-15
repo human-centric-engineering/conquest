@@ -181,7 +181,14 @@ describe('loadSessionExport', () => {
             { id: 'ds-3', name: 'Tenure', description: null, theme: 'Background' },
           ],
         },
-        dataSlotFills: [{ dataSlotId: 'ds-1', paraphrase: 'Prefers deep, uninterrupted blocks.' }],
+        dataSlotFills: [
+          {
+            dataSlotId: 'ds-1',
+            paraphrase: 'Prefers deep, uninterrupted blocks.',
+            rationale: 'Said they lose an hour after each interruption.',
+            confidence: 0.82,
+          },
+        ],
       })
     );
     const loaded = await loadSessionExport('sess-1');
@@ -194,13 +201,24 @@ describe('loadSessionExport', () => {
             name: 'Focus needs',
             description: 'How they work',
             value: 'Prefers deep, uninterrupted blocks.',
+            // rationale + confidence ride along for the report writer's data-slot context block.
+            rationale: 'Said they lose an hour after each interruption.',
+            confidence: 0.82,
           },
-          { name: 'Collaboration', description: null, value: null },
+          {
+            name: 'Collaboration',
+            description: null,
+            value: null,
+            rationale: null,
+            confidence: null,
+          },
         ],
       },
       {
         theme: 'Background',
-        slots: [{ name: 'Tenure', description: null, value: null }],
+        slots: [
+          { name: 'Tenure', description: null, value: null, rationale: null, confidence: null },
+        ],
       },
     ]);
   });

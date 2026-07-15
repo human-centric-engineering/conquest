@@ -190,6 +190,12 @@ const respondentReportSettingsSchema = z
         structure: z.string().trim().max(RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH),
         backgroundContext: z.string().trim().max(RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH),
         useClientKnowledge: z.boolean(),
+        // Optional for backward-compat: this schema is reused by definition-import, and a
+        // `respondentReport` block exported before these knobs shipped has a `generation` object
+        // without them. The read path (`narrowRespondentReportSettings`) defaults both; the editor
+        // always sends the whole block, so this only widens what import/PATCH will accept.
+        dataSlotInfluence: z.number().int().min(0).max(100).optional(),
+        discountLowConfidence: z.boolean().optional(),
       })
       .strict(),
     delivery: z

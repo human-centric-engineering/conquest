@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildAnswerTranscript,
+  buildDataSlotContextBlock,
   partialReportCaveat,
   splitReportParagraphs,
   validateRespondentReportContent,
@@ -23,6 +24,7 @@ import {
   type AnswerTranscriptInput,
 } from '@/lib/app/questionnaire/report/content';
 import type { PanelSlotView, PanelSectionView } from '@/lib/app/questionnaire/panel/types';
+import type { ExportDataSlotGroup } from '@/lib/app/questionnaire/export/types';
 
 function slot(over: Partial<PanelSlotView> = {}): PanelSlotView {
   return {
@@ -270,6 +272,93 @@ describe('buildAnswerTranscript', () => {
     });
     expect(text).not.toContain('Goal:');
     expect(text).not.toContain('Audience:');
+  });
+
+  it('annotates each answer with its confidence when includeConfidence is on', () => {
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'S',
+        slots: [slot({ prompt: 'Mood?', value: 'Good', answered: true, confidence: 0.42 })],
+      },
+    ];
+    expect(buildAnswerTranscript({ ...base, sections }, { includeConfidence: true })).toContain(
+      'A: Good (confidence 0.42)'
+    );
+  });
+
+  it('omits the confidence suffix by default and when the answer has no confidence', () => {
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'S',
+        slots: [slot({ prompt: 'Mood?', value: 'Good', answered: true, confidence: 0.9 })],
+      },
+    ];
+    // Off by default.
+    expect(buildAnswerTranscript({ ...base, sections })).not.toContain('confidence');
+    // On, but the slot carries no confidence → no suffix.
+    const noConf: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'S',
+        slots: [slot({ value: 'Good', answered: true, confidence: null })],
+      },
+    ];
+    expect(
+      buildAnswerTranscript({ ...base, sections: noConf }, { includeConfidence: true })
+    ).not.toContain('confidence');
+  });
+});
+
+describe('buildDataSlotContextBlock', () => {
+  const groups: ExportDataSlotGroup[] = [
+    {
+      theme: 'Motivation',
+      slots: [
+        {
+          name: 'Primary driver',
+          description: null,
+          value: 'Career growth',
+          rationale: 'Said so twice',
+          confidence: 0.72,
+        },
+        { name: 'Blocker', description: null, value: null, rationale: null, confidence: null }, // unfilled → skipped
+      ],
+    },
+    {
+      theme: '',
+      slots: [
+        { name: 'Tenure', description: null, value: '3 years', rationale: null, confidence: 0.5 },
+      ],
+    },
+  ];
+
+  it('renders themed, filled slots with rationale + confidence when includeConfidence is on', () => {
+    const text = buildDataSlotContextBlock(groups, { includeConfidence: true });
+    expect(text).toContain('## Motivation');
+    expect(text).toContain('Primary driver: Career growth (confidence 0.72)');
+    expect(text).toContain('  Why: Said so twice');
+    // Themeless group renders its slot without a heading.
+    expect(text).toContain('Tenure: 3 years (confidence 0.50)');
+    // Unfilled slot is skipped entirely.
+    expect(text).not.toContain('Blocker');
+  });
+
+  it('omits confidence suffixes when includeConfidence is off', () => {
+    const text = buildDataSlotContextBlock(groups, { includeConfidence: false });
+    expect(text).toContain('Primary driver: Career growth');
+    expect(text).not.toContain('confidence');
+  });
+
+  it('returns an empty string for no groups, undefined, or all-unfilled slots', () => {
+    expect(buildDataSlotContextBlock([])).toBe('');
+    expect(buildDataSlotContextBlock(undefined)).toBe('');
+    expect(
+      buildDataSlotContextBlock([
+        { theme: 'T', slots: [{ name: 'X', description: null, value: null }] },
+      ])
+    ).toBe('');
   });
 });
 

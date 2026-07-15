@@ -277,6 +277,8 @@ describe('upsert + response', () => {
         structure: 'Summary, themes, next steps.',
         backgroundContext: 'Quarterly engagement pulse.',
         useClientKnowledge: true,
+        dataSlotInfluence: 60,
+        discountLowConfidence: false,
       },
       delivery: { onScreen: true, download: true },
       research: {

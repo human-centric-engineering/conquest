@@ -88,55 +88,61 @@ export async function duplicateQuestionnaire(
     MAX_QUESTIONNAIRE_TITLE_LENGTH
   );
 
-  const result = await executeTransaction(async (tx) => {
-    const newQuestionnaire = await tx.appQuestionnaire.create({
-      data: {
-        title: newTitle,
-        status: 'draft',
-        ...(demoClientId !== null ? { demoClientId } : {}),
-      },
-      select: { id: true },
-    });
-
-    const newVersion = await tx.appQuestionnaireVersion.create({
-      data: {
-        questionnaireId: newQuestionnaire.id,
-        versionNumber: 1,
-        status: 'draft',
-        goal: sourceVersion.goal,
-        audience: jsonInput(sourceVersion.audience),
-        goalProvenance: sourceVersion.goalProvenance,
-        audienceProvenance: jsonInput(sourceVersion.audienceProvenance),
-      },
-      select: { id: true },
-    });
-
-    await copyVersionGraph(tx, sourceVersion.id, newVersion.id);
-
-    // Copy the source's newest source-document row as provenance (the parsed text /
-    // file metadata; raw bytes were never persisted). Best-effort — a hand-built
-    // questionnaire may have none.
-    const srcDoc = await tx.appQuestionnaireSourceDocument.findFirst({
-      where: { versionId: sourceVersion.id },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        fileName: true,
-        fileHash: true,
-        byteSize: true,
-        mimeType: true,
-        pageCount: true,
-        warnings: true,
-        extractedText: true,
-      },
-    });
-    if (srcDoc) {
-      await tx.appQuestionnaireSourceDocument.create({
-        data: { versionId: newVersion.id, ...srcDoc, warnings: jsonInput(srcDoc.warnings) },
+  // Deep-copies the whole version graph (sections, slots, tags, data slots, embeddings) in one
+  // transaction; the default 5s interactive-transaction budget is too tight for a large version on a
+  // high-latency (serverless → managed Postgres) prod link, so raise it (matches import-definition).
+  const result = await executeTransaction(
+    async (tx) => {
+      const newQuestionnaire = await tx.appQuestionnaire.create({
+        data: {
+          title: newTitle,
+          status: 'draft',
+          ...(demoClientId !== null ? { demoClientId } : {}),
+        },
+        select: { id: true },
       });
-    }
 
-    return { questionnaireId: newQuestionnaire.id, versionId: newVersion.id };
-  });
+      const newVersion = await tx.appQuestionnaireVersion.create({
+        data: {
+          questionnaireId: newQuestionnaire.id,
+          versionNumber: 1,
+          status: 'draft',
+          goal: sourceVersion.goal,
+          audience: jsonInput(sourceVersion.audience),
+          goalProvenance: sourceVersion.goalProvenance,
+          audienceProvenance: jsonInput(sourceVersion.audienceProvenance),
+        },
+        select: { id: true },
+      });
+
+      await copyVersionGraph(tx, sourceVersion.id, newVersion.id);
+
+      // Copy the source's newest source-document row as provenance (the parsed text /
+      // file metadata; raw bytes were never persisted). Best-effort — a hand-built
+      // questionnaire may have none.
+      const srcDoc = await tx.appQuestionnaireSourceDocument.findFirst({
+        where: { versionId: sourceVersion.id },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          fileName: true,
+          fileHash: true,
+          byteSize: true,
+          mimeType: true,
+          pageCount: true,
+          warnings: true,
+          extractedText: true,
+        },
+      });
+      if (srcDoc) {
+        await tx.appQuestionnaireSourceDocument.create({
+          data: { versionId: newVersion.id, ...srcDoc, warnings: jsonInput(srcDoc.warnings) },
+        });
+      }
+
+      return { questionnaireId: newQuestionnaire.id, versionId: newVersion.id };
+    },
+    { timeout: 20_000 }
+  );
 
   return { ok: true, ...result, sourceVersionId: sourceVersion.id };
 }
