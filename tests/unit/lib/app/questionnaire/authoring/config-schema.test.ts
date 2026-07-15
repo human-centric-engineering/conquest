@@ -184,6 +184,46 @@ describe('updateConfigSchema', () => {
       });
       expect(res.success).toBe(true);
     });
+
+    it('defaults a field validation mode to deterministic when omitted (legacy JSON)', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [{ key: 'name', label: 'Name', type: 'text', required: true }],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.profileFields?.[0]?.validation).toBe('deterministic');
+      }
+    });
+
+    it('accepts an explicit per-field validation mode', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, validation: 'hybrid' },
+        ],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) expect(res.data.profileFields?.[0]?.validation).toBe('hybrid');
+    });
+
+    it('rejects an unknown validation mode', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, validation: 'psychic' },
+        ],
+      });
+      expect(res.success).toBe(false);
+    });
+  });
+
+  describe('captureMode', () => {
+    it('accepts form and conversational', () => {
+      expect(updateConfigSchema.safeParse({ captureMode: 'form' }).success).toBe(true);
+      expect(updateConfigSchema.safeParse({ captureMode: 'conversational' }).success).toBe(true);
+    });
+
+    it('rejects an unknown capture mode', () => {
+      expect(updateConfigSchema.safeParse({ captureMode: 'telepathy' }).success).toBe(false);
+    });
   });
 });
 

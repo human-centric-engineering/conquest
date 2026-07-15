@@ -187,7 +187,7 @@ describe('ConfigEditor', () => {
     expect(content.getByText('Access & invitations')).toBeInTheDocument();
     expect(content.getByText('Answer quality & safeguarding')).toBeInTheDocument();
     expect(content.getByText('Budget & limits')).toBeInTheDocument();
-    expect(content.getByText('Session-start profile fields')).toBeInTheDocument();
+    expect(content.getByText('Respondent profile fields')).toBeInTheDocument();
   });
 
   // ── "Not yet saved" warning ──────────────────────────────────────────────────
@@ -618,7 +618,15 @@ describe('ConfigEditor', () => {
 
   it('removing a profile field removes it from the list', () => {
     setup({
-      profileFields: [{ key: 'org', label: 'Organisation', type: 'text', required: false }],
+      profileFields: [
+        {
+          key: 'org',
+          label: 'Organisation',
+          type: 'text',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
     });
     expect(screen.getByDisplayValue('org')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /remove/i }));
@@ -627,7 +635,15 @@ describe('ConfigEditor', () => {
 
   it('PATCHes profileFields with trimmed key/label on save', () => {
     const { specs } = setup({
-      profileFields: [{ key: 'org', label: 'Organisation', type: 'text', required: false }],
+      profileFields: [
+        {
+          key: 'org',
+          label: 'Organisation',
+          type: 'text',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
     });
     fireEvent.change(screen.getByDisplayValue('org'), { target: { value: ' org_key ' } });
     fireEvent.change(screen.getByDisplayValue('Organisation'), {
@@ -641,7 +657,15 @@ describe('ConfigEditor', () => {
 
   it('shows the Options input only for select-type profile fields', async () => {
     setup({
-      profileFields: [{ key: 'dept', label: 'Department', type: 'text', required: false }],
+      profileFields: [
+        {
+          key: 'dept',
+          label: 'Department',
+          type: 'text',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
     });
     expect(screen.queryByPlaceholderText(/e\.g\. Engineering/i)).not.toBeInTheDocument();
 
@@ -658,7 +682,15 @@ describe('ConfigEditor', () => {
 
   it('PATCHes select-type profile field with parsed options on save', async () => {
     const { specs } = setup({
-      profileFields: [{ key: 'dept', label: 'Department', type: 'select', required: false }],
+      profileFields: [
+        {
+          key: 'dept',
+          label: 'Department',
+          type: 'select',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
     });
     fireEvent.change(screen.getByPlaceholderText(/e\.g\. Engineering/i), {
       target: { value: 'Engineering, Sales, Support' },
@@ -674,7 +706,9 @@ describe('ConfigEditor', () => {
 
   it('does not include options key for non-select profile field types', () => {
     const { specs } = setup({
-      profileFields: [{ key: 'name', label: 'Name', type: 'text', required: false }],
+      profileFields: [
+        { key: 'name', label: 'Name', type: 'text', required: false, validation: 'deterministic' },
+      ],
     });
     clickSave();
     const fields = bodyOf(specs).profileFields as Array<{ key: string; options?: string[] }>;
@@ -683,7 +717,15 @@ describe('ConfigEditor', () => {
 
   it('toggling required on a profile field includes required:true in the body', () => {
     const { specs } = setup({
-      profileFields: [{ key: 'org', label: 'Organisation', type: 'text', required: false }],
+      profileFields: [
+        {
+          key: 'org',
+          label: 'Organisation',
+          type: 'text',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
     });
     // The profile field row is rendered as a div; the required switch label appears right next to
     // the switch inside that row. The invitee table uses aria-label="... required" so the only
@@ -692,8 +734,8 @@ describe('ConfigEditor', () => {
     // reasoningStreamEnabled (DEFAULT=true), reasoningStreamPersist, sensitivityAwareness (false),
     // and the invitee field rows (6 rows × 2 = 12 switches). Profile field Required switch
     // comes after those. Use label text proximity inside the profile section.
-    // Strategy: all profile-field switches are below the "Session-start profile fields" heading.
-    const sectionHeading = settingsContent().getByText('Session-start profile fields');
+    // Strategy: all profile-field switches are below the "Respondent profile fields" heading.
+    const sectionHeading = settingsContent().getByText('Respondent profile fields');
     const section = sectionHeading.closest('[class*="overflow-hidden"]') as HTMLElement;
     const requiredSwitch = within(section).getByRole('switch');
     fireEvent.click(requiredSwitch);

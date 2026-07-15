@@ -229,7 +229,7 @@ describe('upsert + response', () => {
     );
   });
 
-  it('writes profileFields through the JSON boundary', async () => {
+  it('writes profileFields through the JSON boundary (applying the validation default)', async () => {
     const fields = [{ key: 'role', label: 'Role', type: 'text', required: true }];
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
       configRow({ profileFields: fields })
@@ -238,7 +238,9 @@ describe('upsert + response', () => {
     const res = await configPATCH(req({ profileFields: fields }), ctx(PARAMS));
     expect(res.status).toBe(200);
     const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
-    expect(call.update.profileFields).toEqual(fields);
+    // F8.7: the per-field `validation` mode defaults to `deterministic` at the schema boundary, so a
+    // field authored without it is persisted with the explicit default.
+    expect(call.update.profileFields).toEqual([{ ...fields[0], validation: 'deterministic' }]);
   });
 
   it('writes the tone block through the JSON boundary and narrows it back on the response', async () => {

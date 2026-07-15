@@ -178,6 +178,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     profileFields: [],
     answerSlotPanelScope: 'full_progress',
     presentationMode: 'chat',
+    captureMode: 'form',
     inlineCorrectionEnabled: true,
     reasoningStreamEnabled: false,
     reasoningStreamPlacement: 'overlay',

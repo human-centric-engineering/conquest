@@ -2,10 +2,9 @@
  * The single definition of a respondent's "resumable" session (F8.3).
  *
  * A respondent resumes — rather than starts afresh — when they already have a
- * non-preview, non-terminal session for the version. Both the create route
- * (`questionnaire-sessions/_lib/create.ts`) and the pre-create resolver
- * (`chat/start-context.ts`) must agree on this rule, or the start page would redirect
- * to a session the create route wouldn't resume (or vice-versa). Keep it here so the
+ * non-preview, non-terminal session for the version. The create route
+ * (`questionnaire-sessions/_lib/create.ts`) is the single caller and owns this rule
+ * (the `/start` page just delegates to it, resuming idempotently). Keep it here so the
  * rule lives in one place. Server-only.
  */
 

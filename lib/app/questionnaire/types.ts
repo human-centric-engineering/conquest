@@ -244,6 +244,29 @@ export const PROFILE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as cons
 export type ProfileFieldType = (typeof PROFILE_FIELD_TYPES)[number];
 
 /**
+ * How a captured profile field's value is validated (F-capture). `deterministic` runs only the
+ * type-aware Zod/regex checks (format, required, select membership). `agentic` additionally runs a
+ * best-effort LLM pass that normalises the value (proper-case names, tidy organisation, E.164-ish
+ * phone) and flags implausible/garbage input (`asdf`, `test@test`). `hybrid` runs the deterministic
+ * gate first (a format failure rejects without spending an LLM call) and, on pass, applies the
+ * agentic normalise/flag. The agentic layer is always non-fatal — an LLM outage falls back to the
+ * deterministic-passed value, never blocking a respondent (mirrors the `answerFitMode` convention).
+ * See `lib/app/questionnaire/profile/validate-profile-fields.ts`. */
+export const PROFILE_FIELD_VALIDATION_MODES = ['deterministic', 'agentic', 'hybrid'] as const;
+export type ProfileFieldValidationMode = (typeof PROFILE_FIELD_VALIDATION_MODES)[number];
+
+/**
+ * How the admin-authored profile fields are collected from the respondent (F-capture). `form`
+ * (default) presents them as a standard form that rides the carousel AFTER the intro and BEFORE the
+ * chat/interviewer, blocking progress (and the opening LLM turn) until they're filled and validated.
+ * `conversational` drops the gate — the interviewer collects the fields naturally in-chat and a
+ * best-effort extraction pass maps the answers back to the fields. Neither collects anything when the
+ * version is `anonymousMode` (the PII-free public path). See
+ * `lib/app/questionnaire/profile/resolve-capture.ts`. */
+export const CAPTURE_MODES = ['form', 'conversational'] as const;
+export type CaptureMode = (typeof CAPTURE_MODES)[number];
+
+/**
  * How much of the questionnaire the respondent's live answer-slot panel shows
  * (F7.2). `full_progress` lists every slot grouped by section with an X-of-N
  * header (the conversation's running state); `answered_only` shows just the
@@ -391,6 +414,12 @@ export type ProfileFieldConfig = {
   required: boolean;
   /** Choices for a `select` field; absent/empty for other types. */
   options?: string[];
+  /**
+   * How this field's value is validated. Defaulted to `deterministic` on read, so legacy stored
+   * fields without the key keep their current format-only behaviour. See
+   * {@link PROFILE_FIELD_VALIDATION_MODES}.
+   */
+  validation: ProfileFieldValidationMode;
 };
 
 /**
@@ -1033,6 +1062,12 @@ export type QuestionnaireConfigShape = {
   /** Optional support resource URL appended to {@link supportMessage} when set. */
   supportResourceUrl: string;
   profileFields: ProfileFieldConfig[];
+  /**
+   * How the {@link profileFields} are collected from the respondent (F-capture). See
+   * {@link CAPTURE_MODES}. Defaults to `form` (a blocking form gate after the intro); `conversational`
+   * has the interviewer gather them in-chat instead. Ignored entirely when `anonymousMode` is on.
+   */
+  captureMode: CaptureMode;
   answerSlotPanelScope: AnswerSlotPanelScope;
   /**
    * How the respondent completes the session: `chat`, raw `form`, or `both`
@@ -1175,6 +1210,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   supportMessage: '',
   supportResourceUrl: '',
   profileFields: [],
+  captureMode: 'form',
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'both',
   inlineCorrectionEnabled: false,

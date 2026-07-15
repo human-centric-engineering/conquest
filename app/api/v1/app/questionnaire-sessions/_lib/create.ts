@@ -43,6 +43,7 @@ import {
   validateProfileValues,
   type ProfileValues,
 } from '@/lib/app/questionnaire/profile/profile-values';
+import { upsertProfileSnapshot } from '@/lib/app/questionnaire/profile/profile-snapshot';
 
 /**
  * Cohorts & Rounds: the round a session runs within, plus the cohort member it belongs to.
@@ -114,16 +115,18 @@ function resolveProfileCapture(
   return { ok: true, values: Object.keys(result.values).length > 0 ? result.values : null };
 }
 
-/** Persist a profile snapshot inside the session-create transaction (non-anonymous only). */
+/**
+ * Persist a profile snapshot inside the session-create transaction (non-anonymous only). Delegates
+ * to the shared idempotent upsert so create-time, the in-flow capture PUT, and conversational
+ * extraction never race on the 1:1 `sessionId` constraint.
+ */
 async function writeProfileSnapshot(
   tx: Prisma.TransactionClient,
   sessionId: string,
   respondentUserId: string | null,
   values: ProfileValues
 ): Promise<void> {
-  await tx.appRespondentProfileSnapshot.create({
-    data: { sessionId, respondentUserId, values },
-  });
+  await upsertProfileSnapshot(tx, sessionId, respondentUserId, values);
 }
 
 /**

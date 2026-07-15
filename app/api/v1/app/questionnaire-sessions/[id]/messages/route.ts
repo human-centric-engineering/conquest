@@ -53,6 +53,12 @@ import { resolveSessionTone } from '@/lib/app/questionnaire/persona/settings';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
 import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
 import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
+import { parseProfileFields } from '@/lib/app/questionnaire/profile/profile-values';
+import {
+  buildProfileCaptureInstructions,
+  extractAndPersistConversationalProfile,
+  hasProfileSnapshot,
+} from '@/lib/app/questionnaire/profile/conversational-capture';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/questionnaire/inspector';
@@ -342,6 +348,24 @@ async function handleMessage(
     const peerInsightByKey = new Map(
       (peerInsights ?? []).map((p) => [`${p.slotKind}:${p.slotKey}`, p])
     );
+
+    // Conversational profile capture (F-capture): when the version collects profile fields in
+    // `conversational` mode (non-anonymous) and no snapshot exists yet, the interviewer gathers them
+    // in-chat and a best-effort post-turn pass (below) persists them. Resolved once per turn.
+    const captureFields =
+      loaded.base.config.captureMode === 'conversational' && !loaded.base.config.anonymousMode
+        ? parseProfileFields(loaded.base.config.profileFields)
+        : [];
+    const captureSnapshotExists =
+      captureFields.length > 0 ? await hasProfileSnapshot(sessionId) : false;
+    const captureActive = captureFields.length > 0 && !captureSnapshotExists;
+    // Captured here (where `loaded` is narrowed non-null) for the post-turn extraction inside the
+    // stream generator, which loses the narrowing across the closure boundary.
+    const captureRespondentUserId = loaded.session.respondentUserId;
+    // Directive spliced into the phraser's system prompt while the snapshot is still incomplete.
+    const profileCapturePhraserInput = captureActive
+      ? { profileCapture: buildProfileCaptureInstructions(captureFields) }
+      : {};
     // Adaptive probing: peers' divergence per QUESTION key — leans the adaptive selector toward
     // topics where earlier respondents split. Only question-kind insights drive selection.
     const peerDivergenceByKey: Record<string, number> = {};
@@ -842,6 +866,7 @@ async function handleMessage(
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
             ...strategyPhraserInput,
+            ...profileCapturePhraserInput,
             // Open approach/phase broadens to the slot's THEME instead of this one specific slot.
             ...(strategyActive && r.theme ? { topicArea: r.theme } : {}),
           },
@@ -903,6 +928,7 @@ async function handleMessage(
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
             ...strategyPhraserInput,
+            ...profileCapturePhraserInput,
           },
           userId,
           sessionId,
@@ -983,6 +1009,21 @@ async function handleMessage(
           error: err,
         });
       }
+
+      // Conversational profile capture (F-capture): once the turn is persisted, best-effort extract
+      // the gathered profile details from the transcript and persist them once complete. Fully
+      // non-fatal (own try/catch) and only runs while the snapshot is still absent, so it stops itself
+      // once a complete profile lands. STARTED here (concurrent with the fast post-turn work + the
+      // `done` frame) but AWAITED only after `done` is yielded — the extraction is an up-to-8s LLM call,
+      // so awaiting it before `done` would keep the composer locked that whole time every turn. Starting
+      // it now and awaiting at the end still guarantees the write completes before the generator returns.
+      const captureExtraction = captureActive
+        ? extractAndPersistConversationalProfile({
+            sessionId,
+            respondentUserId: captureRespondentUserId,
+            fields: captureFields,
+          })
+        : null;
 
       // Seriousness / abuse gate: persist the new strike count and, at the threshold, ABORT the
       // session (status → `aborted`, reason `abuse_threshold_exceeded` + metadata for analytics).
@@ -1080,6 +1121,11 @@ async function handleMessage(
         tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         costUsd,
       };
+
+      // Await the conversational-capture extraction AFTER `done` (started above): the client has
+      // already unlocked, but the generator keeps running until it returns, so the snapshot write still
+      // completes within this request. Non-fatal — it can never reject.
+      if (captureExtraction) await captureExtraction;
     }
 
     return sseResponse(drive(), { signal: request.signal });

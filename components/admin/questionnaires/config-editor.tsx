@@ -75,15 +75,18 @@ import {
   ACCESS_MODE_LABELS,
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
+  CAPTURE_MODES,
   CONTRADICTION_MODES,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
+  PROFILE_FIELD_VALIDATION_MODES,
   REASONING_PLACEMENTS,
   TONE_PERSONA_MAX_LENGTH,
   type AccessMode,
+  type CaptureMode,
   type IntroSettings,
   type AnswerFitMode,
   type AnswerSlotPanelScope,
@@ -92,6 +95,7 @@ import {
   type PresentationMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
+  type ProfileFieldValidationMode,
   type ReasoningPlacement,
   type SelectionStrategy,
   type ToneDimension,
@@ -145,6 +149,17 @@ const PROFILE_FIELD_TYPE_LABELS: Record<ProfileFieldType, string> = {
   select: 'Select (choices)',
 };
 
+const PROFILE_FIELD_VALIDATION_MODE_LABELS: Record<ProfileFieldValidationMode, string> = {
+  deterministic: 'Format only',
+  agentic: 'AI (tidy + flag)',
+  hybrid: 'Both (format + AI)',
+};
+
+const CAPTURE_MODE_LABELS: Record<CaptureMode, string> = {
+  form: 'Form (before the conversation)',
+  conversational: 'Conversational (in chat)',
+};
+
 const ANSWER_SLOT_PANEL_SCOPE_LABELS: Record<AnswerSlotPanelScope, string> = {
   full_progress: 'Full progress (all questions)',
   answered_only: 'Answered only',
@@ -169,6 +184,8 @@ interface ProfileFieldRow {
   required: boolean;
   /** Comma-separated options text; only meaningful for `select`. */
   optionsText: string;
+  /** How the value is validated (deterministic / agentic / hybrid). */
+  validation: ProfileFieldValidationMode;
 }
 
 function toRow(field: ProfileFieldConfig): ProfileFieldRow {
@@ -178,6 +195,7 @@ function toRow(field: ProfileFieldConfig): ProfileFieldRow {
     type: field.type,
     required: field.required,
     optionsText: (field.options ?? []).join(', '),
+    validation: field.validation,
   };
 }
 
@@ -459,6 +477,7 @@ export function ConfigEditor({
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(
     config.presentationMode
   );
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(config.captureMode);
   const [inlineCorrectionEnabled, setInlineCorrectionEnabled] = useState(
     config.inlineCorrectionEnabled
   );
@@ -529,6 +548,7 @@ export function ConfigEditor({
     setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setPresentationMode(config.presentationMode);
+    setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
@@ -562,7 +582,14 @@ export function ConfigEditor({
   const addField = () =>
     setProfileFields((prev) => [
       ...prev,
-      { key: '', label: '', type: 'text', required: false, optionsText: '' },
+      {
+        key: '',
+        label: '',
+        type: 'text',
+        required: false,
+        optionsText: '',
+        validation: 'deterministic',
+      },
     ]);
 
   const removeField = (index: number) =>
@@ -686,11 +713,13 @@ export function ConfigEditor({
           buttonLabel: intro.buttonLabel.trim(),
           videoUrl: intro.videoUrl.trim(),
         },
+        captureMode,
         profileFields: profileFields.map((f) => ({
           key: f.key.trim(),
           label: f.label.trim(),
           type: f.type,
           required: f.required,
+          validation: f.validation,
           ...(f.type === 'select' ? { options: parseOptions(f.optionsText) } : {}),
         })),
       },
@@ -1961,15 +1990,46 @@ export function ConfigEditor({
             />
           </SettingsGroup>
 
-          {/* ── 5. Session-start profile fields — what to collect before the questionnaire begins.
+          {/* ── 5. Respondent profile fields — what to collect from the respondent, and how.
              Last: optional, set-up-once metadata rather than run-time behaviour. ── */}
           <SettingsGroup
             icon={ClipboardList}
             accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
             id="profile-fields"
-            title="Session-start profile fields"
-            description="Fields collected from the respondent before the questionnaire begins. Optional — leave empty to start straight into the conversation."
+            title="Respondent profile fields"
+            description="Details collected from the respondent (name, email, organisation…). Optional — leave empty to start straight into the conversation. Never collected on an anonymous questionnaire."
           >
+            {/* How the fields are collected — a blocking form gate after the intro, or gathered
+                conversationally in-chat. Ignored entirely when the version is anonymous. */}
+            <div className="mb-4 max-w-md space-y-1.5">
+              <Label className="text-sm font-medium">
+                How to collect{' '}
+                <FieldHelp title="How to collect details">
+                  Form (the default) presents these details as a short form after the intro and
+                  before the conversation — the respondent can&apos;t proceed until it&apos;s filled
+                  in and valid. Conversational drops the form and has the interviewer gather the
+                  same details naturally during the chat. Either way, nothing is collected on an
+                  anonymous questionnaire.
+                </FieldHelp>
+              </Label>
+              <Select
+                value={captureMode}
+                onValueChange={(v) => setCaptureMode(v as CaptureMode)}
+                disabled={busy}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CAPTURE_MODES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {CAPTURE_MODE_LABELS[m]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {profileFields.length === 0 ? (
               <p className="text-muted-foreground text-sm italic">No profile fields.</p>
             ) : (
@@ -2039,6 +2099,37 @@ export function ConfigEditor({
                         />
                       </div>
                     )}
+                    <div className="space-y-1 sm:max-w-[16rem]">
+                      <Label className="text-xs">
+                        Validation{' '}
+                        <FieldHelp title="Validation">
+                          How this field&apos;s value is checked. Format only runs the standard
+                          format/required checks (e.g. a valid email shape). AI adds a quick model
+                          pass that tidies the value (proper-case names, neat organisation names)
+                          and rejects obvious nonsense (&quot;asdf&quot;, &quot;test@test&quot;).
+                          Both runs the format check first, then the AI tidy/flag. The AI pass is
+                          best-effort — if it can&apos;t run, the respondent is never blocked.
+                        </FieldHelp>
+                      </Label>
+                      <Select
+                        value={field.validation}
+                        onValueChange={(v) =>
+                          updateField(index, { validation: v as ProfileFieldValidationMode })
+                        }
+                        disabled={busy}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PROFILE_FIELD_VALIDATION_MODES.map((m) => (
+                            <SelectItem key={m} value={m}>
+                              {PROFILE_FIELD_VALIDATION_MODE_LABELS[m]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className="flex justify-end">
                       <Button
                         type="button"

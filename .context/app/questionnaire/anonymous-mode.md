@@ -27,7 +27,8 @@ export); what's withheld is identity, free-text prose, and small-cohort detail.
 | ---------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Authed-direct session create | `questionnaire-sessions/_lib/create.ts`                                                  | `respondentUserId` bound, but **no profile snapshot** ever written                                |
 | No-login session create      | `questionnaire-sessions/_lib/create.ts` (`createAnonymousSession`)                       | `respondentUserId = null`; no profile                                                             |
-| Profile capture              | `create.ts` (`resolveProfileCapture`)                                                    | Skipped entirely — short-circuits on the anonymous flag                                           |
+| Profile capture (form gate)  | `profile/resolve-capture.ts` (`resolveSessionCapture`) + `[id]/profile` PUT              | Resolver returns `null` (no gate) and the PUT rejects — no snapshot ever written (F8.7)           |
+| Conversational capture       | `messages/route.ts` (guards on `!anonymousMode`)                                         | No interviewer directive injected, no extraction/snapshot (F8.7)                                  |
 | Single-session PDF           | `questionnaire-sessions/_lib/session-export.ts` + `export/build-session-export-model.ts` | Identity query skipped; `respondent` and `profile` null                                           |
 | Bulk CSV/JSON export         | `export/results-loader.ts`                                                               | Names skipped; `turns = []`; `profile = null` per session                                         |
 | Distributions analytics      | `analytics/distributions.ts`                                                             | Identity-free by construction; small-cohort detail suppressed (below)                             |
@@ -44,10 +45,12 @@ invariant — a test asserts `appRespondentProfileSnapshot.create` was never cal
 there is structurally no PII at rest. Read paths additionally null the profile when
 anonymous, as defence in depth.
 
-Capture happens only on the **invitation** surface (always non-anonymous), at session
-create, inside the same transaction. The respondent form lives at
-`components/app/questionnaire/profile/profile-start-form.tsx`, gated by
-`loadStartContext` so it renders only for a non-anonymous version with profile fields.
+**As of F8.7** capture no longer happens pre-session. It rides the respondent carousel as a
+blocking form gate (default) or is gathered conversationally, and the gate keys off
+`anonymousMode` (not authed-vs-public) — so a public no-login link CAN collect a name, while
+an anonymous version never does. The invariant above is unchanged (anonymous ⇒ no snapshot,
+enforced in the resolver, the PUT, and the workspace). Full mechanics:
+[`profile-capture.md`](./profile-capture.md).
 
 ## k-anonymity suppression
 

@@ -16,10 +16,17 @@ import {
 import type { ProfileFieldConfig } from '@/lib/app/questionnaire/types';
 
 const FIELDS: ProfileFieldConfig[] = [
-  { key: 'team', label: 'Team', type: 'text', required: true },
-  { key: 'email', label: 'Email', type: 'email', required: false },
-  { key: 'size', label: 'Team size', type: 'number', required: false },
-  { key: 'tier', label: 'Tier', type: 'select', required: false, options: ['free', 'pro'] },
+  { key: 'team', label: 'Team', type: 'text', required: true, validation: 'deterministic' },
+  { key: 'email', label: 'Email', type: 'email', required: false, validation: 'deterministic' },
+  { key: 'size', label: 'Team size', type: 'number', required: false, validation: 'deterministic' },
+  {
+    key: 'tier',
+    label: 'Tier',
+    type: 'select',
+    required: false,
+    options: ['free', 'pro'],
+    validation: 'deterministic',
+  },
 ];
 
 describe('validateProfileValues', () => {
@@ -77,6 +84,16 @@ describe('parseProfileFields', () => {
   it('degrades to [] on a malformed column', () => {
     expect(parseProfileFields('garbage')).toEqual([]);
     expect(parseProfileFields([{ key: 'x' }])).toEqual([]); // missing required props
+  });
+
+  it('injects the deterministic validation default for a legacy field without the key', () => {
+    // A field written before per-field validation existed parses cleanly and reads as deterministic.
+    const parsed = parseProfileFields([
+      { key: 'name', label: 'Name', type: 'text', required: true },
+    ]);
+    expect(parsed).toEqual([
+      { key: 'name', label: 'Name', type: 'text', required: true, validation: 'deterministic' },
+    ]);
   });
 });
 

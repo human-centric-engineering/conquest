@@ -46,6 +46,28 @@ vi.mock('@/lib/hooks/use-form-answers', () => ({
 vi.mock('@/components/app/questionnaire/form/questionnaire-form', () => ({
   QuestionnaireForm: () => <div data-testid="form" />,
 }));
+// Capture-gate stub surfaces `onSubmitted` as a button so the gate-advance/kickoff-release tests can
+// drive it without rendering the real form (RHF + fetch).
+vi.mock('@/components/app/questionnaire/profile/profile-capture-gate', () => ({
+  ProfileCaptureGate: ({ onSubmitted }: { onSubmitted: () => void }) => (
+    <div data-testid="capture-gate">
+      <button type="button" onClick={onSubmitted}>
+        capture-submit
+      </button>
+    </div>
+  ),
+}));
+// Persona-picker stub surfaces `onContinue` so the capture→persona kickoff-defer test can advance the
+// carousel past the picker without the real component.
+vi.mock('@/components/app/questionnaire/persona/persona-picker', () => ({
+  PersonaPicker: ({ onContinue }: { onContinue: () => void }) => (
+    <div data-testid="persona-picker">
+      <button type="button" onClick={onContinue}>
+        persona-continue
+      </button>
+    </div>
+  ),
+}));
 
 // Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap. The chat
 // stub surfaces `readOnly` so the read-only-mode tests can assert it's threaded through.
@@ -367,6 +389,180 @@ describe('SessionWorkspace', () => {
       expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
       expect(screen.queryByRole('tab', { name: 'Form' })).not.toBeInTheDocument();
       expect(kickoff).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Capture gate (blocking pre-chat form; F-capture) ─────────────────────────
+  describe('capture gate', () => {
+    const captureForm = (over: Record<string, unknown> = {}) => ({
+      captureMode: 'form' as const,
+      fields: [
+        {
+          key: 'name',
+          label: 'Name',
+          type: 'text' as const,
+          required: true,
+          validation: 'deterministic' as const,
+        },
+      ],
+      satisfied: false,
+      ...over,
+    });
+
+    const setStreamIdle = () =>
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+
+    const personasFixture = {
+      enabled: true,
+      personas: [
+        { key: 'a', label: 'Ana', description: 'da' },
+        { key: 'b', label: 'Bo', description: 'db' },
+      ],
+      selectedPersonaKey: null,
+      defaultPersonaKey: 'a',
+      switcher: 'page' as const,
+    };
+
+    it('lands ON the Details gate (active surface) on a fresh session and DEFERS the kickoff', () => {
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          autoStart
+          capture={captureForm()}
+        />
+      );
+      // The gate is the ACTIVE carousel surface (its tabpanel is not inert), not merely mounted — the
+      // carousel renders every surface, so presence alone wouldn't prove we landed on it.
+      const capturePanel = screen.getByRole('tabpanel', { name: 'Details' });
+      expect(capturePanel).not.toHaveAttribute('inert');
+      expect(within(capturePanel).getByTestId('capture-gate')).toBeInTheDocument();
+      // The opening turn has NOT been spent yet.
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+
+    it('blocks forward keyboard/swipe nav past the unsubmitted gate (stays on Details)', () => {
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="both"
+          autoStart
+          capture={captureForm()}
+        />
+      );
+      // ArrowRight would advance the carousel — but the blocking gate forbids moving past it.
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      const capturePanel = screen.getByRole('tabpanel', { name: 'Details' });
+      expect(capturePanel).not.toHaveAttribute('inert'); // still the active surface
+      expect(kickoff).not.toHaveBeenCalled();
+    });
+
+    it('with a persona picker after it, submitting capture lands on the picker and STILL defers the kickoff', () => {
+      // Regression: releasing the kickoff on submit would stream the opening turn behind the persona
+      // picker with the DEFAULT persona. `started` must stay false until the respondent leaves the picker.
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          autoStart
+          capture={captureForm()}
+          personas={personasFixture}
+        />
+      );
+      expect(kickoff).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText('capture-submit'));
+      // Advanced to the persona picker — not the chat — and the opening turn is STILL deferred.
+      expect(screen.getByTestId('persona-picker')).toBeInTheDocument();
+      expect(kickoff).not.toHaveBeenCalled();
+
+      // Leaving the picker for the chat finally releases the kickoff (now with the chosen persona in place).
+      fireEvent.click(screen.getByText('persona-continue'));
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('fires the kickoff only after the gate is submitted', () => {
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          autoStart
+          capture={captureForm()}
+        />
+      );
+      expect(kickoff).not.toHaveBeenCalled();
+      // Submitting the gate advances to the chat and releases the deferred opening turn.
+      fireEvent.click(screen.getByText('capture-submit'));
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('suppresses the surface toggle while the blocking gate is open (no skip)', () => {
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="both"
+          autoStart
+          capture={captureForm()}
+        />
+      );
+      // The toggle would otherwise offer a one-tap skip past required details.
+      expect(screen.queryAllByRole('tab')).toHaveLength(0);
+      // Once submitted, the toggle returns.
+      fireEvent.click(screen.getByText('capture-submit'));
+      expect(screen.getAllByRole('tab').length).toBeGreaterThan(0);
+    });
+
+    it('skips the gate when the capture is already satisfied (resume)', () => {
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          autoStart
+          capture={captureForm({ satisfied: true })}
+        />
+      );
+      expect(screen.queryByTestId('capture-gate')).not.toBeInTheDocument();
+      // No gate → the kickoff fires immediately.
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('never shows the gate for a conversational-mode version', () => {
+      setStreamIdle();
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          autoStart
+          capture={captureForm({ captureMode: 'conversational' })}
+        />
+      );
+      expect(screen.queryByTestId('capture-gate')).not.toBeInTheDocument();
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('never shows the gate for an anonymous version (capture null)', () => {
+      setStreamIdle();
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" autoStart capture={null} />);
+      expect(screen.queryByTestId('capture-gate')).not.toBeInTheDocument();
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('is never shown in the read-only admin viewer', () => {
+      setStreamIdle();
+      render(<SessionWorkspace sessionId="s1" readOnly capture={captureForm()} />);
+      expect(screen.queryByTestId('capture-gate')).not.toBeInTheDocument();
     });
   });
 
