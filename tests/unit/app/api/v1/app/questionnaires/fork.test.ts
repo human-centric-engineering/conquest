@@ -55,7 +55,6 @@ import type { ScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authori
 type Mock = ReturnType<typeof vi.fn>;
 
 let sectionSeq = 0;
-let tagSeq = 0;
 const tx = {
   appQuestionnaireVersion: {
     findUniqueOrThrow: vi.fn(),
@@ -73,13 +72,19 @@ const tx = {
     ]),
   },
   appQuestionTag: {
-    create: vi.fn(async () => ({ id: `newtag-${++tagSeq}` })),
+    createMany: vi.fn(async () => ({ count: 0 })),
+    // Re-read by normalizedLabel after createMany to build the old→new tag id map.
+    findMany: vi.fn(async () => [
+      { id: 'newtag-1', normalizedLabel: 'core' },
+      { id: 'newtag-2', normalizedLabel: 'optional' },
+    ]),
   },
   appQuestionSlotTag: {
     createMany: vi.fn(async () => ({ count: 0 })),
   },
   appDataSlot: {
-    create: vi.fn(async () => ({ id: 'newds-1' })),
+    createMany: vi.fn(async () => ({ count: 0 })),
+    findMany: vi.fn(async () => [] as Array<{ id: string; key: string }>),
   },
   appDataSlotQuestion: {
     createMany: vi.fn(async () => ({ count: 0 })),
@@ -175,7 +180,6 @@ function sourceGraph() {
 beforeEach(() => {
   vi.clearAllMocks();
   sectionSeq = 0;
-  tagSeq = 0;
   headerState.value = null; // default: legacy fork-through
   mockCountLaunchBlockers.mockResolvedValue({ sessions: 0, invitations: 0 });
   prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([]);
@@ -369,22 +373,24 @@ describe('forkVersionIfLaunched — fork', () => {
   it('copies the tag vocabulary, preserving label/normalizedLabel and omitting a null colour', async () => {
     const result = await forkVersionIfLaunched(scoped());
 
-    expect(tx.appQuestionTag.create).toHaveBeenCalledTimes(2);
-    expect(tx.appQuestionTag.create).toHaveBeenNthCalledWith(1, {
-      data: { versionId: 'v2', label: 'Core', normalizedLabel: 'core', color: 'blue' },
-      select: { id: true },
+    // Tags are createMany'd in one call, then re-read by normalizedLabel to map old→new ids.
+    expect(tx.appQuestionTag.createMany).toHaveBeenCalledTimes(1);
+    const rows = (tx.appQuestionTag.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
+    >;
+    expect(rows[0]).toEqual({
+      versionId: 'v2',
+      label: 'Core',
+      normalizedLabel: 'core',
+      color: 'blue',
     });
     // The uncoloured tag omits `color` rather than writing null.
-    const second = (tx.appQuestionTag.create as Mock).mock.calls[1][0].data as Record<
-      string,
-      unknown
-    >;
-    expect(second).toMatchObject({
+    expect(rows[1]).toMatchObject({
       versionId: 'v2',
       label: 'Optional',
       normalizedLabel: 'optional',
     });
-    expect(second).not.toHaveProperty('color');
+    expect(rows[1]).not.toHaveProperty('color');
 
     expect(result.tagIdMap?.get('oldtag-1')).toBe('newtag-1');
     expect(result.tagIdMap?.get('oldtag-2')).toBe('newtag-2');
@@ -413,7 +419,7 @@ describe('forkVersionIfLaunched — fork', () => {
 
     await forkVersionIfLaunched(scoped());
 
-    expect(tx.appQuestionTag.create).toHaveBeenCalledTimes(1);
+    expect(tx.appQuestionTag.createMany).toHaveBeenCalledTimes(1);
     expect(tx.appQuestionSlotTag.createMany).not.toHaveBeenCalled();
   });
 

@@ -12,9 +12,9 @@
  *   - question optional fields null   → guidelines / rationale / typeConfig /
  *                                       extractionConfidence absent from createMany payload
  *   - empty sections (no questions)   → appQuestionSlot.createMany NOT called for that section
- *   - zero tags                       → appQuestionTag.create + appQuestionSlotTag.createMany
+ *   - zero tags                       → appQuestionTag.createMany + appQuestionSlotTag.createMany
  *                                       NOT called
- *   - zero data slots                 → appDataSlot.create + appDataSlotQuestion.createMany
+ *   - zero data slots                 → appDataSlot.createMany + appDataSlotQuestion.createMany
  *                                       NOT called
  *   - returned id maps are correct    → sectionIdMap / questionIdMap populated;
  *                                       tagIdMap / dataSlotIdMap are empty
@@ -79,13 +79,15 @@ function buildTx() {
       findMany: vi.fn(async () => [] as Array<{ id: string; key: string }>),
     },
     appQuestionTag: {
-      create: vi.fn(async () => ({ id: 'new-tag' })),
+      createMany: vi.fn(async () => ({ count: 0 })),
+      findMany: vi.fn(async () => [] as Array<{ id: string; normalizedLabel: string }>),
     },
     appQuestionSlotTag: {
       createMany: vi.fn(async () => ({ count: 0 })),
     },
     appDataSlot: {
-      create: vi.fn(async () => ({ id: 'new-ds' })),
+      createMany: vi.fn(async () => ({ count: 0 })),
+      findMany: vi.fn(async () => [] as Array<{ id: string; key: string }>),
     },
     appDataSlotQuestion: {
       createMany: vi.fn(async () => ({ count: 0 })),
@@ -270,7 +272,7 @@ describe('copyVersionGraph — null-guard else-branches', () => {
       await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
 
       // Assert: neither the tag nor the assignment write was reached
-      expect(tx.appQuestionTag.create).not.toHaveBeenCalled();
+      expect(tx.appQuestionTag.createMany).not.toHaveBeenCalled();
       expect(tx.appQuestionSlotTag.createMany).not.toHaveBeenCalled();
     });
   });
@@ -283,7 +285,7 @@ describe('copyVersionGraph — null-guard else-branches', () => {
       await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
 
       // Assert: no data-slot or data-slot-question writes
-      expect(tx.appDataSlot.create).not.toHaveBeenCalled();
+      expect(tx.appDataSlot.createMany).not.toHaveBeenCalled();
       expect(tx.appDataSlotQuestion.createMany).not.toHaveBeenCalled();
     });
   });
@@ -444,18 +446,19 @@ describe('copyVersionGraph — positive branches (tags + data slots)', () => {
     tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(richSource());
     // findMany returns the copied question slot so the assignment lookup succeeds
     tx.appQuestionSlot.findMany.mockResolvedValue([{ id: 'newq-1', key: 'resp_name' }]);
-    tx.appQuestionTag.create.mockResolvedValue({ id: 'newtag-1' });
+    // Tags are createMany'd, then re-read by normalizedLabel to build the old→new id map.
+    tx.appQuestionTag.findMany.mockResolvedValue([{ id: 'newtag-1', normalizedLabel: 'critical' }]);
 
     // Act
     const result = await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
 
-    // Assert: tag was created with the non-null color included
-    expect(tx.appQuestionTag.create).toHaveBeenCalledTimes(1);
-    const tagData = (tx.appQuestionTag.create as Mock).mock.calls[0][0].data as Record<
-      string,
-      unknown
+    // Assert: tags were createMany'd with the non-null color included
+    expect(tx.appQuestionTag.createMany).toHaveBeenCalledTimes(1);
+    const tagRows = (tx.appQuestionTag.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
     >;
-    expect(tagData.color).toBe('red');
+    expect(tagRows[0].color).toBe('red');
+    expect(tagRows[0].normalizedLabel).toBe('critical');
 
     // Assert: the slot assignment was re-linked to the copied question and tag
     expect(tx.appQuestionSlotTag.createMany).toHaveBeenCalledTimes(1);
@@ -473,16 +476,20 @@ describe('copyVersionGraph — positive branches (tags + data slots)', () => {
     // Arrange
     tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(richSource());
     tx.appQuestionSlot.findMany.mockResolvedValue([{ id: 'newq-1', key: 'resp_name' }]);
-    tx.appDataSlot.create.mockResolvedValue({ id: 'newds-1' });
+    // Data slots are createMany'd, then re-read by key to build the old→new id map.
+    tx.appDataSlot.findMany.mockResolvedValue([{ id: 'newds-1', key: 'ds_name' }]);
 
     // Act
     const result = await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
 
-    // Assert: data slot was written with generationConfidence included
-    expect(tx.appDataSlot.create).toHaveBeenCalledTimes(1);
-    const dsData = (tx.appDataSlot.create as Mock).mock.calls[0][0].data as Record<string, unknown>;
-    expect(dsData.generationConfidence).toBe(0.95);
-    expect(dsData.versionId).toBe('tgt-v');
+    // Assert: data slots were createMany'd with generationConfidence included
+    expect(tx.appDataSlot.createMany).toHaveBeenCalledTimes(1);
+    const dsRows = (tx.appDataSlot.createMany as Mock).mock.calls[0][0].data as Array<
+      Record<string, unknown>
+    >;
+    expect(dsRows[0].generationConfidence).toBe(0.95);
+    expect(dsRows[0].versionId).toBe('tgt-v');
+    expect(dsRows[0].key).toBe('ds_name');
 
     // Assert: question link was re-linked via the copied question id
     expect(tx.appDataSlotQuestion.createMany).toHaveBeenCalledTimes(1);

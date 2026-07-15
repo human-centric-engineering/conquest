@@ -210,35 +210,50 @@ export async function copyVersionGraph(
   // question + copied tag. Done after the slot loop because re-linking needs the
   // fully-assembled questionIdMap. A copied tag's `normalizedLabel` is unique by
   // construction (carried 1:1 into a fresh version).
-  const tagIdMap = new Map<string, string>();
-  const newSlotTags: { questionSlotId: string; tagId: string }[] = [];
-  for (const tag of source.tags) {
-    const newTag = await tx.appQuestionTag.create({
-      data: {
+  if (source.tags.length > 0) {
+    await tx.appQuestionTag.createMany({
+      data: source.tags.map((tag) => ({
         versionId: targetVersionId,
         label: tag.label,
         normalizedLabel: tag.normalizedLabel,
         ...(tag.color !== null ? { color: tag.color } : {}),
-      },
-      select: { id: true },
+      })),
     });
-    tagIdMap.set(tag.id, newTag.id);
+  }
+  // Map original tag ids to copies via the per-version-unique `normalizedLabel` (createMany returns no
+  // ids). One createMany + one findMany replaces a per-tag round-trip — bounding the interactive
+  // transaction's DB chatter so a tag-heavy version copy stays well inside its timeout.
+  const newTagIdByNormalized = new Map(
+    (
+      await tx.appQuestionTag.findMany({
+        where: { versionId: targetVersionId },
+        select: { id: true, normalizedLabel: true },
+      })
+    ).map((t) => [t.normalizedLabel, t.id])
+  );
+  const tagIdMap = new Map<string, string>();
+  const newSlotTags: { questionSlotId: string; tagId: string }[] = [];
+  for (const tag of source.tags) {
+    const newTagId = newTagIdByNormalized.get(tag.normalizedLabel);
+    if (!newTagId) continue;
+    tagIdMap.set(tag.id, newTagId);
     for (const link of tag.slots) {
       const newSlotId = questionIdMap.get(link.questionSlotId);
-      if (newSlotId) newSlotTags.push({ questionSlotId: newSlotId, tagId: newTag.id });
+      if (newSlotId) newSlotTags.push({ questionSlotId: newSlotId, tagId: newTagId });
     }
   }
   if (newSlotTags.length > 0) {
     await tx.appQuestionSlotTag.createMany({ data: newSlotTags });
   }
 
-  // Data Slots feature: copy each data slot, then re-link its question mappings to the copied
-  // question ids (via questionIdMap). A copied key is unique by construction (carried 1:1).
-  const dataSlotIdMap = new Map<string, string>();
-  const newDataSlotQuestions: { dataSlotId: string; questionSlotId: string }[] = [];
-  for (const slot of source.dataSlots) {
-    const newSlot = await tx.appDataSlot.create({
-      data: {
+  // Data Slots feature: copy the data slots in one createMany, then re-link each slot's question
+  // mappings to the copied question ids (via questionIdMap). A copied key is unique by construction
+  // (carried 1:1), so — like the question slots above — one createMany + one findMany-by-key replaces
+  // the per-slot create round-trip. This is the loop that overran the interactive-transaction budget
+  // on a data-slot-heavy version in prod (P2028); collapsing it keeps the copy inside the timeout.
+  if (source.dataSlots.length > 0) {
+    await tx.appDataSlot.createMany({
+      data: source.dataSlots.map((slot) => ({
         versionId: targetVersionId,
         key: slot.key,
         name: slot.name,
@@ -249,14 +264,27 @@ export async function copyVersionGraph(
         ...(slot.generationConfidence !== null
           ? { generationConfidence: slot.generationConfidence }
           : {}),
-      },
-      select: { id: true },
+      })),
     });
-    dataSlotIdMap.set(slot.id, newSlot.id);
+  }
+  const newDataSlotIdByKey = new Map(
+    (
+      await tx.appDataSlot.findMany({
+        where: { versionId: targetVersionId },
+        select: { id: true, key: true },
+      })
+    ).map((ds) => [ds.key, ds.id])
+  );
+  const dataSlotIdMap = new Map<string, string>();
+  const newDataSlotQuestions: { dataSlotId: string; questionSlotId: string }[] = [];
+  for (const slot of source.dataSlots) {
+    const newSlotId = newDataSlotIdByKey.get(slot.key);
+    if (!newSlotId) continue;
+    dataSlotIdMap.set(slot.id, newSlotId);
     for (const link of slot.questions) {
       const newQuestionId = questionIdMap.get(link.questionSlotId);
       if (newQuestionId) {
-        newDataSlotQuestions.push({ dataSlotId: newSlot.id, questionSlotId: newQuestionId });
+        newDataSlotQuestions.push({ dataSlotId: newSlotId, questionSlotId: newQuestionId });
       }
     }
   }
