@@ -214,6 +214,8 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
         structure: '',
         backgroundContext: '',
         useClientKnowledge: false,
+        dataSlotInfluence: 50,
+        discountLowConfidence: true,
       },
       delivery: { onScreen: true, download: true },
       research: {

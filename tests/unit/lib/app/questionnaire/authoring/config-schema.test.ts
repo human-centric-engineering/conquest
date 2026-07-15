@@ -187,6 +187,47 @@ describe('updateConfigSchema', () => {
   });
 });
 
+describe('respondentReport generation knobs', () => {
+  /** A full respondentReport block whose generation object omits the new knobs. */
+  const baseGeneration = {
+    narrativeStyle: 'flowing' as const,
+    instructions: '',
+    structure: '',
+    backgroundContext: '',
+    useClientKnowledge: false,
+  };
+  const report = (generation: Record<string, unknown>) => ({
+    respondentReport: {
+      enabled: true,
+      mode: 'narrative' as const,
+      rawIncludes: { dataSlots: false, questionsAsPresented: false },
+      generation,
+      delivery: { onScreen: true, download: true },
+    },
+  });
+
+  it('accepts a config whose generation omits the new knobs (backward-compat)', () => {
+    expect(updateConfigSchema.safeParse(report(baseGeneration)).success).toBe(true);
+  });
+
+  it('accepts the new knobs when present and within bounds', () => {
+    expect(
+      updateConfigSchema.safeParse(
+        report({ ...baseGeneration, dataSlotInfluence: 60, discountLowConfidence: false })
+      ).success
+    ).toBe(true);
+  });
+
+  it('rejects a data-slot influence outside 0–100 or non-integer', () => {
+    expect(
+      updateConfigSchema.safeParse(report({ ...baseGeneration, dataSlotInfluence: 120 })).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse(report({ ...baseGeneration, dataSlotInfluence: 33.5 })).success
+    ).toBe(false);
+  });
+});
+
 describe('profileFieldSchema', () => {
   it('accepts a plain text field', () => {
     expect(

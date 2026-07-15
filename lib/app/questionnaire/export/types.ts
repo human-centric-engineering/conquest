@@ -40,6 +40,17 @@ export interface ExportDataSlotEntry {
    * the data-slot layer is the respondent's abstraction, mirroring the live panel.
    */
   value: string | null;
+  /**
+   * The agent's rationale for the captured position, or null/absent. Loaded for the report writer's
+   * data-slot context block (Feature: data-slot influence); the respondent-facing "Captured
+   * information" appendix ignores it.
+   */
+  rationale?: string | null;
+  /**
+   * The agent's 0–1 confidence in the captured position, or null/absent. Surfaced to the report writer
+   * when `discountLowConfidence` is on; the respondent-facing appendix ignores it.
+   */
+  confidence?: number | null;
 }
 
 /** Data slots grouped by theme, as rendered in the PDF's "Captured information" appendix. */

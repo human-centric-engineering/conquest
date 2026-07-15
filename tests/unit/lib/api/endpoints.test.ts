@@ -1097,6 +1097,8 @@ describe('API Endpoints', () => {
       expect(Q.versionStatus('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/status`);
       expect(Q.versionReingest('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/reingest`);
       expect(Q.versionConfig('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/config`);
+      expect(Q.reportCraft('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/report/craft`);
+      expect(Q.reportPreview('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/report/preview`);
       expect(Q.versionCostEstimate('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/cost-estimate`);
       expect(Q.versionNextQuestion('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/next-question`);
       expect(Q.versionEmbedQuestions('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/embed-questions`);

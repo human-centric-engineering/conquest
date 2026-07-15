@@ -13,7 +13,7 @@
 
 import { isRecord } from '@/lib/utils';
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
-import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
+import type { ExportDataSlotGroup, SessionExportModel } from '@/lib/app/questionnaire/export/types';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 
 /**
@@ -358,12 +358,28 @@ function describeAudience(audience: AudienceShape | null): string[] {
   return lines;
 }
 
+/** Format a 0–1 confidence as a compact ` (confidence 0.72)` suffix, or '' when absent/off. */
+function confidenceSuffix(
+  confidence: number | null | undefined,
+  includeConfidence: boolean | undefined
+): string {
+  if (!includeConfidence || typeof confidence !== 'number' || !Number.isFinite(confidence))
+    return '';
+  return ` (confidence ${confidence.toFixed(2)})`;
+}
+
 /**
  * Flatten the export model into a plain-text Q&A transcript for the report agent. Only answered
  * slots are included (an unanswered slot adds noise, not signal); sections with no answers are
  * skipped. Leads with the questionnaire goal + the full structured audience for grounding.
+ *
+ * `includeConfidence` annotates each answer with its capture confidence (0–1) so the writer can
+ * discount low-confidence items — set when `generation.discountLowConfidence` is on.
  */
-export function buildAnswerTranscript(model: AnswerTranscriptInput): string {
+export function buildAnswerTranscript(
+  model: AnswerTranscriptInput,
+  opts: { includeConfidence?: boolean } = {}
+): string {
   const lines: string[] = [];
   lines.push(`Questionnaire: ${model.questionnaireTitle}`);
   if (model.goal) lines.push(`Goal: ${model.goal}`);
@@ -379,10 +395,45 @@ export function buildAnswerTranscript(model: AnswerTranscriptInput): string {
       // Slot-aware rendering: choice answers show their respondent-facing labels (not stored option
       // keys) and booleans honour their configured true/false labels — the same shared formatter the
       // PDF and on-screen panel use, so the report transcript can't drift from what the respondent saw.
-      lines.push(`A: ${formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}`);
+      const conf = confidenceSuffix(slot.confidence, opts.includeConfidence);
+      lines.push(`A: ${formatSlotAnswer(slot.type, slot.typeConfig, slot.value)}${conf}`);
     }
     lines.push('');
   }
 
   return lines.join('\n').trim();
+}
+
+/**
+ * Flatten the captured data slots into a themed plain-text context block for the report agent — the
+ * conversational "understanding" layer that complements the direct questionnaire answers (Feature:
+ * data-slot influence). Only filled slots are included; each carries its agent rationale ("Why:") and,
+ * when `includeConfidence`, its 0–1 confidence. Returns '' when nothing usable, so the caller can skip
+ * the block (and its weighting instruction) entirely for versions without data slots.
+ *
+ *   ## <theme>
+ *   <slot name>: <captured paraphrase> (confidence 0.72)
+ *     Why: <rationale>
+ */
+export function buildDataSlotContextBlock(
+  groups: ExportDataSlotGroup[] | null | undefined,
+  opts: { includeConfidence?: boolean } = {}
+): string {
+  const blocks: string[] = [];
+  for (const group of groups ?? []) {
+    const rows: string[] = [];
+    for (const slot of group.slots) {
+      const value = slot.value?.trim();
+      if (!value) continue; // an unfilled slot adds noise, not signal
+      rows.push(
+        `${slot.name}: ${value}${confidenceSuffix(slot.confidence, opts.includeConfidence)}`
+      );
+      const rationale = slot.rationale?.trim();
+      if (rationale) rows.push(`  Why: ${rationale}`);
+    }
+    if (rows.length === 0) continue;
+    const heading = group.theme.trim();
+    blocks.push(heading ? `## ${heading}\n${rows.join('\n')}` : rows.join('\n'));
+  }
+  return blocks.join('\n\n').trim();
 }

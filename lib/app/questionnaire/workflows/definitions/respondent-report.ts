@@ -124,10 +124,10 @@ export const respondentReportWorkflow = diagram({
       x: 880,
       y: 0,
       description:
-        'The reasoning model writes the report from the transcript, any retrieved knowledge, and (when enabled) the before-research background. When the report will also append the raw questionnaire data, the writer is told the respondent can already see their answers, so it analyses and synthesises rather than restating them.',
+        'The reasoning model writes the report from the transcript, any retrieved knowledge, and (when enabled) the before-research background. When the version has data slots, the conversational data-slot understanding (each captured position + the agent’s rationale) is folded in as extra context, and a weighting instruction balances how much the report leans on it versus the direct answers. Each answer/fill can also carry a confidence score the writer is told to discount when low. When the report will also append the raw questionnaire data, the writer is told the respondent can already see their answers, so it analyses and synthesises rather than restating them.',
       meta: {
         agentSlug: RESPONDENT_REPORT_AGENT_SLUG,
-        note: 'The reasoning model writes the report.',
+        note: 'The reasoning model writes the report; data-slot context + confidence weight the emphasis.',
         settings: [
           {
             key: 'respondentReport.mode',
@@ -139,6 +139,18 @@ export const respondentReportWorkflow = diagram({
             key: 'respondentReport.generation.narrativeStyle',
             label: 'Narrative style',
             effect: 'Shapes prose density/format (flowing / concise / structured).',
+          },
+          {
+            key: 'respondentReport.generation.dataSlotInfluence',
+            label: 'Data-slot influence',
+            effect:
+              'A 0–100 weighting balancing how much the report is shaped by the contextual data-slot understanding vs the direct answers. Only bites when the version has data slots.',
+          },
+          {
+            key: 'respondentReport.generation.discountLowConfidence',
+            label: 'Discount low-confidence answers',
+            effect:
+              'When on, each answer/data-slot confidence is shown to the writer, which is told to weight down or disregard low-confidence items.',
           },
         ],
       },

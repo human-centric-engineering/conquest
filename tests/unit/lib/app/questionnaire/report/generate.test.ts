@@ -161,6 +161,86 @@ describe('generateRespondentReport', () => {
     expect(system?.content.toLowerCase()).toContain('actionable');
   });
 
+  it('feeds the data-slot context + weighting instruction when the version has data slots', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'narrative',
+          generation: { dataSlotInfluence: 70 },
+        },
+      })
+    );
+    (loadSessionExport as Mock).mockResolvedValue({
+      ...loadedExport(),
+      dataSlotGroups: [
+        {
+          theme: 'Motivation',
+          slots: [
+            {
+              name: 'Driver',
+              description: null,
+              value: 'Career growth',
+              rationale: 'Said so twice',
+              confidence: 0.8,
+            },
+          ],
+        },
+      ],
+    });
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+
+    const messages = chat.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    const system = messages.find((m) => m.role === 'system')!.content;
+    // The themed data-slot understanding is folded into the system prompt, with its confidence.
+    expect(system).toContain('data slots');
+    expect(system).toContain('Driver: Career growth (confidence 0.80)');
+    // The weighting instruction reflects 70% data-slot / 30% questionnaire.
+    expect(system).toContain('70%');
+    expect(system).toContain('30%');
+    // discountLowConfidence defaults on → the confidence-handling instruction is present.
+    expect(system).toContain('proportionally less weight');
+  });
+
+  it('omits the data-slot block + weighting instruction when the version has no data slots', async () => {
+    // The default loaded export carries no dataSlotGroups → the block builder returns ''.
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    )!.content;
+    expect(system).not.toContain('Balance the report');
+    // The "(data slots)" context header never appears without a block.
+    expect(system).not.toContain('captured during the conversation (data slots)');
+  });
+
+  it('omits the confidence-handling instruction when discountLowConfidence is off', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'narrative',
+          generation: { discountLowConfidence: false },
+        },
+      })
+    );
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    )!.content;
+    expect(system).not.toContain('proportionally less weight');
+  });
+
   it('strips a research block the writer hallucinated (research disabled → no fabricated sources)', async () => {
     // Web search is off in this suite, so no real research round runs and nothing is attached below.
     // A model that invents its own `research` key with plausible-but-fake links must not leak through.

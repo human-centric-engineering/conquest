@@ -15,7 +15,16 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('@/lib/api/client', () => ({
-  apiClient: { patch: vi.fn().mockResolvedValue({}) },
+  apiClient: {
+    patch: vi.fn().mockResolvedValue({}),
+    post: vi.fn().mockResolvedValue({
+      questionnaireTitle: 'Pulse',
+      mode: 'narrative',
+      content: { summary: 'Sample.', sections: [], actions: [] },
+      formatted: false,
+      completionPct: 100,
+    }),
+  },
   APIClientError: class extends Error {},
 }));
 // Tabs → render all panels (so we can assert across them without switching).
@@ -170,6 +179,35 @@ describe('RespondentReportEditor', () => {
   it('enables the generation fields in narrative mode (an AI mode)', () => {
     renderEditor({ mode: 'narrative' });
     expect(screen.getByPlaceholderText(/Warm and encouraging/i)).not.toBeDisabled();
+  });
+
+  it('reflects the confidence toggle in the save payload', () => {
+    const { container } = renderEditor({ mode: 'narrative' });
+    const confidence = container.querySelector('#rr-confidence') as HTMLInputElement;
+    expect(confidence).not.toBeNull();
+    expect(confidence.checked).toBe(true); // default on
+    fireEvent.click(confidence);
+    fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
+
+    const opts = (apiClient.patch as unknown as Mock).mock.calls[0][1];
+    expect(opts.body.respondentReport.generation.discountLowConfidence).toBe(false);
+    // The default influence rides along untouched.
+    expect(opts.body.respondentReport.generation.dataSlotInfluence).toBe(50);
+  });
+
+  it('generates a preview from the current config via the preview endpoint', () => {
+    renderEditor({
+      mode: 'narrative',
+      generation: { ...DEFAULT_RESPONDENT_REPORT_SETTINGS.generation, dataSlotInfluence: 70 },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /preview report/i }));
+
+    const post = apiClient.post as unknown as Mock;
+    expect(post).toHaveBeenCalledTimes(1);
+    const [path, opts] = post.mock.calls[0];
+    expect(path).toBe('/api/v1/app/questionnaires/qn-1/versions/v1/report/preview');
+    expect(opts.body.config.mode).toBe('narrative');
+    expect(opts.body.config.generation.dataSlotInfluence).toBe(70);
   });
 
   it('hides the Q&A toggle in narrative mode (woven-only) but keeps the captured-data toggle', () => {

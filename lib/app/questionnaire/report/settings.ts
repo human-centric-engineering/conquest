@@ -109,6 +109,16 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
         d.generation.backgroundContext
       ),
       useClientKnowledge: asBool(generation.useClientKnowledge, d.generation.useClientKnowledge),
+      dataSlotInfluence: asBoundedInt(
+        generation.dataSlotInfluence,
+        0,
+        100,
+        d.generation.dataSlotInfluence
+      ),
+      discountLowConfidence: asBool(
+        generation.discountLowConfidence,
+        d.generation.discountLowConfidence
+      ),
     },
     delivery: {
       onScreen: asBool(delivery.onScreen, d.delivery.onScreen),

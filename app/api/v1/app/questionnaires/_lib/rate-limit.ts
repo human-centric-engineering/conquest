@@ -256,6 +256,22 @@ export const reportConfigAssistLimiter = createRateLimiter({
 });
 
 /**
+ * Respondent-report preview sub-cap. Each preview runs TWO reasoning-model calls (synthesise sample
+ * answers, then generate the report) — the heaviest report sub-flow — so it's capped tighter than the
+ * config-assistant turn. 20/min per admin is ample for iterating on config while bounding a hammered
+ * "Preview" button. Keyed on the admin user id, who owns the spend.
+ */
+export const REPORT_PREVIEW_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link reportPreviewLimiter}, in milliseconds. */
+export const REPORT_PREVIEW_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const reportPreviewLimiter = createRateLimiter({
+  interval: REPORT_PREVIEW_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: REPORT_PREVIEW_RATE_LIMIT_MAX,
+});
+
+/**
  * Cohort-report generation sub-cap (F14.3). Each generate runs the cohort dataset build plus one
  * reasoning-model call over the whole round — a costly, slow sub-flow. Capped tightly at 10/min per
  * admin (the ingest class), keyed on the admin user id who owns the spend, so a hammered "Generate"
