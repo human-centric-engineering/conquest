@@ -19,16 +19,27 @@ import {
   type ProfileFieldConfig,
 } from '@/lib/app/questionnaire/types';
 import { parseProfileFields } from '@/lib/app/questionnaire/profile/profile-values';
+import { splitFieldsByPlacement } from '@/lib/app/questionnaire/profile/capture-placement';
 
-/** The resolved capture config a respondent surface needs to decide whether to gate. */
+/**
+ * The resolved capture config a respondent surface needs to decide whether to gate. This resolver owns
+ * only the FORM-gate half of capture — the fields that ride the blocking carousel gate. The
+ * conversational half is resolved independently by the interviewer turn loop (`messages/route.ts`), so
+ * a hybrid version (some `form` fields, some `conversational`) is served by both without either seeing
+ * the other's subset.
+ */
 export interface ResolvedSessionCapture {
-  /** How the fields are collected — `form` gates the carousel; `conversational` does not. */
+  /** The version-wide DEFAULT placement (a label/back-compat hint; the gate keys off `formFields`). */
   captureMode: CaptureMode;
-  /** The admin-authored fields to collect, in order (each carries its `validation` mode). */
-  fields: ProfileFieldConfig[];
   /**
-   * Nothing left to collect: a snapshot already exists (resume), the mode is conversational, or
-   * there are no fields. A form-mode surface skips the gate when this is true.
+   * The subset of admin-authored fields whose effective placement is `form` (their own `captureVia`,
+   * else the `captureMode` default), in authored order — exactly what the form gate renders and the
+   * PUT re-validates. Empty when every field is collected conversationally (or there are no fields).
+   */
+  formFields: ProfileFieldConfig[];
+  /**
+   * The form gate has nothing to do: a snapshot already exists (resume, or the form pass ran), or the
+   * `formFields` subset is empty. The form-mode surface skips the gate when this is true.
    */
   satisfied: boolean;
 }
@@ -60,13 +71,19 @@ export async function resolveSessionCapture(
   // Anonymous → never collect a profile (the PII-free invariant). Treat an absent config as anon-safe.
   if (!config || config.anonymousMode) return null;
 
-  const fields = parseProfileFields(config.profileFields);
   const captureMode = narrowToEnum<CaptureMode>(config.captureMode ?? '', CAPTURE_MODES, 'form');
+  const { formFields } = splitFieldsByPlacement(
+    parseProfileFields(config.profileFields),
+    captureMode
+  );
   const hasSnapshot = session.profileSnapshot !== null;
 
   return {
     captureMode,
-    fields,
-    satisfied: hasSnapshot || captureMode === 'conversational' || fields.length === 0,
+    formFields,
+    // The form gate is done once a snapshot exists (its write is what creates one, and it always
+    // precedes any conversational turn) or when there is no form subset to collect. A hybrid version's
+    // conversational subset is NOT this resolver's concern, so it never keeps the gate open.
+    satisfied: hasSnapshot || formFields.length === 0,
   };
 }

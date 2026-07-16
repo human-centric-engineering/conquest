@@ -21,6 +21,10 @@ import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import type { ProfileFieldConfig } from '@/lib/app/questionnaire/types';
 import { validateProfileSubmission } from '@/lib/app/questionnaire/profile/validate-profile-fields';
 import { upsertProfileSnapshot } from '@/lib/app/questionnaire/profile/profile-snapshot';
+import {
+  asProfileValues,
+  type ProfileValues,
+} from '@/lib/app/questionnaire/profile/profile-values';
 
 /**
  * Build the interviewer directive for conversational capture, or `''` when there's nothing to
@@ -41,9 +45,18 @@ export function buildProfileCaptureInstructions(fields: ProfileFieldConfig[]): s
   );
 }
 
-/** Whether a session already has a persisted profile snapshot (capture complete). */
-export async function hasProfileSnapshot(sessionId: string): Promise<boolean> {
-  return (await prisma.appRespondentProfileSnapshot.count({ where: { sessionId } })) > 0;
+/**
+ * The profile values already persisted for a session (empty object when there's no snapshot yet). The
+ * interviewer reads these to decide whether the conversational subset still needs gathering
+ * (`conversationalCaptureActive`) — in a hybrid version the form gate may have written the `form`
+ * subset first, so "a snapshot exists" is no longer the same as "the conversational fields are in hand".
+ */
+export async function readProfileSnapshotValues(sessionId: string): Promise<ProfileValues> {
+  const snapshot = await prisma.appRespondentProfileSnapshot.findUnique({
+    where: { sessionId },
+    select: { values: true },
+  });
+  return asProfileValues(snapshot?.values) ?? {};
 }
 
 const EXTRACT_MAX_TOKENS = 600;
@@ -109,12 +122,16 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * Best-effort: extract the conversationally-gathered profile details from the transcript and, once
- * ALL required fields are present and valid, persist them to the snapshot. Writing the snapshot is
- * what stops {@link buildProfileCaptureInstructions} being injected on later turns, so we only write
- * a COMPLETE profile (a partial extraction leaves the interviewer to keep gathering the rest). Runs
- * each turn while the snapshot is still absent; entirely non-fatal (an LLM/DB failure just retries
- * next turn). Never called for an anonymous version (the caller guards on `anonymousMode`).
+ * Best-effort: extract the conversationally-gathered profile details from the transcript and persist
+ * whatever the respondent has provided so far, MERGING into the snapshot (the shared upsert accumulates
+ * across passes — see `profile-snapshot.ts`). Persist is PARTIAL, not all-or-nothing: a field the
+ * respondent has answered lands immediately even if others are still outstanding, which is what lets a
+ * hybrid version's form subset and conversational subset coexist in one snapshot and matches the
+ * confirmed "persist partial, don't block" rule. Whether the interviewer keeps asking is governed
+ * separately by `conversationalCaptureActive` (required fields keep the directive alive; optional ones
+ * are taken as-offered). `fields` is the CONVERSATIONAL subset only. Runs each turn while that subset is
+ * still active; entirely non-fatal (an LLM/DB failure just retries next turn). Never called for an
+ * anonymous version (the caller guards on `anonymousMode`).
  */
 export async function extractAndPersistConversationalProfile(opts: {
   sessionId: string;
@@ -165,10 +182,13 @@ export async function extractAndPersistConversationalProfile(opts: {
     }
     if (Object.keys(raw).length === 0) return; // nothing captured yet — keep gathering
 
-    // Validate + normalise (honours each field's `validation` mode). Only a COMPLETE, valid profile
-    // (all required fields present) is persisted — an incomplete one keeps the interviewer gathering.
-    const result = await validateProfileSubmission({ fields, raw, sessionId });
+    // Validate + normalise only the fields the respondent has actually answered (honouring each one's
+    // `validation` mode), so a partial capture persists without a missing-required rejection blocking
+    // the fields that ARE in hand. The upsert merges into any existing snapshot (e.g. the form subset).
+    const capturedFields = fields.filter((f) => f.key in raw);
+    const result = await validateProfileSubmission({ fields: capturedFields, raw, sessionId });
     if (!result.ok) return;
+    if (Object.keys(result.values).length === 0) return; // all captured values dropped as blank
 
     await upsertProfileSnapshot(prisma, sessionId, respondentUserId, result.values);
     logger.info('conversational_capture: profile snapshot persisted', {

@@ -213,6 +213,37 @@ describe('updateConfigSchema', () => {
       });
       expect(res.success).toBe(false);
     });
+
+    it('leaves captureVia undefined when omitted (inherit the version default — no hybrid override)', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [{ key: 'name', label: 'Name', type: 'text', required: true }],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) expect(res.data.profileFields?.[0]?.captureVia).toBeUndefined();
+    });
+
+    it('accepts an explicit per-field captureVia override (hybrid placement)', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, captureVia: 'form' },
+          { key: 'org', label: 'Org', type: 'text', required: false, captureVia: 'conversational' },
+        ],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.profileFields?.[0]?.captureVia).toBe('form');
+        expect(res.data.profileFields?.[1]?.captureVia).toBe('conversational');
+      }
+    });
+
+    it('rejects an unknown captureVia value', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, captureVia: 'telepathy' },
+        ],
+      });
+      expect(res.success).toBe(false);
+    });
   });
 
   describe('captureMode', () => {

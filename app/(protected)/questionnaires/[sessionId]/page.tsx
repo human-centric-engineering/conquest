@@ -170,9 +170,10 @@ export default async function QuestionnaireSessionPage({
     ? await resolveSessionPersonas(sessionId)
     : null;
 
-  // Respondent profile capture (F-capture). Resolves the blocking form gate for non-anonymous
-  // versions collecting fields in `form` mode; `null` for anonymous (PII-free) and `satisfied` on a
-  // resume with an existing snapshot. No platform flag — purely per-version config (like profileFields).
+  // Respondent profile capture (F-capture). Resolves the blocking form gate (its `formFields` subset)
+  // for non-anonymous versions; `null` for anonymous (PII-free) and `satisfied` on a resume with an
+  // existing snapshot or when there is no form subset (all-conversational / hybrid's conversational
+  // half is gathered in-chat). No platform flag — purely per-version config (like profileFields).
   const capture = await resolveSessionCapture(sessionId);
 
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is

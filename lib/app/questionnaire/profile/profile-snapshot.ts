@@ -14,14 +14,23 @@
 
 import type { Prisma } from '@prisma/client';
 
-import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
+import {
+  asProfileValues,
+  type ProfileValues,
+} from '@/lib/app/questionnaire/profile/profile-values';
 
 /** A Prisma client or an interactive-transaction client — both expose the model delegate. */
 type ProfileSnapshotDb = Pick<Prisma.TransactionClient, 'appRespondentProfileSnapshot'>;
 
 /**
- * Idempotently write the collected profile values for a session. `respondentUserId` is the authed
- * owner (denormalised for the GDPR cascade) or `null` for a non-anonymous no-login respondent.
+ * Idempotently write the collected profile values for a session, MERGING them into any values already
+ * stored (new keys win). Merge — not overwrite — because a **hybrid** questionnaire builds the snapshot
+ * in two passes: the form gate writes its subset up front, then the conversational extraction adds the
+ * in-chat subset later. A plain overwrite would drop whichever pass ran first. For the single-pass
+ * modes (pure form / pure conversational) the merge is a no-op over an empty base, so behaviour is
+ * unchanged. `respondentUserId` is the authed owner (denormalised for the GDPR cascade) or `null` for a
+ * non-anonymous no-login respondent. Never called for an anonymous session (callers guard on
+ * `anonymousMode`). Server-only (Prisma).
  */
 export async function upsertProfileSnapshot(
   db: ProfileSnapshotDb,
@@ -29,9 +38,14 @@ export async function upsertProfileSnapshot(
   respondentUserId: string | null,
   values: ProfileValues
 ): Promise<void> {
+  const existing = await db.appRespondentProfileSnapshot.findUnique({
+    where: { sessionId },
+    select: { values: true },
+  });
+  const merged: ProfileValues = { ...(asProfileValues(existing?.values) ?? {}), ...values };
   await db.appRespondentProfileSnapshot.upsert({
     where: { sessionId },
-    create: { sessionId, respondentUserId, values },
-    update: { values, respondentUserId },
+    create: { sessionId, respondentUserId, values: merged },
+    update: { values: merged, respondentUserId },
   });
 }

@@ -82,7 +82,7 @@ const FIELDS = [
     validation: 'hybrid' as const,
   },
 ];
-const CAPTURE = { captureMode: 'form' as const, fields: FIELDS, satisfied: false };
+const CAPTURE = { captureMode: 'form' as const, formFields: FIELDS, satisfied: false };
 
 function session(over: Record<string, unknown> = {}) {
   return { id: 'sess-1', respondentUserId: USER, status: 'active', ...over };
@@ -193,13 +193,18 @@ describe('PUT — capture submit', () => {
     expect(snapshotMock.upsertProfileSnapshot).not.toHaveBeenCalled();
   });
 
-  it('409s CAPTURE_NOT_APPLICABLE for a conversational version', async () => {
+  it('409s CAPTURE_NOT_APPLICABLE when there is no form subset (all-conversational version)', async () => {
+    // A conversational default with no form-placement fields resolves to an empty formFields subset —
+    // the PUT (which only handles the form gate) is not applicable.
     captureMock.resolveSessionCapture.mockResolvedValue({
-      ...CAPTURE,
-      captureMode: 'conversational',
+      captureMode: 'conversational' as const,
+      formFields: [],
+      satisfied: true,
     });
     const res = await PUT(req({ body: { profileValues: { name: 'Ada' } } }), ctx);
     expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('CAPTURE_NOT_APPLICABLE');
   });
 
   it('409s SESSION_NOT_ACTIVE for a terminal session', async () => {

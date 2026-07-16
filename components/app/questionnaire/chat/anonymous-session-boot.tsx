@@ -290,10 +290,13 @@ const profileFieldSchema = z.object({
   required: z.boolean(),
   options: z.array(z.string()).optional(),
   validation: z.enum(PROFILE_FIELD_VALIDATION_MODES),
+  captureVia: z.enum(CAPTURE_MODES).optional(),
 });
 const resolvedCaptureSchema = z.object({
   captureMode: z.enum(CAPTURE_MODES),
-  fields: z.array(profileFieldSchema),
+  // Only the form-gate subset reaches the client; a hybrid version's conversational fields are gathered
+  // server-side by the interviewer and never gate the carousel.
+  formFields: z.array(profileFieldSchema),
   satisfied: z.boolean(),
 });
 const captureResponseSchema = z.object({

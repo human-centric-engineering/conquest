@@ -396,7 +396,7 @@ describe('SessionWorkspace', () => {
   describe('capture gate', () => {
     const captureForm = (over: Record<string, unknown> = {}) => ({
       captureMode: 'form' as const,
-      fields: [
+      formFields: [
         {
           key: 'name',
           label: 'Name',
@@ -538,14 +538,17 @@ describe('SessionWorkspace', () => {
       expect(kickoff).toHaveBeenCalledTimes(1);
     });
 
-    it('never shows the gate for a conversational-mode version', () => {
+    it('never shows the gate when there is no form subset (all-conversational version)', () => {
+      // A pure-conversational version (or the conversational half of a hybrid) resolves to an empty
+      // `formFields` subset — the interviewer gathers those fields in-chat, so the gate is absent and
+      // the kickoff fires immediately. `captureMode` is only a default-placement hint here.
       setStreamIdle();
       render(
         <SessionWorkspace
           sessionId="s1"
           presentationMode="chat"
           autoStart
-          capture={captureForm({ captureMode: 'conversational' })}
+          capture={captureForm({ captureMode: 'conversational', formFields: [] })}
         />
       );
       expect(screen.queryByTestId('capture-gate')).not.toBeInTheDocument();

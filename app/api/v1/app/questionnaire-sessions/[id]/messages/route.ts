@@ -53,12 +53,15 @@ import { resolveSessionTone } from '@/lib/app/questionnaire/persona/settings';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
 import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
 import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
-import { parseProfileFields } from '@/lib/app/questionnaire/profile/profile-values';
 import {
   buildProfileCaptureInstructions,
   extractAndPersistConversationalProfile,
-  hasProfileSnapshot,
+  readProfileSnapshotValues,
 } from '@/lib/app/questionnaire/profile/conversational-capture';
+import {
+  conversationalCaptureActive,
+  conversationalCaptureFieldsForConfig,
+} from '@/lib/app/questionnaire/profile/capture-placement';
 import { buildReasoningTrace, type ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/questionnaire/inspector';
@@ -349,16 +352,18 @@ async function handleMessage(
       (peerInsights ?? []).map((p) => [`${p.slotKind}:${p.slotKey}`, p])
     );
 
-    // Conversational profile capture (F-capture): when the version collects profile fields in
-    // `conversational` mode (non-anonymous) and no snapshot exists yet, the interviewer gathers them
-    // in-chat and a best-effort post-turn pass (below) persists them. Resolved once per turn.
-    const captureFields =
-      loaded.base.config.captureMode === 'conversational' && !loaded.base.config.anonymousMode
-        ? parseProfileFields(loaded.base.config.profileFields)
-        : [];
-    const captureSnapshotExists =
-      captureFields.length > 0 ? await hasProfileSnapshot(sessionId) : false;
-    const captureActive = captureFields.length > 0 && !captureSnapshotExists;
+    // Conversational profile capture (F-capture): the interviewer gathers the CONVERSATIONAL subset of
+    // the profile fields in-chat and a best-effort post-turn pass (below) persists them. The subset is
+    // the fields whose effective placement is `conversational` (their own `captureVia`, else the
+    // version-wide `captureMode` default) — so this fires for a pure-conversational version AND for the
+    // conversational half of a hybrid one, while the `form` half rides the carousel gate. Resolved once
+    // per turn. Never for an anonymous version (PII-free).
+    const captureFields = conversationalCaptureFieldsForConfig(loaded.base.config);
+    // Read the already-persisted values (a hybrid form pass may have written the `form` subset first),
+    // so "still gathering?" is decided on the conversational fields specifically — not mere existence.
+    const captureValues =
+      captureFields.length > 0 ? await readProfileSnapshotValues(sessionId) : {};
+    const captureActive = conversationalCaptureActive(captureFields, captureValues);
     // Captured here (where `loaded` is narrowed non-null) for the post-turn extraction inside the
     // stream generator, which loses the narrowing across the closure boundary.
     const captureRespondentUserId = loaded.session.respondentUserId;

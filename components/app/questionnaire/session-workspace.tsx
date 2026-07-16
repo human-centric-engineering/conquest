@@ -159,12 +159,13 @@ export interface SessionWorkspaceProps {
    */
   personas?: ResolvedSessionPersonas | null;
   /**
-   * Respondent profile capture (F-capture). When the version collects `profileFields` in `form` mode
-   * and the version is NOT anonymous, a BLOCKING form gate rides the carousel just after the intro and
-   * before the persona/chat: the respondent cannot advance (and the opening LLM turn is deferred)
-   * until they submit valid details. `satisfied` (a snapshot already exists on resume, or the mode is
-   * conversational / there are no fields) skips the gate. Null for an anonymous version — that path
-   * stays PII-free and never gates. The read-only admin viewer omits it.
+   * Respondent profile capture (F-capture). When the version has a `form`-placement subset of
+   * `profileFields` (`formFields`) and is NOT anonymous, a BLOCKING form gate rides the carousel just
+   * after the intro and before the persona/chat: the respondent cannot advance (and the opening LLM
+   * turn is deferred) until they submit valid details. `satisfied` (a snapshot already exists on
+   * resume, or there is no form subset) skips the gate. A hybrid version's conversational fields aren't
+   * here — the interviewer gathers those in-chat. Null for an anonymous version — that path stays
+   * PII-free and never gates. The read-only admin viewer omits it.
    */
   capture?: ResolvedSessionCapture | null;
 }
@@ -215,16 +216,14 @@ export function SessionWorkspace({
     personas?.enabled && showChat && !readOnly && personas.switcher !== 'indicator'
   );
   // The profile capture form-gate rides the carousel between the intro and the persona/chat, whenever
-  // the version collects fields in `form` mode and hasn't already (a resume with an existing snapshot,
-  // or a conversational/anonymous version, leaves `satisfied`/`null` so the gate is absent). BLOCKING:
-  // the respondent can't advance past it until it's submitted (see `goToView`) — and the LLM kickoff is
-  // deferred until then. Never in the read-only admin viewer.
+  // the version has a form-placement subset to collect and hasn't already (a resume with an existing
+  // snapshot, an all-conversational/anonymous version, or no fields leaves `satisfied`/empty/`null` so
+  // the gate is absent). `formFields` is only the `form`-placement subset — a hybrid version's
+  // conversational fields are gathered in-chat, never here. BLOCKING: the respondent can't advance past
+  // it until it's submitted (see `goToView`) — and the LLM kickoff is deferred until then. Never in the
+  // read-only admin viewer.
   const showCapture = Boolean(
-    capture &&
-    capture.captureMode === 'form' &&
-    capture.fields.length > 0 &&
-    !capture.satisfied &&
-    !readOnly
+    capture && capture.formFields.length > 0 && !capture.satisfied && !readOnly
   );
   // The in-chat "Interviewer: {name} · Change" chip — shown for the `indicator` and `both` switchers.
   const showInterviewerChip = Boolean(
@@ -821,7 +820,7 @@ export function SessionWorkspace({
       <ProfileCaptureGate
         sessionId={sessionId}
         accessToken={accessToken}
-        fields={capture.fields}
+        fields={capture.formFields}
         // When a persona picker follows, the CTA leads to it; otherwise it begins the conversation.
         proceedLabel={showPersona ? 'Continue' : (intro?.copy.buttonLabel ?? undefined)}
         onSubmitted={handleCaptureSubmitted}

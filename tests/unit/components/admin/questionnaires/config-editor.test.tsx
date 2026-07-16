@@ -606,14 +606,14 @@ describe('ConfigEditor', () => {
 
   it('shows the empty-state message when no profile fields exist', () => {
     setup({ profileFields: [] });
-    expect(screen.getByText(/no profile fields/i)).toBeInTheDocument();
+    expect(screen.getByText(/no details collected yet/i)).toBeInTheDocument();
   });
 
   it('"Add profile field" adds a new row', () => {
     setup({ profileFields: [] });
     fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
-    // A new row with Key/Label inputs appears
-    expect(screen.getAllByPlaceholderText(/e\.g\. organisation/i).length).toBeGreaterThan(0);
+    // A new field card appears with the respondent-facing label input.
+    expect(screen.getAllByPlaceholderText(/your organisation/i).length).toBeGreaterThan(0);
   });
 
   it('removing a profile field removes it from the list', () => {
@@ -653,6 +653,89 @@ describe('ConfigEditor', () => {
     const fields = bodyOf(specs).profileFields as Array<{ key: string; label: string }>;
     expect(fields[0].key).toBe('org_key');
     expect(fields[0].label).toBe('Org Label');
+  });
+
+  it('auto-derives the storage key (slugified) from the label for a NEW field', () => {
+    const { specs } = setup({ profileFields: [] });
+    fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
+    fireEvent.change(screen.getByPlaceholderText(/your organisation/i), {
+      target: { value: 'Company Size!' },
+    });
+    // The key input mirrors the slugified label without the admin touching it.
+    expect(screen.getByDisplayValue('company_size')).toBeInTheDocument();
+    clickSave();
+    const fields = bodyOf(specs).profileFields as Array<{ key: string; label: string }>;
+    expect(fields[0]).toMatchObject({ key: 'company_size', label: 'Company Size!' });
+  });
+
+  it('stops auto-deriving the key once it has been hand-edited', () => {
+    const { specs } = setup({ profileFields: [] });
+    fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
+    fireEvent.change(screen.getByPlaceholderText(/your organisation/i), {
+      target: { value: 'Name' },
+    });
+    expect(screen.getByDisplayValue('name')).toBeInTheDocument(); // auto-derived
+    // Hand-edit the key, then change the label again — the key must NOT be rewritten.
+    fireEvent.change(screen.getByDisplayValue('name'), { target: { value: 'custom_id' } });
+    fireEvent.change(screen.getByDisplayValue('Name'), { target: { value: 'Full Name' } });
+    clickSave();
+    const fields = bodyOf(specs).profileFields as Array<{ key: string; label: string }>;
+    expect(fields[0]).toMatchObject({ key: 'custom_id', label: 'Full Name' });
+  });
+
+  it('does NOT rewrite a saved field’s key when its label is edited (protects stored answers)', () => {
+    const { specs } = setup({
+      profileFields: [
+        {
+          key: 'org',
+          label: 'Organisation',
+          type: 'text',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
+    });
+    // A loaded field is key-locked — editing the label leaves the key alone.
+    fireEvent.change(screen.getByDisplayValue('Organisation'), { target: { value: 'Company' } });
+    clickSave();
+    const fields = bodyOf(specs).profileFields as Array<{ key: string; label: string }>;
+    expect(fields[0]).toMatchObject({ key: 'org', label: 'Company' });
+  });
+
+  it('preserves a per-field captureVia override on save (hybrid placement)', () => {
+    const { specs } = setup({
+      captureMode: 'conversational',
+      profileFields: [
+        {
+          key: 'name',
+          label: 'Name',
+          type: 'text',
+          required: true,
+          validation: 'deterministic',
+          captureVia: 'form',
+        },
+      ],
+    });
+    clickSave();
+    const fields = bodyOf(specs).profileFields as Array<{ key: string; captureVia?: string }>;
+    expect(fields[0].captureVia).toBe('form');
+  });
+
+  it('omits captureVia from the payload when a field inherits the default placement', () => {
+    const { specs } = setup({
+      profileFields: [
+        {
+          key: 'name',
+          label: 'Name',
+          type: 'text',
+          required: true,
+          validation: 'deterministic',
+        },
+      ],
+    });
+    clickSave();
+    const fields = bodyOf(specs).profileFields as Array<Record<string, unknown>>;
+    expect(fields[0]).not.toHaveProperty('captureVia');
   });
 
   it('shows the Options input only for select-type profile fields', async () => {

@@ -1,18 +1,20 @@
 /**
  * Unit test: conversational profile capture (F-capture).
  *
- * Covers the interviewer directive builder and the best-effort transcript extraction: it persists
- * ONLY a complete, valid profile (a partial extraction leaves the interviewer gathering the rest), it
- * writes nothing when the respondent hasn't provided anything yet, and it is fully non-fatal (an LLM
- * failure just retries next turn). Prisma, the LLM runner, the validator, and the snapshot writer are
- * all mocked so no real I/O runs.
+ * Covers the interviewer directive builder and the best-effort transcript extraction: it persists the
+ * captured subset PARTIALLY (a field the respondent has answered lands even while others are still
+ * outstanding — hybrid-friendly, "persist partial, don't block"), it writes nothing when the respondent
+ * hasn't provided anything yet, and it is fully non-fatal (an LLM failure just retries next turn). It
+ * also covers `readProfileSnapshotValues`, the read the interviewer uses to decide whether the
+ * conversational subset still needs gathering. Prisma, the LLM runner, the validator, and the snapshot
+ * writer are all mocked so no real I/O runs.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireTurn: { findMany: vi.fn() },
-  appRespondentProfileSnapshot: { count: vi.fn() },
+  appRespondentProfileSnapshot: { findUnique: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
@@ -37,7 +39,7 @@ vi.mock('@/lib/logging', () => ({ logger: loggerMock }));
 import {
   buildProfileCaptureInstructions,
   extractAndPersistConversationalProfile,
-  hasProfileSnapshot,
+  readProfileSnapshotValues,
   parseExtraction,
 } from '@/lib/app/questionnaire/profile/conversational-capture';
 import type { ProfileFieldConfig } from '@/lib/app/questionnaire/types';
@@ -80,7 +82,7 @@ describe('buildProfileCaptureInstructions', () => {
 });
 
 describe('extractAndPersistConversationalProfile', () => {
-  it('persists a COMPLETE, valid profile (all required present)', async () => {
+  it('persists all captured, valid values', async () => {
     vi.mocked(runStructuredCompletion).mockResolvedValue(
       extractionResult([
         { key: 'name', value: 'Ada' },
@@ -104,13 +106,38 @@ describe('extractAndPersistConversationalProfile', () => {
     });
   });
 
-  it('writes NOTHING when the required field is still missing (validation not ok)', async () => {
+  it('persists PARTIALLY — validates only the captured subset, so a required field still missing does not block the ones in hand', async () => {
+    // The respondent has given only the (optional) org so far; the required name is still outstanding.
+    // Partial persist writes org now (merged by the snapshot writer) rather than withholding everything
+    // until the whole profile is complete.
     vi.mocked(runStructuredCompletion).mockResolvedValue(
       extractionResult([{ key: 'org', value: 'Acme' }])
     );
+    validateMock.validateProfileSubmission.mockResolvedValue({ ok: true, values: { org: 'Acme' } });
+
+    await extractAndPersistConversationalProfile({
+      sessionId: 's1',
+      respondentUserId: 'u1',
+      fields: FIELDS,
+    });
+
+    // Only the captured field is handed to the validator — the missing required one must NOT force a
+    // rejection of the value we do have.
+    expect(validateMock.validateProfileSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ fields: [FIELDS[1]], raw: { org: 'Acme' } })
+    );
+    expect(snapshotMock.upsertProfileSnapshot).toHaveBeenCalledWith(expect.anything(), 's1', 'u1', {
+      org: 'Acme',
+    });
+  });
+
+  it('writes NOTHING when validation rejects the captured value (retries next turn)', async () => {
+    vi.mocked(runStructuredCompletion).mockResolvedValue(
+      extractionResult([{ key: 'org', value: 'asdf' }])
+    );
     validateMock.validateProfileSubmission.mockResolvedValue({
       ok: false,
-      fieldErrors: { name: 'Name is required' },
+      fieldErrors: { org: 'That does not look like a real organisation' },
       message: 'x',
     });
 
@@ -168,18 +195,21 @@ describe('extractAndPersistConversationalProfile', () => {
   });
 });
 
-describe('hasProfileSnapshot', () => {
-  it('is true when a snapshot row exists for the session', async () => {
-    prismaMock.appRespondentProfileSnapshot.count.mockResolvedValue(1);
-    expect(await hasProfileSnapshot('s1')).toBe(true);
-    expect(prismaMock.appRespondentProfileSnapshot.count).toHaveBeenCalledWith({
+describe('readProfileSnapshotValues', () => {
+  it('returns the stored values when a snapshot exists', async () => {
+    prismaMock.appRespondentProfileSnapshot.findUnique.mockResolvedValue({
+      values: { name: 'Ada', org: 'Acme' },
+    });
+    expect(await readProfileSnapshotValues('s1')).toEqual({ name: 'Ada', org: 'Acme' });
+    expect(prismaMock.appRespondentProfileSnapshot.findUnique).toHaveBeenCalledWith({
       where: { sessionId: 's1' },
+      select: { values: true },
     });
   });
 
-  it('is false when no snapshot row exists', async () => {
-    prismaMock.appRespondentProfileSnapshot.count.mockResolvedValue(0);
-    expect(await hasProfileSnapshot('s1')).toBe(false);
+  it('returns an empty object when no snapshot row exists', async () => {
+    prismaMock.appRespondentProfileSnapshot.findUnique.mockResolvedValue(null);
+    expect(await readProfileSnapshotValues('s1')).toEqual({});
   });
 });
 

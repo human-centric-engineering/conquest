@@ -2,9 +2,11 @@
  * Unit test: respondent profile capture resolution (F-capture).
  *
  * `resolveSessionCapture` owns the identity-axis decision (the PII-safety gate): capture keys off
- * `anonymousMode`, NOT authed-vs-public. These tests exercise that logic for real (only Prisma is
- * mocked) — the anonymous → null gate, the `satisfied` derivation (snapshot / conversational / no
- * fields), and the captureMode narrowing — since every other suite mocks this resolver.
+ * `anonymousMode`, NOT authed-vs-public. It also owns the FORM-gate half of a version's fields — the
+ * `formFields` subset (per-field `captureVia`, else the `captureMode` default). These tests exercise
+ * that logic for real (only Prisma is mocked) — the anonymous → null gate, the `formFields` split
+ * (incl. a hybrid version), the `satisfied` derivation (snapshot / no form subset), and the
+ * captureMode narrowing — since every other suite mocks this resolver.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -65,9 +67,40 @@ describe('resolveSessionCapture', () => {
     const result = await resolveSessionCapture('s1');
     expect(result).toEqual({
       captureMode: 'form',
-      fields: [{ ...FIELDS[0], validation: 'hybrid' }],
+      formFields: [{ ...FIELDS[0], validation: 'hybrid' }],
       satisfied: false,
     });
+  });
+
+  it('splits a HYBRID version — only the form-placement fields are in formFields (gate shows for those)', async () => {
+    // Default mode conversational; `name` overrides to `form`, `org` inherits conversational. The gate
+    // collects only `name`; `org` is left to the interviewer and never reaches formFields.
+    prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(
+      sessionRow({
+        captureMode: 'conversational',
+        profileFields: [
+          {
+            key: 'name',
+            label: 'Name',
+            type: 'text',
+            required: true,
+            validation: 'deterministic',
+            captureVia: 'form',
+          },
+          {
+            key: 'org',
+            label: 'Organisation',
+            type: 'text',
+            required: false,
+            validation: 'agentic',
+          },
+        ],
+      })
+    );
+    const result = await resolveSessionCapture('s1');
+    expect(result?.captureMode).toBe('conversational');
+    expect(result?.formFields.map((f) => f.key)).toEqual(['name']);
+    expect(result?.satisfied).toBe(false);
   });
 
   it('is satisfied when a snapshot already exists (resume — gate skipped)', async () => {
@@ -77,12 +110,14 @@ describe('resolveSessionCapture', () => {
     expect((await resolveSessionCapture('s1'))?.satisfied).toBe(true);
   });
 
-  it('is satisfied for a conversational-mode version (no gate)', async () => {
+  it('is satisfied for an all-conversational version — no form subset, so no gate', async () => {
+    // The single field inherits the conversational default, leaving formFields empty → satisfied.
     prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(
       sessionRow({ captureMode: 'conversational' })
     );
     const result = await resolveSessionCapture('s1');
     expect(result?.captureMode).toBe('conversational');
+    expect(result?.formFields).toEqual([]);
     expect(result?.satisfied).toBe(true);
   });
 

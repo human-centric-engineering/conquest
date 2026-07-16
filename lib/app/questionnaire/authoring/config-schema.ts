@@ -85,6 +85,11 @@ export const profileFieldSchema = z
     // How the value is validated. Optional-with-default so legacy stored fields (written before this
     // key existed) parse cleanly and resolve to format-only `deterministic` behaviour.
     validation: z.enum(PROFILE_FIELD_VALIDATION_MODES).optional().default('deterministic'),
+    // Where this field is collected, overriding the version-wide `captureMode`. Optional with NO
+    // default (unlike `validation`): an absent value means "inherit the default", which is what a
+    // mixed set of per-field overrides expresses as a hybrid questionnaire. Legacy fields simply omit
+    // it and inherit, so no migration is needed.
+    captureVia: z.enum(CAPTURE_MODES).optional(),
   })
   .superRefine((field, ctx) => {
     if (field.type === 'select') {

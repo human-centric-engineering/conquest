@@ -108,9 +108,11 @@ async function handlePutProfile(
     }
 
     // Re-derive the fields + applicability from stored config — never trust the client's field list.
+    // Only the FORM subset is submitted here; a hybrid version's conversational fields are gathered
+    // in-chat and never reach this route.
     const capture = await resolveSessionCapture(sessionId);
-    if (!capture || capture.captureMode !== 'form' || capture.fields.length === 0) {
-      // Anonymous (resolver null), conversational, or no fields → capture isn't applicable here.
+    if (!capture || capture.formFields.length === 0) {
+      // Anonymous (resolver null), or an all-conversational / no-fields version → not applicable here.
       return errorResponse('Profile capture is not applicable for this session', {
         code: 'CAPTURE_NOT_APPLICABLE',
         status: 409,
@@ -128,7 +130,7 @@ async function handlePutProfile(
 
     // Authoritative validation — deterministic + (per field) the best-effort agentic normalise/flag.
     const result = await validateProfileSubmission({
-      fields: capture.fields,
+      fields: capture.formFields,
       raw: parsed.data.profileValues,
       sessionId,
     });

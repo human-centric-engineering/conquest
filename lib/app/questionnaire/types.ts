@@ -261,8 +261,13 @@ export type ProfileFieldValidationMode = (typeof PROFILE_FIELD_VALIDATION_MODES)
  * chat/interviewer, blocking progress (and the opening LLM turn) until they're filled and validated.
  * `conversational` drops the gate — the interviewer collects the fields naturally in-chat and a
  * best-effort extraction pass maps the answers back to the fields. Neither collects anything when the
- * version is `anonymousMode` (the PII-free public path). See
- * `lib/app/questionnaire/profile/resolve-capture.ts`. */
+ * version is `anonymousMode` (the PII-free public path).
+ *
+ * `captureMode` is the version-wide DEFAULT placement; an individual field may override it via
+ * {@link ProfileFieldConfig.captureVia}, which is how a **hybrid** questionnaire is expressed — e.g.
+ * name + email in the form gate, everything else gathered conversationally. The runtime split lives in
+ * `lib/app/questionnaire/profile/capture-placement.ts`; the resolver and interviewer read it from
+ * there. See `lib/app/questionnaire/profile/resolve-capture.ts`. */
 export const CAPTURE_MODES = ['form', 'conversational'] as const;
 export type CaptureMode = (typeof CAPTURE_MODES)[number];
 
@@ -420,6 +425,15 @@ export type ProfileFieldConfig = {
    * {@link PROFILE_FIELD_VALIDATION_MODES}.
    */
   validation: ProfileFieldValidationMode;
+  /**
+   * Where THIS field is collected, overriding the version-wide {@link QuestionnaireConfig.captureMode}
+   * default. Absent (the common case) means "inherit the default". Setting it per field is what makes a
+   * questionnaire **hybrid** — e.g. `captureVia: 'form'` on name/email while the default mode is
+   * `conversational`, so those two ride the blocking form gate and the rest are gathered in-chat. The
+   * effective placement is resolved by `effectiveCaptureVia`
+   * (`lib/app/questionnaire/profile/capture-placement.ts`). Ignored entirely when `anonymousMode` is on.
+   */
+  captureVia?: CaptureMode;
 };
 
 /**
@@ -1063,9 +1077,10 @@ export type QuestionnaireConfigShape = {
   supportResourceUrl: string;
   profileFields: ProfileFieldConfig[];
   /**
-   * How the {@link profileFields} are collected from the respondent (F-capture). See
-   * {@link CAPTURE_MODES}. Defaults to `form` (a blocking form gate after the intro); `conversational`
-   * has the interviewer gather them in-chat instead. Ignored entirely when `anonymousMode` is on.
+   * The DEFAULT placement for the {@link profileFields} (F-capture). See {@link CAPTURE_MODES}. Defaults
+   * to `form` (a blocking form gate after the intro); `conversational` has the interviewer gather them
+   * in-chat instead. Individual fields may override this via {@link ProfileFieldConfig.captureVia} — a
+   * mix of `form` and `conversational` fields is a hybrid questionnaire. Ignored when `anonymousMode`.
    */
   captureMode: CaptureMode;
   answerSlotPanelScope: AnswerSlotPanelScope;
