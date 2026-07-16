@@ -18,7 +18,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getRoundDetail } from '@/app/api/v1/app/rounds/_lib/read';
 
 const handleClose = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
@@ -59,4 +58,4 @@ const handleClose = withAdminAuth<{ id: string }>(async (request, session, { par
   return successResponse(detail);
 });
 
-export const POST = withCohortsEnabled(handleClose);
+export const POST = handleClose;

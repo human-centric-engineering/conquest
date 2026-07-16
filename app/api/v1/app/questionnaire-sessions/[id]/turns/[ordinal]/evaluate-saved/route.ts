@@ -18,7 +18,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { turnEvaluationLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { runSavedTurnEvaluation } from '@/app/api/v1/app/questionnaire-sessions/_lib/evaluate-saved-turn';
 
@@ -90,4 +89,4 @@ const handleEvaluateSaved = withAdminAuth<{ id: string; ordinal: string }>(
   }
 );
 
-export const POST = withTurnEvaluationEnabled(handleEvaluateSaved);
+export const POST = handleEvaluateSaved;

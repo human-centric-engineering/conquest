@@ -15,7 +15,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createTagSchema, normalizeTagLabel } from '@/lib/app/questionnaire/tagging';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -74,4 +73,4 @@ const handleCreateTag = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleCreateTag);
+export const POST = handleCreateTag;

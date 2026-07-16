@@ -1,16 +1,7 @@
 import type { Metadata } from 'next';
 import { Fraunces } from 'next/font/google';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 
-import {
-  isAttachmentInputEnabled,
-  isIntroScreenEnabled,
-  isPersonaSelectionEnabled,
-  isLiveSessionsEnabled,
-  isReasoningStreamEnabled,
-  isVoiceInputEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
@@ -49,7 +40,6 @@ export async function generateMetadata({
   params: Promise<{ versionId: string }>;
 }): Promise<Metadata> {
   const description = 'Complete a short conversational questionnaire — no account needed.';
-  if (!(await isLiveSessionsEnabled())) return { title: 'Questionnaire', description };
   const { versionId } = await params;
   const header = await resolveVersionHeader(versionId);
   return { title: header?.title ?? 'Questionnaire', description };
@@ -70,8 +60,6 @@ export default async function PublicQuestionnairePage({
   params: Promise<{ versionId: string }>;
   searchParams: Promise<{ preview?: string; i?: string }>;
 }) {
-  if (!(await isLiveSessionsEnabled())) notFound();
-
   const { versionId } = await params;
   // Admin "Preview as respondent" (`?preview=1`): boot via the admin-gated `/preview` route,
   // which works on any launched version (anonymous or invitation-gated) and marks the run
@@ -87,9 +75,6 @@ export default async function PublicQuestionnairePage({
   // attachments each need BOTH the platform flag (capability dark-launch) AND the version's
   // per-questionnaire opt-in, so the affordance shows only when the author turned it on.
   const [
-    voicePlatform,
-    attachmentPlatform,
-    reasoningPlatform,
     theme,
     bandHeader,
     anonymous,
@@ -100,13 +85,8 @@ export default async function PublicQuestionnairePage({
     reasoningDwell,
     inlineCorrectionEnabled,
     previewMeta,
-    introScreenEnabled,
-    personaSelectionEnabled,
     resumeEnabled,
   ] = await Promise.all([
-    isVoiceInputEnabled(),
-    isAttachmentInputEnabled(),
-    isReasoningStreamEnabled(),
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
     resolveAnonymousForVersion(versionId),
@@ -117,18 +97,16 @@ export default async function PublicQuestionnairePage({
     resolveReasoningDwellForVersion(versionId),
     resolveInlineCorrectionForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
-    isIntroScreenEnabled(),
-    isPersonaSelectionEnabled(),
     resolveSessionResumeEnabledForVersion(versionId),
   ]);
   // The cross-device "continue with your code" footer is for the public anonymous path only — admin
   // preview and frictionless-invite links resume by other means, so it would only confuse there.
   const showResumeByRef = resumeEnabled && !preview && !inviteToken;
-  const voiceInputEnabled = voicePlatform && voiceConfigured;
-  const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
+  const voiceInputEnabled = voiceConfigured;
+  const attachmentInputEnabled = attachmentsConfigured;
   // Live "watch it think" reasoning (demo feature): the effective placement, or null when the
-  // platform flag is off or the version turned it off.
-  const reasoningPlacement = reasoningPlatform ? reasoningPlacementConfigured : null;
+  // version turned it off.
+  const reasoningPlacement = reasoningPlacementConfigured;
 
   return (
     <div
@@ -174,8 +152,8 @@ export default async function PublicQuestionnairePage({
             reasoningPerItemMs={reasoningDwell.perItemMs}
             inlineCorrectionEnabled={inlineCorrectionEnabled}
             welcomeCopy={theme.welcomeCopy}
-            introScreenEnabled={introScreenEnabled}
-            personaSelectionEnabled={personaSelectionEnabled}
+            introScreenEnabled={true}
+            personaSelectionEnabled={true}
             resumeEnabled={resumeEnabled}
           />
           {showResumeByRef && (

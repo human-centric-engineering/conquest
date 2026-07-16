@@ -27,7 +27,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { sseResponse } from '@/lib/api/sse';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
   deriveTitle,
@@ -193,9 +192,4 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
   return sseResponse(drive(), { signal: request.signal });
 });
 
-export async function POST(request: NextRequest): Promise<Response> {
-  // Flag gate first — a switched-off app is indistinguishable from a missing route.
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleIngestStream(request);
-}
+export const POST = handleIngestStream;

@@ -33,7 +33,6 @@ import { estimateTokens } from '@/lib/orchestration/chat/token-estimator';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
 import { getDefaultModelForTaskOrNull } from '@/lib/orchestration/llm/settings-resolver';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { estimateSessionCost } from '@/lib/app/questionnaire';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -121,4 +120,4 @@ const handleCostEstimate = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleCostEstimate);
+export const GET = handleCostEstimate;

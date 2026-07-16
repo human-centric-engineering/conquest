@@ -20,7 +20,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { attachRoundQuestionnaireSchema } from '@/lib/app/questionnaire/rounds';
 import { getRoundDetail } from '@/app/api/v1/app/rounds/_lib/read';
 
@@ -96,4 +95,4 @@ const handleAttach = withAdminAuth<{ id: string }>(async (request, session, { pa
   return successResponse(detail, undefined, { status: 201 });
 });
 
-export const POST = withCohortsEnabled(handleAttach);
+export const POST = handleAttach;

@@ -29,26 +29,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import {
-  isAdaptiveSelectionEnabled,
-  isAdaptiveDataSlotSelectionEnabled,
-  isAnswerExtractionEnabled,
-  isAnswerRefinementEnabled,
-  isCompletionEnabled,
-  isAttachmentInputEnabled,
-  isContradictionDetectionEnabled,
-  isCostCapEnforcementEnabled,
-  isDataSlotsEnabled,
-  isLearningModeEnabled,
-  isQuestionPhrasingEnabled,
-  isReasoningStreamEnabled,
-  isRoundContextEnabled,
-  isSeriousnessGateEnabled,
-  isSensitivityAwarenessEnabled,
-  isToneEnabled,
-  isPersonaSelectionEnabled,
-  withLiveSessionsEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { resolveSessionTone } from '@/lib/app/questionnaire/persona/settings';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
 import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
@@ -213,7 +193,7 @@ async function handleMessage(
     // and writes the soft marker once. Gated by its own sub-flag and a configured budget.
     const capUsd = loaded.base.config.costBudgetUsd;
     let costPressure: 'soft' | undefined;
-    if (capUsd !== null && (await isCostCapEnforcementEnabled())) {
+    if (capUsd !== null) {
       const spentUsd = await sumSessionTurnCost(sessionId);
       const tier = classifyCostCap(spentUsd, capUsd);
       if (tier === 'hard') {
@@ -264,42 +244,25 @@ async function handleMessage(
       }
     }
 
-    // Resolve the per-step flags (async DB reads) up front, so the pure core stays sync.
-    const [
-      extraction,
-      contradiction,
-      refinement,
-      completion,
-      adaptive,
-      attachmentInput,
-      questionPhrasing,
-      dataSlotsFlag,
-      seriousnessGate,
-      sensitivityAwarenessFlag,
-      reasoningStreamFlag,
-      toneFlag,
-      personaSelectionFlag,
-      dataSlotAdaptive,
-      roundContextFlag,
-      learningModeFlag,
-    ] = await Promise.all([
-      isAnswerExtractionEnabled(),
-      isContradictionDetectionEnabled(),
-      isAnswerRefinementEnabled(),
-      isCompletionEnabled(),
-      isAdaptiveSelectionEnabled(),
-      isAttachmentInputEnabled(),
-      isQuestionPhrasingEnabled(),
-      isDataSlotsEnabled(),
-      isSeriousnessGateEnabled(),
-      isSensitivityAwarenessEnabled(),
-      isReasoningStreamEnabled(),
-      isToneEnabled(),
-      isPersonaSelectionEnabled(),
-      isAdaptiveDataSlotSelectionEnabled(),
-      isRoundContextEnabled(),
-      isLearningModeEnabled(),
-    ]);
+    // Every questionnaire per-step feature is permanently on (the platform feature
+    // flags were retired). The per-version config toggles ANDed with these below
+    // remain the real gates — the version author's opt-ins.
+    const extraction = true;
+    const contradiction = true;
+    const refinement = true;
+    const completion = true;
+    const adaptive = true;
+    const attachmentInput = true;
+    const questionPhrasing = true;
+    const dataSlotsFlag = true;
+    const seriousnessGate = true;
+    const sensitivityAwarenessFlag = true;
+    const reasoningStreamFlag = true;
+    const toneFlag = true;
+    const personaSelectionFlag = true;
+    const dataSlotAdaptive = true;
+    const roundContextFlag = true;
+    const learningModeFlag = true;
 
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
     // embedding — and nothing in the authoring flow generates them, so an `adaptive` version would
@@ -1152,4 +1115,4 @@ async function handleMessage(
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleMessage);
+export const POST = handleMessage;

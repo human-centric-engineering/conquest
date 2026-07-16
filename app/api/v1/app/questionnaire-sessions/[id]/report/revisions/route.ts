@@ -31,7 +31,6 @@ import {
   enqueueRespondentReportRevision,
   getRespondentReportRevisionsView,
 } from '@/lib/app/questionnaire/report/revision';
-import { withRespondentReportEnabled } from '@/app/api/v1/app/questionnaire-sessions/_lib/report-flag';
 import { reportRerunLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 /** Body: the edited report settings (optional — defaults to the version config) + a short note. */
@@ -98,5 +97,5 @@ const handleEnqueue = withAdminAuth<{ id: string }>(async (request, session, { p
   });
 });
 
-export const GET = withRespondentReportEnabled(handleList);
-export const POST = withRespondentReportEnabled(handleEnqueue);
+export const GET = handleList;
+export const POST = handleEnqueue;

@@ -10,7 +10,6 @@
  */
 
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { CohortsTable } from '@/components/admin/cohorts/cohorts-table';
 import { SectionHeading } from '@/components/admin/cohorts/cohort-ui';
@@ -18,7 +17,6 @@ import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isCohortsEnabled, isIntroScreenEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { CohortView } from '@/lib/app/questionnaire/rounds';
 
 export const metadata: Metadata = {
@@ -50,10 +48,8 @@ function overallCompletionRate(cohorts: CohortView[]): number {
 }
 
 export default async function DemoClientCohortsTab({ params }: PageProps) {
-  if (!(await isCohortsEnabled())) notFound();
-
   const { id } = await params;
-  const [cohorts, introScreenEnabled] = await Promise.all([getCohorts(id), isIntroScreenEnabled()]);
+  const cohorts = await getCohorts(id);
 
   const totalStarted = cohorts.reduce((sum, c) => sum + c.stats.sessionsStarted, 0);
   const statTiles: CqStat[] = [
@@ -79,7 +75,7 @@ export default async function DemoClientCohortsTab({ params }: PageProps) {
 
       <CqStatTiles stats={statTiles} />
 
-      <CohortsTable demoClientId={id} cohorts={cohorts} introScreenEnabled={introScreenEnabled} />
+      <CohortsTable demoClientId={id} cohorts={cohorts} introScreenEnabled={true} />
     </div>
   );
 }

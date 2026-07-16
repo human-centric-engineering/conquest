@@ -15,7 +15,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getRoundDetail } from '@/app/api/v1/app/rounds/_lib/read';
 
 type Params = { id: string; itemId: string };
@@ -47,4 +46,4 @@ const handleDetach = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse(detail);
 });
 
-export const DELETE = withCohortsEnabled(handleDetach);
+export const DELETE = handleDetach;

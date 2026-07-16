@@ -13,7 +13,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { NotFoundError } from '@/lib/api/errors';
 import { withAdminAuth } from '@/lib/auth/guards';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { getEvaluationRunDetail } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
 
@@ -42,4 +41,4 @@ const handleRunDetail = withAdminAuth<{ id: string; vid: string; runId: string }
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleRunDetail);
+export const GET = handleRunDetail;

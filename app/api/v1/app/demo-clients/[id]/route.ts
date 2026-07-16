@@ -21,7 +21,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateDemoClientSchema } from '@/lib/app/questionnaire/demo-clients';
 import {
   DEMO_CLIENT_SELECT,
@@ -147,6 +146,6 @@ const handleDelete = withAdminAuth<{ id: string }>(async (request, session, { pa
   return successResponse({ id, deleted: true });
 });
 
-export const GET = withQuestionnairesEnabled(handleDetail);
-export const PATCH = withQuestionnairesEnabled(handleUpdate);
-export const DELETE = withQuestionnairesEnabled(handleDelete);
+export const GET = handleDetail;
+export const PATCH = handleUpdate;
+export const DELETE = handleDelete;

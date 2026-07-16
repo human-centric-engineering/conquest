@@ -1,11 +1,9 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { BehindTheScenesExplorer } from '@/components/app/questionnaire/behind-the-scenes/behind-the-scenes-explorer';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { WorkflowSummary } from '@/lib/app/questionnaire/workflows/types';
 
 export const metadata: Metadata = {
@@ -23,8 +21,6 @@ export const metadata: Metadata = {
  * explorer (which fetches per-workflow detail on demand).
  */
 export default async function BehindTheScenesPage() {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   let workflows: WorkflowSummary[] = [];
   try {
     const res = await serverFetch(API.APP.QUESTIONNAIRES.workflows);

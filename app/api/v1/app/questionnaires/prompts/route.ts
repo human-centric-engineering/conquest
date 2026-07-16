@@ -14,7 +14,6 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   buildPromptCatalog,
   type PromptAgentApiView,
@@ -72,4 +71,4 @@ const handleGet = withAdminAuth(async (_request: NextRequest) => {
   return successResponse({ agents });
 });
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

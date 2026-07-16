@@ -23,10 +23,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 
-import {
-  withLiveSessionsEnabled,
-  isFrictionlessInvitesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { sessionStartLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { createSessionFromInviteToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
@@ -36,11 +32,6 @@ const bodySchema = z.object({ inviteToken: z.string().min(1).max(128) });
 async function handleFromInvite(request: NextRequest): Promise<Response> {
   try {
     const log = await getRouteLogger(request);
-
-    // Sub-flag: when off, behave as if the route doesn't exist (the accept flow is the fallback).
-    if (!(await isFrictionlessInvitesEnabled())) {
-      return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
-    }
 
     // No user to key on — cap on client IP (also a token brute-force guard).
     const ip = getClientIP(request);
@@ -72,4 +63,4 @@ async function handleFromInvite(request: NextRequest): Promise<Response> {
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleFromInvite);
+export const POST = handleFromInvite;

@@ -25,7 +25,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 import { parseAudienceShape } from '@/lib/app/questionnaire/evaluation/structure-schema';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
@@ -174,4 +173,4 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handlePreview);
+export const POST = handlePreview;

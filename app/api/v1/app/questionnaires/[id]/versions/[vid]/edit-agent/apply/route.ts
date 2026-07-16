@@ -21,7 +21,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withEditAgentEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveOps, EditOpError } from '@/lib/app/questionnaire/edit-agent/resolve';
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
@@ -127,4 +126,4 @@ const handleApply = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withEditAgentEnabled(handleApply);
+export const POST = handleApply;

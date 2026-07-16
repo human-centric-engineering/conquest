@@ -3,14 +3,6 @@ import { notFound } from 'next/navigation';
 
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
-import {
-  isAttachmentInputEnabled,
-  isIntroScreenEnabled,
-  isPersonaSelectionEnabled,
-  isLiveSessionsEnabled,
-  isReasoningStreamEnabled,
-  isVoiceInputEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
@@ -93,8 +85,6 @@ export default async function QuestionnaireSessionPage({
 }: {
   params: Promise<{ sessionId: string }>;
 }) {
-  if (!(await isLiveSessionsEnabled())) notFound();
-
   const { sessionId } = await params;
 
   const session = await getServerSession();
@@ -121,20 +111,7 @@ export default async function QuestionnaireSessionPage({
   // panel + lifecycle status are SSR-seeded here (the user is already verified as owner),
   // so they paint with no fetch flash; the live updates after each turn come from the
   // client hooks.
-  const [
-    voicePlatform,
-    attachmentPlatform,
-    reasoningPlatform,
-    theme,
-    bandHeader,
-    panel,
-    status,
-    formPanel,
-    transcript,
-  ] = await Promise.all([
-    isVoiceInputEnabled(),
-    isAttachmentInputEnabled(),
-    isReasoningStreamEnabled(),
+  const [theme, bandHeader, panel, status, formPanel, transcript] = await Promise.all([
     resolveThemeForSession(sessionId),
     resolveSessionHeader(sessionId),
     loadAnswerPanelState(sessionId),
@@ -145,30 +122,26 @@ export default async function QuestionnaireSessionPage({
     // Replay the prior conversation (incl. its persisted side-band notices) on resume.
     loadTranscript(sessionId),
   ]);
-  const voiceInputEnabled = voicePlatform && voiceConfigured;
-  const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
+  const voiceInputEnabled = voiceConfigured;
+  const attachmentInputEnabled = attachmentsConfigured;
   // Live "watch it think" reasoning (demo feature): the effective placement, or null when the
-  // platform flag or version toggle is off (the chat then renders no trace).
-  const reasoningPlacement =
-    reasoningPlatform && reasoningConfigured
-      ? narrowToEnum(
-          row.config?.reasoningStreamPlacement ?? 'overlay',
-          REASONING_PLACEMENTS,
-          'overlay'
-        )
-      : null;
+  // version toggle is off (the chat then renders no trace).
+  const reasoningPlacement = reasoningConfigured
+    ? narrowToEnum(
+        row.config?.reasoningStreamPlacement ?? 'overlay',
+        REASONING_PLACEMENTS,
+        'overlay'
+      )
+    : null;
   const initialStatus = initialChatStatus(status?.view, row.status === 'active');
 
-  // Respondent intro / splash (admin opt-in). Resolve only when the platform flag is on; the
-  // per-version `intro.enabled` (and a fresh session) are the second gate, applied in SessionEntry.
-  const intro = (await isIntroScreenEnabled()) ? await resolveSessionIntro(sessionId) : null;
+  // Respondent intro / splash (admin opt-in). The per-version `intro.enabled` (and a fresh session)
+  // are the gate, applied in SessionEntry.
+  const intro = await resolveSessionIntro(sessionId);
 
-  // Selectable interviewer personas (F-persona). Resolve only when the platform flag is on; the
-  // per-version `personaSelection.enabled` (and ≥2 personas) are the second gate, applied in the
-  // workspace via the resolved payload's `enabled`.
-  const personas = (await isPersonaSelectionEnabled())
-    ? await resolveSessionPersonas(sessionId)
-    : null;
+  // Selectable interviewer personas (F-persona). The per-version `personaSelection.enabled`
+  // (and ≥2 personas) are the gate, applied in the workspace via the resolved payload's `enabled`.
+  const personas = await resolveSessionPersonas(sessionId);
 
   // Respondent profile capture (F-capture). Resolves the blocking form gate (its `formFields` subset)
   // for non-anonymous versions; `null` for anonymous (PII-free) and `satisfied` on a resume with an

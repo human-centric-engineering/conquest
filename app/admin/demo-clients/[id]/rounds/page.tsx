@@ -10,7 +10,6 @@
  */
 
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { RoundsTable } from '@/components/admin/cohorts/rounds-table';
@@ -18,7 +17,6 @@ import { SectionHeading } from '@/components/admin/cohorts/cohort-ui';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { RoundView } from '@/lib/app/questionnaire/rounds';
 
 export const metadata: Metadata = {
@@ -43,8 +41,6 @@ async function getRounds(demoClientId: string): Promise<RoundView[]> {
 }
 
 export default async function DemoClientRoundsTab({ params }: PageProps) {
-  if (!(await isCohortsEnabled())) notFound();
-
   const { id } = await params;
   const rounds = await getRounds(id);
 

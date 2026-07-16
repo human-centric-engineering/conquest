@@ -12,9 +12,7 @@
  * independently by `resolveTurnAccess` on the turn route (403 to a non-owner).
  *
  * Nested under the questionnaire for the same ownership check as the transcript read (404 when the
- * session belongs to a different questionnaire). Admin-authenticated; gated on
- * `withLiveSessionsEnabled` because continuing only makes sense when the live turn loop
- * (`/messages`) is available — minting a token for a dead surface would be useless.
+ * session belongs to a different questionnaire). Admin-authenticated.
  */
 
 import { withAdminAuth } from '@/lib/auth/guards';
@@ -22,7 +20,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { prisma } from '@/lib/db/client';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 
 const handleMintPreviewToken = withAdminAuth<{ id: string; sessionId: string }>(
@@ -70,4 +67,4 @@ const handleMintPreviewToken = withAdminAuth<{ id: string; sessionId: string }>(
   }
 );
 
-export const POST = withLiveSessionsEnabled(handleMintPreviewToken);
+export const POST = handleMintPreviewToken;

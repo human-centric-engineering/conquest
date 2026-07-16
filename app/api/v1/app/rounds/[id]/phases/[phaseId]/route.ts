@@ -19,7 +19,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withRoundPhasesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   ROUND_PHASE_END_MODES,
   updateRoundPhaseSchema,
@@ -129,5 +128,5 @@ const handleDelete = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse({ id: phaseId });
 });
 
-export const PATCH = withRoundPhasesEnabled(handleUpdate);
-export const DELETE = withRoundPhasesEnabled(handleDelete);
+export const PATCH = handleUpdate;
+export const DELETE = handleDelete;

@@ -22,7 +22,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { extractScoringSchema } from '@/lib/app/questionnaire/scoring/extract';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { cohortReportGenerateLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -96,4 +95,4 @@ const handleExtract = withAdminAuth<Params>(
   }
 );
 
-export const POST = withCohortReportEnabled(handleExtract);
+export const POST = handleExtract;

@@ -32,7 +32,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { prisma } from '@/lib/db/client';
-import { isDataSlotsEnabled, withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { validateAnswerValue } from '@/lib/app/questionnaire/extraction/answer-value';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
@@ -58,9 +57,9 @@ async function handleGetAnswers(
     // data-slot abstraction — the form edits the underlying questions directly.
     const forForm = new URL(request.url).searchParams.get('view') === 'form';
 
-    // Data Slots feature: render the data-slot panel when the feature is on (the loader only
-    // switches if the version actually has data slots). A cheap flag read before the access check.
-    const loaded = await loadAnswerPanelState(sessionId, await isDataSlotsEnabled(), forForm);
+    // Data Slots feature: render the data-slot panel (the loader only switches if the version
+    // actually has data slots).
+    const loaded = await loadAnswerPanelState(sessionId, true, forForm);
     if (!loaded) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
 
     // Access: an authenticated owner OR a valid anonymous session token (no-login surface).
@@ -174,11 +173,6 @@ async function handlePutAnswers(
       });
     }
 
-    // Data Slots feature: keep the chat-facing data-slot fills in sync with form edits in the
-    // same transaction (when on), so a form change is reflected in the data-slot panel
-    // immediately rather than only on the next chat turn.
-    const dataSlotsOn = await isDataSlotsEnabled();
-
     // Persist atomically: all reads + writes share one transaction.
     const outcomes = await prisma.$transaction(async (tx) => {
       const results: Array<{ questionKey: string; outcome: ManualAnswerOutcome | 'cleared' }> = [];
@@ -191,13 +185,14 @@ async function handlePutAnswers(
           results.push({ questionKey: w.questionKey, outcome });
         }
       }
-      if (dataSlotsOn) {
-        await reconcileDataSlotFills(
-          tx,
-          sessionId,
-          writes.map((w) => w.slotId)
-        );
-      }
+      // Data Slots feature: keep the chat-facing data-slot fills in sync with form edits in the
+      // same transaction, so a form change is reflected in the data-slot panel immediately rather
+      // than only on the next chat turn.
+      await reconcileDataSlotFills(
+        tx,
+        sessionId,
+        writes.map((w) => w.slotId)
+      );
       return results;
     });
 
@@ -218,5 +213,5 @@ async function handlePutAnswers(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetAnswers);
-export const PUT = withLiveSessionsEnabled(handlePutAnswers);
+export const GET = handleGetAnswers;
+export const PUT = handlePutAnswers;

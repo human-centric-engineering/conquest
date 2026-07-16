@@ -39,7 +39,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
   deriveTitle,
@@ -177,16 +176,6 @@ const handleList = withAdminAuth(async (request: NextRequest) => {
   return paginatedResponse(items, { page: query.page, limit: query.limit, total });
 });
 
-export async function GET(request: NextRequest): Promise<Response> {
-  // Flag gate first — a switched-off app is indistinguishable from a missing route.
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleList(request);
-}
+export const GET = handleList;
 
-export async function POST(request: NextRequest): Promise<Response> {
-  // Flag gate first — a switched-off app is indistinguishable from a missing route.
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleIngest(request);
-}
+export const POST = handleIngest;

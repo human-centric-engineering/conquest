@@ -18,7 +18,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withRoundPhasesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { dispatchDuePhaseInvitations } from '@/app/api/v1/app/rounds/_lib/invites';
 
 const handleDispatch = withAdminAuth(async (request, session) => {
@@ -44,4 +43,4 @@ const handleDispatch = withAdminAuth(async (request, session) => {
   return successResponse(result);
 });
 
-export const POST = withRoundPhasesEnabled(handleDispatch);
+export const POST = handleDispatch;

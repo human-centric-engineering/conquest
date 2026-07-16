@@ -36,7 +36,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 import {
   evaluateTurn,
@@ -174,4 +173,4 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
   }
 });
 
-export const POST = withTurnEvaluationEnabled(handleEvaluateTurn);
+export const POST = handleEvaluateTurn;

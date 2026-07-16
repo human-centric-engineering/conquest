@@ -19,7 +19,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { sseResponse } from '@/lib/api/sse';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   buildCohortDataset,
   ensureCohortReport,
@@ -77,4 +76,4 @@ const handleGenerateStream = withAdminAuth<Params>(async (request, session, { pa
   );
 });
 
-export const POST = withCohortReportEnabled(handleGenerateStream);
+export const POST = handleGenerateStream;

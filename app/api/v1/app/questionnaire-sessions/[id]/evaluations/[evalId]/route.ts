@@ -22,7 +22,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   updateTurnEvaluationReview,
   TURN_EVAL_REVIEW_STATUSES,
@@ -76,4 +75,4 @@ const handlePatch = withAdminAuth<{ id: string; evalId: string }>(
   }
 );
 
-export const PATCH = withTurnEvaluationEnabled(handlePatch);
+export const PATCH = handlePatch;

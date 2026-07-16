@@ -5,12 +5,6 @@
  * reaching into individual files. Grows as later phases add sub-modules.
  */
 export {
-  APP_QUESTIONNAIRES_FLAG,
-  ensureQuestionnairesEnabled,
-  withQuestionnairesEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-export {
   QUESTION_TYPES,
   QUESTION_TYPE_LABELS,
   APP_QUESTIONNAIRE_STATUSES,

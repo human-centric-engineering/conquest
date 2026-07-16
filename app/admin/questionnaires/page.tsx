@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { QuestionnairesTable } from '@/components/admin/questionnaires/questionnaires-table';
 import { NewQuestionnaireMenu } from '@/components/admin/questionnaires/new-questionnaire-menu';
@@ -10,12 +9,6 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
-import {
-  isAdaptiveDataSlotSelectionEnabled,
-  isDataSlotsEnabled,
-  isGenerativeAuthoringEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 import type { PaginationMeta } from '@/types/api';
@@ -109,24 +102,10 @@ async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
 }
 
 export default async function QuestionnairesListPage() {
-  // The whole questionnaire surface is dark when the flag is off — match the API,
-  // which 404s, so the page doesn't render an empty shell behind a hidden feature.
-  if (!(await isQuestionnairesEnabled())) notFound();
-
-  const [
-    { items, meta },
-    stats,
-    demoClientOptions,
-    dataSlotsEnabled,
-    generativeAuthoringEnabled,
-    adaptiveDataSlotsEnabled,
-  ] = await Promise.all([
+  const [{ items, meta }, stats, demoClientOptions] = await Promise.all([
     getQuestionnaires(),
     getQuestionnaireStats(),
     getActiveDemoClients(),
-    isDataSlotsEnabled(),
-    isGenerativeAuthoringEnabled(),
-    isAdaptiveDataSlotSelectionEnabled(),
   ]);
 
   const statTiles: CqStat[] = [
@@ -164,21 +143,19 @@ export default async function QuestionnairesListPage() {
         </div>
         <NewQuestionnaireMenu
           demoClientOptions={demoClientOptions}
-          generativeAuthoringEnabled={generativeAuthoringEnabled}
+          generativeAuthoringEnabled={true}
         />
       </header>
 
       <CqStatTiles stats={statTiles} />
 
-      {dataSlotsEnabled && (
-        <DataSlotEmbeddingInfo adaptiveDataSlotsEnabled={adaptiveDataSlotsEnabled} />
-      )}
+      <DataSlotEmbeddingInfo adaptiveDataSlotsEnabled={true} />
 
       <QuestionnairesTable
         initialItems={items}
         initialMeta={meta}
         demoClientOptions={demoClientOptions}
-        showDataSlots={dataSlotsEnabled}
+        showDataSlots={true}
       />
     </div>
   );

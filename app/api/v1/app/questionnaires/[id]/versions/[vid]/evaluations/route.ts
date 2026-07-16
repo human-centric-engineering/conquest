@@ -30,10 +30,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
 import {
-  isDesignEvaluationEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
   type EvaluationDimension,
@@ -57,12 +53,6 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const { id, vid } = await params;
     const adminId = session.user.id;
-
-    // Sub-flag gate: the panel always spends seven LLM calls, so it's opt-in on top of the
-    // master flag. Off → 404 (same as the preview route — no free deterministic half).
-    if (!(await isDesignEvaluationEnabled())) {
-      throw new NotFoundError('Questionnaire design-time evaluation is not enabled');
-    }
 
     const body = await validateRequestBody(request, bodySchema);
     const dimensions: EvaluationDimension[] =
@@ -158,5 +148,5 @@ const handleListRuns = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleCreateRun);
-export const GET = withQuestionnairesEnabled(handleListRuns);
+export const POST = handleCreateRun;
+export const GET = handleListRuns;

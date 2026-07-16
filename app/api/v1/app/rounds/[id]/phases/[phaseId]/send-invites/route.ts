@@ -17,7 +17,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withRoundPhasesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { generateRoundInvitations } from '@/app/api/v1/app/rounds/_lib/invites';
 
 type Params = { id: string; phaseId: string };
@@ -63,4 +62,4 @@ const handleSend = withAdminAuth<Params>(async (request, session, { params }) =>
   return successResponse(result, undefined, { status: 201 });
 });
 
-export const POST = withRoundPhasesEnabled(handleSend);
+export const POST = handleSend;

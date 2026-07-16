@@ -21,7 +21,6 @@ import { validateQueryParams } from '@/lib/api/validation';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { buildCohortDataset, roundScope } from '@/lib/app/questionnaire/cohort-report';
 import { assertRoundBundlesVersion } from '@/app/api/v1/app/rounds/_lib/context';
 
@@ -63,4 +62,4 @@ const handleGet = withAdminAuth<Params>(async (request, _session, { params }) =>
   return successResponse(dataset);
 });
 
-export const GET = withCohortReportEnabled(handleGet);
+export const GET = handleGet;

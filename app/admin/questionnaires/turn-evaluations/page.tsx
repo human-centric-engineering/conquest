@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { TurnEvaluationsTable } from '@/components/admin/questionnaires/turn-evaluations-table';
 import { RefLookupPanel } from '@/components/admin/questionnaires/ref-lookup-panel';
@@ -7,7 +6,6 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
-import { isTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { TurnEvaluationListItem } from '@/lib/app/questionnaire/views';
 import type { PaginationMeta } from '@/types/api';
 
@@ -46,8 +44,6 @@ async function getEvaluations(): Promise<{
  * search / filter / pagination / detail / review.
  */
 export default async function TurnEvaluationsPage() {
-  if (!(await isTurnEvaluationEnabled())) notFound();
-
   const { items, meta } = await getEvaluations();
 
   return (

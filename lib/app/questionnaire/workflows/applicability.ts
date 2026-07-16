@@ -15,16 +15,6 @@ import {
   APP_QUESTIONNAIRE_STATUSES,
   type AppQuestionnaireStatus,
 } from '@/lib/app/questionnaire/types';
-import {
-  isAdaptiveSelectionEnabled,
-  isAdvisorEnabled,
-  isAnswerExtractionEnabled,
-  isDesignEvaluationEnabled,
-  isGenerativeAuthoringEnabled,
-  isTurnEvaluationEnabled,
-  isVoiceInputEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
 
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
@@ -40,43 +30,26 @@ function coerceStatus(raw: string): AppQuestionnaireStatus {
     : 'draft';
 }
 
-/** Resolve the normalised {@link WorkflowFlags} the predicates read. */
-async function resolveWorkflowFlags(): Promise<WorkflowFlags> {
-  const [
-    ws,
-    generativeAuthoring,
-    answerExtraction,
-    voiceInput,
-    adaptiveSelection,
-    turnEvaluation,
-    designEvaluation,
-    advisor,
-  ] = await Promise.all([
-    resolveQuestionnaireWorkspaceFlags(),
-    isGenerativeAuthoringEnabled(),
-    isAnswerExtractionEnabled(),
-    isVoiceInputEnabled(),
-    isAdaptiveSelectionEnabled(),
-    isTurnEvaluationEnabled(),
-    isDesignEvaluationEnabled(),
-    isAdvisorEnabled(),
-  ]);
+/** Resolve the normalised {@link WorkflowFlags} the predicates read. Every
+ *  questionnaire feature is permanently on (the platform feature flags were
+ *  retired), so every workflow-applicability flag is `true`. */
+function resolveWorkflowFlags(): WorkflowFlags {
   return {
-    master: ws.master,
-    generativeAuthoring,
-    editAgent: ws.editAgent,
-    liveSessions: ws.liveSessions,
-    answerExtraction,
-    dataSlots: ws.dataSlots,
-    respondentReport: ws.respondentReport,
-    cohortReport: ws.cohortReport,
-    introScreen: ws.introScreen,
-    voiceInput,
-    personaSelection: ws.personaSelection,
-    adaptiveSelection,
-    turnEvaluation,
-    designEvaluation,
-    advisor,
+    master: true,
+    generativeAuthoring: true,
+    editAgent: true,
+    liveSessions: true,
+    answerExtraction: true,
+    dataSlots: true,
+    respondentReport: true,
+    cohortReport: true,
+    introScreen: true,
+    voiceInput: true,
+    personaSelection: true,
+    adaptiveSelection: true,
+    turnEvaluation: true,
+    designEvaluation: true,
+    advisor: true,
   };
 }
 
@@ -88,19 +61,17 @@ async function resolveWorkflowFlags(): Promise<WorkflowFlags> {
 export async function buildApplicabilityContext(
   versionId: string
 ): Promise<ApplicabilityContext | null> {
-  const [flags, version] = await Promise.all([
-    resolveWorkflowFlags(),
-    prisma.appQuestionnaireVersion.findUnique({
-      where: { id: versionId },
-      select: {
-        questionnaireId: true,
-        status: true,
-        goalProvenance: true,
-        config: { select: CONFIG_SELECT },
-        _count: { select: { sourceDocuments: true, dataSlots: true } },
-      },
-    }),
-  ]);
+  const flags = resolveWorkflowFlags();
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      questionnaireId: true,
+      status: true,
+      goalProvenance: true,
+      config: { select: CONFIG_SELECT },
+      _count: { select: { sourceDocuments: true, dataSlots: true } },
+    },
+  });
 
   if (!version) return null;
 

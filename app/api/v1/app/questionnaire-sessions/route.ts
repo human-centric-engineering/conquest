@@ -24,7 +24,6 @@ import { withAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import { sessionStartLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import {
@@ -125,4 +124,4 @@ const handleCreateSession = withAuth(async (request, session) => {
   );
 });
 
-export const POST = withLiveSessionsEnabled(handleCreateSession);
+export const POST = handleCreateSession;

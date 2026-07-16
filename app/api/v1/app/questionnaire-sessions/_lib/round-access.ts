@@ -15,7 +15,6 @@
 
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
-import { isRoundPhasesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   evaluateRoundAccess,
   type RoundAccessVerdict,
@@ -106,11 +105,11 @@ export async function assertRoundAccess(input: AssertRoundAccessInput): Promise<
     }
   }
 
-  // Phase resolution (feature-flagged): the member's subgroup may have a staggered window on this
-  // round. When the flag is off, or the member has no subgroup / no phase, `phase` stays null and the
-  // round's own window applies — today's behaviour.
+  // Phase resolution: the member's subgroup may have a staggered window on this round. When the
+  // member has no subgroup / no phase, `phase` stays null and the round's own window applies —
+  // today's behaviour.
   let phase: PhaseWindow | null = null;
-  if (subgroupId && (await isRoundPhasesEnabled())) {
+  if (subgroupId) {
     const p = await prisma.appRoundPhase.findUnique({
       where: { roundId_subgroupId: { roundId: input.roundId, subgroupId } },
       select: { opensAt: true, closesAt: true, endMode: true },

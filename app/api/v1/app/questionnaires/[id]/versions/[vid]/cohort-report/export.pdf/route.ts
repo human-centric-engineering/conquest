@@ -18,7 +18,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateQueryParams } from '@/lib/api/validation';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTheme } from '@/lib/app/questionnaire/theming';
 import {
   buildCohortDataset,
@@ -91,4 +90,4 @@ const handleExportPdf = withAdminAuth<Params>(
   }
 );
 
-export const GET = withCohortReportEnabled(handleExportPdf);
+export const GET = handleExportPdf;

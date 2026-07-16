@@ -14,11 +14,6 @@ import { EvaluationRunDetail } from '@/components/admin/questionnaires/evaluatio
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import {
-  isDataSlotsEnabled,
-  isDesignEvaluationEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { getVersionDataSlotCountCached } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { EvaluationRunDetail as EvaluationRunDetailView } from '@/lib/app/questionnaire/views';
@@ -51,19 +46,13 @@ async function getRun(
 }
 
 export default async function EvaluationRunTab({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const { id, vid, runId } = await params;
-  const [run, canApply, dataSlotsEnabled] = await Promise.all([
-    getRun(id, vid, runId),
-    isDesignEvaluationEnabled(),
-    isDataSlotsEnabled(),
-  ]);
+  const run = await getRun(id, vid, runId);
   if (!run) notFound();
 
   // Offer to slot a newly-added question only when the version already has data slots (a question
   // added afterwards would otherwise be orphaned from them).
-  const dataSlotsAvailable = dataSlotsEnabled && (await getVersionDataSlotCountCached(id, vid)) > 0;
+  const dataSlotsAvailable = (await getVersionDataSlotCountCached(id, vid)) > 0;
 
   return (
     <div className="space-y-4">
@@ -80,7 +69,7 @@ export default async function EvaluationRunTab({ params }: PageProps) {
         run={run}
         questionnaireId={id}
         versionId={vid}
-        canApply={canApply}
+        canApply={true}
         dataSlotsAvailable={dataSlotsAvailable}
       />
     </div>

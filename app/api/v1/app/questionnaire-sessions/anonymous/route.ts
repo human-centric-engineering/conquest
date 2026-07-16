@@ -21,7 +21,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { sessionStartLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { createAnonymousSession } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
@@ -65,4 +64,4 @@ async function handleAnonymousCreate(request: NextRequest): Promise<Response> {
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleAnonymousCreate);
+export const POST = handleAnonymousCreate;

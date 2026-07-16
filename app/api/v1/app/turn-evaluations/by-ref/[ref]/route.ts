@@ -13,7 +13,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { lookupSessionByRef } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-list';
 
 const handleLookup = withAdminAuth<{ ref: string }>(async (request, _session, { params }) => {
@@ -32,4 +31,4 @@ const handleLookup = withAdminAuth<{ ref: string }>(async (request, _session, { 
   return successResponse(result);
 });
 
-export const GET = withTurnEvaluationEnabled(handleLookup);
+export const GET = handleLookup;

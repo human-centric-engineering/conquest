@@ -13,7 +13,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { withAdminAuth } from '@/lib/auth/guards';
 
 import { getRespondentReportRevisionDetail } from '@/lib/app/questionnaire/report/revision';
-import { withRespondentReportEnabled } from '@/app/api/v1/app/questionnaire-sessions/_lib/report-flag';
 
 const handleGet = withAdminAuth<{ id: string; rev: string }>(
   async (_request, _session, { params }) => {
@@ -36,4 +35,4 @@ const handleGet = withAdminAuth<{ id: string; rev: string }>(
   }
 );
 
-export const GET = withRespondentReportEnabled(handleGet);
+export const GET = handleGet;

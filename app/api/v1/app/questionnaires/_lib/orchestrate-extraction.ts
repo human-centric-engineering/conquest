@@ -30,7 +30,6 @@ import {
   QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG,
   VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
-import { isIngestVerifyRepairEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { validateTypeConfig } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
@@ -152,9 +151,6 @@ export async function* orchestrateExtraction(
 
   const extracted = await extractionPromise;
   if (!extracted.ok) return extracted;
-
-  // Sub-flag off → today's exact behaviour (single extractor pass, already coherence-checked).
-  if (!(await isIngestVerifyRepairEnabled())) return extracted;
 
   let extraction = extracted.value.extraction;
   const parsed = extracted.value.parsed;

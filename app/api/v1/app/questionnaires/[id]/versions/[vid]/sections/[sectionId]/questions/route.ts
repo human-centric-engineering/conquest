@@ -18,7 +18,6 @@ import { prisma } from '@/lib/db/client';
 import { Prisma } from '@prisma/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createQuestionSchema, validateTypeConfig } from '@/lib/app/questionnaire/authoring';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -121,4 +120,4 @@ const handleCreateQuestion = withAdminAuth<Params>(async (request, session, { pa
   }
 });
 
-export const POST = withQuestionnairesEnabled(handleCreateQuestion);
+export const POST = handleCreateQuestion;

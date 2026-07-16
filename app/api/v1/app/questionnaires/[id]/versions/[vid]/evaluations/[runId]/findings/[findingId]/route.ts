@@ -28,10 +28,6 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
-import {
-  isDesignEvaluationEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { reviewFindingSchema } from '@/lib/app/questionnaire/evaluation';
 import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
@@ -45,11 +41,6 @@ const handleReview = withAdminAuth<Params>(async (request, session, { params }) 
   const log = await getRouteLogger(request);
   const clientIp = getClientIP(request);
   const { id, vid, runId, findingId } = await params;
-
-  // A review decision is part of the paid sub-feature — gate it like the run POST.
-  if (!(await isDesignEvaluationEnabled())) {
-    throw new NotFoundError('Questionnaire design-time evaluation is not enabled');
-  }
 
   const scoped = await loadScopedFinding(vid, runId, findingId);
   if (!scoped) throw new NotFoundError('Evaluation finding not found');
@@ -116,4 +107,4 @@ const handleReview = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse(view);
 });
 
-export const PATCH = withQuestionnairesEnabled(handleReview);
+export const PATCH = handleReview;

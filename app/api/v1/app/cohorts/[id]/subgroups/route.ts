@@ -20,7 +20,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withRoundPhasesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createCohortSubgroupSchema } from '@/lib/app/questionnaire/rounds';
 import { listCohortSubgroups, toCohortSubgroupView } from '@/app/api/v1/app/cohorts/_lib/read';
 
@@ -90,5 +89,5 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
   }
 });
 
-export const GET = withRoundPhasesEnabled(handleList);
-export const POST = withRoundPhasesEnabled(handleCreate);
+export const GET = handleList;
+export const POST = handleCreate;

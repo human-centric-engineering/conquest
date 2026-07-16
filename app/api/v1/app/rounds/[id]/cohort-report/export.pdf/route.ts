@@ -19,7 +19,6 @@ import { validateQueryParams } from '@/lib/api/validation';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTheme } from '@/lib/app/questionnaire/theming';
 import {
   buildCohortDataset,
@@ -121,4 +120,4 @@ const handleExportPdf = withAdminAuth<Params>(
   }
 );
 
-export const GET = withCohortReportEnabled(handleExportPdf);
+export const GET = handleExportPdf;

@@ -21,10 +21,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { prisma } from '@/lib/db/client';
 import {
-  isDataSlotsEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   DEFAULT_DATA_SLOT_GRANULARITY,
   dataSlotGranularitySchema,
   type DataSlotGenEvent,
@@ -45,10 +41,6 @@ const handleGenerateStream = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const { id, vid } = await params;
     const adminId = session.user.id;
-
-    if (!(await isDataSlotsEnabled())) {
-      throw new NotFoundError('Data slots are not enabled');
-    }
 
     const rl = dataSlotsGenerationLimiter.check(adminId);
     if (!rl.success) {
@@ -139,4 +131,4 @@ const handleGenerateStream = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleGenerateStream);
+export const POST = handleGenerateStream;

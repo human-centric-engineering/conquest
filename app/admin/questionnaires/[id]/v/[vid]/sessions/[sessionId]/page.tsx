@@ -27,7 +27,6 @@ import { loadAdminSessionView } from '@/app/api/v1/app/questionnaire-sessions/_l
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 import { loadAdminReportRerunPanel } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-report-rerun-view';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 
@@ -43,9 +42,6 @@ interface PageProps {
 export default async function SessionViewerPage({ params }: PageProps) {
   const { id, vid, sessionId } = await params;
 
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.liveSessions) notFound();
-
   const view = await loadAdminSessionView(sessionId);
   // Ownership AND version must match the URL — otherwise the session renders under the wrong
   // version's chrome/back-link (and the URL could confirm a cross-questionnaire session).
@@ -58,9 +54,9 @@ export default async function SessionViewerPage({ params }: PageProps) {
   const continuable = view.isPreview && view.status === 'active';
   const accessToken = continuable ? mintSessionToken(sessionId).token : undefined;
 
-  // Admin "re-run report" affordance — only when the respondent-report feature is on. Seeds the panel
-  // with the version's current report config (the re-run starting point) and the existing re-run history.
-  const rerun = flags.respondentReport ? await loadAdminReportRerunPanel(vid, sessionId) : null;
+  // Admin "re-run report" affordance. Seeds the panel with the version's current report config (the
+  // re-run starting point) and the existing re-run history.
+  const rerun = await loadAdminReportRerunPanel(vid, sessionId);
 
   return (
     <div className="flex h-[calc(100vh-13rem)] min-h-0 flex-col gap-3">

@@ -15,7 +15,6 @@ import type { NextRequest } from 'next/server';
 
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { handleAPIError } from '@/lib/api/errors';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { prisma } from '@/lib/db/client';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
@@ -47,4 +46,4 @@ async function handleGetReport(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetReport);
+export const GET = handleGetReport;

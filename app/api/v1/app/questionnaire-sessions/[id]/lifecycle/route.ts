@@ -31,7 +31,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { ConflictError, handleAPIError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
@@ -134,4 +133,4 @@ async function handleLifecycle(
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleLifecycle);
+export const POST = handleLifecycle;

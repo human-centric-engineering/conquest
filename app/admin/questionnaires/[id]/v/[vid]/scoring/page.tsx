@@ -9,17 +9,13 @@
  * the scoring-schema GET endpoint.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { ScoringBuilder } from '@/components/admin/questionnaires/cohort-report/scoring-builder';
 import { CohortReportSettingsForm } from '@/components/admin/questionnaires/cohort-report/cohort-report-settings-form';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import {
-  getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
-} from '@/lib/app/questionnaire/workspace-data';
+import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
 import { DEFAULT_COHORT_REPORT_SETTINGS } from '@/lib/app/questionnaire/types';
 import { EMPTY_SCORING_SCHEMA, type ScoringSchemaContent } from '@/lib/app/questionnaire/scoring';
 
@@ -54,9 +50,6 @@ async function getSchemaView(id: string, vid: string): Promise<SchemaView | null
 }
 
 export default async function ScoringTab({ params }: PageProps) {
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.cohortReport) notFound();
-
   const { id, vid } = await params;
   const [view, graph] = await Promise.all([getSchemaView(id, vid), getVersionGraphCached(id, vid)]);
   const settings = graph?.config.cohortReport ?? DEFAULT_COHORT_REPORT_SETTINGS;

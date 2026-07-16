@@ -13,8 +13,6 @@
  * Flag-gate first (404 when off), then `withAdminAuth`; `inviteLimiter` sub-cap + audit.
  */
 
-import type { NextRequest } from 'next/server';
-
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
@@ -23,7 +21,6 @@ import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { inviteLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { mintInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import { loadScopedInvitation } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/read';
 import { buildFrictionlessInviteUrl } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/send';
@@ -74,11 +71,4 @@ const handleLink = withAdminAuth<Params>(async (request, session, { params }) =>
   });
 });
 
-export async function POST(
-  request: NextRequest,
-  context: { params: Promise<Params> }
-): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleLink(request, context);
-}
+export const POST = handleLink;

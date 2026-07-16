@@ -12,7 +12,6 @@ import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getInvitationDiagnostics } from '@/lib/app/questionnaire/analytics';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 
@@ -45,4 +44,4 @@ const handleGet = withAdminAuth<{ id: string; vid: string; invitationId: string 
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

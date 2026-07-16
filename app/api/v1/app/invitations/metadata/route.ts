@@ -18,7 +18,6 @@ import { handleAPIError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
 import { prisma } from '@/lib/db/client';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   isInvitationTransitionAllowed,
   type AppInvitationStatus,
@@ -30,9 +29,6 @@ import {
 } from '@/app/api/v1/app/invitations/_lib/resolve';
 
 export async function GET(request: NextRequest): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-
   const log = await getRouteLogger(request);
   const token = new URL(request.url).searchParams.get('token');
   if (!token) {

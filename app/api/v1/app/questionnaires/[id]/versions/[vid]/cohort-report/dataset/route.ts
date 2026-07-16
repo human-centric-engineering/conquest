@@ -16,7 +16,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { NotFoundError } from '@/lib/api/errors';
 import { withAdminAuth } from '@/lib/auth/guards';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { buildCohortDataset } from '@/lib/app/questionnaire/cohort-report';
 import { loadVersionReportScope } from '@/app/api/v1/app/questionnaires/_lib/version-report';
 
@@ -40,4 +39,4 @@ const handleGet = withAdminAuth<Params>(async (request, _session, { params }) =>
   return successResponse(dataset);
 });
 
-export const GET = withCohortReportEnabled(handleGet);
+export const GET = handleGet;

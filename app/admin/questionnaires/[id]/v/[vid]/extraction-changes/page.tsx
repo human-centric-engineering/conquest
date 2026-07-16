@@ -3,14 +3,12 @@
  * selected version. Lifted into the workspace; reads `vid` from the path.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 import { Wand2 } from 'lucide-react';
 
 import { ExtractionChangesTable } from '@/components/admin/questionnaires/extraction-changes-table';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { ExtractionChangeListResponse } from '@/lib/app/questionnaire/extraction-review';
 
 export const metadata: Metadata = {
@@ -38,8 +36,6 @@ async function getChanges(
 }
 
 export default async function ExtractionChangesTab({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const { id, vid } = await params;
   const changes = await getChanges(id, vid);
 

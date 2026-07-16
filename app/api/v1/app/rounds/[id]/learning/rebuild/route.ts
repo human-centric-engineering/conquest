@@ -19,7 +19,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withLearningModeEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 import { listBriefableQuestionnaires } from '@/app/api/v1/app/rounds/_lib/context';
 
@@ -61,4 +60,4 @@ const handleRebuild = withAdminAuth<Params>(async (request, session, { params })
   return successResponse({ versions: results });
 });
 
-export const POST = withLearningModeEnabled(handleRebuild);
+export const POST = handleRebuild;

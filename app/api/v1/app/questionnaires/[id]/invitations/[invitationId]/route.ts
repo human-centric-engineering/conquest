@@ -11,7 +11,6 @@
  * Flag-gate first (404 when off), then `withAdminAuth`. Audited.
  */
 
-import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { errorResponse, successResponse } from '@/lib/api/responses';
@@ -22,7 +21,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { isInvitationTransitionAllowed } from '@/lib/app/questionnaire/invitations';
 import {
   loadScopedInvitation,
@@ -72,11 +70,4 @@ const handlePatch = withAdminAuth<Params>(async (request, session, { params }) =
   return successResponse(toInvitationView(updated));
 });
 
-export async function PATCH(
-  request: NextRequest,
-  context: { params: Promise<Params> }
-): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handlePatch(request, context);
-}
+export const PATCH = handlePatch;

@@ -18,7 +18,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withRoundContextEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createRoundContextEntrySchema } from '@/lib/app/questionnaire/rounds';
 import {
   assertRoundBundlesVersion,
@@ -108,5 +107,5 @@ const handleCreate = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse(entry, undefined, { status: 201 });
 });
 
-export const GET = withRoundContextEnabled(handleList);
-export const POST = withRoundContextEnabled(handleCreate);
+export const GET = handleList;
+export const POST = handleCreate;

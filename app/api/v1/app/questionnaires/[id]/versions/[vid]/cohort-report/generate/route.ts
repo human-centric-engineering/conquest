@@ -23,7 +23,6 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   buildCohortDataset,
   buildCohortReportView,
@@ -115,4 +114,4 @@ const handleGenerate = withAdminAuth<Params>(async (request, session, { params }
   return successResponse(view);
 });
 
-export const POST = withCohortReportEnabled(handleGenerate);
+export const POST = handleGenerate;

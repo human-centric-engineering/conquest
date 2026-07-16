@@ -1,14 +1,9 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
 import { ComposeStudio } from '@/components/admin/questionnaires/compose/compose-studio';
 import { FieldHelp } from '@/components/ui/field-help';
-import {
-  isGenerativeAuthoringEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 
 export const metadata: Metadata = {
   title: 'Compose a questionnaire',
@@ -23,11 +18,7 @@ export const metadata: Metadata = {
  * the API would 404 too), then hands off to the client `<ComposeStudio>`, which
  * owns the brief → stream → refine flow.
  */
-export default async function ComposeQuestionnairePage() {
-  if (!(await isQuestionnairesEnabled()) || !(await isGenerativeAuthoringEnabled())) {
-    notFound();
-  }
-
+export default function ComposeQuestionnairePage() {
   return (
     <div className="space-y-6">
       <div>

@@ -24,7 +24,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { actionTurnEvaluationForLearning } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 
 const bodySchema = z.object({
@@ -81,4 +80,4 @@ const handleAction = withAdminAuth<{ id: string; evalId: string }>(
   }
 );
 
-export const POST = withTurnEvaluationEnabled(handleAction);
+export const POST = handleAction;

@@ -22,7 +22,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { ensureCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createCohortSchema } from '@/lib/app/questionnaire/rounds';
 import { demoClientExists, getCohortDetail, listCohorts } from '@/app/api/v1/app/cohorts/_lib/read';
 
@@ -76,14 +75,5 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
   return successResponse(detail, undefined, { status: 201 });
 });
 
-export async function GET(request: NextRequest): Promise<Response> {
-  const blocked = await ensureCohortsEnabled();
-  if (blocked) return blocked;
-  return handleList(request);
-}
-
-export async function POST(request: NextRequest): Promise<Response> {
-  const blocked = await ensureCohortsEnabled();
-  if (blocked) return blocked;
-  return handleCreate(request);
-}
+export const GET = handleList;
+export const POST = handleCreate;

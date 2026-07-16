@@ -21,7 +21,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logging';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { parseDefinitionImport } from '@/lib/app/questionnaire/authoring';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { persistDefinitionImport } from '@/app/api/v1/app/questionnaires/_lib/import-definition';
@@ -122,4 +121,4 @@ const handleImport = withAdminAuth(async (request: NextRequest, session) => {
   return successResponse(result, undefined, { status: 201 });
 });
 
-export const POST = withQuestionnairesEnabled(handleImport);
+export const POST = handleImport;

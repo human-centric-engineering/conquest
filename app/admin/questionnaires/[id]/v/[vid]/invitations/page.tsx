@@ -17,10 +17,6 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import {
-  isQuestionnairesEnabled,
-  isInvitationImportEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
 } from '@/lib/app/questionnaire/workspace-data';
@@ -58,8 +54,6 @@ async function getInvitations(
 }
 
 export default async function InvitationsTab({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const { id } = await params;
 
   const detail = await getQuestionnaireDetailCached(id);
@@ -73,11 +67,8 @@ export default async function InvitationsTab({ params }: PageProps) {
   const { invitations, total } = await getInvitations(id);
   const truncated = total > invitations.length;
 
-  // Invitee-field config drives the verify-grid columns; AI import gated by its sub-flag.
-  const [graph, importEnabled] = await Promise.all([
-    launchedVersion ? getVersionGraphCached(id, launchedVersion.id) : Promise.resolve(null),
-    isInvitationImportEnabled(),
-  ]);
+  // Invitee-field config drives the verify-grid columns.
+  const graph = launchedVersion ? await getVersionGraphCached(id, launchedVersion.id) : null;
   const inviteeFields = graph?.config.inviteeFields ?? DEFAULT_INVITEE_FIELDS;
   // The collective no-login link only works when the launched version permits a direct
   // (no-invitation) start — i.e. access mode is `public` or `both`, not `invitation_only`.
@@ -106,7 +97,7 @@ export default async function InvitationsTab({ params }: PageProps) {
       <InviteImportWizard
         questionnaireId={id}
         inviteeFields={inviteeFields}
-        importEnabled={importEnabled}
+        importEnabled={true}
         disabled={!hasLaunchedVersion}
       />
 

@@ -10,10 +10,8 @@
  * `CohortReportPanel` (via the version client island) with a version-scoped `ReportApi`.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { VersionCohortReport } from '@/components/admin/questionnaires/cohort-report/version-cohort-report';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 export const metadata: Metadata = {
   title: 'Report · Questionnaire',
@@ -25,9 +23,6 @@ interface PageProps {
 }
 
 export default async function CohortReportTab({ params }: PageProps) {
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.cohortReport) notFound();
-
   const { id, vid } = await params;
 
   return (

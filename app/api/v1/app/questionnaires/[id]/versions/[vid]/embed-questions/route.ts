@@ -33,7 +33,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
   embedVersionSlots,
@@ -89,5 +88,5 @@ const handleEmbedQuestions = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleEmbeddingCoverage);
-export const POST = withQuestionnairesEnabled(handleEmbedQuestions);
+export const GET = handleEmbeddingCoverage;
+export const POST = handleEmbedQuestions;

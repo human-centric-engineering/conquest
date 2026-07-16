@@ -32,7 +32,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
@@ -189,4 +188,4 @@ const handleReingest = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleReingest);
+export const POST = handleReingest;

@@ -18,10 +18,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { prisma } from '@/lib/db/client';
-import {
-  withLiveSessionsEnabled,
-  isIntroScreenEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { resolveSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 
@@ -44,12 +40,6 @@ async function handleGetIntro(
       return errorResponse(access.message, { code: access.code, status: access.status });
     }
 
-    // Platform flag off → no splash at all (the per-version toggle is the second gate, but the
-    // platform flag wins). Return null so the client skips straight into the questionnaire.
-    if (!(await isIntroScreenEnabled())) {
-      return successResponse({ intro: null });
-    }
-
     const intro = await resolveSessionIntro(sessionId);
     log.info('Session intro read', { sessionId, enabled: intro?.enabled ?? false });
     return successResponse({ intro });
@@ -58,4 +48,4 @@ async function handleGetIntro(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetIntro);
+export const GET = handleGetIntro;

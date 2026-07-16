@@ -8,8 +8,7 @@
  * the verbatim conversation, served from the admin session viewer. Nested under the
  * questionnaire so the route enforces ownership: the session's version must belong to
  * questionnaire `:id` (404 otherwise — don't confirm a session exists under a questionnaire
- * it doesn't). Admin-authenticated (`withAdminAuth`); the feature-flag gate runs first
- * (`withQuestionnairesEnabled`) so a disabled app looks like a missing route.
+ * it doesn't). Admin-authenticated (`withAdminAuth`).
  *
  * Unlike the respondent route there is no `resolveTurnAccess` — admin auth replaces the
  * owner/anonymous-token check. Anonymous-mode redaction is unchanged: it lives in the model
@@ -23,7 +22,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   loadTranscriptExport,
   assembleTranscriptExportModel,
@@ -63,4 +61,4 @@ const handleAdminTranscriptPdf = withAdminAuth<{ id: string; sessionId: string }
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleAdminTranscriptPdf);
+export const GET = handleAdminTranscriptPdf;

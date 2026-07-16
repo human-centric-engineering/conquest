@@ -1,11 +1,9 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { AgentSettingsPanel } from '@/components/admin/questionnaires/agent-settings/agent-settings-panel';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { AgentSettingsEvaluation } from '@/lib/app/questionnaire/agent-advisory/evaluate';
 
 export const metadata: Metadata = {
@@ -23,8 +21,6 @@ export const metadata: Metadata = {
  * off), pre-fetches the deterministic evaluation, hands to the client panel.
  */
 export default async function AgentSettingsPage() {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   let evaluation: AgentSettingsEvaluation | null = null;
   try {
     const res = await serverFetch(API.APP.QUESTIONNAIRES.agentSettings);

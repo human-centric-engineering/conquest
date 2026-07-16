@@ -19,7 +19,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateQueryParams } from '@/lib/api/validation';
 import { exportLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveAnalyticsScope } from '@/lib/app/questionnaire/analytics';
 import { resultsExportQuerySchema } from '@/lib/app/questionnaire/export/results-query';
 import { loadResultsExport } from '@/lib/app/questionnaire/export/results-loader';
@@ -90,4 +89,4 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

@@ -29,7 +29,6 @@ import { prisma } from '@/lib/db/client';
 import { Prisma } from '@prisma/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateVersionMetaSchema } from '@/lib/app/questionnaire/authoring';
 import type {
   AudienceProvenance,
@@ -152,7 +151,5 @@ const handleVersionMetaPatch = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-// Flag gate first (404 when off) — a switched-off app must look like a missing
-// route, not a 401 — then the admin-auth'd handler. The HOC enforces that order.
-export const GET = withQuestionnairesEnabled(handleVersionGraph);
-export const PATCH = withQuestionnairesEnabled(handleVersionMetaPatch);
+export const GET = handleVersionGraph;
+export const PATCH = handleVersionMetaPatch;
