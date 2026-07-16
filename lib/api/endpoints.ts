@@ -605,6 +605,8 @@ export const API = {
       PREVIEW: '/api/v1/app/questionnaire-sessions/preview',
       /** Cross-device resume of an anonymous in-progress session by its support ref (POST `{ ref }` → `{ session, accessToken, expiresAt, ref }`); re-mints a fresh token. Public, hard rate-limited, anonymous+resumable only. */
       RESUME_BY_REF: '/api/v1/app/questionnaire-sessions/resume-by-ref',
+      /** ALPHA admin: paginated cross-questionnaire session-ref browser (GET `?page&limit&q&status`). Gated by the alpha release stage. */
+      REFS: '/api/v1/app/questionnaire-sessions/refs',
       /** Respondent turn — SSE stream (POST `{ message }`). */
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
