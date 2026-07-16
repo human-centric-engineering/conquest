@@ -159,11 +159,10 @@ export function nodeRetrievalKind(config: Record<string, unknown>): RetrievalKin
 // ---------------------------------------------------------------------------
 
 /**
- * Normalised feature-flag set the applicability predicates read. Deliberately
- * decoupled from the platform `QuestionnaireWorkspaceFlags` (which uses
- * different field names and omits a few flags) so predicates stay pure and
- * trivially testable. Every sub-flag here is already ANDed with the master flag
- * by `buildApplicabilityContext`.
+ * Normalised capability set the applicability predicates read. The questionnaire
+ * feature flags have been retired (every feature is permanently on), so
+ * `buildApplicabilityContext` resolves every field here to `true`; the shape is
+ * kept so the predicates stay pure and trivially testable.
  */
 export interface WorkflowFlags {
   master: boolean;
