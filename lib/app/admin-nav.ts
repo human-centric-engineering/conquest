@@ -20,11 +20,13 @@ import {
   Gauge,
   MessageSquareText,
   SlidersHorizontal,
+  TicketCheck,
   Workflow,
 } from 'lucide-react';
 
 import { QuestionnairesNavBrand } from '@/components/app/questionnaire/questionnaires-nav-brand';
 import { registerNavSection } from '@/lib/admin-nav/registry';
+import { IS_ALPHA } from '@/lib/app/release-stage';
 
 export function initAppNav(): void {
   // ConQuest questionnaires (P2 / F2.1). The whole surface is flag-gated server
@@ -77,6 +79,19 @@ export function initAppNav(): void {
         icon: Gauge,
         description: 'Search, review, and flag persisted interview-turn evaluations',
       },
+      // ALPHA-ONLY: browse session refs → open a session → regenerate its report. Present only while
+      // the product is in the alpha release stage; the page + API 404 otherwise, so the entry hides to match.
+      ...(IS_ALPHA
+        ? [
+            {
+              href: '/admin/questionnaires/sessions',
+              label: 'Sessions',
+              icon: TicketCheck,
+              description:
+                'Alpha: browse session references, open a session, regenerate its report',
+            },
+          ]
+        : []),
     ],
   });
 }

@@ -170,8 +170,8 @@ model AppQuestionnaireConfig {
   selectionStrategy String @default("adaptive") // sequential | random | weighted | adaptive (SELECTION_STRATEGIES)
 
   // Completion thresholds: when a session may be considered done.
-  minQuestionsAnswered Int   @default(0) // require at least this many answered
-  coverageThreshold    Float @default(1.0) // 0–1 fraction of (weighted) questions covered
+  minQuestionsAnswered  Int   @default(0) // require at least this many answered
+  coverageThreshold     Float @default(1.0) // 0–1 fraction of (weighted) questions covered
   // Confirmation floor (opportunistic fill): an answer below this confidence is "tentative" — it
   // does NOT count toward completion coverage or satisfy a required question until corroborated
   // above it. Governs how cautious the background form-fill loop is (lower = accept guesses sooner).
@@ -956,26 +956,71 @@ model AppRespondentProfileSnapshot {
 /// it natively. The lease columns (`lockedBy`/`lockedAt`) mirror the evaluations batch worker
 /// (lib/orchestration/evaluations/run-worker.ts) for crash-safe recovery of stale claims.
 model AppRespondentReport {
-  id          String    @id @default(cuid())
-  sessionId   String    @unique
-  mode        String // RESPONDENT_REPORT_MODES (types.ts); the AI modes `raw_plus_insights` + `narrative` persist a row
-  status      String    @default("queued") // RESPONDENT_REPORT_STATUSES: queued | processing | ready | failed
-  content     Json? // RespondentReportContent (insights payload); null until ready
-  formatted   Boolean   @default(false) // true when the Report Formatter second pass produced the stored prose (renderers honour its paragraphs verbatim); false = deterministic split at render
-  completionPct Int? // questionnaire completion % at generation (answered/total slots); drives the partial-report caveat below PARTIAL_REPORT_THRESHOLD_PCT. Null for legacy rows (no caveat).
-  costUsd     Float? // generation cost actual; null until ready
-  error       String? // failure message when status = failed
-  notifyEmail String? // respondent opted in to be emailed when ready; null = no notify. Sent best-effort by the worker on status→ready, then cleared.
-  lockedBy    String? // worker host holding the lease; null when idle
-  lockedAt    DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
-  generatedAt DateTime? // when content was written (status → ready)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                  String    @id @default(cuid())
+  sessionId           String    @unique
+  mode                String // RESPONDENT_REPORT_MODES (types.ts); the AI modes `raw_plus_insights` + `narrative` persist a row
+  status              String    @default("queued") // RESPONDENT_REPORT_STATUSES: queued | processing | ready | failed
+  content             Json? // RespondentReportContent (insights payload); null until ready
+  formatted           Boolean   @default(false) // true when the Report Formatter second pass produced the stored prose (renderers honour its paragraphs verbatim); false = deterministic split at render
+  completionPct       Int? // questionnaire completion % at generation (answered/total slots); drives the partial-report caveat below PARTIAL_REPORT_THRESHOLD_PCT. Null for legacy rows (no caveat).
+  costUsd             Float? // generation cost actual; null until ready
+  error               String? // failure message when status = failed
+  notifyEmail         String? // respondent opted in to be emailed when ready; null = no notify. Sent best-effort by the worker on status→ready, then cleared.
+  lockedBy            String? // worker host holding the lease; null when idle
+  lockedAt            DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
+  generatedAt         DateTime? // when content was written (status → ready)
+  // The admin re-run revision (AppRespondentReportRevision.id) whose content was last PROMOTED into
+  // this delivered report; null when the delivered content is the original submit-time generation. Lets
+  // the admin viewer mark which revision is live. Plain String pointer (no FK): a revision may be pruned
+  // with the session while the header lingers only via cascade, so nothing dangles.
+  deliveredRevisionId String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  session AppQuestionnaireSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session   AppQuestionnaireSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  revisions AppRespondentReportRevision[]
 
   @@index([status, lockedAt])
   @@map("app_respondent_report")
+}
+
+/// One admin-triggered re-run of a Respondent Report against a real session (F10.x "re-run report").
+/// Every re-run appends a revision (never mutates one) carrying the exact instructions/settings it used
+/// (`settingsSnapshot`), so the admin has a full, comparable history of experiments and can PROMOTE any
+/// `ready` revision into the delivered `AppRespondentReport`. Generated ASYNC by the same maintenance
+/// worker that drains the delivered report — its own `status` + lease (`lockedBy`/`lockedAt`) mirror the
+/// header row so a crash mid-generation is re-claimable. This is decoupled from the delivered report on
+/// purpose: an experimental re-run never touches what the respondent sees until an admin promotes it.
+///
+/// Cascade from the report (which cascades from the session), so session deletion + GDPR erasure remove
+/// every re-run natively. `createdBy` is a plain String admin `User.id` (UG-1, no FK) — admin action
+/// attribution, not personal data that must cascade.
+model AppRespondentReportRevision {
+  id               String    @id @default(cuid())
+  reportId         String
+  revisionNumber   Int // 1-based; monotonic per report. Working head = MAX(revisionNumber).
+  status           String    @default("queued") // RESPONDENT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
+  content          Json? // RespondentReportContent (insights payload); null until ready
+  formatted        Boolean   @default(false) // true when the Report Formatter second pass produced the stored prose (see AppRespondentReport.formatted)
+  completionPct    Int? // questionnaire completion % at generation; drives the partial-report caveat. Null for a not-yet-generated revision.
+  settingsSnapshot Json // the RespondentReportSettings this re-run used (defensively narrowed on read); the "new instructions/settings" for this run
+  instructions     String? // the admin's short free-text note for this re-run (why / what changed), shown in the history
+  authoredBy       String    @default("admin") // RESPONDENT_REPORT_AUTHORS (types.ts): admin (re-run) | ai (reserved)
+  costUsd          Float? // generation cost actual; null until ready
+  error            String? // failure message when status = failed
+  lockedBy         String? // worker host holding the lease; null when idle
+  lockedAt         DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
+  createdBy        String? // admin User.id who triggered it; plain String, no FK (UG-1)
+  generatedAt      DateTime? // when content was written (status → ready)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  report AppRespondentReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, revisionNumber])
+  @@index([reportId])
+  @@index([status, lockedAt])
+  @@map("app_respondent_report_revision")
 }
 
 /// The generated Cohort Report (report kind `cohort`) for one round — the cross-respondent

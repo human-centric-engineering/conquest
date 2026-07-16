@@ -66,6 +66,20 @@ sample can re-identify an individual answer. Applied at the aggregator:
 
 An empty cohort (`0` sessions) is **not** "suppressed" — it genuinely has no data.
 
+### Temporary alpha bypass (dashboard only)
+
+While the product is in the `alpha` release stage (`IS_ALPHA`, driven by the existing
+`NEXT_PUBLIC_RELEASE_STAGE`, see `lib/app/release-stage.ts` — **not a separate flag**), the
+**analytics-dashboard** aggregators (distributions, funnel, cost) bypass the low-N floor via
+`isAnalyticsPanelSuppressed()` (`analytics/privacy.ts`) so the team can see analytics on the tiny
+cohorts alpha produces. `ALPHA_ANALYTICS_ANONYMITY_DISABLED` gates it, and the admin analytics view
+(`analytics-view.tsx`) shows a visible "disabled for alpha testing" note whenever it is active. This is
+**scoped to the dashboard only** — cohort reports (`cohort-report/dataset.ts`), safeguarding alerts
+(`analytics/safeguarding.ts`), the data-slot material floor, and the version's explicit
+**anonymous-mode** session-table suppression all still enforce k-anonymity via `isCohortSuppressed()`.
+It **auto-restores** the moment the stage moves off `alpha` — no code change is needed for GA. The same
+`alpha` stage also gates the alpha **session-ref browser** (`/admin/questionnaires/sessions`).
+
 ## Erasure
 
 `AppRespondentProfileSnapshot` is the **first** questionnaire model with a modelled `User`

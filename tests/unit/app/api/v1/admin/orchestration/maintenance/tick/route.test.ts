@@ -73,6 +73,7 @@ vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
 
 vi.mock('@/lib/app/questionnaire/report/worker', () => ({
   processQueuedRespondentReports: vi.fn(),
+  processQueuedReportRevisions: vi.fn(),
 }));
 
 // ─── Imports ────────────────────────────────────────────────────────────────
@@ -218,6 +219,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'pendingExecutionRecovery',
       'evaluationRuns',
       'respondentReports',
+      'respondentReportRevisions',
     ]);
     expect(typeof body.data.durationMs).toBe('number');
     expect(body.data.durationMs).toBeGreaterThanOrEqual(0);
@@ -302,8 +304,8 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     expect(response.status).toBe(202);
     expect(body.data.schedules).toEqual({ error: 'schedules DB down' });
     // Background tasks still kick off even when schedules fail
-    // (9 tasks since respondentReports was added).
-    expect(body.data.backgroundTasks).toHaveLength(9);
+    // (10 tasks since the respondentReportRevisions re-run drain was added).
+    expect(body.data.backgroundTasks).toHaveLength(10);
   });
 
   it('still kicks off background tasks when schedules reject', async () => {

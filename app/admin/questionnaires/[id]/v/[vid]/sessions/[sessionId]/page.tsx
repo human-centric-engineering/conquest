@@ -21,10 +21,12 @@ import { ArrowLeft } from 'lucide-react';
 
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { SessionDownloads } from '@/components/admin/questionnaires/sessions/session-downloads';
+import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { Badge } from '@/components/ui/badge';
 import { loadAdminSessionView } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
+import { loadAdminReportRerunPanel } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-report-rerun-view';
 import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
@@ -56,6 +58,10 @@ export default async function SessionViewerPage({ params }: PageProps) {
   const continuable = view.isPreview && view.status === 'active';
   const accessToken = continuable ? mintSessionToken(sessionId).token : undefined;
 
+  // Admin "re-run report" affordance — only when the respondent-report feature is on. Seeds the panel
+  // with the version's current report config (the re-run starting point) and the existing re-run history.
+  const rerun = flags.respondentReport ? await loadAdminReportRerunPanel(vid, sessionId) : null;
+
   return (
     <div className="flex h-[calc(100vh-13rem)] min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -85,7 +91,17 @@ export default async function SessionViewerPage({ params }: PageProps) {
             You can continue this preview conversation.
           </span>
         )}
-        <SessionDownloads questionnaireId={id} sessionId={sessionId} className="ml-auto" />
+        <div className="ml-auto flex items-center gap-2">
+          {rerun && (
+            <SessionReportRerun
+              sessionId={sessionId}
+              initialSettings={rerun.settings}
+              initialView={rerun.initialView}
+              hasClient={rerun.hasClient}
+            />
+          )}
+          <SessionDownloads questionnaireId={id} sessionId={sessionId} />
+        </div>
       </div>
 
       <div className="min-h-0 flex-1">

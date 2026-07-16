@@ -605,6 +605,8 @@ export const API = {
       PREVIEW: '/api/v1/app/questionnaire-sessions/preview',
       /** Cross-device resume of an anonymous in-progress session by its support ref (POST `{ ref }` → `{ session, accessToken, expiresAt, ref }`); re-mints a fresh token. Public, hard rate-limited, anonymous+resumable only. */
       RESUME_BY_REF: '/api/v1/app/questionnaire-sessions/resume-by-ref',
+      /** ALPHA admin: paginated cross-questionnaire session-ref browser (GET `?page&limit&q&status`). Gated by the alpha release stage. */
+      REFS: '/api/v1/app/questionnaire-sessions/refs',
       /** Respondent turn — SSE stream (POST `{ message }`). */
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
@@ -652,6 +654,15 @@ export const API = {
       /** Opt in to a report-ready email (POST `{ email }`). */
       reportNotify: (id: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/report/notify`,
+      /** Admin re-run history + enqueue a re-run (GET → revisions view / POST `{ config?, instructions? }`). */
+      reportRevisions: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/revisions`,
+      /** One re-run revision's full content, for the admin viewer (GET). */
+      reportRevision: (id: string, revisionNumber: number): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/revisions/${revisionNumber}`,
+      /** Promote a `ready` re-run revision into the delivered report (POST). */
+      reportRevisionPromote: (id: string, revisionNumber: number): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/revisions/${revisionNumber}/promote`,
     },
     /** Persisted turn-evaluation search surface (admin) — cross-session list + detail. */
     TURN_EVALUATIONS: {

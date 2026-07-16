@@ -25,3 +25,11 @@ export const RELEASE_STAGE: ReleaseStage = RAW === 'alpha' || RAW === 'beta' ? R
 
 /** True while the product is pre-release (alpha or beta) — drives the badge + recording notice. */
 export const IS_PRERELEASE = RELEASE_STAGE === 'alpha' || RELEASE_STAGE === 'beta';
+
+/**
+ * True only while the product is in the `alpha` stage. Gates alpha-only admin tooling that is
+ * deliberately exposed for the alpha test period and protected again afterwards (the analytics
+ * k-anonymity bypass + the session-ref browser). NOT a separate flag — derived from the single
+ * existing release-stage env, so moving off `alpha` for GA re-protects everything with no cleanup.
+ */
+export const IS_ALPHA = RELEASE_STAGE === 'alpha';

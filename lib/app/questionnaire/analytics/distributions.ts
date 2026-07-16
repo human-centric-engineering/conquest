@@ -24,7 +24,7 @@ import {
   QUESTION_TYPES,
 } from '@/lib/app/questionnaire/types';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
-import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
+import { isAnalyticsPanelSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import type { TagColor } from '@/lib/app/questionnaire/types';
 import type { TagView } from '@/lib/app/questionnaire/views';
 import {
@@ -363,7 +363,7 @@ export function assembleQuestionDistributions(
   // sessions can re-identify a respondent's exact answer, so withhold all per-question
   // detail and zero the counts. The question structure (prompt/type/section/tags) stays —
   // only the response data is suppressed. An empty cohort (0) is not "suppressed".
-  const suppressed = isCohortSuppressed(totalSessions);
+  const suppressed = isAnalyticsPanelSuppressed(totalSessions);
 
   const questions: QuestionDistribution[] = slots.map((slot) => {
     const type = narrowToEnum<QuestionType>(slot.type, QUESTION_TYPES, 'free_text');

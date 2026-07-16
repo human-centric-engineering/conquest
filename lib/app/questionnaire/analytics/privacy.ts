@@ -13,6 +13,8 @@
  * the **data boundary** (the aggregator), never just in the UI.
  */
 
+import { IS_ALPHA } from '@/lib/app/release-stage';
+
 /**
  * Minimum cohort size before granular analytics detail is surfaced. Below this many
  * (non-preview) sessions, the aggregators withhold per-respondent-shaped detail. `5`
@@ -28,4 +30,30 @@ export const K_ANONYMITY_THRESHOLD = 5;
  */
 export function isCohortSuppressed(total: number): boolean {
   return total > 0 && total < K_ANONYMITY_THRESHOLD;
+}
+
+/**
+ * ALPHA (temporary): while the product is in the `alpha` release stage ({@link IS_ALPHA}, driven by the
+ * existing `NEXT_PUBLIC_RELEASE_STAGE`), the analytics **dashboard** panels (completion funnel, question
+ * distributions, per-session cost) bypass the low-N k-anonymity suppression so the team can see analytics
+ * on the tiny test cohorts alpha produces. NOT a dedicated flag — tied to the release stage so it
+ * **auto-restores** the moment the stage moves off `alpha` for GA, with no code change or cleanup.
+ *
+ * Deliberately scoped to the dashboard only: cohort reports (`cohort-report/dataset.ts`), safeguarding
+ * alerts (`analytics/safeguarding.ts`), and the data-slot material floor still enforce k-anonymity via
+ * {@link isCohortSuppressed}/{@link K_ANONYMITY_THRESHOLD}. The admin analytics view shows a visible
+ * "disabled for alpha testing" note whenever this is active. See
+ * `.context/app/questionnaire/anonymous-mode.md`.
+ */
+export const ALPHA_ANALYTICS_ANONYMITY_DISABLED = IS_ALPHA;
+
+/**
+ * Low-N suppression decision for the analytics **dashboard** panels. Identical to
+ * {@link isCohortSuppressed} except it honours the temporary {@link ALPHA_ANALYTICS_ANONYMITY_DISABLED}
+ * bypass. Use this (not `isCohortSuppressed`) only for the funnel / distributions / cost dashboard
+ * surfaces; keep `isCohortSuppressed` for every other k-anonymity gate.
+ */
+export function isAnalyticsPanelSuppressed(total: number): boolean {
+  if (ALPHA_ANALYTICS_ANONYMITY_DISABLED) return false;
+  return isCohortSuppressed(total);
 }

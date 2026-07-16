@@ -15,7 +15,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
-import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
+import { isAnalyticsPanelSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import {
   roundSessionFilter,
   type AnalyticsScope,
@@ -143,7 +143,7 @@ export async function getCompletionFunnel(scope: AnalyticsScope): Promise<Comple
   // (draft) invitations neither pads the count past the floor nor trips suppression on
   // an otherwise-empty funnel.
   const cohortSize = invited + anonStarted;
-  const suppressed = isCohortSuppressed(cohortSize);
+  const suppressed = isAnalyticsPanelSuppressed(cohortSize);
 
   const counts = suppressed
     ? { invited: 0, opened: 0, started: 0, completed: 0 }

@@ -19,7 +19,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { narrowToEnum, SESSION_STATUSES, type SessionStatus } from '@/lib/app/questionnaire/types';
-import { isCohortSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
+import { isAnalyticsPanelSuppressed } from '@/lib/app/questionnaire/analytics/privacy';
 import {
   roundSessionFilter,
   type AnalyticsScope,
@@ -102,8 +102,10 @@ export async function getQuestionnaireCostBreakdown(
   // Withhold it when the version is anonymous, or the cohort is below the k-anonymity
   // threshold. Aggregate spend (total / by-capability / trend) carries no identity and
   // is always returned.
+  // The `anonymous` gate is the version's explicit anonymous-mode setting, NOT the low-N floor — the
+  // alpha bypass only lifts the low-N floor, so anonymous versions keep their session table hidden.
   const anonymous = config?.anonymousMode ?? false;
-  const topSessionsSuppressed = anonymous || isCohortSuppressed(sessions.length);
+  const topSessionsSuppressed = anonymous || isAnalyticsPanelSuppressed(sessions.length);
 
   const sessionMeta = new Map(sessions.map((s) => [s.id, s]));
   const sessionIds = sessions.map((s) => s.id);
