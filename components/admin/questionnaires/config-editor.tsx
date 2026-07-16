@@ -18,7 +18,7 @@
  * flight, and the parent resyncs on refetch.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Brain,
   ClipboardList,
@@ -57,6 +57,14 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  detectConfigConflicts,
+  type ConfigConflict,
+} from '@/lib/app/questionnaire/authoring/config-conflicts';
+import {
+  ConfigConflictBanner,
+  SectionConflicts,
+} from '@/components/admin/questionnaires/config-conflicts';
 import { cn } from '@/lib/utils';
 import { SectionRail } from '@/components/admin/section-rail';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
@@ -401,6 +409,7 @@ function SettingsGroup({
   title,
   description,
   headerAction,
+  conflicts,
   children,
 }: {
   /** Anchor id + scroll-spy target — picked up by the `SectionRail`. */
@@ -412,6 +421,8 @@ function SettingsGroup({
   description: string;
   /** Optional right-aligned control in the header (e.g. an enable/disable switch). */
   headerAction?: React.ReactNode;
+  /** Active config conflicts anchored to this section — rendered as inline alerts atop the body. */
+  conflicts?: ConfigConflict[];
   children: React.ReactNode;
 }) {
   return (
@@ -436,7 +447,10 @@ function SettingsGroup({
         </div>
         {headerAction && <div className="mt-0.5 shrink-0">{headerAction}</div>}
       </CardHeader>
-      <CardContent className="space-y-4 p-4">{children}</CardContent>
+      <CardContent className="space-y-4 p-4">
+        {conflicts && conflicts.length > 0 && <SectionConflicts conflicts={conflicts} />}
+        {children}
+      </CardContent>
     </Card>
   );
 }
@@ -777,6 +791,51 @@ export function ConfigEditor({
     if (enabled && profileFields.length === 0) setProfileFields(defaultProfileFieldRows());
   };
 
+  // Live conflict detection over the CURRENT editor state — recomputed as the admin edits, so a
+  // contradictory combination (e.g. profile fields on an anonymous version) is flagged inline and in
+  // the summary banner the moment it exists. Pure + cheap; the memo just avoids re-running on unrelated
+  // re-renders. `conflictsBySection` buckets them for the per-section alerts.
+  const conflicts = useMemo(
+    () =>
+      detectConfigConflicts({
+        anonymousMode,
+        presentationMode,
+        captureEnabled,
+        captureMode,
+        profileFields,
+        personaSelectionEnabled: personaSelection.enabled,
+        reasoningStreamEnabled,
+        voiceInputEnabled: voiceEnabled,
+        attachmentInputEnabled: attachmentsEnabled,
+        minQuestionsAnswered: boundedNumber(
+          minQuestionsAnswered,
+          0,
+          Number.MAX_SAFE_INTEGER,
+          0,
+          true
+        ),
+        questionCount,
+        sensitivityAwareness,
+        supportMessage,
+      }),
+    [
+      anonymousMode,
+      presentationMode,
+      captureEnabled,
+      captureMode,
+      profileFields,
+      personaSelection.enabled,
+      reasoningStreamEnabled,
+      voiceEnabled,
+      attachmentsEnabled,
+      minQuestionsAnswered,
+      questionCount,
+      sensitivityAwareness,
+      supportMessage,
+    ]
+  );
+  const conflictsFor = (sectionId: string) => conflicts.filter((c) => c.sectionId === sectionId);
+
   const save = () =>
     run(() => [
       'PATCH',
@@ -946,6 +1005,10 @@ export function ConfigEditor({
         />
 
         <div id="settings-sections" className="min-w-0 space-y-4 lg:col-start-2">
+          {/* Live conflict summary — contradictory / no-op setting combinations, each linking to its
+              section. Renders nothing when the config is coherent. */}
+          <ConfigConflictBanner conflicts={conflicts} />
+
           {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
              session is allowed to finish. Most-used knobs, so they lead. ── */}
           <SettingsGroup
@@ -954,6 +1017,7 @@ export function ConfigEditor({
             id="questions"
             title="Questions & completion"
             description="How the agent chooses the next question and when a session is allowed to finish."
+            conflicts={conflictsFor('questions')}
           >
             <div className="space-y-1.5 sm:max-w-sm">
               <Label className="text-sm font-medium">
@@ -1187,6 +1251,7 @@ export function ConfigEditor({
             id="experience"
             title="Respondent experience"
             description="How a respondent completes the questionnaire — format, input, and what they see alongside the chat."
+            conflicts={conflictsFor('experience')}
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -1311,19 +1376,6 @@ export function ConfigEditor({
                 </FieldHelp>
               </Label>
             </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={anonymousMode} onCheckedChange={setAnonymousMode} disabled={busy} />
-              <Label className="text-sm font-medium">
-                Anonymous mode{' '}
-                <FieldHelp title="Anonymous mode">
-                  Don&apos;t collect identifying profile fields at session start — responses
-                  aren&apos;t tied to a named individual. This is the <em>identity</em> axis and is
-                  independent of <em>Access</em> (who may start): an anonymous questionnaire can
-                  still be invitation-only, and a named one can still be public. When anonymous,
-                  invitees are tracked only as started/completed — never linked to their answers.
-                </FieldHelp>
-              </Label>
-            </div>
           </SettingsGroup>
 
           {/* ── 2a-intro. Respondent intro / splash — an admin opt-in cover screen shown before the
@@ -1431,6 +1483,7 @@ export function ConfigEditor({
             id="reasoning"
             title="Reasoning stream"
             description="Show a per-turn “watch it think” trace in the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
+            conflicts={conflictsFor('reasoning')}
           >
             <div className="flex items-center gap-2">
               <Switch
@@ -1593,6 +1646,7 @@ export function ConfigEditor({
                 ? 'How the conversational interviewer sounds. Choose one — hand-tune a custom voice (a persona plus tone dials), or use one of the built-in personas. They’re mutually exclusive. Also requires the platform tone / persona-selection flags.'
                 : 'Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag.'
             }
+            conflicts={conflictsFor('tone')}
           >
             {personaSelectionEnabled && (
               <VoiceModeToggle
@@ -1843,8 +1897,32 @@ export function ConfigEditor({
             accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
             id="access"
             title="Access & invitations"
-            description="Who may start this questionnaire, and which invitee details the Invitations tab captures. Independent of Anonymous mode (the identity axis)."
+            description="Who may start this questionnaire, the identity (anonymous) axis, and which invitee details the Invitations tab captures."
+            conflicts={conflictsFor('access')}
           >
+            {/* Identity axis — lives here (with Access) so it's findable, though it's independent of
+                the access mode: an anonymous questionnaire can still be invitation-only, and a named
+                one can still be public. */}
+            <div className="bg-muted/20 flex items-start gap-3 rounded-lg border p-3">
+              <Switch
+                checked={anonymousMode}
+                onCheckedChange={setAnonymousMode}
+                disabled={busy}
+                className="mt-0.5"
+              />
+              <Label className="text-sm font-medium">
+                Anonymous mode{' '}
+                <FieldHelp title="Anonymous mode">
+                  Don&apos;t collect identifying profile fields — responses aren&apos;t tied to a
+                  named individual. This is the <em>identity</em> axis, independent of{' '}
+                  <em>Access</em> (who may start): an anonymous questionnaire can still be
+                  invitation-only, and a named one can still be public. When anonymous, invitees are
+                  tracked only as started/completed — never linked to their answers, and{' '}
+                  <strong>respondent profile fields are not collected</strong>.
+                </FieldHelp>
+              </Label>
+            </div>
+
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
                 Access mode{' '}
@@ -1946,6 +2024,7 @@ export function ConfigEditor({
             id="safeguarding"
             title="Answer quality & safeguarding"
             description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions. Each also requires its platform flag."
+            conflicts={conflictsFor('safeguarding')}
           >
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -2208,6 +2287,7 @@ export function ConfigEditor({
             id="profile-fields"
             title="Respondent profile fields"
             description="Ask respondents for a name, email, or other details — on a short form or during the conversation. Off by default; never collected on an anonymous questionnaire."
+            conflicts={conflictsFor('profile-fields')}
             headerAction={
               <label className="flex cursor-pointer items-center gap-2 text-xs font-medium select-none">
                 <span className={captureEnabled ? 'text-foreground' : 'text-muted-foreground'}>

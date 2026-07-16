@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => {
   const tx = {
     appQuestionnaireSession: { create: vi.fn() },
     appQuestionnaireInvitation: { update: vi.fn() },
-    appRespondentProfileSnapshot: { upsert: vi.fn() },
+    // `findUnique` for the merge read in `upsertProfileSnapshot` (F8.7 hybrid): defaults to no prior
+    // snapshot so the merge is a no-op over an empty base.
+    appRespondentProfileSnapshot: { upsert: vi.fn(), findUnique: vi.fn().mockResolvedValue(null) },
   };
   const prisma = {
     $transaction: vi.fn((cb: (t: typeof tx) => unknown) => cb(tx)),

@@ -927,6 +927,40 @@ describe('ConfigEditor', () => {
     expect(fields[0].required).toBe(true);
   });
 
+  // ── Config conflicts ───────────────────────────────────────────────────────────
+
+  it('surfaces a config conflict (anonymous mode + profile capture) in the banner and inline', () => {
+    setup({
+      anonymousMode: true,
+      profileFields: [
+        { key: 'name', label: 'Name', type: 'text', required: true, validation: 'deterministic' },
+      ],
+    });
+    // Summary banner flags an error-level conflict.
+    expect(screen.getByText(/won.t work as set/i)).toBeInTheDocument();
+    // The conflict title appears (banner row + inline alert in the profile-fields section).
+    expect(screen.getAllByText(/profile fields won.t be collected/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows no conflict banner for a coherent config', () => {
+    setup({ anonymousMode: false, profileFields: [] });
+    expect(screen.queryByText(/won.t work as set/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/needs? a look/i)).not.toBeInTheDocument();
+  });
+
+  it('the Anonymous mode toggle now lives in the Access & invitations section', () => {
+    setup();
+    const section = settingsContent()
+      .getByText('Access & invitations')
+      .closest('[class*="overflow-hidden"]') as HTMLElement;
+    expect(within(section).getAllByText(/anonymous mode/i).length).toBeGreaterThan(0);
+    // ...and no longer in the Respondent experience section (where it used to live).
+    const experience = settingsContent()
+      .getByText('Respondent experience')
+      .closest('[class*="overflow-hidden"]') as HTMLElement;
+    expect(within(experience).queryByText(/anonymous mode/i)).not.toBeInTheDocument();
+  });
+
   // ── Save mutation path ────────────────────────────────────────────────────────
 
   it('calls run once on save with PATCH and the correct version config URL', () => {
