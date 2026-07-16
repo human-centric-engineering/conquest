@@ -65,6 +65,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveReasoningPlacementForVersion: vi.fn(),
   resolveReasoningDwellForVersion: vi.fn(),
   resolveInlineCorrectionForVersion: vi.fn(),
+  resolveSessionResumeEnabledForVersion: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
@@ -129,6 +130,7 @@ import {
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
+  resolveSessionResumeEnabledForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
@@ -179,6 +181,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');
     vi.mocked(resolveReasoningDwellForVersion).mockResolvedValue({ dwellMs: 2000, perItemMs: 330 });
     vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
+    vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(true);
     // Per-questionnaire opt-ins default ON, so these tests isolate the platform flag as the
     // deciding factor. The page ANDs platform flag AND config opt-in; dedicated tests below
     // exercise the config-off path.

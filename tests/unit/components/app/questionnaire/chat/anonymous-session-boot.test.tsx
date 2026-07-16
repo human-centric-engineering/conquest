@@ -26,6 +26,7 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import type { SessionWorkspaceProps } from '@/components/app/questionnaire/session-workspace';
 
@@ -196,6 +197,7 @@ function createCalls(): unknown[][] {
 
 let fakeFetch: ReturnType<typeof vi.fn>;
 let fakeStorage: Storage;
+let fakeLocalStorage: Storage;
 
 beforeEach(() => {
   // Default: dispatch by URL — a transcript read returns an empty transcript (fresh session), a
@@ -212,6 +214,10 @@ beforeEach(() => {
 
   fakeStorage = makeSessionStorage();
   vi.stubGlobal('sessionStorage', fakeStorage);
+  // Durable-resume path (F7.11) keeps credentials in localStorage; stub it too. Non-resume tests
+  // never touch it (they run the sessionStorage path), so this is inert for them.
+  fakeLocalStorage = makeSessionStorage();
+  vi.stubGlobal('localStorage', fakeLocalStorage);
 });
 
 afterEach(() => {
@@ -713,6 +719,149 @@ describe('AnonymousSessionBoot', () => {
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-session-id',
         'pv-stored'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (8) Session resume (durable localStorage path, F7.11) — resumeEnabled
+  // -------------------------------------------------------------------------
+
+  describe('session resume (durable)', () => {
+    const MARKER_KEY = `qn.anon.active.${VERSION_ID}`;
+
+    /** A status-read body (`GET …/status`) with the fields the resume gate reads. */
+    function statusResponse(
+      status: string,
+      answeredCount: number,
+      ref: string | null = '7F3K9M2P'
+    ) {
+      return {
+        success: true,
+        data: { status, ref, completion: { answeredCount } },
+      };
+    }
+
+    /** A fetch that dispatches the resume URLs; create POST returns a fresh session. */
+    function resumeFetch(statusBody: unknown) {
+      return vi.fn((url: unknown, init?: RequestInit) => {
+        const u = typeof url === 'string' ? url : '';
+        if (u.includes('/status')) return Promise.resolve(jsonResponse(statusBody));
+        if (u.includes('/transcript')) return Promise.resolve(jsonResponse(transcriptResponse([])));
+        if (u.includes('/lifecycle')) return Promise.resolve(jsonResponse({ success: true }));
+        if (init?.method === 'POST') {
+          return Promise.resolve(jsonResponse(successBody('fresh-sess', 'fresh-tok')));
+        }
+        return Promise.resolve(jsonResponse(transcriptResponse([])));
+      });
+    }
+
+    function seedDurableCreds(sessionId = 'dur-sess', accessToken = 'dur-tok') {
+      fakeLocalStorage.setItem(STORAGE_KEY, storedSession(sessionId, accessToken, futureExpiry()));
+    }
+
+    it('shows the welcome-back gate on a genuine return (durable creds, no tab marker, resumable)', async () => {
+      seedDurableCreds();
+      fakeFetch = resumeFetch(statusResponse('active', 3));
+      vi.stubGlobal('fetch', fakeFetch);
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} resumeEnabled />);
+
+      expect(await screen.findByText(/welcome back/i)).toBeInTheDocument();
+      expect(screen.getByText('7F3K-9M2P')).toBeInTheDocument();
+      // Not entered the chat yet, and no fresh session minted.
+      expect(screen.queryByTestId('questionnaire-chat')).not.toBeInTheDocument();
+      expect(createCalls()).toHaveLength(0);
+    });
+
+    it('resumes silently on a same-tab refresh (marker present) — no gate', async () => {
+      seedDurableCreds('same-tab-sess', 'same-tab-tok');
+      fakeStorage.setItem(MARKER_KEY, '1');
+      fakeFetch = resumeFetch(statusResponse('active', 3));
+      vi.stubGlobal('fetch', fakeFetch);
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} resumeEnabled />);
+
+      await waitFor(() => expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument());
+      expect(screen.queryByText(/welcome back/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'same-tab-sess'
+      );
+    });
+
+    it('starts fresh for a zero-progress session (no gate — do not nag a barely-started returner)', async () => {
+      seedDurableCreds('barely-started', 'bs-tok');
+      // Active but answeredCount 0 → below the resume threshold → treat as not worth resuming.
+      fakeFetch = resumeFetch(statusResponse('active', 0));
+      vi.stubGlobal('fetch', fakeFetch);
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} resumeEnabled />);
+
+      await waitFor(() => expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument());
+      expect(screen.queryByText(/welcome back/i)).not.toBeInTheDocument();
+      expect(createCalls()).toHaveLength(1); // stale creds cleared, fresh session minted
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'fresh-sess'
+      );
+    });
+
+    it('starts fresh when the stored session is terminal (clears stale creds, no gate)', async () => {
+      seedDurableCreds('old-done', 'old-tok');
+      fakeFetch = resumeFetch(statusResponse('completed', 5));
+      vi.stubGlobal('fetch', fakeFetch);
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} resumeEnabled />);
+
+      await waitFor(() => expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument());
+      expect(screen.queryByText(/welcome back/i)).not.toBeInTheDocument();
+      expect(createCalls()).toHaveLength(1); // a fresh session was minted
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'fresh-sess'
+      );
+    });
+
+    it('Continue enters the existing session and marks the tab', async () => {
+      seedDurableCreds('resume-me', 'resume-tok');
+      fakeFetch = resumeFetch(statusResponse('active', 2));
+      vi.stubGlobal('fetch', fakeFetch);
+      const user = userEvent.setup();
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} resumeEnabled />);
+      await user.click(await screen.findByRole('button', { name: /continue where you left off/i }));
+
+      await waitFor(() => expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument());
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'resume-me'
+      );
+      expect(fakeStorage.getItem(MARKER_KEY)).toBe('1');
+      expect(createCalls()).toHaveLength(0); // continued, never created
+    });
+
+    it('Start new abandons the old session and mints a fresh one', async () => {
+      seedDurableCreds('abandon-me', 'abandon-tok');
+      fakeFetch = resumeFetch(statusResponse('active', 4));
+      vi.stubGlobal('fetch', fakeFetch);
+      const user = userEvent.setup();
+
+      render(<AnonymousSessionBoot versionId={VERSION_ID} resumeEnabled />);
+      await user.click(await screen.findByRole('button', { name: /start a new questionnaire/i }));
+
+      await waitFor(() => expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument());
+      // A lifecycle abandon POST fired for the old session, and a fresh session was created.
+      const lifecycleCall = fakeFetch.mock.calls.find(
+        (c) => typeof c[0] === 'string' && c[0].includes('/lifecycle')
+      );
+      expect(lifecycleCall).toBeTruthy();
+      expect(JSON.parse((lifecycleCall![1] as RequestInit).body as string)).toMatchObject({
+        action: 'abandon',
+      });
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-session-id',
+        'fresh-sess'
       );
     });
   });

@@ -10,6 +10,9 @@ import {
   createOrResumeAuthedSession,
   type AuthedSessionRequest,
 } from '@/lib/app/questionnaire/chat/session-bootstrap';
+import { findAuthedResumeDetail } from '@/lib/app/questionnaire/chat/resumable-session';
+import { resolveSessionResumeEnabledForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import { AuthedResumeChooser } from '@/components/app/questionnaire/intro/authed-resume-chooser';
 
 export const metadata: Metadata = {
   title: 'Start questionnaire',
@@ -54,6 +57,28 @@ export default async function StartQuestionnairePage({
       : `?versionId=${encodeURIComponent(sp.versionId ?? '')}`;
     clearInvalidSession(`/questionnaires/start${query}`);
     return null; // unreachable — clearInvalidSession redirects
+  }
+
+  // Session resume (versionId path only): if the respondent already has an in-progress session for
+  // this version WITH real progress, offer Continue / Start new instead of silently resuming. The
+  // invitation path keeps its idempotent silent resume — its round/cohort context is resolved by the
+  // create seam, not re-derived here. A zero-progress session isn't worth a prompt (like the
+  // anonymous gate), so it falls through to the silent create/resume below.
+  if ('versionId' in request) {
+    const resumeEnabled = await resolveSessionResumeEnabledForVersion(request.versionId);
+    if (resumeEnabled) {
+      const resume = await findAuthedResumeDetail(request.versionId, session.user.id);
+      if (resume && resume.answeredCount >= 1) {
+        return (
+          <AuthedResumeChooser
+            versionId={request.versionId}
+            sessionId={resume.sessionId}
+            refRaw={resume.ref}
+            answeredCount={resume.answeredCount}
+          />
+        );
+      }
+    }
   }
 
   // Create (or idempotently resume) the session and go straight to the chat. Profile capture is no

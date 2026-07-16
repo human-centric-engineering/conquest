@@ -2,22 +2,25 @@
  * Respondent session pause / resume (F7.3).
  *
  * POST /api/v1/app/questionnaire-sessions/:id/lifecycle
- *   body: { action: 'pause' | 'resume' }
+ *   body: { action: 'pause' | 'resume' | 'abandon' }
  *
  * The respondent-facing counterpart to the admin `/transition` route, driving the same
  * F4.6 state machine through the same `_lib/sessions.ts` seam — but authorised via
  * `resolveTurnAccess` (the session's owner) instead of `withAdminAuth`. `resume` returns
  * the resume state (status + answers so far) so the surface picks up where it left off.
  *
- * **Signed-in respondents only.** A no-login anonymous session lives entirely in the
- * browser tab (its token is client-only and lost on reload), so a deliberate pause has
- * nowhere durable to resume from — the endpoint refuses anonymous callers with 403. They
- * still see system-driven states (budget pause, completed) via `GET …/status`.
+ * **`pause`/`resume` are signed-in respondents only.** A no-login anonymous session lives
+ * entirely in the browser (its token is client-held), so a deliberate pause has nowhere
+ * durable to resume from — the endpoint refuses anonymous callers those actions with 403.
+ * `abandon` IS permitted for an anonymous token holder: it's terminal (nothing to resume),
+ * and it backs the no-login "Start new" flow, which abandons the prior in-progress session
+ * before minting a fresh one. Anonymous callers still see system-driven states (budget
+ * pause, completed) via `GET …/status`.
  *
- * Gate order: live-sessions flag (404 before auth) → load → access (401/403) →
- * anonymous-refusal (403) → transition. An illegal move (e.g. resuming an active session,
- * or pausing a completed one) is a 409 via {@link SessionTransitionError}. Completion is
- * NOT an action here — accept→submit is the dedicated `/submit` route.
+ * Gate order: live-sessions flag (404 before auth) → load → access (401/403) → parse →
+ * anonymous-refusal for pause/resume (403) → transition. An illegal move (e.g. resuming an
+ * active session, or abandoning a completed one) is a 409 via {@link SessionTransitionError}.
+ * Completion is NOT an action here — accept→submit is the dedicated `/submit` route.
  */
 
 import { z } from 'zod';
@@ -33,12 +36,13 @@ import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
 import {
+  abandonSession,
   loadSessionResumeState,
   pauseSession,
   resumeSession,
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 
-const bodySchema = z.object({ action: z.enum(['pause', 'resume']) });
+const bodySchema = z.object({ action: z.enum(['pause', 'resume', 'abandon']) });
 
 async function handleLifecycle(
   request: NextRequest,
@@ -67,16 +71,18 @@ async function handleLifecycle(
       return errorResponse(access.message, { code: access.code, status: access.status });
     }
 
-    // Pause/resume is for signed-in respondents only — an anonymous session has no durable
-    // place to resume from (see the header note).
-    if (access.anonymous) {
+    const body = await validateRequestBody(request, bodySchema);
+
+    // Pause/resume is for signed-in respondents only — an anonymous session has no durable place
+    // to resume from (see the header note). `abandon` IS permitted for an anonymous token holder:
+    // it's terminal, so there's nothing to resume — it backs the no-login "Start new" flow, which
+    // abandons the prior session before minting a fresh one.
+    if (access.anonymous && body.action !== 'abandon') {
       return errorResponse('Pause is only available for signed-in respondents', {
         code: 'PAUSE_NOT_PERMITTED',
         status: 403,
       });
     }
-
-    const body = await validateRequestBody(request, bodySchema);
 
     // Cohorts & Rounds: a respondent may only resume a round-scoped session while the round is
     // still open AND they're still an active member — a closed round / removed member can't be
@@ -100,6 +106,12 @@ async function handleLifecycle(
         const resumeState = await loadSessionResumeState(sessionId);
         log.info('Respondent session resumed', { sessionId, status: resumeState.status });
         return successResponse({ sessionId, ...resumeState });
+      }
+
+      if (body.action === 'abandon') {
+        const status = await abandonSession(sessionId, { reason: 'respondent_abandon' });
+        log.info('Respondent session abandoned', { sessionId, status });
+        return successResponse({ sessionId, status });
       }
 
       const status = await pauseSession(sessionId, { reason: 'respondent_pause' });

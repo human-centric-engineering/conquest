@@ -236,6 +236,13 @@ model AppQuestionnaireConfig {
   // Off by default; respondent-facing UX with no platform flag (the admin toggles it per version).
   inlineCorrectionEnabled Boolean @default(false)
 
+  // Session resume: let a respondent return to an in-progress session rather than always starting
+  // fresh. Governs the whole capability — the no-login surface remembering its session on the device
+  // (localStorage) + the "Continue where you left off / Start new" chooser + the cross-device
+  // resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag. Off = today's
+  // behaviour (anonymous returns always mint a fresh session; by-ref resume 404s).
+  sessionResumeEnabled Boolean @default(true)
+
   // Session-start profile fields (ProfileFieldConfig[] — types.ts). Each field carries its own
   // `validation` mode (deterministic | agentic | hybrid) inside this JSON — no column per field.
   profileFields Json @default("[]")

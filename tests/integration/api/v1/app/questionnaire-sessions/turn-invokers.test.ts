@@ -132,6 +132,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       presentationMode: 'chat',
       captureMode: 'form',
       inlineCorrectionEnabled: true,
+      sessionResumeEnabled: true,
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamDwellMs: 2000,

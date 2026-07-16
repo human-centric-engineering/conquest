@@ -590,6 +590,7 @@ export function ConfigEditor({
   const [inlineCorrectionEnabled, setInlineCorrectionEnabled] = useState(
     config.inlineCorrectionEnabled
   );
+  const [sessionResumeEnabled, setSessionResumeEnabled] = useState(config.sessionResumeEnabled);
   const [reasoningStreamEnabled, setReasoningStreamEnabled] = useState(
     config.reasoningStreamEnabled
   );
@@ -659,6 +660,7 @@ export function ConfigEditor({
     setPresentationMode(config.presentationMode);
     setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
+    setSessionResumeEnabled(config.sessionResumeEnabled);
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
     setReasoningStreamDwellMs(String(config.reasoningStreamDwellMs));
@@ -798,6 +800,8 @@ export function ConfigEditor({
         presentationMode,
         // Inline answer correction (Variant B): respondent-facing UX, no platform flag.
         inlineCorrectionEnabled,
+        // Session resume: device-remember + Continue/Start-new chooser + by-ref resume. No platform flag.
+        sessionResumeEnabled,
         // Live "watch it think" reasoning stream (demo feature). Requires the platform
         // reasoning-stream flag to take effect.
         reasoningStreamEnabled,
@@ -1197,6 +1201,26 @@ export function ConfigEditor({
                   — instead of re-explaining in a new message. Corrections save directly (the same
                   path as the form view), so they don&apos;t spend a turn or trip a contradiction
                   notice. On by default.
+                </FieldHelp>
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={sessionResumeEnabled}
+                onCheckedChange={setSessionResumeEnabled}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Resume in-progress sessions{' '}
+                <FieldHelp title="Resume in-progress sessions">
+                  Let a respondent return to a session they already started instead of always
+                  beginning again. The no-login link remembers the session on that device, so
+                  reopening it shows a &ldquo;Continue where you left off / Start new&rdquo; choice
+                  (quoting the session&apos;s reference code), and a respondent can also resume from
+                  another device by entering that code. On by default. When off, returning always
+                  starts a fresh session. Note: on a shared or kiosk device the next person could
+                  see and continue the previous session within its 24-hour window — turn this off
+                  for shared devices.
                 </FieldHelp>
               </Label>
             </div>

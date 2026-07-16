@@ -180,6 +180,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     presentationMode: 'chat',
     captureMode: 'form',
     inlineCorrectionEnabled: true,
+    sessionResumeEnabled: true,
     reasoningStreamEnabled: false,
     reasoningStreamPlacement: 'overlay',
     reasoningStreamDwellMs: 2000,

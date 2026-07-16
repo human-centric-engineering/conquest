@@ -122,6 +122,7 @@ export const CONFIG_SELECT = {
   answerSlotPanelScope: true,
   presentationMode: true,
   inlineCorrectionEnabled: true,
+  sessionResumeEnabled: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: true,
   reasoningStreamDwellMs: true,
@@ -167,6 +168,7 @@ type ConfigRow = {
   answerSlotPanelScope: string;
   presentationMode: string;
   inlineCorrectionEnabled: boolean;
+  sessionResumeEnabled: boolean;
   reasoningStreamEnabled: boolean;
   reasoningStreamPlacement: string;
   reasoningStreamDwellMs: number;
@@ -286,6 +288,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
+    sessionResumeEnabled: row.sessionResumeEnabled,
     reasoningStreamEnabled: row.reasoningStreamEnabled,
     reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
     reasoningStreamDwellMs: row.reasoningStreamDwellMs,

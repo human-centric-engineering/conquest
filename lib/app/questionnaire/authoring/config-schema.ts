@@ -343,6 +343,9 @@ export const updateConfigSchema = z
     // (in the chat + on the answer panel) instead of sending a fresh turn. On by default;
     // respondent-facing UX, no platform flag.
     inlineCorrectionEnabled: z.boolean().optional(),
+    // Session resume: remember an in-progress session on the device + the Continue/Start-new chooser
+    // + the cross-device resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag.
+    sessionResumeEnabled: z.boolean().optional(),
     // Live "watch it think" reasoning trace (demo feature). Gated additionally by the platform
     // flag APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED. placement = overlay | inline.
     reasoningStreamEnabled: z.boolean().optional(),

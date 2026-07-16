@@ -35,6 +35,7 @@ import {
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
+  resolveSessionResumeEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
@@ -201,6 +202,35 @@ describe('resolveInlineCorrectionForVersion', () => {
       where: { id: 'ver-xyz' },
       select: { config: { select: { inlineCorrectionEnabled: true } } },
     });
+  });
+});
+
+describe('resolveSessionResumeEnabledForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored toggle (off)', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { sessionResumeEnabled: false },
+    } as never);
+    expect(await resolveSessionResumeEnabledForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to ON when the config row is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveSessionResumeEnabledForVersion('ver-abc')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.sessionResumeEnabled
+    );
+  });
+
+  it('defaults to ON when the version is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveSessionResumeEnabledForVersion('ver-missing')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.sessionResumeEnabled
+    );
   });
 });
 

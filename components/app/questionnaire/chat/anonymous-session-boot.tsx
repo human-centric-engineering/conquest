@@ -20,13 +20,24 @@
  * @see app/api/v1/app/questionnaire-sessions/preview/route.ts
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
 import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
+import { SessionResumeGate } from '@/components/app/questionnaire/chat/session-resume-gate';
+import {
+  anonCredsKey,
+  clearAnonSession,
+  clearTabMarker,
+  hasTabMarker,
+  readAnonSession,
+  setTabMarker,
+  writeAnonSession,
+  type StoredAnonSession,
+} from '@/lib/app/questionnaire/chat/anon-session-storage';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
@@ -100,19 +111,28 @@ interface AnonymousSessionBootProps {
    * per-version `personaSelection.enabled` inside the payload is the second gate. Off → no fetch.
    */
   personaSelectionEnabled?: boolean;
+  /**
+   * Session resume opt-in (per-version config, resolved server-side). When on (and this is the public
+   * anonymous path — not preview/invite), the credential is kept durably in `localStorage` so the
+   * session survives a browser close, and a genuine return (new tab / after close, NOT a same-tab
+   * refresh) shows the "Continue where you left off / Start new" gate. Off → the pre-resume behaviour
+   * (sessionStorage only; a return mints a fresh session).
+   */
+  resumeEnabled?: boolean;
 }
 
-interface StoredAnonSession {
-  sessionId: string;
-  accessToken: string;
-  expiresAt: string;
-}
-
-interface AnonCreateResponse {
-  success: boolean;
-  data?: { session: { id: string }; accessToken: string; expiresAt: string };
-  error?: { code?: string; message?: string };
-}
+/** Session-create response shape — validated at the fetch boundary (no `as` on the wire). */
+const anonCreateResponseSchema = z.object({
+  success: z.boolean(),
+  data: z
+    .object({
+      session: z.object({ id: z.string() }),
+      accessToken: z.string(),
+      expiresAt: z.string(),
+    })
+    .optional(),
+  error: z.object({ code: z.string().optional(), message: z.string().optional() }).optional(),
+});
 
 type BootState =
   | { phase: 'creating' }
@@ -136,6 +156,13 @@ type BootState =
       personas: ResolvedSessionPersonas | null;
       /** Resolved profile capture; null for anonymous versions or when the fetch fails soft. */
       capture: ResolvedSessionCapture | null;
+    }
+  | {
+      /** A durable session was found on a genuine return — offer Continue / Start new (resume). */
+      phase: 'welcome-back';
+      stored: StoredAnonSession;
+      refRaw: string | null;
+      answeredCount: number;
     }
   | { phase: 'error'; message: string };
 
@@ -328,33 +355,44 @@ async function fetchCapture(
   }
 }
 
-function storageKey(versionId: string, preview: boolean, inviteToken?: string): string {
-  // Invite sessions key on the token (truncated) — a shared device must not cross two invitees.
-  if (inviteToken) return `qn.invite.${inviteToken.slice(0, 16)}`;
-  return `${preview ? 'qn.preview' : 'qn.anon'}.${versionId}`;
-}
+/** Status-read response shape — the fields the resume gate needs, validated at the fetch boundary. */
+const statusResponseSchema = z.object({
+  success: z.boolean(),
+  data: z
+    .object({
+      status: z.string(),
+      ref: z.string().nullable().optional(),
+      completion: z.object({ answeredCount: z.number() }).partial().optional(),
+    })
+    .optional(),
+});
 
-function readStored(
-  versionId: string,
-  preview: boolean,
-  inviteToken?: string
-): StoredAnonSession | null {
+/**
+ * Fetch a session's resumability (token-authed): its status, support ref, and answered count. Used
+ * only on a genuine return (durable creds present, no tab marker) to decide whether to show the
+ * welcome-back gate. Fails soft to `null` on any error — the caller then treats the session as
+ * unresumable and starts fresh, exactly the pre-resume behaviour.
+ */
+async function fetchStatus(
+  sessionId: string,
+  accessToken: string
+): Promise<{ status: string; ref: string | null; answeredCount: number } | null> {
   try {
-    const raw = window.sessionStorage.getItem(storageKey(versionId, preview, inviteToken));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredAnonSession>;
-    if (
-      typeof parsed.sessionId === 'string' &&
-      typeof parsed.accessToken === 'string' &&
-      typeof parsed.expiresAt === 'string' &&
-      new Date(parsed.expiresAt).getTime() > Date.now()
-    ) {
-      return parsed as StoredAnonSession;
-    }
+    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.status(sessionId), {
+      headers: { 'X-Session-Token': accessToken },
+    });
+    if (!res.ok) return null;
+    const parsed = statusResponseSchema.safeParse(await res.json());
+    if (!parsed.success || !parsed.data.data) return null;
+    const d = parsed.data.data;
+    return {
+      status: d.status,
+      ref: d.ref ?? null,
+      answeredCount: d.completion?.answeredCount ?? 0,
+    };
   } catch {
-    // Corrupt / unavailable storage — fall through to a fresh create.
+    return null;
   }
-  return null;
 }
 
 export function AnonymousSessionBoot({
@@ -372,8 +410,12 @@ export function AnonymousSessionBoot({
   inlineCorrectionEnabled = false,
   introScreenEnabled = false,
   personaSelectionEnabled = false,
+  resumeEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
+  // A gate action (Continue / Start new) is mid-flight — keeps the welcome-back buttons disabled
+  // + spinning until the session enters (or a fresh one is minted).
+  const [gateBusy, setGateBusy] = useState(false);
   // Dedup the create across React 19 StrictMode's double-invoke (which would otherwise mint two
   // sessions in dev): the ref persists across the simulated unmount/remount, so only the first
   // run fetches. We deliberately do NOT cancel the in-flight create on cleanup — StrictMode's
@@ -382,82 +424,21 @@ export function AnonymousSessionBoot({
   // unmount mid-flight just lands a harmless no-op `setState` (React 19 ignores it).
   const startedRef = useRef(false);
 
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
+  // Durable resume applies only to the public anonymous path when the version opted in — admin
+  // preview and frictionless-invite sessions stay ephemeral (sessionStorage), the pre-resume
+  // behaviour (invite sessions already resume server-side via their invitationId).
+  const usesDurableResume = resumeEnabled && !preview && !inviteToken;
+  const credsKey = anonCredsKey(versionId, preview, inviteToken);
 
-    void (async () => {
-      // Resolve a session + token: reuse a still-valid stored one (refresh within the 24h TTL),
-      // else mint a fresh session.
-      let sessionId: string;
-      let accessToken: string;
-
-      const existing = readStored(versionId, preview, inviteToken);
-      if (existing) {
-        sessionId = existing.sessionId;
-        accessToken = existing.accessToken;
-      } else {
-        try {
-          // Frictionless invite link → /from-invite ({ inviteToken }); else preview / public anon.
-          const endpoint = inviteToken
-            ? API.APP.QUESTIONNAIRE_SESSIONS.FROM_INVITE
-            : preview
-              ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
-              : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(inviteToken ? { inviteToken } : { versionId }),
-          });
-          const body = (await res.json()) as AnonCreateResponse;
-
-          if (!res.ok || !body.success || !body.data) {
-            setState({
-              phase: 'error',
-              message: body.error?.message ?? 'This questionnaire is not available right now.',
-            });
-            return;
-          }
-
-          const stored: StoredAnonSession = {
-            sessionId: body.data.session.id,
-            accessToken: body.data.accessToken,
-            expiresAt: body.data.expiresAt,
-          };
-          try {
-            window.sessionStorage.setItem(
-              storageKey(versionId, preview, inviteToken),
-              JSON.stringify(stored)
-            );
-          } catch {
-            // Storage unavailable (private mode) — the in-memory token still works for this load.
-          }
-          sessionId = stored.sessionId;
-          accessToken = stored.accessToken;
-        } catch {
-          setState({
-            phase: 'error',
-            message:
-              'We could not start the questionnaire. Please check your connection and try again.',
-          });
-          return;
-        }
-      }
-
-      // Replay a prior conversation (incl. its persisted side-band notices) when this session
-      // already has turns — e.g. a refresh of a session in progress. A fresh session has none, so
-      // it shows the branded welcome and auto-opens the first question. (The token is client-only,
-      // so unlike the authenticated page this can't SSR-seed — hence the on-boot fetch.)
+  // Enter a resolved session: replay its transcript (incl. persisted side-band notices) when it
+  // already has turns — else show the branded welcome + auto-open the first question. The intro
+  // rides the carousel on BOTH fresh and resumed sessions (a returner can slide back to re-read it);
+  // only `autoStart` is resume-gated. Capture is always fetched (server returns null fast for
+  // anonymous versions); `satisfied` skips its gate on resume.
+  const enterSession = useCallback(
+    async (sessionId: string, accessToken: string) => {
       const { turns, inspectorTurns } = await fetchTranscript(sessionId, accessToken);
       const resumed = turns.length > 0;
-      // The intro rides the workspace carousel as a tab, so it must be present on BOTH a fresh
-      // session AND a resume — a returning respondent can still slide back to re-read it. Resolve it
-      // whenever the platform flag is on (skipping only that round-trip when off); `autoStart` alone
-      // is resume-gated below, so a resumed session simply doesn't land on the intro. This mirrors
-      // the authenticated page, which passes `intro` unconditionally.
-      // Capture has no platform flag (purely per-version config, like profileFields), so it's always
-      // fetched — the server returns `null` fast for anonymous versions. On resume the snapshot exists,
-      // so `satisfied` is true and the gate is skipped.
       const [intro, personas, capture] = await Promise.all([
         introScreenEnabled ? fetchIntro(sessionId, accessToken) : Promise.resolve(null),
         personaSelectionEnabled ? fetchPersonas(sessionId, accessToken) : Promise.resolve(null),
@@ -473,24 +454,138 @@ export function AnonymousSessionBoot({
         initialTurns: resumed
           ? turns
           : buildWelcomeTurns({ welcomeCopy, voiceInputEnabled, anonymous }),
-        // Pass the fetched traces straight through — the route already returns [] (or omits the
-        // field) for a fresh or non-preview session, so this is empty in exactly those cases. No
-        // `resumed` gate: that signal is about the transcript, and gating inspector data on it would
-        // drop fetched traces if the two ever diverged (e.g. traces present, transcript empty).
         initialInspectorTurns: inspectorTurns,
         autoStart: !resumed,
       });
+    },
+    [welcomeCopy, voiceInputEnabled, anonymous, introScreenEnabled, personaSelectionEnabled]
+  );
+
+  // Mint a fresh session (invite → /from-invite, else preview / public anon), persist its credential
+  // to the right store, and mark this tab entered (durable path only). Returns the stored creds, or
+  // null after setting the error state.
+  const createFreshSession = useCallback(async (): Promise<StoredAnonSession | null> => {
+    try {
+      const endpoint = inviteToken
+        ? API.APP.QUESTIONNAIRE_SESSIONS.FROM_INVITE
+        : preview
+          ? API.APP.QUESTIONNAIRE_SESSIONS.PREVIEW
+          : API.APP.QUESTIONNAIRE_SESSIONS.ANONYMOUS;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inviteToken ? { inviteToken } : { versionId }),
+      });
+      const parsedBody = anonCreateResponseSchema.safeParse(await res.json());
+      const body = parsedBody.success ? parsedBody.data : null;
+      if (!res.ok || !body || !body.success || !body.data) {
+        setState({
+          phase: 'error',
+          message: body?.error?.message ?? 'This questionnaire is not available right now.',
+        });
+        return null;
+      }
+      const stored: StoredAnonSession = {
+        sessionId: body.data.session.id,
+        accessToken: body.data.accessToken,
+        expiresAt: body.data.expiresAt,
+      };
+      writeAnonSession(credsKey, usesDurableResume, stored);
+      if (usesDurableResume) setTabMarker(versionId);
+      return stored;
+    } catch {
+      setState({
+        phase: 'error',
+        message:
+          'We could not start the questionnaire. Please check your connection and try again.',
+      });
+      return null;
+    }
+  }, [versionId, preview, inviteToken, credsKey, usesDurableResume]);
+
+  // Welcome-back → Continue: mark the tab entered so a later refresh resumes silently, then enter.
+  const handleContinue = useCallback(
+    async (stored: StoredAnonSession) => {
+      setGateBusy(true);
+      setTabMarker(versionId);
+      await enterSession(stored.sessionId, stored.accessToken);
+    },
+    [versionId, enterSession]
+  );
+
+  // Welcome-back → Start new: best-effort abandon the old session (so it's not left dangling in
+  // analytics), drop the durable creds + tab marker, then mint and enter a fresh session.
+  const handleStartNew = useCallback(
+    async (stored: StoredAnonSession) => {
+      setGateBusy(true);
+      try {
+        await fetch(API.APP.QUESTIONNAIRE_SESSIONS.lifecycle(stored.sessionId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Session-Token': stored.accessToken },
+          body: JSON.stringify({ action: 'abandon' }),
+        });
+      } catch {
+        // Best-effort — a failed abandon just leaves the old session to age out via retention.
+      }
+      clearAnonSession(credsKey);
+      clearTabMarker(versionId);
+      setState({ phase: 'creating' });
+      const fresh = await createFreshSession();
+      if (fresh) await enterSession(fresh.sessionId, fresh.accessToken);
+      setGateBusy(false);
+    },
+    [versionId, credsKey, createFreshSession, enterSession]
+  );
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
+    void (async () => {
+      if (usesDurableResume) {
+        const existing = readAnonSession(credsKey, true);
+        if (existing) {
+          // A same-tab refresh (marker present) resumes silently — the returning-respondent gate is
+          // only for a genuine return (new tab / after close), where the marker is absent.
+          if (hasTabMarker(versionId)) {
+            await enterSession(existing.sessionId, existing.accessToken);
+            return;
+          }
+          // Genuine return: confirm the session is still resumable (active/paused with real
+          // progress) before offering to continue it. Otherwise fall through to a fresh start.
+          const status = await fetchStatus(existing.sessionId, existing.accessToken);
+          const resumable =
+            status !== null &&
+            (status.status === 'active' || status.status === 'paused') &&
+            status.answeredCount >= 1;
+          if (resumable) {
+            setState({
+              phase: 'welcome-back',
+              stored: existing,
+              refRaw: status.ref,
+              answeredCount: status.answeredCount,
+            });
+            return;
+          }
+          // Terminal / invalid token / no progress — drop the stale credential and start fresh.
+          clearAnonSession(credsKey);
+        }
+        const fresh = await createFreshSession();
+        if (fresh) await enterSession(fresh.sessionId, fresh.accessToken);
+        return;
+      }
+
+      // Non-durable path (admin preview / frictionless invite / resume off): reuse a still-valid
+      // stored token (refresh within the 24h TTL), else mint fresh — the pre-resume behaviour.
+      const existing = readAnonSession(credsKey, false);
+      if (existing) {
+        await enterSession(existing.sessionId, existing.accessToken);
+        return;
+      }
+      const fresh = await createFreshSession();
+      if (fresh) await enterSession(fresh.sessionId, fresh.accessToken);
     })();
-  }, [
-    versionId,
-    preview,
-    inviteToken,
-    welcomeCopy,
-    voiceInputEnabled,
-    anonymous,
-    introScreenEnabled,
-    personaSelectionEnabled,
-  ]);
+  }, [versionId, credsKey, usesDurableResume, enterSession, createFreshSession]);
 
   if (state.phase === 'creating') {
     return (
@@ -498,6 +593,19 @@ export function AnonymousSessionBoot({
         <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" aria-hidden="true" />
         <span className="sr-only">Starting your questionnaire…</span>
       </div>
+    );
+  }
+
+  if (state.phase === 'welcome-back') {
+    return (
+      <SessionResumeGate
+        versionId={versionId}
+        refRaw={state.refRaw}
+        answeredCount={state.answeredCount}
+        onContinue={() => void handleContinue(state.stored)}
+        onStartNew={() => void handleStartNew(state.stored)}
+        busy={gateBusy}
+      />
     );
   }
 

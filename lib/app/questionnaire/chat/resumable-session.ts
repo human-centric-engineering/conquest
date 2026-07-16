@@ -43,6 +43,42 @@ export async function findResumableSession(
 }
 
 /**
+ * A resumable session enriched for the authenticated "Continue where you left off / Start new"
+ * chooser: its support ref (for the header) and how many answers it already holds (to decide the
+ * chooser is worth showing — a zero-progress session resumes silently, like the anonymous gate).
+ */
+export interface AuthedResumeDetail {
+  sessionId: string;
+  ref: string | null;
+  answeredCount: number;
+}
+
+/**
+ * Find the authenticated respondent's resumable session for a version WITH the detail the resume
+ * chooser needs (ref + answered count), or null if none. Same resume rule as
+ * {@link findResumableSession}; a separate reader so the plain create path stays lean.
+ */
+export async function findAuthedResumeDetail(
+  versionId: string,
+  respondentUserId: string,
+  roundId?: string | null
+): Promise<AuthedResumeDetail | null> {
+  const row = await prisma.appQuestionnaireSession.findFirst({
+    where: {
+      versionId,
+      respondentUserId,
+      isPreview: false,
+      status: { in: ['active', 'paused'] },
+      roundId: roundId ?? null,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, publicRef: true, _count: { select: { answers: true } } },
+  });
+  if (!row) return null;
+  return { sessionId: row.id, ref: row.publicRef, answeredCount: row._count.answers };
+}
+
+/**
  * Find the non-terminal session a frictionless invitee already booted from their invitation (the
  * resume target keyed on `invitationId`, since a no-account respondent has no `respondentUserId`).
  * Lets a re-opened invite link resume rather than minting a second session. Most-recent first.

@@ -130,6 +130,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       presentationMode: 'chat',
       captureMode: 'form',
       inlineCorrectionEnabled: true,
+      sessionResumeEnabled: true,
       reasoningStreamEnabled: true,
       reasoningStreamPlacement: 'overlay',
       reasoningStreamDwellMs: 2000,

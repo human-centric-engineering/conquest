@@ -23,8 +23,10 @@ import {
   resolvePresentationModeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
+  resolveSessionResumeEnabledForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
+import { ResumeByRefEntry } from '@/components/app/questionnaire/chat/resume-by-ref-entry';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 
 // Display serif for the ConQuest wordmark, shown only in the admin "Preview as
@@ -100,6 +102,7 @@ export default async function PublicQuestionnairePage({
     previewMeta,
     introScreenEnabled,
     personaSelectionEnabled,
+    resumeEnabled,
   ] = await Promise.all([
     isVoiceInputEnabled(),
     isAttachmentInputEnabled(),
@@ -116,7 +119,11 @@ export default async function PublicQuestionnairePage({
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
     isIntroScreenEnabled(),
     isPersonaSelectionEnabled(),
+    resolveSessionResumeEnabledForVersion(versionId),
   ]);
+  // The cross-device "continue with your code" footer is for the public anonymous path only — admin
+  // preview and frictionless-invite links resume by other means, so it would only confuse there.
+  const showResumeByRef = resumeEnabled && !preview && !inviteToken;
   const voiceInputEnabled = voicePlatform && voiceConfigured;
   const attachmentInputEnabled = attachmentPlatform && attachmentsConfigured;
   // Live "watch it think" reasoning (demo feature): the effective placement, or null when the
@@ -169,7 +176,13 @@ export default async function PublicQuestionnairePage({
             welcomeCopy={theme.welcomeCopy}
             introScreenEnabled={introScreenEnabled}
             personaSelectionEnabled={personaSelectionEnabled}
+            resumeEnabled={resumeEnabled}
           />
+          {showResumeByRef && (
+            <div className="mt-3 flex shrink-0 justify-center">
+              <ResumeByRefEntry versionId={versionId} />
+            </div>
+          )}
         </BrandThemeProvider>
       </div>
     </div>

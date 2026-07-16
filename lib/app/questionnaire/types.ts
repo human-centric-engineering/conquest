@@ -1098,6 +1098,14 @@ export type QuestionnaireConfigShape = {
    */
   inlineCorrectionEnabled: boolean;
   /**
+   * Session resume: let a respondent return to an in-progress session instead of always starting
+   * fresh. Governs the whole capability — the no-login surface remembering its session on the device
+   * (localStorage) + the "Continue where you left off / Start new" chooser + the cross-device
+   * resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag.
+   * Off ⇒ today's behaviour (anonymous returns mint a fresh session; by-ref resume 404s).
+   */
+  sessionResumeEnabled: boolean;
+  /**
    * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
    * answers captured (with provenance + confidence), contradictions spotted, why the next question
    * was chosen — as a live feed beside the chat. On by default; only takes effect when the platform
@@ -1229,6 +1237,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'both',
   inlineCorrectionEnabled: false,
+  sessionResumeEnabled: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
   reasoningStreamDwellMs: 2000,

@@ -74,3 +74,20 @@ export const profileCaptureLimiter = createRateLimiter({
   interval: PROFILE_CAPTURE_RATE_LIMIT_INTERVAL_MS,
   maxRequests: PROFILE_CAPTURE_RATE_LIMIT_MAX,
 });
+
+/**
+ * Resume-by-ref sub-cap. The public `/resume-by-ref` route takes an 8-char support reference and,
+ * on a match, re-mints a session token that reads an in-progress anonymous session — a low-entropy
+ * code used as a bearer credential. This TIGHT cap (well below the section default and the other
+ * sub-caps) is the primary throttle against brute-force enumeration of the ref space; a returning
+ * respondent needs only a handful of attempts. Keyed on the client IP (no user to key on).
+ */
+export const RESUME_BY_REF_RATE_LIMIT_MAX = 5;
+
+/** Sliding-window length for {@link resumeByRefLimiter}, in milliseconds. */
+export const RESUME_BY_REF_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const resumeByRefLimiter = createRateLimiter({
+  interval: RESUME_BY_REF_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: RESUME_BY_REF_RATE_LIMIT_MAX,
+});

@@ -66,11 +66,25 @@ vi.mock('@/lib/app/questionnaire/chat/session-bootstrap', () => ({
   createOrResumeAuthedSession: vi.fn(),
 }));
 
+/**
+ * Mock the session-resume readers (F7.11). The versionId start path now checks for a resumable
+ * session before creating; these resolvers are mocked so the default happy path (resume enabled,
+ * nothing resumable) falls through to the create/redirect the existing tests assert.
+ */
+vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
+  resolveSessionResumeEnabledForVersion: vi.fn(),
+}));
+vi.mock('@/lib/app/questionnaire/chat/resumable-session', () => ({
+  findAuthedResumeDetail: vi.fn(),
+}));
+
 import StartQuestionnairePage, { metadata } from '@/app/(protected)/questionnaires/start/page';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { isLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createOrResumeAuthedSession } from '@/lib/app/questionnaire/chat/session-bootstrap';
+import { resolveSessionResumeEnabledForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import { findAuthedResumeDetail } from '@/lib/app/questionnaire/chat/resumable-session';
 import { redirect } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
@@ -117,6 +131,9 @@ describe('StartQuestionnairePage', () => {
       sessionId: 's1',
       resumed: false,
     });
+    // Resume defaults: enabled, but nothing resumable → the versionId path falls through to create.
+    vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(true);
+    vi.mocked(findAuthedResumeDetail).mockResolvedValue(null);
   });
 
   // -------------------------------------------------------------------------
@@ -260,6 +277,60 @@ describe('StartQuestionnairePage', () => {
         })
       ).rejects.toThrow('NEXT_REDIRECT:/questionnaires/sess_v2');
       expect(redirect).toHaveBeenCalledWith('/questionnaires/sess_v2');
+    });
+
+    it('renders the resume chooser (no create/redirect) when a resumable session with progress exists', async () => {
+      // Arrange: resume enabled + an in-progress session with real progress on the versionId path.
+      vi.mocked(findAuthedResumeDetail).mockResolvedValue({
+        sessionId: 'sess-resume',
+        ref: '7F3K9M2P',
+        answeredCount: 3,
+      });
+
+      // Act
+      const result = await StartQuestionnairePage({
+        searchParams: makeSearchParams({ versionId: 'ver_abc' }),
+      });
+
+      // Assert: short-circuits to the chooser — no silent create, no redirect.
+      expect(createOrResumeAuthedSession).not.toHaveBeenCalled();
+      expect(redirect).not.toHaveBeenCalled();
+      expect(result?.props).toMatchObject({
+        versionId: 'ver_abc',
+        sessionId: 'sess-resume',
+        refRaw: '7F3K9M2P',
+        answeredCount: 3,
+      });
+    });
+
+    it('falls through to create when resume is enabled but nothing is resumable', async () => {
+      vi.mocked(findAuthedResumeDetail).mockResolvedValue(null);
+      await expect(
+        StartQuestionnairePage({ searchParams: makeSearchParams({ versionId: 'ver_abc' }) })
+      ).rejects.toThrow('NEXT_REDIRECT:');
+      expect(createOrResumeAuthedSession).toHaveBeenCalled();
+    });
+
+    it('falls through to create for a zero-progress session (no chooser for a barely-started returner)', async () => {
+      // A resumable session exists but with no answers yet → below the >=1 threshold → resume silently.
+      vi.mocked(findAuthedResumeDetail).mockResolvedValue({
+        sessionId: 'sess-zero',
+        ref: '7F3K9M2P',
+        answeredCount: 0,
+      });
+      await expect(
+        StartQuestionnairePage({ searchParams: makeSearchParams({ versionId: 'ver_abc' }) })
+      ).rejects.toThrow('NEXT_REDIRECT:');
+      expect(createOrResumeAuthedSession).toHaveBeenCalled();
+    });
+
+    it('skips the resume check when resume is disabled for the version', async () => {
+      vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(false);
+      await expect(
+        StartQuestionnairePage({ searchParams: makeSearchParams({ versionId: 'ver_abc' }) })
+      ).rejects.toThrow('NEXT_REDIRECT:');
+      expect(findAuthedResumeDetail).not.toHaveBeenCalled();
+      expect(createOrResumeAuthedSession).toHaveBeenCalled();
     });
   });
 
