@@ -17,7 +17,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -41,9 +40,7 @@ vi.mock('@/lib/app/questionnaire/analytics', async (importOriginal) => ({
 import { GET as getVersion } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/diagnostics/route';
 import { GET as getInvitation } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/diagnostics/[invitationId]/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -111,9 +108,6 @@ const INVITE_PAYLOAD = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -127,14 +121,6 @@ beforeEach(() => {
 
 describe('GET versions/:vid/diagnostics (version rollup)', () => {
   const agg = analyticsMock.getVersionDiagnostics;
-
-  it('404s when the master flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    setAuth(null);
-    const res = await getVersion(req(), ctx(VERSION_PARAMS));
-    expect(res.status).toBe(404);
-    expect(agg).not.toHaveBeenCalled();
-  });
 
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
@@ -183,14 +169,6 @@ describe('GET versions/:vid/diagnostics (version rollup)', () => {
 
 describe('GET versions/:vid/diagnostics/:invitationId (drill-down)', () => {
   const agg = analyticsMock.getInvitationDiagnostics;
-
-  it('404s when the master flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    setAuth(null);
-    const res = await getInvitation(req('/inv-1'), ctx(INVITE_PARAMS));
-    expect(res.status).toBe(404);
-    expect(agg).not.toHaveBeenCalled();
-  });
 
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());

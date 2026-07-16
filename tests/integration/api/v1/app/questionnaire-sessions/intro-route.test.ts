@@ -13,7 +13,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -31,12 +30,7 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { GET } from '@/app/api/v1/app/questionnaire-sessions/[id]/intro/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
-  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import { mockAuthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -70,24 +64,12 @@ function session(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   dbMock.findUnique.mockResolvedValue(session());
   introMock.resolveSessionIntro.mockResolvedValue(RESOLVED_INTRO);
 });
 
 describe('gate order', () => {
-  it('404s when the live-sessions flag is off, before load or access', async () => {
-    // Master flag on, live-sessions specifically off — isolates the live-sessions gate.
-    vi.mocked(isFeatureEnabled).mockImplementation(async (f) =>
-      f === APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG ? false : true
-    );
-    const res = await GET(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(dbMock.findUnique).not.toHaveBeenCalled();
-    expect(introMock.resolveSessionIntro).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist', async () => {
     dbMock.findUnique.mockResolvedValue(null);
     const res = await GET(req(), ctx);
@@ -133,20 +115,6 @@ describe('anonymous access', () => {
   it('401s when the token is missing', async () => {
     const res = await GET(req(), ctx);
     expect(res.status).toBe(401);
-    expect(introMock.resolveSessionIntro).not.toHaveBeenCalled();
-  });
-});
-
-describe('intro platform flag off', () => {
-  it('returns intro: null without resolving when the intro-screen flag is off', async () => {
-    // Live-sessions + master on (access passes), but the intro-screen sub-flag is off.
-    vi.mocked(isFeatureEnabled).mockImplementation(async (name: string) =>
-      name === APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG ? false : true
-    );
-    const res = await GET(req(), ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { intro: unknown } };
-    expect(body.data.intro).toBeNull();
     expect(introMock.resolveSessionIntro).not.toHaveBeenCalled();
   });
 });

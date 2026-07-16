@@ -4,7 +4,6 @@ dotenv.config({ path: '.env' });
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { isDataSlotsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { dataSlotGranularitySchema } from '@/lib/app/questionnaire/data-slots';
 import { generateAndSaveDataSlots } from '@/app/api/v1/app/questionnaires/_lib/generate-data-slots';
 
@@ -147,13 +146,6 @@ async function main(): Promise<void> {
         ? `questionnaire ${flags.questionnaireId}`
         : 'all versions',
   });
-
-  if (!(await isDataSlotsEnabled())) {
-    logger.warn(
-      '⚠️  Data slots are NOT enabled (APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED). Backfilled slots ' +
-        'will be written but stay dormant until the flag is on — see the F9.2 runbook.'
-    );
-  }
 
   const allTargets = await findTargets(flags);
   const targets = flags.force ? allTargets : allTargets.filter((t) => t.existingSlotCount === 0);

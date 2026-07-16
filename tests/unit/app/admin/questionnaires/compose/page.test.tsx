@@ -1,14 +1,11 @@
 /**
- * Compose Questionnaire page — feature-flag gate tests.
+ * Compose Questionnaire page — render tests.
  *
- * The page is a thin async server-component shell. Its only logic is:
- *   1. Call `isQuestionnairesEnabled()` and `isGenerativeAuthoringEnabled()`.
- *   2. If EITHER is falsy → call `notFound()`.
- *   3. Otherwise render the heading, back link, FieldHelp, and `<ComposeStudio>`.
+ * The page is a thin server-component shell that renders the heading, back link,
+ * FieldHelp, and `<ComposeStudio>`.
  *
- * Heavy children (ComposeStudio, FieldHelp) are stubbed so this stays a pure
- * flag-gate test. The `notFound` mock throws so the page aborts — the same
- * contract the sibling list-page test uses.
+ * Heavy children (ComposeStudio, FieldHelp) are stubbed so this stays a focused
+ * render test.
  *
  * @see app/admin/questionnaires/compose/page.tsx
  */
@@ -22,11 +19,6 @@ vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
-}));
-
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isQuestionnairesEnabled: vi.fn(),
-  isGenerativeAuthoringEnabled: vi.fn(),
 }));
 
 // Stub ComposeStudio — it's a 'use client' component with hooks, router, fetch.
@@ -45,10 +37,6 @@ vi.mock('@/components/ui/field-help', () => ({
 // --- imports after mocks -------------------------------------------------------
 
 import ComposeQuestionnairePage from '@/app/admin/questionnaires/compose/page';
-import {
-  isQuestionnairesEnabled,
-  isGenerativeAuthoringEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { notFound } from 'next/navigation';
 import type React from 'react';
 
@@ -59,28 +47,8 @@ describe('ComposeQuestionnairePage', () => {
     vi.clearAllMocks();
   });
 
-  it('calls notFound when the master questionnaires flag is off', async () => {
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(false);
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(false);
-
-    // notFound() throws 'NEXT_NOT_FOUND' (see mock above) so the page aborts.
-    await expect(ComposeQuestionnairePage()).rejects.toThrow('NEXT_NOT_FOUND');
-    expect(notFound).toHaveBeenCalledTimes(1);
-  });
-
-  it('calls notFound when master flag is on but generative-authoring sub-flag is off', async () => {
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(false);
-
-    await expect(ComposeQuestionnairePage()).rejects.toThrow('NEXT_NOT_FOUND');
-    expect(notFound).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders ComposeStudio and does NOT call notFound when both flags are on', async () => {
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(true);
-
-    render(await ComposeQuestionnairePage());
+  it('renders ComposeStudio and does NOT call notFound', async () => {
+    render(ComposeQuestionnairePage());
 
     // The page's own logic: ComposeStudio must be mounted.
     expect(screen.getByTestId('compose-studio')).toBeInTheDocument();
@@ -89,20 +57,14 @@ describe('ComposeQuestionnairePage', () => {
     expect(notFound).not.toHaveBeenCalled();
   });
 
-  it('renders the page heading when both flags are on', async () => {
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(true);
-
-    render(await ComposeQuestionnairePage());
+  it('renders the page heading', async () => {
+    render(ComposeQuestionnairePage());
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/compose a questionnaire/i);
   });
 
-  it('renders a back-link to /admin/questionnaires when both flags are on', async () => {
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(true);
-
-    render(await ComposeQuestionnairePage());
+  it('renders a back-link to /admin/questionnaires', async () => {
+    render(ComposeQuestionnairePage());
 
     const link = screen.getByRole('link', { name: /questionnaires/i });
     expect(link).toHaveAttribute('href', '/admin/questionnaires');

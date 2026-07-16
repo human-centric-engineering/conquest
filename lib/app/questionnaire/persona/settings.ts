@@ -94,7 +94,7 @@ export function resolveEffectiveTone(input: {
  * The tone that governs a live session's turns, applying the FULL persona gate — the single seam the
  * turn loop should use so the gate can't be re-derived inconsistently at the call site. On top of
  * {@link resolveEffectiveTone} it folds in the two gates that live outside the version config:
- *   - `personaFlagEnabled` — the platform persona-selection flag(s) (`isPersonaSelectionEnabled()`).
+ *   - `personaFlagEnabled` — a caller-supplied gate for built-in persona mode.
  *     It's a kill-switch: built-in persona mode governs only when it AND the version toggle are on, so
  *     when the flag is off the version's own tone prevails (returned unchanged) even if a version was
  *     left with `personaSelection.enabled` true.

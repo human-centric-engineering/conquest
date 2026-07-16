@@ -13,7 +13,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -32,17 +31,12 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes', () => ({
 }));
 
 import { PATCH } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/[runId]/findings/[findingId]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import {
   loadScopedFinding,
   buildScopedFindingView,
 } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
-import {
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -80,11 +74,6 @@ function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(
-      flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG
-    )
-  );
   setAuth(mockAdminUser());
   (loadScopedFinding as Mock).mockResolvedValue(scopedFinding('pending'));
   (buildScopedFindingView as Mock).mockResolvedValue({ id: 'find-1', status: 'accepted' });
@@ -93,14 +82,6 @@ beforeEach(() => {
 });
 
 describe('PATCH finding — gate and auth', () => {
-  it('returns 404 when the design-eval sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await PATCH(jsonReq({ action: 'accept' }), ctx(PARAMS));
-    expect(res.status).toBe(404);
-  });
-
   it('returns 401 when unauthenticated', async () => {
     mockUnauthenticatedUser();
     setAuth(null);

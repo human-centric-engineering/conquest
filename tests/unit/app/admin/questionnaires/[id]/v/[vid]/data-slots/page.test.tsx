@@ -2,12 +2,11 @@
  * Data Slots tab page (`/admin/questionnaires/[id]/v/[vid]/data-slots`) tests.
  *
  * The page is an async Server Component that:
- *  - gates on isQuestionnairesEnabled() and isDataSlotsEnabled()
  *  - fetches the version graph via getVersionGraphCached and data slots via serverFetch
  *  - renders a "no questions" message when the graph has no questions
  *  - renders DataSlotsReview when questions are present
  *
- * Fetching is mocked at the `server-fetch` + `feature-flag` + `workspace-data` boundaries.
+ * Fetching is mocked at the `server-fetch` + `workspace-data` boundaries.
  * The heavy DataSlotsReview child is stubbed to an identifiable marker.
  */
 
@@ -30,15 +29,6 @@ vi.mock('next/navigation', () => ({
   notFound: mockNotFound,
   redirect: vi.fn(),
 }));
-
-// ─── Feature-flag mock ────────────────────────────────────────────────────────
-
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-  isDataSlotsEnabled: vi.fn(),
-  isAdaptiveDataSlotSelectionEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 // ─── workspace-data mock (for getVersionGraphCached) ─────────────────────────
 
@@ -65,6 +55,13 @@ const loggerMock = vi.hoisted(() => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('@/lib/logging', () => loggerMock);
+
+// ─── Stub DataSlotEmbeddingStep (rendered whenever slots exist; a client component
+//     that calls useRouter, so stub it to keep these server-page tests hook-free) ──
+
+vi.mock('@/components/admin/questionnaires/data-slot-embedding-step', () => ({
+  DataSlotEmbeddingStep: () => <div data-testid="data-slot-embedding-step" />,
+}));
 
 // ─── Stub DataSlotsReview ────────────────────────────────────────────────────
 
@@ -155,9 +152,6 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
-  flagMock.isDataSlotsEnabled.mockResolvedValue(true);
-  flagMock.isAdaptiveDataSlotSelectionEnabled.mockResolvedValue(false);
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph(3));
   apiData.slots = { slots: [], draft: null };
   apiMock.serverFetch.mockImplementation(async (url: string) => ({ ok: true, _url: url }));
@@ -169,18 +163,6 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('DataSlotsTab', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires feature flag is off', async () => {
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-
-    it('calls notFound when the data-slots feature flag is off', async () => {
-      flagMock.isDataSlotsEnabled.mockResolvedValue(false);
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
   describe('no-questions state', () => {
     it('renders a "no questions" message when the graph has no sections/questions', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph(0));

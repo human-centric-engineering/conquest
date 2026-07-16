@@ -378,7 +378,7 @@ export const DEFAULT_INVITEE_FIELDS: InviteeFieldConfig[] = [
 /**
  * The ways an admin can bulk-add invitees on the import wizard. `paste` is a heuristic free-text
  * parse (no AI); `csv` maps columns; `pdf`/`image` extract people via an AI agent (PDF text / vision)
- * and are gated by `isInvitationImportEnabled`. All converge on the editable verify grid before send.
+ * All converge on the editable verify grid before send.
  */
 export const IMPORT_METHODS = ['paste', 'csv', 'pdf', 'image'] as const;
 export type ImportMethod = (typeof IMPORT_METHODS)[number];

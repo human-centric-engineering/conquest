@@ -9,7 +9,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 import { Prisma } from '@prisma/client';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -48,7 +47,6 @@ import {
 } from '@/app/api/v1/app/rounds/[id]/phases/[phaseId]/route';
 import { POST as sendPOST } from '@/app/api/v1/app/rounds/[id]/phases/[phaseId]/send-invites/route';
 import { POST as dispatchPOST } from '@/app/api/v1/app/rounds/maintenance/dispatch-phase-invites/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { getRoundDetail } from '@/app/api/v1/app/rounds/_lib/read';
@@ -79,7 +77,6 @@ const ROUND = { id: 'r-1', name: 'July', cohortId: 'c-1', opensAt: null, closesA
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true); // master AND cohorts AND round-phases on
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue(ROUND);
   prismaMock.appCohortSubgroup.findFirst.mockResolvedValue({ id: 'sg-1', name: 'SLT' });
@@ -118,13 +115,6 @@ beforeEach(() => {
 });
 
 describe('GET /rounds/:id/phases', () => {
-  it('404s before auth when the flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await listGET(plainReq(), collCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('returns the round phases', async () => {
     (getRoundDetail as Mock).mockResolvedValue({ id: 'r-1', phases: [{ id: 'ph-1' }] });
     const res = await listGET(plainReq(), collCtx);
@@ -283,17 +273,10 @@ describe('POST /rounds/:id/phases/:phaseId/send-invites', () => {
 
 describe('POST /rounds/maintenance/dispatch-phase-invites', () => {
   it('dispatches due phases and returns the summary', async () => {
-    const res = await dispatchPOST(plainReq(), { params: Promise.resolve({}) });
+    const res = await dispatchPOST(plainReq());
     expect(res.status).toBe(200);
     expect((await res.json()).data).toEqual({ phasesProcessed: 1, created: 2, sent: 2 });
     expect(dispatchDuePhaseInvitations).toHaveBeenCalledWith(expect.any(String));
-  });
-
-  it('404s when the flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await dispatchPOST(plainReq(), { params: Promise.resolve({}) });
-    expect(res.status).toBe(404);
-    expect(dispatchDuePhaseInvitations).not.toHaveBeenCalled();
   });
 
   it('is a quiet 200 with no audit when nothing was due', async () => {
@@ -302,7 +285,7 @@ describe('POST /rounds/maintenance/dispatch-phase-invites', () => {
       created: 0,
       sent: 0,
     });
-    const res = await dispatchPOST(plainReq(), { params: Promise.resolve({}) });
+    const res = await dispatchPOST(plainReq());
     expect(res.status).toBe(200);
     expect((await res.json()).data).toEqual({ phasesProcessed: 0, created: 0, sent: 0 });
     expect(logAdminAction).not.toHaveBeenCalled();

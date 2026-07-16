@@ -10,7 +10,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -36,7 +35,6 @@ import {
   POST,
 } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/embed-data-slots/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   dataSlotEmbeddingCoverage,
@@ -72,7 +70,6 @@ const PARAMS = { id: 'qn-1', vid: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -102,13 +99,6 @@ describe('GET coverage', () => {
     expect(dataSlotEmbeddingCoverage).toHaveBeenCalledWith('v1');
   });
 
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await GET(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('403s for a non-admin', async () => {
     setAuth(mockAuthenticatedUser('USER'));
     expect((await GET(req({}), ctx(PARAMS))).status).toBe(403);
@@ -116,13 +106,6 @@ describe('GET coverage', () => {
 });
 
 describe('POST generate — gate order + auth', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req({}), ctx(PARAMS))).status).toBe(401);

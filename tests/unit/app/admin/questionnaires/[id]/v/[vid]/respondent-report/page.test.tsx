@@ -1,8 +1,7 @@
 /**
  * Respondent report tab page — unit tests.
  *
- *  - notFound() when the respondentReport flag is off
- *  - renders the editor with the resolved config slice + data-slots flag when on
+ *  - renders the editor with the resolved config slice + data-slots
  *  - falls back to DEFAULT_RESPONDENT_REPORT_SETTINGS when the version has no config
  *
  * @see app/admin/questionnaires/[id]/v/[vid]/respondent-report/page.tsx
@@ -12,7 +11,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import type { QuestionnaireDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   DEFAULT_RESPONDENT_REPORT_SETTINGS,
@@ -28,7 +26,6 @@ vi.mock('next/navigation', () => ({ notFound: mockNotFound, redirect: vi.fn() })
 const workspaceDataMock = vi.hoisted(() => ({
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
-  resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -54,30 +51,10 @@ vi.mock('@/components/admin/questionnaires/report/respondent-report-editor', () 
 
 import RespondentReportTab from '@/app/admin/questionnaires/[id]/v/[vid]/respondent-report/page';
 
-function flags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
-  return {
-    master: true,
-    dataSlots: false,
-    designEval: false,
-    liveSessions: true,
-    adaptive: false,
-    adaptiveDataSlots: false,
-    respondentReport: true,
-    cohortReport: true,
-    reportWebSearch: true,
-    introScreen: false,
-    personaSelection: false,
-    advisor: false,
-    editAgent: false,
-    ...over,
-  };
-}
-
 const ctx = { params: Promise.resolve({ id: 'qn-1', vid: 'v1' }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(flags());
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(null);
   workspaceDataMock.getVersionGraphCached.mockResolvedValue({
     config: {
@@ -89,18 +66,7 @@ beforeEach(() => {
 });
 
 describe('RespondentReportTab', () => {
-  it('notFound()s when the respondentReport flag is off', async () => {
-    workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-      flags({ respondentReport: false })
-    );
-    await expect(RespondentReportTab({ params: ctx.params })).rejects.toThrow('NEXT_NOT_FOUND');
-    expect(mockNotFound).toHaveBeenCalled();
-  });
-
-  it('renders the editor with the resolved config + data-slots flag', async () => {
-    workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-      flags({ dataSlots: true })
-    );
+  it('renders the editor with the resolved config + data-slots', async () => {
     render(await RespondentReportTab({ params: ctx.params }));
     const editor = screen.getByTestId('rr-editor');
     expect(editor.dataset.qid).toBe('qn-1');

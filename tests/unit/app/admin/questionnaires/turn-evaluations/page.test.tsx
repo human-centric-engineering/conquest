@@ -2,7 +2,6 @@
  * Admin Turn Evaluations page tests.
  *
  * The page is a thin async Server Component that:
- *  - calls notFound() when isTurnEvaluationEnabled() returns false
  *  - pre-fetches page 1 of turn evaluations via serverFetch / parseApiResponse
  *  - passes the fetched items + meta to TurnEvaluationsTable as initialItems / initialMeta
  *  - renders RefLookupPanel above the table
@@ -34,13 +33,6 @@ const { mockNotFound } = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   notFound: mockNotFound,
 }));
-
-// ─── Feature-flag mock ────────────────────────────────────────────────────────
-
-const flagMock = vi.hoisted(() => ({
-  isTurnEvaluationEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 // ─── server-fetch mock ────────────────────────────────────────────────────────
 
@@ -135,7 +127,6 @@ import TurnEvaluationsPage from '@/app/admin/questionnaires/turn-evaluations/pag
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isTurnEvaluationEnabled.mockResolvedValue(true);
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({
     success: true,
@@ -147,16 +138,8 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('TurnEvaluationsPage', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when isTurnEvaluationEnabled returns false', async () => {
-      flagMock.isTurnEvaluationEnabled.mockResolvedValue(false);
-
-      await expect(TurnEvaluationsPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-
-    it('renders when isTurnEvaluationEnabled returns true', async () => {
-      flagMock.isTurnEvaluationEnabled.mockResolvedValue(true);
-
+  describe('render', () => {
+    it('renders the turn-evaluations table', async () => {
       render(await TurnEvaluationsPage());
 
       expect(screen.getByTestId('turn-evaluations-table')).toBeInTheDocument();

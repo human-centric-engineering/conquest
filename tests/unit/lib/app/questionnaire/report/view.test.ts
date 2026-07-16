@@ -6,7 +6,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionnaireSession: { findUnique: vi.fn() },
@@ -14,7 +13,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { prisma } from '@/lib/db/client';
 import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
 
@@ -54,35 +52,12 @@ function session(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
 });
 
 describe('buildRespondentReportClientView', () => {
   it('returns null when the session does not exist', async () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(null);
     await expect(buildRespondentReportClientView('s1')).resolves.toBeNull();
-  });
-
-  it('reports disabled when the platform flag is off, even if config is enabled', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
-      session({ enabled: true, mode: 'raw_plus_insights' })
-    );
-    const view = await buildRespondentReportClientView('s1');
-    expect(view?.enabled).toBe(false);
-    expect(view?.insights).toBeNull();
-  });
-
-  it('reports disabled when only the respondent-report sub-flag is off (master on)', async () => {
-    (isFeatureEnabled as unknown as Mock)
-      .mockResolvedValueOnce(true) // master
-      .mockResolvedValueOnce(false); // sub-flag
-    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
-      session({ enabled: true, mode: 'raw_plus_insights' })
-    );
-    const view = await buildRespondentReportClientView('s1');
-    expect(view?.enabled).toBe(false);
-    expect(view?.insights).toBeNull();
   });
 
   it('carries no insights for raw mode', async () => {

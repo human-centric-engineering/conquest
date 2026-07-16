@@ -14,7 +14,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -34,12 +33,7 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { GET, PATCH } from '@/app/api/v1/app/questionnaire-sessions/[id]/persona/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
-  APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import { mockAuthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -76,7 +70,6 @@ function session(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   dbMock.findUnique.mockResolvedValue(session());
   dbMock.update.mockResolvedValue(session());
@@ -84,31 +77,10 @@ beforeEach(() => {
 });
 
 describe('GET — gate order', () => {
-  it('404s when the live-sessions flag is off, before load or resolve', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation(async (f) =>
-      f === APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG ? false : true
-    );
-    const res = await GET(req('GET'), ctx);
-    expect(res.status).toBe(404);
-    expect(dbMock.findUnique).not.toHaveBeenCalled();
-    expect(personaMock.resolveSessionPersonas).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist', async () => {
     dbMock.findUnique.mockResolvedValue(null);
     const res = await GET(req('GET'), ctx);
     expect(res.status).toBe(404);
-    expect(personaMock.resolveSessionPersonas).not.toHaveBeenCalled();
-  });
-
-  it('returns persona: null without resolving when the persona flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation(async (name: string) =>
-      name === APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG ? false : true
-    );
-    const res = await GET(req('GET'), ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { persona: unknown } };
-    expect(body.data.persona).toBeNull();
     expect(personaMock.resolveSessionPersonas).not.toHaveBeenCalled();
   });
 });
@@ -186,15 +158,6 @@ describe('PATCH — set the chosen persona', () => {
     personaMock.resolveSessionPersonas.mockResolvedValue({ ...MENU, enabled: false });
     const res = await PATCH(req('PATCH', { personaKey: 'comedian' }), ctx);
     expect(res.status).toBe(422);
-    expect(dbMock.update).not.toHaveBeenCalled();
-  });
-
-  it('404s when the persona flag is off, before any write', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation(async (name: string) =>
-      name === APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG ? false : true
-    );
-    const res = await PATCH(req('PATCH', { personaKey: 'comedian' }), ctx);
-    expect(res.status).toBe(404);
     expect(dbMock.update).not.toHaveBeenCalled();
   });
 

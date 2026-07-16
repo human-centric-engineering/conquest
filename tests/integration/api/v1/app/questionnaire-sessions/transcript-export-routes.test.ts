@@ -13,7 +13,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -32,7 +31,6 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () 
 
 import { GET as GET_PDF } from '@/app/api/v1/app/questionnaire-sessions/[id]/transcript.pdf/route';
 import { GET as GET_TXT } from '@/app/api/v1/app/questionnaire-sessions/[id]/transcript.txt/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import type { TranscriptExportModel } from '@/lib/app/questionnaire/export/transcript-types';
@@ -89,7 +87,6 @@ function loaded(respondentUserId: string | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   seamMock.loadTranscriptExport.mockResolvedValue(loaded(USER));
   seamMock.assembleTranscriptExportModel.mockResolvedValue(model());
@@ -98,14 +95,6 @@ beforeEach(() => {
 
 describe('transcript.pdf', () => {
   describe('gate order', () => {
-    it('404s when the live-sessions flag is off, before auth or load', async () => {
-      vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-      const res = await GET_PDF(req('transcript.pdf'), ctx);
-      expect(res.status).toBe(404);
-      expect(auth.api.getSession).not.toHaveBeenCalled();
-      expect(seamMock.loadTranscriptExport).not.toHaveBeenCalled();
-    });
-
     it('404s when the session does not exist (no access, no render)', async () => {
       seamMock.loadTranscriptExport.mockResolvedValue(null);
       const res = await GET_PDF(req('transcript.pdf'), ctx);
@@ -173,13 +162,6 @@ describe('transcript.pdf', () => {
 });
 
 describe('transcript.txt', () => {
-  it('404s when the live-sessions flag is off, before load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await GET_TXT(req('transcript.txt'), ctx);
-    expect(res.status).toBe(404);
-    expect(seamMock.loadTranscriptExport).not.toHaveBeenCalled();
-  });
-
   it('200s a text envelope with the real serialised transcript', async () => {
     const res = await GET_TXT(req('transcript.txt'), ctx);
     expect(res.status).toBe(200);

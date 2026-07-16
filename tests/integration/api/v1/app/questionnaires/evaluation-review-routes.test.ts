@@ -6,7 +6,7 @@
  *   mocked here; its internals — fork lineage, op execution — are covered by the apply-engine
  *   and staleness unit tests).
  *
- * Covers: sub-flag-off 404, auth, finding-scope 404, the `applied` terminal 409, each review
+ * Covers: auth, finding-scope 404, the `applied` terminal 409, each review
  * action's write, the apply rate-limit 429, an `unapplicable` 409 with its reason, and a
  * successful apply's fork meta.
  */
@@ -14,7 +14,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -45,9 +44,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-structure', () => ({
 import { PATCH } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/[runId]/findings/[findingId]/route';
 import { POST as APPLY } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/[runId]/findings/[findingId]/apply/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG } from '@/lib/app/questionnaire/constants';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import { applyFinding } from '@/app/api/v1/app/questionnaires/_lib/evaluation-apply';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
@@ -69,15 +66,6 @@ function ctx() {
 }
 function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
   (auth.api.getSession as unknown as Mock).mockResolvedValue(session);
-}
-/** All feature flags on by default (master + sub). */
-function allFlagsOn() {
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
-}
-function subFlagOff() {
-  vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-    Promise.resolve(name !== APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG)
-  );
 }
 
 /** A scoped finding row as `loadScopedFinding` returns it (finding + nested run). */
@@ -104,7 +92,6 @@ function findingRow(status = 'pending', proposedEdit: unknown = { op: 'delete_qu
 
 beforeEach(() => {
   vi.clearAllMocks();
-  allFlagsOn();
   setAuth(mockAdminUser());
   (buildEvaluationStructure as unknown as Mock).mockResolvedValue(null); // skip derivation
   // Real `loadScopedVersion` resolves this row (apply route).
@@ -117,13 +104,6 @@ beforeEach(() => {
 });
 
 describe('PATCH finding review', () => {
-  it('404s when the design-evaluation sub-flag is off (after auth)', async () => {
-    subFlagOff();
-    const res = await PATCH(req({ action: 'accept' }), ctx());
-    expect(res.status).toBe(404);
-    expect(prismaMock.appQuestionnaireEvaluationFinding.update).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await PATCH(req({ action: 'accept' }), ctx());
@@ -205,13 +185,6 @@ describe('PATCH finding review', () => {
 });
 
 describe('POST finding apply', () => {
-  it('404s when the sub-flag is off', async () => {
-    subFlagOff();
-    const res = await APPLY(req(), ctx());
-    expect(res.status).toBe(404);
-    expect(applyFinding).not.toHaveBeenCalled();
-  });
-
   it('429s when the apply sub-cap is exceeded', async () => {
     rateLimitMock.evaluationApplyLimiter.check.mockReturnValueOnce({
       success: false,

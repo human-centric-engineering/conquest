@@ -14,10 +14,6 @@ import { NextRequest } from 'next/server';
 
 // ─── Module mocks (hoisted before imports) ────────────────────────────────────
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withQuestionnairesEnabled: (handler: unknown) => handler,
-}));
-
 vi.mock('@/lib/auth/guards', () => ({
   withAdminAuth: (handler: unknown) => handler,
 }));
@@ -153,26 +149,6 @@ beforeEach(() => {
 
   // Demo-client lookup resolves to an existing client by default
   (prisma.appDemoClient.findUnique as Mock).mockResolvedValue({ id: 'client-1' });
-});
-
-// ─── Feature-flag gate (withQuestionnairesEnabled mock wiring) ────────────────
-
-describe('feature-flag gate (withQuestionnairesEnabled mock wiring)', () => {
-  it('allows the handler to run when the flag mock is the identity function', async () => {
-    // Drive the rate-limit path to prove the handler body ran, not a gate.
-    (ingestLimiter.check as Mock).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: 0,
-    });
-
-    const req = makeRequest();
-    await POST(req, ADMIN_SESSION);
-
-    // createRateLimitResponse called → handler body executed → identity mock is transparent
-    expect(createRateLimitResponse).toHaveBeenCalledOnce();
-  });
 });
 
 // ─── Rate limit ───────────────────────────────────────────────────────────────

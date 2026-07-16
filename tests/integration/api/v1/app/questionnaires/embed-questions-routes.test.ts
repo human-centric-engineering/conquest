@@ -12,7 +12,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -43,7 +42,6 @@ import {
   POST,
 } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/embed-questions/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   embedVersionSlots,
@@ -79,7 +77,6 @@ const PARAMS = { id: 'qn-1', vid: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -96,13 +93,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req({}), ctx(PARAMS))).status).toBe(401);
@@ -172,14 +162,6 @@ describe('GET coverage', () => {
     expect(body.success).toBe(true);
     expect(body.data).toEqual({ total: 3, embedded: 2, missing: 1 });
     expect(slotEmbeddingCoverage).toHaveBeenCalledWith('v1');
-  });
-
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await GET(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(slotEmbeddingCoverage).not.toHaveBeenCalled();
   });
 
   it('404s on a scope mismatch without reading coverage', async () => {

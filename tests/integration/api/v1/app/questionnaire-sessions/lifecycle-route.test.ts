@@ -11,7 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -33,7 +32,6 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/lifecycle/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
@@ -57,7 +55,6 @@ function setAuth(s: ReturnType<typeof mockAuthenticatedUser> | null): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   dbMock.prisma.appQuestionnaireSession.findUnique.mockResolvedValue({
     id: 'sess-1',
@@ -73,13 +70,6 @@ beforeEach(() => {
 });
 
 describe('gate order', () => {
-  it('404s when the live-sessions flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await POST(req({ action: 'pause' }), ctx);
-    expect(res.status).toBe(404);
-    expect(dbMock.prisma.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist (before access)', async () => {
     dbMock.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(null);
     const res = await POST(req({ action: 'pause' }), ctx);

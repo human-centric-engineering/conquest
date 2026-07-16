@@ -144,7 +144,7 @@ export async function buildTurnInvokers(opts: {
   adaptiveEnabled: boolean;
   /**
    * Data Slots feature: when true, wire the adaptive data-slot `selectDataSlot` invoker (embedding
-   * pre-filter + LLM selector). The route sets it from `isAdaptiveDataSlotSelectionEnabled()` AND
+   * pre-filter + LLM selector). The route sets it from adaptive data-slot mode being active AND
    * data-slot mode being active. When false/absent, the invoker is omitted and the data-slot
    * orchestrator keeps its deterministic topic-local pick.
    */

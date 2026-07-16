@@ -10,7 +10,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -29,12 +28,7 @@ const diagnosticsMock = vi.hoisted(() => ({ recordQuestionnaireError: vi.fn() })
 vi.mock('@/lib/app/questionnaire/diagnostics', () => diagnosticsMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -57,12 +51,6 @@ const OK_SESSION = { id: 'sess-1', status: 'active', versionId: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Both the master flag and the live-sessions sub-flag on.
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(
-      flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG
-    )
-  );
   setAuth(mockAuthenticatedUser());
   rateMock.sessionStartLimiter.check.mockReturnValue({ success: true });
   createMock.createSessionFromInvitation.mockResolvedValue({
@@ -78,18 +66,9 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the live-sessions flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    ); // master on, sub-flag off
-    const res = await POST(req({ versionId: 'v1' }), undefined);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(401);
     expect(createMock.createSessionForVersion).not.toHaveBeenCalled();
   });
@@ -101,13 +80,13 @@ describe('gate order + auth', () => {
       remaining: 0,
       reset: 0,
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(429);
     expect(createMock.createSessionForVersion).not.toHaveBeenCalled();
   });
 
   it('400s on a body that is neither invitationToken nor versionId', async () => {
-    const res = await POST(req({ nonsense: true }), undefined);
+    const res = await POST(req({ nonsense: true }));
     expect(res.status).toBe(400);
     expect(createMock.createSessionFromInvitation).not.toHaveBeenCalled();
     expect(createMock.createSessionForVersion).not.toHaveBeenCalled();
@@ -116,7 +95,7 @@ describe('gate order + auth', () => {
 
 describe('dispatch', () => {
   it('routes an invitationToken body to createSessionFromInvitation', async () => {
-    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }), undefined);
+    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }));
     expect(res.status).toBe(201);
     expect(createMock.createSessionFromInvitation).toHaveBeenCalledWith(
       'tok_abcdefghij',
@@ -131,8 +110,7 @@ describe('dispatch', () => {
 
   it('forwards profileValues from an invitationToken body (F8.3)', async () => {
     const res = await POST(
-      req({ invitationToken: 'tok_abcdefghij', profileValues: { team: 'Analytics' } }),
-      undefined
+      req({ invitationToken: 'tok_abcdefghij', profileValues: { team: 'Analytics' } })
     );
     expect(res.status).toBe(201);
     expect(createMock.createSessionFromInvitation).toHaveBeenCalledWith(
@@ -143,7 +121,7 @@ describe('dispatch', () => {
   });
 
   it('routes a versionId body to createSessionForVersion', async () => {
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(201);
     expect(createMock.createSessionForVersion).toHaveBeenCalledWith(
       'v1',
@@ -158,7 +136,7 @@ describe('dispatch', () => {
       session: OK_SESSION,
       resumed: true,
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(200);
     expect((await res.json()).meta.resumed).toBe(true);
   });
@@ -172,7 +150,7 @@ describe('typed failure → HTTP mapping', () => {
       code: 'INVITATION_REQUIRED',
       message: 'This questionnaire requires an invitation',
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.success).toBe(false);
@@ -186,7 +164,7 @@ describe('typed failure → HTTP mapping', () => {
       code: 'INVITATION_NOT_FOUND',
       message: 'Invitation not found',
     });
-    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }), undefined);
+    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.success).toBe(false);
@@ -204,7 +182,7 @@ describe('diagnostics capture (F8.5)', () => {
       versionId: 'v-9',
       invitationId: 'inv-1',
     });
-    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }), undefined);
+    const res = await POST(req({ invitationToken: 'tok_abcdefghij' }));
     expect(res.status).toBe(409);
     expect(diagnosticsMock.recordQuestionnaireError).toHaveBeenCalledTimes(1);
     expect(diagnosticsMock.recordQuestionnaireError.mock.calls[0][0]).toMatchObject({
@@ -218,7 +196,7 @@ describe('diagnostics capture (F8.5)', () => {
 
   it('records a session_create error and rethrows (→ 500) when create throws', async () => {
     createMock.createSessionForVersion.mockRejectedValue(new Error('db down'));
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(500);
     expect(diagnosticsMock.recordQuestionnaireError).toHaveBeenCalledTimes(1);
     expect(diagnosticsMock.recordQuestionnaireError.mock.calls[0][0]).toMatchObject({

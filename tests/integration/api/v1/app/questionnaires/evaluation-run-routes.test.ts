@@ -3,8 +3,7 @@
  *
  * Pins the persisting POST and the read GET (list + detail) with the DB seam (`prisma`,
  * including `$transaction`) and the capability dispatcher mocked. Covers:
- *   - POST gate order (master-flag-off 404 before auth; sub-flag-off 404 after auth, no
- *     dispatch), 401/403, scope-404, not-configured-404, the 429 sub-cap;
+ *   - POST 401/403, scope-404, not-configured-404, the 429 sub-cap;
  *   - POST persistence: the derived terminal status (completed / partial / failed), the
  *     per-judge finding rows, and that the response is the full run detail;
  *   - GET list: version-scope 404 and newest-first paged headers;
@@ -17,7 +16,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -59,12 +57,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/route';
 import { GET as DETAIL } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/[runId]/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
-  APP_QUESTIONNAIRES_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
@@ -191,11 +184,6 @@ function persistedRunRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(
-      flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG
-    )
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(versionGraphRow());
   prismaMock.aiAgent.findMany.mockResolvedValue(allJudgeAgents());
@@ -219,24 +207,6 @@ beforeEach(() => {
 });
 
 describe('POST evaluations — gate order + auth', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
-  it('404s when the sub-flag is off (after auth, no dispatch, no write)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).toHaveBeenCalled();
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-    expect(prismaMock.appQuestionnaireEvaluationRun.create).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req({}), ctx(PARAMS))).status).toBe(401);

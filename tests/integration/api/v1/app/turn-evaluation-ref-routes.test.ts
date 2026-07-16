@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -28,7 +27,6 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rateLim
 
 import { GET as BY_REF } from '@/app/api/v1/app/turn-evaluations/by-ref/[ref]/route';
 import { POST as EVAL_SAVED } from '@/app/api/v1/app/questionnaire-sessions/[id]/turns/[ordinal]/evaluate-saved/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -57,7 +55,6 @@ const SAVED_URL =
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   listMock.lookupSessionByRef.mockResolvedValue({ session: { id: 'sess-1' }, turns: [] });
   savedMock.runSavedTurnEvaluation.mockResolvedValue({
@@ -76,14 +73,6 @@ beforeEach(() => {
 });
 
 describe('GET by-ref', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null);
-    const res = await BY_REF(req(REF_URL), refCtx('7F3K-9M2P'));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await BY_REF(req(REF_URL), refCtx('x'))).status).toBe(401);
@@ -109,14 +98,6 @@ describe('GET by-ref', () => {
 });
 
 describe('POST evaluate-saved', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null);
-    const res = await EVAL_SAVED(req(SAVED_URL), savedCtx('sess-1', '2'));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await EVAL_SAVED(req(SAVED_URL), savedCtx('sess-1', '2'));

@@ -14,10 +14,6 @@ import { NextRequest } from 'next/server';
 
 // ─── Module mocks (hoisted before imports) ────────────────────────────────────
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withQuestionnairesEnabled: (handler: unknown) => handler,
-}));
-
 vi.mock('@/lib/auth/guards', () => ({
   withAdminAuth: (handler: unknown) => handler,
 }));
@@ -139,25 +135,6 @@ beforeEach(() => {
 
   // Builder returns a canonical envelope
   (buildDefinitionExport as Mock).mockReturnValue(EXPORT_ENVELOPE);
-});
-
-// ─── Feature-flag gate (withQuestionnairesEnabled mock wiring) ────────────────
-
-describe('feature-flag gate (withQuestionnairesEnabled mock wiring)', () => {
-  it('allows the handler to run when the flag mock is the identity function', async () => {
-    (exportLimiter.check as Mock).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: 0,
-    });
-
-    const req = makeRequest();
-    await GET(req, ADMIN_SESSION, makeContext());
-
-    // createRateLimitResponse called → handler body ran → identity wrapper is transparent
-    expect(createRateLimitResponse).toHaveBeenCalledOnce();
-  });
 });
 
 // ─── Rate limit ───────────────────────────────────────────────────────────────

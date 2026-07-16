@@ -14,7 +14,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -27,9 +26,7 @@ const applicabilityMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/app/questionnaire/workflows/applicability', () => applicabilityMock);
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -47,10 +44,8 @@ const DETAIL_URL = 'http://localhost:3000/api/v1/app/questionnaires/workflows/do
 function listReq(search = ''): NextRequest {
   return new NextRequest(`${LIST_URL}${search}`);
 }
-// The flag wrapper types the list GET as (request, context) — pass an undefined
-// context (there are no route params on the non-dynamic list route).
 function runList(search = ''): Promise<Response> {
-  return getList(listReq(search), undefined);
+  return getList(listReq(search));
 }
 function detailReq(search = ''): NextRequest {
   return new NextRequest(`${DETAIL_URL}${search}`);
@@ -64,9 +59,6 @@ function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-  );
   setAuth(mockAdminUser());
   enrichMock.enrichWorkflow.mockResolvedValue({
     slug: 'document-ingestion',
@@ -79,12 +71,6 @@ beforeEach(() => {
 });
 
 describe('GET /workflows (list)', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    setAuth(null);
-    expect((await runList()).status).toBe(404);
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await runList()).status).toBe(401);
@@ -125,14 +111,6 @@ describe('GET /workflows (list)', () => {
 });
 
 describe('GET /workflows/:slug (detail)', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    setAuth(null);
-    const res = await getDetail(detailReq(), detailCtx('document-ingestion'));
-    expect(res.status).toBe(404);
-    expect(enrichMock.enrichWorkflow).not.toHaveBeenCalled();
-  });
-
   it('403s for a non-admin', async () => {
     setAuth(mockAuthenticatedUser());
     expect((await getDetail(detailReq(), detailCtx('document-ingestion'))).status).toBe(403);

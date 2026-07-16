@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -18,7 +17,6 @@ vi.mock('@/lib/app/questionnaire/report/revision', () => ({
 }));
 
 import { GET } from '@/app/api/v1/app/questionnaire-sessions/[id]/report/revisions/[rev]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { getRespondentReportRevisionDetail } from '@/lib/app/questionnaire/report/revision';
 import { mockAdminUser, mockAuthenticatedUser } from '@/tests/helpers/auth';
@@ -46,19 +44,11 @@ const DETAIL = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (getRespondentReportRevisionDetail as unknown as Mock).mockResolvedValue(DETAIL);
 });
 
 describe('GET …/report/revisions/:rev', () => {
-  it('404s when the respondent-report flag is off (before auth)', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await GET(req(), ctx('2'));
-    expect(res.status).toBe(404);
-    expect(getRespondentReportRevisionDetail).not.toHaveBeenCalled();
-  });
-
   it('403s a non-admin', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAuthenticatedUser('USER'));
     expect((await GET(req(), ctx('2'))).status).toBe(403);

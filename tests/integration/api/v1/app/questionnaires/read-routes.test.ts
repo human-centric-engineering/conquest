@@ -19,7 +19,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/db/client', () => ({ prisma: {} }));
@@ -39,7 +38,6 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/detail', () => ({
 import { GET as listGET } from '@/app/api/v1/app/questionnaires/route';
 import { GET as detailGET } from '@/app/api/v1/app/questionnaires/[id]/route';
 import { GET as versionGET } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { listQuestionnaires } from '@/app/api/v1/app/questionnaires/_lib/list';
 import {
@@ -68,19 +66,10 @@ function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
 });
 
 describe('GET /api/v1/app/questionnaires (list)', () => {
-  it('404s when the feature flag is off (before auth)', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await listGET(req());
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(listQuestionnaires).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await listGET(req());
@@ -139,13 +128,6 @@ describe('GET /api/v1/app/questionnaires (list)', () => {
 });
 
 describe('GET /api/v1/app/questionnaires/:id (detail)', () => {
-  it('404s when the feature flag is off (before auth)', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await detailGET(req(), ctx({ id: 'qn-1' }));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await detailGET(req(), ctx({ id: 'qn-1' }));
@@ -186,13 +168,6 @@ describe('GET /api/v1/app/questionnaires/:id (detail)', () => {
 });
 
 describe('GET /api/v1/app/questionnaires/:id/versions/:vid (graph)', () => {
-  it('404s when the feature flag is off (before auth)', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await versionGET(req(), ctx({ id: 'qn-1', vid: 'ver-1' }));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await versionGET(req(), ctx({ id: 'qn-1', vid: 'ver-1' }));

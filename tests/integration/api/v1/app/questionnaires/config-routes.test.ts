@@ -13,7 +13,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -36,7 +35,6 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import { PATCH as configPATCH } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/config/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
@@ -89,7 +87,6 @@ const PARAMS = { id: 'qn-1', vid: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (forkVersionIfLaunched as unknown as Mock).mockResolvedValue(noFork());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
@@ -103,16 +100,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe('NOT_FOUND');
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));

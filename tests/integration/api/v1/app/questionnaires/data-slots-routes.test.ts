@@ -19,8 +19,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
-
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -95,7 +93,6 @@ import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-s
 import { POST as POST_REFINE } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/refine/route';
 import { POST as POST_ASSIGN } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/data-slots/assign/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import {
@@ -108,11 +105,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
-import {
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
-  GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
-} from '@/lib/app/questionnaire/constants';
+import { GENERATE_DATA_SLOTS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -228,11 +221,6 @@ function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
 beforeEach(() => {
   vi.clearAllMocks();
 
-  // Both flags on.
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_DATA_SLOTS_FLAG)
-  );
-
   setAuth(mockAdminUser());
 
   (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
@@ -281,35 +269,6 @@ beforeEach(() => {
 // ─── GET — gate + auth ─────────────────────────────────────────────────────────
 
 describe('GET …/data-slots — gate and auth', () => {
-  it('returns 404 NOT_FOUND when the master questionnaires flag is off (gate runs before auth)', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-
-    const res = await GET(jsonReq(null), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe('NOT_FOUND');
-    // Gate short-circuits before any auth work.
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(loadDataSlots).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 when master flag is on but data-slots sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-
-    const res = await GET(jsonReq(null), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe('NOT_FOUND');
-    // withQuestionnairesEnabled passes, but isDataSlotsEnabled inside handler returns false.
-    expect(loadDataSlots).not.toHaveBeenCalled();
-  });
-
   it('returns 401 when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
 
@@ -395,30 +354,6 @@ describe('GET …/data-slots — happy path', () => {
 // ─── PUT — gate + auth ─────────────────────────────────────────────────────────
 
 describe('PUT …/data-slots — gate and auth', () => {
-  it('returns 404 when the questionnaire app is disabled (gate runs before auth)', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-
-    const res = await PUT(jsonReq(validSlotsBody()), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe('NOT_FOUND');
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(replaceDataSlots).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 when the data-slots sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-
-    const res = await PUT(jsonReq(validSlotsBody()), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    expect(replaceDataSlots).not.toHaveBeenCalled();
-  });
-
   it('returns 401 when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
 
@@ -616,30 +551,6 @@ describe('PUT …/data-slots — launched version (fork path)', () => {
 // ─── POST /generate — gate + auth ─────────────────────────────────────────────
 
 describe('POST …/data-slots/generate — gate and auth', () => {
-  it('returns 404 NOT_FOUND when the questionnaire app is disabled (gate runs before auth)', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-
-    const res = await POST(jsonReq(null), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe('NOT_FOUND');
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 when the data-slots sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-
-    const res = await POST(jsonReq(null), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
   it('returns 401 when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
 
@@ -859,15 +770,6 @@ function refineDispatchSuccess() {
 }
 
 describe('POST …/data-slots/refine — gate and auth', () => {
-  it('returns 404 when the data-slots sub-flag is off (before auth)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
   it('returns 403 for a non-admin authenticated user', async () => {
     setAuth(mockAuthenticatedUser());
     const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
@@ -885,14 +787,6 @@ describe('POST …/data-slots/refine — gate and auth', () => {
     (buildDataSlotStructure as Mock).mockResolvedValue(null);
     const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
     expect(res.status).toBe(404);
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 when the master questionnaires flag is off (before auth)', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await POST_REFINE(jsonReq(refineReqBody()), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
     expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
   });
 
@@ -1111,15 +1005,5 @@ describe('POST …/data-slots/assign — fork + fail-soft + rate limit', () => {
     const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
 
     expect(res.status).toBe(429);
-  });
-
-  it('returns 404 when the data-slots sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-
-    const res = await POST_ASSIGN(jsonReq({}), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
   });
 });

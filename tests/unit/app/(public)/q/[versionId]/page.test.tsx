@@ -34,18 +34,6 @@ vi.mock('next/navigation', () => ({
 }));
 
 /**
- * Mock feature flags — defaulted to true (happy path); individual tests override.
- */
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isLiveSessionsEnabled: vi.fn(),
-  isVoiceInputEnabled: vi.fn(),
-  isAttachmentInputEnabled: vi.fn(),
-  isReasoningStreamEnabled: vi.fn(),
-  isIntroScreenEnabled: vi.fn(),
-  isPersonaSelectionEnabled: vi.fn(),
-}));
-
-/**
  * Mock theme resolver — returns a minimal resolved theme.
  */
 vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
@@ -114,14 +102,6 @@ vi.mock('@/components/app/questionnaire/chat/brand-theme-provider', () => ({
 
 import PublicQuestionnairePage, { generateMetadata } from '@/app/(public)/q/[versionId]/page';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
-import {
-  isAttachmentInputEnabled,
-  isIntroScreenEnabled,
-  isLiveSessionsEnabled,
-  isPersonaSelectionEnabled,
-  isReasoningStreamEnabled,
-  isVoiceInputEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
@@ -169,12 +149,6 @@ describe('PublicQuestionnairePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Happy-path defaults
-    vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
-    vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
-    vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
-    vi.mocked(isReasoningStreamEnabled).mockResolvedValue(false);
-    vi.mocked(isIntroScreenEnabled).mockResolvedValue(false);
-    vi.mocked(isPersonaSelectionEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
@@ -199,8 +173,7 @@ describe('PublicQuestionnairePage', () => {
   // -------------------------------------------------------------------------
 
   describe('metadata', () => {
-    it('titles the tab after the questionnaire when live sessions are on', async () => {
-      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
+    it('titles the tab after the questionnaire', async () => {
       vi.mocked(resolveVersionHeader).mockResolvedValue({
         title: 'Merlin5 Alpha Demo',
         round: null,
@@ -209,27 +182,10 @@ describe('PublicQuestionnairePage', () => {
       expect(meta.title).toBe('Merlin5 Alpha Demo');
     });
 
-    it('uses the generic title (no version lookup) when live sessions are off — no dark-launch leak', async () => {
-      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(false);
+    it('falls back to the generic title when the version has no resolvable header', async () => {
+      vi.mocked(resolveVersionHeader).mockResolvedValue(null);
       const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
       expect(meta.title).toBe('Questionnaire');
-      expect(resolveVersionHeader).not.toHaveBeenCalled();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Feature flag gate
-  // -------------------------------------------------------------------------
-
-  describe('feature flag gate', () => {
-    it('calls notFound when live sessions are disabled', async () => {
-      // Arrange
-      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(false);
-
-      // Act & Assert: execution halts with the NEXT_NOT_FOUND sentinel
-      await expect(
-        PublicQuestionnairePage({ params: makeParams(), searchParams: makeSearchParams() })
-      ).rejects.toThrow('NEXT_NOT_FOUND');
     });
   });
 
@@ -287,26 +243,8 @@ describe('PublicQuestionnairePage', () => {
       );
     });
 
-    it('passes voiceInputEnabled=false when the voice flag is off', async () => {
-      // Arrange: voice flag already defaulted to false in beforeEach
-
-      // Act
-      const Component = await PublicQuestionnairePage({
-        params: makeParams(),
-        searchParams: makeSearchParams(),
-      });
-      render(Component);
-
-      // Assert: the resolved flag value reaches the boot component
-      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
-        'data-voice-input-enabled',
-        'false'
-      );
-    });
-
-    it('passes voiceInputEnabled=true when the voice flag is on', async () => {
-      // Arrange
-      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+    it('passes voiceInputEnabled=true when the version enables voice', async () => {
+      // Arrange: version opt-in defaulted to true in beforeEach
 
       // Act
       const Component = await PublicQuestionnairePage({
@@ -322,9 +260,7 @@ describe('PublicQuestionnairePage', () => {
       );
     });
 
-    it('passes attachmentInputEnabled=true when the attachment flag is on', async () => {
-      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
-
+    it('passes attachmentInputEnabled=true when the version enables attachments', async () => {
       const Component = await PublicQuestionnairePage({
         params: makeParams(),
         searchParams: makeSearchParams(),
@@ -337,23 +273,9 @@ describe('PublicQuestionnairePage', () => {
       );
     });
 
-    it('passes attachmentInputEnabled=false when the attachment flag is off', async () => {
-      const Component = await PublicQuestionnairePage({
-        params: makeParams(),
-        searchParams: makeSearchParams(),
-      });
-      render(Component);
-
-      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
-        'data-attachment-input-enabled',
-        'false'
-      );
-    });
-
-    it('passes voiceInputEnabled=false when the platform flag is on but the version opted out', async () => {
-      // The affordance needs BOTH gates: platform capability AND the author's per-questionnaire
-      // opt-in. Platform on + config off must still resolve to off (the reported mic-always-on bug).
-      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+    it('passes voiceInputEnabled=false when the version opted out', async () => {
+      // The affordance is driven by the author's per-questionnaire opt-in: config off resolves to
+      // off (the reported mic-always-on bug).
       vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(false);
 
       const Component = await PublicQuestionnairePage({
@@ -369,8 +291,7 @@ describe('PublicQuestionnairePage', () => {
       );
     });
 
-    it('passes attachmentInputEnabled=false when the platform flag is on but the version opted out', async () => {
-      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+    it('passes attachmentInputEnabled=false when the version opted out', async () => {
       vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(false);
 
       const Component = await PublicQuestionnairePage({

@@ -16,28 +16,6 @@ import {
   visibleWorkspaceGroups,
   dimmedWorkspacePhases,
 } from '@/lib/app/questionnaire/workspace-nav';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
-  return {
-    master: true,
-    dataSlots: true,
-    designEval: true,
-    liveSessions: true,
-    adaptive: true,
-    adaptiveDataSlots: true,
-    respondentReport: true,
-    cohortReport: true,
-    reportWebSearch: true,
-    introScreen: false,
-    personaSelection: false,
-    advisor: true,
-    editAgent: true,
-    ...over,
-  };
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -85,8 +63,8 @@ describe('workspaceTabHref', () => {
 });
 
 describe('visibleWorkspaceTabs', () => {
-  it('returns all tabs when all flags are on', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags());
+  it('returns all tabs — every questionnaire feature is permanently on', () => {
+    const tabs = visibleWorkspaceTabs();
     const ids = tabs.map((t) => t.id);
     expect(ids).toContain('overview');
     expect(ids).toContain('structure');
@@ -97,53 +75,8 @@ describe('visibleWorkspaceTabs', () => {
     expect(ids).toContain('analytics');
   });
 
-  it('hides the respondent-report tab when the respondentReport flag is off', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags({ respondentReport: false }));
-    expect(tabs.find((t) => t.id === 'respondent-report')).toBeUndefined();
-  });
-
-  it('hides the data-slots tab when the dataSlots flag is off', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags({ dataSlots: false }));
-    expect(tabs.find((t) => t.id === 'data-slots')).toBeUndefined();
-  });
-
-  it('hides the evaluations tab when the designEval flag is off', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags({ designEval: false }));
-    expect(tabs.find((t) => t.id === 'evaluations')).toBeUndefined();
-  });
-
-  it('keeps always-on tabs (overview, structure, invitations, analytics, settings, changes) regardless of sub-flags', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags({ dataSlots: false, designEval: false }));
-    const ids = tabs.map((t) => t.id);
-    expect(ids).toContain('overview');
-    expect(ids).toContain('structure');
-    expect(ids).toContain('invitations');
-    expect(ids).toContain('analytics');
-    expect(ids).toContain('extraction-changes');
-    expect(ids).toContain('settings');
-  });
-
-  it('returns an empty-ish list when all sub-flag tabs are hidden', () => {
-    const tabs = visibleWorkspaceTabs(
-      makeFlags({
-        dataSlots: false,
-        designEval: false,
-        respondentReport: false,
-        cohortReport: false,
-        reportWebSearch: false,
-        liveSessions: false,
-      })
-    );
-    // Every flag-gated tab (data-slots, sessions, respondent-report, scoring, evaluations)
-    // must be hidden once its flag is off — only the always-on tabs remain.
-    const flaggedTabIds = QUESTIONNAIRE_WORKSPACE_TABS.filter((t) => t.flag).map((t) => t.id);
-    for (const id of flaggedTabIds) {
-      expect(tabs.find((t) => t.id === id)).toBeUndefined();
-    }
-  });
-
   it('preserves the display order from QUESTIONNAIRE_WORKSPACE_TABS', () => {
-    const tabs = visibleWorkspaceTabs(makeFlags());
+    const tabs = visibleWorkspaceTabs();
     // Must be a strict subset of the source order — no reordering
     const expectedOrder = QUESTIONNAIRE_WORKSPACE_TABS.map((t) => t.id);
     const actualOrder = tabs.map((t) => t.id);
@@ -185,8 +118,8 @@ describe('QUESTIONNAIRE_WORKSPACE_GROUPS', () => {
 });
 
 describe('visibleWorkspaceGroups', () => {
-  it('returns all five groups when every flag is on', () => {
-    const groups = visibleWorkspaceGroups(makeFlags());
+  it('returns all five groups', () => {
+    const groups = visibleWorkspaceGroups();
     expect(groups.map((g) => g.id)).toEqual([
       'overview',
       'build',
@@ -196,29 +129,8 @@ describe('visibleWorkspaceGroups', () => {
     ]);
   });
 
-  it('reduces a group to only its always-visible tabs when flag-gated tabs are off', () => {
-    // Every group owns at least one flag-free tab (Results has Analytics), so a group is
-    // never fully emptied by flags — the `tabs.length === 0` drop guard stays defensive.
-    // Here Results collapses to just Analytics once the two report tabs are gated off.
-    const groups = visibleWorkspaceGroups(
-      makeFlags({ cohortReport: false, respondentReport: false })
-    );
-    const results = groups.find((g) => g.id === 'results');
-    expect(results?.tabs.map((t) => t.id)).toEqual(['analytics']);
-  });
-
-  it('keeps only the flag-visible tabs within a group, in registry order', () => {
-    const groups = visibleWorkspaceGroups(makeFlags({ dataSlots: false }));
-    const build = groups.find((g) => g.id === 'build');
-    expect(build?.tabs.map((t) => t.id)).toEqual([
-      'structure',
-      'evaluations',
-      'extraction-changes',
-    ]);
-  });
-
   it('carries the lifecycle phase through for build/distribute/results only', () => {
-    const groups = visibleWorkspaceGroups(makeFlags());
+    const groups = visibleWorkspaceGroups();
     const phaseById = Object.fromEntries(groups.map((g) => [g.id, g.phase]));
     expect(phaseById.overview).toBeUndefined();
     expect(phaseById.settings).toBeUndefined();

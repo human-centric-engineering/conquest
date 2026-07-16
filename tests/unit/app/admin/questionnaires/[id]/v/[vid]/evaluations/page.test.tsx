@@ -2,15 +2,13 @@
  * Evaluations tab page (`/admin/questionnaires/[id]/v/[vid]/evaluations`) tests.
  *
  * The page is an async Server Component that:
- *  - gates on isQuestionnairesEnabled() — calls notFound() when off
  *  - fetches the questionnaire detail via getQuestionnaireDetailCached
  *  - calls notFound() when the detail is null or vid is not in the versions list
  *  - fetches evaluation runs via serverFetch (with a limit=50 cap)
- *  - reads isDesignEvaluationEnabled() to derive `canRun`
- *  - renders EvaluationRunsTable with the resolved props
+ *  - renders EvaluationRunsTable with the resolved props (canRun always true)
  *  - degrades gracefully on fetch failures (network error, !ok, success:false)
  *
- * Fetching is mocked at the `server-fetch`, `feature-flag`, and `workspace-data` boundaries.
+ * Fetching is mocked at the `server-fetch` and `workspace-data` boundaries.
  * EvaluationRunsTable is stubbed to an identifiable marker so we assert the page's own logic,
  * not the child's internals.
  */
@@ -36,14 +34,6 @@ vi.mock('next/navigation', () => ({
   notFound: mockNotFound,
   redirect: vi.fn(),
 }));
-
-// ─── Feature-flag mock ────────────────────────────────────────────────────────
-
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-  isDesignEvaluationEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 // ─── workspace-data mock ──────────────────────────────────────────────────────
 
@@ -151,8 +141,6 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
-  flagMock.isDesignEvaluationEnabled.mockResolvedValue(true);
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: [] });
@@ -161,16 +149,6 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('EvaluationsTab', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires master flag is off', async () => {
-      // Arrange
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-
-      // Act + Assert
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
   describe('data gating', () => {
     it('calls notFound when the questionnaire detail is null', async () => {
       // Arrange
@@ -237,26 +215,11 @@ describe('EvaluationsTab', () => {
       expect(screen.getByTestId('evaluation-runs-table')).toHaveAttribute('data-run-count', '2');
     });
 
-    it('passes canRun=true when design-evaluation flag is on', async () => {
-      // Arrange — flag already on from beforeEach
-      flagMock.isDesignEvaluationEnabled.mockResolvedValue(true);
-
-      // Act
-      render(await renderPage());
-
-      // Assert — canRun reflects the live flag value
-      expect(screen.getByTestId('evaluation-runs-table')).toHaveAttribute('data-can-run', 'true');
-    });
-
-    it('passes canRun=false when design-evaluation flag is off', async () => {
-      // Arrange
-      flagMock.isDesignEvaluationEnabled.mockResolvedValue(false);
-
-      // Act
+    it('passes canRun=true (design evaluation is always available)', async () => {
       render(await renderPage());
 
       // Assert
-      expect(screen.getByTestId('evaluation-runs-table')).toHaveAttribute('data-can-run', 'false');
+      expect(screen.getByTestId('evaluation-runs-table')).toHaveAttribute('data-can-run', 'true');
     });
 
     it('fetches runs with limit=50 applied to the URL', async () => {

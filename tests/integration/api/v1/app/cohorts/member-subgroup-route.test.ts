@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -24,7 +23,6 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import { PATCH, DELETE } from '@/app/api/v1/app/cohorts/[id]/members/[memberId]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { mockAdminUser } from '@/tests/helpers/auth';
 
@@ -59,7 +57,6 @@ function plainReq(): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   prismaMock.appCohortMember.findFirst.mockResolvedValue(MEMBER);
   prismaMock.appCohortMember.update.mockResolvedValue({ ...MEMBER, subgroupId: 'sg-1' });
@@ -103,14 +100,6 @@ describe('PATCH member subgroup assignment', () => {
     expect(res.status).toBe(404);
     expect(prismaMock.appCohortSubgroup.findFirst).not.toHaveBeenCalled();
   });
-
-  it('404s before auth when the cohorts flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await PATCH(jsonReq({ subgroupId: 'sg-1' }), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(prismaMock.appCohortMember.update).not.toHaveBeenCalled();
-  });
 });
 
 describe('DELETE member (soft remove)', () => {
@@ -133,12 +122,5 @@ describe('DELETE member (soft remove)', () => {
     const res = await DELETE(plainReq(), ctx);
     expect(res.status).toBe(404);
     expect(prismaMock.appCohortMember.update).not.toHaveBeenCalled();
-  });
-
-  it('404s before auth when the cohorts flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await DELETE(plainReq(), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
   });
 });

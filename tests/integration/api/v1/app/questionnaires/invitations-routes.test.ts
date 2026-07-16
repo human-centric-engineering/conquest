@@ -14,7 +14,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -64,7 +63,6 @@ import { PATCH as revokePATCH } from '@/app/api/v1/app/questionnaires/[id]/invit
 import { POST as resendPOST } from '@/app/api/v1/app/questionnaires/[id]/invitations/[invitationId]/resend/route';
 import { POST as linkPOST } from '@/app/api/v1/app/questionnaires/[id]/invitations/[invitationId]/link/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { sendEmail } from '@/lib/email/send';
@@ -133,7 +131,6 @@ const SINGLE = { id: 'qn-1', invitationId: 'inv-1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (sendEmail as unknown as Mock).mockResolvedValue({ success: true, status: 'sent', id: 'em-1' });
   // Default: a launched version exists, on a generic (unattributed) questionnaire.
@@ -150,13 +147,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth (collection)', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await createPOST(req({ recipients: [{ email: 'a@x.com' }] }), ctx(COLL));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await createPOST(req({ recipients: [{ email: 'a@x.com' }] }), ctx(COLL))).status).toBe(

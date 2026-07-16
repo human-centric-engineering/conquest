@@ -19,7 +19,6 @@ import type {
   QuestionnaireVersionSummary,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
 // ─── Navigation mocks ────────────────────────────────────────────────────────
@@ -41,7 +40,8 @@ const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
   getVersionDataSlotCountCached: vi.fn<() => Promise<number>>(),
-  resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
+  getVersionEmbeddingCoverageCached: vi.fn(),
+  getVersionDataSlotEmbeddingCoverageCached: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
@@ -131,25 +131,9 @@ function launchReadyDraft() {
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(
     makeGraph({ audience: { description: 'Prospective customers' } })
   );
-}
-
-function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
-  return {
-    master: true,
-    dataSlots: false,
-    designEval: false,
-    liveSessions: true,
-    adaptive: false,
-    adaptiveDataSlots: false,
-    respondentReport: false,
-    cohortReport: false,
-    reportWebSearch: false,
-    introScreen: false,
-    personaSelection: false,
-    advisor: false,
-    editAgent: false,
-    ...over,
-  };
+  // Launch readiness now always requires data slots (previously flag-gated) — a launch-ready
+  // draft has them.
+  workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(2);
 }
 
 // ─── Page import ──────────────────────────────────────────────────────────────
@@ -169,7 +153,10 @@ beforeEach(() => {
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
   workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(0);
-  workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(makeFlags());
+  // Adaptive-launch embedding gates (only read for adaptive drafts) — default to "no coverage
+  // resolved" so the launch checklist mounts without depending on embedding readiness here.
+  workspaceDataMock.getVersionEmbeddingCoverageCached.mockResolvedValue(null);
+  workspaceDataMock.getVersionDataSlotEmbeddingCoverageCached.mockResolvedValue(null);
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -303,16 +290,6 @@ describe('OverviewTab', () => {
       expect(link).toHaveAttribute('target', '_blank');
     });
 
-    it('is absent when the live-sessions flag is off', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ liveSessions: false })
-      );
-      render(await renderPage());
-      expect(
-        screen.queryByRole('link', { name: /preview as respondent/i })
-      ).not.toBeInTheDocument();
-    });
-
     it('is absent for a draft that is NOT launch-ready (audience missing)', async () => {
       // Default draft fixture has audience: null → not launch-ready → no pre-launch preview.
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
@@ -365,10 +342,7 @@ describe('OverviewTab', () => {
   });
 
   describe('data-slots stat tile', () => {
-    it('merges Questions + Data slots into one tile when the dataSlots flag is on', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ dataSlots: true })
-      );
+    it('merges Questions + Data slots into one tile', async () => {
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({
           versions: [makeVersion({ id: 'ver-1', questionCount: 5, dataSlotCount: 3 })],
@@ -381,38 +355,15 @@ describe('OverviewTab', () => {
       // No separate plain "Questions" tile when the two are merged.
       expect(screen.queryByTestId('stat-Questions')).not.toBeInTheDocument();
     });
-
-    it('keeps a standalone Questions tile when the dataSlots flag is off', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ dataSlots: false })
-      );
-      render(await renderPage());
-      expect(screen.getByTestId('stat-Questions')).toBeInTheDocument();
-      expect(screen.queryByTestId('stat-Questions / Data slots')).not.toBeInTheDocument();
-    });
   });
 
   describe('version timeline — data slots', () => {
-    it('appends the data-slot count to each row when the dataSlots flag is on', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ dataSlots: true })
-      );
+    it('appends the data-slot count to each row', async () => {
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({ versions: [makeVersion({ id: 'ver-1', dataSlotCount: 3 })] })
       );
       render(await renderPage());
       expect(screen.getByText(/3 data slots/)).toBeInTheDocument();
-    });
-
-    it('omits the data-slot count from the timeline when the dataSlots flag is off', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ dataSlots: false })
-      );
-      workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
-        makeDetail({ versions: [makeVersion({ id: 'ver-1', dataSlotCount: 3 })] })
-      );
-      render(await renderPage());
-      expect(screen.queryByText(/data slots?/i)).not.toBeInTheDocument();
     });
   });
 });

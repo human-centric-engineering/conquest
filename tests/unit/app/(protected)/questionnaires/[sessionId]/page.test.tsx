@@ -68,23 +68,25 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 /**
- * Mock feature flags — default both to true (the happy path), individual tests
- * override as needed.
- */
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isLiveSessionsEnabled: vi.fn(),
-  isVoiceInputEnabled: vi.fn(),
-  isAttachmentInputEnabled: vi.fn(),
-  isReasoningStreamEnabled: vi.fn(),
-  isIntroScreenEnabled: vi.fn(),
-  isPersonaSelectionEnabled: vi.fn(),
-}));
-
-/**
  * Mock theme resolver — returns a minimal resolved theme.
  */
 vi.mock('@/lib/app/questionnaire/chat/theme', () => ({
   resolveThemeForSession: vi.fn(),
+}));
+
+/**
+ * Mock the respondent intro / persona / capture resolvers — the page resolves these unconditionally
+ * and threads the result into SessionEntry. They read their own version graph, so stub them to the
+ * benign "nothing to gate" values; SessionEntry forwards them to the (stubbed) SessionWorkspace.
+ */
+vi.mock('@/lib/app/questionnaire/intro/resolve', () => ({
+  resolveSessionIntro: vi.fn(async () => null),
+}));
+vi.mock('@/lib/app/questionnaire/persona/resolve', () => ({
+  resolveSessionPersonas: vi.fn(async () => null),
+}));
+vi.mock('@/lib/app/questionnaire/profile/resolve-capture', () => ({
+  resolveSessionCapture: vi.fn(async () => null),
 }));
 
 // Banner header resolver (title + round for the brand band) — stubbed so it makes no real Prisma call.
@@ -162,14 +164,6 @@ import { resolveOwnedSessionTitle } from '@/lib/app/questionnaire/header/resolve
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
-import {
-  isAttachmentInputEnabled,
-  isIntroScreenEnabled,
-  isLiveSessionsEnabled,
-  isPersonaSelectionEnabled,
-  isReasoningStreamEnabled,
-  isVoiceInputEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
@@ -282,12 +276,6 @@ describe('QuestionnaireSessionPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Happy-path defaults
-    vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
-    vi.mocked(isVoiceInputEnabled).mockResolvedValue(false);
-    vi.mocked(isAttachmentInputEnabled).mockResolvedValue(false);
-    vi.mocked(isReasoningStreamEnabled).mockResolvedValue(false);
-    vi.mocked(isIntroScreenEnabled).mockResolvedValue(false);
-    vi.mocked(isPersonaSelectionEnabled).mockResolvedValue(false);
     vi.mocked(resolveThemeForSession).mockResolvedValue(MOCK_THEME);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(makeRow() as never);
@@ -330,22 +318,6 @@ describe('QuestionnaireSessionPage', () => {
       const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
       expect(meta.title).toBe('Questionnaire');
       expect(resolveOwnedSessionTitle).not.toHaveBeenCalled();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Feature flag gate
-  // -------------------------------------------------------------------------
-
-  describe('feature flag gate', () => {
-    it('calls notFound when live sessions are disabled', async () => {
-      // Arrange
-      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(false);
-
-      // Act & Assert: execution halts with the NEXT_NOT_FOUND sentinel
-      await expect(QuestionnaireSessionPage({ params: makeParams() })).rejects.toThrow(
-        'NEXT_NOT_FOUND'
-      );
     });
   });
 
@@ -608,40 +580,24 @@ describe('QuestionnaireSessionPage', () => {
   // Voice input flag propagation
   // -------------------------------------------------------------------------
 
-  describe('voiceInputEnabled flag', () => {
-    it('passes voiceInputEnabled=true when the flag is on', async () => {
-      // Arrange
-      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+  describe('voiceInputEnabled (per-version opt-in)', () => {
+    it('passes voiceInputEnabled=true when the version enables voice', async () => {
+      // Arrange: makeRow defaults voiceEnabled to true
 
       // Act
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
-      // Assert: the resolved flag value reaches the chat component
+      // Assert: the resolved config value reaches the chat component
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-voice-input-enabled',
         'true'
       );
     });
 
-    it('passes voiceInputEnabled=false when the flag is off', async () => {
-      // Arrange: flag already defaulted to false in beforeEach
-
-      // Act
-      const Component = await QuestionnaireSessionPage({ params: makeParams() });
-      render(Component);
-
-      // Assert
-      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
-        'data-voice-input-enabled',
-        'false'
-      );
-    });
-
-    it('passes voiceInputEnabled=false when the platform flag is on but the version opted out', async () => {
-      // Both gates required: platform capability AND the author's per-questionnaire opt-in.
-      // Platform on + config off must still resolve to off (the reported mic-always-on bug).
-      vi.mocked(isVoiceInputEnabled).mockResolvedValue(true);
+    it('passes voiceInputEnabled=false when the version opted out', async () => {
+      // Driven by the author's per-questionnaire opt-in: config off resolves to off (the
+      // reported mic-always-on bug).
       vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
         makeRow({ voiceEnabled: false }) as never
       );
@@ -657,13 +613,11 @@ describe('QuestionnaireSessionPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Attachment input flag propagation
+  // Attachment input propagation (per-version opt-in)
   // -------------------------------------------------------------------------
 
-  describe('attachmentInputEnabled flag', () => {
-    it('passes attachmentInputEnabled=true when the flag is on', async () => {
-      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
-
+  describe('attachmentInputEnabled (per-version opt-in)', () => {
+    it('passes attachmentInputEnabled=true when the version enables attachments', async () => {
       const Component = await QuestionnaireSessionPage({ params: makeParams() });
       render(Component);
 
@@ -673,18 +627,7 @@ describe('QuestionnaireSessionPage', () => {
       );
     });
 
-    it('passes attachmentInputEnabled=false when the flag is off', async () => {
-      const Component = await QuestionnaireSessionPage({ params: makeParams() });
-      render(Component);
-
-      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
-        'data-attachment-input-enabled',
-        'false'
-      );
-    });
-
-    it('passes attachmentInputEnabled=false when the platform flag is on but the version opted out', async () => {
-      vi.mocked(isAttachmentInputEnabled).mockResolvedValue(true);
+    it('passes attachmentInputEnabled=false when the version opted out', async () => {
       vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
         makeRow({ attachmentsEnabled: false }) as never
       );

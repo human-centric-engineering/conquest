@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -22,7 +21,6 @@ vi.mock('@/lib/app/questionnaire/report/preview-sample', () => ({
 vi.mock('@/lib/app/questionnaire/report/generate', () => ({ generateReportFromInputs: vi.fn() }));
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/report/preview/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { synthesiseSampleReportInputs } from '@/lib/app/questionnaire/report/preview-sample';
@@ -60,7 +58,6 @@ const versionRow = {
 beforeEach(() => {
   vi.clearAllMocks();
   reportPreviewLimiter.reset?.('admin-user-id');
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (prisma.appQuestionnaireVersion.findFirst as unknown as Mock).mockResolvedValue(versionRow);
   (synthesiseSampleReportInputs as unknown as Mock).mockResolvedValue({
@@ -77,13 +74,6 @@ beforeEach(() => {
 });
 
 describe('POST …/report/preview', () => {
-  it('404s when the questionnaires flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req(validBody), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
     expect((await POST(req(validBody), ctx)).status).toBe(401);

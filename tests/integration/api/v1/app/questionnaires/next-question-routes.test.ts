@@ -15,7 +15,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -44,10 +43,8 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/next-question/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { buildAdaptiveDeps } from '@/app/api/v1/app/questionnaires/_lib/adaptive-deps';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -118,23 +115,11 @@ function versionRow(config: Record<string, unknown> | null = null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Master flag on, adaptive sub-flag off by default — so an `adaptive` selection
-  // degrades to weighted unless a test turns the sub-flag on explicitly.
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(versionRow());
 });
 
 describe('gate order + auth', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req({}), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req({}), ctx(PARAMS))).status).toBe(401);
@@ -220,21 +205,6 @@ describe('selection wiring', () => {
     expect(first.data.decision.kind).toBe('ask');
   });
 
-  it('degrades adaptive to weighted when the adaptive sub-flag is off', async () => {
-    const res = await POST(
-      req({ strategyOverride: 'adaptive', recentMessages: ['hello'], answered: [] }),
-      ctx(PARAMS)
-    );
-    const body = await res.json();
-    expect(body.data.strategy).toBe('adaptive');
-    expect(body.data.decision.kind).toBe('ask');
-    expect(body.data.decision.rationale).toMatch(/fell back to weighted/i);
-    // weighted fallback prefers the heavier q2
-    expect(body.data.decision.questionId).toBe('q2-id');
-    // Sub-flag off → adaptive deps never built.
-    expect(buildAdaptiveDeps).not.toHaveBeenCalled();
-  });
-
   it('returns a terminal complete decision once everything is answered', async () => {
     const res = await POST(req({ answered: [{ key: 'q1' }, { key: 'q2' }] }), ctx(PARAMS));
     expect(res.status).toBe(200);
@@ -267,8 +237,6 @@ describe('selection wiring', () => {
 
 describe('adaptive path (sub-flag on)', () => {
   beforeEach(() => {
-    // Both flags on.
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
     // A controllable fake of the real embedder/LLM deps.
     (buildAdaptiveDeps as unknown as Mock).mockReturnValue({
       embedText: vi.fn(async () => [0.1, 0.2]),

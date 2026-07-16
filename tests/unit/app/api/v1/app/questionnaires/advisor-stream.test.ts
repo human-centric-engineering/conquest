@@ -14,10 +14,6 @@ import { NextRequest } from 'next/server';
 
 // ─── Module mocks (hoisted before imports) ───────────────────────────────────
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withAdvisorEnabled: (handler: unknown) => handler,
-}));
-
 vi.mock('@/lib/auth/guards', () => ({
   withAdminAuth: (handler: unknown) => handler,
 }));
@@ -100,9 +96,9 @@ function makeRequest(id = QN_ID, vid = VID) {
 }
 
 /**
- * Invoke the advisor POST handler. Because withAdvisorEnabled and withAdminAuth
- * are both mocked to identity functions, POST is the bare handler with signature
- * (request, session, context). We call it with all three arguments.
+ * Invoke the advisor POST handler. Because withAdminAuth is mocked to an identity
+ * function, POST is the bare handler with signature (request, session, context).
+ * We call it with all three arguments.
  */
 async function callAdvisor(
   req: NextRequest,
@@ -172,30 +168,6 @@ beforeEach(() => {
       };
     })()
   );
-});
-
-// ─── Feature-flag gate (withAdvisorEnabled mock wiring) ──────────────────────
-//
-// withAdvisorEnabled is tested in feature-flag.ts. Here we verify that the mock
-// is correctly wired: when it's replaced with the identity function, the handler
-// body runs (proven by the rate-limit path triggering).
-
-describe('feature-flag gate (withAdvisorEnabled mock wiring)', () => {
-  it('allows the handler to run when the flag mock is the identity function', async () => {
-    (advisorLimiter.check as Mock).mockReturnValue({
-      success: false,
-      limit: 20,
-      remaining: 0,
-      reset: 0,
-    });
-
-    const req = makeRequest();
-    await callAdvisor(req, { params: Promise.resolve({ id: QN_ID, vid: VID }) });
-
-    // If the gate were blocking, createRateLimitResponse would NOT be called.
-    // It IS called → the handler body ran → the identity mock is correctly transparent.
-    expect(createRateLimitResponse).toHaveBeenCalledOnce();
-  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

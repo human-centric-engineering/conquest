@@ -11,8 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
-
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireSession: { findUnique: vi.fn() },
   appRespondentReport: { updateMany: vi.fn() },
@@ -38,7 +36,6 @@ vi.mock('@/lib/app/questionnaire/report/worker', () => workerMock);
 
 import { POST as RETRY } from '@/app/api/v1/app/questionnaire-sessions/[id]/report/retry/route';
 import { POST as NOTIFY } from '@/app/api/v1/app/questionnaire-sessions/[id]/report/notify/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -54,7 +51,6 @@ const ctx = { params: Promise.resolve({ id: 's1' }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue({
     id: 's1',
     respondentUserId: null,
@@ -70,13 +66,6 @@ beforeEach(() => {
 });
 
 describe('POST …/:id/report/retry', () => {
-  it('404s when the live-sessions flag is off, before loading', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await RETRY(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(prismaMock.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist', async () => {
     prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(null);
     const res = await RETRY(req(), ctx);

@@ -13,9 +13,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withQuestionnairesEnabled: (handler: unknown) => handler,
-}));
 vi.mock('@/lib/auth/guards', () => ({
   withAdminAuth:
     (handler: (req: NextRequest, session: { user: { id: string } }) => unknown) =>
@@ -48,8 +45,8 @@ import { POST as rawPost } from '@/app/api/v1/app/questionnaires/agent-settings/
 
 // The mocked auth/flag guards are pass-throughs that inject the session, so the
 // handlers are single-arg at runtime; cast away the real 2-arg wrapper signature.
-const GET = rawGet as unknown as (req: NextRequest) => Promise<Response>;
-const POST = rawPost as unknown as (req: NextRequest) => Promise<Response>;
+const GET = rawGet;
+const POST = rawPost;
 
 type Mock = ReturnType<typeof vi.fn>;
 

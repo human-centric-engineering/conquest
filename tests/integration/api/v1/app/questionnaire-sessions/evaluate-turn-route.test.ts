@@ -14,7 +14,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -43,7 +42,6 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store', ()
 // ─── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/evaluate-turn/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -111,8 +109,6 @@ const VERDICT_RESULT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Flags on by default (both master + sub resolve true).
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue(previewSession());
   prismaMock.aiAgent.findFirst.mockResolvedValue(evaluatorAgent());
@@ -134,19 +130,7 @@ beforeEach(() => {
 });
 
 describe('POST evaluate-turn', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null); // auth must not be reached
-
-    const res = await POST(req({ turn: TURN }), ctx('sess-1'));
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body).toEqual({ success: false, error: { message: 'Not found', code: 'NOT_FOUND' } });
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
-  it('401s when unauthenticated (flag on)', async () => {
+  it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await POST(req({ turn: TURN }), ctx('sess-1'));
     expect(res.status).toBe(401);

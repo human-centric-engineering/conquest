@@ -9,8 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
-
 const rateMock = vi.hoisted(() => ({ resumeByRefLimiter: { check: vi.fn() } }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rateMock);
 
@@ -21,8 +19,6 @@ const tokenMock = vi.hoisted(() => ({ mintSessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/resume-by-ref/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 
 const URL = 'http://localhost:3000/api/v1/app/questionnaire-sessions/resume-by-ref';
 function req(body: unknown): NextRequest {
@@ -35,7 +31,6 @@ function req(body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   rateMock.resumeByRefLimiter.check.mockReturnValue({ success: true });
   resolveMock.resolveAnonymousResumeByRef.mockResolvedValue({
     sessionId: 'sess-1',
@@ -50,15 +45,6 @@ beforeEach(() => {
 });
 
 describe('resume-by-ref', () => {
-  it('404s when the live-sessions flag is off (no resolve, no mint)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req({ ref: '7F3K9M2P' }), undefined);
-    expect(res.status).toBe(404);
-    expect(resolveMock.resolveAnonymousResumeByRef).not.toHaveBeenCalled();
-  });
-
   it('429s when the tight IP sub-cap is exceeded (throttles enumeration)', async () => {
     rateMock.resumeByRefLimiter.check.mockReturnValue({
       success: false,
@@ -66,13 +52,13 @@ describe('resume-by-ref', () => {
       remaining: 0,
       reset: 0,
     });
-    const res = await POST(req({ ref: '7F3K9M2P' }), undefined);
+    const res = await POST(req({ ref: '7F3K9M2P' }));
     expect(res.status).toBe(429);
     expect(resolveMock.resolveAnonymousResumeByRef).not.toHaveBeenCalled();
   });
 
   it('matches a resumable session and re-mints a fresh token', async () => {
-    const res = await POST(req({ ref: '7f3k-9m2p' }), undefined);
+    const res = await POST(req({ ref: '7f3k-9m2p' }));
     expect(res.status).toBe(200);
     expect(resolveMock.resolveAnonymousResumeByRef).toHaveBeenCalledWith('7f3k-9m2p');
     expect(tokenMock.mintSessionToken).toHaveBeenCalledWith('sess-1');
@@ -86,7 +72,7 @@ describe('resume-by-ref', () => {
 
   it('404s generically on any non-match, without minting a token', async () => {
     resolveMock.resolveAnonymousResumeByRef.mockResolvedValue(null);
-    const res = await POST(req({ ref: 'BADCODE1' }), undefined);
+    const res = await POST(req({ ref: 'BADCODE1' }));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.success).toBe(false);
@@ -95,7 +81,7 @@ describe('resume-by-ref', () => {
   });
 
   it('400s on a missing ref', async () => {
-    const res = await POST(req({}), undefined);
+    const res = await POST(req({}));
     expect(res.status).toBe(400);
     expect(resolveMock.resolveAnonymousResumeByRef).not.toHaveBeenCalled();
   });

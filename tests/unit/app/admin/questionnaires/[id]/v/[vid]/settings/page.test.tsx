@@ -2,7 +2,6 @@
  * Settings tab page (`/admin/questionnaires/[id]/v/[vid]/settings`) tests.
  *
  * The page is an async Server Component that:
- *  - gates on isQuestionnairesEnabled() — calls notFound() when off
  *  - fetches the questionnaire detail via getQuestionnaireDetailCached
  *  - calls notFound() when the detail is null
  *  - fetches active demo clients via serverFetch (DEMO-ONLY)
@@ -11,7 +10,7 @@
  *  - renders CloneForClientDialog with the same filtered options list
  *  - degrades gracefully on demo-clients fetch failures (network error, !ok, success:false)
  *
- * Fetching is mocked at the `server-fetch`, `feature-flag`, and `workspace-data` boundaries.
+ * Fetching is mocked at the `server-fetch` and `workspace-data` boundaries.
  * DemoClientAssign and CloneForClientDialog are stubbed to identifiable markers.
  */
 
@@ -31,7 +30,6 @@ import {
   DEFAULT_INTERVIEWER_STRATEGY,
 } from '@/lib/app/questionnaire/types';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 // ─── Navigation mock ──────────────────────────────────────────────────────────
 
@@ -46,21 +44,19 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }));
 
-// ─── Feature-flag mock ────────────────────────────────────────────────────────
-
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
-
 // ─── workspace-data mock ──────────────────────────────────────────────────────
 
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
-  resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
+
+// ─── Stub AdvisorPanel — a client component (rendered whenever the graph loads) ──
+
+vi.mock('@/components/admin/questionnaires/advisor/advisor-panel', () => ({
+  AdvisorPanel: () => <div data-testid="advisor-panel" />,
+}));
 
 // ─── server-fetch mock ────────────────────────────────────────────────────────
 
@@ -237,17 +233,6 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
   };
 }
 
-function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
-  return {
-    adaptive: false,
-    adaptiveDataSlots: false,
-    dataSlots: false,
-    designEval: false,
-    respondentReport: false,
-    ...over,
-  } as QuestionnaireWorkspaceFlags;
-}
-
 /** Build a DemoClientView row as the API would return — isActive controls the filter. */
 function makeDemoClientApiRow(
   over: Partial<DemoClientView> & { id: string; slug: string; name: string }
@@ -284,10 +269,8 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
-  workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(makeFlags());
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({ success: true, data: [] });
 });
@@ -295,16 +278,6 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('SettingsTab', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires master flag is off', async () => {
-      // Arrange
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-
-      // Act + Assert
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
   describe('data gating', () => {
     it('calls notFound when the questionnaire detail is null', async () => {
       // Arrange
@@ -462,12 +435,9 @@ describe('SettingsTab', () => {
   });
 
   describe('version settings (run-time config; goal/audience now live on Structure)', () => {
-    it('renders the version-settings panel with the graph + adaptive flag', async () => {
+    it('renders the version-settings panel with the graph + adaptive enabled', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
         makeGraph({ id: 'ver-9', goal: 'Understand churn' })
-      );
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ adaptive: true })
       );
       render(await renderPage({ id: 'qn-3', vid: 'ver-9' }));
 

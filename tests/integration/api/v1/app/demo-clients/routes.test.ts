@@ -19,7 +19,6 @@ import { Prisma } from '@prisma/client';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -55,7 +54,6 @@ import {
   PATCH as updatePATCH,
   DELETE as deleteDELETE,
 } from '@/app/api/v1/app/demo-clients/[id]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { listDemoClients, getDemoClientDetail } from '@/app/api/v1/app/demo-clients/_lib/read';
@@ -104,19 +102,10 @@ const ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
 });
 
 describe('GET /api/v1/app/demo-clients (list)', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await listGET(getReq());
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(listDemoClients).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await listGET(getReq())).status).toBe(401);
@@ -148,11 +137,6 @@ describe('GET /api/v1/app/demo-clients (list)', () => {
 });
 
 describe('POST /api/v1/app/demo-clients (create)', () => {
-  it('404s when the flag is off', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    expect((await createPOST(jsonReq({ name: 'Acme Bank' }))).status).toBe(404);
-  });
-
   it('403s for a non-admin', async () => {
     setAuth(mockAuthenticatedUser());
     expect((await createPOST(jsonReq({ name: 'Acme Bank' }))).status).toBe(403);
@@ -221,14 +205,6 @@ describe('POST /api/v1/app/demo-clients (create)', () => {
 });
 
 describe('GET /api/v1/app/demo-clients/:id (detail)', () => {
-  it('404s when the flag is off, before auth (the withQuestionnairesEnabled gate)', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await detailGET(getReq(), ctx({ id: 'dc-1' }));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(getDemoClientDetail).not.toHaveBeenCalled();
-  });
-
   it('404s when unknown', async () => {
     (getDemoClientDetail as unknown as Mock).mockResolvedValue(null);
     expect((await detailGET(getReq(), ctx({ id: 'missing' }))).status).toBe(404);

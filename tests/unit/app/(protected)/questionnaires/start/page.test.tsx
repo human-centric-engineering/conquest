@@ -51,13 +51,6 @@ vi.mock('@/lib/auth/clear-session', () => ({
 }));
 
 /**
- * Mock feature flag — defaulted to true (happy path); individual tests override.
- */
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isLiveSessionsEnabled: vi.fn(),
-}));
-
-/**
  * Mock session bootstrap — the page's create/resume call. Profile capture now rides the workspace
  * carousel (F-capture), so the page no longer resolves a pre-create profile context — it just
  * creates (or idempotently resumes) the session and redirects.
@@ -81,7 +74,6 @@ vi.mock('@/lib/app/questionnaire/chat/resumable-session', () => ({
 import StartQuestionnairePage, { metadata } from '@/app/(protected)/questionnaires/start/page';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
-import { isLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createOrResumeAuthedSession } from '@/lib/app/questionnaire/chat/session-bootstrap';
 import { resolveSessionResumeEnabledForVersion } from '@/lib/app/questionnaire/chat/anonymity';
 import { findAuthedResumeDetail } from '@/lib/app/questionnaire/chat/resumable-session';
@@ -124,7 +116,6 @@ describe('StartQuestionnairePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Happy-path defaults
-    vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
     vi.mocked(createOrResumeAuthedSession).mockResolvedValue({
       ok: true,
@@ -144,24 +135,6 @@ describe('StartQuestionnairePage', () => {
     it('has the correct title', () => {
       // Assert: the page exports the right metadata — no rendering needed
       expect(metadata.title).toBe('Start questionnaire');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Feature flag gate
-  // -------------------------------------------------------------------------
-
-  describe('feature flag gate', () => {
-    it('calls notFound when live sessions are disabled', async () => {
-      // Arrange
-      vi.mocked(isLiveSessionsEnabled).mockResolvedValue(false);
-
-      // Act & Assert: execution halts with the NEXT_NOT_FOUND sentinel
-      await expect(
-        StartQuestionnairePage({
-          searchParams: makeSearchParams({ invitationToken: 'tok_xyz' }),
-        })
-      ).rejects.toThrow('NEXT_NOT_FOUND');
     });
   });
 

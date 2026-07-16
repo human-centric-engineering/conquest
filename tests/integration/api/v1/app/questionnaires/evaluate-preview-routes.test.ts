@@ -15,7 +15,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -42,12 +41,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluate-preview/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
-  APP_QUESTIONNAIRES_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
@@ -139,12 +133,6 @@ const VALID_BODY = {};
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Master + sub-flag both on by default.
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(
-      flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG
-    )
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(versionRow());
   prismaMock.aiAgent.findMany.mockResolvedValue(allJudgeAgents());
@@ -161,23 +149,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req(VALID_BODY), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
-  it('404s when the design-evaluation sub-flag is off (after auth, no dispatch)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req(VALID_BODY), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).toHaveBeenCalled();
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req(VALID_BODY), ctx(PARAMS))).status).toBe(401);

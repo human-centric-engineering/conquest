@@ -11,7 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -37,7 +36,6 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/detail', () => ({
 }));
 
 import { PATCH as attributePATCH } from '@/app/api/v1/app/questionnaires/[id]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { getQuestionnaireDetail } from '@/app/api/v1/app/questionnaires/_lib/detail';
@@ -67,18 +65,10 @@ function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
 });
 
 describe('PATCH /api/v1/app/questionnaires/:id (attribution)', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await attributePATCH(jsonReq({ demoClientId: 'dc-1' }), ctx('qn-1'));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await attributePATCH(jsonReq({ demoClientId: 'dc-1' }), ctx('qn-1'))).status).toBe(401);

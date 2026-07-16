@@ -9,8 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
-
 const rateMock = vi.hoisted(() => ({ sessionStartLimiter: { check: vi.fn() } }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rateMock);
 
@@ -21,8 +19,6 @@ const tokenMock = vi.hoisted(() => ({ mintSessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/anonymous/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 
 const URL = 'http://localhost:3000/api/v1/app/questionnaire-sessions/anonymous';
 function req(body: unknown): NextRequest {
@@ -37,7 +33,6 @@ const SESSION = { id: 'sess-anon', status: 'active', versionId: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   rateMock.sessionStartLimiter.check.mockReturnValue({ success: true });
   createMock.createAnonymousSession.mockResolvedValue({
     ok: true,
@@ -51,16 +46,6 @@ beforeEach(() => {
 });
 
 describe('anonymous create', () => {
-  it('404s when the live-sessions flag is off (no create, no auth needed)', async () => {
-    // Master on, live-sessions sub-flag off → isLiveSessionsEnabled() is false → 404.
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req({ versionId: 'v1' }), undefined);
-    expect(res.status).toBe(404);
-    expect(createMock.createAnonymousSession).not.toHaveBeenCalled();
-  });
-
   it('429s when the IP sub-cap is exceeded', async () => {
     rateMock.sessionStartLimiter.check.mockReturnValue({
       success: false,
@@ -68,12 +53,12 @@ describe('anonymous create', () => {
       remaining: 0,
       reset: 0,
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(429);
   });
 
   it('creates an anonymous session and returns the minted access token (201)', async () => {
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(201);
     expect(createMock.createAnonymousSession).toHaveBeenCalledWith('v1');
     expect(tokenMock.mintSessionToken).toHaveBeenCalledWith('sess-anon');
@@ -88,7 +73,7 @@ describe('anonymous create', () => {
       code: 'INVITATION_REQUIRED',
       message: 'This questionnaire requires an invitation',
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.success).toBe(false);
@@ -97,7 +82,7 @@ describe('anonymous create', () => {
   });
 
   it('400s on a missing versionId', async () => {
-    const res = await POST(req({}), undefined);
+    const res = await POST(req({}));
     expect(res.status).toBe(400);
   });
 });

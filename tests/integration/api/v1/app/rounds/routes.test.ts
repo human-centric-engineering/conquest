@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -31,7 +30,6 @@ vi.mock('@/app/api/v1/app/rounds/_lib/read', async (importOriginal) => {
 import { GET as listGET, POST as createPOST } from '@/app/api/v1/app/rounds/route';
 import { POST as closePOST } from '@/app/api/v1/app/rounds/[id]/close/route';
 import { PATCH as updatePATCH } from '@/app/api/v1/app/rounds/[id]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { getRoundDetail, listRounds } from '@/app/api/v1/app/rounds/_lib/read';
@@ -56,19 +54,11 @@ function postReq(url: string): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (getRoundDetail as unknown as Mock).mockResolvedValue({ id: 'r-1' });
 });
 
 describe('GET /api/v1/app/rounds', () => {
-  it('404s when the cohorts flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=dc-1`));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s an unauthenticated caller', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
     const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=dc-1`));
@@ -123,13 +113,6 @@ describe('POST /api/v1/app/rounds', () => {
 describe('POST /api/v1/app/rounds/:id/close', () => {
   const ctx = { params: Promise.resolve({ id: 'r-1' }) };
   const url = `${ROUNDS_URL}/r-1/close`;
-
-  it('404s when the cohorts flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await closePOST(postReq(url), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
 
   it('closes an open round and audits it', async () => {
     prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({

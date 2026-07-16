@@ -1,17 +1,11 @@
 /**
  * Unit test: the alpha session-tools route gate (`withAlphaSessionToolsEnabled`).
  *
- * `withLiveSessionsEnabled` is stubbed to a passthrough so this isolates the added alpha-stage check:
- * the wrapped handler runs only when the product is in the alpha stage, and 404s (handler untouched)
+ * The wrapped handler runs only when the product is in the alpha stage, and 404s (handler untouched)
  * otherwise. The stage is resolved at module load, so each case re-imports with a fresh mock.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-
-// Isolate the alpha check — live-sessions gating has its own tests.
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withLiveSessionsEnabled: <C>(h: (req: unknown, ctx: C) => Promise<Response>) => h,
-}));
 
 async function loadGate(alpha: boolean) {
   vi.resetModules();

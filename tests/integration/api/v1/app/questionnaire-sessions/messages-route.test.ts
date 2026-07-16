@@ -10,7 +10,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -103,15 +102,6 @@ import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   DEFAULT_TONE_SETTINGS,
 } from '@/lib/app/questionnaire/types';
-import { isFeatureEnabled } from '@/lib/feature-flags';
-import {
-  APP_QUESTIONNAIRES_COST_CAP_FLAG,
-  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG,
-  APP_QUESTIONNAIRES_REASONING_STREAM_FLAG,
-  APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG,
-  APP_QUESTIONNAIRES_TONE_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
@@ -230,7 +220,6 @@ async function drainSse(res: Response): Promise<Array<{ event: string; data: unk
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true); // master + all sub-flags on
   setAuth(mockAuthenticatedUser());
   rateMock.turnLimiter.check.mockReturnValue({ success: true });
   ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
@@ -293,13 +282,6 @@ function cappedContext(capUsd: number, answered: Array<{ questionId: string }> =
 }
 
 describe('gate order', () => {
-  it('404s when the live-sessions flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await POST(req({ message: 'hi' }), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req({ message: 'hi' }), ctx)).status).toBe(401);
@@ -413,21 +395,6 @@ describe('streaming a question turn', () => {
     expect(arg.input.isOpening).toBe(true);
   });
 
-  it('falls back to the verbatim prompt (no phraser) when question phrasing is disabled', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG)
-    );
-
-    const events = await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
-
-    expect(questionMock.streamQuestionMessage).not.toHaveBeenCalled();
-    const text = events
-      .filter((e) => e.event === 'content')
-      .map((e) => (e.data as { delta: string }).delta)
-      .join('');
-    expect(text).toBe('What is your role?');
-  });
-
   it('does not forward tone to the phraser when every dimension is off (the default)', async () => {
     // The default fixture config has tone all-off → the route omits `tone` from the phraser input
     // so the interviewer keeps its default voice.
@@ -458,30 +425,6 @@ describe('streaming a question turn', () => {
       input: { tone?: { empathy: { enabled: boolean; level: number } } };
     };
     expect(arg.input.tone?.empathy).toEqual({ enabled: true, level: 5 });
-  });
-
-  it('does not forward tone when a dimension is enabled but the platform tone flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_TONE_FLAG)
-    );
-    ctxMock.buildTurnContext.mockResolvedValue(
-      loadedContext({
-        base: {
-          ...loadedContext().base,
-          config: {
-            ...DEFAULT_QUESTIONNAIRE_CONFIG,
-            tone: { ...DEFAULT_TONE_SETTINGS, empathy: { enabled: true, level: 5 } },
-          },
-        },
-      })
-    );
-
-    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
-
-    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
-      input: { tone?: unknown };
-    };
-    expect(arg.input.tone).toBeUndefined();
   });
 });
 
@@ -540,11 +483,6 @@ describe('data-slot mode', () => {
   }
 
   it('calls runDataSlotTurn (not runTurn) and passes dataSlotFills to persistTurn', async () => {
-    // Arrange: data-slots flag is already on globally (isFeatureEnabled → true).
-    // Stub isFeatureEnabled so data-slots is explicitly confirmed on.
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_DATA_SLOTS_FLAG || true)
-    );
     ctxMock.buildTurnContext.mockResolvedValue(dataSlotContext());
 
     // The question-message phraser is called from the data_slot response branch.
@@ -578,9 +516,6 @@ describe('data-slot mode', () => {
     // Arrange: a context with a data slot that already has a prior fill — exercises the
     // `(loaded.base.dataSlotAnswered ?? []).map(...)` path and the `current` field in
     // the invoker's candidate build.
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_DATA_SLOTS_FLAG || true)
-    );
     const baseCtx = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({
@@ -913,21 +848,6 @@ describe('cost cap (F6.3)', () => {
     await drainSse(res);
     expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
   });
-
-  it('does not enforce when the cost-cap sub-flag is off, even over the cap', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_COST_CAP_FLAG)
-    );
-    ctxMock.buildTurnContext.mockResolvedValue(cappedContext(1.0));
-    turnsMock.sumSessionTurnCost.mockResolvedValue(2.0); // would be hard if enforced
-
-    const res = await POST(req({ message: 'hi' }), ctx);
-    expect(res.status).toBe(200);
-    await drainSse(res); // persistTurn runs inside the streamed generator
-    expect(turnsMock.sumSessionTurnCost).not.toHaveBeenCalled();
-    expect(sessionsMock.recordCostCapReached).not.toHaveBeenCalled();
-    expect(runMock.persistTurn).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe('POST /messages — seriousness / abuse gate', () => {
@@ -1113,10 +1033,7 @@ describe('reasoning stream (F9.9)', () => {
   }
 
   it('emits a reasoning frame before the content when the trace is non-empty', async () => {
-    // Arrange: platform flag on AND per-version toggle on.
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
-    );
+    // Arrange: per-version toggle on.
     ctxMock.buildTurnContext.mockResolvedValue(reasoningContext());
     // The builder returns a non-empty trace so the route emits the reasoning frame.
     const steps = [{ kind: 'answer_captured', label: 'Captured your answer', tone: 'positive' }];
@@ -1137,9 +1054,6 @@ describe('reasoning stream (F9.9)', () => {
   });
 
   it('does not emit a reasoning frame when the trace is empty', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
-    );
     ctxMock.buildTurnContext.mockResolvedValue(reasoningContext());
     // Builder returns empty → no frame emitted.
     reasoningMock.buildReasoningTrace.mockReturnValue([]);
@@ -1149,9 +1063,6 @@ describe('reasoning stream (F9.9)', () => {
   });
 
   it('persists the trace when the version opts into persistence', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
-    );
     ctxMock.buildTurnContext.mockResolvedValue(reasoningContext(true)); // persist = true
     const steps = [
       { kind: 'next_question', label: 'Moving to the next question', tone: 'neutral' },
@@ -1165,9 +1076,6 @@ describe('reasoning stream (F9.9)', () => {
   });
 
   it('does not persist the trace when the version does not opt into persistence', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
-    );
     ctxMock.buildTurnContext.mockResolvedValue(reasoningContext(false)); // persist = false
     const steps = [{ kind: 'answer_captured', label: 'Got it', tone: 'positive' }];
     reasoningMock.buildReasoningTrace.mockReturnValue(steps);
@@ -1177,22 +1085,6 @@ describe('reasoning stream (F9.9)', () => {
     // The frame streamed but the trace must NOT be saved (live-only when persist is off).
     const persistArg = runMock.persistTurn.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(persistArg.reasoning).toBeUndefined();
-  });
-
-  it('does not emit a reasoning frame when the platform flag is off', async () => {
-    // The platform flag overrides the per-version toggle — when off, nothing streams.
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_REASONING_STREAM_FLAG)
-    );
-    ctxMock.buildTurnContext.mockResolvedValue(reasoningContext());
-    reasoningMock.buildReasoningTrace.mockReturnValue([
-      { kind: 'answer_captured', label: 'Got it', tone: 'positive' },
-    ]);
-
-    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
-    expect(frames.map((f) => f.event)).not.toContain('reasoning');
-    // The builder is never called when the flag is off.
-    expect(reasoningMock.buildReasoningTrace).not.toHaveBeenCalled();
   });
 });
 
@@ -1902,66 +1794,6 @@ describe('data_slot response — phrasing inputs', () => {
 });
 
 // ---------------------------------------------------------------------------
-// question response — chunked fallback (line 673-676: phrasing OFF + not data-slot mode)
-// ---------------------------------------------------------------------------
-describe('question response — deterministic chunked fallback', () => {
-  it('yields chunked content frames for the verbatim prompt when phrasing flag is off and not data-slot mode', async () => {
-    // phrasing flag off → phraser not called → chunkText(response.text) is the stream.
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG)
-    );
-
-    // Use a prompt longer than 48 chars to exercise the multi-chunk path.
-    const longPrompt = 'A'.repeat(100);
-    // The selector returns a question whose text is the long prompt; the route reads it from result.response.text.
-    invokersMock.buildTurnInvokers.mockResolvedValue({
-      ...stubInvokers(),
-      selectNext: vi.fn(async () => ({
-        decision: { kind: 'ask', questionId: 'q1', rationale: 'first', costUsd: 0 },
-      })),
-    });
-    // Override the context question text so result.response.text is the long prompt.
-    const base = loadedContext();
-    ctxMock.buildTurnContext.mockResolvedValue(
-      loadedContext({
-        base: {
-          ...base.base,
-          questions: [
-            {
-              ...base.base.questions[0],
-              prompt: longPrompt,
-            },
-          ],
-        },
-        slots: [
-          {
-            id: 'q1',
-            key: 'q1',
-            sectionId: 's1',
-            prompt: longPrompt,
-            type: 'free_text',
-            required: false,
-          },
-        ],
-      })
-    );
-
-    const frames = await drainSse(await POST(req({ message: 'hi' }), ctx));
-
-    // Phrasing off → streamQuestionMessage not called.
-    expect(questionMock.streamQuestionMessage).not.toHaveBeenCalled();
-
-    // Multiple content frames (chunked at 48 chars each).
-    const contentFrames = frames.filter((f) => f.event === 'content');
-    expect(contentFrames.length).toBeGreaterThan(1);
-
-    // Concatenated content equals the original prompt.
-    const assembled = contentFrames.map((f) => (f.data as { delta: string }).delta).join('');
-    expect(assembled).toBe(longPrompt);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // data-slot candidate with parkPending flag (lines 381, 388, 393)
 // ---------------------------------------------------------------------------
 describe('data-slot candidate parkPending', () => {
@@ -2168,50 +2000,6 @@ describe('adaptive embedding lazy-ensure', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sensitivity awareness: platform flag off suppresses detection (lines 779)
-// ---------------------------------------------------------------------------
-describe('sensitivity awareness platform flag gate', () => {
-  it('does not persist or record sensitivity when the platform flag is off even if config is on', async () => {
-    // Arrange: turn off the sensitivity platform flag only.
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name !== APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG)
-    );
-
-    const base = loadedContext();
-    ctxMock.buildTurnContext.mockResolvedValue(
-      loadedContext({
-        activeQuestionKey: 'q1',
-        base: {
-          ...base.base,
-          config: { ...base.base.config, sensitivityAwareness: true },
-        },
-      })
-    );
-
-    // Invokers whose extractor reports a sensitivity disclosure.
-    invokersMock.buildTurnInvokers.mockResolvedValue({
-      ...stubInvokers(),
-      extractAnswers: vi.fn(async () => ({
-        intents: [],
-        costUsd: 0,
-        sensitivity: {
-          detected: true,
-          severity: 'high',
-          category: 'harassment',
-          summary: 'Flagged disclosure',
-        },
-      })),
-    });
-
-    await drainSse(await POST(req({ message: 'I was mistreated' }), ctx));
-
-    // Platform flag off → sensitivityAware = false → no persistence, no event.
-    expect(sessionsMock.persistSensitivity).not.toHaveBeenCalled();
-    expect(sessionsMock.recordSensitivityFlagged).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
 // abuse gate: abortSession called on threshold, persistAbuseStrikes + abortSession
 // fail-soft swallows the error (lines 723-747)
 // ---------------------------------------------------------------------------
@@ -2303,10 +2091,6 @@ describe('abuse gate: abort on threshold strike', () => {
 // ---------------------------------------------------------------------------
 describe('reasoning stream in data-slot mode', () => {
   it('passes dataSlots to buildReasoningTrace when in data-slot mode', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((name: string) =>
-      Promise.resolve(name === APP_QUESTIONNAIRES_REASONING_STREAM_FLAG || true)
-    );
-
     const base = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({

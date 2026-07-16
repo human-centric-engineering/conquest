@@ -11,9 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withRoundContextEnabled: (handler: unknown) => handler,
-}));
 vi.mock('@/lib/auth/guards', () => ({ withAdminAuth: (handler: unknown) => handler }));
 vi.mock('@/lib/api/context', () => ({
   getRouteLogger: vi.fn(async () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })),

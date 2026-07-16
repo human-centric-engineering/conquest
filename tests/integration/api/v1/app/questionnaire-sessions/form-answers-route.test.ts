@@ -14,7 +14,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -42,7 +41,6 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { PUT } from '@/app/api/v1/app/questionnaire-sessions/[id]/answers/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
@@ -88,7 +86,6 @@ function slots() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   seamMock.loadSessionForFormWrite.mockResolvedValue(session());
   seamMock.loadVersionSlotsByKey.mockResolvedValue(slots());
@@ -102,13 +99,6 @@ beforeEach(() => {
 });
 
 describe('gate order', () => {
-  it('404s when the live-sessions flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await PUT(req({ answers: [{ questionKey: 'role', value: 'Eng' }] }), ctx);
-    expect(res.status).toBe(404);
-    expect(seamMock.loadSessionForFormWrite).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist', async () => {
     seamMock.loadSessionForFormWrite.mockResolvedValue(null);
     const res = await PUT(req({ answers: [{ questionKey: 'role', value: 'Eng' }] }), ctx);
@@ -236,15 +226,5 @@ describe('persistence', () => {
       'slot-role',
       'slot-score',
     ]);
-  });
-
-  it('skips data-slot reconciliation when the data-slots feature is off', async () => {
-    // The live-sessions gate stays on; only the data-slots flag is off. The route reads both via
-    // isFeatureEnabled, so toggle it per-call: live-sessions check → true, data-slots check → false.
-    vi.mocked(isFeatureEnabled).mockImplementation(async (name: string) =>
-      name.includes('DATA_SLOTS') ? false : true
-    );
-    await PUT(req({ answers: [{ questionKey: 'role', value: 'Engineer' }] }), ctx);
-    expect(seamMock.reconcileDataSlotFills).not.toHaveBeenCalled();
   });
 });

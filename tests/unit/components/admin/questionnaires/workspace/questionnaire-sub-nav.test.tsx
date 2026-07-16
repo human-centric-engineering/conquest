@@ -13,7 +13,6 @@
  * - Children of non-active groups are absent from the DOM
  * - Active-state (aria-current) tracks both the active group and its active child
  * - Exact-match Overview group is active only on the version base, not sub-routes
- * - Feature flags collapse / hide group children
  * - Lifecycle dimming: a draft de-emphasizes Distribute + Results; launched dims none
  *
  * @see components/admin/questionnaires/workspace/questionnaire-sub-nav.tsx
@@ -42,33 +41,12 @@ import {
   workspaceVersionBase,
 } from '@/lib/app/questionnaire/workspace-nav';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const QID = 'qn-abc';
 const VID = 'ver-xyz';
 const GROUP_LABELS = ['Overview', 'Build', 'Distribute', 'Results', 'Settings'];
-
-/** Flags that enable every tab. */
-const allFlagsOn: QuestionnaireWorkspaceFlags = {
-  master: true,
-  dataSlots: true,
-  designEval: true,
-  liveSessions: true,
-  adaptive: true,
-  adaptiveDataSlots: true,
-  respondentReport: true,
-  cohortReport: true,
-  reportWebSearch: true,
-  introScreen: true,
-  personaSelection: true,
-  advisor: true,
-  editAgent: true,
-};
-
-/** Cohort report (Scoring + Report) off; everything else on. */
-const cohortReportOff: QuestionnaireWorkspaceFlags = { ...allFlagsOn, cohortReport: false };
 
 const tabHref = (id: string) =>
   workspaceTabHref(
@@ -77,12 +55,9 @@ const tabHref = (id: string) =>
     QUESTIONNAIRE_WORKSPACE_TABS.find((t) => t.id === id)!
   );
 
-function renderNav(
-  pathname: string,
-  opts: { flags?: QuestionnaireWorkspaceFlags; status?: AppQuestionnaireStatus } = {}
-) {
+function renderNav(pathname: string, opts: { status?: AppQuestionnaireStatus } = {}) {
   mockUsePathname.mockReturnValue(pathname);
-  const groups = visibleWorkspaceGroups(opts.flags ?? allFlagsOn);
+  const groups = visibleWorkspaceGroups();
   return render(
     <QuestionnaireSubNav
       questionnaireId={QID}
@@ -181,24 +156,6 @@ describe('QuestionnaireSubNav', () => {
         'aria-current',
         'page'
       );
-    });
-  });
-
-  describe('feature-flag visibility', () => {
-    it('drops Scoring + Report from the Results group when cohortReport is off', () => {
-      renderNav(tabHref('analytics'), { flags: cohortReportOff });
-      // Results is active; Analytics + Respondent report remain, Scoring/Report gone.
-      expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Respondent report' })).toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: 'Scoring' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: 'Report' })).not.toBeInTheDocument();
-    });
-
-    it('still renders all five groups with cohortReport off (Results survives)', () => {
-      renderNav(workspaceVersionBase(QID, VID), { flags: cohortReportOff });
-      for (const label of GROUP_LABELS) {
-        expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
-      }
     });
   });
 

@@ -8,14 +8,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
 vi.mock('@/lib/app/questionnaire/report/craft', () => ({ craftReportConfig: vi.fn() }));
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/report/craft/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { craftReportConfig } from '@/lib/app/questionnaire/report/craft';
 import { reportConfigAssistLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -40,7 +38,6 @@ const validBody = {
 beforeEach(() => {
   vi.clearAllMocks();
   reportConfigAssistLimiter.reset?.('admin-user-id');
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (craftReportConfig as unknown as Mock).mockResolvedValue({
     reply: 'Here you go.',
@@ -50,13 +47,6 @@ beforeEach(() => {
 });
 
 describe('POST …/report/craft', () => {
-  it('404s when the questionnaires flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req(validBody), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
     expect((await POST(req(validBody), ctx)).status).toBe(401);

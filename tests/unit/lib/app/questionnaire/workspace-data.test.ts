@@ -6,7 +6,6 @@
  * - getQuestionnaireDetailCached: success, !res.ok, body.success=false, fetch throws
  * - getVersionGraphCached: success, !res.ok, body.success=false, fetch throws
  * - getVersionDataSlotCountCached: success (counts slots), !res.ok, body.success=false, fetch throws
- * - resolveQuestionnaireWorkspaceFlags: all-on, master-off (sub-flags ANDed to false), mixed
  *
  * @see lib/app/questionnaire/workspace-data.ts
  */
@@ -23,14 +22,6 @@ const { mockServerFetch, mockParseApiResponse } = vi.hoisted(() => ({
 vi.mock('@/lib/api/server-fetch', () => ({
   serverFetch: mockServerFetch,
   parseApiResponse: mockParseApiResponse,
-}));
-
-const { mockIsFeatureEnabled } = vi.hoisted(() => ({
-  mockIsFeatureEnabled: vi.fn(),
-}));
-
-vi.mock('@/lib/feature-flags', () => ({
-  isFeatureEnabled: mockIsFeatureEnabled,
 }));
 
 const { mockLogger } = vi.hoisted(() => ({
@@ -68,7 +59,6 @@ import {
   getVersionDataSlotCountCached,
   getVersionEmbeddingCoverageCached,
   getVersionDataSlotEmbeddingCoverageCached,
-  resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 
 // ─── Factories ────────────────────────────────────────────────────────────────
@@ -919,215 +909,5 @@ describe('getEvaluationAddQuestionSeed', () => {
     expect(seed).not.toBeNull();
     expect(seed!.sectionKey).toBeNull();
     expect(seed!.prompt).toBe('What is your budget?');
-  });
-});
-
-// ─── resolveQuestionnaireWorkspaceFlags ───────────────────────────────────────
-
-describe('resolveQuestionnaireWorkspaceFlags', () => {
-  /**
-   * Flag resolution order mirrors the Promise.all in the source:
-   *   [master, dataSlots, designEval, liveSessions, adaptive, adaptiveDataSlots]
-   *
-   * Sub-flags are ANDed with master locally (after the parallel lookups),
-   * so even when a sub-flag's own DB row is `true`, it resolves to `false`
-   * when the master is `false`. `adaptiveDataSlots` is additionally ANDed with
-   * dataSlots + liveSessions (it only runs in live data-slot mode).
-   */
-
-  describe('all flags on', () => {
-    it('returns all flags true when master and all sub-flags are enabled', async () => {
-      // Arrange: every flag enabled in the DB
-      mockIsFeatureEnabled.mockResolvedValue(true);
-
-      // Act
-      const flags = await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert: the shape is complete and every field is true
-      expect(flags).toMatchObject({
-        master: true,
-        dataSlots: true,
-        designEval: true,
-        liveSessions: true,
-        adaptive: true,
-        adaptiveDataSlots: true,
-        respondentReport: true,
-        cohortReport: true,
-        reportWebSearch: true,
-        introScreen: true,
-        personaSelection: true,
-        advisor: true,
-        editAgent: true,
-      });
-    });
-
-    it('resolves each flag constant by its exact env-var name', async () => {
-      // Arrange
-      mockIsFeatureEnabled.mockResolvedValue(true);
-
-      // Act
-      await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert: each flag constant is looked up by its exact string name — verifies the
-      // Promise.all wires the right constant for each field, not just "some 8 calls".
-      // Uses toHaveBeenCalledWith rather than a bare count so a renamed constant fails loudly.
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
-        'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED'
-      );
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
-        'APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED'
-      );
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
-        'APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED'
-      );
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
-        'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED'
-      );
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
-        'APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED'
-      );
-      // Cohort report (incl. the Scoring tab) requires cohorts + its own sub-flag.
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORTS_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith(
-        'APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED'
-      );
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_ADVISOR_ENABLED');
-      expect(mockIsFeatureEnabled).toHaveBeenCalledWith('APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED');
-      // Also verify exactly 14 calls — prevents accidental re-resolution of the master flag
-      expect(mockIsFeatureEnabled).toHaveBeenCalledTimes(14);
-    });
-  });
-
-  describe('master flag off — AND semantics enforced', () => {
-    it('returns all sub-flags false when master is off, even when sub-flag DB rows are true', async () => {
-      // Arrange: master=false, every sub-flag DB row=true (this is the critical AND test)
-      mockIsFeatureEnabled.mockImplementation(async (flagName: string) => {
-        if (
-          flagName === 'APP_QUESTIONNAIRES_ENABLED' ||
-          flagName === 'APP_QUESTIONNAIRES_MASTER' // defensive: catch any synonym
-        ) {
-          return false;
-        }
-        return true; // all sub-flags are "on" in the DB
-      });
-
-      // Act
-      const flags = await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert: master is correctly false, AND sub-flags must be false even though
-      // their own DB rows returned true — verifies the local AND operation
-      expect(flags.master).toBe(false);
-      expect(flags.dataSlots).toBe(false);
-      expect(flags.designEval).toBe(false);
-      expect(flags.liveSessions).toBe(false);
-      expect(flags.adaptive).toBe(false);
-    });
-  });
-
-  describe('master on, mixed sub-flags', () => {
-    it('reflects individual sub-flag values when master is on', async () => {
-      // Arrange: master=true, dataSlots=true, designEval=false, liveSessions=true, adaptive=false
-      const flagValues: Record<string, boolean> = {
-        APP_QUESTIONNAIRES_ENABLED: true,
-        APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED: true,
-        APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED: false,
-        APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED: true,
-        APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED: false,
-      };
-      mockIsFeatureEnabled.mockImplementation(async (flagName: string) => {
-        return flagValues[flagName] ?? false;
-      });
-
-      // Act
-      const flags = await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert: master=true so each sub-flag mirrors its own DB value
-      expect(flags.master).toBe(true);
-      expect(flags.dataSlots).toBe(true); // DB=true AND master=true → true
-      expect(flags.designEval).toBe(false); // DB=false AND master=true → false
-      expect(flags.liveSessions).toBe(true); // DB=true AND master=true → true
-      expect(flags.adaptive).toBe(false); // DB=false AND master=true → false
-    });
-
-    it('gates cohortReport on the cohorts flag, not just its own sub-flag', async () => {
-      // Arrange: master + the cohort-report sub-flag are on, but the cohorts flag is OFF.
-      // cohortReport = master && cohorts && cohortReport, so it must resolve false — this guards
-      // against a silent regression if the `&& cohorts` term is ever dropped.
-      const flagValues: Record<string, boolean> = {
-        APP_QUESTIONNAIRES_ENABLED: true,
-        APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED: true,
-        APP_QUESTIONNAIRES_COHORTS_ENABLED: false,
-        APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED: true,
-      };
-      mockIsFeatureEnabled.mockImplementation(
-        async (flagName: string) => flagValues[flagName] ?? false
-      );
-
-      // Act
-      const flags = await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert: cohortReport is false despite its own sub-flag being true (cohorts gate wins);
-      // reportWebSearch mirrors its own flag now that master is on.
-      expect(flags.cohortReport).toBe(false);
-      expect(flags.reportWebSearch).toBe(true);
-    });
-
-    it('returns a QuestionnaireWorkspaceFlags-shaped object with the expected keys', async () => {
-      // Arrange
-      mockIsFeatureEnabled.mockResolvedValue(false);
-
-      // Act
-      const flags = await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert: the returned object has the exact keys the interface defines
-      expect(Object.keys(flags).sort()).toEqual(
-        [
-          'adaptive',
-          'adaptiveDataSlots',
-          'advisor',
-          'cohortReport',
-          'dataSlots',
-          'designEval',
-          'editAgent',
-          'introScreen',
-          'liveSessions',
-          'master',
-          'personaSelection',
-          'reportWebSearch',
-          'respondentReport',
-        ].sort()
-      );
-    });
-  });
-
-  describe('master on, all sub-flags off', () => {
-    it('returns master=true and all sub-flags false when sub-flag DB rows are false', async () => {
-      // Arrange
-      const flagValues: Record<string, boolean> = {
-        APP_QUESTIONNAIRES_ENABLED: true,
-        APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED: false,
-        APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED: false,
-        APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED: false,
-        APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED: false,
-      };
-      mockIsFeatureEnabled.mockImplementation(async (flagName: string) => {
-        return flagValues[flagName] ?? false;
-      });
-
-      // Act
-      const flags = await resolveQuestionnaireWorkspaceFlags();
-
-      // Assert
-      expect(flags.master).toBe(true);
-      expect(flags.dataSlots).toBe(false);
-      expect(flags.designEval).toBe(false);
-      expect(flags.liveSessions).toBe(false);
-      expect(flags.adaptive).toBe(false);
-    });
   });
 });

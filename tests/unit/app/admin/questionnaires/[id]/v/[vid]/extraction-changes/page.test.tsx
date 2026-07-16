@@ -2,7 +2,6 @@
  * Extraction-changes tab page (`/admin/questionnaires/[id]/v/[vid]/extraction-changes`) tests.
  *
  * The page is an async Server Component that:
- *  - gates on isQuestionnairesEnabled()
  *  - reads `id` and `vid` from params
  *  - fetches the version's extraction changes via serverFetch
  *  - renders ExtractionChangesTable when the fetch succeeds
@@ -31,13 +30,6 @@ vi.mock('next/navigation', () => ({
   notFound: mockNotFound,
   redirect: vi.fn(),
 }));
-
-// --- Feature-flag mock --------------------------------------------------------
-
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 // --- server-fetch mock --------------------------------------------------------
 
@@ -100,7 +92,6 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
   apiMock.serverFetch.mockResolvedValue({ ok: true });
   apiMock.parseApiResponse.mockResolvedValue({
     success: true,
@@ -111,16 +102,6 @@ beforeEach(() => {
 // --- Tests --------------------------------------------------------------------
 
 describe('ExtractionChangesTab', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires feature flag is off', async () => {
-      // Arrange
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-
-      // Act + Assert
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
   describe('happy path -- ExtractionChangesTable rendering', () => {
     it('renders the ExtractionChangesTable with the correct questionnaireId and versionId', async () => {
       // Act

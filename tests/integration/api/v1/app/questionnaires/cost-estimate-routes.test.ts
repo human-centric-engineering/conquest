@@ -14,7 +14,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -35,7 +34,6 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import { GET } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/cost-estimate/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { getDefaultModelForTaskOrNull } from '@/lib/orchestration/llm/settings-resolver';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
@@ -77,7 +75,6 @@ const pricedModel = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   // Default: a scoped version exists with 3 questions and a saved config.
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
@@ -101,13 +98,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await GET(req(), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await GET(req(), ctx(PARAMS))).status).toBe(401);

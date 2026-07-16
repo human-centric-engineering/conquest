@@ -13,7 +13,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -49,8 +48,6 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getAudioProvider: v
 vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({ logCost: vi.fn() }));
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/transcribe/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
-import { APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG } from '@/lib/app/questionnaire/constants';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { audioLimiter } from '@/lib/security/rate-limit';
@@ -129,7 +126,6 @@ async function expectError(res: Response, status: number, code: string): Promise
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true); // master + voice sub-flag on
   setAuth(mockAuthenticatedUser());
   setSession();
   vi.mocked(audioLimiter.check).mockReturnValue({ success: true } as never);
@@ -137,23 +133,6 @@ beforeEach(() => {
 });
 
 describe('gate order', () => {
-  it('404s when the voice-input flag is off, before auth or DB lookup', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await POST(req(makeAudioFormData()), ctx);
-    expect(res.status).toBe(404);
-    expect(prisma.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
-  it('404s when live-sessions is off even though voice is on (voice depends on the live surface)', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag !== APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG)
-    );
-    const res = await POST(req(makeAudioFormData()), ctx);
-    expect(res.status).toBe(404);
-    expect(prisma.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist', async () => {
     vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(null);
     expect((await POST(req(makeAudioFormData()), ctx)).status).toBe(404);

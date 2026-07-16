@@ -14,7 +14,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({
   resolveApiKey: vi.fn(() => Promise.resolve(null)),
@@ -33,7 +32,6 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/render-transcript-pdf', ()
 
 import { GET as GET_PDF } from '@/app/api/v1/app/questionnaires/[id]/sessions/[sessionId]/transcript.pdf/route';
 import { GET as GET_TXT } from '@/app/api/v1/app/questionnaires/[id]/sessions/[sessionId]/transcript.txt/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -96,7 +94,6 @@ function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAdminUser());
   seamMock.loadTranscriptExport.mockResolvedValue(loaded());
   seamMock.assembleTranscriptExportModel.mockResolvedValue(model());
@@ -104,14 +101,6 @@ beforeEach(() => {
 });
 
 describe('admin transcript.pdf', () => {
-  it('404s when the app flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await GET_PDF(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(seamMock.loadTranscriptExport).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await GET_PDF(req(), ctx);
@@ -154,13 +143,6 @@ describe('admin transcript.pdf', () => {
 });
 
 describe('admin transcript.txt', () => {
-  it('404s when the app flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await GET_TXT(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(seamMock.loadTranscriptExport).not.toHaveBeenCalled();
-  });
-
   it('403s a non-admin user', async () => {
     setAuth(mockAuthenticatedUser('USER'));
     const res = await GET_TXT(req(), ctx);
