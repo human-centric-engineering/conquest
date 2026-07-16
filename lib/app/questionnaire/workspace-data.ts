@@ -18,24 +18,7 @@ import { cache } from 'react';
 
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { logger } from '@/lib/logging';
-import {
-  APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
-  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
-  APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
-  APP_QUESTIONNAIRES_COHORTS_FLAG,
-  APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
-  APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG,
-  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
-  APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
-  APP_QUESTIONNAIRES_ADVISOR_FLAG,
-  APP_QUESTIONNAIRES_EDIT_AGENT_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import type {
   EvaluationRunDetail,
@@ -237,63 +220,27 @@ export interface QuestionnaireWorkspaceFlags {
 }
 
 /**
- * Resolve every workspace flag in a single `Promise.all`.
+ * Resolve every workspace flag.
  *
- * The per-feature helpers in `feature-flag.ts` each re-resolve the master flag
- * internally, so calling four of them would query the master flag four times.
- * The workspace layout needs all of them at once, so it resolves the raw flag
- * constants once here and ANDs the sub-flags with the master locally.
+ * The questionnaire feature flags have been retired — every questionnaire
+ * feature is now permanently on — so this resolves everything to `true`. It is
+ * kept (rather than deleted) so the many `flags.X` consumers need no change; the
+ * shape is preserved to match {@link QuestionnaireWorkspaceFlags}.
  */
-export const resolveQuestionnaireWorkspaceFlags = cache(
-  async (): Promise<QuestionnaireWorkspaceFlags> => {
-    const [
-      master,
-      dataSlots,
-      designEval,
-      liveSessions,
-      adaptive,
-      adaptiveDataSlots,
-      respondentReport,
-      cohorts,
-      cohortReport,
-      reportWebSearch,
-      introScreen,
-      personaSelection,
-      advisor,
-      editAgent,
-    ] = await Promise.all([
-      isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_EDIT_AGENT_FLAG),
-    ]);
-    return {
-      master,
-      dataSlots: master && dataSlots,
-      designEval: master && designEval,
-      liveSessions: master && liveSessions,
-      adaptive: master && adaptive,
-      // Adaptive data-slot selection also depends on the data-slots + live-sessions flags (it only
-      // runs in live data-slot mode); AND them here so the workspace flag matches the runtime gate.
-      adaptiveDataSlots: master && dataSlots && liveSessions && adaptiveDataSlots,
-      respondentReport: master && respondentReport,
-      // Cohort report (incl. the Scoring tab) is round-scoped, so it also requires the cohorts flag.
-      cohortReport: master && cohorts && cohortReport,
-      reportWebSearch: master && reportWebSearch,
-      introScreen: master && introScreen,
-      personaSelection: master && personaSelection,
-      advisor: master && advisor,
-      editAgent: master && editAgent,
-    };
-  }
+export const resolveQuestionnaireWorkspaceFlags = cache((): Promise<QuestionnaireWorkspaceFlags> =>
+  Promise.resolve({
+    master: true,
+    dataSlots: true,
+    designEval: true,
+    liveSessions: true,
+    adaptive: true,
+    adaptiveDataSlots: true,
+    respondentReport: true,
+    cohortReport: true,
+    reportWebSearch: true,
+    introScreen: true,
+    personaSelection: true,
+    advisor: true,
+    editAgent: true,
+  })
 );

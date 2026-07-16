@@ -14,18 +14,13 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manager';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
-import {
-  APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG,
-  APP_REPORT_FORMATTER_FLAG,
-  RESPONDENT_REPORT_AGENT_SLUG,
-} from '@/lib/app/questionnaire/constants';
+import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
@@ -447,16 +442,15 @@ export async function generateReportFromInputs(
   // report research loop): a primary-provider outage or open circuit fails over instead of throwing.
   const { provider } = await getProviderWithFallbacks(providerSlug, fallbacks);
 
-  // The optional second-pass formatter owns final layout when enabled, so agent 1 sheds its
-  // paragraph/bullet responsibilities (resolved once; gates both the prompt thinning and the pass).
-  const formatterEnabled = await isFeatureEnabled(APP_REPORT_FORMATTER_FLAG);
+  // The optional second-pass formatter owns final layout, so agent 1 sheds its
+  // paragraph/bullet responsibilities (gates both the prompt thinning and the pass).
+  const formatterEnabled = true;
 
   // 4b. Optional web-search rounds. Gated by the version toggle AND the platform flag; the search
   // backend being unconfigured degrades gracefully inside `runReportResearch` (never fails a report).
   // `before` gathers external context to inform the prose; `after` researches the finished report.
   const researchCfg = settings.research;
-  const researchEnabled =
-    researchCfg.enabled && (await isFeatureEnabled(APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG));
+  const researchEnabled = researchCfg.enabled;
   // Only run a phase whose output can actually surface, so a config that surfaces nothing never pays
   // for discarded LLM + web calls. Findings surface three ways: the displayed sources section, the
   // grounded prose (`before` only, when `informNarrative`), and the synthesized appendix (either phase,
