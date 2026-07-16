@@ -652,6 +652,15 @@ export const API = {
       /** Opt in to a report-ready email (POST `{ email }`). */
       reportNotify: (id: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/report/notify`,
+      /** Admin re-run history + enqueue a re-run (GET → revisions view / POST `{ config?, instructions? }`). */
+      reportRevisions: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/revisions`,
+      /** One re-run revision's full content, for the admin viewer (GET). */
+      reportRevision: (id: string, revisionNumber: number): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/revisions/${revisionNumber}`,
+      /** Promote a `ready` re-run revision into the delivered report (POST). */
+      reportRevisionPromote: (id: string, revisionNumber: number): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/revisions/${revisionNumber}/promote`,
     },
     /** Persisted turn-evaluation search surface (admin) — cross-session list + detail. */
     TURN_EVALUATIONS: {

@@ -687,8 +687,18 @@ export function isAiRespondentReportMode(mode: RespondentReportMode): boolean {
 export const RESPONDENT_REPORT_STATUSES = ['queued', 'processing', 'ready', 'failed'] as const;
 export type RespondentReportStatus = (typeof RESPONDENT_REPORT_STATUSES)[number];
 
+/**
+ * Origin of a Respondent Report revision (admin re-run). `admin` = an admin triggered the re-run with
+ * (possibly overridden) instructions; `ai` is reserved for a future automated re-run source. Mirrors
+ * COHORT_REPORT_AUTHORS.
+ */
+export const RESPONDENT_REPORT_AUTHORS = ['admin', 'ai'] as const;
+export type RespondentReportAuthor = (typeof RESPONDENT_REPORT_AUTHORS)[number];
+
 /** Max length of the admin's free-text generation instruction / structure fields (Zod bound). */
 export const RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH = 4000;
+/** Max length of the admin's short per-re-run note ("why / what changed"), shown in the history (Zod bound). */
+export const RESPONDENT_REPORT_RERUN_NOTE_MAX_LENGTH = 500;
 /** Max length of the flat background-context blob fed to the report agent (Zod bound). */
 export const RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH = 8000;
 

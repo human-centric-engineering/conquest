@@ -288,6 +288,24 @@ export const cohortReportGenerateLimiter = createRateLimiter({
 });
 
 /**
+ * Respondent-report re-run sub-cap (admin "re-run report against a session"). Each re-run queues a
+ * revision the maintenance worker then generates — the same costly, slow report sub-flow as a delivered
+ * report (one reasoning-model call, plus optional web-search rounds + KB grounding). Capped tightly at
+ * 10/min per admin (the ingest class, matching the cohort-report generate cap), keyed on the admin user
+ * id who owns the spend, so a hammered "Re-run" button can't run up the report bill. Only the enqueue is
+ * limited here; reading the revision history / promoting a revision are cheap and inherit the section cap.
+ */
+export const REPORT_RERUN_RATE_LIMIT_MAX = 10;
+
+/** Sliding-window length for {@link reportRerunLimiter}, in milliseconds. */
+export const REPORT_RERUN_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const reportRerunLimiter = createRateLimiter({
+  interval: REPORT_RERUN_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: REPORT_RERUN_RATE_LIMIT_MAX,
+});
+
+/**
  * Config Advisor sub-cap. Each run is two reasoning-model calls (a streamed narrative + a structured
  * analysis), so it's in the same paid class as the design-evaluation panel / compose. Capped at
  * 20/min per admin, keyed on the admin user id who owns the spend, so a hammered "Run advisor"

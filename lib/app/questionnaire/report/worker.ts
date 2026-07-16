@@ -12,7 +12,11 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
+import {
+  generateRespondentReport,
+  generateRespondentReportWithSettings,
+} from '@/lib/app/questionnaire/report/generate';
+import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { sendRespondentReportReadyEmail } from '@/lib/app/questionnaire/report/notify-send';
 
 /**
@@ -181,6 +185,124 @@ export async function processQueuedRespondentReports(): Promise<ReportWorkerResu
     });
     if (backlog >= BACKLOG_WARN_THRESHOLD) {
       logger.warn('respondent report backlog', { backlog, drainedThisTick: out.claimed });
+    }
+  }
+
+  return out;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+ * Admin re-run revisions (report/revision.ts) — a SEPARATE queue drained the same way.
+ *
+ * An admin re-run appends a `queued` AppRespondentReportRevision carrying its own settings snapshot;
+ * this drains it exactly like the delivered report (same lease/claim idempotency) but generates with
+ * `generateRespondentReportWithSettings` (the snapshot settings, not the version config) and writes the
+ * result onto the REVISION — never the delivered report. Promoting a revision into the delivered report
+ * is a separate, explicit admin action (`promoteRespondentReportRevision`).
+ * ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** A claimed revision row — enough to generate its report with the snapshot settings. */
+interface ClaimedRevision {
+  id: string;
+  sessionId: string;
+  settingsSnapshot: unknown;
+}
+
+/** Atomically claim the oldest claimable revision. Returns the claimed row, or null. */
+async function claimNextRevision(workerId: string): Promise<ClaimedRevision | null> {
+  const orphanCutoff = new Date(Date.now() - REPORT_LEASE_TTL_MS);
+
+  const candidate = await prisma.appRespondentReportRevision.findFirst({
+    where: claimableWhere(orphanCutoff),
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  if (!candidate) return null;
+
+  const result = await prisma.appRespondentReportRevision.updateMany({
+    where: { id: candidate.id, ...claimableWhere(orphanCutoff) },
+    data: { status: 'processing', lockedBy: workerId, lockedAt: new Date() },
+  });
+  if (result.count === 0) return null; // another worker won the race
+
+  const row = await prisma.appRespondentReportRevision.findUnique({
+    where: { id: candidate.id },
+    select: { id: true, settingsSnapshot: true, report: { select: { sessionId: true } } },
+  });
+  if (!row) return null;
+  return { id: row.id, sessionId: row.report.sessionId, settingsSnapshot: row.settingsSnapshot };
+}
+
+/** Prisma's `updateMany` data input for the revision model (keeps this module `@prisma/client`-free). */
+type RevisionUpdateData = Parameters<
+  typeof prisma.appRespondentReportRevision.updateMany
+>[0]['data'];
+
+/** Generate + persist one claimed revision. Returns whether it succeeded. */
+async function driveRevision(claimed: ClaimedRevision): Promise<boolean> {
+  try {
+    const settings = narrowRespondentReportSettings(claimed.settingsSnapshot);
+    const { content, costUsd, formatted, completionPct } =
+      await generateRespondentReportWithSettings(claimed.sessionId, settings);
+    await prisma.appRespondentReportRevision.updateMany({
+      where: { id: claimed.id, status: 'processing' },
+      data: {
+        status: 'ready',
+        content,
+        formatted,
+        completionPct,
+        costUsd,
+        generatedAt: new Date(),
+        error: null,
+        lockedBy: null,
+        lockedAt: null,
+      } as unknown as RevisionUpdateData,
+    });
+    return true;
+  } catch (err) {
+    logger.error('respondent report revision generation failed', {
+      revisionId: claimed.id,
+      sessionId: claimed.sessionId,
+      error: errorMessage(err),
+    });
+    await prisma.appRespondentReportRevision.updateMany({
+      where: { id: claimed.id, status: 'processing' },
+      data: {
+        status: 'failed',
+        error: errorMessage(err).slice(0, ERROR_MAX),
+        lockedBy: null,
+        lockedAt: null,
+      },
+    });
+    return false;
+  }
+}
+
+/**
+ * Drain queued admin re-run revisions for this tick. Same batch/budget/lease discipline as
+ * {@link processQueuedRespondentReports}; kept as its own drain so a delivered-report backlog and a
+ * re-run backlog never starve each other within a tick.
+ */
+export async function processQueuedReportRevisions(): Promise<ReportWorkerResult> {
+  const workerId = `report-revision-worker:${crypto.randomUUID()}`;
+  const deadline = Date.now() + TICK_BUDGET_MS;
+  const out: ReportWorkerResult = { claimed: 0, succeeded: 0, failed: 0 };
+
+  while (out.claimed < MAX_PER_TICK && Date.now() < deadline) {
+    const claimed = await claimNextRevision(workerId);
+    if (!claimed) break;
+    out.claimed += 1;
+    const ok = await driveRevision(claimed);
+    if (ok) out.succeeded += 1;
+    else out.failed += 1;
+  }
+
+  if (out.claimed >= MAX_PER_TICK) {
+    const backlog = await prisma.appRespondentReportRevision.count({
+      where: { status: { in: ['queued', 'processing'] } },
+    });
+    if (backlog >= BACKLOG_WARN_THRESHOLD) {
+      logger.warn('respondent report revision backlog', { backlog, drainedThisTick: out.claimed });
     }
   }
 

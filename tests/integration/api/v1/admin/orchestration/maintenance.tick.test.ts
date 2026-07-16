@@ -83,6 +83,7 @@ vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
 }));
 vi.mock('@/lib/app/questionnaire/report/worker', () => ({
   processQueuedRespondentReports: vi.fn(),
+  processQueuedReportRevisions: vi.fn(),
 }));
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
@@ -212,6 +213,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'pendingExecutionRecovery',
       'evaluationRuns',
       'respondentReports',
+      'respondentReportRevisions',
     ]);
     expect(body.data.durationMs).toEqual(expect.any(Number));
   });

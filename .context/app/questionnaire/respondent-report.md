@@ -143,7 +143,16 @@ Report Formatter second pass laid out the stored prose — see below), `completi
 completion % at generation — drives the partial-report caveat), `costUsd`,
 `notifyEmail` (respondent opt-in for a report-ready email; cleared once sent), and worker lease
 columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the evaluations
-batch worker). Raw-only mode never creates a row.
+batch worker). Raw-only mode never creates a row. `deliveredRevisionId` points at the admin re-run
+revision last **promoted** into this delivered row (null = the original submit-time generation) — see
+[Admin re-run](#admin-re-run-revisions).
+
+`AppRespondentReportRevision` — an append-only log of **admin re-runs** for a session (FK to
+`AppRespondentReport`, `onDelete: Cascade`). Each row carries its own `settingsSnapshot` (the exact
+instructions/config that re-run used), `instructions` (a short admin note), `status` + lease columns
+(its own async generation, mirroring the header), `content`/`formatted`/`completionPct`/`costUsd`, and
+`authoredBy` (`admin`). `@@unique([reportId, revisionNumber])` — monotonic per report. This is decoupled
+from the delivered report: a re-run never changes what the respondent sees until an admin promotes it.
 
 ## Generation pipeline (AI modes, async)
 
@@ -170,6 +179,10 @@ batch worker). Raw-only mode never creates a row.
    the lease makes the kick and the cron drain safe to overlap.
 
 3. **Generation** — `generateRespondentReport(sessionId)` (`lib/app/questionnaire/report/generate.ts`)
+   is a thin wrapper that resolves the version's report config, then delegates to
+   `generateRespondentReportWithSettings(sessionId, settings)` — the settings-parameterised core the
+   admin re-run also calls (with an overridden config) so a re-run and the delivered report share the
+   exact same pipeline. It
    loads the answers (`loadSessionExport` → `buildAnswerPanelView` → `buildAnswerTranscript`),
    optionally retrieves client-KB snippets (scoped via `resolveClientKnowledgeDocumentIds` →
    `searchKnowledge({ documentIds })`), resolves the seeded `app-respondent-report` agent
@@ -269,6 +282,41 @@ in a paper dialog using the shared `ReportBody` / `ReportPaperHeader`
 (`components/app/questionnaire/report/report-body.tsx`, extracted from `session-complete.tsx` so preview
 and the live respondent view can't drift), behind a caveat banner ("sample answers; research/KB skipped").
 Nothing is persisted.
+
+## Admin re-run (revisions)
+
+An admin can look up a **real** completed session (by its support reference, on the Sessions tab) and
+**re-run** its report against the respondent's actual captured answers, optionally with **new
+instructions/settings** — the answer to "the delivered report reads wrong / I want to try a different
+framing without re-launching." Unlike the config preview (which uses AI-synthesised sample answers), a
+re-run uses the session's real answers; unlike the respondent-facing `retry` (which regenerates from the
+version config and no-ops a `ready` report), a re-run takes an **overridden config** and is **retained as
+a revision**.
+
+- **Trigger UI** — `SessionReportRerun`
+  (`components/admin/questionnaires/sessions/session-report-rerun.tsx`), a dialog opened from the
+  session viewer's action bar (rendered only when `flags.respondentReport`). It seeds from the version's
+  current report config, lets the admin edit the key generation fields (mode, narrative style,
+  instructions, structure, background, discount-low-confidence, KB grounding) + a short note, and lists
+  the re-run history. The full (narrowed) settings object is sent, so research config carries through.
+- **Enqueue** — `POST /api/v1/app/questionnaire-sessions/:id/report/revisions` (`reportRevisions`;
+  admin-only, master + respondent-report flag gated, per-admin `reportRerunLimiter` at the ingest class
+  of 10/min). Body `{ config?, instructions? }` — `config` omitted falls back to the version config.
+  Rejects a `raw` mode (nothing to generate). `enqueueRespondentReportRevision`
+  (`lib/app/questionnaire/report/revision.ts`) ensures the 1:1 header exists (created **`ready` with
+  null content**, never `queued`, so the delivered-report worker never claims a header that only hosts
+  re-runs), then appends the next `queued` revision with its `settingsSnapshot`. Returns `202`.
+- **Worker** — `processQueuedReportRevisions()` (`lib/app/questionnaire/report/worker.ts`, tick task
+  `respondentReportRevisions`) drains queued revisions with the same lease/batch/budget discipline as
+  the delivered-report worker, generating each via `generateRespondentReportWithSettings` with the
+  **snapshot** settings and writing the result onto the **revision** — never the delivered report.
+- **View + promote** — `GET …/report/revisions` returns the delivered-report summary + the revision
+  history (newest first, marking which revision is delivered); `GET …/report/revisions/:rev` returns one
+  revision's full content for the viewer dialog (same `ReportBody` paper renderer). `POST
+…/report/revisions/:rev/promote` (`promoteRespondentReportRevision`) copies a `ready` revision's
+  content onto the delivered `AppRespondentReport` and records `deliveredRevisionId`, so the respondent's
+  on-screen report + PDF now render that re-run (clears any pending notify email; `409` when the revision
+  isn't ready). Promotion is explicit — an experimental re-run never auto-replaces the delivered report.
 
 ## Respondent delivery
 

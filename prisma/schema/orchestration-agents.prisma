@@ -60,14 +60,14 @@ model AiAgent {
   // instruction fields the live model never receives. Default false = stored
   // instructions are load-bearing (the streamChat / workflow agent_call path).
   // See components/admin/orchestration/agent-form.tsx and GitHub issue #304.
-  runtimePromptManaged      Boolean  @default(false)
-  runtimePromptNote         String?  @db.Text // optional operator note shown in the callout (e.g. where the real prompt is built)
-  persona                   String?  @db.Text // who the agent is (identity/role); inheritable from AiAgentProfile
-  brandVoiceInstructions    String?  @db.Text // tone/style; inheritable from AiAgentProfile
-  guardrails                String?  @db.Text // refusals/don'ts; inheritable from AiAgentProfile
-  personaMode               String   @default("override") // "override" | "append"
-  voiceMode                 String   @default("override") // "override" | "append"
-  guardrailsMode            String   @default("override") // "override" | "append"
+  runtimePromptManaged      Boolean   @default(false)
+  runtimePromptNote         String?   @db.Text // optional operator note shown in the callout (e.g. where the real prompt is built)
+  persona                   String?   @db.Text // who the agent is (identity/role); inheritable from AiAgentProfile
+  brandVoiceInstructions    String?   @db.Text // tone/style; inheritable from AiAgentProfile
+  guardrails                String?   @db.Text // refusals/don'ts; inheritable from AiAgentProfile
+  personaMode               String    @default("override") // "override" | "append"
+  voiceMode                 String    @default("override") // "override" | "append"
+  guardrailsMode            String    @default("override") // "override" | "append"
   profileId                 String? // optional link to AiAgentProfile
   rateLimitRpm              Int? // per-agent rate limit (requests per minute); null = use global default
   inputGuardMode            String? // "log_only" | "warn_and_continue" | "block"; null = use global default

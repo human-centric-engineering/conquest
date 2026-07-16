@@ -47,6 +47,7 @@ vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
 }));
 vi.mock('@/lib/app/questionnaire/report/worker', () => ({
   processQueuedRespondentReports: vi.fn(),
+  processQueuedReportRevisions: vi.fn(),
 }));
 
 // ─── Imports ────────────────────────────────────────────────────────────────

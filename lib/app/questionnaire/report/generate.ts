@@ -322,25 +322,42 @@ export interface ReportGenerationInputs {
 }
 
 /**
- * Generate the insights content for a session's respondent report. Throws on unrecoverable problems
- * (missing session, no provider, malformed model output after retry) — the worker maps a throw to a
- * `failed` report row.
+ * Generate the insights content for a session's respondent report, reading the report config from the
+ * session's version. This is the submit-time / delivered-report path (the worker calls it once per
+ * queued row). Throws on unrecoverable problems (missing session, no provider, malformed model output
+ * after retry) — the worker maps a throw to a `failed` report row.
+ *
+ * A thin wrapper over {@link generateRespondentReportWithSettings}: it resolves the stored version
+ * config, then delegates. The admin "re-run report" path calls the with-settings form directly with an
+ * overridden config, so a re-run and the delivered report share the exact same generation core.
  */
 export async function generateRespondentReport(sessionId: string): Promise<GeneratedReport> {
-  // 1. Config + client attribution for this session's version.
   const meta = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
-    select: {
-      version: {
-        select: {
-          config: { select: { respondentReport: true } },
-          questionnaire: { select: { demoClientId: true } },
-        },
-      },
-    },
+    select: { version: { select: { config: { select: { respondentReport: true } } } } },
   });
   if (!meta?.version) throw new Error(`Session ${sessionId} not found for report generation`);
   const settings = narrowRespondentReportSettings(meta.version.config?.respondentReport);
+  return generateRespondentReportWithSettings(sessionId, settings);
+}
+
+/**
+ * Generate a session's respondent report using EXPLICIT settings (rather than the stored version
+ * config). Backs the admin "re-run report" flow: an admin edits the instructions/settings, and this
+ * runs the real generation core against the real session's captured answers with that override. The
+ * settings are trusted as-is (callers narrow them at the boundary). Same throw contract as
+ * {@link generateRespondentReport}.
+ */
+export async function generateRespondentReportWithSettings(
+  sessionId: string,
+  settings: RespondentReportSettings
+): Promise<GeneratedReport> {
+  // 1. Client attribution for this session's version (the KB grounding scope).
+  const meta = await prisma.appQuestionnaireSession.findUnique({
+    where: { id: sessionId },
+    select: { version: { select: { questionnaire: { select: { demoClientId: true } } } } },
+  });
+  if (!meta?.version) throw new Error(`Session ${sessionId} not found for report generation`);
 
   // 2. Captured answers → Q&A transcript + the contextual data-slot block.
   const loaded = await loadSessionExport(sessionId);
