@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 import {
   Brain,
   ClipboardList,
+  ChevronRight,
   Compass,
   Gauge,
   Hash,
@@ -292,6 +293,9 @@ interface ProfileFieldRow {
    * handle and silently changing it on an existing field would orphan collected data.
    */
   keyTouched: boolean;
+  /** UI-only: is this field's editor expanded? Loaded/seeded fields start collapsed to keep the list
+   *  scannable; a freshly-added field opens expanded so it can be filled in straight away. */
+  expanded: boolean;
 }
 
 function toRow(field: ProfileFieldConfig): ProfileFieldRow {
@@ -305,7 +309,28 @@ function toRow(field: ProfileFieldConfig): ProfileFieldRow {
     captureVia: field.captureVia,
     // A saved field's key is locked — it already keys stored answers, so the label must not rewrite it.
     keyTouched: true,
+    expanded: false,
   };
+}
+
+/**
+ * The starter set seeded when an admin first turns capture on — the fields most questionnaires want,
+ * with sensible required/optional defaults. Fresh rows (locked keys, collapsed) the admin can then
+ * trim or extend. A function, not a constant, so each seed is an independent, mutable copy.
+ */
+function defaultProfileFieldRows(): ProfileFieldRow[] {
+  const base = {
+    optionsText: '',
+    validation: 'deterministic' as const,
+    keyTouched: true,
+    expanded: false,
+  };
+  return [
+    { key: 'name', label: 'Name', type: 'text', required: true, ...base },
+    { key: 'email', label: 'Email address', type: 'email', required: true, ...base },
+    { key: 'phone', label: 'Phone number', type: 'text', required: false, ...base },
+    { key: 'organisation', label: 'Organisation', type: 'text', required: false, ...base },
+  ];
 }
 
 /** Parse a comma-separated options string into a distinct, non-empty list. */
@@ -375,6 +400,7 @@ function SettingsGroup({
   accent,
   title,
   description,
+  headerAction,
   children,
 }: {
   /** Anchor id + scroll-spy target — picked up by the `SectionRail`. */
@@ -384,6 +410,8 @@ function SettingsGroup({
   accent: string;
   title: string;
   description: string;
+  /** Optional right-aligned control in the header (e.g. an enable/disable switch). */
+  headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -402,10 +430,11 @@ function SettingsGroup({
         >
           <Icon className="h-4 w-4" />
         </span>
-        <div className="space-y-0.5">
+        <div className="min-w-0 flex-1 space-y-0.5">
           <CardTitle className="text-sm font-semibold">{title}</CardTitle>
           <CardDescription className="text-xs leading-relaxed">{description}</CardDescription>
         </div>
+        {headerAction && <div className="mt-0.5 shrink-0">{headerAction}</div>}
       </CardHeader>
       <CardContent className="space-y-4 p-4">{children}</CardContent>
     </Card>
@@ -612,6 +641,11 @@ export function ConfigEditor({
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
+  // Whether respondent-profile capture is on at all (off by default). Derived from "has any field" —
+  // an empty `profileFields` is exactly how the runtime already reads "don't collect", so no separate
+  // stored flag / migration is needed. Kept as its own state (not recomputed from length) so toggling
+  // off can hide the fields without discarding them mid-edit; the save maps to `[]` when off.
+  const [captureEnabled, setCaptureEnabled] = useState(config.profileFields.length > 0);
   // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
   // a single dimension / the persona immutably.
   const [tone, setTone] = useState<ToneSettings>(config.tone);
@@ -668,6 +702,7 @@ export function ConfigEditor({
     setReasoningStreamPersist(config.reasoningStreamPersist);
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
+    setCaptureEnabled(config.profileFields.length > 0);
     setTone(config.tone);
     setPersonaSelection(config.personaSelection);
     setInterviewerStrategy(config.interviewerStrategy);
@@ -705,9 +740,11 @@ export function ConfigEditor({
       prev.map((f, i) => (i === index ? { ...f, key, keyTouched: true } : f))
     );
 
+  // Accordion: a new field opens expanded and collapses every existing one, so only one editor is
+  // ever open at a time.
   const addField = () =>
     setProfileFields((prev) => [
-      ...prev,
+      ...prev.map((f) => ({ ...f, expanded: false })),
       {
         key: '',
         label: '',
@@ -716,11 +753,29 @@ export function ConfigEditor({
         optionsText: '',
         validation: 'deterministic',
         keyTouched: false,
+        expanded: true,
       },
     ]);
 
   const removeField = (index: number) =>
     setProfileFields((prev) => prev.filter((_, i) => i !== index));
+
+  // Accordion: expanding a field collapses all others; clicking the open one just closes it.
+  const toggleFieldExpanded = (index: number) =>
+    setProfileFields((prev) =>
+      prev.map((f, i) => ({ ...f, expanded: i === index ? !f.expanded : false }))
+    );
+
+  const collapseAllFields = () =>
+    setProfileFields((prev) => prev.map((f) => ({ ...f, expanded: false })));
+
+  // Turn capture on/off. Turning it on for the first time (no fields yet) seeds the common starter set
+  // so the admin lands on a working setup rather than a blank slate; turning it off keeps the fields in
+  // state (so a mis-click is recoverable before saving) but the save writes `[]`.
+  const toggleCaptureEnabled = (enabled: boolean) => {
+    setCaptureEnabled(enabled);
+    if (enabled && profileFields.length === 0) setProfileFields(defaultProfileFieldRows());
+  };
 
   const save = () =>
     run(() => [
@@ -843,16 +898,20 @@ export function ConfigEditor({
           videoUrl: intro.videoUrl.trim(),
         },
         captureMode,
-        profileFields: profileFields.map((f) => ({
-          key: f.key.trim(),
-          label: f.label.trim(),
-          type: f.type,
-          required: f.required,
-          validation: f.validation,
-          // Only send an override when set — an absent `captureVia` inherits the default placement.
-          ...(f.captureVia ? { captureVia: f.captureVia } : {}),
-          ...(f.type === 'select' ? { options: parseOptions(f.optionsText) } : {}),
-        })),
+        // Capture off → send no fields (exactly how the runtime reads "don't collect"), keeping the
+        // in-editor rows so a re-enable before the next save restores them.
+        profileFields: captureEnabled
+          ? profileFields.map((f) => ({
+              key: f.key.trim(),
+              label: f.label.trim(),
+              type: f.type,
+              required: f.required,
+              validation: f.validation,
+              // Only send an override when set — an absent `captureVia` inherits the default placement.
+              ...(f.captureVia ? { captureVia: f.captureVia } : {}),
+              ...(f.type === 'select' ? { options: parseOptions(f.optionsText) } : {}),
+            }))
+          : [],
       },
     ]);
 
@@ -2148,261 +2207,368 @@ export function ConfigEditor({
             accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
             id="profile-fields"
             title="Respondent profile fields"
-            description="Details collected from the respondent (name, email, organisation…). Optional — leave empty to start straight into the conversation. Never collected on an anonymous questionnaire."
+            description="Ask respondents for a name, email, or other details — on a short form or during the conversation. Off by default; never collected on an anonymous questionnaire."
+            headerAction={
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium select-none">
+                <span className={captureEnabled ? 'text-foreground' : 'text-muted-foreground'}>
+                  {captureEnabled ? 'On' : 'Off'}
+                </span>
+                <Switch
+                  checked={captureEnabled}
+                  onCheckedChange={toggleCaptureEnabled}
+                  disabled={busy}
+                  aria-label="Collect respondent profile fields"
+                />
+              </label>
+            }
           >
-            {/* Default placement — the version-wide default for where fields are collected, shown as a
-                segmented control so both options are visible at once. Each field can override it below,
-                which is how a hybrid questionnaire is built. Ignored when the version is anonymous. */}
-            <div className="mb-6 space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label className="text-foreground text-sm font-medium">
-                  Where are answers collected by default?
-                </Label>
-                <FieldHelp title="Default placement">
-                  The default for the fields below. <strong>Form</strong> shows a short form after
-                  the intro and before the conversation — the respondent can&apos;t start until
-                  it&apos;s filled in. <strong>Conversation</strong> drops the form and has the
-                  interviewer ask for these naturally in the chat. Any field can override this with
-                  its own &quot;Collect via&quot; setting — e.g. keep name &amp; email on the form
-                  while the rest are gathered in conversation (a hybrid questionnaire).
-                </FieldHelp>
-              </div>
-              <Segmented
-                ariaLabel="Default placement"
-                value={captureMode}
-                onChange={(v) => setCaptureMode(v)}
-                disabled={busy}
-                options={CAPTURE_MODES.map((m) => ({
-                  value: m,
-                  label: CAPTURE_MODE_SHORT_LABELS[m],
-                  icon: CAPTURE_MODE_ICONS[m],
-                }))}
-              />
-              <p className="text-muted-foreground text-xs">
-                {captureMode === 'form'
-                  ? 'Respondents fill a short form before the conversation starts.'
-                  : 'The interviewer asks for these naturally during the conversation.'}{' '}
-                Each field can override this below.
-              </p>
-            </div>
-
-            {profileFields.length === 0 ? (
-              <div className="border-border/70 rounded-xl border border-dashed px-6 py-8 text-center">
-                <div className="bg-muted text-muted-foreground/70 mx-auto flex h-10 w-10 items-center justify-center rounded-full">
+            {!captureEnabled ? (
+              /* Off state — the default. A calm panel that says what turning it on does. */
+              <div className="bg-muted/20 border-border/70 rounded-xl border border-dashed px-6 py-8 text-center">
+                <div className="bg-muted text-muted-foreground/70 mx-auto flex h-11 w-11 items-center justify-center rounded-full">
                   <ClipboardList className="h-5 w-5" aria-hidden />
                 </div>
-                <p className="text-foreground mt-3 text-sm font-medium">No details collected yet</p>
-                <p className="text-muted-foreground mx-auto mt-1 max-w-xs text-xs">
-                  Respondents go straight into the conversation. Add a field to collect a name,
-                  email, or anything else you need alongside their answers.
+                <p className="text-foreground mt-3 text-sm font-medium">
+                  Not collecting respondent details
                 </p>
+                <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-xs">
+                  Respondents go straight into the conversation. Turn this on to ask for a name,
+                  email, and anything else — on a short form before the chat, or naturally during
+                  it.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => toggleCaptureEnabled(true)}
+                  disabled={busy}
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Turn on &amp; add starter fields
+                </Button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {profileFields.map((field, index) => {
-                  const FieldIcon = PROFILE_FIELD_TYPE_ICONS[field.type];
-                  const fieldName = field.label.trim() || `Field ${index + 1}`;
-                  return (
-                    <div
-                      key={index}
-                      className="bg-card overflow-hidden rounded-xl border shadow-sm"
-                    >
-                      {/* Header: the respondent-facing question is the headline; type + remove sit beside it. */}
-                      <div className="flex items-start gap-3 p-4">
-                        <div className="bg-muted text-muted-foreground mt-6 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
-                          <FieldIcon className="h-4 w-4" aria-hidden />
-                        </div>
-                        <div className="min-w-0 flex-1 space-y-3">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                            <div className="flex-1 space-y-1">
-                              <Label className="text-xs">What to ask the respondent</Label>
-                              <Input
-                                value={field.label}
-                                placeholder="e.g. Your organisation"
-                                onChange={(e) => updateFieldLabel(index, e.target.value)}
-                                disabled={busy}
+              <>
+                {/* Default placement — the version-wide default for where fields are collected, shown
+                    as a segmented control so both options are visible at once. Each field can override
+                    it below (a hybrid questionnaire). Ignored when the version is anonymous. */}
+                <div className="mb-6 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-foreground text-sm font-medium">
+                      Where are answers collected by default?
+                    </Label>
+                    <FieldHelp title="Default placement">
+                      The default for the fields below. <strong>Form</strong> shows a short form
+                      after the intro and before the conversation — the respondent can&apos;t start
+                      until it&apos;s filled in. <strong>Conversation</strong> drops the form and
+                      has the interviewer ask for these naturally in the chat. Any field can
+                      override this with its own &quot;Collect via&quot; setting — e.g. keep name
+                      &amp; email on the form while the rest are gathered in conversation (a hybrid
+                      questionnaire).
+                    </FieldHelp>
+                  </div>
+                  <Segmented
+                    ariaLabel="Default placement"
+                    value={captureMode}
+                    onChange={(v) => setCaptureMode(v)}
+                    disabled={busy}
+                    options={CAPTURE_MODES.map((m) => ({
+                      value: m,
+                      label: CAPTURE_MODE_SHORT_LABELS[m],
+                      icon: CAPTURE_MODE_ICONS[m],
+                    }))}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    {captureMode === 'form'
+                      ? 'Respondents fill a short form before the conversation starts.'
+                      : 'The interviewer asks for these naturally during the conversation.'}{' '}
+                    Each field can override this below.
+                  </p>
+                </div>
+
+                {profileFields.length === 0 ? (
+                  <div className="border-border/70 bg-muted/10 rounded-xl border border-dashed px-6 py-6 text-center">
+                    <p className="text-foreground text-sm font-medium">No fields yet</p>
+                    <p className="text-muted-foreground mx-auto mt-1 max-w-xs text-xs">
+                      Add a field to collect a name, email, or anything else you need alongside
+                      their answers.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {profileFields.length > 1 && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-muted-foreground text-xs">
+                          {profileFields.length} fields
+                        </p>
+                        {profileFields.some((f) => f.expanded) && (
+                          <button
+                            type="button"
+                            onClick={collapseAllFields}
+                            className="text-muted-foreground hover:text-foreground text-xs font-medium"
+                          >
+                            Collapse
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {profileFields.map((field, index) => {
+                      const FieldIcon = PROFILE_FIELD_TYPE_ICONS[field.type];
+                      const fieldName = field.label.trim() || `Field ${index + 1}`;
+                      return (
+                        <div
+                          key={index}
+                          className="bg-card overflow-hidden rounded-xl border shadow-sm"
+                        >
+                          {/* Summary row — always visible; click to expand/collapse the editor. */}
+                          <div className="flex items-center gap-2 p-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleFieldExpanded(index)}
+                              aria-expanded={field.expanded}
+                              aria-label={`Toggle ${fieldName}`}
+                              disabled={busy}
+                              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  'text-muted-foreground h-4 w-4 shrink-0 transition-transform',
+                                  field.expanded && 'rotate-90'
+                                )}
+                                aria-hidden
                               />
-                            </div>
-                            <div className="space-y-1 sm:w-44">
-                              <Label className="text-xs">Answer type</Label>
-                              <Select
-                                value={field.type}
-                                onValueChange={(v) =>
-                                  updateField(index, { type: v as ProfileFieldType })
-                                }
-                                disabled={busy}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PROFILE_FIELD_TYPES.map((t) => (
-                                    <SelectItem key={t} value={t}>
-                                      {PROFILE_FIELD_TYPE_LABELS[t]}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                              <span className="bg-muted text-muted-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+                                <FieldIcon className="h-4 w-4" aria-hidden />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="text-foreground block truncate text-sm font-medium">
+                                  {fieldName}
+                                </span>
+                                {!field.expanded && (
+                                  <span className="text-muted-foreground block truncate text-xs">
+                                    {describeProfileField(field, captureMode)}
+                                  </span>
+                                )}
+                              </span>
+                              {!field.expanded && (
+                                <span
+                                  className={cn(
+                                    'shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium',
+                                    field.required
+                                      ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                                      : 'bg-muted text-muted-foreground'
+                                  )}
+                                >
+                                  {field.required ? 'Required' : 'Optional'}
+                                </span>
+                              )}
+                            </button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeField(index)}
+                              disabled={busy}
+                              aria-label={`Remove ${fieldName}`}
+                              className="text-muted-foreground hover:text-destructive shrink-0"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
 
-                          {field.type === 'select' && (
-                            <div className="space-y-1">
-                              <Label className="text-xs">
-                                Choices{' '}
-                                <FieldHelp title="Select choices">
-                                  Comma-separated list of options the respondent picks from.
-                                </FieldHelp>
-                              </Label>
-                              <Input
-                                value={field.optionsText}
-                                placeholder="e.g. Engineering, Sales, Support"
-                                onChange={(e) =>
-                                  updateField(index, { optionsText: e.target.value })
-                                }
-                                disabled={busy}
-                              />
+                          {field.expanded && (
+                            <div className="border-t">
+                              <div className="space-y-3 p-4">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                  <div className="flex-1 space-y-1">
+                                    <Label className="text-xs">What to ask the respondent</Label>
+                                    <Input
+                                      value={field.label}
+                                      placeholder="e.g. Your organisation"
+                                      onChange={(e) => updateFieldLabel(index, e.target.value)}
+                                      disabled={busy}
+                                    />
+                                  </div>
+                                  <div className="space-y-1 sm:w-44">
+                                    <Label className="text-xs">Answer type</Label>
+                                    <Select
+                                      value={field.type}
+                                      onValueChange={(v) =>
+                                        updateField(index, { type: v as ProfileFieldType })
+                                      }
+                                      disabled={busy}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {PROFILE_FIELD_TYPES.map((t) => (
+                                          <SelectItem key={t} value={t}>
+                                            {PROFILE_FIELD_TYPE_LABELS[t]}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+
+                                {field.type === 'select' && (
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">
+                                      Choices{' '}
+                                      <FieldHelp title="Select choices">
+                                        Comma-separated list of options the respondent picks from.
+                                      </FieldHelp>
+                                    </Label>
+                                    <Input
+                                      value={field.optionsText}
+                                      placeholder="e.g. Engineering, Sales, Support"
+                                      onChange={(e) =>
+                                        updateField(index, { optionsText: e.target.value })
+                                      }
+                                      disabled={busy}
+                                    />
+                                  </div>
+                                )}
+
+                                <label className="inline-flex cursor-pointer items-center gap-2 text-sm select-none">
+                                  <Switch
+                                    checked={field.required}
+                                    onCheckedChange={(checked) =>
+                                      updateField(index, { required: checked })
+                                    }
+                                    disabled={busy}
+                                  />
+                                  <span className="font-medium">Required</span>
+                                  <span className="text-muted-foreground text-xs">
+                                    {field.required ? 'must be answered' : 'optional'}
+                                  </span>
+                                </label>
+                              </div>
+
+                              {/* Advanced strip: placement override, checking, and the auto-derived storage key. */}
+                              <div className="bg-muted/30 space-y-3 border-t px-4 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-xs">Collect via</Label>
+                                    <FieldHelp title="Collect via">
+                                      Where THIS field is collected. <strong>Default</strong>{' '}
+                                      follows the version default above. Override it to mix the two
+                                      — e.g. keep name &amp; email on the form while the rest are
+                                      gathered in conversation. Conversation fields are asked for
+                                      naturally in-chat and saved as the respondent provides them;
+                                      required ones keep being asked until answered.
+                                    </FieldHelp>
+                                  </div>
+                                  <Segmented
+                                    size="sm"
+                                    ariaLabel={`Collect ${fieldName} via`}
+                                    value={field.captureVia ?? '__default__'}
+                                    onChange={(v) =>
+                                      updateField(index, {
+                                        captureVia: v === '__default__' ? undefined : v,
+                                      })
+                                    }
+                                    disabled={busy}
+                                    options={[
+                                      {
+                                        value: '__default__',
+                                        label: 'Default',
+                                        hint: `(${CAPTURE_MODE_SHORT_LABELS[captureMode]})`,
+                                      },
+                                      { value: 'form', label: 'Form', icon: PanelTop },
+                                      {
+                                        value: 'conversational',
+                                        label: 'Chat',
+                                        icon: MessageSquareText,
+                                      },
+                                    ]}
+                                  />
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-xs">Checking</Label>
+                                    <FieldHelp title="Answer checking">
+                                      How the answer is checked. <strong>Format only</strong> runs
+                                      the standard format/required checks (e.g. a valid email
+                                      shape). <strong>AI</strong> adds a quick model pass that
+                                      tidies the value (proper-case names, neat organisation names)
+                                      and rejects obvious nonsense (&quot;asdf&quot;,
+                                      &quot;test@test&quot;). <strong>Both</strong> runs the format
+                                      check first, then the AI tidy/flag. The AI pass is best-effort
+                                      — if it can&apos;t run, the respondent is never blocked.
+                                    </FieldHelp>
+                                  </div>
+                                  <Select
+                                    value={field.validation}
+                                    onValueChange={(v) =>
+                                      updateField(index, {
+                                        validation: v as ProfileFieldValidationMode,
+                                      })
+                                    }
+                                    disabled={busy}
+                                  >
+                                    <SelectTrigger className="h-8 w-full sm:w-56">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {PROFILE_FIELD_VALIDATION_MODES.map((m) => (
+                                        <SelectItem key={m} value={m}>
+                                          {PROFILE_FIELD_VALIDATION_MODE_LABELS[m]}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-muted-foreground text-xs">
+                                      Storage key
+                                    </Label>
+                                    <FieldHelp title="Storage key">
+                                      The internal id this answer is saved under — auto-filled from
+                                      the label, lowercase with underscores. You rarely need to
+                                      touch it; change it only if another system reads these answers
+                                      by a specific key. Avoid renaming it on a live questionnaire,
+                                      or previously collected answers won&apos;t line up.
+                                    </FieldHelp>
+                                  </div>
+                                  <Input
+                                    value={field.key}
+                                    placeholder="auto from label"
+                                    onChange={(e) => updateFieldKey(index, e.target.value)}
+                                    disabled={busy}
+                                    className="h-8 w-full font-mono text-xs sm:w-56"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Live preview: a plain-English sentence of how this field behaves. */}
+                              <div className="text-muted-foreground border-t px-4 py-2.5 text-xs">
+                                <span className="text-foreground/70 font-medium">Preview · </span>
+                                {describeProfileField(field, captureMode)}
+                              </div>
                             </div>
                           )}
-
-                          <label className="inline-flex cursor-pointer items-center gap-2 text-sm select-none">
-                            <Switch
-                              checked={field.required}
-                              onCheckedChange={(checked) =>
-                                updateField(index, { required: checked })
-                              }
-                              disabled={busy}
-                            />
-                            <span className="font-medium">Required</span>
-                            <span className="text-muted-foreground text-xs">
-                              {field.required ? 'must be answered' : 'optional'}
-                            </span>
-                          </label>
                         </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeField(index)}
-                          disabled={busy}
-                          aria-label={`Remove ${fieldName}`}
-                          className="text-muted-foreground hover:text-destructive shrink-0"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      {/* Advanced strip: placement override, checking, and the auto-derived storage key. */}
-                      <div className="bg-muted/30 space-y-3 border-t px-4 py-3">
-                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <Label className="text-xs">Collect via</Label>
-                            <FieldHelp title="Collect via">
-                              Where THIS field is collected. <strong>Default</strong> follows the
-                              version default above. Override it to mix the two — e.g. keep name
-                              &amp; email on the form while the rest are gathered in conversation.
-                              Conversation fields are asked for naturally in-chat and saved as the
-                              respondent provides them; required ones keep being asked until
-                              answered.
-                            </FieldHelp>
-                          </div>
-                          <Segmented
-                            size="sm"
-                            ariaLabel={`Collect ${fieldName} via`}
-                            value={field.captureVia ?? '__default__'}
-                            onChange={(v) =>
-                              updateField(index, {
-                                captureVia: v === '__default__' ? undefined : v,
-                              })
-                            }
-                            disabled={busy}
-                            options={[
-                              {
-                                value: '__default__',
-                                label: 'Default',
-                                hint: `(${CAPTURE_MODE_SHORT_LABELS[captureMode]})`,
-                              },
-                              { value: 'form', label: 'Form', icon: PanelTop },
-                              { value: 'conversational', label: 'Chat', icon: MessageSquareText },
-                            ]}
-                          />
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <Label className="text-xs">Checking</Label>
-                            <FieldHelp title="Answer checking">
-                              How the answer is checked. <strong>Format only</strong> runs the
-                              standard format/required checks (e.g. a valid email shape).{' '}
-                              <strong>AI</strong> adds a quick model pass that tidies the value
-                              (proper-case names, neat organisation names) and rejects obvious
-                              nonsense (&quot;asdf&quot;, &quot;test@test&quot;).{' '}
-                              <strong>Both</strong> runs the format check first, then the AI
-                              tidy/flag. The AI pass is best-effort — if it can&apos;t run, the
-                              respondent is never blocked.
-                            </FieldHelp>
-                          </div>
-                          <Select
-                            value={field.validation}
-                            onValueChange={(v) =>
-                              updateField(index, { validation: v as ProfileFieldValidationMode })
-                            }
-                            disabled={busy}
-                          >
-                            <SelectTrigger className="h-8 w-full sm:w-56">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PROFILE_FIELD_VALIDATION_MODES.map((m) => (
-                                <SelectItem key={m} value={m}>
-                                  {PROFILE_FIELD_VALIDATION_MODE_LABELS[m]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <Label className="text-muted-foreground text-xs">Storage key</Label>
-                            <FieldHelp title="Storage key">
-                              The internal id this answer is saved under — auto-filled from the
-                              label, lowercase with underscores. You rarely need to touch it; change
-                              it only if another system reads these answers by a specific key. Avoid
-                              renaming it on a live questionnaire, or previously collected answers
-                              won&apos;t line up.
-                            </FieldHelp>
-                          </div>
-                          <Input
-                            value={field.key}
-                            placeholder="auto from label"
-                            onChange={(e) => updateFieldKey(index, e.target.value)}
-                            disabled={busy}
-                            className="h-8 w-full font-mono text-xs sm:w-56"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Live preview: a plain-English sentence of exactly how this field behaves. */}
-                      <div className="text-muted-foreground border-t px-4 py-2.5 text-xs">
-                        <span className="text-foreground/70 font-medium">Preview · </span>
-                        {describeProfileField(field, captureMode)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addField}
+                  disabled={busy}
+                  className="mt-1"
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Add profile field
+                </Button>
+              </>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addField}
-              disabled={busy}
-              className="mt-4"
-            >
-              <Plus className="mr-1 h-4 w-4" /> Add profile field
-            </Button>
           </SettingsGroup>
         </div>
       </div>

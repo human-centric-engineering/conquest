@@ -134,6 +134,14 @@ import { ConfigEditor as ConfigEditorUnderTest } from '@/components/admin/questi
 const clickSave = () =>
   fireEvent.click(screen.getByRole('button', { name: /save configuration/i }));
 
+/** Toggle the "Respondent profile fields" enable switch (off by default; on seeds the starter set). */
+const enableCapture = () =>
+  fireEvent.click(screen.getByRole('switch', { name: /collect respondent profile fields/i }));
+
+/** Expand a collapsed profile-field card by its summary "Toggle {label}" button. */
+const expandField = (label: string) =>
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`toggle ${label}`, 'i') }));
+
 const bodyOf = (specs: MutationSpec[]) => specs[0][2] as Record<string, unknown>;
 
 /**
@@ -604,16 +612,93 @@ describe('ConfigEditor', () => {
 
   // ── Profile fields ────────────────────────────────────────────────────────────
 
-  it('shows the empty-state message when no profile fields exist', () => {
+  it('shows the OFF state (disabled by default) when there are no fields', () => {
     setup({ profileFields: [] });
-    expect(screen.getByText(/no details collected yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/not collecting respondent details/i)).toBeInTheDocument();
+    // No field editor / add control while capture is off.
+    expect(screen.queryByRole('button', { name: /add profile field/i })).not.toBeInTheDocument();
   });
 
-  it('"Add profile field" adds a new row', () => {
-    setup({ profileFields: [] });
+  it('enabling capture seeds the four starter fields (name/email req, phone/org optional)', () => {
+    const { specs } = setup({ profileFields: [] });
+    enableCapture();
+    for (const label of ['Name', 'Email address', 'Phone number', 'Organisation']) {
+      expect(
+        screen.getByRole('button', { name: new RegExp(`toggle ${label}`, 'i') })
+      ).toBeInTheDocument();
+    }
+    clickSave();
+    const fields = bodyOf(specs).profileFields as Array<{
+      key: string;
+      required: boolean;
+      type: string;
+    }>;
+    expect(fields.map((f) => f.key)).toEqual(['name', 'email', 'phone', 'organisation']);
+    expect(fields.map((f) => f.required)).toEqual([true, true, false, false]);
+    expect(fields[1].type).toBe('email');
+  });
+
+  it('disabling capture saves no fields even when fields are configured', () => {
+    const { specs } = setup({
+      profileFields: [
+        {
+          key: 'org',
+          label: 'Organisation',
+          type: 'text',
+          required: false,
+          validation: 'deterministic',
+        },
+      ],
+    });
+    enableCapture(); // was on (has a field) → turn off
+    clickSave();
+    expect(bodyOf(specs).profileFields).toEqual([]);
+  });
+
+  it('"Add profile field" adds a new expanded row', () => {
+    setup({
+      profileFields: [
+        { key: 'x', label: 'Existing', type: 'text', required: false, validation: 'deterministic' },
+      ],
+    });
+    // The existing field is collapsed — its editor inputs are not rendered.
+    expect(screen.queryByPlaceholderText(/your organisation/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
-    // A new field card appears with the respondent-facing label input.
-    expect(screen.getAllByPlaceholderText(/your organisation/i).length).toBeGreaterThan(0);
+    // The new field opens expanded, so its label input is visible.
+    expect(screen.getByPlaceholderText(/your organisation/i)).toBeInTheDocument();
+  });
+
+  it('opening a field collapses any other open field (accordion)', () => {
+    setup({ profileFields: [] });
+    enableCapture(); // seeds Name, Email address, Phone number, Organisation — all collapsed
+    const nameToggle = () => screen.getByRole('button', { name: /toggle name/i });
+    const emailToggle = () => screen.getByRole('button', { name: /toggle email address/i });
+
+    fireEvent.click(nameToggle());
+    expect(nameToggle()).toHaveAttribute('aria-expanded', 'true');
+
+    // Opening a second field closes the first.
+    fireEvent.click(emailToggle());
+    expect(emailToggle()).toHaveAttribute('aria-expanded', 'true');
+    expect(nameToggle()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('adding a field collapses the currently-open one (accordion)', () => {
+    setup({
+      profileFields: [
+        { key: 'x', label: 'Existing', type: 'text', required: false, validation: 'deterministic' },
+      ],
+    });
+    expandField('existing');
+    expect(screen.getByRole('button', { name: /toggle existing/i })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
+    expect(screen.getByRole('button', { name: /toggle existing/i })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
   });
 
   it('removing a profile field removes it from the list', () => {
@@ -628,9 +713,9 @@ describe('ConfigEditor', () => {
         },
       ],
     });
-    expect(screen.getByDisplayValue('org')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /remove/i }));
-    expect(screen.queryByDisplayValue('org')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /toggle organisation/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /remove organisation/i }));
+    expect(screen.queryByRole('button', { name: /toggle organisation/i })).not.toBeInTheDocument();
   });
 
   it('PATCHes profileFields with trimmed key/label on save', () => {
@@ -645,6 +730,7 @@ describe('ConfigEditor', () => {
         },
       ],
     });
+    expandField('organisation');
     fireEvent.change(screen.getByDisplayValue('org'), { target: { value: ' org_key ' } });
     fireEvent.change(screen.getByDisplayValue('Organisation'), {
       target: { value: ' Org Label ' },
@@ -656,7 +742,11 @@ describe('ConfigEditor', () => {
   });
 
   it('auto-derives the storage key (slugified) from the label for a NEW field', () => {
-    const { specs } = setup({ profileFields: [] });
+    const { specs } = setup({
+      profileFields: [
+        { key: 'x', label: 'Existing', type: 'text', required: false, validation: 'deterministic' },
+      ],
+    });
     fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
     fireEvent.change(screen.getByPlaceholderText(/your organisation/i), {
       target: { value: 'Company Size!' },
@@ -665,22 +755,30 @@ describe('ConfigEditor', () => {
     expect(screen.getByDisplayValue('company_size')).toBeInTheDocument();
     clickSave();
     const fields = bodyOf(specs).profileFields as Array<{ key: string; label: string }>;
-    expect(fields[0]).toMatchObject({ key: 'company_size', label: 'Company Size!' });
+    expect(fields).toContainEqual(
+      expect.objectContaining({ key: 'company_size', label: 'Company Size!' })
+    );
   });
 
   it('stops auto-deriving the key once it has been hand-edited', () => {
-    const { specs } = setup({ profileFields: [] });
+    const { specs } = setup({
+      profileFields: [
+        { key: 'x', label: 'Existing', type: 'text', required: false, validation: 'deterministic' },
+      ],
+    });
     fireEvent.click(screen.getByRole('button', { name: /add profile field/i }));
     fireEvent.change(screen.getByPlaceholderText(/your organisation/i), {
-      target: { value: 'Name' },
+      target: { value: 'Full Name' },
     });
-    expect(screen.getByDisplayValue('name')).toBeInTheDocument(); // auto-derived
+    expect(screen.getByDisplayValue('full_name')).toBeInTheDocument(); // auto-derived
     // Hand-edit the key, then change the label again — the key must NOT be rewritten.
-    fireEvent.change(screen.getByDisplayValue('name'), { target: { value: 'custom_id' } });
-    fireEvent.change(screen.getByDisplayValue('Name'), { target: { value: 'Full Name' } });
+    fireEvent.change(screen.getByDisplayValue('full_name'), { target: { value: 'custom_id' } });
+    fireEvent.change(screen.getByDisplayValue('Full Name'), { target: { value: 'Full Name X' } });
     clickSave();
     const fields = bodyOf(specs).profileFields as Array<{ key: string; label: string }>;
-    expect(fields[0]).toMatchObject({ key: 'custom_id', label: 'Full Name' });
+    expect(fields).toContainEqual(
+      expect.objectContaining({ key: 'custom_id', label: 'Full Name X' })
+    );
   });
 
   it('does NOT rewrite a saved field’s key when its label is edited (protects stored answers)', () => {
@@ -695,6 +793,7 @@ describe('ConfigEditor', () => {
         },
       ],
     });
+    expandField('organisation');
     // A loaded field is key-locked — editing the label leaves the key alone.
     fireEvent.change(screen.getByDisplayValue('Organisation'), { target: { value: 'Company' } });
     clickSave();
@@ -750,6 +849,7 @@ describe('ConfigEditor', () => {
         },
       ],
     });
+    expandField('department');
     expect(screen.queryByPlaceholderText(/e\.g\. Engineering/i)).not.toBeInTheDocument();
 
     // Switch the field type to 'select'
@@ -775,6 +875,7 @@ describe('ConfigEditor', () => {
         },
       ],
     });
+    expandField('department');
     fireEvent.change(screen.getByPlaceholderText(/e\.g\. Engineering/i), {
       target: { value: 'Engineering, Sales, Support' },
     });
@@ -810,18 +911,17 @@ describe('ConfigEditor', () => {
         },
       ],
     });
-    // The profile field row is rendered as a div; the required switch label appears right next to
-    // the switch inside that row. The invitee table uses aria-label="... required" so the only
-    // plain "Required" text (xs label with no aria-label) is the profile field row.
-    // getAllByRole('switch') includes: voiceEnabled, attachmentsEnabled, anonymousMode,
-    // reasoningStreamEnabled (DEFAULT=true), reasoningStreamPersist, sensitivityAwareness (false),
-    // and the invitee field rows (6 rows × 2 = 12 switches). Profile field Required switch
-    // comes after those. Use label text proximity inside the profile section.
-    // Strategy: all profile-field switches are below the "Respondent profile fields" heading.
-    const sectionHeading = settingsContent().getByText('Respondent profile fields');
-    const section = sectionHeading.closest('[class*="overflow-hidden"]') as HTMLElement;
-    const requiredSwitch = within(section).getByRole('switch');
-    fireEvent.click(requiredSwitch);
+    // Scope to the profile section, expand the field, and click its required switch — the section has
+    // exactly two switches (the section enable toggle, which carries an aria-label, and the field's
+    // required toggle, which doesn't), so filter out the enable one.
+    const section = settingsContent()
+      .getByText('Respondent profile fields')
+      .closest('[class*="overflow-hidden"]') as HTMLElement;
+    expandField('organisation');
+    const requiredSwitch = within(section)
+      .getAllByRole('switch')
+      .find((s) => s.getAttribute('aria-label') !== 'Collect respondent profile fields');
+    fireEvent.click(requiredSwitch!);
     clickSave();
     const fields = bodyOf(specs).profileFields as Array<{ key: string; required: boolean }>;
     expect(fields[0].required).toBe(true);
