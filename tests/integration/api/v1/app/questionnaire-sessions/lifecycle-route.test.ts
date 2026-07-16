@@ -24,6 +24,7 @@ vi.mock('@/lib/db/client', () => dbMock);
 const sessionsMock = vi.hoisted(() => ({
   pauseSession: vi.fn(),
   resumeSession: vi.fn(),
+  abandonSession: vi.fn(),
   loadSessionResumeState: vi.fn(),
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/sessions', () => sessionsMock);
@@ -64,6 +65,7 @@ beforeEach(() => {
   });
   sessionsMock.pauseSession.mockResolvedValue('paused');
   sessionsMock.resumeSession.mockResolvedValue('active');
+  sessionsMock.abandonSession.mockResolvedValue('abandoned');
   sessionsMock.loadSessionResumeState.mockResolvedValue({
     status: 'active',
     answeredSlots: [{ slotKey: 'role', value: 'Engineer', provenance: 'direct', confidence: 0.9 }],
@@ -103,18 +105,62 @@ describe('gate order', () => {
   });
 });
 
-describe('anonymous refusal (signed-in only)', () => {
-  it('403s a valid anonymous caller — pause is not available to no-login sessions', async () => {
+describe('anonymous refusal (pause/resume signed-in only)', () => {
+  function asAnonymousCaller(): void {
     setAuth(mockUnauthenticatedUser());
     dbMock.prisma.appQuestionnaireSession.findUnique.mockResolvedValue({
       id: 'sess-1',
       respondentUserId: null,
     });
     tokenMock.verifySessionToken.mockReturnValue({ ok: true, sessionId: 'sess-1' });
+  }
+
+  it('403s a valid anonymous caller pausing — pause is not available to no-login sessions', async () => {
+    asAnonymousCaller();
     const res = await POST(req({ action: 'pause' }, { 'x-session-token': 'tok.sig' }), ctx);
     expect(res.status).toBe(403);
     expect((await res.json()).error.code).toBe('PAUSE_NOT_PERMITTED');
     expect(sessionsMock.pauseSession).not.toHaveBeenCalled();
+  });
+
+  it('403s a valid anonymous caller resuming', async () => {
+    asAnonymousCaller();
+    const res = await POST(req({ action: 'resume' }, { 'x-session-token': 'tok.sig' }), ctx);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe('PAUSE_NOT_PERMITTED');
+    expect(sessionsMock.resumeSession).not.toHaveBeenCalled();
+  });
+
+  it('ALLOWS a valid anonymous caller to abandon (backs the no-login "Start new" flow)', async () => {
+    asAnonymousCaller();
+    const res = await POST(req({ action: 'abandon' }, { 'x-session-token': 'tok.sig' }), ctx);
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.status).toBe('abandoned');
+    expect(sessionsMock.abandonSession).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_abandon',
+    });
+  });
+});
+
+describe('abandon', () => {
+  it('200s and abandons the session for the authed owner', async () => {
+    const res = await POST(req({ action: 'abandon' }), ctx);
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.status).toBe('abandoned');
+    expect(sessionsMock.abandonSession).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_abandon',
+    });
+  });
+
+  it('409s when the state machine rejects abandoning a terminal session', async () => {
+    sessionsMock.abandonSession.mockRejectedValue(
+      new SessionTransitionError('completed', 'abandoned')
+    );
+    const res = await POST(req({ action: 'abandon' }), ctx);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.details.from).toBe('completed');
+    expect(body.error.details.to).toBe('abandoned');
   });
 });
 

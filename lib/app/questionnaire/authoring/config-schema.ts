@@ -21,6 +21,7 @@ import {
   ACCESS_MODES,
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
+  CAPTURE_MODES,
   COHORT_REPORT_BACKGROUND_MAX_LENGTH,
   COHORT_REPORT_DETAIL_LEVELS,
   COHORT_REPORT_FORMALITIES,
@@ -38,6 +39,7 @@ import {
   MAX_REPORT_RESEARCH_RESULTS,
   MAX_REPORT_RESEARCH_ROUNDS,
   PROFILE_FIELD_TYPES,
+  PROFILE_FIELD_VALIDATION_MODES,
   REASONING_PLACEMENTS,
   REPORT_RESEARCH_DISPLAYS,
   REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH,
@@ -80,6 +82,14 @@ export const profileFieldSchema = z
     type: z.enum(PROFILE_FIELD_TYPES),
     required: z.boolean(),
     options: z.array(z.string().trim().min(1)).optional(),
+    // How the value is validated. Optional-with-default so legacy stored fields (written before this
+    // key existed) parse cleanly and resolve to format-only `deterministic` behaviour.
+    validation: z.enum(PROFILE_FIELD_VALIDATION_MODES).optional().default('deterministic'),
+    // Where this field is collected, overriding the version-wide `captureMode`. Optional with NO
+    // default (unlike `validation`): an absent value means "inherit the default", which is what a
+    // mixed set of per-field overrides expresses as a hybrid questionnaire. Legacy fields simply omit
+    // it and inherit, so no migration is needed.
+    captureVia: z.enum(CAPTURE_MODES).optional(),
   })
   .superRefine((field, ctx) => {
     if (field.type === 'select') {
@@ -322,6 +332,9 @@ export const updateConfigSchema = z
     supportMessage: z.string().trim().max(500).optional(),
     supportResourceUrl: z.string().trim().max(500).optional(),
     profileFields: z.array(profileFieldSchema).optional(),
+    // How the profile fields are collected: `form` (a blocking form gate after the intro) or
+    // `conversational` (the interviewer gathers them in-chat). Defaults to `form`.
+    captureMode: z.enum(CAPTURE_MODES).optional(),
     answerSlotPanelScope: z.enum(ANSWER_SLOT_PANEL_SCOPES).optional(),
     // How the respondent completes the session: chat (conversation), form (raw sectioned
     // form), or both (toggle between them). Defaults to chat for existing versions.
@@ -330,6 +343,9 @@ export const updateConfigSchema = z
     // (in the chat + on the answer panel) instead of sending a fresh turn. On by default;
     // respondent-facing UX, no platform flag.
     inlineCorrectionEnabled: z.boolean().optional(),
+    // Session resume: remember an in-progress session on the device + the Continue/Start-new chooser
+    // + the cross-device resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag.
+    sessionResumeEnabled: z.boolean().optional(),
     // Live "watch it think" reasoning trace (demo feature). Gated additionally by the platform
     // flag APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED. placement = overlay | inline.
     reasoningStreamEnabled: z.boolean().optional(),

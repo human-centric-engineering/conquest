@@ -603,6 +603,8 @@ export const API = {
       FROM_INVITE: '/api/v1/app/questionnaire-sessions/from-invite',
       /** Admin "Preview as respondent" session (POST `{ versionId }` → `{ session, accessToken }`); bypasses the anonymous-mode gate, `isPreview`. */
       PREVIEW: '/api/v1/app/questionnaire-sessions/preview',
+      /** Cross-device resume of an anonymous in-progress session by its support ref (POST `{ ref }` → `{ session, accessToken, expiresAt, ref }`); re-mints a fresh token. Public, hard rate-limited, anonymous+resumable only. */
+      RESUME_BY_REF: '/api/v1/app/questionnaire-sessions/resume-by-ref',
       /** Respondent turn — SSE stream (POST `{ message }`). */
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
@@ -623,13 +625,15 @@ export const API = {
       transcript: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/transcript`,
       /** Resolved respondent intro / splash — adaptive copy + background (GET — intro screen). */
       intro: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/intro`,
+      /** Respondent profile capture — resolved config + satisfied state (GET); submit + validate + persist (PUT `{ profileValues }`) (F-capture). */
+      profile: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/profile`,
       /** Selectable interviewer persona — resolved menu (GET) + set the chosen persona (PATCH). */
       persona: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/persona`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */
       status: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/status`,
-      /** Pause/resume a session (POST `{ action }`) — signed-in respondents only (F7.3). */
+      /** Pause/resume/abandon a session (POST `{ action }`) — pause/resume signed-in only; `abandon` also allowed for an anonymous token holder (backs "Start new"). */
       lifecycle: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/lifecycle`,
       /** Submit (complete) a session (POST) — the respondent accept→completed path (F7.3). */
       submit: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/submit`,

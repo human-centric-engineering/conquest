@@ -67,13 +67,17 @@ import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnai
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
+import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
+import { ProfileCaptureGate } from '@/components/app/questionnaire/profile/profile-capture-gate';
 import { API } from '@/lib/api/endpoints';
 
 /**
- * Which surface the carousel is showing. `intro` and `persona` are pre-chat "gates" that only exist
- * when their feature is on; both defer the opening LLM turn until the respondent moves past them.
+ * Which surface the carousel is showing. `intro`, `capture`, and `persona` are pre-chat "gates" that
+ * only exist when their feature is on; all defer the opening LLM turn until the respondent moves past
+ * them. `capture` is additionally BLOCKING — unlike intro/persona (which the respondent may swipe past
+ * freely), the respondent cannot advance beyond it until the profile form is submitted and validated.
  */
-type WorkspaceView = 'intro' | 'persona' | 'chat' | 'form';
+type WorkspaceView = 'intro' | 'capture' | 'persona' | 'chat' | 'form';
 
 export interface SessionWorkspaceProps {
   sessionId: string;
@@ -154,12 +158,23 @@ export interface SessionWorkspaceProps {
    * their chosen persona is in place before the first question streams. Disabled / read-only omit it.
    */
   personas?: ResolvedSessionPersonas | null;
+  /**
+   * Respondent profile capture (F-capture). When the version has a `form`-placement subset of
+   * `profileFields` (`formFields`) and is NOT anonymous, a BLOCKING form gate rides the carousel just
+   * after the intro and before the persona/chat: the respondent cannot advance (and the opening LLM
+   * turn is deferred) until they submit valid details. `satisfied` (a snapshot already exists on
+   * resume, or there is no form subset) skips the gate. A hybrid version's conversational fields aren't
+   * here — the interviewer gathers those in-chat. Null for an anonymous version — that path stays
+   * PII-free and never gates. The read-only admin viewer omits it.
+   */
+  capture?: ResolvedSessionCapture | null;
 }
 
 // Static label/icon lookup for the carousel toggle — module-scoped so it isn't
 // reallocated on every render (the workspace re-renders on each streaming token).
 const VIEW_META: Record<WorkspaceView, { label: string; Icon: typeof BookOpen }> = {
   intro: { label: 'Intro', Icon: BookOpen },
+  capture: { label: 'Details', Icon: ClipboardList },
   persona: { label: 'Interviewer', Icon: Drama },
   chat: { label: 'Chat', Icon: MessageSquare },
   form: { label: 'Form', Icon: ListChecks },
@@ -185,6 +200,7 @@ export function SessionWorkspace({
   readOnly = false,
   intro = null,
   personas = null,
+  capture = null,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
@@ -199,6 +215,16 @@ export function SessionWorkspace({
   const showPersona = Boolean(
     personas?.enabled && showChat && !readOnly && personas.switcher !== 'indicator'
   );
+  // The profile capture form-gate rides the carousel between the intro and the persona/chat, whenever
+  // the version has a form-placement subset to collect and hasn't already (a resume with an existing
+  // snapshot, an all-conversational/anonymous version, or no fields leaves `satisfied`/empty/`null` so
+  // the gate is absent). `formFields` is only the `form`-placement subset — a hybrid version's
+  // conversational fields are gathered in-chat, never here. BLOCKING: the respondent can't advance past
+  // it until it's submitted (see `goToView`) — and the LLM kickoff is deferred until then. Never in the
+  // read-only admin viewer.
+  const showCapture = Boolean(
+    capture && capture.formFields.length > 0 && !capture.satisfied && !readOnly
+  );
   // The in-chat "Interviewer: {name} · Change" chip — shown for the `indicator` and `both` switchers.
   const showInterviewerChip = Boolean(
     personas?.enabled &&
@@ -207,22 +233,31 @@ export function SessionWorkspace({
     (personas.switcher === 'indicator' || personas.switcher === 'both')
   );
 
-  // The pre-chat gates, in carousel order: intro first (read the brief), then persona (pick a voice).
-  // The workspace lands on the FIRST present gate on a fresh session and defers the kickoff until the
-  // respondent moves past every gate to the conversation. A resume lands on the conversation instead.
-  const firstGate: WorkspaceView | null = showIntro ? 'intro' : showPersona ? 'persona' : null;
+  // The pre-chat gates, in carousel order: intro first (read the brief), then capture (enter details),
+  // then persona (pick a voice). The workspace lands on the FIRST present gate on a fresh session and
+  // defers the kickoff until the respondent moves past every gate to the conversation. A resume lands
+  // on the conversation instead.
+  const firstGate: WorkspaceView | null = showIntro
+    ? 'intro'
+    : showCapture
+      ? 'capture'
+      : showPersona
+        ? 'persona'
+        : null;
   const openOnGate = firstGate !== null && autoStart;
 
   // The carousel surfaces, left→right, present-only. At least one of chat/form always exists
-  // (presentationMode is chat | form | both), so this is never empty.
+  // (presentationMode is chat | form | both), so this is never empty. Capture sits after intro and
+  // before persona so the required details are in hand before a voice is chosen or a turn streams.
   const views = useMemo<WorkspaceView[]>(() => {
     const list: WorkspaceView[] = [];
     if (showIntro) list.push('intro');
+    if (showCapture) list.push('capture');
     if (showPersona) list.push('persona');
     if (showChat) list.push('chat');
     if (showForm) list.push('form');
     return list;
-  }, [showIntro, showPersona, showChat, showForm]);
+  }, [showIntro, showCapture, showPersona, showChat, showForm]);
 
   // Active surface. A fresh session opens on the first gate (intro, else persona); everything else
   // opens on the primary surface (a resume keeps the gates reachable via the toggle).
@@ -233,6 +268,13 @@ export function SessionWorkspace({
   // is spent while they're still reading the intro or choosing a persona. Initialises `true` whenever
   // we don't open on a gate (resume, or no gates), preserving "open immediately" for those paths.
   const [started, setStarted] = useState(!openOnGate);
+  // Has the respondent submitted the blocking capture gate? Initialises `true` when there's no gate,
+  // so non-capture sessions behave exactly as before. Gates BOTH forward navigation past the capture
+  // surface (see `goToView`) and the LLM kickoff (below), so no turn streams while the form is open.
+  const [captureDone, setCaptureDone] = useState(!showCapture);
+  // The blocking window: on the unsubmitted capture gate, forward moves and the surface toggle are
+  // suppressed so the respondent can't skip required details.
+  const captureBlocking = showCapture && !captureDone;
   // Data-slot mode: the slot keys the latest turn filled, fed to the panel so it can scroll to them
   // and step through. Computed by diffing the previous panel snapshot against each new one (the
   // stream never tells the client a turn ordinal, so a diff is the reliable signal). `prevPanelRef`
@@ -341,11 +383,12 @@ export function SessionWorkspace({
   useEffect(() => {
     if (!autoStart) return;
     if (!started) return; // intro present and not yet left — hold the opening turn
+    if (captureBlocking) return; // required details not yet submitted — hold the opening turn
     if (!showChat) return; // form-only mode never opens a chat turn
     if (streamStatus !== 'idle') return;
     if (turnCount > 1) return;
     void kickoff();
-  }, [autoStart, started, showChat, kickoff, streamStatus, turnCount]);
+  }, [autoStart, started, captureBlocking, showChat, kickoff, streamStatus, turnCount]);
 
   // Keep the settle targets current without touching refs during render. The stream calls
   // `onTurnSettled` (and thus reads these) only after a turn settles — well after this effect.
@@ -415,19 +458,43 @@ export function SessionWorkspace({
     [stream]
   );
 
-  // Carousel navigation. Leaving the intro (to either surface) marks the session started, which
-  // releases the deferred kickoff. Switching TO the form re-seeds it so chat-inferred answers appear;
-  // switching TO chat refetches the panel so it reflects the form's edits.
+  // Carousel navigation. Leaving the pre-chat gates (to a real surface) marks the session started,
+  // which releases the deferred kickoff. Switching TO the form re-seeds it so chat-inferred answers
+  // appear; switching TO chat refetches the panel so it reflects the form's edits.
   const goToView = useCallback(
     (view: WorkspaceView) => {
+      // Blocking capture gate: never advance PAST it until it's submitted. Guards every nav vector
+      // (toggle, swipe, arrow keys, the intro's Proceed) at once; the gate's own submit uses
+      // `handleCaptureSubmitted` (below), which advances directly and bypasses this. Backward moves
+      // (to the intro) and re-selecting the capture surface itself stay allowed.
+      if (showCapture && !captureDone) {
+        const captureIdx = views.indexOf('capture');
+        if (captureIdx !== -1 && views.indexOf(view) > captureIdx) return;
+      }
       setActiveView(view);
-      // Reaching a real surface (past the intro/persona gates) releases the deferred kickoff.
-      if (view !== 'intro' && view !== 'persona') setStarted(true);
+      // Reaching a real surface (past the intro/capture/persona gates) releases the deferred kickoff.
+      if (view !== 'intro' && view !== 'capture' && view !== 'persona') setStarted(true);
       if (view === 'form') form.refresh();
       else if (view === 'chat') panel.refetch();
     },
-    [form, panel]
+    [form, panel, showCapture, captureDone, views]
   );
+
+  // The capture gate was submitted (server-validated + snapshot persisted). Mark it done and slide to
+  // the next surface — advancing DIRECTLY (not via `goToView`, whose forward-lock still reads the
+  // pre-flip `captureDone`). The next surface is the persona picker if present, else the primary
+  // conversation/form. CRITICAL: only release the kickoff (`started`) when the next surface is NOT a
+  // further gate — if a persona picker follows, `started` must stay false so the opening turn is still
+  // deferred until the respondent picks a voice and moves to the chat (else it streams behind the
+  // picker, with the DEFAULT persona). Mirrors `goToView`'s gate rule.
+  const handleCaptureSubmitted = useCallback(() => {
+    setCaptureDone(true);
+    const next = views.find((v) => v !== 'intro' && v !== 'capture') ?? 'chat';
+    if (next !== 'persona') setStarted(true);
+    setActiveView(next);
+    if (next === 'form') form.refresh();
+    else if (next === 'chat') panel.refetch();
+  }, [views, form, panel]);
 
   // Selectable interviewer persona: the respondent's current choice, seeded from the resolved menu.
   // Persisted on pick so the turn loop reads it (`resolveEffectiveTone`). Fails soft — a persona is an
@@ -485,7 +552,9 @@ export function SessionWorkspace({
   const swipe = useHorizontalSwipe({
     onCommitNext: () => goRelative(1),
     onCommitPrev: () => goRelative(-1),
-    canNext: activeIndex < views.length - 1,
+    // Rubber-band (don't commit) a forward gesture on the unsubmitted capture gate — the gesture
+    // physically can't skip required details. `goToView`'s lock is the belt to this suspenders.
+    canNext: activeIndex < views.length - 1 && !(activeView === 'capture' && !captureDone),
     canPrev: activeIndex > 0,
     getWidth: measureWidth,
   });
@@ -599,12 +668,16 @@ export function SessionWorkspace({
   // The carousel toggle's segments, derived from the present surfaces (left→right). Shown whenever
   // there's more than one surface to move between — chat↔form, or intro alongside either.
   const toggleItems: ToggleItem[] = views.map((id) => ({ id, ...VIEW_META[id] }));
-  const showToggle = views.length > 1;
+  // Suppressed entirely while the blocking capture gate is open — the toggle would otherwise offer a
+  // one-tap skip past required details (and `ModeToggle` has no per-segment disabled state). The intro
+  // Proceed button and the gate's own submit drive the flow until the details are in.
+  const showToggle = views.length > 1 && !captureBlocking;
 
   // Right-cluster controls: the surface toggle and the mobile answer-review trigger. Kept
   // `undefined` when neither applies so the lifecycle strip still collapses to nothing on a plain
   // form-only session (the bar renders the strip whenever `trailing` is present).
-  const showReviewTrigger = showChat && activeView !== 'intro' && activeView !== 'persona'; // the answer panel only rides the chat surface
+  const showReviewTrigger =
+    showChat && activeView !== 'intro' && activeView !== 'capture' && activeView !== 'persona'; // the answer panel only rides the chat surface
   // The interviewer chip only makes sense on the chat surface (not while reading the intro / on the
   // form / on the picker page itself).
   const showChipHere = showInterviewerChip && activeView === 'chat';
@@ -730,11 +803,27 @@ export function SessionWorkspace({
         // "Continue" only once a real answer exists — a merely-opened/resumed session at 0% still
         // reads "Begin" (the workspace's `started` flag governs the kickoff, not this label).
         inProgress={(lifecycle.view?.completion.answeredCount ?? 0) > 0}
-        // When the interviewer picker rides between the intro and the chat, the intro CTA leads to it,
-        // not straight into the conversation — so it reads "Select your interviewer". The configured
-        // begin label then lands on the picker's own CTA (below).
-        proceedLabel={showPersona ? 'Select your interviewer' : undefined}
+        // The intro CTA leads to whatever rides next, not always straight into the conversation: the
+        // capture form ("Continue" to enter details), else the interviewer picker ("Select your
+        // interviewer"). The configured begin label then lands on that surface's own CTA.
+        proceedLabel={
+          showCapture ? 'Continue' : showPersona ? 'Select your interviewer' : undefined
+        }
         onProceed={() => goToView(views.find((v) => v !== 'intro') ?? 'chat')}
+      />
+    ) : null;
+
+  // The profile capture form gate. Submitting validates + persists server-side, then advances to the
+  // next surface (persona/chat) via `handleCaptureSubmitted`, which also releases the deferred kickoff.
+  const captureSurface =
+    showCapture && capture ? (
+      <ProfileCaptureGate
+        sessionId={sessionId}
+        accessToken={accessToken}
+        fields={capture.formFields}
+        // When a persona picker follows, the CTA leads to it; otherwise it begins the conversation.
+        proceedLabel={showPersona ? 'Continue' : (intro?.copy.buttonLabel ?? undefined)}
+        onSubmitted={handleCaptureSubmitted}
       />
     ) : null;
 
@@ -873,11 +962,13 @@ export function SessionWorkspace({
               >
                 {view === 'intro'
                   ? introSurface
-                  : view === 'persona'
-                    ? personaSurface
-                    : view === 'form'
-                      ? formSurface
-                      : chatSurface}
+                  : view === 'capture'
+                    ? captureSurface
+                    : view === 'persona'
+                      ? personaSurface
+                      : view === 'form'
+                        ? formSurface
+                        : chatSurface}
               </div>
             );
           })}

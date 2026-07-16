@@ -10,8 +10,9 @@ import {
   createOrResumeAuthedSession,
   type AuthedSessionRequest,
 } from '@/lib/app/questionnaire/chat/session-bootstrap';
-import { loadStartContext } from '@/lib/app/questionnaire/chat/start-context';
-import { ProfileStartForm } from '@/components/app/questionnaire/profile/profile-start-form';
+import { findAuthedResumeDetail } from '@/lib/app/questionnaire/chat/resumable-session';
+import { resolveSessionResumeEnabledForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import { AuthedResumeChooser } from '@/components/app/questionnaire/intro/authed-resume-chooser';
 
 export const metadata: Metadata = {
   title: 'Start questionnaire',
@@ -58,19 +59,31 @@ export default async function StartQuestionnairePage({
     return null; // unreachable — clearInvalidSession redirects
   }
 
-  // F8.3: a non-anonymous questionnaire with profile fields collects them BEFORE the
-  // session is created. The form posts the values back into the create route (which
-  // writes the snapshot atomically); a resumable session skips straight to the chat.
-  const context = await loadStartContext(request, session.user.id);
-  if (context.kind === 'resume') {
-    redirect(`/questionnaires/${context.sessionId}`);
-  }
-  if (context.kind === 'needs-profile' && 'invitationToken' in request) {
-    return (
-      <ProfileStartForm invitationToken={request.invitationToken} fields={context.profileFields} />
-    );
+  // Session resume (versionId path only): if the respondent already has an in-progress session for
+  // this version WITH real progress, offer Continue / Start new instead of silently resuming. The
+  // invitation path keeps its idempotent silent resume — its round/cohort context is resolved by the
+  // create seam, not re-derived here. A zero-progress session isn't worth a prompt (like the
+  // anonymous gate), so it falls through to the silent create/resume below.
+  if ('versionId' in request) {
+    const resumeEnabled = await resolveSessionResumeEnabledForVersion(request.versionId);
+    if (resumeEnabled) {
+      const resume = await findAuthedResumeDetail(request.versionId, session.user.id);
+      if (resume && resume.answeredCount >= 1) {
+        return (
+          <AuthedResumeChooser
+            versionId={request.versionId}
+            sessionId={resume.sessionId}
+            refRaw={resume.ref}
+            answeredCount={resume.answeredCount}
+          />
+        );
+      }
+    }
   }
 
+  // Create (or idempotently resume) the session and go straight to the chat. Profile capture is no
+  // longer collected here — for a non-anonymous version it now rides the workspace carousel as a
+  // blocking form gate AFTER the intro (F-capture), so the session is always created first.
   const result = await createOrResumeAuthedSession(request);
   if (result.ok) {
     redirect(`/questionnaires/${result.sessionId}`);

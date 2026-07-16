@@ -236,8 +236,22 @@ model AppQuestionnaireConfig {
   // Off by default; respondent-facing UX with no platform flag (the admin toggles it per version).
   inlineCorrectionEnabled Boolean @default(false)
 
-  // Session-start profile fields (ProfileFieldConfig[] — types.ts).
+  // Session resume: let a respondent return to an in-progress session rather than always starting
+  // fresh. Governs the whole capability — the no-login surface remembering its session on the device
+  // (localStorage) + the "Continue where you left off / Start new" chooser + the cross-device
+  // resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag. Off = today's
+  // behaviour (anonymous returns always mint a fresh session; by-ref resume 404s).
+  sessionResumeEnabled Boolean @default(true)
+
+  // Session-start profile fields (ProfileFieldConfig[] — types.ts). Each field carries its own
+  // `validation` mode (deterministic | agentic | hybrid) inside this JSON — no column per field.
   profileFields Json @default("[]")
+
+  // How the profile fields are collected from the respondent (CAPTURE_MODES — types.ts).
+  // form = a blocking form gate that rides the carousel after the intro and before the chat;
+  // conversational = the interviewer gathers them naturally in-chat. Default form. Ignored entirely
+  // when anonymousMode is on (the PII-free public path never collects a profile).
+  captureMode String @default("form") // form | conversational
 
   // Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning
   // (answers captured with provenance/confidence, contradictions spotted, why the next question was

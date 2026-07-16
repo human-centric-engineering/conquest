@@ -5,7 +5,7 @@
  * non-anonymous session that supplied valid profile values; it is NEVER written for an
  * anonymous session (no-login or authed-anonymous), and invalid/empty submissions are
  * rejected or skipped. Prisma + the `recordSessionCreated` seam are mocked; `$transaction`
- * runs its callback against a tx mock that records `appRespondentProfileSnapshot.create`.
+ * runs its callback against a tx mock that records `appRespondentProfileSnapshot.upsert`.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => {
   const tx = {
     appQuestionnaireSession: { create: vi.fn() },
     appQuestionnaireInvitation: { update: vi.fn() },
-    appRespondentProfileSnapshot: { create: vi.fn() },
+    // `findUnique` for the merge read in `upsertProfileSnapshot` (F8.7 hybrid): defaults to no prior
+    // snapshot so the merge is a no-op over an empty base.
+    appRespondentProfileSnapshot: { upsert: vi.fn(), findUnique: vi.fn().mockResolvedValue(null) },
   };
   const prisma = {
     $transaction: vi.fn((cb: (t: typeof tx) => unknown) => cb(tx)),
@@ -69,7 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (mocks.tx.appQuestionnaireSession.create as Mock).mockResolvedValue(NEW_SESSION);
   (mocks.tx.appQuestionnaireInvitation.update as Mock).mockResolvedValue({});
-  (mocks.tx.appRespondentProfileSnapshot.create as Mock).mockResolvedValue({});
+  (mocks.tx.appRespondentProfileSnapshot.upsert as Mock).mockResolvedValue({});
   (mocks.prisma.appQuestionnaireSession.findFirst as Mock).mockResolvedValue(null);
   (seamMock.recordSessionCreated as Mock).mockResolvedValue(undefined);
 });
@@ -84,12 +86,16 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
     });
 
     expect(result).toMatchObject({ ok: true, resumed: false });
-    expect(mocks.tx.appRespondentProfileSnapshot.create).toHaveBeenCalledWith({
-      data: {
+    // The shared writer (F8.7) upserts on the 1:1 sessionId so create-time / in-flow / conversational
+    // writers never race on the unique constraint.
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).toHaveBeenCalledWith({
+      where: { sessionId: 'sess-new' },
+      create: {
         sessionId: 'sess-new',
         respondentUserId: USER,
         values: { team: 'Analytics', seniority: 'senior' },
       },
+      update: { respondentUserId: USER, values: { team: 'Analytics', seniority: 'senior' } },
     });
   });
 
@@ -103,7 +109,7 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
 
     expect(result).toMatchObject({ ok: false, status: 400, code: 'INVALID_PROFILE' });
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('rejects a missing required field with a 400', async () => {
@@ -113,7 +119,7 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
     const result = await createSessionFromInvitation('tok', USER, { seniority: 'junior' });
 
     expect(result).toMatchObject({ ok: false, status: 400, code: 'INVALID_PROFILE' });
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('writes no snapshot row when the submission is empty (no empty rows)', async () => {
@@ -127,7 +133,7 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
 
     expect(result).toMatchObject({ ok: true });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledTimes(1);
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('rejects with a 400 (and creates nothing) when a required field is configured but no profileValues are sent', async () => {
@@ -140,7 +146,7 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
 
     expect(result).toMatchObject({ ok: false, status: 400, code: 'INVALID_PROFILE' });
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('creates the session with no snapshot when no profileValues are sent and all fields are optional', async () => {
@@ -164,7 +170,7 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
 
     expect(result).toMatchObject({ ok: true });
     expect(mocks.tx.appQuestionnaireSession.create).toHaveBeenCalledTimes(1);
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('does not capture a profile on resume (snapshot is written once, at first start)', async () => {
@@ -178,7 +184,7 @@ describe('profile snapshot capture (non-anonymous invitation surface)', () => {
     const result = await createSessionFromInvitation('tok', USER, { team: 'Analytics' });
 
     expect(result).toMatchObject({ ok: true, resumed: true });
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 });
 
@@ -196,7 +202,7 @@ describe('profile snapshot is NEVER written in anonymous mode (F8.3 invariant)',
     const result = await createSessionFromInvitation('tok', USER, { team: 'Analytics' });
 
     expect(result).toMatchObject({ ok: true });
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('never captures a profile on the authed anonymous-direct surface', async () => {
@@ -208,7 +214,7 @@ describe('profile snapshot is NEVER written in anonymous mode (F8.3 invariant)',
 
     await createSessionForVersion('v1', USER);
 
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 
   it('never captures a profile on the no-login anonymous surface', async () => {
@@ -220,6 +226,6 @@ describe('profile snapshot is NEVER written in anonymous mode (F8.3 invariant)',
 
     await createAnonymousSession('v1');
 
-    expect(mocks.tx.appRespondentProfileSnapshot.create).not.toHaveBeenCalled();
+    expect(mocks.tx.appRespondentProfileSnapshot.upsert).not.toHaveBeenCalled();
   });
 });

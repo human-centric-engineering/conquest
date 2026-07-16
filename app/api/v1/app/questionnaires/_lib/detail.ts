@@ -19,6 +19,7 @@ import { prisma } from '@/lib/db/client';
 import {
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
+  CAPTURE_MODES,
   CONTRADICTION_MODES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   ACCESS_MODES,
@@ -29,6 +30,7 @@ import {
   type AccessMode,
   type AnswerFitMode,
   type AnswerSlotPanelScope,
+  type CaptureMode,
   type AudienceProvenance,
   type AppQuestionnaireStatus,
   type AudienceShape,
@@ -40,6 +42,7 @@ import {
   type SelectionStrategy,
 } from '@/lib/app/questionnaire/types';
 import { parseInviteeFields } from '@/lib/app/questionnaire/invitations/invitee-fields';
+import { parseProfileFields } from '@/lib/app/questionnaire/profile/profile-values';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
 import { narrowInterviewerStrategy } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { narrowPersonas, narrowPersonaSelection } from '@/lib/app/questionnaire/persona/settings';
@@ -115,9 +118,11 @@ export const CONFIG_SELECT = {
   supportMessage: true,
   supportResourceUrl: true,
   profileFields: true,
+  captureMode: true,
   answerSlotPanelScope: true,
   presentationMode: true,
   inlineCorrectionEnabled: true,
+  sessionResumeEnabled: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: true,
   reasoningStreamDwellMs: true,
@@ -159,9 +164,11 @@ type ConfigRow = {
   supportMessage: string;
   supportResourceUrl: string;
   profileFields: Prisma.JsonValue;
+  captureMode: string;
   answerSlotPanelScope: string;
   presentationMode: string;
   inlineCorrectionEnabled: boolean;
+  sessionResumeEnabled: boolean;
   reasoningStreamEnabled: boolean;
   reasoningStreamPlacement: string;
   reasoningStreamDwellMs: number;
@@ -198,9 +205,20 @@ function asAnswerFitMode(value: string): AnswerFitMode {
     : DEFAULT_QUESTIONNAIRE_CONFIG.answerFitMode;
 }
 
-/** Cast a stored `profileFields` Json column back to our own array (we wrote it). */
+/**
+ * Parse a stored `profileFields` Json column back to typed configs. Routed through
+ * `parseProfileFields` (not a blind cast) so every field resolves its `validation` default —
+ * legacy rows written before that key existed read back as `deterministic`.
+ */
 function asProfileFields(value: Prisma.JsonValue): ProfileFieldConfig[] {
-  return Array.isArray(value) ? (value as unknown as ProfileFieldConfig[]) : [];
+  return parseProfileFields(value);
+}
+
+/** Narrow a stored `captureMode` to the enum (default when unknown). */
+function asCaptureMode(value: string): CaptureMode {
+  return (CAPTURE_MODES as readonly string[]).includes(value)
+    ? (value as CaptureMode)
+    : DEFAULT_QUESTIONNAIRE_CONFIG.captureMode;
 }
 
 /** Narrow a stored `answerSlotPanelScope` to the enum (default when unknown). */
@@ -266,9 +284,11 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     supportMessage: row.supportMessage,
     supportResourceUrl: row.supportResourceUrl,
     profileFields: asProfileFields(row.profileFields),
+    captureMode: asCaptureMode(row.captureMode),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),
     presentationMode: asPresentationMode(row.presentationMode),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
+    sessionResumeEnabled: row.sessionResumeEnabled,
     reasoningStreamEnabled: row.reasoningStreamEnabled,
     reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
     reasoningStreamDwellMs: row.reasoningStreamDwellMs,

@@ -18,12 +18,15 @@
  * flight, and the parent resyncs on refetch.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Brain,
   ClipboardList,
+  ChevronRight,
   Compass,
   Gauge,
+  Hash,
+  List,
   ListChecks,
   Mail,
   MessageSquareText,
@@ -32,6 +35,7 @@ import {
   ScanSearch,
   ShieldCheck,
   SlidersHorizontal,
+  Type as TypeIcon,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -53,6 +57,14 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
+import {
+  detectConfigConflicts,
+  type ConfigConflict,
+} from '@/lib/app/questionnaire/authoring/config-conflicts';
+import {
+  ConfigConflictBanner,
+  SectionConflicts,
+} from '@/components/admin/questionnaires/config-conflicts';
 import { cn } from '@/lib/utils';
 import { SectionRail } from '@/components/admin/section-rail';
 import { CostEstimateCard } from '@/components/admin/questionnaires/cost-estimate-card';
@@ -75,15 +87,18 @@ import {
   ACCESS_MODE_LABELS,
   ANSWER_FIT_MODES,
   ANSWER_SLOT_PANEL_SCOPES,
+  CAPTURE_MODES,
   CONTRADICTION_MODES,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
+  PROFILE_FIELD_VALIDATION_MODES,
   REASONING_PLACEMENTS,
   TONE_PERSONA_MAX_LENGTH,
   type AccessMode,
+  type CaptureMode,
   type IntroSettings,
   type AnswerFitMode,
   type AnswerSlotPanelScope,
@@ -92,6 +107,7 @@ import {
   type PresentationMode,
   type ProfileFieldConfig,
   type ProfileFieldType,
+  type ProfileFieldValidationMode,
   type ReasoningPlacement,
   type SelectionStrategy,
   type ToneDimension,
@@ -145,6 +161,111 @@ const PROFILE_FIELD_TYPE_LABELS: Record<ProfileFieldType, string> = {
   select: 'Select (choices)',
 };
 
+const PROFILE_FIELD_TYPE_ICONS: Record<ProfileFieldType, LucideIcon> = {
+  text: TypeIcon,
+  email: Mail,
+  number: Hash,
+  select: List,
+};
+
+const PROFILE_FIELD_VALIDATION_MODE_LABELS: Record<ProfileFieldValidationMode, string> = {
+  deterministic: 'Format only',
+  agentic: 'AI (tidy + flag)',
+  hybrid: 'Both (format + AI)',
+};
+
+/** Short labels for the compact segmented placement controls. */
+const CAPTURE_MODE_SHORT_LABELS: Record<CaptureMode, string> = {
+  form: 'Form',
+  conversational: 'Conversation',
+};
+
+/** Icon per placement — form = a panel at the top of the flow, conversation = a chat bubble. */
+const CAPTURE_MODE_ICONS: Record<CaptureMode, LucideIcon> = {
+  form: PanelTop,
+  conversational: MessageSquareText,
+};
+
+/** Lowercase a label into a valid profile-field key (`^[a-z0-9_]+$`); '' when nothing usable. */
+function slugifyFieldKey(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60);
+}
+
+/** A plain-English one-liner describing how a field is collected — the live preview under each card. */
+function describeProfileField(
+  field: { type: ProfileFieldType; required: boolean; captureVia?: CaptureMode },
+  defaultMode: CaptureMode
+): string {
+  const placement = field.captureVia ?? defaultMode;
+  const where =
+    placement === 'form'
+      ? 'on the form, before the conversation'
+      : 'naturally during the conversation';
+  const necessity = field.required ? 'Required' : 'Optional';
+  const kind = PROFILE_FIELD_TYPE_LABELS[field.type].toLowerCase().replace(' (choices)', '');
+  return `${necessity} · asked as ${field.type === 'email' ? 'an' : 'a'} ${kind} answer, collected ${where}.`;
+}
+
+/**
+ * A compact segmented control (radiogroup) — the whole option set is visible at once, so a
+ * placement choice reads as "these are the options, this is the current one" rather than a dropdown
+ * that hides its alternatives. Used for the version default and each field's placement override.
+ */
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  disabled,
+  ariaLabel,
+  size = 'md',
+}: {
+  value: T;
+  options: { value: T; label: string; icon?: LucideIcon; hint?: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+  ariaLabel: string;
+  size?: 'md' | 'sm';
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="border-border/70 bg-muted/40 inline-flex flex-wrap items-center gap-1 rounded-lg border p-1"
+    >
+      {options.map((o) => {
+        const active = o.value === value;
+        const Icon = o.icon;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            disabled={disabled}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md px-3 font-medium transition-colors',
+              size === 'sm' ? 'h-7 text-xs' : 'h-8 text-sm',
+              active
+                ? 'bg-background text-foreground shadow-sm ring-1 ring-black/5'
+                : 'text-muted-foreground hover:text-foreground',
+              disabled && 'cursor-not-allowed opacity-50'
+            )}
+          >
+            {Icon && <Icon className={cn(size === 'sm' ? 'h-3 w-3' : 'h-3.5 w-3.5')} aria-hidden />}
+            {o.label}
+            {o.hint && <span className="text-muted-foreground/70 font-normal">{o.hint}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 const ANSWER_SLOT_PANEL_SCOPE_LABELS: Record<AnswerSlotPanelScope, string> = {
   full_progress: 'Full progress (all questions)',
   answered_only: 'Answered only',
@@ -169,6 +290,20 @@ interface ProfileFieldRow {
   required: boolean;
   /** Comma-separated options text; only meaningful for `select`. */
   optionsText: string;
+  /** How the value is validated (deterministic / agentic / hybrid). */
+  validation: ProfileFieldValidationMode;
+  /** Where this field is collected, overriding the default. `undefined` = inherit the default mode. */
+  captureVia?: CaptureMode;
+  /**
+   * UI-only: has the admin hand-edited the key? A fresh field auto-derives its key from the label
+   * (so "Key" stops being a thing to think about); once the admin edits the key directly — or the
+   * field was loaded from a saved config — we stop touching it, because the key is the stored answer's
+   * handle and silently changing it on an existing field would orphan collected data.
+   */
+  keyTouched: boolean;
+  /** UI-only: is this field's editor expanded? Loaded/seeded fields start collapsed to keep the list
+   *  scannable; a freshly-added field opens expanded so it can be filled in straight away. */
+  expanded: boolean;
 }
 
 function toRow(field: ProfileFieldConfig): ProfileFieldRow {
@@ -178,7 +313,32 @@ function toRow(field: ProfileFieldConfig): ProfileFieldRow {
     type: field.type,
     required: field.required,
     optionsText: (field.options ?? []).join(', '),
+    validation: field.validation,
+    captureVia: field.captureVia,
+    // A saved field's key is locked — it already keys stored answers, so the label must not rewrite it.
+    keyTouched: true,
+    expanded: false,
   };
+}
+
+/**
+ * The starter set seeded when an admin first turns capture on — the fields most questionnaires want,
+ * with sensible required/optional defaults. Fresh rows (locked keys, collapsed) the admin can then
+ * trim or extend. A function, not a constant, so each seed is an independent, mutable copy.
+ */
+function defaultProfileFieldRows(): ProfileFieldRow[] {
+  const base = {
+    optionsText: '',
+    validation: 'deterministic' as const,
+    keyTouched: true,
+    expanded: false,
+  };
+  return [
+    { key: 'name', label: 'Name', type: 'text', required: true, ...base },
+    { key: 'email', label: 'Email address', type: 'email', required: true, ...base },
+    { key: 'phone', label: 'Phone number', type: 'text', required: false, ...base },
+    { key: 'organisation', label: 'Organisation', type: 'text', required: false, ...base },
+  ];
 }
 
 /** Parse a comma-separated options string into a distinct, non-empty list. */
@@ -248,6 +408,8 @@ function SettingsGroup({
   accent,
   title,
   description,
+  headerAction,
+  conflicts,
   children,
 }: {
   /** Anchor id + scroll-spy target — picked up by the `SectionRail`. */
@@ -257,6 +419,10 @@ function SettingsGroup({
   accent: string;
   title: string;
   description: string;
+  /** Optional right-aligned control in the header (e.g. an enable/disable switch). */
+  headerAction?: React.ReactNode;
+  /** Active config conflicts anchored to this section — rendered as inline alerts atop the body. */
+  conflicts?: ConfigConflict[];
   children: React.ReactNode;
 }) {
   return (
@@ -275,12 +441,16 @@ function SettingsGroup({
         >
           <Icon className="h-4 w-4" />
         </span>
-        <div className="space-y-0.5">
+        <div className="min-w-0 flex-1 space-y-0.5">
           <CardTitle className="text-sm font-semibold">{title}</CardTitle>
           <CardDescription className="text-xs leading-relaxed">{description}</CardDescription>
         </div>
+        {headerAction && <div className="mt-0.5 shrink-0">{headerAction}</div>}
       </CardHeader>
-      <CardContent className="space-y-4 p-4">{children}</CardContent>
+      <CardContent className="space-y-4 p-4">
+        {conflicts && conflicts.length > 0 && <SectionConflicts conflicts={conflicts} />}
+        {children}
+      </CardContent>
     </Card>
   );
 }
@@ -459,9 +629,11 @@ export function ConfigEditor({
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(
     config.presentationMode
   );
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(config.captureMode);
   const [inlineCorrectionEnabled, setInlineCorrectionEnabled] = useState(
     config.inlineCorrectionEnabled
   );
+  const [sessionResumeEnabled, setSessionResumeEnabled] = useState(config.sessionResumeEnabled);
   const [reasoningStreamEnabled, setReasoningStreamEnabled] = useState(
     config.reasoningStreamEnabled
   );
@@ -483,6 +655,11 @@ export function ConfigEditor({
   const [profileFields, setProfileFields] = useState<ProfileFieldRow[]>(
     config.profileFields.map(toRow)
   );
+  // Whether respondent-profile capture is on at all (off by default). Derived from "has any field" —
+  // an empty `profileFields` is exactly how the runtime already reads "don't collect", so no separate
+  // stored flag / migration is needed. Kept as its own state (not recomputed from length) so toggling
+  // off can hide the fields without discarding them mid-edit; the save maps to `[]` when off.
+  const [captureEnabled, setCaptureEnabled] = useState(config.profileFields.length > 0);
   // Interviewer tone & persona (F-tone): the whole block edited as one object. Helpers below patch
   // a single dimension / the persona immutably.
   const [tone, setTone] = useState<ToneSettings>(config.tone);
@@ -529,7 +706,9 @@ export function ConfigEditor({
     setSupportResourceUrl(config.supportResourceUrl);
     setAnswerSlotPanelScope(config.answerSlotPanelScope);
     setPresentationMode(config.presentationMode);
+    setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
+    setSessionResumeEnabled(config.sessionResumeEnabled);
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
     setReasoningStreamDwellMs(String(config.reasoningStreamDwellMs));
@@ -537,6 +716,7 @@ export function ConfigEditor({
     setReasoningStreamPersist(config.reasoningStreamPersist);
     setPreviewInspectorEnabled(config.previewInspectorEnabled);
     setProfileFields(config.profileFields.map(toRow));
+    setCaptureEnabled(config.profileFields.length > 0);
     setTone(config.tone);
     setPersonaSelection(config.personaSelection);
     setInterviewerStrategy(config.interviewerStrategy);
@@ -559,14 +739,102 @@ export function ConfigEditor({
   const updateField = (index: number, patch: Partial<ProfileFieldRow>) =>
     setProfileFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
 
+  // Editing the label auto-fills the key (slugified) until the admin has hand-edited the key — so a
+  // fresh field's key just tracks the label and the admin never has to think about it.
+  const updateFieldLabel = (index: number, label: string) =>
+    setProfileFields((prev) =>
+      prev.map((f, i) =>
+        i === index ? { ...f, label, key: f.keyTouched ? f.key : slugifyFieldKey(label) } : f
+      )
+    );
+
+  // Hand-editing the key locks it (keyTouched) so later label edits stop rewriting it.
+  const updateFieldKey = (index: number, key: string) =>
+    setProfileFields((prev) =>
+      prev.map((f, i) => (i === index ? { ...f, key, keyTouched: true } : f))
+    );
+
+  // Accordion: a new field opens expanded and collapses every existing one, so only one editor is
+  // ever open at a time.
   const addField = () =>
     setProfileFields((prev) => [
-      ...prev,
-      { key: '', label: '', type: 'text', required: false, optionsText: '' },
+      ...prev.map((f) => ({ ...f, expanded: false })),
+      {
+        key: '',
+        label: '',
+        type: 'text',
+        required: false,
+        optionsText: '',
+        validation: 'deterministic',
+        keyTouched: false,
+        expanded: true,
+      },
     ]);
 
   const removeField = (index: number) =>
     setProfileFields((prev) => prev.filter((_, i) => i !== index));
+
+  // Accordion: expanding a field collapses all others; clicking the open one just closes it.
+  const toggleFieldExpanded = (index: number) =>
+    setProfileFields((prev) =>
+      prev.map((f, i) => ({ ...f, expanded: i === index ? !f.expanded : false }))
+    );
+
+  const collapseAllFields = () =>
+    setProfileFields((prev) => prev.map((f) => ({ ...f, expanded: false })));
+
+  // Turn capture on/off. Turning it on for the first time (no fields yet) seeds the common starter set
+  // so the admin lands on a working setup rather than a blank slate; turning it off keeps the fields in
+  // state (so a mis-click is recoverable before saving) but the save writes `[]`.
+  const toggleCaptureEnabled = (enabled: boolean) => {
+    setCaptureEnabled(enabled);
+    if (enabled && profileFields.length === 0) setProfileFields(defaultProfileFieldRows());
+  };
+
+  // Live conflict detection over the CURRENT editor state — recomputed as the admin edits, so a
+  // contradictory combination (e.g. profile fields on an anonymous version) is flagged inline and in
+  // the summary banner the moment it exists. Pure + cheap; the memo just avoids re-running on unrelated
+  // re-renders. `conflictsBySection` buckets them for the per-section alerts.
+  const conflicts = useMemo(
+    () =>
+      detectConfigConflicts({
+        anonymousMode,
+        presentationMode,
+        captureEnabled,
+        captureMode,
+        profileFields,
+        personaSelectionEnabled: personaSelection.enabled,
+        reasoningStreamEnabled,
+        voiceInputEnabled: voiceEnabled,
+        attachmentInputEnabled: attachmentsEnabled,
+        minQuestionsAnswered: boundedNumber(
+          minQuestionsAnswered,
+          0,
+          Number.MAX_SAFE_INTEGER,
+          0,
+          true
+        ),
+        questionCount,
+        sensitivityAwareness,
+        supportMessage,
+      }),
+    [
+      anonymousMode,
+      presentationMode,
+      captureEnabled,
+      captureMode,
+      profileFields,
+      personaSelection.enabled,
+      reasoningStreamEnabled,
+      voiceEnabled,
+      attachmentsEnabled,
+      minQuestionsAnswered,
+      questionCount,
+      sensitivityAwareness,
+      supportMessage,
+    ]
+  );
+  const conflictsFor = (sectionId: string) => conflicts.filter((c) => c.sectionId === sectionId);
 
   const save = () =>
     run(() => [
@@ -646,6 +914,8 @@ export function ConfigEditor({
         presentationMode,
         // Inline answer correction (Variant B): respondent-facing UX, no platform flag.
         inlineCorrectionEnabled,
+        // Session resume: device-remember + Continue/Start-new chooser + by-ref resume. No platform flag.
+        sessionResumeEnabled,
         // Live "watch it think" reasoning stream (demo feature). Requires the platform
         // reasoning-stream flag to take effect.
         reasoningStreamEnabled,
@@ -686,13 +956,21 @@ export function ConfigEditor({
           buttonLabel: intro.buttonLabel.trim(),
           videoUrl: intro.videoUrl.trim(),
         },
-        profileFields: profileFields.map((f) => ({
-          key: f.key.trim(),
-          label: f.label.trim(),
-          type: f.type,
-          required: f.required,
-          ...(f.type === 'select' ? { options: parseOptions(f.optionsText) } : {}),
-        })),
+        captureMode,
+        // Capture off → send no fields (exactly how the runtime reads "don't collect"), keeping the
+        // in-editor rows so a re-enable before the next save restores them.
+        profileFields: captureEnabled
+          ? profileFields.map((f) => ({
+              key: f.key.trim(),
+              label: f.label.trim(),
+              type: f.type,
+              required: f.required,
+              validation: f.validation,
+              // Only send an override when set — an absent `captureVia` inherits the default placement.
+              ...(f.captureVia ? { captureVia: f.captureVia } : {}),
+              ...(f.type === 'select' ? { options: parseOptions(f.optionsText) } : {}),
+            }))
+          : [],
       },
     ]);
 
@@ -727,6 +1005,10 @@ export function ConfigEditor({
         />
 
         <div id="settings-sections" className="min-w-0 space-y-4 lg:col-start-2">
+          {/* Live conflict summary — contradictory / no-op setting combinations, each linking to its
+              section. Renders nothing when the config is coherent. */}
+          <ConfigConflictBanner conflicts={conflicts} />
+
           {/* ── 1. Questions & completion — the core run loop: how questions are chosen and when a
              session is allowed to finish. Most-used knobs, so they lead. ── */}
           <SettingsGroup
@@ -735,6 +1017,7 @@ export function ConfigEditor({
             id="questions"
             title="Questions & completion"
             description="How the agent chooses the next question and when a session is allowed to finish."
+            conflicts={conflictsFor('questions')}
           >
             <div className="space-y-1.5 sm:max-w-sm">
               <Label className="text-sm font-medium">
@@ -968,6 +1251,7 @@ export function ConfigEditor({
             id="experience"
             title="Respondent experience"
             description="How a respondent completes the questionnaire — format, input, and what they see alongside the chat."
+            conflicts={conflictsFor('experience')}
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -1045,6 +1329,26 @@ export function ConfigEditor({
               </Label>
             </div>
             <div className="flex items-center gap-2">
+              <Switch
+                checked={sessionResumeEnabled}
+                onCheckedChange={setSessionResumeEnabled}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Resume in-progress sessions{' '}
+                <FieldHelp title="Resume in-progress sessions">
+                  Let a respondent return to a session they already started instead of always
+                  beginning again. The no-login link remembers the session on that device, so
+                  reopening it shows a &ldquo;Continue where you left off / Start new&rdquo; choice
+                  (quoting the session&apos;s reference code), and a respondent can also resume from
+                  another device by entering that code. On by default. When off, returning always
+                  starts a fresh session. Note: on a shared or kiosk device the next person could
+                  see and continue the previous session within its 24-hour window — turn this off
+                  for shared devices.
+                </FieldHelp>
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
               <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />
               <Label className="text-sm font-medium">
                 Voice input{' '}
@@ -1069,19 +1373,6 @@ export function ConfigEditor({
                   paperclip button in the composer. When off, the button is hidden and any
                   attachments sent anyway are ignored. Also requires the platform attachment-input
                   flag.
-                </FieldHelp>
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={anonymousMode} onCheckedChange={setAnonymousMode} disabled={busy} />
-              <Label className="text-sm font-medium">
-                Anonymous mode{' '}
-                <FieldHelp title="Anonymous mode">
-                  Don&apos;t collect identifying profile fields at session start — responses
-                  aren&apos;t tied to a named individual. This is the <em>identity</em> axis and is
-                  independent of <em>Access</em> (who may start): an anonymous questionnaire can
-                  still be invitation-only, and a named one can still be public. When anonymous,
-                  invitees are tracked only as started/completed — never linked to their answers.
                 </FieldHelp>
               </Label>
             </div>
@@ -1192,6 +1483,7 @@ export function ConfigEditor({
             id="reasoning"
             title="Reasoning stream"
             description="Show a per-turn “watch it think” trace in the chat — answers captured, contradictions spotted, and why the next question was chosen. Also requires the platform reasoning-stream flag."
+            conflicts={conflictsFor('reasoning')}
           >
             <div className="flex items-center gap-2">
               <Switch
@@ -1354,6 +1646,7 @@ export function ConfigEditor({
                 ? 'How the conversational interviewer sounds. Choose one — hand-tune a custom voice (a persona plus tone dials), or use one of the built-in personas. They’re mutually exclusive. Also requires the platform tone / persona-selection flags.'
                 : 'Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag.'
             }
+            conflicts={conflictsFor('tone')}
           >
             {personaSelectionEnabled && (
               <VoiceModeToggle
@@ -1604,8 +1897,32 @@ export function ConfigEditor({
             accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
             id="access"
             title="Access & invitations"
-            description="Who may start this questionnaire, and which invitee details the Invitations tab captures. Independent of Anonymous mode (the identity axis)."
+            description="Who may start this questionnaire, the identity (anonymous) axis, and which invitee details the Invitations tab captures."
+            conflicts={conflictsFor('access')}
           >
+            {/* Identity axis — lives here (with Access) so it's findable, though it's independent of
+                the access mode: an anonymous questionnaire can still be invitation-only, and a named
+                one can still be public. */}
+            <div className="bg-muted/20 flex items-start gap-3 rounded-lg border p-3">
+              <Switch
+                checked={anonymousMode}
+                onCheckedChange={setAnonymousMode}
+                disabled={busy}
+                className="mt-0.5"
+              />
+              <Label className="text-sm font-medium">
+                Anonymous mode{' '}
+                <FieldHelp title="Anonymous mode">
+                  Don&apos;t collect identifying profile fields — responses aren&apos;t tied to a
+                  named individual. This is the <em>identity</em> axis, independent of{' '}
+                  <em>Access</em> (who may start): an anonymous questionnaire can still be
+                  invitation-only, and a named one can still be public. When anonymous, invitees are
+                  tracked only as started/completed — never linked to their answers, and{' '}
+                  <strong>respondent profile fields are not collected</strong>.
+                </FieldHelp>
+              </Label>
+            </div>
+
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
                 Access mode{' '}
@@ -1707,6 +2024,7 @@ export function ConfigEditor({
             id="safeguarding"
             title="Answer quality & safeguarding"
             description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions. Each also requires its platform flag."
+            conflicts={conflictsFor('safeguarding')}
           >
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -1961,102 +2279,376 @@ export function ConfigEditor({
             />
           </SettingsGroup>
 
-          {/* ── 5. Session-start profile fields — what to collect before the questionnaire begins.
+          {/* ── 5. Respondent profile fields — what to collect from the respondent, and how.
              Last: optional, set-up-once metadata rather than run-time behaviour. ── */}
           <SettingsGroup
             icon={ClipboardList}
             accent="bg-slate-500/10 text-slate-600 dark:text-slate-300"
             id="profile-fields"
-            title="Session-start profile fields"
-            description="Fields collected from the respondent before the questionnaire begins. Optional — leave empty to start straight into the conversation."
+            title="Respondent profile fields"
+            description="Ask respondents for a name, email, or other details — on a short form or during the conversation. Off by default; never collected on an anonymous questionnaire."
+            conflicts={conflictsFor('profile-fields')}
+            headerAction={
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium select-none">
+                <span className={captureEnabled ? 'text-foreground' : 'text-muted-foreground'}>
+                  {captureEnabled ? 'On' : 'Off'}
+                </span>
+                <Switch
+                  checked={captureEnabled}
+                  onCheckedChange={toggleCaptureEnabled}
+                  disabled={busy}
+                  aria-label="Collect respondent profile fields"
+                />
+              </label>
+            }
           >
-            {profileFields.length === 0 ? (
-              <p className="text-muted-foreground text-sm italic">No profile fields.</p>
+            {!captureEnabled ? (
+              /* Off state — the default. A calm panel that says what turning it on does. */
+              <div className="bg-muted/20 border-border/70 rounded-xl border border-dashed px-6 py-8 text-center">
+                <div className="bg-muted text-muted-foreground/70 mx-auto flex h-11 w-11 items-center justify-center rounded-full">
+                  <ClipboardList className="h-5 w-5" aria-hidden />
+                </div>
+                <p className="text-foreground mt-3 text-sm font-medium">
+                  Not collecting respondent details
+                </p>
+                <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-xs">
+                  Respondents go straight into the conversation. Turn this on to ask for a name,
+                  email, and anything else — on a short form before the chat, or naturally during
+                  it.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => toggleCaptureEnabled(true)}
+                  disabled={busy}
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Turn on &amp; add starter fields
+                </Button>
+              </div>
             ) : (
-              <div className="space-y-3">
-                {profileFields.map((field, index) => (
-                  <div key={index} className="bg-muted/20 space-y-2 rounded-md border p-3">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Key</Label>
-                        <Input
-                          value={field.key}
-                          placeholder="e.g. organisation"
-                          onChange={(e) => updateField(index, { key: e.target.value })}
-                          disabled={busy}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Label</Label>
-                        <Input
-                          value={field.label}
-                          placeholder="e.g. Organisation"
-                          onChange={(e) => updateField(index, { label: e.target.value })}
-                          disabled={busy}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Type</Label>
-                        <Select
-                          value={field.type}
-                          onValueChange={(v) => updateField(index, { type: v as ProfileFieldType })}
-                          disabled={busy}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PROFILE_FIELD_TYPES.map((t) => (
-                              <SelectItem key={t} value={t}>
-                                {PROFILE_FIELD_TYPE_LABELS[t]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex items-center gap-2 pt-5">
-                        <Switch
-                          checked={field.required}
-                          onCheckedChange={(checked) => updateField(index, { required: checked })}
-                          disabled={busy}
-                        />
-                        <Label className="text-xs">Required</Label>
-                      </div>
-                    </div>
-                    {field.type === 'select' && (
-                      <div className="space-y-1">
-                        <Label className="text-xs">
-                          Options{' '}
-                          <FieldHelp title="Select options">
-                            Comma-separated list of choices the respondent picks from.
-                          </FieldHelp>
-                        </Label>
-                        <Input
-                          value={field.optionsText}
-                          placeholder="e.g. Engineering, Sales, Support"
-                          onChange={(e) => updateField(index, { optionsText: e.target.value })}
-                          disabled={busy}
-                        />
+              <>
+                {/* Default placement — the version-wide default for where fields are collected, shown
+                    as a segmented control so both options are visible at once. Each field can override
+                    it below (a hybrid questionnaire). Ignored when the version is anonymous. */}
+                <div className="mb-6 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-foreground text-sm font-medium">
+                      Where are answers collected by default?
+                    </Label>
+                    <FieldHelp title="Default placement">
+                      The default for the fields below. <strong>Form</strong> shows a short form
+                      after the intro and before the conversation — the respondent can&apos;t start
+                      until it&apos;s filled in. <strong>Conversation</strong> drops the form and
+                      has the interviewer ask for these naturally in the chat. Any field can
+                      override this with its own &quot;Collect via&quot; setting — e.g. keep name
+                      &amp; email on the form while the rest are gathered in conversation (a hybrid
+                      questionnaire).
+                    </FieldHelp>
+                  </div>
+                  <Segmented
+                    ariaLabel="Default placement"
+                    value={captureMode}
+                    onChange={(v) => setCaptureMode(v)}
+                    disabled={busy}
+                    options={CAPTURE_MODES.map((m) => ({
+                      value: m,
+                      label: CAPTURE_MODE_SHORT_LABELS[m],
+                      icon: CAPTURE_MODE_ICONS[m],
+                    }))}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    {captureMode === 'form'
+                      ? 'Respondents fill a short form before the conversation starts.'
+                      : 'The interviewer asks for these naturally during the conversation.'}{' '}
+                    Each field can override this below.
+                  </p>
+                </div>
+
+                {profileFields.length === 0 ? (
+                  <div className="border-border/70 bg-muted/10 rounded-xl border border-dashed px-6 py-6 text-center">
+                    <p className="text-foreground text-sm font-medium">No fields yet</p>
+                    <p className="text-muted-foreground mx-auto mt-1 max-w-xs text-xs">
+                      Add a field to collect a name, email, or anything else you need alongside
+                      their answers.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {profileFields.length > 1 && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-muted-foreground text-xs">
+                          {profileFields.length} fields
+                        </p>
+                        {profileFields.some((f) => f.expanded) && (
+                          <button
+                            type="button"
+                            onClick={collapseAllFields}
+                            className="text-muted-foreground hover:text-foreground text-xs font-medium"
+                          >
+                            Collapse
+                          </button>
+                        )}
                       </div>
                     )}
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeField(index)}
-                        disabled={busy}
-                      >
-                        <X className="mr-1 h-3 w-3" /> Remove
-                      </Button>
-                    </div>
+                    {profileFields.map((field, index) => {
+                      const FieldIcon = PROFILE_FIELD_TYPE_ICONS[field.type];
+                      const fieldName = field.label.trim() || `Field ${index + 1}`;
+                      return (
+                        <div
+                          key={index}
+                          className="bg-card overflow-hidden rounded-xl border shadow-sm"
+                        >
+                          {/* Summary row — always visible; click to expand/collapse the editor. */}
+                          <div className="flex items-center gap-2 p-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleFieldExpanded(index)}
+                              aria-expanded={field.expanded}
+                              aria-label={`Toggle ${fieldName}`}
+                              disabled={busy}
+                              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  'text-muted-foreground h-4 w-4 shrink-0 transition-transform',
+                                  field.expanded && 'rotate-90'
+                                )}
+                                aria-hidden
+                              />
+                              <span className="bg-muted text-muted-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+                                <FieldIcon className="h-4 w-4" aria-hidden />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="text-foreground block truncate text-sm font-medium">
+                                  {fieldName}
+                                </span>
+                                {!field.expanded && (
+                                  <span className="text-muted-foreground block truncate text-xs">
+                                    {describeProfileField(field, captureMode)}
+                                  </span>
+                                )}
+                              </span>
+                              {!field.expanded && (
+                                <span
+                                  className={cn(
+                                    'shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium',
+                                    field.required
+                                      ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                                      : 'bg-muted text-muted-foreground'
+                                  )}
+                                >
+                                  {field.required ? 'Required' : 'Optional'}
+                                </span>
+                              )}
+                            </button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeField(index)}
+                              disabled={busy}
+                              aria-label={`Remove ${fieldName}`}
+                              className="text-muted-foreground hover:text-destructive shrink-0"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+
+                          {field.expanded && (
+                            <div className="border-t">
+                              <div className="space-y-3 p-4">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                  <div className="flex-1 space-y-1">
+                                    <Label className="text-xs">What to ask the respondent</Label>
+                                    <Input
+                                      value={field.label}
+                                      placeholder="e.g. Your organisation"
+                                      onChange={(e) => updateFieldLabel(index, e.target.value)}
+                                      disabled={busy}
+                                    />
+                                  </div>
+                                  <div className="space-y-1 sm:w-44">
+                                    <Label className="text-xs">Answer type</Label>
+                                    <Select
+                                      value={field.type}
+                                      onValueChange={(v) =>
+                                        updateField(index, { type: v as ProfileFieldType })
+                                      }
+                                      disabled={busy}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {PROFILE_FIELD_TYPES.map((t) => (
+                                          <SelectItem key={t} value={t}>
+                                            {PROFILE_FIELD_TYPE_LABELS[t]}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+
+                                {field.type === 'select' && (
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">
+                                      Choices{' '}
+                                      <FieldHelp title="Select choices">
+                                        Comma-separated list of options the respondent picks from.
+                                      </FieldHelp>
+                                    </Label>
+                                    <Input
+                                      value={field.optionsText}
+                                      placeholder="e.g. Engineering, Sales, Support"
+                                      onChange={(e) =>
+                                        updateField(index, { optionsText: e.target.value })
+                                      }
+                                      disabled={busy}
+                                    />
+                                  </div>
+                                )}
+
+                                <label className="inline-flex cursor-pointer items-center gap-2 text-sm select-none">
+                                  <Switch
+                                    checked={field.required}
+                                    onCheckedChange={(checked) =>
+                                      updateField(index, { required: checked })
+                                    }
+                                    disabled={busy}
+                                  />
+                                  <span className="font-medium">Required</span>
+                                  <span className="text-muted-foreground text-xs">
+                                    {field.required ? 'must be answered' : 'optional'}
+                                  </span>
+                                </label>
+                              </div>
+
+                              {/* Advanced strip: placement override, checking, and the auto-derived storage key. */}
+                              <div className="bg-muted/30 space-y-3 border-t px-4 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-xs">Collect via</Label>
+                                    <FieldHelp title="Collect via">
+                                      Where THIS field is collected. <strong>Default</strong>{' '}
+                                      follows the version default above. Override it to mix the two
+                                      — e.g. keep name &amp; email on the form while the rest are
+                                      gathered in conversation. Conversation fields are asked for
+                                      naturally in-chat and saved as the respondent provides them;
+                                      required ones keep being asked until answered.
+                                    </FieldHelp>
+                                  </div>
+                                  <Segmented
+                                    size="sm"
+                                    ariaLabel={`Collect ${fieldName} via`}
+                                    value={field.captureVia ?? '__default__'}
+                                    onChange={(v) =>
+                                      updateField(index, {
+                                        captureVia: v === '__default__' ? undefined : v,
+                                      })
+                                    }
+                                    disabled={busy}
+                                    options={[
+                                      {
+                                        value: '__default__',
+                                        label: 'Default',
+                                        hint: `(${CAPTURE_MODE_SHORT_LABELS[captureMode]})`,
+                                      },
+                                      { value: 'form', label: 'Form', icon: PanelTop },
+                                      {
+                                        value: 'conversational',
+                                        label: 'Chat',
+                                        icon: MessageSquareText,
+                                      },
+                                    ]}
+                                  />
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-xs">Checking</Label>
+                                    <FieldHelp title="Answer checking">
+                                      How the answer is checked. <strong>Format only</strong> runs
+                                      the standard format/required checks (e.g. a valid email
+                                      shape). <strong>AI</strong> adds a quick model pass that
+                                      tidies the value (proper-case names, neat organisation names)
+                                      and rejects obvious nonsense (&quot;asdf&quot;,
+                                      &quot;test@test&quot;). <strong>Both</strong> runs the format
+                                      check first, then the AI tidy/flag. The AI pass is best-effort
+                                      — if it can&apos;t run, the respondent is never blocked.
+                                    </FieldHelp>
+                                  </div>
+                                  <Select
+                                    value={field.validation}
+                                    onValueChange={(v) =>
+                                      updateField(index, {
+                                        validation: v as ProfileFieldValidationMode,
+                                      })
+                                    }
+                                    disabled={busy}
+                                  >
+                                    <SelectTrigger className="h-8 w-full sm:w-56">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {PROFILE_FIELD_VALIDATION_MODES.map((m) => (
+                                        <SelectItem key={m} value={m}>
+                                          {PROFILE_FIELD_VALIDATION_MODE_LABELS[m]}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Label className="text-muted-foreground text-xs">
+                                      Storage key
+                                    </Label>
+                                    <FieldHelp title="Storage key">
+                                      The internal id this answer is saved under — auto-filled from
+                                      the label, lowercase with underscores. You rarely need to
+                                      touch it; change it only if another system reads these answers
+                                      by a specific key. Avoid renaming it on a live questionnaire,
+                                      or previously collected answers won&apos;t line up.
+                                    </FieldHelp>
+                                  </div>
+                                  <Input
+                                    value={field.key}
+                                    placeholder="auto from label"
+                                    onChange={(e) => updateFieldKey(index, e.target.value)}
+                                    disabled={busy}
+                                    className="h-8 w-full font-mono text-xs sm:w-56"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Live preview: a plain-English sentence of how this field behaves. */}
+                              <div className="text-muted-foreground border-t px-4 py-2.5 text-xs">
+                                <span className="text-foreground/70 font-medium">Preview · </span>
+                                {describeProfileField(field, captureMode)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addField}
+                  disabled={busy}
+                  className="mt-1"
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Add profile field
+                </Button>
+              </>
             )}
-            <Button type="button" variant="outline" size="sm" onClick={addField} disabled={busy}>
-              <Plus className="mr-1 h-4 w-4" /> Add profile field
-            </Button>
           </SettingsGroup>
         </div>
       </div>

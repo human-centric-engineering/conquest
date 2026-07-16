@@ -44,7 +44,10 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
   if (!loaded) return null;
 
   const status = narrowToEnum(loaded.session.status, SESSION_STATUSES, 'active');
-  const anonymous = loaded.session.respondentUserId === null;
+  // "Responses are anonymous" reflects the version's ANONYMOUS-MODE config (the PII-free identity
+  // axis) — NOT merely being a no-login/preview session. A no-login walk-up on a non-anonymous
+  // questionnaire still collects a name/email, so the badge must not claim anonymity there.
+  const anonymous = loaded.base.config.anonymousMode;
 
   let assessment = assessCompletion({
     questions: loaded.base.questions,

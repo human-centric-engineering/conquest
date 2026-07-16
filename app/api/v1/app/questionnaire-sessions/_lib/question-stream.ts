@@ -156,6 +156,13 @@ export interface QuestionComposeInput {
    */
   interviewerStrategy?: InterviewerStrategySettings;
   /**
+   * Conversational profile capture (F-capture): the directive telling the interviewer to gather the
+   * admin-authored profile fields naturally in-chat. Set only for a NON-anonymous version in
+   * `conversational` capture mode whose snapshot is still incomplete; `''`/absent otherwise (form-mode
+   * versions collect via the carousel gate instead). Built by `buildProfileCaptureInstructions`.
+   */
+  profileCapture?: string;
+  /**
    * Fraction of the questionnaire covered so far (0–1), for the funnel arc's open→targeted phase.
    * Absent ⇒ the funnel falls back to {@link questionsAsked}.
    */
@@ -448,6 +455,10 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     // approach in `rules`/`this_turn` above — placed after them so it governs (later sections win,
     // same as tone). Collapses to '' when disabled, leaving the default voice untouched.
     section('interviewer_strategy', strategyInstructions),
+    // Conversational profile capture (F-capture): when set, the interviewer also gathers the
+    // admin-authored profile fields naturally in-chat. Collapses to '' once the snapshot is complete
+    // (or for form-mode / anonymous versions), leaving the questionnaire flow untouched.
+    section('profile_capture', input.profileCapture ?? ''),
     section(
       'context',
       joinSections(

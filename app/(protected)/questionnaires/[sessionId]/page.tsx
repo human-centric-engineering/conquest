@@ -21,6 +21,7 @@ import {
 } from '@/lib/app/questionnaire/header/resolve';
 import { resolveSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import { resolveSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
+import { resolveSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
 import { loadAnswerPanelState } from '@/app/api/v1/app/questionnaire-sessions/_lib/answer-panel';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
@@ -169,6 +170,12 @@ export default async function QuestionnaireSessionPage({
     ? await resolveSessionPersonas(sessionId)
     : null;
 
+  // Respondent profile capture (F-capture). Resolves the blocking form gate (its `formFields` subset)
+  // for non-anonymous versions; `null` for anonymous (PII-free) and `satisfied` on a resume with an
+  // existing snapshot or when there is no form subset (all-conversational / hybrid's conversational
+  // half is gathered in-chat). No platform flag — purely per-version config (like profileFields).
+  const capture = await resolveSessionCapture(sessionId);
+
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
   // its own context); a fresh session shows the branded welcome + guidance and auto-opens. Keyed
   // on turn count, not answers: a session can have turns with no captured answer yet (e.g. an
@@ -189,6 +196,7 @@ export default async function QuestionnaireSessionPage({
         <SessionEntry
           intro={intro}
           personas={personas}
+          capture={capture}
           sessionId={sessionId}
           initialTurns={initialTurns}
           autoStart={!resumed}

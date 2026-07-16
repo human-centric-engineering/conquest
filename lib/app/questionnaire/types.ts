@@ -244,6 +244,34 @@ export const PROFILE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as cons
 export type ProfileFieldType = (typeof PROFILE_FIELD_TYPES)[number];
 
 /**
+ * How a captured profile field's value is validated (F-capture). `deterministic` runs only the
+ * type-aware Zod/regex checks (format, required, select membership). `agentic` additionally runs a
+ * best-effort LLM pass that normalises the value (proper-case names, tidy organisation, E.164-ish
+ * phone) and flags implausible/garbage input (`asdf`, `test@test`). `hybrid` runs the deterministic
+ * gate first (a format failure rejects without spending an LLM call) and, on pass, applies the
+ * agentic normalise/flag. The agentic layer is always non-fatal — an LLM outage falls back to the
+ * deterministic-passed value, never blocking a respondent (mirrors the `answerFitMode` convention).
+ * See `lib/app/questionnaire/profile/validate-profile-fields.ts`. */
+export const PROFILE_FIELD_VALIDATION_MODES = ['deterministic', 'agentic', 'hybrid'] as const;
+export type ProfileFieldValidationMode = (typeof PROFILE_FIELD_VALIDATION_MODES)[number];
+
+/**
+ * How the admin-authored profile fields are collected from the respondent (F-capture). `form`
+ * (default) presents them as a standard form that rides the carousel AFTER the intro and BEFORE the
+ * chat/interviewer, blocking progress (and the opening LLM turn) until they're filled and validated.
+ * `conversational` drops the gate — the interviewer collects the fields naturally in-chat and a
+ * best-effort extraction pass maps the answers back to the fields. Neither collects anything when the
+ * version is `anonymousMode` (the PII-free public path).
+ *
+ * `captureMode` is the version-wide DEFAULT placement; an individual field may override it via
+ * {@link ProfileFieldConfig.captureVia}, which is how a **hybrid** questionnaire is expressed — e.g.
+ * name + email in the form gate, everything else gathered conversationally. The runtime split lives in
+ * `lib/app/questionnaire/profile/capture-placement.ts`; the resolver and interviewer read it from
+ * there. See `lib/app/questionnaire/profile/resolve-capture.ts`. */
+export const CAPTURE_MODES = ['form', 'conversational'] as const;
+export type CaptureMode = (typeof CAPTURE_MODES)[number];
+
+/**
  * How much of the questionnaire the respondent's live answer-slot panel shows
  * (F7.2). `full_progress` lists every slot grouped by section with an X-of-N
  * header (the conversation's running state); `answered_only` shows just the
@@ -391,6 +419,21 @@ export type ProfileFieldConfig = {
   required: boolean;
   /** Choices for a `select` field; absent/empty for other types. */
   options?: string[];
+  /**
+   * How this field's value is validated. Defaulted to `deterministic` on read, so legacy stored
+   * fields without the key keep their current format-only behaviour. See
+   * {@link PROFILE_FIELD_VALIDATION_MODES}.
+   */
+  validation: ProfileFieldValidationMode;
+  /**
+   * Where THIS field is collected, overriding the version-wide {@link QuestionnaireConfig.captureMode}
+   * default. Absent (the common case) means "inherit the default". Setting it per field is what makes a
+   * questionnaire **hybrid** — e.g. `captureVia: 'form'` on name/email while the default mode is
+   * `conversational`, so those two ride the blocking form gate and the rest are gathered in-chat. The
+   * effective placement is resolved by `effectiveCaptureVia`
+   * (`lib/app/questionnaire/profile/capture-placement.ts`). Ignored entirely when `anonymousMode` is on.
+   */
+  captureVia?: CaptureMode;
 };
 
 /**
@@ -1033,6 +1076,13 @@ export type QuestionnaireConfigShape = {
   /** Optional support resource URL appended to {@link supportMessage} when set. */
   supportResourceUrl: string;
   profileFields: ProfileFieldConfig[];
+  /**
+   * The DEFAULT placement for the {@link profileFields} (F-capture). See {@link CAPTURE_MODES}. Defaults
+   * to `form` (a blocking form gate after the intro); `conversational` has the interviewer gather them
+   * in-chat instead. Individual fields may override this via {@link ProfileFieldConfig.captureVia} — a
+   * mix of `form` and `conversational` fields is a hybrid questionnaire. Ignored when `anonymousMode`.
+   */
+  captureMode: CaptureMode;
   answerSlotPanelScope: AnswerSlotPanelScope;
   /**
    * How the respondent completes the session: `chat`, raw `form`, or `both`
@@ -1047,6 +1097,14 @@ export type QuestionnaireConfigShape = {
    * same-slot contradiction re-check. Off by default; respondent-facing UX with no platform flag.
    */
   inlineCorrectionEnabled: boolean;
+  /**
+   * Session resume: let a respondent return to an in-progress session instead of always starting
+   * fresh. Governs the whole capability — the no-login surface remembering its session on the device
+   * (localStorage) + the "Continue where you left off / Start new" chooser + the cross-device
+   * resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag.
+   * Off ⇒ today's behaviour (anonymous returns mint a fresh session; by-ref resume 404s).
+   */
+  sessionResumeEnabled: boolean;
   /**
    * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
    * answers captured (with provenance + confidence), contradictions spotted, why the next question
@@ -1175,9 +1233,11 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   supportMessage: '',
   supportResourceUrl: '',
   profileFields: [],
+  captureMode: 'form',
   answerSlotPanelScope: 'full_progress',
   presentationMode: 'both',
   inlineCorrectionEnabled: false,
+  sessionResumeEnabled: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'overlay',
   reasoningStreamDwellMs: 2000,

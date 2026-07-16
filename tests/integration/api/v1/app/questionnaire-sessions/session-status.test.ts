@@ -5,7 +5,8 @@
  * sum are mocked; the real pure {@link assessCompletion}, {@link classifyCostCap}, and
  * {@link buildSessionStatusView} run. Pins the seam's own responsibilities: the
  * null-context → null return, the `status` narrowing + default fallback, the anonymous
- * flag (`respondentUserId === null`), the assessment passthrough, and — the seam's core
+ * flag (from the version's `anonymousMode` config, not the no-login session type), the
+ * assessment passthrough, and — the seam's core
  * branch — when the cost tier is graded vs. reported as `null`: only when a positive
  * budget is configured AND enforcement is enabled (otherwise the soft-cap hint would
  * mislead). Mirrors the sibling answer-panel seam test.
@@ -143,11 +144,19 @@ describe('loadSessionStatus', () => {
     expect(loaded?.view.status).toBe('active');
   });
 
-  it('flags an anonymous session when respondentUserId is null', async () => {
-    mocks.buildTurnContext.mockResolvedValue(ctx({ respondentUserId: null }));
-    const loaded = await loadSessionStatus('sess-1');
-    expect(loaded?.view.anonymous).toBe(true);
-    expect(loaded?.session.respondentUserId).toBeNull();
+  it('reports anonymous from the version anonymousMode config, NOT the no-login session type', async () => {
+    // A no-login session (respondentUserId null) on a NON-anonymous version is NOT flagged anonymous —
+    // it still collects a name/email, so the badge must not claim anonymity.
+    mocks.buildTurnContext.mockResolvedValue(
+      ctx({ respondentUserId: null, config: { anonymousMode: false } })
+    );
+    expect((await loadSessionStatus('sess-1'))?.view.anonymous).toBe(false);
+
+    // An anonymous-mode version IS flagged, even with an authenticated respondent.
+    mocks.buildTurnContext.mockResolvedValue(
+      ctx({ respondentUserId: 'user-1', config: { anonymousMode: true } })
+    );
+    expect((await loadSessionStatus('sess-1'))?.view.anonymous).toBe(true);
   });
 
   // -------------------------------------------------------------------------

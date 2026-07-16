@@ -2,10 +2,9 @@
  * The single definition of a respondent's "resumable" session (F8.3).
  *
  * A respondent resumes — rather than starts afresh — when they already have a
- * non-preview, non-terminal session for the version. Both the create route
- * (`questionnaire-sessions/_lib/create.ts`) and the pre-create resolver
- * (`chat/start-context.ts`) must agree on this rule, or the start page would redirect
- * to a session the create route wouldn't resume (or vice-versa). Keep it here so the
+ * non-preview, non-terminal session for the version. The create route
+ * (`questionnaire-sessions/_lib/create.ts`) is the single caller and owns this rule
+ * (the `/start` page just delegates to it, resuming idempotently). Keep it here so the
  * rule lives in one place. Server-only.
  */
 
@@ -41,6 +40,42 @@ export async function findResumableSession(
     orderBy: { createdAt: 'desc' },
     select: { id: true, status: true, versionId: true },
   });
+}
+
+/**
+ * A resumable session enriched for the authenticated "Continue where you left off / Start new"
+ * chooser: its support ref (for the header) and how many answers it already holds (to decide the
+ * chooser is worth showing — a zero-progress session resumes silently, like the anonymous gate).
+ */
+export interface AuthedResumeDetail {
+  sessionId: string;
+  ref: string | null;
+  answeredCount: number;
+}
+
+/**
+ * Find the authenticated respondent's resumable session for a version WITH the detail the resume
+ * chooser needs (ref + answered count), or null if none. Same resume rule as
+ * {@link findResumableSession}; a separate reader so the plain create path stays lean.
+ */
+export async function findAuthedResumeDetail(
+  versionId: string,
+  respondentUserId: string,
+  roundId?: string | null
+): Promise<AuthedResumeDetail | null> {
+  const row = await prisma.appQuestionnaireSession.findFirst({
+    where: {
+      versionId,
+      respondentUserId,
+      isPreview: false,
+      status: { in: ['active', 'paused'] },
+      roundId: roundId ?? null,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, publicRef: true, _count: { select: { answers: true } } },
+  });
+  if (!row) return null;
+  return { sessionId: row.id, ref: row.publicRef, answeredCount: row._count.answers };
 }
 
 /**

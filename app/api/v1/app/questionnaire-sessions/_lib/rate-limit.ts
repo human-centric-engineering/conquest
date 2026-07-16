@@ -56,3 +56,38 @@ export const turnEvaluationLimiter = createRateLimiter({
   interval: TURN_EVALUATION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: TURN_EVALUATION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Profile-capture sub-cap (F8.7). The `[id]/profile` PUT runs the agentic validation pass — a
+ * paid LLM call — and a REJECTED submission writes no snapshot, so nothing naturally stops a
+ * respondent (incl. a no-login token holder) from re-submitting invalid values to burn LLM spend.
+ * A capture is legitimately submitted once (plus a few validation-error retries), so 20/min per key
+ * is ample while bounding abuse. Keyed on the respondent user id (authed) or client IP + session
+ * (no-login) via `resolveTurnAccess().rateKey`.
+ */
+export const PROFILE_CAPTURE_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link profileCaptureLimiter}, in milliseconds. */
+export const PROFILE_CAPTURE_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const profileCaptureLimiter = createRateLimiter({
+  interval: PROFILE_CAPTURE_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: PROFILE_CAPTURE_RATE_LIMIT_MAX,
+});
+
+/**
+ * Resume-by-ref sub-cap. The public `/resume-by-ref` route takes an 8-char support reference and,
+ * on a match, re-mints a session token that reads an in-progress anonymous session — a low-entropy
+ * code used as a bearer credential. This TIGHT cap (well below the section default and the other
+ * sub-caps) is the primary throttle against brute-force enumeration of the ref space; a returning
+ * respondent needs only a handful of attempts. Keyed on the client IP (no user to key on).
+ */
+export const RESUME_BY_REF_RATE_LIMIT_MAX = 5;
+
+/** Sliding-window length for {@link resumeByRefLimiter}, in milliseconds. */
+export const RESUME_BY_REF_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const resumeByRefLimiter = createRateLimiter({
+  interval: RESUME_BY_REF_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: RESUME_BY_REF_RATE_LIMIT_MAX,
+});

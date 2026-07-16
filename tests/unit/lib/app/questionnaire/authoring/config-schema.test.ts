@@ -184,6 +184,77 @@ describe('updateConfigSchema', () => {
       });
       expect(res.success).toBe(true);
     });
+
+    it('defaults a field validation mode to deterministic when omitted (legacy JSON)', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [{ key: 'name', label: 'Name', type: 'text', required: true }],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.profileFields?.[0]?.validation).toBe('deterministic');
+      }
+    });
+
+    it('accepts an explicit per-field validation mode', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, validation: 'hybrid' },
+        ],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) expect(res.data.profileFields?.[0]?.validation).toBe('hybrid');
+    });
+
+    it('rejects an unknown validation mode', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, validation: 'psychic' },
+        ],
+      });
+      expect(res.success).toBe(false);
+    });
+
+    it('leaves captureVia undefined when omitted (inherit the version default — no hybrid override)', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [{ key: 'name', label: 'Name', type: 'text', required: true }],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) expect(res.data.profileFields?.[0]?.captureVia).toBeUndefined();
+    });
+
+    it('accepts an explicit per-field captureVia override (hybrid placement)', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, captureVia: 'form' },
+          { key: 'org', label: 'Org', type: 'text', required: false, captureVia: 'conversational' },
+        ],
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.profileFields?.[0]?.captureVia).toBe('form');
+        expect(res.data.profileFields?.[1]?.captureVia).toBe('conversational');
+      }
+    });
+
+    it('rejects an unknown captureVia value', () => {
+      const res = updateConfigSchema.safeParse({
+        profileFields: [
+          { key: 'name', label: 'Name', type: 'text', required: true, captureVia: 'telepathy' },
+        ],
+      });
+      expect(res.success).toBe(false);
+    });
+  });
+
+  describe('captureMode', () => {
+    it('accepts form and conversational', () => {
+      expect(updateConfigSchema.safeParse({ captureMode: 'form' }).success).toBe(true);
+      expect(updateConfigSchema.safeParse({ captureMode: 'conversational' }).success).toBe(true);
+    });
+
+    it('rejects an unknown capture mode', () => {
+      expect(updateConfigSchema.safeParse({ captureMode: 'telepathy' }).success).toBe(false);
+    });
   });
 });
 

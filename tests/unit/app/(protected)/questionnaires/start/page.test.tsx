@@ -58,29 +58,24 @@ vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
 }));
 
 /**
- * Mock session bootstrap — the page's create/resume call.
+ * Mock session bootstrap — the page's create/resume call. Profile capture now rides the workspace
+ * carousel (F-capture), so the page no longer resolves a pre-create profile context — it just
+ * creates (or idempotently resumes) the session and redirects.
  */
 vi.mock('@/lib/app/questionnaire/chat/session-bootstrap', () => ({
   createOrResumeAuthedSession: vi.fn(),
 }));
 
 /**
- * Mock the F8.3 pre-create resolver — the page calls this (which hits Prisma)
- * before bootstrap to decide whether to collect a profile first. Defaulted to
- * `start-now` (the legacy straight-to-chat path); branch tests override it.
+ * Mock the session-resume readers (F7.11). The versionId start path now checks for a resumable
+ * session before creating; these resolvers are mocked so the default happy path (resume enabled,
+ * nothing resumable) falls through to the create/redirect the existing tests assert.
  */
-vi.mock('@/lib/app/questionnaire/chat/start-context', () => ({
-  loadStartContext: vi.fn(),
+vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
+  resolveSessionResumeEnabledForVersion: vi.fn(),
 }));
-
-/**
- * Mock the profile form — a client component the page renders for the
- * `needs-profile` branch. We only assert it is reached, not its internals.
- */
-vi.mock('@/components/app/questionnaire/profile/profile-start-form', () => ({
-  ProfileStartForm: vi.fn(({ invitationToken }: { invitationToken: string }) => (
-    <div data-testid="profile-start-form" data-token={invitationToken} />
-  )),
+vi.mock('@/lib/app/questionnaire/chat/resumable-session', () => ({
+  findAuthedResumeDetail: vi.fn(),
 }));
 
 import StartQuestionnairePage, { metadata } from '@/app/(protected)/questionnaires/start/page';
@@ -88,7 +83,8 @@ import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { isLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createOrResumeAuthedSession } from '@/lib/app/questionnaire/chat/session-bootstrap';
-import { loadStartContext } from '@/lib/app/questionnaire/chat/start-context';
+import { resolveSessionResumeEnabledForVersion } from '@/lib/app/questionnaire/chat/anonymity';
+import { findAuthedResumeDetail } from '@/lib/app/questionnaire/chat/resumable-session';
 import { redirect } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
@@ -130,12 +126,14 @@ describe('StartQuestionnairePage', () => {
     // Happy-path defaults
     vi.mocked(isLiveSessionsEnabled).mockResolvedValue(true);
     vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
-    vi.mocked(loadStartContext).mockResolvedValue({ kind: 'start-now' });
     vi.mocked(createOrResumeAuthedSession).mockResolvedValue({
       ok: true,
       sessionId: 's1',
       resumed: false,
     });
+    // Resume defaults: enabled, but nothing resumable → the versionId path falls through to create.
+    vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(true);
+    vi.mocked(findAuthedResumeDetail).mockResolvedValue(null);
   });
 
   // -------------------------------------------------------------------------
@@ -280,6 +278,60 @@ describe('StartQuestionnairePage', () => {
       ).rejects.toThrow('NEXT_REDIRECT:/questionnaires/sess_v2');
       expect(redirect).toHaveBeenCalledWith('/questionnaires/sess_v2');
     });
+
+    it('renders the resume chooser (no create/redirect) when a resumable session with progress exists', async () => {
+      // Arrange: resume enabled + an in-progress session with real progress on the versionId path.
+      vi.mocked(findAuthedResumeDetail).mockResolvedValue({
+        sessionId: 'sess-resume',
+        ref: '7F3K9M2P',
+        answeredCount: 3,
+      });
+
+      // Act
+      const result = await StartQuestionnairePage({
+        searchParams: makeSearchParams({ versionId: 'ver_abc' }),
+      });
+
+      // Assert: short-circuits to the chooser — no silent create, no redirect.
+      expect(createOrResumeAuthedSession).not.toHaveBeenCalled();
+      expect(redirect).not.toHaveBeenCalled();
+      expect(result?.props).toMatchObject({
+        versionId: 'ver_abc',
+        sessionId: 'sess-resume',
+        refRaw: '7F3K9M2P',
+        answeredCount: 3,
+      });
+    });
+
+    it('falls through to create when resume is enabled but nothing is resumable', async () => {
+      vi.mocked(findAuthedResumeDetail).mockResolvedValue(null);
+      await expect(
+        StartQuestionnairePage({ searchParams: makeSearchParams({ versionId: 'ver_abc' }) })
+      ).rejects.toThrow('NEXT_REDIRECT:');
+      expect(createOrResumeAuthedSession).toHaveBeenCalled();
+    });
+
+    it('falls through to create for a zero-progress session (no chooser for a barely-started returner)', async () => {
+      // A resumable session exists but with no answers yet → below the >=1 threshold → resume silently.
+      vi.mocked(findAuthedResumeDetail).mockResolvedValue({
+        sessionId: 'sess-zero',
+        ref: '7F3K9M2P',
+        answeredCount: 0,
+      });
+      await expect(
+        StartQuestionnairePage({ searchParams: makeSearchParams({ versionId: 'ver_abc' }) })
+      ).rejects.toThrow('NEXT_REDIRECT:');
+      expect(createOrResumeAuthedSession).toHaveBeenCalled();
+    });
+
+    it('skips the resume check when resume is disabled for the version', async () => {
+      vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(false);
+      await expect(
+        StartQuestionnairePage({ searchParams: makeSearchParams({ versionId: 'ver_abc' }) })
+      ).rejects.toThrow('NEXT_REDIRECT:');
+      expect(findAuthedResumeDetail).not.toHaveBeenCalled();
+      expect(createOrResumeAuthedSession).toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -330,61 +382,26 @@ describe('StartQuestionnairePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // F8.3 pre-create profile resolution
+  // Resume is idempotent inside bootstrap (capture moved to the carousel — F-capture)
   // -------------------------------------------------------------------------
 
-  describe('profile resolution (F8.3)', () => {
-    it('redirects straight to the chat when a resumable session already exists', async () => {
-      // Arrange: resolver finds a non-terminal session — skip the form entirely
-      vi.mocked(loadStartContext).mockResolvedValue({ kind: 'resume', sessionId: 'resumed_1' });
+  describe('idempotent resume', () => {
+    it('redirects to the resumed session (bootstrap reports resumed:true)', async () => {
+      // Arrange: the create route returned an existing non-terminal session.
+      vi.mocked(createOrResumeAuthedSession).mockResolvedValue({
+        ok: true,
+        sessionId: 'resumed_1',
+        resumed: true,
+      });
 
-      // Act & Assert: page redirects without creating a new session
+      // Act & Assert: same redirect, no separate pre-create profile step.
       await expect(
         StartQuestionnairePage({
           searchParams: makeSearchParams({ invitationToken: 'tok_xyz' }),
         })
       ).rejects.toThrow('NEXT_REDIRECT:/questionnaires/resumed_1');
       expect(redirect).toHaveBeenCalledWith('/questionnaires/resumed_1');
-      // Bootstrap is bypassed — the existing session is reused
-      expect(createOrResumeAuthedSession).not.toHaveBeenCalled();
-    });
-
-    it('renders the profile form when the version needs a profile and no session exists', async () => {
-      // Arrange: resolver asks for profile collection before session creation
-      vi.mocked(loadStartContext).mockResolvedValue({
-        kind: 'needs-profile',
-        profileFields: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }],
-      });
-
-      // Act
-      const Component = await StartQuestionnairePage({
-        searchParams: makeSearchParams({ invitationToken: 'tok_xyz' }),
-      });
-      render(Component);
-
-      // Assert: the form is rendered with the invitation token; bootstrap is deferred
-      // to the form's submit (the page does not create the session itself here)
-      const form = screen.getByTestId('profile-start-form');
-      expect(form).toHaveAttribute('data-token', 'tok_xyz');
-      expect(createOrResumeAuthedSession).not.toHaveBeenCalled();
-    });
-
-    it('falls through to bootstrap for a needs-profile context on the versionId surface', async () => {
-      // Arrange: needs-profile but the request is versionId (no invitationToken) — the
-      // page guards the form render on `'invitationToken' in request`, so it must NOT
-      // render the form and instead create the session normally.
-      vi.mocked(loadStartContext).mockResolvedValue({
-        kind: 'needs-profile',
-        profileFields: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }],
-      });
-
-      // Act & Assert: version-direct path creates the session despite needs-profile
-      await expect(
-        StartQuestionnairePage({
-          searchParams: makeSearchParams({ versionId: 'ver_abc' }),
-        })
-      ).rejects.toThrow('NEXT_REDIRECT:/questionnaires/s1');
-      expect(createOrResumeAuthedSession).toHaveBeenCalledWith({ versionId: 'ver_abc' });
+      expect(createOrResumeAuthedSession).toHaveBeenCalledWith({ invitationToken: 'tok_xyz' });
     });
   });
 });
