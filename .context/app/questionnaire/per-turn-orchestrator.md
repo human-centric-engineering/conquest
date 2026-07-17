@@ -19,10 +19,10 @@ orchestrator directly. This matches the P4/P5 app-native dispatch precedent.
 `runTurn(state: TurnState, invokers: CapabilityInvokers): Promise<TurnResult>` — Prisma-free
 and Next-free, pure relative to its inputs (no clock, no DB, no randomness). The impure
 capability calls are injected as `CapabilityInvokers` (real wiring at the route seam,
-stubbed in unit tests). Per-step feature flags are resolved by the route and passed in via
-`state.flags`, so the core's branching stays synchronous.
+stubbed in unit tests).
 
-Pipeline (a step is **skipped, not failed**, when its flag/config is off):
+Pipeline (a step is **skipped, not failed**, when its per-version config leaves it off —
+e.g. contradiction mode `off`):
 
 1. **Extract** (F4.2) — only with a non-empty message → `AnswerSlotIntent[]`.
 2. **Merge** — `applyIntents` folds the extracted answer into an _effective_ state so
@@ -49,8 +49,7 @@ deterministic and prompt-faithful either way.
 
 ## Conversational question phrasing (interviewer)
 
-By default the route streams the question's verbatim `prompt`. With the
-`APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED` sub-flag on, a `question` turn instead runs an
+Rather than stream the question's verbatim `prompt`, a `question` turn runs an
 **interviewer pass** (`_lib/question-stream.ts` → `streamQuestionMessage`) that renders the
 targeted question as warm, natural prose — briefly acknowledging the prior answer, calibrating
 tone to the version's `goal`/`audience` (role, expertise, sensitivity, locale), and **re-asking
@@ -105,8 +104,7 @@ deterministic orchestrator over `streamChat`.
 **Fail-soft & cost.** A missing agent, no provider, or a mid-stream error before any token drops
 back to the **verbatim prompt** (a question is never lost). The phrased message is what's
 persisted as the turn's `agentResponse`, so future turns' transcript context reads naturally.
-It's an extra LLM call per asked question, hence the opt-in sub-flag (master + live-sessions +
-phrasing); when off, there's no extra spend and behaviour is unchanged. The version `goal` +
+It's an extra LLM call per asked question, always run. The version `goal` +
 `audience` reach the route via `buildTurnContext`'s `meta` (the pure core never reads them).
 
 ## The route seam
@@ -118,7 +116,7 @@ phrasing); when off, there's no extra spend and behaviour is unchanged. The vers
 - **Invokers** `_lib/turn-invokers.ts` map `TurnState` → each P4 capability's args and
   dispatch via `capabilityDispatcher` with the seeded agent binding, **fail-soft** (a
   failure → empty outcome + diagnostic, never a throw). Selection runs the pure F4.1
-  strategy directly (adaptive degrades to weighted when its sub-flag is off).
+  strategy directly (whichever the version's `selectionStrategy` config selects).
 - **Offer stream** `_lib/offer-stream.ts` (`streamOfferMessage`) is an async generator that
   yields `content` frames off `provider.chatStream` and returns the accumulated message +
   cost; the route delegates with `yield*`.
@@ -217,8 +215,8 @@ wire Sunrise's `<MicButton>` (which expects an endpoint returning `{ text }`) at
 ### Attachment input
 
 The `/messages` body accepts an optional `attachments` array (the platform `chatAttachmentSchema`
-— up to 10 files, ~5 MB each / ~25 MB combined; images + PDF/DOCX/text). When the attachment
-sub-flag is on, the route threads them onto `TurnState.attachments`; the extraction invoker forwards
+— up to 10 files, ~5 MB each / ~25 MB combined; images + PDF/DOCX/text). The route threads them
+onto `TurnState.attachments`; the extraction invoker forwards
 them to the answer-extractor capability, whose prompt builder turns the user turn into multimodal
 content parts (`text` + one `image`/`document` part per file — the same conversion as the platform
 chat message builder) so the model reads the file alongside the message. Before the LLM call the
@@ -258,23 +256,16 @@ slot that the next send cleared. Both are now persisted and replayed.
 
 ## Gating
 
-- Master `APP_QUESTIONNAIRES_ENABLED` + the dark-launch sub-flag
-  `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` (seed 021, off by default). Both off → 404
-  before auth, so the respondent surface is invisible until an operator opts in.
-- Per-step sub-flags (extraction/contradiction/refinement/completion) gate **individual
-  pipeline steps**, not the whole turn — a disabled sub-feature is skipped and the turn
-  continues.
-- Voice input (F6.2) has its own dark-launch sub-flag `APP_QUESTIONNAIRES_VOICE_INPUT_ENABLED`
-  (seed 022, off by default) that opts the paid Whisper path in **on top of** live-sessions —
-  `isVoiceInputEnabled` requires master + live-sessions + voice, because a transcript is only
-  useful once the respondent can send it through the live `/messages` loop (with live-sessions off
-  that route 404s, so transcription would be a dead but still-paid call). Off → the transcribe
-  route 404s before auth (`withVoiceInputEnabled`).
-- Attachment input has its own dark-launch sub-flag `APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED`
-  (seed 024, off by default), also ANDed with master + live-sessions (`isAttachmentInputEnabled`).
-  Unlike voice it doesn't gate a dedicated route — the chat surface hides the affordance and the
-  `/messages` route **ignores** any attachments a client sends while it's off, so the paid
-  multimodal path stays shut.
+- The respondent surface — the turn loop, live sessions, voice input, and attachment input —
+  is **always on**. There is no flag to check and no 404-when-off path.
+- Individual pipeline steps (extraction/contradiction/refinement/completion) are still governed
+  by their own per-version config (e.g. contradiction mode `off`) — a step whose config leaves
+  it off is skipped and the turn continues.
+- Voice input (F6.2) runs the paid Whisper path whenever the respondent submits audio; the
+  transcript then flows through the live `/messages` loop like any text.
+- Attachment input runs whenever a client sends attachments on the `/messages` body — the chat
+  surface always offers the affordance and the route always threads any attachments through the
+  multimodal extraction path.
 
 ## Preview Turn Inspector (admin only)
 

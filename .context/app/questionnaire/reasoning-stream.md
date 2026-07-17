@@ -53,13 +53,10 @@ flow through their existing side-band notices, unchanged.
 
 ## Gating
 
-Two gates, ANDed (like cost-cap / seriousness):
+The reasoning stream is **always on** — there is no platform flag. Whether it shows, and how, is
+governed entirely by the **per-version config** on the **Settings** tab (`config-editor.tsx`):
 
-- **Platform flag** `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED` (DB-backed feature_flag row, seed
-  `039`, off by default) → `isReasoningStreamEnabled()` (requires the master app flag + live-sessions
-  too). See [[feature-flags-are-db-rows]].
-- **Per-version config** on the **Settings** tab (`config-editor.tsx`):
-  - `reasoningStreamEnabled` (default **on**) — show the trace at all.
+- `reasoningStreamEnabled` (default **on**) — show the trace at all.
   - `reasoningStreamPlacement` — `overlay` (default; UI label **"Animated"** — newest turn opens
     then animates closed) or `inline` (quiet disclosure, opens on click only). The enum value
     `overlay` is retained for config compatibility even though the UI now reads "Animated".
@@ -69,22 +66,22 @@ Two gates, ANDed (like cost-cap / seriousness):
   - `reasoningStreamPersist` (default **on**) — replay on resume + admin trace later.
 
 The pages (`app/(protected)/questionnaires/[sessionId]`, `app/(public)/q/[versionId]` via
-`AnonymousSessionBoot`) resolve the effective placement server-side (platform flag AND version
-toggle) and pass it through `SessionWorkspace` → `QuestionnaireChat`; absent ⇒ no trace.
+`AnonymousSessionBoot`) resolve the effective placement server-side from the version config and pass
+it through `SessionWorkspace` → `QuestionnaireChat`; absent ⇒ no trace.
 
 ## Files
 
-| Concern                           | Path                                                                                             |
-| --------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Pure builder + types              | `lib/app/questionnaire/reasoning/`                                                               |
-| Selection rationale on the result | `lib/app/questionnaire/orchestrator/{orchestrator,data-slot-orchestrator}.ts`                    |
-| SSE emit                          | `app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts`                                   |
-| Wire narrow                       | `lib/app/questionnaire/chat/parse-session-event.ts`                                              |
-| Persist / replay                  | `_lib/turns.ts`, `_lib/turn-run.ts`, `_lib/transcript.ts`                                        |
-| Client hook                       | `lib/hooks/use-questionnaire-session-stream.ts` (attaches `reasoning` onto the committed turn)   |
-| UI                                | `components/app/questionnaire/chat/reasoning-trace.tsx`, `questionnaire-chat.tsx`                |
-| Dwell resolve (no-login)          | `lib/app/questionnaire/chat/anonymity.ts` (`resolveReasoningDwellForVersion`)                    |
-| Config / flag                     | `authoring/config-schema.ts`, `types.ts` (`REASONING_PLACEMENTS`), `feature-flag.ts`, seed `039` |
+| Concern                           | Path                                                                                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Pure builder + types              | `lib/app/questionnaire/reasoning/`                                                             |
+| Selection rationale on the result | `lib/app/questionnaire/orchestrator/{orchestrator,data-slot-orchestrator}.ts`                  |
+| SSE emit                          | `app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts`                                 |
+| Wire narrow                       | `lib/app/questionnaire/chat/parse-session-event.ts`                                            |
+| Persist / replay                  | `_lib/turns.ts`, `_lib/turn-run.ts`, `_lib/transcript.ts`                                      |
+| Client hook                       | `lib/hooks/use-questionnaire-session-stream.ts` (attaches `reasoning` onto the committed turn) |
+| UI                                | `components/app/questionnaire/chat/reasoning-trace.tsx`, `questionnaire-chat.tsx`              |
+| Dwell resolve (no-login)          | `lib/app/questionnaire/chat/anonymity.ts` (`resolveReasoningDwellForVersion`)                  |
+| Config                            | `authoring/config-schema.ts`, `types.ts` (`REASONING_PLACEMENTS`)                              |
 
 Migrations: `20260615094314_reasoning_stream` (additive — 3 config columns + `reasoning` on the
 turn) and `20260619080504_app_questionnaire_reasoning_dwell_config` (additive — the two

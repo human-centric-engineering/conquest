@@ -103,11 +103,9 @@ persist write fails it may re-signpost, which is safer than missing it.
 
 ## Gating
 
-- Platform flag `APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED` (`isSensitivityAwarenessEnabled()`
-  = app && live && sub-flag; seed `032-sensitivity-awareness-flag.ts`, default off).
-- Per-questionnaire `config.sensitivityAwareness` (default false) + `supportMessage` /
-  `supportResourceUrl`. The route runs detection only when **both** the flag and the toggle are on
-  (`flags.sensitivityAwareness`). Kickoff turns force it off.
+Safeguarding is **always on** — there is no platform flag. It is governed solely by the per-version
+config opt-in: `config.sensitivityAwareness` (default false) + `supportMessage` /
+`supportResourceUrl`. The route runs detection only when that toggle is on. Kickoff turns force it off.
 
 ## PII discipline
 
@@ -137,8 +135,8 @@ on a tiny cohort is itself re-identifying). Surfaced as a small tile on the anal
 - Phraser: `_lib/question-stream.ts`.
 - Persistence + route: `_lib/sessions.ts`, `_lib/turn-context.ts`, `_lib/detail.ts`,
   `[id]/messages/route.ts`.
-- Gating + config: `constants.ts`, `feature-flag.ts`, `authoring/config-schema.ts`,
-  `components/admin/questionnaires/config-editor.tsx`, seed `032-sensitivity-awareness-flag.ts`.
+- Gating + config: `constants.ts`, `authoring/config-schema.ts`,
+  `components/admin/questionnaires/config-editor.tsx`.
 - UI: `components/app/questionnaire/chat/{support-notice,questionnaire-chat}.tsx`.
 - Analytics: `analytics/{safeguarding,views,index}.ts` + the analytics page + route.
 - Schema: `AppQuestionnaireConfig` (sensitivityAwareness/supportMessage/supportResourceUrl),

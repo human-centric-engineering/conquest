@@ -4,8 +4,8 @@
 > questionnaire version, surfaced to the admin **before launch** so they can size
 > the cost budget and decide whether to proceed. Built by **F3.3**
 > ([`../planning/features/f3.3.md`](../planning/features/f3.3.md)) — the third
-> feature of P3. Gated by `APP_QUESTIONNAIRES_ENABLED` (404 when off). Reads the
-> F3.1 config and prices through Sunrise's provider-agnostic model registry.
+> feature of P3. Always on. Reads the F3.1 config and prices through Sunrise's
+> provider-agnostic model registry.
 
 ## What it does
 
@@ -95,7 +95,7 @@ than a misleading `$0.00`. Token volume is still estimated in this case.
 GET /api/v1/app/questionnaires/:id/versions/:vid/cost-estimate?respondents=N
 ```
 
-`withAdminAuth`, flag-gated (404 when off), read-only. `respondents` is optional
+`withAdminAuth`, always on, read-only. `respondents` is optional
 (default `1`, `1..10000`). Returns a `SessionCostEstimate`:
 
 ```jsonc

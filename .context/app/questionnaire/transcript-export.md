@@ -5,9 +5,8 @@ PDF or plain text. This is distinct from the F7.4 [respondent report / answers
 export](./respondent-report.md): F7.4 renders the captured _answers_; F7.6 renders the
 _conversation_ that produced them.
 
-Gated by the live-sessions platform flag (`APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED`, a
-[feature-flag row](./feature-flags.md)) — the same gate as the rest of the respondent surface.
-No migration: it reads existing `AppQuestionnaireTurn` rows.
+Always on — part of the always-on respondent surface. No migration: it reads existing
+`AppQuestionnaireTurn` rows.
 
 ## What's in the document
 
@@ -41,8 +40,8 @@ the user message and agent reply within one turn share that timestamp.
 | `GET …/questionnaire-sessions/:id/transcript.pdf` | `application/pdf`           | `resolveTurnAccess` (owner OR anon token) |
 | `GET …/questionnaire-sessions/:id/transcript.txt` | `text/plain; charset=utf-8` | `resolveTurnAccess`                       |
 
-Both are `withLiveSessionsEnabled`-gated, dot-segment routes. Gate order mirrors the F7.4
-`export.pdf`: **flag (404 before auth) → load → access (401/403) → build → render → respond.** The
+Both are dot-segment routes. Gate order mirrors the F7.4
+`export.pdf`: **load → access (401/403) → build → render → respond.** The
 PDF route is `runtime = 'nodejs'` (`@react-pdf/renderer` renders to a Node Buffer); the logo is
 fetched best-effort **only after** access is granted. The text route skips the logo fetch
 (`fetchLogo: false`). Download filename: `transcript-<slug>-v<N>.<ext>`, `Cache-Control: no-store`.

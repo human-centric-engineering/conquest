@@ -264,7 +264,7 @@ report built on contradictory answers would mislead. This is distinct from the a
 (`…/versions/:vid/complete`, over body-supplied answers): the live sweep sources the session's stored
 answers.
 
-- **Gate.** Runs only when `contradictionMode ≠ off` AND the detection sub-flag is on, and never when
+- **Gate.** Runs only when `contradictionMode ≠ off`, and never when
   the respondent chose to finish anyway (`skipSweep`). Needs ≥2 answered slots (no `currentStatement`
   at submit). The paid dispatch takes a per-flow sub-cap (`turnLimiter.check(access.rateKey)`, 60/min —
   the same guard the per-turn messages route uses), so a held session can't be re-POSTed to hammer
@@ -313,14 +313,14 @@ fire-and-forget `logCost` → `normalizeContradictionFindings` →
 ## The preview route
 
 `POST /api/v1/app/questionnaires/:id/versions/:vid/detect-contradictions` —
-`withQuestionnairesEnabled(withAdminAuth(…))`.
+`withAdminAuth(…)`.
 
 - Body: `{ answers: { key, value, confidence?, provenance?, turnIndex? }[] (≥2),
 mode?, windowN?, sessionId? }`.
-- **Sub-flag gate** — `APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED` (seed 011,
-  off by default), on top of the master flag, because every call spends an LLM
-  completion. Off → 404 (looks like a missing route). Same opt-in shape as answer
-  extraction.
+- **Always on** — detection is a permanent capability; there is no flag to check and no route
+  that 404s when off. Whether it actually runs on a given version is governed by the per-version
+  `contradictionMode` config (`off` disables it). Each call spends an LLM completion, which is why
+  the per-admin sub-cap below exists.
 - **Per-admin LLM sub-cap** — `contradictionDetectionLimiter` (60/min), keyed on the
   admin who owns the spend.
 - **DB seam** — `_lib/contradiction-context.ts` `buildContradictionContext` is the

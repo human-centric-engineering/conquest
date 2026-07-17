@@ -30,7 +30,7 @@ ConQuest is an **application fork of Sunrise**. Two tiers share one repo:
 | Concern      | Location                                 | Rule                                                                                                                                                                                                              |
 | ------------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Domain logic | `lib/app/questionnaire/**`               | Platform-agnostic. The `lib/app/**` ESLint boundary forbids runtime `next/*`, `prisma`, `react-dom`, and node built-in imports (type-only OK). DB/HTTP glue lives in `app/` or a `lib/app/<name>/server/` module. |
-| HTTP API     | `app/api/v1/app/**`                      | Inherits the 100/min `api` rate-limit cap automatically; gated by the feature flag.                                                                                                                               |
+| HTTP API     | `app/api/v1/app/**`                      | Inherits the 100/min `api` rate-limit cap automatically. Always on — no feature-flag gate.                                                                                                                        |
 | Admin UI     | `app/admin/questionnaires/**`            | Registered into the sidebar via the nav seam (`lib/app/admin-nav.ts`), not by editing the sidebar component.                                                                                                      |
 | End-user UI  | `app/(protected)/questionnaires/**`      | Session-gated route group.                                                                                                                                                                                        |
 | Models       | `prisma/schema/app-questionnaire.prisma` | A **dedicated** file — `app.prisma` already holds platform models. Every model prefixed `App…`.                                                                                                                   |
@@ -54,7 +54,6 @@ Primitives **already consumed** (F0.1 + F1.1):
 | Document parsing           | `parseDocument()` — called **directly** (see note)                           |
 | Audit                      | `logAdminAction()`                                                           |
 | Cost                       | Per-agent budgets + `logCost()` / `AiCostLog`                                |
-| Feature flag               | `isFeatureEnabled('APP_QUESTIONNAIRES_ENABLED')`                             |
 
 > **Parsing — `parseDocument()` directly, not `previewDocument()`/`confirmPreview()`.**
 > Those preview helpers chunk + embed the document into the RAG knowledge base;
@@ -74,9 +73,10 @@ Primitives **planned but not yet consumed** (later phases):
 
 - **Provider-agnostic.** Every LLM call resolves through Sunrise's provider
   manager / `AiProviderModel` registry — nothing locks to a single vendor.
-- **Feature-flagged.** `APP_QUESTIONNAIRES_ENABLED` (DB-backed) gates every
-  surface. Routes flag-gate first via `ensureQuestionnairesEnabled()` before any
-  auth/handler work.
+- **Always on.** Questionnaire surfaces carry no feature-flag gate — the old
+  `APP_QUESTIONNAIRES_*` layer was removed (2026-07). Routes go straight to
+  auth/handler work; per-feature behaviour is governed only by each version's own
+  config toggles. See [`feature-flags.md`](./feature-flags.md).
 - **Auditable & provenance-bearing.** Admin mutations log via `logAdminAction()`;
   extracted answers carry `ProvenanceItem` records.
 - **Fork-ready.** Clean seams, `// DEMO-ONLY:` markers on sales-demo-only code, and

@@ -119,7 +119,7 @@ The migration was generated `--create-only` with the phantom pgvector `DROP INDE
 statements stripped before applying (see `.context/database/migrations.md` and the
 drift warning on `AppQuestionSlot`).
 
-## Capability, agent, sub-flag
+## Capability, agent
 
 - **`AppRefineAnswerCapability`** (`capabilities/refine-answer.ts`) — a `BaseCapability`
   running one provider-agnostic structured LLM call (call → parse →
@@ -130,16 +130,14 @@ drift warning on `AppQuestionSlot`).
   from the extractor (006) and detector (009): its own cadence, persona, and
   `monthlyBudgetUsd`. Resolves the `chat` tier; ships with empty model/provider
   (dynamic resolution). `visibility: 'internal'`.
-- **Sub-flag** `APP_QUESTIONNAIRES_ANSWER_REFINEMENT_ENABLED` (seed 014, disabled) on
-  top of the master flag — refinement spends an LLM call per pass.
-  `isAnswerRefinementEnabled()` requires both.
+- **Always on** — refinement is a permanent capability; there is no flag to check.
+  Each pass still spends an LLM call, which is why the per-admin sub-cap below exists.
 
 ## The route (read/write)
 
 `POST /api/v1/app/questionnaires/:id/versions/:vid/refine-answer` — admin-only.
 
-Gate order: `withQuestionnairesEnabled` (404 master-off, before auth) → `withAdminAuth`
-(401/403) → `isAnswerRefinementEnabled()` (404 sub-flag-off) → `validateRequestBody`
+Gate order: `withAdminAuth` (401/403) → `validateRequestBody`
 (400) → `answerRefinementLimiter` (429, 60/min per admin) → `buildRefinementContext`
 (404 version, 400 no-resolvable-answers) → seed the supplied answers into the preview
 session → load the refiner agent (404 if unseeded) → dispatch → for each decision:

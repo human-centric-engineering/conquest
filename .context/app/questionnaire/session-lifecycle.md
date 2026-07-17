@@ -26,8 +26,7 @@ refetched on turn-settle**, plus two mutations.
 | `POST /api/v1/app/questionnaire-sessions/:id/submit`    | both respondent kinds | accept → `completed` (the sole respondent path)    |
 
 All three reuse `resolveTurnAccess` (authed owner OR a valid anonymous `X-Session-Token`).
-Gate order is the house pattern: **flag (404 before auth) → load → access (401/403) →
-action**.
+Gate order is the house pattern: **load → access (401/403) → action**.
 
 ### `SessionStatusView` (respondent-safe projection)
 
@@ -45,8 +44,7 @@ F4.5 assessment + F6.3 cost tier + F4.6 status into:
 
 It's deliberately narrow (same quiet-signal discipline as the panel's confidence dot):
 authoring internals and the raw spend are never projected. `cost` is `null` unless a
-positive budget is configured **and** enforcement is enabled — otherwise a soft-cap hint
-would mislead. A `hard` tier on a `paused` session is the tell that the pause was
+positive budget is configured — otherwise a soft-cap hint would mislead. A `hard` tier on a `paused` session is the tell that the pause was
 budget-driven (terminal) vs. a respondent pause (resumable). `canSubmitSession(view)` is the
 shared derivation — `status === 'active' && completion.kind === 'offer'` — used by both the
 UI and the submit route, so the button and the endpoint can't disagree.
@@ -100,9 +98,8 @@ anonymous page can't SSR (the token is client-only), so the hook fetches on moun
 
 ## Gating
 
-Gated entirely by the existing `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` sub-flag (via
-`withLiveSessionsEnabled`) — no new flag, no migration (the `completed`/`paused`/`resumed`
-statuses and events already exist from F4.6).
+Always on — part of the always-on respondent surface. No flag, no migration (the
+`completed`/`paused`/`resumed` statuses and events already exist from F4.6).
 
 ## See also
 

@@ -7,7 +7,7 @@ with cost trade-offs and one-click apply. ConQuest defaults to **OpenAI**.
 - **Page:** `/admin/questionnaires/agent-settings` (nav: Questionnaires → Agent settings)
 - **API:** `GET /api/v1/app/questionnaires/agent-settings` (evaluation),
   `POST …/agent-settings/explain` (AI explain)
-- **Flag:** gated by the master `APP_QUESTIONNAIRES_ENABLED` (404 when off); no sub-flag.
+- **Flag:** none — always on (admin-only).
 
 ## Why this exists
 

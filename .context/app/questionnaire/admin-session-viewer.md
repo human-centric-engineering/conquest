@@ -28,14 +28,14 @@ All nested under the questionnaire so the route shape enforces ownership: the se
 belong to `:id`, else `404` (never confirm a cross-questionnaire session). Same pattern as the F7.4
 `export.pdf` route.
 
-| Route                                                         | Gate                        | Purpose                                                                                                                   |
-| ------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `GET …/questionnaires/:id/sessions/:sessionId/transcript`     | `withQuestionnairesEnabled` | Read the conversation + viewer metadata (`isPreview`, `status`, `publicRef`, redacted identity). Reuses `loadTranscript`. |
-| `POST …/questionnaires/:id/sessions/:sessionId/preview-token` | `withLiveSessionsEnabled`   | Mint a continue token for a preview session (the only continue path).                                                     |
-| `GET …/questionnaires/:id/sessions/:sessionId/export.pdf`     | `withQuestionnairesEnabled` | Download the session's answers/results PDF (embeds the AI report when ready). The F7.4 admin export.                      |
-| `GET …/questionnaires/:id/sessions/:sessionId/transcript.pdf` | `withQuestionnairesEnabled` | Download the verbatim conversation as a branded PDF. Admin twin of the F7.6 respondent transcript export.                 |
-| `GET …/questionnaires/:id/sessions/:sessionId/transcript.txt` | `withQuestionnairesEnabled` | Download the verbatim conversation as plain text. Admin twin of the F7.6 respondent transcript export.                    |
-| `GET …/questionnaires/sessions/by-ref/:ref`                   | `withQuestionnairesEnabled` | Resolve a support reference → its session's viewer location (static sibling of the `[id]` segment).                       |
+| Route                                                         | Gate         | Purpose                                                                                                                   |
+| ------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `GET …/questionnaires/:id/sessions/:sessionId/transcript`     | admin (auth) | Read the conversation + viewer metadata (`isPreview`, `status`, `publicRef`, redacted identity). Reuses `loadTranscript`. |
+| `POST …/questionnaires/:id/sessions/:sessionId/preview-token` | admin (auth) | Mint a continue token for a preview session (the only continue path).                                                     |
+| `GET …/questionnaires/:id/sessions/:sessionId/export.pdf`     | admin (auth) | Download the session's answers/results PDF (embeds the AI report when ready). The F7.4 admin export.                      |
+| `GET …/questionnaires/:id/sessions/:sessionId/transcript.pdf` | admin (auth) | Download the verbatim conversation as a branded PDF. Admin twin of the F7.6 respondent transcript export.                 |
+| `GET …/questionnaires/:id/sessions/:sessionId/transcript.txt` | admin (auth) | Download the verbatim conversation as plain text. Admin twin of the F7.6 respondent transcript export.                    |
+| `GET …/questionnaires/sessions/by-ref/:ref`                   | admin (auth) | Resolve a support reference → its session's viewer location (static sibling of the `[id]` segment).                       |
 
 The read seams live in `app/api/v1/app/questionnaire-sessions/_lib/admin-session-view.ts`
 (`loadAdminSessionView`, `resolveSessionRefLocation`). Identity redaction **mirrors the PDF export**:
@@ -46,7 +46,7 @@ identity.
 
 - **Entry points (both):** a compact "View a session" ref input in the workspace header
   (`SessionRefLookup compact`, reachable from every tab) **and** a **Sessions** tab
-  (`…/v/[vid]/sessions`, gated on the `liveSessions` flag) holding the full lookup panel. The tab is
+  (`…/v/[vid]/sessions`, always on) holding the full lookup panel. The tab is
   built to later grow a per-version session list above the lookup.
 - **Viewer route:** `…/v/[vid]/sessions/[sessionId]` (server component). Loads the metadata +
   transcript, branches on `isPreview`:

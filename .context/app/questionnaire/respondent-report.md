@@ -2,9 +2,9 @@
 
 The per-respondent report delivered after a respondent completes a questionnaire (report kind
 `respondent`). The first of two report kinds — the later cross-respondent **Cohort Report**
-(`cohort`) is a separate feature. Gated by the platform flag
-`APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED` (a DB feature-flag row, seeded disabled by
-`prisma/seeds/app-questionnaire/044-respondent-report-flag.ts`).
+(`cohort`) is a separate feature. The feature is **always on**; whether a report is actually
+generated for a version is governed by that version's own config (`respondentReport.enabled` + an
+AI mode — see [Configuration](#configuration)), not any platform flag.
 
 ## Modes
 
@@ -105,7 +105,7 @@ which runs `craftReportConfig` (`lib/app/questionnaire/report/craft.ts`): it res
 returning `{ reply, suggestions }`. `suggestions` carries the **full** proposed text for any of
 `instructions` / `structure` / `backgroundContext`; the admin applies a field wholesale via a
 per-field "Apply" button (which calls back into the editor — config still saves through the normal
-PATCH). The route is admin-only, gated on the master flag, and per-admin rate-limited
+PATCH). The route is admin-only and per-admin rate-limited
 (`reportConfigAssistLimiter`). Stateless server-side — the transcript lives in the component. This
 mirrors the generative-authoring **refine** pattern (a structured app turn), not the platform chat
 tool-loop.
@@ -158,7 +158,7 @@ from the delivered report: a re-run never changes what the respondent sees until
 
 1. **Enqueue** — the submit route calls `enqueueRespondentReport(sessionId)`
    (`lib/app/questionnaire/report/enqueue.ts`) after `markSessionCompleted`. It creates a `queued`
-   row only when the platform flag is on AND the version's config is `enabled` + an AI mode
+   row only when the version's config is `enabled` + an AI mode
    (`raw_plus_insights` or `narrative`, via `isAiRespondentReportMode`).
    Idempotent (upsert by `sessionId`); best-effort — a failure never fails submission.
 2. **Worker** — `processQueuedRespondentReports()` (`lib/app/questionnaire/report/worker.ts`) runs in
@@ -213,21 +213,21 @@ from the delivered report: a re-run never changes what the respondent sees until
    (`SessionPdfDocument`) and the on-screen completion view. The seeded agent persona (045) carries the
    same grounding + short-paragraph guidance as its default voice.
 
-4. **Formatting (optional second pass, flag-gated)** — when `APP_REPORT_FORMATTER_ENABLED` is on,
-   generation runs a second agent (`REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter'`, seeded by
+4. **Formatting (second pass, always on)** — generation always runs a second agent
+   (`REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter'`, seeded by
    `061-report-formatter-agent.ts`) over the writer's output via `formatReportContent`
    (`lib/app/questionnaire/report/format.ts`). It does **form only**: re-paragraphs at natural
    boundaries, converts inline dash-runs into bullet lists, and strips AI-isms (em-dash overuse,
    flowery filler) — the things the content agent self-polices poorly and the deterministic
-   `splitReportParagraphs` split can only approximate with a blunt sentence count. When the flag is on,
-   agent 1's prompt is **thinned** — it sheds the strict paragraph/bullet mechanics (layout is now the
-   formatter's job) so it focuses on grounded substance. **Fidelity is load-bearing**: a guard verifies
-   the formatter preserved structure (same sections, headings, and action count); on any drift, parse
-   failure, timeout, or provider error it returns the **original content unchanged** and the pass never
-   fails an otherwise-valid report. `actions` pass through verbatim. Success stores `formatted = true`
+   `splitReportParagraphs` split can only approximate with a blunt sentence count. Because the formatter
+   always runs, agent 1's prompt is **thinned** — it sheds the strict paragraph/bullet mechanics (layout
+   is now the formatter's job) so it focuses on grounded substance. **Fidelity is load-bearing**: a guard
+   verifies the formatter preserved structure (same sections, headings, and action count); on any drift,
+   parse failure, timeout, or provider error it returns the **original content unchanged** and the pass
+   never fails an otherwise-valid report. `actions` pass through verbatim. Success stores `formatted = true`
    and sums the second call's cost; both renderers then honour the formatter's paragraphs/bullets
    **verbatim** (`splitReportParagraphs(text, { trustParagraphs: true })` — skips the sentence
-   re-grouping). `formatted = false` (flag off, fallback, or legacy rows) keeps the deterministic split.
+   re-grouping). `formatted = false` (a fidelity fallback, or legacy rows) keeps the deterministic split.
    Report-kind-agnostic (operates on the shared `summary / sections[{heading,body}] / actions` core), so
    the Cohort Report can adopt it later (passing `format: 'markdown'`) — see the seam note in
    [`cohort-report.md`](./cohort-report.md).
@@ -266,8 +266,8 @@ information" appendix ignores them).
 
 The Generation tab's **Preview report** button lets an admin see how the configured report will read
 **before going live**, without a real respondent. It posts the current (possibly unsaved) config to
-`POST …/versions/:vid/report/preview` (`reportPreview` in `lib/api/endpoints.ts`; admin-only, master-flag
-gated, per-admin `reportPreviewLimiter` — two LLM calls per preview). The route:
+`POST …/versions/:vid/report/preview` (`reportPreview` in `lib/api/endpoints.ts`; admin-only,
+per-admin `reportPreviewLimiter` — two LLM calls per preview). The route:
 
 1. loads the version's structure (questions + data slots);
 2. `synthesiseSampleReportInputs` (`lib/app/questionnaire/report/preview-sample.ts`) invents a single
@@ -295,12 +295,12 @@ a revision**.
 
 - **Trigger UI** — `SessionReportRerun`
   (`components/admin/questionnaires/sessions/session-report-rerun.tsx`), a dialog opened from the
-  session viewer's action bar (rendered only when `flags.respondentReport`). It seeds from the version's
+  session viewer's action bar. It seeds from the version's
   current report config, lets the admin edit the key generation fields (mode, narrative style,
   instructions, structure, background, discount-low-confidence, KB grounding) + a short note, and lists
   the re-run history. The full (narrowed) settings object is sent, so research config carries through.
 - **Enqueue** — `POST /api/v1/app/questionnaire-sessions/:id/report/revisions` (`reportRevisions`;
-  admin-only, master + respondent-report flag gated, per-admin `reportRerunLimiter` at the ingest class
+  admin-only, per-admin `reportRerunLimiter` at the ingest class
   of 10/min). Body `{ config?, instructions? }` — `config` omitted falls back to the version config.
   Rejects a `raw` mode (nothing to generate). `enqueueRespondentReportRevision`
   (`lib/app/questionnaire/report/revision.ts`) ensures the 1:1 header exists (created **`ready` with
@@ -323,8 +323,8 @@ a revision**.
 - **Status endpoint** — `GET /api/v1/app/questionnaire-sessions/:id/report` (`report` in
   `lib/api/endpoints.ts`) serves both respondent kinds via `resolveTurnAccess` (auth cookie or
   `X-Session-Token`). It returns the `RespondentReportClientView` built by
-  `buildRespondentReportClientView` (`lib/app/questionnaire/report/view.ts`): `enabled` (config AND
-  platform flag), `mode`, delivery toggles, and — for the AI modes (`raw_plus_insights`, `narrative`)
+  `buildRespondentReportClientView` (`lib/app/questionnaire/report/view.ts`): `enabled` (the version's
+  `respondentReport.enabled` config), `mode`, delivery toggles, and — for the AI modes (`raw_plus_insights`, `narrative`)
   — the insights `{ status, started, content, generatedAt, error, notifyRequested }`. `started`
   disambiguates a genuine `queued` row from "no row yet" (both surface `status: 'queued'`), so the UI
   can show "Starting…" vs "Preparing…"; `notifyRequested` reflects a stored `notifyEmail`.
@@ -382,5 +382,4 @@ a revision**.
     slugified title (`RespondentReportClientView.questionnaireTitle`, added to `view.ts`), since a blob
     URL loses the server's `Content-Disposition`; and both run pages
     (`(protected)/questionnaires/[sessionId]`, `(public)/q/[versionId]`) set their tab title via
-    `generateMetadata` from the resolved header (the public one gated behind the live-sessions flag so a
-    dark-launched surface can't leak a title).
+    `generateMetadata` from the resolved header.

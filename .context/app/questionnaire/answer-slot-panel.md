@@ -2,9 +2,8 @@
 
 The live panel beside the respondent chat that shows the questionnaire's answer slots
 as the conversation fills them in — confidence, provenance, refinement history, and a
-per-slot "Revisit". Pure consumer UI on top of **one new read endpoint**. Gated by
-`APP_QUESTIONNAIRES_ENABLED` + `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` (the same
-flags as the chat surface).
+per-slot "Revisit". Pure consumer UI on top of **one new read endpoint**. Always on,
+like the chat surface it sits beside.
 
 `// DEMO-ONLY:` everything here is questionnaire-domain — a non-questionnaire fork
 strips the `panel/` directory and the `answers` route and keeps the generic chat.
@@ -20,8 +19,8 @@ slot updates. This keeps the streaming contract untouched.
 ### `GET /api/v1/app/questionnaire-sessions/:id/answers`
 
 Returns `{ success: true, data: AnswerPanelView }`. Gate order mirrors the messages
-route: **live-sessions flag (404 before auth) → load session → `resolveTurnAccess`
-(401/403) → respond**. It reuses `resolveTurnAccess` (an authenticated owner OR a valid
+route: **load session → `resolveTurnAccess` (401/403) → respond**. It reuses
+`resolveTurnAccess` (an authenticated owner OR a valid
 anonymous `X-Session-Token`), so it serves both respondent kinds; `withAuth` can't. No
 status gate — a paused or completed session still shows its answers. No extra rate
 limiter (a read inherits the automatic 100/min on `/api/v1/**`).
@@ -109,8 +108,8 @@ stays a single readable column.
 
 `Revisit` re-asks a question via a fresh chat turn; **inline correction** is the lighter
 alternative — fix what the latest turn just captured _in place_, without spending a turn.
-Gated by the per-version `inlineCorrectionEnabled` config (default on; **no platform flag** —
-respondent-facing UX). Two surfaces, one shared editor:
+Gated by the per-version `inlineCorrectionEnabled` config (default on) — a respondent-facing
+UX toggle. Two surfaces, one shared editor:
 
 - **Chat strip** (`components/.../chat/correction-strip.tsx`): rendered beneath the transcript
   once the latest reply has settled (`composerReady`), listing what the turn recorded

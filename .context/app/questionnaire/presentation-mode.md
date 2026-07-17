@@ -113,5 +113,5 @@ follow-up.
 ## Gating
 
 No dedicated feature flag — the whole respondent surface (pages, answers GET/PUT,
-messages, lifecycle) already sits behind `APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG`, and
-form mode adds no LLM spend. `presentationMode` is the per-questionnaire opt-in.
+messages, lifecycle) is always on, and form mode adds no LLM spend. `presentationMode`
+is the per-questionnaire opt-in that governs which surface a respondent gets.

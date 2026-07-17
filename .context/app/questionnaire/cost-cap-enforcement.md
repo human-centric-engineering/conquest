@@ -43,7 +43,7 @@ per-turn spend.
 In the `/messages` route (`app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts`),
 **pre-stream**, after the status-active gate and body validation, before any per-turn work:
 
-1. Skip entirely unless `costBudgetUsd` is set **and** `isCostCapEnforcementEnabled()`.
+1. Skip entirely unless `costBudgetUsd` is set — a configured budget is the only gate.
 2. `spent = sumSessionTurnCost(sessionId)`; `tier = classifyCostCap(spent, cap)`.
 3. **hard** → `recordCostCapReached(…, tier: 'hard')`, `pauseSession(…, { reason: 'cost_cap' })`,
    return `errorResponse('Session cost budget exhausted', { code: 'COST_CAP_REACHED', status: 402, details: { spentUsd, capUsd } })`. The turn never runs. Every later turn then fails
@@ -74,12 +74,11 @@ with `metadata: { spentUsd, capUsd, tier }`. The hard-cap auto-pause additionall
 own `paused` transition event (via `pauseSession`). `recordCostCapReached` never changes
 status itself.
 
-## Feature flag
+## The only gate: a configured budget
 
-`APP_QUESTIONNAIRES_COST_CAP_ENABLED` (seed 023, **disabled by default**). Resolved by
-`isCostCapEnforcementEnabled()` which ANDs the master flag, the live-sessions flag, and the
-cost-cap sub-flag — the cap is about respondent spend on the live loop, so it depends on
-live-sessions the same way voice input does. When off, turns run with no budget check even if
-a version sets `costBudgetUsd`. Unlike the other sub-features this gates a behaviour _inside_
-an already-gated route, so there is no route to 404 — `isCostCapEnforcementEnabled` returns a
-boolean rather than a gate `Response`.
+Cost-cap enforcement is **always on** — there is no feature flag to check. The single gate is
+the per-version `costBudgetUsd` config: enforcement runs whenever a version sets a positive
+budget, and is a no-op (`none` tier, no budget check) when the budget is `null`/non-positive.
+Because this is a behaviour _inside_ the already-live `/messages` loop, there is no route to
+404 — the budget check simply doesn't fire without a configured cap. The budget is the version
+author's opt-in, exactly as it was the real second half of the old gate.

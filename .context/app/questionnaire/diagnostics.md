@@ -90,8 +90,7 @@ version's `anonymousMode` opt-in: when on, `identitySuppressed` is true and emai
 | `GET …/questionnaires/:id/versions/:vid/diagnostics`               | `VersionDiagnosticsResult`    |
 | `GET …/questionnaires/:id/versions/:vid/diagnostics/:invitationId` | `InvitationDiagnosticsResult` |
 
-Admin-only (`withAdminAuth`), master-flag-gated (`withQuestionnairesEnabled`), version-scoped via
-`loadScopedVersion`; query params `from`/`to`/`roundId` reuse the shared `questionnaireAnalyticsQuerySchema`.
+Admin-only (`withAdminAuth`), version-scoped via `loadScopedVersion`; query params `from`/`to`/`roundId` reuse the shared `questionnaireAnalyticsQuerySchema`.
 
 ## UI
 

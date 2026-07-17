@@ -79,14 +79,12 @@ questionnaire objectives can't be spoofed and are present even though the dump d
 | Shared verdict + review components (drawer + admin reuse)                             | `components/app/questionnaire/turn-evaluation/`                                                                     |
 | Drawer UI (Evaluate button + verdict + inline review)                                 | `components/app/questionnaire/chat/turn-inspector-drawer.tsx`                                                       |
 | Evaluator agent seed (`turn-evaluator`, `kind: 'judge'`)                              | `prisma/seeds/app-questionnaire/043-turn-evaluator-agent.ts`                                                        |
-| Sub-flag seed (disabled by default)                                                   | `prisma/seeds/app-questionnaire/042-turn-evaluation-flag.ts`                                                        |
 
 It deliberately reuses the F5.1 design-evaluation machinery: `runStructuredCompletion`
 (call → parse → retry-once-at-temp-0 → cost-sum) from `lib/orchestration/evaluations/parse-structured.ts`,
-`resolveAgentProviderAndModel` (empty binding → system default, `reasoning` tier), and the seeded-judge
-
-- sub-flag pattern. It is a **plain service**, not a `BaseCapability` — a single call from one route
-  has no fan-out or dispatcher reuse to justify the registry weight.
+`resolveAgentProviderAndModel` (empty binding → system default, `reasoning` tier), and the
+seeded-judge pattern. It is a **plain service**, not a `BaseCapability` — a single call from one route
+has no fan-out or dispatcher reuse to justify the registry weight.
 
 ## Output shape (hybrid)
 
@@ -207,24 +205,23 @@ can be judged after the fact against the exact calls it made.
 
 ## Gating & limits
 
-- **Flag:** `APP_QUESTIONNAIRES_TURN_EVALUATION_ENABLED` (a `feature_flag` row, **not** an env var),
-  disabled by default. ANDed with the master `APP_QUESTIONNAIRES_ENABLED` by `isTurnEvaluationEnabled()`.
-  Off → the route 404s (looks like a missing route), via `withTurnEvaluationEnabled` (gate before auth).
-- **Preview-only:** the route additionally 404s unless the session is a preview — the same gate the
+- **Always on:** turn evaluation is a permanent capability — there is no flag to check and no route
+  that 404s when off.
+- **Preview-only:** the route 404s unless the session is a preview — the same gate the
   inspector that produces the dump enforces, so it can only run where the inspector runs.
 - **Auth:** `withAdminAuth` (admin session cookie; no `X-Session-Token` needed).
 - **Rate limit:** `turnEvaluationLimiter` (20/min per admin) in `questionnaire-sessions/_lib/rate-limit.ts`
   — the expensive-sub-flow sub-cap on top of the section 100/min.
 - **Cost:** logged fire-and-forget via `logCost` with `{ capability: 'turn-evaluation', sessionId, turnIndex }`.
-- **Review / search / action / ref-lookup routes** share the same flag + `withAdminAuth` (all 404
-  when the flag is off). They are reads / cheap writes, so they inherit the section 100/min cap with
+- **Review / search / action / ref-lookup routes** share `withAdminAuth`. They are reads / cheap
+  writes, so they inherit the section 100/min cap with
   no extra sub-cap. The **saved-turn evaluation** route is a paid reasoning call, so it takes the
   same per-admin `turnEvaluationLimiter` (20/min) as the live evaluator — but it is **not**
   preview-gated (re-evaluating a real chat by ref is the whole point).
 
 ## Try it
 
-1. `npm run db:seed`; enable the flag (`APP_QUESTIONNAIRES_TURN_EVALUATION_ENABLED`).
+1. `npm run db:seed`.
 2. Start an admin **Preview as respondent** session with the inspector toggle on; complete a turn.
 3. Open the Inspector drawer → expand a turn → **Evaluate turn** → read the scored verdict; **Copy**
    or **Download** the Markdown. Add a reviewer comment and **flag for learning** inline.

@@ -6,20 +6,14 @@ seniority, region, age group, …). It is the sibling of the per-respondent
 [Respondent Report](./respondent-report.md): scope (one session vs many) is the distinguishing axis,
 carried by the `ReportKind = 'respondent' | 'cohort'` enum (`lib/app/questionnaire/types.ts`).
 
-It is being built as phase **P14**, feature-flagged and additive. This doc grows feature by feature;
-F14.1 lands the foundation (the analytical substrate + flag + config + base model).
+It was built as phase **P14**, additive to Cohorts & Rounds. This doc grows feature by feature;
+F14.1 landed the foundation (the analytical substrate + config + base model).
 
 ## Gating
 
-Three flags, ANDed — a cohort report is round-scoped, so it sits on top of Cohorts & Rounds:
-
-- `APP_QUESTIONNAIRES_ENABLED` (master)
-- `APP_QUESTIONNAIRES_COHORTS_ENABLED` (cohorts/rounds exist)
-- `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` (this feature; seeded **disabled** by `054-cohort-report-flag.ts`)
-
-Resolved by `isCohortReportEnabled()` and the `ensureCohortReportEnabled()` / `withCohortReportEnabled()`
-route gates in `lib/app/questionnaire/feature-flag.ts`. Per-version, a further `config.cohortReport.enabled`
-toggle (the admin opt-in) ANDs on top once the editing surface ships (F14.5).
+The cohort-report feature is **always on**. The only remaining gate is the per-version
+`config.cohortReport.enabled` toggle (the admin opt-in) — a report is round-scoped, so it also
+requires a round bundling the version, but there is no platform feature flag to check.
 
 ## Report scope — round **or** version-wide
 
@@ -97,9 +91,8 @@ demographic segmentation at all — the report is cohort-level only.
 
 ### Endpoint
 
-`GET /api/v1/app/rounds/:id/cohort-report/dataset?versionId=…` — `withAdminAuth`, gated by
-`withCohortReportEnabled`. Validates the version is one the round bundles
-(`assertRoundBundlesVersion`) and returns the `CohortDataset`.
+`GET /api/v1/app/rounds/:id/cohort-report/dataset?versionId=…` — `withAdminAuth`. Validates the
+version is one the round bundles (`assertRoundBundlesVersion`) and returns the `CohortDataset`.
 
 ## Charts — `ChartSpec` → `ChartData` (F14.2)
 
@@ -155,7 +148,7 @@ status + the head revision's content + the dataset the charts render against.
 
 - `GET …/cohort-report?versionId=` — the read view (`exists:false` before first generation).
 - `POST …/cohort-report/generate` `{ versionId }` — generate + append an AI revision; gated by the
-  flag AND the per-version `config.cohortReport.enabled` toggle; per-admin generate sub-cap (paid).
+  per-version `config.cohortReport.enabled` toggle; per-admin generate sub-cap (paid).
 - `GET …/cohort-report/dataset?versionId=` — the raw dataset (F14.1).
 
 The admin surface is the **Cohort report** section on the round detail page
@@ -206,7 +199,7 @@ versioned **`AppScoringSchema`** (1:1 with a version, forks on launch like confi
 **Both authoring paths, one schema:**
 
 - **Visual builder** — `ScoringBuilder` (`components/admin/questionnaires/cohort-report/`) on the
-  **Scoring** workspace tab (gated by `flags.cohortReport`); saves via
+  **Scoring** workspace tab; saves via
   `PATCH …/versions/:vid/scoring-schema` (forks-if-launched, recomputes scores).
 - **Upload** — `POST …/scoring-schema/extract` parses a scoring document and runs the cohort-report
   agent (`scoring/extract.ts`) to PROPOSE a schema scoped to the version's real keys; the admin
@@ -244,7 +237,7 @@ so the report can reason over them as hard inputs.
 
 ## Roadmap (all shipped)
 
-- **F14.1** ✅ — dataset & segmentation foundation, flag, config, base model.
+- **F14.1** ✅ — dataset & segmentation foundation, config, base model.
 - **F14.2** ✅ — `ChartSpec` + recharts web charts (shared `ChartData` reused by the PDF).
 - **F14.3** ✅ — `app-cohort-report` agent + generation; revisions; charted narrative + actions.
 - **F14.4** ✅ — deterministic scoring engine (upload + visual builder), scored aggregation.

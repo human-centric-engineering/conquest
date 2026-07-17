@@ -19,10 +19,9 @@ In built-in mode the admin pins _which_ persona governs and _whether_ respondent
 who wants a bespoke voice picks "Custom voice" and tunes the
 [interviewer-tone](./interviewer-tone.md) block instead.
 
-> A respondent-experience feature, **config block + platform flag** (both required), like
-> [presentation-mode](./presentation-mode.md) and the tone/strategy siblings. Dark-launched behind
-> `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED`; **off by default**, so an untouched questionnaire is
-> unchanged.
+> A respondent-experience feature, like [presentation-mode](./presentation-mode.md) and the
+> tone/strategy siblings. **Always on**; the remaining gate is the per-version `personaSelection.enabled`
+> config toggle, which is **off by default**, so an untouched questionnaire is unchanged.
 
 ## The model
 
@@ -55,7 +54,7 @@ The menu (which personas exist + the default) lives on the **version config**; t
 1. **Admin** picks **"Built-in persona"** mode on the merged **Settings → Interviewer tone & persona**
    group (the mode toggle flips `personaSelection.enabled`), then pins the persona and — optionally —
    turns on **"Let respondents switch interviewer"** (`allowRespondentSwitch`) + a switcher style
-   (`persona-library-panel.tsx`, gated by the `personaSelection` workspace flag). The panel is a
+   (`persona-library-panel.tsx`, gated by the `personaSelection.enabled` config toggle). The panel is a
    dropdown (the pinned persona first, tagged _Selected_) + a **read-only preview** — name (badged
    _Selected_), respondent-facing description, persona prompt, and its active tone dials — no editing.
    Only `personaSelection` is saved, through the same config PATCH as tone.
@@ -64,7 +63,7 @@ The menu (which personas exist + the default) lives on the **version config**; t
    badged _Default_. The choice PATCHes `…/questionnaire-sessions/:id/persona` (fail-soft). With
    switching off there is no picker — the pinned persona simply governs.
 3. **Turn time** — the `/messages` route resolves the effective tone with `resolveEffectiveTone`
-   (`persona/settings.ts`): when `personaSelection.enabled` (AND the platform flag), the pinned/chosen
+   (`persona/settings.ts`): when `personaSelection.enabled`, the pinned/chosen
    persona's `tone` **replaces** `config.tone` for that session; otherwise `config.tone` flows through
    **byte-for-byte unchanged**. Everything downstream (`buildToneInstructions`, verbosity/mimicry
    handling) is untouched. Note `resolveEffectiveTone` keys off `enabled` alone — `allowRespondentSwitch`
@@ -113,17 +112,17 @@ pinned persona.
 
 ## Where things live
 
-| Concern             | File                                                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Types + defaults    | `lib/app/questionnaire/types.ts` (`PersonaOption`, `PersonaSelectionSettings`)                                   |
-| Built-in library    | `lib/app/questionnaire/persona/presets.ts`                                                                       |
-| Narrow + resolve    | `lib/app/questionnaire/persona/settings.ts` (`resolveEffectiveTone`)                                             |
-| Session menu (DB)   | `lib/app/questionnaire/persona/resolve.ts`                                                                       |
-| Zod validation      | `lib/app/questionnaire/authoring/config-schema.ts` (`personaSelectionSchema`)                                    |
-| Read/write config   | `_lib/detail.ts` (`toConfigView`), `…/versions/[vid]/config/route.ts`                                            |
-| Turn-time injection | `app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts`                                                   |
-| Session persona API | `app/api/v1/app/questionnaire-sessions/[id]/persona/route.ts` (GET/PATCH)                                        |
-| Admin control       | `config-editor.tsx` (`VoiceModeToggle` either/or) + `persona-library-panel.tsx` (pin + switch + preview)         |
-| Respondent picker   | `components/app/questionnaire/persona/persona-picker.tsx`; carousel in `session-workspace.tsx`                   |
-| In-chat switcher    | `components/app/questionnaire/persona/interviewer-switcher.tsx` (chip + modal); wired in `session-workspace.tsx` |
-| Flag                | `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED` (`feature-flag.ts`, seed `063-…`)                                 |
+| Concern             | File                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Types + defaults    | `lib/app/questionnaire/types.ts` (`PersonaOption`, `PersonaSelectionSettings`)                                                  |
+| Built-in library    | `lib/app/questionnaire/persona/presets.ts`                                                                                      |
+| Narrow + resolve    | `lib/app/questionnaire/persona/settings.ts` (`resolveEffectiveTone`)                                                            |
+| Session menu (DB)   | `lib/app/questionnaire/persona/resolve.ts`                                                                                      |
+| Zod validation      | `lib/app/questionnaire/authoring/config-schema.ts` (`personaSelectionSchema`)                                                   |
+| Read/write config   | `_lib/detail.ts` (`toConfigView`), `…/versions/[vid]/config/route.ts`                                                           |
+| Turn-time injection | `app/api/v1/app/questionnaire-sessions/[id]/messages/route.ts`                                                                  |
+| Session persona API | `app/api/v1/app/questionnaire-sessions/[id]/persona/route.ts` (GET/PATCH)                                                       |
+| Admin control       | `config-editor.tsx` (`VoiceModeToggle` either/or) + `persona-library-panel.tsx` (pin + switch + preview)                        |
+| Respondent picker   | `components/app/questionnaire/persona/persona-picker.tsx`; carousel in `session-workspace.tsx`                                  |
+| In-chat switcher    | `components/app/questionnaire/persona/interviewer-switcher.tsx` (chip + modal); wired in `session-workspace.tsx`                |
+| Gate                | Per-version `personaSelection.enabled` config toggle (no platform flag — always on; see [feature-flags.md](./feature-flags.md)) |

@@ -4,6 +4,12 @@
 
 The feature flag system enables runtime control of application features without redeployment. Flags are stored in the database and can be toggled instantly by administrators, supporting use cases like maintenance mode, gradual rollouts, and A/B testing.
 
+> **Scope note (2026-07):** in ConQuest this generic infrastructure now governs only
+> **`MAINTENANCE_MODE`**. The questionnaire product's `APP_QUESTIONNAIRES_*` flags were
+> retired — every questionnaire feature is permanently on and their seeds/rows were removed
+> (see [`.context/app/questionnaire/feature-flags.md`](../app/questionnaire/feature-flags.md)).
+> The infra below is unchanged and remains available for any flag you add deliberately in future.
+
 ## Use Cases
 
 - **Maintenance Mode**: Show maintenance page to non-admin users
