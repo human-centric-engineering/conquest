@@ -1,6 +1,6 @@
 /**
- * Shared server-side data + flag resolution for the questionnaire admin
- * **workspace** (the tabbed `[id]/v/[vid]/…` surface).
+ * Shared server-side data fetchers for the questionnaire admin **workspace**
+ * (the tabbed `[id]/v/[vid]/…` surface).
  *
  * The workspace layout and each tab page both need the questionnaire detail and
  * (often) the selected version's graph. `serverFetch` is `cache: 'no-store'`, so
@@ -68,7 +68,7 @@ export const getVersionGraphCached = cache(
 /**
  * How many data slots the selected version has — drives the launch gate and the
  * "Data slots" tab badge. `cache()`-wrapped; degrades to `0` on any failure.
- * Only meaningful when the data-slots flag is on (callers gate on that first).
+ * Only meaningful when the version actually has data slots.
  */
 export const getVersionDataSlotCountCached = cache(
   async (id: string, versionId: string): Promise<number> => {
@@ -143,7 +143,7 @@ export const getVersionDataSlotEmbeddingCoverageCached = cache(
  * the run detail (HTTP, admin-scoped), finds the finding, and — only when its effective op is a
  * still-actionable `add_question` draft — returns the {@link EvaluationSeed} the composer pre-fills.
  * Returns `null` on any miss (bad ref, finding gone, not an add_question, already terminal), so the
- * editor just opens normally. The caller gates on the design-eval flag before calling.
+ * editor just opens normally.
  */
 export async function getEvaluationAddQuestionSeed(
   id: string,
