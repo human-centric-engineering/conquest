@@ -1,11 +1,15 @@
 /**
  * Server pipeline for the Structure Edit Agent (precise mode).
  *
- * `loadEditableStructure` is the precise-mode sibling of `loadRefinableStructure`: it enforces the
- * same safety guards (the version must exist under the questionnaire, be a **draft**, and have **no
- * respondent sessions**) but returns a richer {@link EditableStructure} carrying entity ids,
- * `required`/`weight`, and ordinals — everything the deterministic executor needs to compute a
- * before→after preview and to apply granular updates that preserve untouched fields.
+ * `loadEditableStructure` is the precise-mode sibling of `loadRefinableStructure`: it loads the
+ * version's structure (scoped to its questionnaire) as a richer {@link EditableStructure} carrying
+ * entity ids, `required`/`weight`, and ordinals — everything the deterministic executor needs to
+ * compute a before→after preview and to apply granular updates that preserve untouched fields.
+ *
+ * It deliberately does NOT block launched or session-pinned versions: the apply route forks a fresh
+ * draft first (via `forkVersionIfLaunched`) when the version is launched or has real respondent
+ * sessions, then loads the fork here — so in-flight work stays pinned to the version it started on
+ * while the edit lands on a new draft. The plan (preview) route just reads; it never writes.
  *
  * `applyResolvedChanges` writes a `ResolvedChange[]` in one transaction via per-entity updates. It
  * deliberately does NOT go through `replaceVersionStructure` (which rewrites the whole graph and
@@ -22,8 +26,9 @@ import type { ResolvedChange } from '@/lib/app/questionnaire/edit-agent/types';
 type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
 
 /**
- * Load a draft version's structure as an {@link EditableStructure}, enforcing the edit guards
- * (draft + no respondent sessions). Returns the structure or a ready-made error `Response`.
+ * Load a version's structure as an {@link EditableStructure}, scoped to its questionnaire. Returns
+ * the structure or a ready-made 404 `Response`. Launched / session-pinned versions are handled by
+ * the caller's fork step, not blocked here (see the module doc).
  */
 export async function loadEditableStructure(
   questionnaireId: string,
@@ -33,8 +38,6 @@ export async function loadEditableStructure(
     where: { id: versionId },
     select: {
       questionnaireId: true,
-      status: true,
-      _count: { select: { sessions: true } },
       sections: {
         orderBy: { ordinal: 'asc' },
         select: {
@@ -65,24 +68,6 @@ export async function loadEditableStructure(
       response: errorResponse('Questionnaire version not found', {
         code: 'NOT_FOUND',
         status: 404,
-      }),
-    };
-  }
-  if (version.status !== 'draft') {
-    return {
-      ok: false,
-      response: errorResponse('Only a draft version can be edited', {
-        code: 'EDIT_REQUIRES_DRAFT',
-        status: 409,
-      }),
-    };
-  }
-  if (version._count.sessions > 0) {
-    return {
-      ok: false,
-      response: errorResponse('This version has respondent sessions and cannot be edited', {
-        code: 'EDIT_HAS_SESSIONS',
-        status: 409,
       }),
     };
   }

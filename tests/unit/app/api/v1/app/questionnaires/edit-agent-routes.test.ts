@@ -57,6 +57,16 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/persist', () => ({
     changeCount: 0,
   })),
 }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/fork', () => ({ forkVersionIfLaunched: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/authoring-routes', () => ({
+  loadScopedVersion: vi.fn(),
+  // Keep the real (trivial) meta shaper so the response `meta` mirrors production.
+  forkMeta: (r: { forked: boolean; versionId: string; versionNumber: number }) => ({
+    forked: r.forked,
+    versionId: r.versionId,
+    versionNumber: r.versionNumber,
+  }),
+}));
 
 // ─── Deferred imports ─────────────────────────────────────────────────────────
 
@@ -82,7 +92,13 @@ import {
   loadRefinableStructure,
 } from '@/app/api/v1/app/questionnaires/_lib/compose-pipeline';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
-import { replaceVersionStructure } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import {
+  assertPersistable,
+  IncoherentExtractionError,
+  replaceVersionStructure,
+} from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
+import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import type { EditableStructure } from '@/lib/app/questionnaire/edit-agent/types';
 
@@ -138,6 +154,18 @@ beforeEach(() => {
   vi.clearAllMocks();
   (composeLimiter.check as Mock).mockReturnValue({ success: true });
   (loadEditableStructure as Mock).mockResolvedValue({ ok: true, value: structure() });
+  // Default apply-path collaborators: version resolves, and it edits in place (no fork).
+  (loadScopedVersion as Mock).mockResolvedValue({
+    id: 'v1',
+    questionnaireId: 'qn-1',
+    versionNumber: 1,
+    status: 'draft',
+  });
+  (forkVersionIfLaunched as Mock).mockResolvedValue({
+    versionId: 'v1',
+    forked: false,
+    versionNumber: 1,
+  });
 });
 
 describe('POST edit-agent/plan — precise', () => {
@@ -145,6 +173,8 @@ describe('POST edit-agent/plan — precise', () => {
     (composeLimiter.check as Mock).mockReturnValue({ success: false, reset: 1 });
     const res = await call(planPost, { instruction: 'x', mode: 'precise' });
     expect(res.status).toBe(429);
+    // No planning work happens under the rate-limit path.
+    expect(planEditOps).not.toHaveBeenCalled();
   });
 
   it('returns 400 on an empty instruction', async () => {
@@ -152,13 +182,28 @@ describe('POST edit-agent/plan — precise', () => {
     expect(res.status).toBe(400);
   });
 
-  it('passes through the loader guard (e.g. 409 non-draft)', async () => {
+  it('returns 400 VALIDATION_ERROR when the request body is malformed JSON', async () => {
+    const req = new NextRequest(
+      'http://localhost/api/v1/app/questionnaires/qn-1/versions/v1/edit-agent',
+      { method: 'POST', body: 'not-valid-json{{{', headers: { 'Content-Type': 'application/json' } }
+    );
+    const res = await planPost(req, ADMIN_SESSION, {
+      params: Promise.resolve({ id: 'qn-1', vid: 'v1' }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(planEditOps).not.toHaveBeenCalled();
+  });
+
+  it('forwards the loader error (e.g. 404 unknown version) without planning', async () => {
     (loadEditableStructure as Mock).mockResolvedValue({
       ok: false,
-      response: new Response('conflict', { status: 409 }),
+      response: new Response('not found', { status: 404 }),
     });
     const res = await call(planPost, { instruction: 'do it', mode: 'precise' });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(404);
     expect(planEditOps).not.toHaveBeenCalled();
   });
 
@@ -170,6 +215,25 @@ describe('POST edit-agent/plan — precise', () => {
     });
     const res = await call(planPost, { instruction: 'do it', mode: 'precise' });
     expect(res.status).toBe(503);
+  });
+
+  describe('planErrorStatus mapping', () => {
+    const cases = [
+      { code: 'edit_agent_not_configured', expectedStatus: 503 },
+      { code: 'no_provider_configured', expectedStatus: 503 },
+      { code: 'some_unrecognised_code', expectedStatus: 502 },
+    ];
+
+    for (const { code, expectedStatus } of cases) {
+      it(`maps translation error code '${code}' → HTTP ${expectedStatus}`, async () => {
+        (planEditOps as Mock).mockResolvedValue({ ok: false, code, message: `Failed: ${code}` });
+        const res = await call(planPost, { instruction: 'do it', mode: 'precise' });
+        const body = await res.json();
+        expect(res.status).toBe(expectedStatus);
+        expect(body.error.code).toBe('EDIT_PLAN_FAILED');
+        expect(body.error.details).toEqual({ reason: code });
+      });
+    }
   });
 
   it('resolves ops into a concrete change list (real resolveOps)', async () => {
@@ -225,6 +289,28 @@ describe('POST edit-agent/plan — rewrite', () => {
       ok: true,
       value: { id: 'agent-1', provider: 'openai', model: '', fallbackProviders: [] },
     });
+    // Default: the previewed structure is coherent (no throw). Individual tests override.
+    (assertPersistable as Mock).mockImplementation(() => undefined);
+    // Default: the rewrite dispatch succeeds with a persistable structure. Individual tests override.
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        summary: 'Rewrote it',
+        structure: {
+          sections: [{ ordinal: 0, title: 'New' }],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'k',
+              prompt: 'P?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+            },
+          ],
+          changes: [],
+        },
+      },
+    });
   });
 
   it('returns the proposed structure + outline without persisting', async () => {
@@ -263,6 +349,151 @@ describe('POST edit-agent/plan — rewrite', () => {
     const res = await call(planPost, { instruction: 'rewrite', mode: 'rewrite' });
     expect(res.status).toBe(429);
   });
+
+  it('sorts a multi-section outline by ordinal (real Array.sort comparator)', async () => {
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: {
+        summary: 'Rewrote it',
+        structure: {
+          // Sections arrive out of order — the route sorts them before building the outline.
+          sections: [
+            { ordinal: 1, title: 'Second' },
+            { ordinal: 0, title: 'First' },
+          ],
+          questions: [
+            {
+              sectionOrdinal: 0,
+              key: 'k1',
+              prompt: 'P1?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+            },
+            {
+              sectionOrdinal: 1,
+              key: 'k2',
+              prompt: 'P2?',
+              suggestedType: 'free_text',
+              extractionConfidence: 1,
+            },
+          ],
+          changes: [],
+        },
+      },
+    });
+    const res = await call(planPost, { instruction: 'rewrite the whole thing', mode: 'rewrite' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.outline).toEqual([
+      { title: 'First', questionCount: 1 },
+      { title: 'Second', questionCount: 1 },
+    ]);
+  });
+
+  it('forwards the loader error from loadRefinableStructure without loading the agent', async () => {
+    (loadRefinableStructure as Mock).mockResolvedValue({
+      ok: false,
+      response: new Response('not found', { status: 404 }),
+    });
+    const res = await call(planPost, { instruction: 'rewrite', mode: 'rewrite' });
+    expect(res.status).toBe(404);
+    expect(loadComposerAgent).not.toHaveBeenCalled();
+  });
+
+  it('returns the error response from loadComposerAgent when the composer is not configured', async () => {
+    const errorResp = new Response(
+      JSON.stringify({ success: false, error: { code: 'COMPOSER_NOT_CONFIGURED' } }),
+      { status: 503 }
+    );
+    (loadComposerAgent as Mock).mockResolvedValue({ ok: false, response: errorResp });
+    const res = await call(planPost, { instruction: 'rewrite', mode: 'rewrite' });
+    expect(res.status).toBe(503);
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to "Rewrite failed" when the dispatch error has no message', async () => {
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({ success: false });
+    const res = await call(planPost, { instruction: 'rewrite', mode: 'rewrite' });
+    const body = await res.json();
+    expect(res.status).toBe(502);
+    expect(body.error.message).toBe('Rewrite failed');
+  });
+
+  it('returns 422 when the rewritten structure is incoherent (assertPersistable throws)', async () => {
+    (assertPersistable as Mock).mockImplementation(() => {
+      throw new IncoherentExtractionError([2]);
+    });
+    const res = await call(planPost, { instruction: 'rewrite', mode: 'rewrite' });
+    const body = await res.json();
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe('EDIT_REWRITE_INCOHERENT');
+    expect(body.error.details.orphanSectionOrdinals).toEqual([2]);
+  });
+
+  it('rethrows a non-IncoherentExtractionError from assertPersistable', async () => {
+    (assertPersistable as Mock).mockImplementation(() => {
+      throw new TypeError('boom');
+    });
+    await expect(call(planPost, { instruction: 'rewrite', mode: 'rewrite' })).rejects.toThrow(
+      TypeError
+    );
+  });
+
+  describe('dispatchStatus mapping', () => {
+    const cases = [
+      { code: 'invalid_args', expectedStatus: 400 },
+      { code: 'no_provider_configured', expectedStatus: 503 },
+      { code: 'provider_unavailable', expectedStatus: 503 },
+      { code: 'capability_inactive', expectedStatus: 503 },
+      { code: 'capability_disabled_for_agent', expectedStatus: 503 },
+      { code: 'unknown_capability', expectedStatus: 503 },
+      { code: 'capability_quarantined', expectedStatus: 503 },
+      { code: 'requires_approval', expectedStatus: 503 },
+      { code: 'some_unrecognised_code', expectedStatus: 502 },
+    ];
+
+    for (const { code, expectedStatus } of cases) {
+      it(`maps dispatch error code '${code}' → HTTP ${expectedStatus}`, async () => {
+        (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+          success: false,
+          error: { code, message: `Dispatch failed: ${code}` },
+        });
+        const res = await call(planPost, { instruction: 'rewrite', mode: 'rewrite' });
+        const body = await res.json();
+        expect(res.status).toBe(expectedStatus);
+        expect(body.error.code).toBe('EDIT_REWRITE_FAILED');
+      });
+    }
+  });
+});
+
+describe('POST edit-agent/apply — rate limit & malformed body', () => {
+  it('returns 429 when the rate limiter rejects', async () => {
+    (composeLimiter.check as Mock).mockReturnValue({ success: false, reset: 1 });
+    const res = await call(applyPost, {
+      mode: 'precise',
+      operations: [{ op: 'set_required', target: { scope: 'all' }, value: false }],
+    });
+    expect(res.status).toBe(429);
+    // Under the rate-limit path nothing downstream runs.
+    expect(loadScopedVersion).not.toHaveBeenCalled();
+    expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 VALIDATION_ERROR when the request body is malformed JSON', async () => {
+    const req = new NextRequest(
+      'http://localhost/api/v1/app/questionnaires/qn-1/versions/v1/edit-agent',
+      { method: 'POST', body: 'not-valid-json{{{', headers: { 'Content-Type': 'application/json' } }
+    );
+    const res = await applyPost(req, ADMIN_SESSION, {
+      params: Promise.resolve({ id: 'qn-1', vid: 'v1' }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(loadScopedVersion).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST edit-agent/apply — precise', () => {
@@ -289,18 +520,76 @@ describe('POST edit-agent/apply — precise', () => {
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'questionnaire.edit_agent', entityName: 'precise' })
     );
+    // Edited in place (no fork) → meta reflects the same version.
+    expect(body.meta).toMatchObject({ forked: false, versionId: 'v1' });
   });
 
-  it('passes through the loader guard', async () => {
+  it('forks a new draft and applies to it when the version is session-pinned', async () => {
+    (forkVersionIfLaunched as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    (applyResolvedChanges as Mock).mockResolvedValue({
+      changeCount: 1,
+      sectionCount: 0,
+      questionCount: 1,
+    });
+    const res = await call(applyPost, {
+      mode: 'precise',
+      operations: [
+        { op: 'set_required', target: { scope: 'type', questionType: 'free_text' }, value: false },
+      ],
+    });
+    expect(res.status).toBe(200);
+    // The ops re-resolve against the FORK's structure (loaded by the new draft id), then write to it.
+    expect(loadEditableStructure).toHaveBeenCalledWith('qn-1', 'v2');
+    expect(applyResolvedChanges).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.meta).toMatchObject({ forked: true, versionId: 'v2', versionNumber: 2 });
+    // Audit + write are attributed to the fork, not the pinned original.
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityId: 'v2',
+        metadata: expect.objectContaining({ forked: true }),
+      })
+    );
+  });
+
+  it('returns 404 when the version does not resolve under the questionnaire', async () => {
+    (loadScopedVersion as Mock).mockResolvedValue(null);
+    const res = await call(applyPost, {
+      mode: 'precise',
+      operations: [{ op: 'set_required', target: { scope: 'all' }, value: false }],
+    });
+    expect(res.status).toBe(404);
+    expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+    expect(applyResolvedChanges).not.toHaveBeenCalled();
+  });
+
+  it('forwards the editable-structure loader error (e.g. fork target vanished → 404)', async () => {
     (loadEditableStructure as Mock).mockResolvedValue({
       ok: false,
-      response: new Response('conflict', { status: 409 }),
+      response: new Response('not found', { status: 404 }),
     });
     const res = await call(applyPost, {
       mode: 'precise',
       operations: [{ op: 'set_required', target: { scope: 'all' }, value: false }],
     });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(404);
+    expect(applyResolvedChanges).not.toHaveBeenCalled();
+  });
+
+  it('does not swallow the fork-confirmation error (withAdminAuth maps it to 409)', async () => {
+    (forkVersionIfLaunched as Mock).mockRejectedValue(
+      Object.assign(new Error('confirm required'), { code: 'VERSION_FORK_CONFIRMATION_REQUIRED' })
+    );
+    await expect(
+      call(applyPost, {
+        mode: 'precise',
+        operations: [{ op: 'set_required', target: { scope: 'all' }, value: false }],
+      })
+    ).rejects.toThrow('confirm required');
     expect(applyResolvedChanges).not.toHaveBeenCalled();
   });
 
@@ -320,6 +609,47 @@ describe('POST edit-agent/apply — precise', () => {
 });
 
 describe('POST edit-agent/apply — rewrite', () => {
+  beforeEach(() => {
+    // Default: the structure being applied is coherent (no throw). Individual tests override.
+    (assertPersistable as Mock).mockImplementation(() => undefined);
+  });
+
+  const REWRITE_STRUCTURE = {
+    sections: [{ ordinal: 0, title: 'New' }],
+    questions: [
+      {
+        sectionOrdinal: 0,
+        key: 'k',
+        prompt: 'P?',
+        suggestedType: 'free_text',
+        extractionConfidence: 1,
+      },
+    ],
+    changes: [],
+  };
+
+  it('returns 422 when the structure is incoherent (assertPersistable throws)', async () => {
+    (assertPersistable as Mock).mockImplementation(() => {
+      throw new IncoherentExtractionError([3]);
+    });
+    const res = await call(applyPost, { mode: 'rewrite', structure: REWRITE_STRUCTURE });
+    const body = await res.json();
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe('EDIT_REWRITE_INCOHERENT');
+    expect(body.error.details.orphanSectionOrdinals).toEqual([3]);
+    expect(replaceVersionStructure).not.toHaveBeenCalled();
+  });
+
+  it('rethrows a non-IncoherentExtractionError from assertPersistable', async () => {
+    (assertPersistable as Mock).mockImplementation(() => {
+      throw new TypeError('boom');
+    });
+    await expect(
+      call(applyPost, { mode: 'rewrite', structure: REWRITE_STRUCTURE })
+    ).rejects.toThrow(TypeError);
+    expect(replaceVersionStructure).not.toHaveBeenCalled();
+  });
+
   it('persists via replaceVersionStructure and returns counts', async () => {
     const res = await call(applyPost, {
       mode: 'rewrite',
@@ -344,5 +674,34 @@ describe('POST edit-agent/apply — rewrite', () => {
     );
     const body = await res.json();
     expect(body.data).toMatchObject({ mode: 'rewrite', sectionCount: 2, questionCount: 3 });
+    expect(body.meta).toMatchObject({ forked: false, versionId: 'v1' });
+  });
+
+  it('rewrites the fork (not the pinned original) when the version is session-pinned', async () => {
+    (forkVersionIfLaunched as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    const res = await call(applyPost, {
+      mode: 'rewrite',
+      structure: {
+        sections: [{ ordinal: 0, title: 'New' }],
+        questions: [
+          {
+            sectionOrdinal: 0,
+            key: 'k',
+            prompt: 'P?',
+            suggestedType: 'free_text',
+            extractionConfidence: 1,
+          },
+        ],
+        changes: [],
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(replaceVersionStructure).toHaveBeenCalledWith('v2', expect.any(Object));
+    const body = await res.json();
+    expect(body.meta).toMatchObject({ forked: true, versionId: 'v2', versionNumber: 2 });
   });
 });

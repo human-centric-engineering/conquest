@@ -3,11 +3,16 @@
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/compose/refine
  *   Admin-only. Applies one natural-language instruction ("make it shorter", "add a
- *   section on pricing") to a draft version's current structure and rewrites the
+ *   section on pricing") to a version's current structure and rewrites the
  *   version's section→slot graph from the composer's full updated structure.
  *   Returns the updated structure (for the live preview) plus a one-line summary of
- *   what changed. Guarded to **draft** versions with **no respondent sessions** — a
- *   refine never rewrites a launched/in-flight graph.
+ *   what changed.
+ *
+ *   Launched or session-pinned versions are not blocked: like every authoring
+ *   mutation this forks a fresh draft first (`forkVersionIfLaunched`) — before the
+ *   paid LLM turn — when the version is launched or has real respondent sessions,
+ *   then writes the refined graph to the fork. The success `meta` carries the fork
+ *   outcome so the editor can notice + redirect.
  *
  * Auth: admin only. Flag: 404 when the master OR generative-authoring sub-flag is
  * off. Rate limit: per-admin compose sub-cap (shared with the compose routes).
@@ -29,6 +34,8 @@ import {
   loadComposerAgent,
   loadRefinableStructure,
 } from '@/app/api/v1/app/questionnaires/_lib/compose-pipeline';
+import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
+import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
   assertPersistable,
   IncoherentExtractionError,
@@ -79,8 +86,20 @@ const handleRefine = withAdminAuth<{ id: string; vid: string }>(
     }
     const { instruction } = body.data;
 
-    // Load + guard the draft structure (404 / 409 on a bad target).
-    const current = await loadRefinableStructure(id, vid);
+    const scoped = await loadScopedVersion(id, vid);
+    if (!scoped) {
+      return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
+    }
+
+    // Fork a fresh draft (before the paid LLM turn) when the version is launched or pinned by real
+    // respondent sessions, then write the refined graph to the fork; otherwise refine in place. Throws
+    // ForkConfirmationRequiredError (→ 409 via handleAPIError) on an unconfirmed `x-fork-confirm:
+    // prompt` request.
+    const fork = await forkVersionIfLaunched(scoped, { userId: adminId, clientIp: clientIP });
+    const editId = fork.versionId;
+
+    // Load the structure we write to (identical content pre/post-fork) as the LLM's input.
+    const current = await loadRefinableStructure(id, editId);
     if (!current.ok) return current.response;
 
     const agentResult = await loadComposerAgent(log);
@@ -128,7 +147,7 @@ const handleRefine = withAdminAuth<{ id: string; vid: string }>(
       if (err instanceof IncoherentExtractionError) {
         log.warn('Questionnaire refine incoherent', {
           adminId,
-          versionId: vid,
+          versionId: editId,
           orphanSectionOrdinals: err.orphanSectionOrdinals,
         });
         return errorResponse(err.message, {
@@ -140,17 +159,18 @@ const handleRefine = withAdminAuth<{ id: string; vid: string }>(
       throw err;
     }
 
-    const counts = await replaceVersionStructure(vid, refined.structure);
+    const counts = await replaceVersionStructure(editId, refined.structure);
 
     logAdminAction({
       userId: adminId,
       action: 'questionnaire.refine',
       entityType: 'questionnaire',
-      entityId: vid,
+      entityId: editId,
       entityName: instruction.slice(0, 80),
       metadata: {
         questionnaireId: id,
-        versionId: vid,
+        versionId: editId,
+        forked: fork.forked,
         sectionCount: counts.sectionCount,
         questionCount: counts.questionCount,
       },
@@ -160,26 +180,30 @@ const handleRefine = withAdminAuth<{ id: string; vid: string }>(
     log.info('Questionnaire refined', {
       adminId,
       questionnaireId: id,
-      versionId: vid,
+      versionId: editId,
+      forked: fork.forked,
       sectionCount: counts.sectionCount,
       questionCount: counts.questionCount,
     });
 
-    return successResponse({
-      summary: refined.summary,
-      sectionCount: counts.sectionCount,
-      questionCount: counts.questionCount,
-      structure: {
-        sections: refined.structure.sections,
-        questions: refined.structure.questions,
-        ...(refined.structure.inferredGoal !== undefined
-          ? { goal: refined.structure.inferredGoal }
-          : {}),
-        ...(refined.structure.inferredAudience !== undefined
-          ? { audience: refined.structure.inferredAudience }
-          : {}),
+    return successResponse(
+      {
+        summary: refined.summary,
+        sectionCount: counts.sectionCount,
+        questionCount: counts.questionCount,
+        structure: {
+          sections: refined.structure.sections,
+          questions: refined.structure.questions,
+          ...(refined.structure.inferredGoal !== undefined
+            ? { goal: refined.structure.inferredGoal }
+            : {}),
+          ...(refined.structure.inferredAudience !== undefined
+            ? { audience: refined.structure.inferredAudience }
+            : {}),
+        },
       },
-    });
+      forkMeta(fork)
+    );
   }
 );
 

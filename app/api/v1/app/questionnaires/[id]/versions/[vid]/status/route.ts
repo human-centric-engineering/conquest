@@ -100,9 +100,9 @@ const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
       });
     }
     // Leaving `launched` (un-launch / archive) must not strand live work pinned to
-    // this version. As of F3.2 `countLaunchBlockers` returns the real count of live
-    // invitations (sessions join at P4) — a launched version with live invitations
-    // cannot be un-launched/archived out from under them.
+    // this version. `countLaunchBlockers` returns the real count of live invitations
+    // and real respondent sessions — a launched version with either cannot be
+    // un-launched/archived out from under them.
     if (from === 'launched' && hasLaunchBlockers(await countLaunchBlockers(vid))) {
       throw new ConflictError(
         'Cannot change status: this version has live sessions or invitations'

@@ -8,9 +8,11 @@
  * the user asked for. Two modes: `precise` (deterministic edit-ops, shown as before→after rows) is the
  * default; `rewrite` (whole-doc LLM regenerate, shown as a new outline) is offered for broader edits.
  *
- * Edits require a draft with no respondent sessions; on a non-draft the panel shows a disabled hint
- * and the server is the final guard (409) either way. On apply success it calls `onApplied` so the
- * parent can refetch the SSR graph.
+ * Available on any non-archived version. Applying via `authoringMutate` runs the fork-confirmation
+ * protocol: when the version is launched or pinned by real respondent sessions the server forks a new
+ * draft (after the admin confirms) and the edit lands there — parity with the manual editor beside it.
+ * On an in-place apply it calls `onApplied` (refetch the SSR graph); on a fork it calls `onForked`
+ * (the parent redirects to the new draft). Preview sessions edit in place; archived versions are read-only.
  */
 
 import { useState } from 'react';
@@ -22,6 +24,12 @@ import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
+import {
+  authoringMutate,
+  AuthoringError,
+  ForkCancelledError,
+  type AuthoringMeta,
+} from '@/components/admin/questionnaires/authoring-mutate';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { EditOp } from '@/lib/app/questionnaire/edit-agent/edit-ops';
 import type { ResolvedChange } from '@/lib/app/questionnaire/edit-agent/types';
@@ -71,14 +79,20 @@ export function EditAgentPanel({
   status,
   busy,
   onApplied,
+  onForked,
 }: {
   questionnaireId: string;
   versionId: string;
   status: AppQuestionnaireStatus;
   /** Parent's mutation lock — disables the panel while another edit is saving. */
   busy: boolean;
-  /** Called after a successful apply so the parent can refetch the graph. */
+  /** Called after a successful in-place apply so the parent can refetch the graph. */
   onApplied: () => void;
+  /**
+   * Called when the apply forked a new draft (the version had real respondent
+   * sessions / was launched) — the parent redirects to the new draft's editor.
+   */
+  onForked: (meta: AuthoringMeta) => void;
 }) {
   const [instruction, setInstruction] = useState('');
   const [mode, setMode] = useState<EditMode>('precise');
@@ -86,7 +100,10 @@ export function EditAgentPanel({
   const [phase, setPhase] = useState<'idle' | 'planning' | 'applying'>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const editable = status === 'draft';
+  // Editable on any non-terminal version. On a launched version (or a draft pinned by real
+  // respondent sessions) apply forks a new draft after the admin confirms — parity with the manual
+  // structure editor beside it, which already forks-on-save. Archived versions are terminal.
+  const editable = status !== 'archived';
   const working = phase !== 'idle' || busy;
 
   const preview = async () => {
@@ -122,24 +139,30 @@ export function EditAgentPanel({
         ? { mode: 'precise', operations: plan.operations }
         : { mode: 'rewrite', structure: plan.structure };
     try {
-      const res = await fetch(API.APP.QUESTIONNAIRES.editAgentApply(questionnaireId, versionId), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify(body),
-      });
-      const parsed = await parseApiResponse<{ changeCount: number }>(res);
-      if (!parsed.success) {
-        setError(parsed.error.message);
-        setPhase('idle');
-        return;
-      }
+      // `authoringMutate` runs the fork-confirmation protocol centrally: if the version has real
+      // respondent sessions (or is launched), the server 409s, the admin confirms "create a new
+      // draft?", and the edit is retried onto the fork — the version-bump the user expects.
+      const { meta } = await authoringMutate<{ changeCount: number }>(
+        'POST',
+        API.APP.QUESTIONNAIRES.editAgentApply(questionnaireId, versionId),
+        body
+      );
       setPlan(null);
       setInstruction('');
       setPhase('idle');
-      onApplied();
-    } catch {
-      setError('Could not apply the changes. Please try again.');
+      if (meta?.forked) onForked(meta);
+      else onApplied();
+    } catch (err) {
+      // The admin declined the "create a new draft?" confirmation — nothing was written, no error.
+      if (err instanceof ForkCancelledError) {
+        setPhase('idle');
+        return;
+      }
+      setError(
+        err instanceof AuthoringError
+          ? err.message
+          : 'Could not apply the changes. Please try again.'
+      );
       setPhase('idle');
     }
   };
@@ -179,7 +202,7 @@ export function EditAgentPanel({
 
       {!editable ? (
         <p className="text-muted-foreground mt-3 rounded-md border border-dashed p-3 text-xs italic">
-          AI editing is available on draft versions only. Un-launch this version to edit it.
+          AI editing is unavailable on archived versions.
         </p>
       ) : (
         <div className="mt-3 space-y-3">
