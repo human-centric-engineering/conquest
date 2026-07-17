@@ -531,10 +531,6 @@ export function ConfigEditor({
   versionId,
   config,
   questionCount,
-  adaptiveEnabled = true,
-  adaptiveDataSlotsEnabled = false,
-  introScreenEnabled = false,
-  personaSelectionEnabled = false,
   isVersionLaunched = false,
   run,
   busy,
@@ -544,29 +540,6 @@ export function ConfigEditor({
   config: ConfigView;
   /** Live question count on the version — folded into the estimate's reload key so it refreshes after question edits. */
   questionCount: number;
-  /**
-   * Whether the adaptive strategy sub-flag is on. When `false`, `adaptive` is
-   * hidden from the picker (unless it's already the saved value, so the Select
-   * still renders a label). Defaults to `true` for non-questionnaire mounts.
-   */
-  adaptiveEnabled?: boolean;
-  /**
-   * Whether adaptive data-slot selection is on (master AND data-slots AND live-sessions AND the
-   * sub-flag). When `true`, the Data-slot embeddings step is surfaced beside the data-slot config so
-   * an admin can generate/refresh them without leaving Settings — mirroring the question-embeddings
-   * step under Selection strategy. Defaults to `false` for non-questionnaire mounts.
-   */
-  adaptiveDataSlotsEnabled?: boolean;
-  /**
-   * Whether the respondent intro / splash sub-flag is on. When `false` the Intro screen card is
-   * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
-   */
-  introScreenEnabled?: boolean;
-  /**
-   * Whether the selectable-persona sub-flag is on. When `false` the Interviewer personas card is
-   * hidden (the per-version toggle would be inert). Defaults to `false` for non-questionnaire mounts.
-   */
-  personaSelectionEnabled?: boolean;
   /**
    * Whether the version being edited is launched. Drives only the public-link helper note
    * (a draft version's `/q/<versionId>` link won't boot a session until launch). Defaults to
@@ -1036,12 +1009,7 @@ export function ConfigEditor({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SELECTION_STRATEGY_ORDER.filter(
-                    // Hide adaptive when its sub-flag is off — unless it's the saved
-                    // value, so the Select still shows a label rather than blank.
-                    (s) =>
-                      s !== 'adaptive' || adaptiveEnabled || config.selectionStrategy === 'adaptive'
-                  ).map((s) => (
+                  {SELECTION_STRATEGY_ORDER.map((s) => (
                     <SelectItem key={s} value={s}>
                       {SELECTION_STRATEGY_LABELS[s]}
                     </SelectItem>
@@ -1232,15 +1200,12 @@ export function ConfigEditor({
             )}
             {/* Adaptive data-slot selection ranks unfilled slots by embedding similarity, so it needs
             the data slots embedded — the data-slot analogue of the question-embeddings step under
-            Selection strategy. Shown only when the adaptive data-slot feature is on; the step itself
-            handles the no-slots-yet empty state. */}
-            {adaptiveDataSlotsEnabled && (
-              <DataSlotEmbeddingStep
-                questionnaireId={questionnaireId}
-                versionId={versionId}
-                busy={busy}
-              />
-            )}
+            Selection strategy. The step itself handles the no-slots-yet empty state. */}
+            <DataSlotEmbeddingStep
+              questionnaireId={questionnaireId}
+              versionId={versionId}
+              busy={busy}
+            />
           </SettingsGroup>
 
           {/* ── 2. Respondent experience — how a person actually completes it (format, input, what
@@ -1379,100 +1344,95 @@ export function ConfigEditor({
           </SettingsGroup>
 
           {/* ── 2a-intro. Respondent intro / splash — an admin opt-in cover screen shown before the
-             questionnaire starts. Hidden entirely when the platform intro-screen flag is off (the
-             toggle would be inert). The "how it works / what you'll get" copy is derived at runtime
+             questionnaire starts. The "how it works / what you'll get" copy is derived at runtime
              from the presentation mode + respondent-report settings — only the background and button
              label are authored here. ── */}
-          {introScreenEnabled && (
-            <SettingsGroup
-              icon={PanelTop}
-              accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
-              id="intro"
-              title="Intro screen"
-              description="An optional cover screen shown before the questionnaire starts — it introduces the process and what the respondent gets at the end (both adapt automatically to the settings above), plus an admin-authored background section."
-            >
-              <div className="flex items-center gap-2">
-                <Switch
-                  checked={intro.enabled}
-                  onCheckedChange={(enabled) => setIntro((i) => ({ ...i, enabled }))}
-                  disabled={busy}
-                />
-                <Label className="text-sm font-medium">
-                  Show the intro screen{' '}
-                  <FieldHelp title="Intro screen">
-                    When on, respondents see a short welcome screen before the questionnaire begins,
-                    explaining how it works (this adapts to the presentation mode) and what
-                    they&apos;ll receive at the end (this adapts to the Respondent Report settings).
-                    They press a button to start — no question is asked until they do. Off by
-                    default, so existing questionnaires are unchanged. Also requires the platform
-                    intro-screen flag.
-                  </FieldHelp>
-                </Label>
-              </div>
-              {intro.enabled && (
-                <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium">
-                      Background{' '}
-                      <FieldHelp title="About this questionnaire">
-                        An optional section shown on the intro screen, in your own words — what this
-                        questionnaire is about, who&apos;s running it, its purpose, and how the
-                        results will be used. Markdown is supported (headings, bold, lists, links).
-                        Leave blank to show just the standard guidance. A cohort can override this
-                        with its own text.
-                      </FieldHelp>
-                    </Label>
-                    <IntroBackgroundField
-                      value={intro.background}
-                      onChange={(v) => setIntro((i) => ({ ...i, background: v }))}
-                      disabled={busy}
-                      questionnaireId={questionnaireId}
-                      versionId={versionId}
-                      placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium">
-                      Intro video{' '}
-                      <FieldHelp title="Intro video">
-                        An optional YouTube or Vimeo link shown alongside the about text on the
-                        intro screen — a welcome from the team, or a short explainer. Paste the
-                        normal share link (e.g. <code>https://youtu.be/…</code> or{' '}
-                        <code>https://vimeo.com/…</code>); it&apos;s embedded as a privacy-enhanced
-                        player. Leave blank for no video.
-                      </FieldHelp>
-                    </Label>
-                    <Input
-                      type="url"
-                      inputMode="url"
-                      value={intro.videoUrl}
-                      onChange={(e) => setIntro((i) => ({ ...i, videoUrl: e.target.value }))}
-                      maxLength={INTRO_VIDEO_URL_MAX_LENGTH}
-                      placeholder="https://youtu.be/dQw4w9WgXcQ"
-                      disabled={busy}
-                    />
-                  </div>
-                  <div className="space-y-1.5 sm:max-w-xs">
-                    <Label className="text-sm font-medium">
-                      Button label{' '}
-                      <FieldHelp title="Button label">
-                        The text on the button that starts the questionnaire. Leave blank for a
-                        sensible default that matches the presentation mode (e.g. “Start the
-                        conversation”).
-                      </FieldHelp>
-                    </Label>
-                    <Input
-                      value={intro.buttonLabel}
-                      onChange={(e) => setIntro((i) => ({ ...i, buttonLabel: e.target.value }))}
-                      maxLength={INTRO_BUTTON_LABEL_MAX_LENGTH}
-                      placeholder="Start the conversation"
-                      disabled={busy}
-                    />
-                  </div>
+          <SettingsGroup
+            icon={PanelTop}
+            accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+            id="intro"
+            title="Intro screen"
+            description="An optional cover screen shown before the questionnaire starts — it introduces the process and what the respondent gets at the end (both adapt automatically to the settings above), plus an admin-authored background section."
+          >
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={intro.enabled}
+                onCheckedChange={(enabled) => setIntro((i) => ({ ...i, enabled }))}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Show the intro screen{' '}
+                <FieldHelp title="Intro screen">
+                  When on, respondents see a short welcome screen before the questionnaire begins,
+                  explaining how it works (this adapts to the presentation mode) and what
+                  they&apos;ll receive at the end (this adapts to the Respondent Report settings).
+                  They press a button to start — no question is asked until they do. Off by default,
+                  so existing questionnaires are unchanged.
+                </FieldHelp>
+              </Label>
+            </div>
+            {intro.enabled && (
+              <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Background{' '}
+                    <FieldHelp title="About this questionnaire">
+                      An optional section shown on the intro screen, in your own words — what this
+                      questionnaire is about, who&apos;s running it, its purpose, and how the
+                      results will be used. Markdown is supported (headings, bold, lists, links).
+                      Leave blank to show just the standard guidance. A cohort can override this
+                      with its own text.
+                    </FieldHelp>
+                  </Label>
+                  <IntroBackgroundField
+                    value={intro.background}
+                    onChange={(v) => setIntro((i) => ({ ...i, background: v }))}
+                    disabled={busy}
+                    questionnaireId={questionnaireId}
+                    versionId={versionId}
+                    placeholder="Tell respondents what this questionnaire is about, who's running it, and how results are used — or upload a document / generate it with AI."
+                  />
                 </div>
-              )}
-            </SettingsGroup>
-          )}
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Intro video{' '}
+                    <FieldHelp title="Intro video">
+                      An optional YouTube or Vimeo link shown alongside the about text on the intro
+                      screen — a welcome from the team, or a short explainer. Paste the normal share
+                      link (e.g. <code>https://youtu.be/…</code> or <code>https://vimeo.com/…</code>
+                      ); it&apos;s embedded as a privacy-enhanced player. Leave blank for no video.
+                    </FieldHelp>
+                  </Label>
+                  <Input
+                    type="url"
+                    inputMode="url"
+                    value={intro.videoUrl}
+                    onChange={(e) => setIntro((i) => ({ ...i, videoUrl: e.target.value }))}
+                    maxLength={INTRO_VIDEO_URL_MAX_LENGTH}
+                    placeholder="https://youtu.be/dQw4w9WgXcQ"
+                    disabled={busy}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:max-w-xs">
+                  <Label className="text-sm font-medium">
+                    Button label{' '}
+                    <FieldHelp title="Button label">
+                      The text on the button that starts the questionnaire. Leave blank for a
+                      sensible default that matches the presentation mode (e.g. “Start the
+                      conversation”).
+                    </FieldHelp>
+                  </Label>
+                  <Input
+                    value={intro.buttonLabel}
+                    onChange={(e) => setIntro((i) => ({ ...i, buttonLabel: e.target.value }))}
+                    maxLength={INTRO_BUTTON_LABEL_MAX_LENGTH}
+                    placeholder="Start the conversation"
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+            )}
+          </SettingsGroup>
 
           {/* ── 2b. Reasoning stream — the live "watch it think" demo feature. Sits with the respondent
              experience (it's a respondent-facing surface) but in its own group so the marquee toggle
@@ -1633,30 +1593,22 @@ export function ConfigEditor({
           {/* ── 2c. Interviewer voice — an either/or: EITHER a hand-tuned custom tone & persona, OR a
              built-in library persona. The two are mutually exclusive — the mode toggle flips
              `personaSelection.enabled` and only the chosen mode's editor renders, so an admin can
-             never configure both at once (the built-in persona would silently win at runtime). The
-             built-in-persona option only appears when the persona-selection sub-flag is on; with it
-             off this is just the custom tone editor, exactly as before. ── */}
+             never configure both at once (the built-in persona would silently win at runtime). ── */}
           <SettingsGroup
             icon={SlidersHorizontal}
             accent="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
             id="tone"
             title="Interviewer tone & persona"
-            description={
-              personaSelectionEnabled
-                ? 'How the conversational interviewer sounds. Choose one — hand-tune a custom voice (a persona plus tone dials), or use one of the built-in personas. They’re mutually exclusive. Also requires the platform tone / persona-selection flags.'
-                : 'Shape how the conversational interviewer responds to answers — empathy, mirroring, formality, mimicry, verbosity and more. Each is off until you enable it; also requires the platform tone flag.'
-            }
+            description="How the conversational interviewer sounds. Choose one — hand-tune a custom voice (a persona plus tone dials), or use one of the built-in personas. They’re mutually exclusive."
             conflicts={conflictsFor('tone')}
           >
-            {personaSelectionEnabled && (
-              <VoiceModeToggle
-                mode={personaSelection.enabled ? 'persona' : 'custom'}
-                onChange={(mode) => setPersonaSelectionPatch({ enabled: mode === 'persona' })}
-                disabled={busy}
-              />
-            )}
+            <VoiceModeToggle
+              mode={personaSelection.enabled ? 'persona' : 'custom'}
+              onChange={(mode) => setPersonaSelectionPatch({ enabled: mode === 'persona' })}
+              disabled={busy}
+            />
 
-            {personaSelectionEnabled && personaSelection.enabled ? (
+            {personaSelection.enabled ? (
               <PersonaLibraryPanel
                 personas={BUILT_IN_PERSONAS}
                 selection={personaSelection}

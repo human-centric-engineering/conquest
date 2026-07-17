@@ -2,7 +2,7 @@
  * VersionSettingsPanel — the Settings-tab surface wrapping the run-time config editor under one
  * mutation runner. The child editor and the mutation helper are mocked; the assertions pin the
  * panel's OWN responsibilities: it renders the config editor with the derived version id / question
- * count / adaptive flag, runs edits through `authoringMutate` + `router.refresh()`, on a
+ * count, runs edits through `authoringMutate` + `router.refresh()`, on a
  * launched-version fork shows the notice + redirects to the new draft's Settings tab, and treats a
  * declined fork confirmation (`ForkCancelledError`) as a silent no-op. (The fork confirmation itself
  * is centralised in `authoringMutate` + `ForkConfirmProvider` — see their tests.)
@@ -32,22 +32,16 @@ vi.mock('@/components/admin/questionnaires/config-editor', () => ({
   ConfigEditor: ({
     run,
     versionId,
-    adaptiveEnabled,
-    adaptiveDataSlotsEnabled,
     questionCount,
   }: {
     run: (s: () => unknown) => void;
     versionId: string;
-    adaptiveEnabled: boolean;
-    adaptiveDataSlotsEnabled: boolean;
     questionCount: number;
   }) => (
     <button
       type="button"
       data-testid="cfg"
       data-version-id={versionId}
-      data-adaptive={String(adaptiveEnabled)}
-      data-adaptive-data-slots={String(adaptiveDataSlotsEnabled)}
       data-qcount={String(questionCount)}
       onClick={() => run(() => ['PATCH', '/cfg', {}])}
     >
@@ -84,16 +78,7 @@ function graph(over: Partial<VersionGraphView> = {}): VersionGraphView {
 }
 
 function renderPanel(over: Partial<VersionGraphView> = {}) {
-  render(
-    <VersionSettingsPanel
-      questionnaireId="qn-1"
-      graph={graph(over)}
-      adaptiveEnabled={false}
-      adaptiveDataSlotsEnabled={false}
-      introScreenEnabled={false}
-      personaSelectionEnabled={false}
-    />
-  );
+  render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph(over)} />);
 }
 
 beforeEach(() => {
@@ -102,21 +87,11 @@ beforeEach(() => {
 });
 
 describe('VersionSettingsPanel', () => {
-  it('renders the config editor with the derived version id, question count, and adaptive flag', () => {
-    render(
-      <VersionSettingsPanel
-        questionnaireId="qn-1"
-        graph={graph({ id: 'ver-9' })}
-        adaptiveEnabled
-        adaptiveDataSlotsEnabled={false}
-        introScreenEnabled={false}
-        personaSelectionEnabled={false}
-      />
-    );
+  it('renders the config editor with the derived version id and question count', () => {
+    render(<VersionSettingsPanel questionnaireId="qn-1" graph={graph({ id: 'ver-9' })} />);
     expect(screen.getByText('Configuration')).toBeInTheDocument();
     // versionId is derived from graph.id and threaded to the editor.
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-version-id', 'ver-9');
-    expect(screen.getByTestId('cfg')).toHaveAttribute('data-adaptive', 'true');
     expect(screen.getByTestId('cfg')).toHaveAttribute('data-qcount', '2');
   });
 

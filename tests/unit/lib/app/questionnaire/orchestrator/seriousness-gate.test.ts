@@ -1,10 +1,10 @@
 /**
  * Unit tests for the seriousness / abuse gate inside the pure per-turn orchestrator.
  *
- * Stub invokers (no capability, no DB): the extractor's `suspectedNonGenuine` flag gates the
- * judge; a non-serious verdict disregards the answer, strikes the session, escalates, and
- * abandons at the threshold. Covers the suspicion gate, the flag/threshold gates, the
- * disregard-and-re-ask path, and abandonment.
+ * Stub invokers (no capability, no DB): the judge runs on every answered turn (no
+ * `suspectedNonGenuine` pre-gate) whenever `config.abuseThreshold > 0`; a non-serious verdict
+ * disregards the answer, strikes the session, escalates, and abandons at the threshold. Covers
+ * the threshold gate, the disregard-and-re-ask path, and abandonment.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -134,22 +134,6 @@ describe('runTurn — seriousness / abuse gate', () => {
     const result = await runTurn(state({ userMessage: 'fine', questions: Q }), invokers);
 
     expect(calls.serious).toHaveLength(1); // judged regardless of the (absent) suspicion flag
-    expect(result.abuse).toBeUndefined();
-    expect(result.sideEffects.answerUpserts).toHaveLength(1);
-  });
-
-  it('does not run the judge when the gate flag is off', async () => {
-    const { invokers, calls } = stubInvokers({
-      extract: { intents: [intent({ slotKey: 'a' })], suspectedNonGenuine: true },
-      serious: { verdict: { serious: false, reason: 'x' } },
-    });
-
-    const result = await runTurn(
-      state({ userMessage: 'x', questions: Q, flags: { seriousnessGate: false } }),
-      invokers
-    );
-
-    expect(calls.serious).toHaveLength(0);
     expect(result.abuse).toBeUndefined();
     expect(result.sideEffects.answerUpserts).toHaveLength(1);
   });

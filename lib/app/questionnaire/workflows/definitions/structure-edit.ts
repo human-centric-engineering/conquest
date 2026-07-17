@@ -13,13 +13,7 @@ import {
   REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const structureEditWorkflow = diagram({
   slug: 'structure-edit',
@@ -91,9 +85,6 @@ export const structureEditWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.editAgent) {
-      return unavailable('The structure edit agent is not enabled.');
-    }
     if (ctx.versionStatus === 'draft') {
       return applies('This is a draft version — edit with AI applies here.');
     }

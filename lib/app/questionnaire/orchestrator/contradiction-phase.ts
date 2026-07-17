@@ -127,23 +127,20 @@ function pendingConflicts(pending: PendingContradiction): Array<{ slotKeys: stri
 function resolvePendingInLedger(
   ledger: RaisedContradiction[],
   pending: PendingContradiction,
-  refinedSlotKeys: ReadonlySet<string>,
-  refinementRan: boolean
+  refinedSlotKeys: ReadonlySet<string>
 ): RaisedContradiction[] {
   const conflicts = pendingConflicts(pending);
   const bundled = conflicts.length > 1;
   const outcome = new Map<string, ContradictionResolution>();
   for (const conflict of conflicts) {
     const refined = conflict.slotKeys.some((k) => refinedSlotKeys.has(k));
-    const resolution: ContradictionResolution = !refinementRan
-      ? 'unresolved'
-      : refined
-        ? 'resolved'
-        : // Un-refined: `kept` only when it was the SOLE conflict (a deliberate decline). In a bundle
-          // we can't tell "declined" from "didn't get to it", so leave it open for the final sweep.
-          bundled
-          ? 'unresolved'
-          : 'kept';
+    const resolution: ContradictionResolution = refined
+      ? 'resolved'
+      : // Un-refined: `kept` only when it was the SOLE conflict (a deliberate decline). In a bundle
+        // we can't tell "declined" from "didn't get to it", so leave it open for the final sweep.
+        bundled
+        ? 'unresolved'
+        : 'kept';
     outcome.set(contradictionKey(conflict.slotKeys), resolution);
   }
   const next = ledger.map((r) =>
@@ -235,31 +232,23 @@ export async function runContradictionPhase(
   if (pending && opts.hasMessage && !opts.disregarded) {
     // Resolve via the refiner — it weighs the confirmation message against the parked conflict and
     // returns a `refine` (apply) or keep decision. Skip fresh detection while resolving.
-    if (effective.flags.refinement) {
-      const out = await invokers.refineAnswer(effective, {
-        contradiction: pendingAsFinding(pending),
-      });
-      base.costUsd += out.costUsd;
-      base.toolCalls.push(
-        toolCall(REFINE_ANSWER_CAPABILITY_SLUG, out.diagnostic === undefined, {
-          ...(out.diagnostic !== undefined ? { code: out.diagnostic } : {}),
-          ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
-        })
-      );
-      base.answerRefinements = out.decisions;
-    }
+    const out = await invokers.refineAnswer(effective, {
+      contradiction: pendingAsFinding(pending),
+    });
+    base.costUsd += out.costUsd;
+    base.toolCalls.push(
+      toolCall(REFINE_ANSWER_CAPABILITY_SLUG, out.diagnostic === undefined, {
+        ...(out.diagnostic !== undefined ? { code: out.diagnostic } : {}),
+        ...(out.latencyMs !== undefined ? { latencyMs: out.latencyMs } : {}),
+      })
+    );
+    base.answerRefinements = out.decisions;
     // Clear the pending state regardless — we asked once; the respondent has had their say. Stamp how
     // each parked conflict ended (a combined probe can cover several) so none is ever re-raised: a
-    // conflict whose slot was actually refined → `resolved`; refinement disabled → `unresolved` (we
-    // never attempted); otherwise the original stands → `kept`.
+    // conflict whose slot was actually refined → `resolved`; otherwise the original stands → `kept`.
     base.pendingContradiction = null;
     const refinedSlotKeys = new Set(base.answerRefinements.map((d) => d.slotKey));
-    base.raisedContradictions = resolvePendingInLedger(
-      ledger,
-      pending,
-      refinedSlotKeys,
-      effective.flags.refinement
-    );
+    base.raisedContradictions = resolvePendingInLedger(ledger, pending, refinedSlotKeys);
     return base;
   }
 
@@ -278,11 +267,7 @@ export async function runContradictionPhase(
   // enough — it can contradict the message. Without one, we need ≥2 answers to compare each other.
   const floor = opts.hasMessage ? 1 : MIN_CONTRADICTION_ANSWERS;
   const canDetect =
-    opts.hasMessage &&
-    !opts.disregarded &&
-    decision.run &&
-    effective.flags.contradiction &&
-    priorAnswers.length >= floor;
+    opts.hasMessage && !opts.disregarded && decision.run && priorAnswers.length >= floor;
   if (!canDetect) return base;
 
   // Detect against the pre-merge answers so the conflicting OLD value (which this turn's extraction
@@ -343,17 +328,15 @@ export async function runContradictionPhase(
 
   // `flag` mode: surface passively AND refine immediately. Reconcile ALL fresh conflicts in one refine
   // pass (a merged trigger over the union of their slots), and record each so none re-alerts.
-  if (effective.flags.refinement) {
-    const refine = await invokers.refineAnswer(effective, { contradiction: mergeFindings(fresh) });
-    base.costUsd += refine.costUsd;
-    base.toolCalls.push(
-      toolCall(REFINE_ANSWER_CAPABILITY_SLUG, refine.diagnostic === undefined, {
-        ...(refine.diagnostic !== undefined ? { code: refine.diagnostic } : {}),
-        ...(refine.latencyMs !== undefined ? { latencyMs: refine.latencyMs } : {}),
-      })
-    );
-    base.answerRefinements = refine.decisions;
-  }
+  const refine = await invokers.refineAnswer(effective, { contradiction: mergeFindings(fresh) });
+  base.costUsd += refine.costUsd;
+  base.toolCalls.push(
+    toolCall(REFINE_ANSWER_CAPABILITY_SLUG, refine.diagnostic === undefined, {
+      ...(refine.diagnostic !== undefined ? { code: refine.diagnostic } : {}),
+      ...(refine.latencyMs !== undefined ? { latencyMs: refine.latencyMs } : {}),
+    })
+  );
+  base.answerRefinements = refine.decisions;
   base.raisedContradictions = [
     ...ledger,
     ...fresh.map((f) => raisedEntry(f, 'flagged', effective.selectionRound)),

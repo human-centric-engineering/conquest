@@ -75,7 +75,7 @@ export default async function DemoClientCohortsTab({ params }: PageProps) {
 
       <CqStatTiles stats={statTiles} />
 
-      <CohortsTable demoClientId={id} cohorts={cohorts} introScreenEnabled={true} />
+      <CohortsTable demoClientId={id} cohorts={cohorts} />
     </div>
   );
 }

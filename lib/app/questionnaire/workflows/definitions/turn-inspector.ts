@@ -11,13 +11,7 @@
  * to a real respondent. Ends by handing a turn off to the Turn Evaluator on request.
  */
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const turnInspectorWorkflow = diagram({
   slug: 'turn-inspector',
@@ -122,9 +116,6 @@ export const turnInspectorWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.liveSessions) {
-      return unavailable('Live sessions are not enabled.');
-    }
     if (!ctx.config.previewInspectorEnabled) {
       return inactive('The preview turn inspector is turned off for this version.');
     }

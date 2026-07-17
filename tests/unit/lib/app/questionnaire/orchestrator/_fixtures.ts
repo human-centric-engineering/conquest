@@ -26,25 +26,11 @@ import type {
   SelectOutcome,
   SeriousnessOutcome,
   SensitivityDetectOutcome,
-  TurnFlags,
   TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
 import { q } from '@/tests/unit/lib/app/questionnaire/selection/_fixtures';
 
 export { q };
-
-/** All sub-features on by default; override per case. */
-export function flags(partial: Partial<TurnFlags> = {}): TurnFlags {
-  return {
-    extraction: true,
-    contradiction: true,
-    refinement: true,
-    completion: true,
-    seriousnessGate: true,
-    sensitivityAwareness: true,
-    ...partial,
-  };
-}
 
 /** Build a `TurnState`, merging config over the resolved defaults. */
 export function state(input: {
@@ -58,7 +44,6 @@ export function state(input: {
   abuseStrikes?: number;
   sensitivityLevel?: TurnState['sensitivityLevel'];
   sensitivityNotes?: string[];
-  flags?: Partial<TurnFlags>;
   sessionId?: string;
   costPressure?: 'soft';
 }): TurnState {
@@ -74,7 +59,6 @@ export function state(input: {
     abuseStrikes: input.abuseStrikes ?? 0,
     ...(input.sensitivityLevel !== undefined ? { sensitivityLevel: input.sensitivityLevel } : {}),
     ...(input.sensitivityNotes !== undefined ? { sensitivityNotes: input.sensitivityNotes } : {}),
-    flags: flags(input.flags),
     ...(input.costPressure ? { costPressure: input.costPressure } : {}),
   };
 }

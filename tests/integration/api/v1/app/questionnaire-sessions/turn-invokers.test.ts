@@ -190,14 +190,6 @@ function state(over: Partial<TurnState> = {}): TurnState {
     recentMessages: ['hi', 'Role?'],
     selectionRound: 1,
     abuseStrikes: 0,
-    flags: {
-      extraction: true,
-      contradiction: true,
-      refinement: true,
-      completion: true,
-      seriousnessGate: false,
-      sensitivityAwareness: false,
-    },
     ...over,
   };
 }
@@ -209,7 +201,6 @@ async function invokers(opts: Partial<Parameters<typeof buildTurnInvokers>[0]> =
     userId: 'user-1',
     slots: SLOTS,
     activeQuestionKey: 'role',
-    adaptiveEnabled: false,
     ...opts,
   });
 }
@@ -907,7 +898,6 @@ describe('assessSeriousness — inspector trace', () => {
     // `...(recordInspectorCall ? { recordInspectorCall } : {})` spreads in selectNext.
     const recordInspectorCall = vi.fn();
     const inv = await invokers({
-      adaptiveEnabled: true,
       anonymous: true,
       recordInspectorCall,
     });
@@ -1238,8 +1228,8 @@ describe('selectNext', () => {
     expect(adaptiveMock.buildAdaptiveDeps).not.toHaveBeenCalled();
   });
 
-  it('wires adaptive deps when the strategy is adaptive and the flag is on', async () => {
-    const inv = await invokers({ adaptiveEnabled: true });
+  it('wires adaptive deps when the strategy is adaptive', async () => {
+    const inv = await invokers();
     await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
     expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith({ userId: 'user-1' });
   });

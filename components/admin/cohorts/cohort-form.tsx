@@ -46,26 +46,13 @@ export interface CohortFormProps {
   demoClientId: string;
   /** Present in edit mode; absent in create mode. */
   cohort?: CohortDetail;
-  /**
-   * Whether the platform respondent intro-screen sub-flag is on. When `false` the cohort intro
-   * background override is hidden entirely — it only surfaces on an intro screen, and its AI / upload
-   * helpers POST to flag-gated routes that 404 when the flag is off. Mirrors the config editor's
-   * Intro card gating. Defaults to `false` (hidden) so callers must opt in.
-   */
-  introScreenEnabled?: boolean;
   /** Called after a successful create/edit (e.g. to close a dialog). */
   onSuccess?: () => void;
   /** Called when the user cancels. */
   onCancel?: () => void;
 }
 
-export function CohortForm({
-  demoClientId,
-  cohort,
-  introScreenEnabled = false,
-  onSuccess,
-  onCancel,
-}: CohortFormProps) {
+export function CohortForm({ demoClientId, cohort, onSuccess, onCancel }: CohortFormProps) {
   const router = useRouter();
   const isEdit = cohort !== undefined;
   const [isLoading, setIsLoading] = useState(false);
@@ -153,31 +140,29 @@ export function CohortForm({
         <FormError message={errors.description?.message} />
       </div>
 
-      {/* Cohort intro background override — only meaningful (and only wired to working AI/upload
-          routes) when the platform intro-screen flag is on; hidden otherwise. */}
-      {introScreenEnabled && (
-        <div className="space-y-2">
-          <Label htmlFor="cohort-intro-background" className="flex items-center gap-1">
-            Intro background override
-            <FieldHelp title="Intro background override">
-              Respondent-facing background shown on this cohort&apos;s intro screen — what the
-              questionnaire is about, who&apos;s running it, and how results are used. When set, it{' '}
-              <strong>replaces</strong> the questionnaire-level background for this cohort&apos;s
-              respondents; leave blank to inherit. Markdown is supported. Only appears when the
-              intro screen is enabled on the questionnaire.
-            </FieldHelp>
-          </Label>
-          <IntroBackgroundField
-            id="cohort-intro-background"
-            value={watch('introBackground')}
-            onChange={(v) => setValue('introBackground', v, { shouldDirty: true })}
-            disabled={isLoading}
-            rows={5}
-            placeholder="Leave blank to inherit the questionnaire's background — or upload / generate cohort-specific text."
-          />
-          <FormError message={errors.introBackground?.message} />
-        </div>
-      )}
+      {/* Cohort intro background override — replaces the questionnaire-level background for this
+          cohort's respondents on the intro screen. */}
+      <div className="space-y-2">
+        <Label htmlFor="cohort-intro-background" className="flex items-center gap-1">
+          Intro background override
+          <FieldHelp title="Intro background override">
+            Respondent-facing background shown on this cohort&apos;s intro screen — what the
+            questionnaire is about, who&apos;s running it, and how results are used. When set, it{' '}
+            <strong>replaces</strong> the questionnaire-level background for this cohort&apos;s
+            respondents; leave blank to inherit. Markdown is supported. Only appears when the intro
+            screen is enabled on the questionnaire.
+          </FieldHelp>
+        </Label>
+        <IntroBackgroundField
+          id="cohort-intro-background"
+          value={watch('introBackground')}
+          onChange={(v) => setValue('introBackground', v, { shouldDirty: true })}
+          disabled={isLoading}
+          rows={5}
+          placeholder="Leave blank to inherit the questionnaire's background — or upload / generate cohort-specific text."
+        />
+        <FormError message={errors.introBackground?.message} />
+      </div>
 
       {error && (
         <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">{error}</div>

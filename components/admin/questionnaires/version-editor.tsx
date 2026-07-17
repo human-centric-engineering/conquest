@@ -80,7 +80,6 @@ export function VersionEditor({
   seed = null,
   hasDataSlots = false,
   designEvalEnabled = false,
-  editAgentEnabled = false,
 }: {
   questionnaireId: string;
   version: VersionGraphView;
@@ -90,8 +89,6 @@ export function VersionEditor({
   hasDataSlots?: boolean;
   /** When on, the goal/audience editor explains how the structure review scores against these fields. */
   designEvalEnabled?: boolean;
-  /** When on, the "Edit with AI" panel (instruction-driven whole-doc edits) is shown. */
-  editAgentEnabled?: boolean;
 }) {
   const router = useRouter();
   const versionId = version.id;
@@ -315,16 +312,15 @@ export function VersionEditor({
         </div>
       )}
 
-      {/* Edit with AI — instruction-driven whole-doc edits (preview, then apply). Flag-gated. */}
-      {editAgentEnabled && (
-        <EditAgentPanel
-          questionnaireId={questionnaireId}
-          versionId={versionId}
-          status={version.status}
-          busy={busy}
-          onApplied={onAgentApplied}
-        />
-      )}
+      {/* Edit with AI — instruction-driven whole-doc edits (preview, then apply). The panel gates
+          itself on the draft / no-sessions runtime check. */}
+      <EditAgentPanel
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        status={version.status}
+        busy={busy}
+        onApplied={onAgentApplied}
+      />
 
       {/* A suggested question deep-linked from the design-evaluation review queue, pre-filled for
           review before it's added (the one-click "Add to questionnaire" path skips this). */}

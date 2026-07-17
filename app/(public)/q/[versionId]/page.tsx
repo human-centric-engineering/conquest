@@ -152,8 +152,6 @@ export default async function PublicQuestionnairePage({
             reasoningPerItemMs={reasoningDwell.perItemMs}
             inlineCorrectionEnabled={inlineCorrectionEnabled}
             welcomeCopy={theme.welcomeCopy}
-            introScreenEnabled={true}
-            personaSelectionEnabled={true}
             resumeEnabled={resumeEnabled}
           />
           {showResumeByRef && (

@@ -100,18 +100,6 @@ interface AnonymousSessionBootProps {
    */
   inlineCorrectionEnabled?: boolean;
   /**
-   * Respondent intro / splash platform flag (resolved server-side). When on, a FRESH session fetches
-   * its resolved intro on boot and gates the workspace behind the splash; the per-version
-   * `intro.enabled` inside the payload is the second gate. Off → no fetch, straight into the surface.
-   */
-  introScreenEnabled?: boolean;
-  /**
-   * Selectable-persona platform flag (resolved server-side). When on, the session fetches its
-   * resolved persona menu on boot so the "Choose your interviewer" step can ride the carousel; the
-   * per-version `personaSelection.enabled` inside the payload is the second gate. Off → no fetch.
-   */
-  personaSelectionEnabled?: boolean;
-  /**
    * Session resume opt-in (per-version config, resolved server-side). When on (and this is the public
    * anonymous path — not preview/invite), the credential is kept durably in `localStorage` so the
    * session survives a browser close, and a genuine return (new tab / after close, NOT a same-tab
@@ -290,7 +278,6 @@ const personaResponseSchema = z.object({
 /**
  * Fetch the session's resolved persona menu (token-authed). Fails soft to `null` on any error — the
  * picker is an enhancement, never a blocker; the worst case is no persona step and the default voice.
- * Only called when the platform flag is on.
  */
 async function fetchPersonas(
   sessionId: string,
@@ -408,8 +395,6 @@ export function AnonymousSessionBoot({
   reasoningDwellMs,
   reasoningPerItemMs,
   inlineCorrectionEnabled = false,
-  introScreenEnabled = false,
-  personaSelectionEnabled = false,
   resumeEnabled = false,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
@@ -440,8 +425,8 @@ export function AnonymousSessionBoot({
       const { turns, inspectorTurns } = await fetchTranscript(sessionId, accessToken);
       const resumed = turns.length > 0;
       const [intro, personas, capture] = await Promise.all([
-        introScreenEnabled ? fetchIntro(sessionId, accessToken) : Promise.resolve(null),
-        personaSelectionEnabled ? fetchPersonas(sessionId, accessToken) : Promise.resolve(null),
+        fetchIntro(sessionId, accessToken),
+        fetchPersonas(sessionId, accessToken),
         fetchCapture(sessionId, accessToken),
       ]);
       setState({
@@ -458,7 +443,7 @@ export function AnonymousSessionBoot({
         autoStart: !resumed,
       });
     },
-    [welcomeCopy, voiceInputEnabled, anonymous, introScreenEnabled, personaSelectionEnabled]
+    [welcomeCopy, voiceInputEnabled, anonymous]
   );
 
   // Mint a fresh session (invite → /from-invite, else preview / public anon), persist its credential

@@ -18,7 +18,6 @@ export {
   DATA_SLOT_SELECTION_TOOL_SLUG,
   DATA_SLOT_FILLED_THRESHOLD,
   PROVISIONAL_FLOOR_CONFIDENCE,
-  DATA_SLOT_COMPLETE_MESSAGE,
 } from '@/lib/app/questionnaire/orchestrator/data-slot-orchestrator';
 export type {
   CapabilityInvokers,
@@ -35,7 +34,6 @@ export type {
   SeriousnessOutcome,
   SensitivityDetectOutcome,
   ToolCallRecord,
-  TurnFlags,
   TurnResponse,
   TurnResult,
   TurnState,

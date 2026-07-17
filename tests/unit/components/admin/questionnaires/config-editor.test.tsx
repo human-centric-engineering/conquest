@@ -103,7 +103,7 @@ function makeConfig(over: Partial<ConfigView> = {}): ConfigView {
 }
 
 /** Capture the [method, path, body] the editor hands to `run`. */
-function setup(over: Partial<ConfigView> = {}, opts: { personaSelectionEnabled?: boolean } = {}) {
+function setup(over: Partial<ConfigView> = {}) {
   const specs: MutationSpec[] = [];
   const run = vi.fn((thunk: () => MutationSpec): Promise<boolean> => {
     specs.push(thunk());
@@ -118,8 +118,6 @@ function setup(over: Partial<ConfigView> = {}, opts: { personaSelectionEnabled?:
       versionId="ver-1"
       config={config}
       questionCount={5}
-      adaptiveEnabled
-      personaSelectionEnabled={opts.personaSelectionEnabled ?? false}
       run={run}
       busy={false}
     />
@@ -1016,7 +1014,6 @@ describe('ConfigEditor', () => {
         versionId="ver-1"
         config={makeConfig({ selectionStrategy: 'sequential' })}
         questionCount={5}
-        adaptiveEnabled
         run={vi.fn(() => Promise.resolve(true))}
         busy={false}
       />
@@ -1031,7 +1028,6 @@ describe('ConfigEditor', () => {
         versionId="ver-1"
         config={makeConfig({ selectionStrategy: 'weighted' })}
         questionCount={5}
-        adaptiveEnabled
         run={vi.fn(() => Promise.resolve(true))}
         busy={false}
       />
@@ -1048,7 +1044,6 @@ describe('ConfigEditor', () => {
         versionId="ver-1"
         config={makeConfig({ reasoningStreamEnabled: false })}
         questionCount={5}
-        adaptiveEnabled
         run={vi.fn(() => Promise.resolve(true))}
         busy={false}
       />
@@ -1062,7 +1057,6 @@ describe('ConfigEditor', () => {
         versionId="ver-1"
         config={makeConfig({ reasoningStreamEnabled: true })}
         questionCount={5}
-        adaptiveEnabled
         run={vi.fn(() => Promise.resolve(true))}
         busy={false}
       />
@@ -1071,32 +1065,15 @@ describe('ConfigEditor', () => {
     expect(screen.getByText(/keep the reasoning on each turn/i)).toBeInTheDocument();
   });
 
-  // ── adaptive hidden when flag off ────────────────────────────────────────────
+  // ── adaptive strategy option ─────────────────────────────────────────────────
 
-  it('hides the adaptive option when adaptiveEnabled is false and current value is not adaptive', () => {
-    render(
-      <ConfigEditorUnderTest
-        questionnaireId="qn-1"
-        versionId="ver-1"
-        config={makeConfig({ selectionStrategy: 'sequential' })}
-        questionCount={5}
-        adaptiveEnabled={false}
-        run={vi.fn(() => Promise.resolve(true))}
-        busy={false}
-      />
-    );
-    // The <option> for adaptive should not be in the DOM
-    expect(screen.queryByRole('option', { name: /adaptive/i })).not.toBeInTheDocument();
-  });
-
-  it('keeps the adaptive option when adaptiveEnabled is false but current strategy is adaptive', () => {
+  it('offers the adaptive option in the strategy picker', () => {
     render(
       <ConfigEditorUnderTest
         questionnaireId="qn-1"
         versionId="ver-1"
         config={makeConfig({ selectionStrategy: 'adaptive' })}
         questionCount={5}
-        adaptiveEnabled={false}
         run={vi.fn(() => Promise.resolve(true))}
         busy={false}
       />
@@ -1104,17 +1081,15 @@ describe('ConfigEditor', () => {
     expect(screen.getByRole('option', { name: /adaptive/i })).toBeInTheDocument();
   });
 
-  // ── data-slot embeddings step gated on the adaptive-data-slots flag ───────────
+  // ── data-slot embeddings step ────────────────────────────────────────────────
 
-  it('shows the data-slot embeddings step when adaptiveDataSlotsEnabled is true', () => {
+  it('shows the data-slot embeddings step', () => {
     render(
       <ConfigEditorUnderTest
         questionnaireId="qn-1"
         versionId="ver-1"
         config={makeConfig()}
         questionCount={5}
-        adaptiveEnabled
-        adaptiveDataSlotsEnabled
         run={vi.fn(() => Promise.resolve(true))}
         busy={false}
       />
@@ -1122,21 +1097,6 @@ describe('ConfigEditor', () => {
     // The shared EmbeddingCoverageStep renders its title synchronously (before the
     // coverage fetch resolves), so the data-slot variant's heading is the proof it mounted.
     expect(screen.getByText(/data-slot selection needs embeddings/i)).toBeInTheDocument();
-  });
-
-  it('hides the data-slot embeddings step when adaptiveDataSlotsEnabled is false (default)', () => {
-    render(
-      <ConfigEditorUnderTest
-        questionnaireId="qn-1"
-        versionId="ver-1"
-        config={makeConfig()}
-        questionCount={5}
-        adaptiveEnabled
-        run={vi.fn(() => Promise.resolve(true))}
-        busy={false}
-      />
-    );
-    expect(screen.queryByText(/data-slot selection needs embeddings/i)).not.toBeInTheDocument();
   });
 
   // ── busy disables controls ────────────────────────────────────────────────────
@@ -1148,7 +1108,6 @@ describe('ConfigEditor', () => {
         versionId="ver-1"
         config={makeConfig()}
         questionCount={5}
-        adaptiveEnabled
         run={vi.fn(() => Promise.resolve(true))}
         busy
       />
@@ -1272,17 +1231,9 @@ describe('ConfigEditor', () => {
 
   // ── Interviewer voice either/or (custom tone vs built-in persona, F-persona) ──
 
-  it('shows no voice-mode toggle when the persona-selection sub-flag is off (custom tone only)', () => {
-    setup(); // personaSelectionEnabled defaults to false
-    const content = settingsContent();
-    expect(content.queryByText('Built-in persona')).not.toBeInTheDocument();
-    // The custom tone editor is present (a tone dimension row renders).
-    expect(content.getByText(/^Empathy/)).toBeInTheDocument();
-  });
-
   it('offers the either/or and starts in Custom voice mode when built-in mode is off', () => {
     const content = () => settingsContent();
-    setup({}, { personaSelectionEnabled: true });
+    setup();
     expect(content().getByText('Custom voice')).toBeInTheDocument();
     expect(content().getByText('Built-in persona')).toBeInTheDocument();
     // Custom mode → tone dials shown, persona-library controls hidden.
@@ -1291,7 +1242,7 @@ describe('ConfigEditor', () => {
   });
 
   it('switches to Built-in persona mode, hiding the tone editor, and saves enabled:true', () => {
-    const { specs } = setup({}, { personaSelectionEnabled: true });
+    const { specs } = setup();
     fireEvent.click(screen.getByText('Built-in persona'));
     const content = settingsContent();
     // Built-in mode → the library controls show and the custom tone dials are gone.
@@ -1303,16 +1254,13 @@ describe('ConfigEditor', () => {
   });
 
   it('opens directly in Built-in persona mode when the version is already on it', () => {
-    setup(
-      {
-        personaSelection: {
-          ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
-          enabled: true,
-          defaultPersonaKey: 'philosopher',
-        },
+    setup({
+      personaSelection: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+        enabled: true,
+        defaultPersonaKey: 'philosopher',
       },
-      { personaSelectionEnabled: true }
-    );
+    });
     const content = settingsContent();
     expect(content.getByText(/^Let respondents switch interviewer/)).toBeInTheDocument();
     // The switcher style is hidden until respondents are allowed to switch.
@@ -1320,15 +1268,12 @@ describe('ConfigEditor', () => {
   });
 
   it('reveals the switcher style only once respondents may switch, and saves the flag', () => {
-    const { specs } = setup(
-      {
-        personaSelection: {
-          ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
-          enabled: true,
-        },
+    const { specs } = setup({
+      personaSelection: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+        enabled: true,
       },
-      { personaSelectionEnabled: true }
-    );
+    });
     fireEvent.click(switchNear(/^Let respondents switch interviewer/));
     expect(screen.getByText(/How respondents switch interviewer/)).toBeInTheDocument();
     clickSave();

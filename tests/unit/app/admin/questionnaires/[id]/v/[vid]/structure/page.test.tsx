@@ -4,7 +4,7 @@
  * The page is an async Server Component that:
  *  - fetches the questionnaire detail and the version graph in parallel
  *  - calls notFound() when the detail is null or the vid is not in the version list
- *  - renders VersionEditor (+ resolves adaptiveEnabled) when ?edit=1 and graph is non-null
+ *  - renders VersionEditor when ?edit=1 and graph is non-null
  *  - renders VersionGraph when not editing and the graph is present
  *  - renders a "Could not load" message when the graph is null
  *  - shows ReingestDialog only for draft versions

@@ -13,7 +13,7 @@
 
 import { AGENT_SETTINGS_ADVISOR_SLUG } from '@/lib/app/questionnaire/agent-advisory/explain-schema';
 
-import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const agentSettingsAdvisorWorkflow = diagram({
   slug: 'agent-settings-advisor',
@@ -63,12 +63,5 @@ export const agentSettingsAdvisorWorkflow = diagram({
       },
     }),
   ],
-  applicability: (ctx) => {
-    // Workspace-level: the advisor is about the agents themselves, not a specific version. Its route
-    // gates only on the master questionnaires flag, so mirror that — available whenever the surface is.
-    if (!ctx.flags.master) {
-      return unavailable('Questionnaires are not enabled in this workspace.');
-    }
-    return applies('The Agent Settings Advisor is available for this workspace.');
-  },
+  applicability: () => applies('The Agent Settings Advisor is available for this workspace.'),
 });

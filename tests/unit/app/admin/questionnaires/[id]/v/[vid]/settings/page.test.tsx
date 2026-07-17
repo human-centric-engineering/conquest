@@ -111,17 +111,12 @@ vi.mock('@/components/admin/questionnaires/clone-for-client-dialog', () => ({
 }));
 
 vi.mock('@/components/admin/questionnaires/version-settings-panel', () => ({
-  VersionSettingsPanel: (props: {
-    questionnaireId: string;
-    graph: VersionGraphView;
-    adaptiveEnabled: boolean;
-  }) => (
+  VersionSettingsPanel: (props: { questionnaireId: string; graph: VersionGraphView }) => (
     <div
       data-testid="version-settings-panel"
       data-qid={props.questionnaireId}
       data-vid={props.graph.id}
       data-goal={props.graph.goal ?? ''}
-      data-adaptive={String(props.adaptiveEnabled)}
     />
   ),
 }));
@@ -435,7 +430,7 @@ describe('SettingsTab', () => {
   });
 
   describe('version settings (run-time config; goal/audience now live on Structure)', () => {
-    it('renders the version-settings panel with the graph + adaptive enabled', async () => {
+    it('renders the version-settings panel with the graph', async () => {
       workspaceDataMock.getVersionGraphCached.mockResolvedValue(
         makeGraph({ id: 'ver-9', goal: 'Understand churn' })
       );
@@ -445,7 +440,6 @@ describe('SettingsTab', () => {
       expect(panel).toHaveAttribute('data-qid', 'qn-3');
       expect(panel).toHaveAttribute('data-vid', 'ver-9');
       expect(panel).toHaveAttribute('data-goal', 'Understand churn');
-      expect(panel).toHaveAttribute('data-adaptive', 'true');
     });
 
     it('omits the version-settings panel when the version graph is unavailable', async () => {

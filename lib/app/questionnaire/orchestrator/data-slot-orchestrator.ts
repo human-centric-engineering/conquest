@@ -90,10 +90,6 @@ export const PROVISIONAL_FLOOR_CONFIDENCE = 0.2;
  */
 export const BALANCED_QUESTION_LAG = 0.2;
 
-/** Deterministic fallback prose for the terminal branches (offer phrasing is the LLM's job). */
-export const DATA_SLOT_COMPLETE_MESSAGE =
-  "Thanks — that's everything we need. You can submit your responses whenever you're ready.";
-
 /**
  * Merge this turn's data-slot fills into the answered set. A slot counts as covered at
  * confidence ≥ threshold OR when its fill is `provisional` (a parked best-effort inference). The
@@ -237,7 +233,7 @@ export async function runDataSlotTurn(
   let extractedSensitivity: SensitivityAssessment | undefined;
 
   // 1. Combined extraction — question answers (background) + data-slot fills (respondent-facing).
-  if (hasMessage && state.flags.extraction) {
+  if (hasMessage) {
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
     toolCalls.push(
@@ -262,7 +258,7 @@ export async function runDataSlotTurn(
   //     on we ALSO run a dedicated detector AND a deterministic keyword floor and merge all three
   //     (strongest signal wins). Runs before the gate so its `!extractedSensitivity` guard sees the
   //     combined result — a genuine disclosure is never judged for sincerity or struck.
-  if (hasMessage && state.flags.sensitivityAwareness) {
+  if (hasMessage && state.config.sensitivityAwareness) {
     const detected = await invokers.detectSensitivity(state);
     costUsd += detected.costUsd;
     toolCalls.push(
@@ -288,7 +284,7 @@ export async function runDataSlotTurn(
   //     persisted), strikes the session, and abandons at the configured threshold.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+  if (hasMessage && state.config.abuseThreshold > 0) {
     const ruleAbuse = keywordAbuseFloor(state.userMessage);
     const harmFloor = keywordSensitivityFloor(state.userMessage);
 
@@ -369,7 +365,7 @@ export async function runDataSlotTurn(
   //     the running-max level + note and the phraser softens every later turn. Support frame pushed
   //     last (below).
   let sensitivity: TurnResult['sensitivity'];
-  if (hasMessage && state.flags.sensitivityAwareness && !disregarded && extractedSensitivity) {
+  if (hasMessage && state.config.sensitivityAwareness && !disregarded && extractedSensitivity) {
     sensitivity = {
       detected: true,
       severity: extractedSensitivity.severity,
@@ -528,14 +524,10 @@ export async function runDataSlotTurn(
     targetedQuestionId = null;
     selectionRationale = 'Checking an apparent change of heart before updating earlier answers.';
   } else if (allQuestionsAnswered) {
-    if (effective.flags.completion) {
-      response = {
-        kind: 'offer',
-        input: buildOfferInput(effective, dataSlots, effectiveDataAnswered, answeredIds.size),
-      };
-    } else {
-      response = { kind: 'complete', text: DATA_SLOT_COMPLETE_MESSAGE };
-    }
+    response = {
+      kind: 'offer',
+      input: buildOfferInput(effective, dataSlots, effectiveDataAnswered, answeredIds.size),
+    };
   } else if (requiredRemaining.length > 0 && (unfilled.length === 0 || questionsLagging)) {
     // Interleave a required question directly (kept conversational by the route's phraser).
     const next = requiredRemaining[0];

@@ -149,7 +149,7 @@ export default async function QuestionnairesListPage() {
 
       <CqStatTiles stats={statTiles} />
 
-      <DataSlotEmbeddingInfo adaptiveDataSlotsEnabled={true} />
+      <DataSlotEmbeddingInfo />
 
       <QuestionnairesTable
         initialItems={items}

@@ -7,18 +7,12 @@
  * where it's used, and whether the features that consume it are currently on — and points at the
  * one place embeddings are generated (a version's Settings tab → "Generate embeddings").
  *
- * The live on/off pills reflect the resolved feature flags (passed in by the page) so the card
- * doubles as a status read-out, not just static copy.
+ * The card doubles as a status read-out, not just static copy.
  */
 
 import { Boxes, Compass, Filter } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-
-export interface DataSlotEmbeddingInfoProps {
-  /** Whether adaptive data-slot selection is live (master + data-slots + live + sub-flag). */
-  adaptiveDataSlotsEnabled: boolean;
-}
 
 function StatusPill({ on }: { on: boolean }) {
   return (
@@ -58,7 +52,7 @@ function UseRow({
   );
 }
 
-export function DataSlotEmbeddingInfo({ adaptiveDataSlotsEnabled }: DataSlotEmbeddingInfoProps) {
+export function DataSlotEmbeddingInfo() {
   return (
     <details className="group bg-card rounded-xl border">
       <summary className="flex cursor-pointer list-none items-center gap-2 p-4 text-sm font-medium select-none">
@@ -89,11 +83,7 @@ export function DataSlotEmbeddingInfo({ adaptiveDataSlotsEnabled }: DataSlotEmbe
             Embeddings keep both relevance and per-turn cost under control as a questionnaire grows.
           </UseRow>
 
-          <UseRow
-            icon={Compass}
-            title="Adaptive question selection"
-            status={adaptiveDataSlotsEnabled}
-          >
+          <UseRow icon={Compass} title="Adaptive question selection" status={true}>
             Ranks the unfilled slots by similarity to the respondent&apos;s last message, then a
             selector agent picks the most natural next topic — so questions follow the conversation
             rather than a list, while still letting it linger on a theme.

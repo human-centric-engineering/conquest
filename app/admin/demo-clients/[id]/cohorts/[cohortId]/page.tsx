@@ -104,7 +104,7 @@ export default async function CohortDetailPage({ params }: PageProps) {
             )}
           </div>
         </div>
-        <CohortHeaderActions demoClientId={id} cohort={cohort} introScreenEnabled={true} />
+        <CohortHeaderActions demoClientId={id} cohort={cohort} />
       </header>
 
       <section className="space-y-3 rounded-xl border px-4 py-4">

@@ -6,18 +6,12 @@
  * server-loaded questionnaire objectives, builds the load-bearing rubric prompt, runs one
  * structured reasoning-model call, validates + repairs the verdict against the Zod contract, then
  * serialises it to Markdown and best-effort-persists it. Sibling of the design-evaluation judge;
- * fed by the `turn-inspector` workflow. Gated by the turn-evaluation flag (paid LLM work).
+ * fed by the `turn-inspector` workflow.
  */
 
 import { TURN_EVALUATOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const turnEvaluationWorkflow = diagram({
   slug: 'turn-evaluation',
@@ -109,9 +103,6 @@ export const turnEvaluationWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.turnEvaluation) {
-      return unavailable('Turn evaluation is not enabled.');
-    }
     if (!ctx.config.previewInspectorEnabled) {
       return inactive('The turn inspector is off, so there are no captured turns to evaluate.');
     }

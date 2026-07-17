@@ -13,7 +13,7 @@
 
 import { RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
-import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const reportConfigAssistantWorkflow = diagram({
   slug: 'report-config-assistant',
@@ -62,10 +62,6 @@ export const reportConfigAssistantWorkflow = diagram({
       meta: { note: 'Per-field apply into the Generation tab, saved via the config PATCH.' },
     }),
   ],
-  applicability: (ctx) => {
-    if (!ctx.flags.respondentReport) {
-      return unavailable('Respondent reports are not enabled.');
-    }
-    return applies('The Report Design Assistant can help configure this version’s report.');
-  },
+  applicability: () =>
+    applies('The Report Design Assistant can help configure this version’s report.'),
 });

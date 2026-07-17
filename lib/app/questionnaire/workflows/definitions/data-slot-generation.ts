@@ -12,7 +12,7 @@ import {
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const dataSlotGenerationWorkflow = diagram({
   slug: 'data-slot-generation',
@@ -61,10 +61,6 @@ export const dataSlotGenerationWorkflow = diagram({
       meta: { note: 'Admin reviews proposed slots; nothing persists until saved.' },
     }),
   ],
-  applicability: (ctx) => {
-    if (!ctx.flags.dataSlots) {
-      return unavailable('Data slots are not enabled.');
-    }
-    return applies('An authoring aid — available on any version to propose data slots.');
-  },
+  applicability: () =>
+    applies('An authoring aid — available on any version to propose data slots.'),
 });

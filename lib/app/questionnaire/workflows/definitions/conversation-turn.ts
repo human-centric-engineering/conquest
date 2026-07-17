@@ -21,13 +21,7 @@ import {
   REFINE_ANSWER_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const conversationTurnWorkflow = diagram({
   slug: 'conversation-turn',
@@ -354,9 +348,6 @@ export const conversationTurnWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.liveSessions) {
-      return unavailable('Live sessions are not enabled.');
-    }
     if (ctx.versionStatus === 'launched') {
       return applies('This version is launched — live conversations run this loop.');
     }

@@ -16,7 +16,7 @@ import { EVALUATE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/cons
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { EVALUATION_DIMENSIONS } from '@/lib/app/questionnaire/evaluation/types';
 
-import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, node } from '@/lib/app/questionnaire/workflows/types';
 
 /** The seven judges share this box on the canvas. */
 const JUDGE_GROUP = { id: 'judge-panel', label: 'Judge panel · 7 dimensions, in parallel' };
@@ -92,10 +92,5 @@ export const designEvaluationWorkflow = diagram({
       meta: { note: 'Persist the run; findings become one-click applicable edits.' },
     }),
   ],
-  applicability: (ctx) => {
-    if (!ctx.flags.designEvaluation) {
-      return unavailable('Design evaluation is not enabled.');
-    }
-    return applies('The judge panel can score this version’s design.');
-  },
+  applicability: () => applies('The judge panel can score this version’s design.'),
 });

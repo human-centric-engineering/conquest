@@ -82,6 +82,11 @@ vi.mock('@/components/admin/questionnaires/evaluation-seed-composer', () => ({
     <div data-testid="seed-composer">{seed.prompt}</div>
   ),
 }));
+vi.mock('@/components/admin/questionnaires/edit-agent-panel', () => ({
+  EditAgentPanel: ({ status }: { status: string }) => (
+    <div data-testid="edit-agent-panel" data-status={status} />
+  ),
+}));
 
 function graph(over: Partial<VersionGraphView> = {}): VersionGraphView {
   return {

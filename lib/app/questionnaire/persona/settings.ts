@@ -93,11 +93,7 @@ export function resolveEffectiveTone(input: {
 /**
  * The tone that governs a live session's turns, applying the FULL persona gate — the single seam the
  * turn loop should use so the gate can't be re-derived inconsistently at the call site. On top of
- * {@link resolveEffectiveTone} it folds in the two gates that live outside the version config:
- *   - `personaFlagEnabled` — a caller-supplied gate for built-in persona mode.
- *     It's a kill-switch: built-in persona mode governs only when it AND the version toggle are on, so
- *     when the flag is off the version's own tone prevails (returned unchanged) even if a version was
- *     left with `personaSelection.enabled` true.
+ * {@link resolveEffectiveTone} it folds in the gate that lives outside the version config:
  *   - `allowRespondentSwitch` — a respondent's own stored `selectedPersonaKey` is honoured only when
  *     switching is allowed; otherwise the pinned default persona governs everyone (a stale key chosen
  *     while switching was on is ignored).
@@ -107,15 +103,13 @@ export function resolveSessionTone(input: {
   personas: PersonaOption[];
   personaSelection: PersonaSelectionSettings;
   selectedPersonaKey: string | null;
-  personaFlagEnabled: boolean;
 }): ToneSettings {
-  const { toneConfig, personas, personaSelection, selectedPersonaKey, personaFlagEnabled } = input;
-  const modeActive = personaFlagEnabled && personaSelection.enabled;
+  const { toneConfig, personas, personaSelection, selectedPersonaKey } = input;
+  const modeActive = personaSelection.enabled;
   const honorChoice = modeActive && personaSelection.allowRespondentSwitch;
   return resolveEffectiveTone({
     toneConfig,
     personas,
-    // `enabled` carries the full platform-AND-version gate so the kill-switch genuinely disables mode.
     personaSelection: { ...personaSelection, enabled: modeActive },
     selectedPersonaKey: honorChoice ? selectedPersonaKey : null,
   });

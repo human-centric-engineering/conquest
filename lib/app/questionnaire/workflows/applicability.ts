@@ -2,12 +2,12 @@
  * Behind-the-Scenes questionnaire lens — server-only applicability.
  *
  * Builds the {@link ApplicabilityContext} for one questionnaire version by
- * combining the resolved feature flags, the version's saved config (or
- * defaults), its status + provenance, and three relation counts — then runs
- * every diagram's pure `applicability` predicate against it.
+ * combining the version's saved config (or defaults), its status + provenance,
+ * and three relation counts — then runs every diagram's pure `applicability`
+ * predicate against it.
  *
- * Server-only: imports prisma + the flag resolvers. Never import from the
- * client canvas — the applicability map is fetched over the API.
+ * Server-only: imports prisma. Never import from the client canvas — the
+ * applicability map is fetched over the API.
  */
 
 import { prisma } from '@/lib/db/client';
@@ -21,7 +21,6 @@ import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
 import type {
   ApplicabilityContext,
   WorkflowApplicability,
-  WorkflowFlags,
 } from '@/lib/app/questionnaire/workflows/types';
 
 function coerceStatus(raw: string): AppQuestionnaireStatus {
@@ -30,38 +29,13 @@ function coerceStatus(raw: string): AppQuestionnaireStatus {
     : 'draft';
 }
 
-/** Resolve the normalised {@link WorkflowFlags} the predicates read. Every
- *  questionnaire feature is permanently on (the platform feature flags were
- *  retired), so every workflow-applicability flag is `true`. */
-function resolveWorkflowFlags(): WorkflowFlags {
-  return {
-    master: true,
-    generativeAuthoring: true,
-    editAgent: true,
-    liveSessions: true,
-    answerExtraction: true,
-    dataSlots: true,
-    respondentReport: true,
-    cohortReport: true,
-    introScreen: true,
-    voiceInput: true,
-    personaSelection: true,
-    adaptiveSelection: true,
-    turnEvaluation: true,
-    designEvaluation: true,
-    advisor: true,
-  };
-}
-
 /**
  * Build the applicability context for a version, or `null` if the version does
- * not exist. Issues the flag resolution and the version/count queries in
- * parallel.
+ * not exist.
  */
 export async function buildApplicabilityContext(
   versionId: string
 ): Promise<ApplicabilityContext | null> {
-  const flags = resolveWorkflowFlags();
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
     select: {
@@ -82,7 +56,6 @@ export async function buildApplicabilityContext(
   });
 
   return {
-    flags,
     config: toConfigView(version.config),
     versionStatus: coerceStatus(version.status),
     goalProvenance: version.goalProvenance ?? null,

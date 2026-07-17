@@ -173,7 +173,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // 1. Extract answer slots from the message. The extractor also emits a `suspectedNonGenuine`
   //    hint, but it proved an unreliable GATE (an optional flag the model often omits even for
   //    blatant abuse) — so it is no longer what decides whether the judge runs; see 1.5.
-  if (hasMessage && state.flags.extraction) {
+  if (hasMessage) {
     const out = await invokers.extractAnswers(state);
     costUsd += out.costUsd;
     toolCalls.push(
@@ -201,7 +201,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //     deterministic keyword floor, and merge all three (strongest signal wins). This runs BEFORE
   //     the seriousness gate so its `!extractedSensitivity` guard sees the combined result — a
   //     genuine disclosure must never be judged for sincerity or struck.
-  if (hasMessage && state.flags.sensitivityAwareness) {
+  if (hasMessage && state.config.sensitivityAwareness) {
     const detected = await invokers.detectSensitivity(state);
     costUsd += detected.costUsd;
     toolCalls.push(
@@ -233,7 +233,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // session, and escalates → abandon at the configured threshold.
   let abuse: TurnResult['abuse'];
   let disregarded = false;
-  if (hasMessage && state.flags.seriousnessGate && state.config.abuseThreshold > 0) {
+  if (hasMessage && state.config.abuseThreshold > 0) {
     const ruleAbuse = keywordAbuseFloor(state.userMessage);
     const harmFloor = keywordSensitivityFloor(state.userMessage);
 
@@ -306,7 +306,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   //     the persisted notes every later turn. The support frame is pushed LAST (below) so it wins
   //     the chat's single notice slot over any other warning this turn.
   let sensitivity: TurnResult['sensitivity'];
-  if (hasMessage && state.flags.sensitivityAwareness && !disregarded && extractedSensitivity) {
+  if (hasMessage && state.config.sensitivityAwareness && !disregarded && extractedSensitivity) {
     sensitivity = {
       detected: true,
       severity: extractedSensitivity.severity,
@@ -373,23 +373,18 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     };
     targetedQuestionId = null;
   } else if (assessment.kind === 'offer' || offerEarly) {
-    if (effective.flags.completion) {
-      // Offer turn: the route streams the composed prose; the core hands it the input.
-      toolCalls.push(toolCall(COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG, true));
-      response = {
-        kind: 'offer',
-        input: buildOfferInput(
-          effective,
-          assessment.coverage,
-          assessment.answeredCount,
-          assessment.capReached,
-          costWrapUp
-        ),
-      };
-    } else {
-      // Offer phrasing disabled: emit a plain completion message (gate still authoritative).
-      response = { kind: 'complete', text: COMPLETE_MESSAGE };
-    }
+    // Offer turn: the route streams the composed prose; the core hands it the input.
+    toolCalls.push(toolCall(COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG, true));
+    response = {
+      kind: 'offer',
+      input: buildOfferInput(
+        effective,
+        assessment.coverage,
+        assessment.answeredCount,
+        assessment.capReached,
+        costWrapUp
+      ),
+    };
     targetedQuestionId = null;
   } else {
     // Not ready to offer — pick the next question.
