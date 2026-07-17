@@ -8,8 +8,8 @@
  *       which are resolved against the current structure into a concrete before→after change list.
  *     - rewrite: the refine capability rewrites the whole structure (LLM); we return the proposed
  *       structure + an outline for the preview, still without writing.
- *   Guarded to **draft** versions with **no respondent sessions** (an edit never rewrites a
- *   launched/in-flight graph).
+ *   Preview is read-only, so it never blocks on version status or sessions; the apply route owns the
+ *   fork-a-new-draft decision for launched / session-pinned versions.
  *
  * Auth: admin only. Flag: 404 when the master OR edit-agent sub-flag is off. Rate limit: per-admin
  * compose sub-cap (shared with the compose/refine routes — same class of paid reasoning work).

@@ -6,8 +6,8 @@
  * Covers:
  *   - loadComposerAgent: returns the agent binding or a 503 response when missing
  *   - composeFromBrief: happy path, dispatch errors (status mapping), incoherence
- *   - loadRefinableStructure: 404 (not found / wrong questionnaire), 409 (not draft,
- *     has sessions), happy path projection
+ *   - loadRefinableStructure: 404 (not found / wrong questionnaire), no status/session
+ *     block (the route forks a draft instead), happy path projection
  *   - ComposeAdminMeta (type-level — exercised through composeFromBrief call)
  *
  * All collaborators are mocked. Tests assert what the helpers DO — they return
@@ -445,49 +445,41 @@ describe('loadRefinableStructure', () => {
     expect(result.response.status).toBe(404);
   });
 
-  it('returns ok:false with 409 REFINE_REQUIRES_DRAFT when status is launched', async () => {
+  it('does NOT block a launched version — the refine route forks a draft instead', async () => {
     prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue(
       makeDraftVersion({ status: 'launched' })
     );
 
     const result = await loadRefinableStructure('qn-1', 'ver-1');
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('narrowing');
-    expect(result.response.status).toBe(409);
-
-    const body = (await result.response.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('REFINE_REQUIRES_DRAFT');
+    // Status/session gating moved to the route's fork step; the loader only reads the structure.
+    expect(result.ok).toBe(true);
   });
 
-  it('returns ok:false with 409 REFINE_HAS_SESSIONS when version has respondent sessions', async () => {
+  it('does NOT block a version with respondent sessions — the route forks a draft instead', async () => {
     prismaMock.appQuestionnaireVersion.findUnique.mockResolvedValue(
-      makeDraftVersion({ _count: { sessions: 3 } })
+      makeDraftVersion({ status: 'launched', _count: { sessions: 3 } })
     );
 
     const result = await loadRefinableStructure('qn-1', 'ver-1');
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('narrowing');
-    expect(result.response.status).toBe(409);
-
-    const body = (await result.response.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('REFINE_HAS_SESSIONS');
+    expect(result.ok).toBe(true);
   });
 
   it('queries with the versionId and selects necessary fields for structure assembly', async () => {
     await loadRefinableStructure('qn-1', 'ver-1');
 
-    expect(prismaMock.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'ver-1' },
-        select: expect.objectContaining({
-          questionnaireId: true,
-          status: true,
-          sections: expect.anything(),
-        }),
-      })
-    );
+    const call = prismaMock.appQuestionnaireVersion.findUnique.mock.calls[0][0];
+    expect(call.where).toEqual({ id: 'ver-1' });
+    expect(call.select).toMatchObject({
+      questionnaireId: true,
+      goal: true,
+      audience: true,
+    });
+    expect(call.select.sections).toBeDefined();
+    // The status / session-count gating fields are no longer read (the route forks instead).
+    expect(call.select).not.toHaveProperty('status');
+    expect(call.select).not.toHaveProperty('_count');
   });
 
   describe('happy path — structure projection', () => {

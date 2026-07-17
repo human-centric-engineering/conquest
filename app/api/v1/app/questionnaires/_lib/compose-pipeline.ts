@@ -171,11 +171,12 @@ export async function composeFromBrief(
 }
 
 /**
- * Load a draft version's current graph as a {@link ComposeStructure} for the
- * conversational-refine turn, enforcing the safety guards: the version must exist
- * under the given questionnaire, be a **draft**, and have **no respondent
- * sessions** (a refine never rewrites a launched/in-flight graph). Returns the
- * structure or a ready-made error `Response` (404 / 409).
+ * Load a version's current graph as a {@link ComposeStructure} for the
+ * conversational-refine turn, scoped to its questionnaire. Returns the structure or
+ * a ready-made 404 `Response`. Launched / session-pinned versions are NOT blocked
+ * here: the refine route forks a fresh draft first (via `forkVersionIfLaunched`)
+ * when the version is launched or has real respondent sessions, then writes the
+ * refined graph to the fork — so in-flight work stays pinned to its own version.
  */
 export async function loadRefinableStructure(
   questionnaireId: string,
@@ -185,10 +186,8 @@ export async function loadRefinableStructure(
     where: { id: versionId },
     select: {
       questionnaireId: true,
-      status: true,
       goal: true,
       audience: true,
-      _count: { select: { sessions: true } },
       sections: {
         orderBy: { ordinal: 'asc' },
         select: {
@@ -218,24 +217,6 @@ export async function loadRefinableStructure(
       response: errorResponse('Questionnaire version not found', {
         code: 'NOT_FOUND',
         status: 404,
-      }),
-    };
-  }
-  if (version.status !== 'draft') {
-    return {
-      ok: false,
-      response: errorResponse('Only a draft version can be refined', {
-        code: 'REFINE_REQUIRES_DRAFT',
-        status: 409,
-      }),
-    };
-  }
-  if (version._count.sessions > 0) {
-    return {
-      ok: false,
-      response: errorResponse('This version has respondent sessions and cannot be refined', {
-        code: 'REFINE_HAS_SESSIONS',
-        status: 409,
       }),
     };
   }

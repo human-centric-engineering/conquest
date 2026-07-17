@@ -37,9 +37,19 @@ apply (POST .../edit-agent/apply)  →  write
 ```
 
 Apply **re-resolves against the live DB** (the preview is advisory), so a concurrent edit can't be
-silently clobbered. Both routes are guarded to **draft** versions with **no respondent sessions**
-(`loadEditableStructure` / `loadRefinableStructure`), admin-only, and rate-limited by the shared
-per-admin `composeLimiter`.
+silently clobbered.
+
+**Version bump on apply.** Like every authoring mutation, apply **forks a fresh draft** when the
+target version is launched or pinned by real respondent sessions (`forkVersionIfLaunched`, keyed on
+`countLaunchBlockers`) and writes the edit to the fork — in-flight responses stay pinned to the
+version they started on. Precise ops re-resolve against the fork (they address sections/questions by
+ordinal/key, both preserved by the deep copy); rewrite writes the fork wholesale. An interactive
+client sends `x-fork-confirm: prompt` so the admin confirms the new draft first (409
+`VERSION_FORK_CONFIRMATION_REQUIRED` → the shared `LaunchedEditConfirmDialog`), then the panel
+redirects to the fork's Structure tab. Admin **preview** sessions (`isPreview: true`) never pin, so
+those edit in place. The loaders (`loadEditableStructure` / `loadRefinableStructure`) no longer block
+on status/sessions — the fork step owns that decision; the plan (preview) route is read-only and
+never forks. Both routes are admin-only and rate-limited by the shared per-admin `composeLimiter`.
 
 ## Files
 

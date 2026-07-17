@@ -50,6 +50,7 @@ import { SaveStatus, type SaveState } from '@/components/admin/questionnaires/sa
 import {
   authoringMutate,
   ForkCancelledError,
+  type AuthoringMeta,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { EvaluationSeedComposer } from '@/components/admin/questionnaires/evaluation-seed-composer';
 import type {
@@ -172,6 +173,19 @@ export function VersionEditor({
     setError(null);
     setSaveState('saving');
     pendingSaveRef.current = true;
+    router.refresh();
+  };
+
+  // The edit agent forked a new draft (the version had real respondent sessions / was launched):
+  // mirror `run`'s fork branch — notice + redirect to the new draft's Structure tab so subsequent
+  // edits target it (the same component instance re-renders with the new `version` prop).
+  const onAgentForked = (meta: AuthoringMeta) => {
+    setBusy(true);
+    setError(null);
+    setSaveState('saving');
+    pendingSaveRef.current = true;
+    setForkNotice(meta.versionNumber);
+    router.replace(`/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/structure?edit=1`);
     router.refresh();
   };
 
@@ -302,8 +316,8 @@ export function VersionEditor({
 
       {forkNotice !== null && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-          You edited a launched version — your changes were saved to a new draft (v{forkNotice}).
-          You are now editing that draft.
+          This version had in-flight responses — your changes were saved to a new draft (v
+          {forkNotice}) so those responses stay on the original. You are now editing that draft.
         </div>
       )}
       {error && (
@@ -312,14 +326,15 @@ export function VersionEditor({
         </div>
       )}
 
-      {/* Edit with AI — instruction-driven whole-doc edits (preview, then apply). The panel gates
-          itself on the draft / no-sessions runtime check. */}
+      {/* Edit with AI — instruction-driven whole-doc edits (preview, then apply). Applying to a
+          version with real respondent sessions forks a new draft (with confirm) via `onAgentForked`. */}
       <EditAgentPanel
         questionnaireId={questionnaireId}
         versionId={versionId}
         status={version.status}
         busy={busy}
         onApplied={onAgentApplied}
+        onForked={onAgentForked}
       />
 
       {/* A suggested question deep-linked from the design-evaluation review queue, pre-filled for

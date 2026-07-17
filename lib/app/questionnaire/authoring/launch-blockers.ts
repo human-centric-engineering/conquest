@@ -11,13 +11,13 @@
  * shape and the {@link hasLaunchBlockers} predicate. **Counting** the blockers
  * needs the DB, so it lives route-local in
  * `app/api/v1/app/questionnaires/_lib/launch-blockers.ts` (`countLaunchBlockers`),
- * keeping `lib/app/questionnaire/**` storage-agnostic. F3.2 made that counter real
- * for invitations; sessions (P4) slot in there next, with no change to callers.
+ * keeping `lib/app/questionnaire/**` storage-agnostic. That counter is real for
+ * both invitations (F3.2) and real respondent sessions.
  */
 
 /** The live work that pins a launched version. */
 export interface LaunchBlockers {
-  /** In-progress questionnaire sessions on this version (P4). */
+  /** Real respondent sessions (`isPreview: false`) on this version — any status. */
   sessions: number;
   /** Live (non-revoked, non-terminal) invitations referencing this version (F3.2). */
   invitations: number;

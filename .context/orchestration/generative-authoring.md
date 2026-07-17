@@ -40,9 +40,15 @@ After the draft is persisted, each refine turn POSTs an instruction
 structure + a one-line summary; `replaceVersionStructure` clears and re-writes the
 draft graph in one transaction (the same delete-then-write shape re-ingest uses).
 
-**Guarded to draft versions with no respondent sessions** — a refine never rewrites
-a launched/in-flight graph (`loadRefinableStructure` → 409 `REFINE_REQUIRES_DRAFT` /
-`REFINE_HAS_SESSIONS`).
+**Version bump instead of a block** — a refine never rewrites a launched/in-flight
+graph. Like every authoring mutation it **forks a fresh draft** (`forkVersionIfLaunched`,
+before the paid LLM turn) when the version is launched or pinned by real respondent
+sessions, then writes the refined graph to the fork; otherwise it refines in place.
+Interactive clients confirm the new draft via `x-fork-confirm` (409
+`VERSION_FORK_CONFIRMATION_REQUIRED`); the success `meta` carries `{ forked, versionId,
+versionNumber }`. `loadRefinableStructure` itself no longer blocks on status/sessions —
+the fork step owns that decision. (The compose-studio refine only ever runs on a
+just-composed draft, so it never forks there.)
 
 ## Routes (all gated, admin-only, per-admin `composeLimiter` 20/min)
 

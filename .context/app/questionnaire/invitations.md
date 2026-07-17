@@ -124,8 +124,10 @@ The seam splits across the `lib/app` boundary:
 - **Pure** (`lib/app/questionnaire/authoring/launch-blockers.ts`): the `LaunchBlockers`
   shape + `hasLaunchBlockers()` predicate.
 - **Route-local** (`app/api/v1/app/questionnaires/_lib/launch-blockers.ts`): the
-  Prisma `countLaunchBlockers(versionId)` (real for invitations as of F3.2; sessions
-  slot in at P4). The fork writer and the status route import the counter from here.
+  Prisma `countLaunchBlockers(versionId)` — counts live invitations (F3.2) **and**
+  real respondent sessions (`isPreview: false`, any status; admin preview sessions
+  never pin). The fork writer and the status route import the counter from here, so a
+  version any respondent has touched forks on edit rather than mutating in place.
 
 ## API
 

@@ -64,8 +64,12 @@ const prismaMock = vi.hoisted(() => ({
   appDataSlot: {
     count: vi.fn(async () => 1),
   },
-  // F3.2: the route-local countLaunchBlockers reads this when leaving `launched`.
+  // The route-local countLaunchBlockers reads these when leaving `launched`: live invitations
+  // (F3.2) and real respondent sessions (isPreview:false) both pin the version.
   appQuestionnaireInvitation: {
+    count: vi.fn(),
+  },
+  appQuestionnaireSession: {
     count: vi.fn(),
   },
   // Adaptive data-slot embedding coverage (raw SQL) feeds the launch gate when the
@@ -139,6 +143,9 @@ beforeEach(() => {
   // Default the likert-slot read (launch readiness + key-collision both hit this mock) to empty,
   // so no describe relies on an ancestor's leftover value; tests that need slots override locally.
   prismaMock.appQuestionSlot.findMany.mockResolvedValue([]);
+  // countLaunchBlockers defaults: no live invitations / respondent sessions (un-launch allowed).
+  prismaMock.appQuestionnaireInvitation.count.mockResolvedValue(0);
+  prismaMock.appQuestionnaireSession.count.mockResolvedValue(0);
   // loadScopedVersion succeeds by default.
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -420,6 +427,26 @@ describe('status PATCH', () => {
         versionId: 'v1',
         status: { in: expect.arrayContaining(['pending', 'sent', 'opened', 'registered']) },
       },
+    });
+  });
+
+  it('refuses to leave launched while a real respondent session pins the version (409)', async () => {
+    prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
+      id: 'v1',
+      questionnaireId: 'qn-1',
+      versionNumber: 1,
+      status: 'launched',
+    });
+    // No invitations, but a real respondent session exists → still pinned.
+    prismaMock.appQuestionnaireInvitation.count.mockResolvedValue(0);
+    prismaMock.appQuestionnaireSession.count.mockResolvedValue(2);
+
+    const res = await statusPATCH(req({ status: 'draft' }), ctx(VERSION_PARAMS));
+    expect(res.status).toBe(409);
+    expect(prismaMock.appQuestionnaireVersion.update).not.toHaveBeenCalled();
+    // Session blockers count only real respondents (isPreview:false), scoped to this version.
+    expect(prismaMock.appQuestionnaireSession.count).toHaveBeenCalledWith({
+      where: { versionId: 'v1', isPreview: false },
     });
   });
 });

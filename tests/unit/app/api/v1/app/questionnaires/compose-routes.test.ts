@@ -78,6 +78,16 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/persist', () => ({
   replaceVersionStructure: vi.fn(),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/fork', () => ({ forkVersionIfLaunched: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/authoring-routes', () => ({
+  loadScopedVersion: vi.fn(),
+  forkMeta: (r: { forked: boolean; versionId: string; versionNumber: number }) => ({
+    forked: r.forked,
+    versionId: r.versionId,
+    versionNumber: r.versionNumber,
+  }),
+}));
+
 vi.mock('@/lib/app/questionnaire/ingestion/stream-compose', () => ({
   streamComposeQuestionnaire: vi.fn(),
   QUESTIONNAIRE_COMPOSER_AGENT_SLUG: 'app-questionnaire-composer',
@@ -127,6 +137,8 @@ import {
   replaceVersionStructure,
   IncoherentExtractionError,
 } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
+import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { sseResponse } from '@/lib/api/sse';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
@@ -230,6 +242,18 @@ beforeEach(() => {
         },
       ],
     },
+  });
+  // Default refine-route fork collaborators: version resolves, edits in place (no fork).
+  (loadScopedVersion as Mock).mockResolvedValue({
+    id: 'ver-1',
+    questionnaireId: 'qn-1',
+    versionNumber: 1,
+    status: 'draft',
+  });
+  (forkVersionIfLaunched as Mock).mockResolvedValue({
+    versionId: 'ver-1',
+    forked: false,
+    versionNumber: 1,
   });
 });
 
@@ -1046,10 +1070,42 @@ describe('POST /[id]/versions/[vid]/compose/refine', () => {
       expect(res.status).toBe(400);
       expect(body.error.code).toBe('VALIDATION_ERROR');
     });
+
+    it('returns 400 VALIDATION_ERROR when the request body is malformed JSON', async () => {
+      const req = new NextRequest(
+        'http://localhost/api/v1/app/questionnaires/qn-1/versions/ver-1/compose/refine',
+        {
+          method: 'POST',
+          body: 'not-valid-json{{{',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      const context = { params: Promise.resolve({ id: 'qn-1', vid: 'ver-1' }) };
+      const res = await callRefine(req, context);
+      const body = (await res.json()) as { success: boolean; error: { code: string } };
+
+      expect(res.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('VALIDATION_ERROR');
+      // No downstream work on a malformed body.
+      expect(loadScopedVersion).not.toHaveBeenCalled();
+    });
   });
 
-  describe('loadRefinableStructure guards', () => {
-    it('returns 404 from loadRefinableStructure when version not found', async () => {
+  describe('version resolution + fork', () => {
+    it('returns 404 when the version does not resolve under the questionnaire', async () => {
+      (loadScopedVersion as Mock).mockResolvedValue(null);
+
+      const { req, context } = makeRefineRequest({ instruction: 'Make it shorter' });
+      const res = await callRefine(req, context);
+
+      expect(res.status).toBe(404);
+      // No fork, no LLM turn, no structure load when the version can't be found.
+      expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+      expect(loadComposerAgent).not.toHaveBeenCalled();
+    });
+
+    it('forwards a 404 from loadRefinableStructure without loading the agent', async () => {
       const errorResp = new Response(
         JSON.stringify({ success: false, error: { code: 'NOT_FOUND' } }),
         { status: 404 }
@@ -1060,36 +1116,36 @@ describe('POST /[id]/versions/[vid]/compose/refine', () => {
       const res = await callRefine(req, context);
 
       expect(res.status).toBe(404);
-      // Should not proceed to agent load when structure fails
       expect(loadComposerAgent).not.toHaveBeenCalled();
     });
 
-    it('returns 409 from loadRefinableStructure when version is not a draft', async () => {
-      const errorResp = new Response(
-        JSON.stringify({ success: false, error: { code: 'REFINE_REQUIRES_DRAFT' } }),
-        { status: 409 }
-      );
-      (loadRefinableStructure as Mock).mockResolvedValue({ ok: false, response: errorResp });
-
-      const { req, context } = makeRefineRequest({ instruction: 'Add a section' });
-      const res = await callRefine(req, context);
-
-      expect(res.status).toBe(409);
-      expect(loadComposerAgent).not.toHaveBeenCalled();
-    });
-
-    it('returns 409 from loadRefinableStructure when version has sessions', async () => {
-      const errorResp = new Response(
-        JSON.stringify({ success: false, error: { code: 'REFINE_HAS_SESSIONS' } }),
-        { status: 409 }
-      );
-      (loadRefinableStructure as Mock).mockResolvedValue({ ok: false, response: errorResp });
+    it('forks a new draft before the LLM turn and writes the refined graph to it', async () => {
+      (forkVersionIfLaunched as Mock).mockResolvedValue({
+        versionId: 'ver-2',
+        forked: true,
+        versionNumber: 2,
+      });
 
       const { req, context } = makeRefineRequest({ instruction: 'Add pricing section' });
       const res = await callRefine(req, context);
 
-      expect(res.status).toBe(409);
-      expect(loadComposerAgent).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      // The refined structure lands on the fork, not the session-pinned original.
+      expect(replaceVersionStructure).toHaveBeenCalledWith('ver-2', expect.any(Object));
+      const body = (await res.json()) as { meta: { forked: boolean; versionId: string } };
+      expect(body.meta).toMatchObject({ forked: true, versionId: 'ver-2', versionNumber: 2 });
+    });
+
+    it('does not swallow the fork-confirmation error (withAdminAuth maps it to 409)', async () => {
+      (forkVersionIfLaunched as Mock).mockRejectedValue(
+        Object.assign(new Error('confirm required'), {
+          code: 'VERSION_FORK_CONFIRMATION_REQUIRED',
+        })
+      );
+
+      const { req, context } = makeRefineRequest({ instruction: 'Add pricing section' });
+      await expect(callRefine(req, context)).rejects.toThrow('confirm required');
+      expect(replaceVersionStructure).not.toHaveBeenCalled();
     });
   });
 

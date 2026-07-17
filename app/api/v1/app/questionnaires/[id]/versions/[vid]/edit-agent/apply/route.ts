@@ -9,7 +9,12 @@
  *       name are preserved).
  *     - rewrite: validates the previewed structure and rewrites the whole graph via
  *       `replaceVersionStructure` (the same path the refine flow uses).
- *   Guarded to **draft** versions with **no respondent sessions**.
+ *
+ *   Launched or session-pinned versions are not blocked: like every authoring mutation this forks a
+ *   fresh draft first (`forkVersionIfLaunched`) when the version is launched or has real respondent
+ *   sessions, then applies to the fork — so in-flight work stays pinned to the version it started on.
+ *   The precise ops re-resolve against the fork (key/ordinal-addressed, and the fork preserves both).
+ *   The success `meta` carries the fork outcome so the editor can notice + redirect.
  *
  * Auth: admin only. Flag: 404 when the master OR edit-agent sub-flag is off.
  */
@@ -27,6 +32,8 @@ import {
   loadEditableStructure,
   applyResolvedChanges,
 } from '@/app/api/v1/app/questionnaires/_lib/edit-agent-pipeline';
+import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
+import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
   assertPersistable,
   IncoherentExtractionError,
@@ -56,15 +63,25 @@ const handleApply = withAdminAuth<{ id: string; vid: string }>(
       });
     }
 
-    // Guard the target version (draft + no sessions) for both modes.
-    const current = await loadEditableStructure(id, vid);
-    if (!current.ok) return current.response;
+    const scoped = await loadScopedVersion(id, vid);
+    if (!scoped) {
+      return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
+    }
+
+    // Fork a new draft when the version is launched or pinned by real respondent sessions, then apply
+    // to the fork; otherwise edit in place. Throws ForkConfirmationRequiredError (→ 409 via
+    // handleAPIError) on an interactive `x-fork-confirm: prompt` request that hasn't confirmed yet.
+    const fork = await forkVersionIfLaunched(scoped, { userId: adminId, clientIp: clientIP });
+    const editId = fork.versionId;
 
     let counts: { changeCount: number; sectionCount: number; questionCount: number };
     let mode: 'precise' | 'rewrite';
 
     if (body.data.mode === 'precise') {
       mode = 'precise';
+      // Re-resolve the previewed ops against the version we actually write (the fork when forked).
+      const current = await loadEditableStructure(id, editId);
+      if (!current.ok) return current.response;
       let changes;
       try {
         ({ changes } = resolveOps(current.value, body.data.operations));
@@ -89,7 +106,7 @@ const handleApply = withAdminAuth<{ id: string; vid: string }>(
         }
         throw err;
       }
-      const graph = await replaceVersionStructure(vid, body.data.structure);
+      const graph = await replaceVersionStructure(editId, body.data.structure);
       counts = {
         changeCount: graph.sectionCount + graph.questionCount,
         sectionCount: graph.sectionCount,
@@ -101,11 +118,12 @@ const handleApply = withAdminAuth<{ id: string; vid: string }>(
       userId: adminId,
       action: 'questionnaire.edit_agent',
       entityType: 'questionnaire',
-      entityId: vid,
+      entityId: editId,
       entityName: mode,
       metadata: {
         questionnaireId: id,
-        versionId: vid,
+        versionId: editId,
+        forked: fork.forked,
         mode,
         changeCount: counts.changeCount,
         sectionCount: counts.sectionCount,
@@ -117,12 +135,13 @@ const handleApply = withAdminAuth<{ id: string; vid: string }>(
     log.info('Edit-agent applied', {
       adminId,
       questionnaireId: id,
-      versionId: vid,
+      versionId: editId,
+      forked: fork.forked,
       mode,
       ...counts,
     });
 
-    return successResponse({ mode, ...counts });
+    return successResponse({ mode, ...counts }, forkMeta(fork));
   }
 );
 
