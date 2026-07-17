@@ -20,7 +20,6 @@ import { Prisma } from '@prisma/client';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -99,7 +98,6 @@ import {
   DELETE as questionDELETE,
 } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/questions/[questionId]/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
@@ -136,7 +134,6 @@ const VERSION_PARAMS = { id: 'qn-1', vid: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (forkVersionIfLaunched as unknown as Mock).mockResolvedValue(noFork());
   // Default the likert-slot read (launch readiness + key-collision both hit this mock) to empty,
@@ -170,13 +167,6 @@ describe('gate order + auth', () => {
   ];
 
   for (const { name, call } of cases) {
-    it(`${name}: 404s when the flag is off, before auth`, async () => {
-      (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-      const res = await call();
-      expect(res.status).toBe(404);
-      expect(auth.api.getSession).not.toHaveBeenCalled();
-    });
-
     it(`${name}: 401s when unauthenticated`, async () => {
       setAuth(mockUnauthenticatedUser());
       expect((await call()).status).toBe(401);

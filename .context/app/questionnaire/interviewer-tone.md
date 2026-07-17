@@ -4,19 +4,19 @@ Per-version control over **how** the live conversational interviewer responds to
 it asks (that's the structure), but its _voice_. An admin sets nine independent tone sliders plus a
 free-text persona on the **Settings** tab; the live phraser folds the enabled ones into its system
 prompt at turn time. Everything is **off by default**, so an untouched questionnaire keeps the
-neutral baseline voice (see "Empathy owns emotional warmth" below), and the whole feature is
-dark-launched behind a platform flag.
+neutral baseline voice (see "Empathy owns emotional warmth" below).
 
 > Sits beside [presentation-mode](./presentation-mode.md), [reasoning-stream](./reasoning-stream.md)
-> and [sensitivity-awareness](./sensitivity-awareness.md) as a respondent-experience feature. Like
-> them it's a **config block + platform flag**, both required to take effect.
+> and [sensitivity-awareness](./sensitivity-awareness.md) as a respondent-experience feature. Tone is
+> **always on**; it takes effect from its per-version config block alone — as soon as at least one
+> dimension or the persona is enabled.
 >
-> **Either/or with [interviewer-personas](./interviewer-personas.md) (F-persona):** when the
-> persona-selection flag is on, this custom tone block and the built-in persona library are the two
+> **Either/or with [interviewer-personas](./interviewer-personas.md) (F-persona):** when
+> persona selection is enabled, this custom tone block and the built-in persona library are the two
 > sides of one **mutually-exclusive** choice — the Settings "Interviewer tone & persona" group shows a
 > mode toggle, and a built-in persona (each _is_ a `ToneSettings`) is swapped in via
-> `resolveEffectiveTone` at turn time, **replacing** this block. With the flag off, this is the only
-> voice control.
+> `resolveEffectiveTone` at turn time, **replacing** this block. With persona selection off, this is
+> the only voice control.
 
 ## The settings (`ToneSettings`)
 
@@ -57,10 +57,9 @@ The voice lives entirely in the turn-time phraser, not in any seeded agent instr
 1. **Read** — `toConfigView` (`_lib/detail.ts`) narrows the opaque `tone` Json with
    `narrowToneSettings` (`lib/app/questionnaire/chat/tone.ts`): every dimension present, `level`
    clamped to 1–5, persona trimmed/capped. A null/legacy/`{}` column resolves to all-off defaults.
-2. **Gate** — the `/messages` route reads the resolved block off `loaded.base.config.tone` and ANDs
-   the platform flag (`isToneEnabled()`) with "at least one dimension or the persona enabled". Only
-   then is `tone` forwarded into the phraser input (`QuestionComposeInput.tone`); otherwise it's
-   omitted and the default voice is unchanged. (Unlike goal/audience — which live only on `TurnMeta`
+2. **Gate** — the `/messages` route reads the resolved block off `loaded.base.config.tone` and checks
+   "at least one dimension or the persona enabled". Only then is `tone` forwarded into the phraser
+   input (`QuestionComposeInput.tone`); otherwise it's omitted and the default voice is unchanged. (Unlike goal/audience — which live only on `TurnMeta`
    — tone is a config field, so it reaches the phraser straight from config.)
 3. **Render** — `buildToneInstructions(tone)` (pure) turns the **enabled** dimensions into imperative
    clauses, spliced into `buildStreamingQuestionPrompt`'s system prompt. Persona leads the block.
@@ -83,19 +82,19 @@ Three interactions with the existing default phrasing:
 `buildToneInstructions` returns `''` for the all-off default → zero added prompt/cost when nothing is
 configured.
 
-## Flag
+## Gating
 
-`APP_QUESTIONNAIRES_TONE_ENABLED` (`APP_QUESTIONNAIRES_TONE_FLAG`), seeded **disabled** by
-`prisma/seeds/app-questionnaire/040-tone-flag.ts`. `isToneEnabled()`
-(`lib/app/questionnaire/feature-flag.ts`) ANDs it with the master app flag and live-sessions (tone
-only matters inside the `/messages` turn loop). See [feature-flags.md](./feature-flags.md).
+Tone is **always on** — there is no platform flag. It takes effect from its per-version config block
+alone: as soon as the `/messages` turn loop sees at least one dimension or the persona enabled, the
+resolved `tone` reaches the phraser. An all-off block adds nothing. See
+[feature-flags.md](./feature-flags.md) for the removed-flag history.
 
 ## UI
 
 The **Interviewer tone & persona** group in `ConfigEditor` (`components/admin/questionnaires/config-editor.tsx`):
 a persona toggle + textarea, then nine dimension rows (enable `Switch`, and when on a signed −2…+2
 `Slider` centred on 0, with pole captions and a scale legend explaining the balanced-vs-intensity
-split). The group always renders; a note flags that the platform tone flag is also required. The whole block is sent on save and validated by `toneSettingsSchema`
+split). The group always renders. The whole block is sent on save and validated by `toneSettingsSchema`
 (`authoring/config-schema.ts`, `.strict()` — unknown keys and out-of-range levels are rejected).
 
 **Live "what's added" preview.** Each dimension row (and the persona textarea) shows the _exact_

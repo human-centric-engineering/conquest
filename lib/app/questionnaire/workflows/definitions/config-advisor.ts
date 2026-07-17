@@ -12,7 +12,7 @@
 
 import { QUESTIONNAIRE_ADVISOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
-import { applies, diagram, node, unavailable } from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const configAdvisorWorkflow = diagram({
   slug: 'config-advisor',
@@ -72,10 +72,5 @@ export const configAdvisorWorkflow = diagram({
       meta: { note: 'The admin one-click applies suggested config changes (Settings tab).' },
     }),
   ],
-  applicability: (ctx) => {
-    if (!ctx.flags.advisor) {
-      return unavailable('The Config Advisor is not enabled.');
-    }
-    return applies('The Config Advisor can review this version’s configuration.');
-  },
+  applicability: () => applies('The Config Advisor can review this version’s configuration.'),
 });

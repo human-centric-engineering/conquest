@@ -20,7 +20,6 @@ import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getClientKnowledgeViewForClient } from '@/lib/app/questionnaire/report/client-knowledge';
 
 const handleGet = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
@@ -39,4 +38,4 @@ const handleGet = withAdminAuth<{ id: string }>(async (request, _session, { para
   return successResponse(view);
 });
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

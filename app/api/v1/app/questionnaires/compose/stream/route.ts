@@ -26,7 +26,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { sseResponse } from '@/lib/api/sse';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withGenerativeAuthoringEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { loadComposerAgent } from '@/app/api/v1/app/questionnaires/_lib/compose-pipeline';
 import { persistIngestion, briefSource } from '@/app/api/v1/app/questionnaires/_lib/persist';
@@ -177,4 +176,4 @@ const handleComposeStream = withAdminAuth(async (request: NextRequest, session) 
   return sseResponse(drive(), { signal: request.signal });
 });
 
-export const POST = withGenerativeAuthoringEnabled(handleComposeStream);
+export const POST = handleComposeStream;

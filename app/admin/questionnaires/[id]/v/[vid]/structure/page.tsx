@@ -22,7 +22,6 @@ import {
   getQuestionnaireDetailCached,
   getVersionDataSlotCountCached,
   getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 
 export const metadata: Metadata = {
@@ -48,22 +47,15 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
   const selected = detail.versions.find((ver) => ver.id === vid);
   if (!selected) notFound();
 
-  // Workspace flags (cached): `dataSlots` controls whether the header surfaces the data-slot count
-  // beside the question count. (Run-time config — incl. the adaptive picker — lives on Settings.)
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-
   // A design-evaluation "Open in editor" deep-link (?seedFinding=<runId>:<findingId>) pre-fills a
   // suggested question. Loading it forces edit mode so the composer is visible immediately.
   const seed =
-    seedFinding && flags.designEval && graph
-      ? await getEvaluationAddQuestionSeed(id, vid, seedFinding)
-      : null;
+    seedFinding && graph ? await getEvaluationAddQuestionSeed(id, vid, seedFinding) : null;
   const editing = (edit === '1' || seed !== null) && graph !== null;
 
   // When the version already has data slots, the seed composer offers to slot a newly-added
   // question (a question added afterwards would otherwise be orphaned from the slots).
-  const hasDataSlots =
-    flags.dataSlots && editing ? (await getVersionDataSlotCountCached(id, vid)) > 0 : false;
+  const hasDataSlots = editing ? (await getVersionDataSlotCountCached(id, vid)) > 0 : false;
 
   return (
     <div className="space-y-4">
@@ -71,10 +63,8 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-muted-foreground text-sm">
             {selected.sectionCount} section{selected.sectionCount === 1 ? '' : 's'} ·{' '}
-            {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'}
-            {flags.dataSlots
-              ? ` · ${selected.dataSlotCount} data slot${selected.dataSlotCount === 1 ? '' : 's'}`
-              : ''}
+            {selected.questionCount} question{selected.questionCount === 1 ? '' : 's'} ·{' '}
+            {selected.dataSlotCount} data slot{selected.dataSlotCount === 1 ? '' : 's'}
           </p>
           {graph && (
             <>
@@ -136,8 +126,7 @@ export default async function StructureTab({ params, searchParams }: PageProps) 
             version={graph}
             seed={seed}
             hasDataSlots={hasDataSlots}
-            designEvalEnabled={flags.designEval}
-            editAgentEnabled={flags.editAgent}
+            designEvalEnabled={true}
           />
         ) : (
           <VersionGraph graph={graph} />

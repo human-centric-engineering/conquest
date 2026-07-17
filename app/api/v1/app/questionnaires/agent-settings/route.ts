@@ -15,7 +15,6 @@ import type { NextRequest } from 'next/server';
 import { logger } from '@/lib/logging';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { evaluateAgentSettings } from '@/lib/app/questionnaire/agent-advisory/evaluate';
 
 const handleGet = withAdminAuth(async (_request: NextRequest) => {
@@ -29,4 +28,4 @@ const handleGet = withAdminAuth(async (_request: NextRequest) => {
   return successResponse(evaluation);
 });
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

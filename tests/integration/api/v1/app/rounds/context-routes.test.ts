@@ -7,7 +7,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -40,7 +39,6 @@ import {
   PATCH as updatePATCH,
   DELETE as deleteDELETE,
 } from '@/app/api/v1/app/rounds/[id]/context/[entryId]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   assertRoundBundlesVersion,
@@ -69,8 +67,6 @@ const entryCtx = { params: Promise.resolve({ id: 'r-1', entryId: 'e-1' }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // All three flags on (master AND cohorts AND round-context) → gate open.
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({ id: 'r-1', name: 'July round' });
   (assertRoundBundlesVersion as unknown as Mock).mockResolvedValue(true);
@@ -79,13 +75,6 @@ beforeEach(() => {
 });
 
 describe('GET /api/v1/app/rounds/:id/context', () => {
-  it('404s before auth when the round-context flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await listGET(getReq(), collCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('returns the round entries', async () => {
     (listRoundContextEntries as unknown as Mock).mockResolvedValue([{ id: 'e-1', title: 'Fact' }]);
     const res = await listGET(getReq(), collCtx);

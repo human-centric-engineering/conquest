@@ -4,7 +4,7 @@
  * The page is an async Server Component that:
  *  - fetches the questionnaire detail and the version graph in parallel
  *  - calls notFound() when the detail is null or the vid is not in the version list
- *  - renders VersionEditor (+ resolves adaptiveEnabled) when ?edit=1 and graph is non-null
+ *  - renders VersionEditor when ?edit=1 and graph is non-null
  *  - renders VersionGraph when not editing and the graph is present
  *  - renders a "Could not load" message when the graph is null
  *  - shows ReingestDialog only for draft versions
@@ -24,7 +24,6 @@ import type {
   QuestionnaireVersionSummary,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
 // ─── Navigation mock ──────────────────────────────────────────────────────────
@@ -46,7 +45,8 @@ vi.mock('next/navigation', () => ({
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
-  resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
+  getVersionDataSlotCountCached: vi.fn<() => Promise<number>>(),
+  getEvaluationAddQuestionSeed: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
@@ -151,25 +151,6 @@ function makeGraph(
   };
 }
 
-function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
-  return {
-    master: true,
-    dataSlots: false,
-    designEval: false,
-    liveSessions: true,
-    adaptive: false,
-    adaptiveDataSlots: false,
-    respondentReport: false,
-    cohortReport: false,
-    reportWebSearch: false,
-    introScreen: false,
-    personaSelection: false,
-    advisor: false,
-    editAgent: false,
-    ...over,
-  };
-}
-
 // ─── Page import ──────────────────────────────────────────────────────────────
 
 import StructureTab from '@/app/admin/questionnaires/[id]/v/[vid]/structure/page';
@@ -187,7 +168,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
-  workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(makeFlags());
+  workspaceDataMock.getVersionDataSlotCountCached.mockResolvedValue(0);
+  workspaceDataMock.getEvaluationAddQuestionSeed.mockResolvedValue(null);
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -244,18 +226,7 @@ describe('StructureTab', () => {
       expect(screen.queryByTestId('version-editor')).not.toBeInTheDocument();
     });
 
-    it('resolves workspace flags even when not editing (to gate the header data-slot count)', async () => {
-      // Arrange: no edit param. Flags are still resolved so the header can decide whether to
-      // surface the data-slot count (the adaptive branch is what's gated on editing, not the read).
-      render(await renderPage());
-
-      expect(workspaceDataMock.resolveQuestionnaireWorkspaceFlags).toHaveBeenCalled();
-    });
-
-    it('surfaces the data-slot count in the header when the data-slots feature is on', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ dataSlots: true })
-      );
+    it('surfaces the data-slot count in the header', async () => {
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(
         makeDetail({ versions: [makeVersion({ dataSlotCount: 3 })] })
       );
@@ -263,13 +234,6 @@ describe('StructureTab', () => {
       render(await renderPage());
 
       expect(screen.getByText(/3 data slots/)).toBeInTheDocument();
-    });
-
-    it('omits the data-slot count from the header when the feature is off', async () => {
-      // Default flags have dataSlots: false.
-      render(await renderPage());
-
-      expect(screen.queryByText(/data slot/)).not.toBeInTheDocument();
     });
   });
 
@@ -308,14 +272,6 @@ describe('StructureTab', () => {
       expect(screen.queryByTestId('version-editor')).not.toBeInTheDocument();
       // Note: curly apostrophe in source — match by regex.
       expect(screen.getByText(/Could not load this version.s structure\./)).toBeInTheDocument();
-    });
-
-    it('resolves workspace flags only when editing', async () => {
-      // Arrange
-      render(await renderPage({ edit: '1' }));
-
-      // Assert: flag resolution was triggered for the adaptive sub-flag
-      expect(workspaceDataMock.resolveQuestionnaireWorkspaceFlags).toHaveBeenCalledTimes(1);
     });
   });
 

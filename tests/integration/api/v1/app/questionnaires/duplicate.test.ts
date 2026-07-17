@@ -18,7 +18,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -52,7 +51,6 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/copy-version-graph', () => ({
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/duplicate/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -88,7 +86,6 @@ const VERSION = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as Mock).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (prisma.appQuestionnaire.findUnique as Mock).mockResolvedValue({
     id: 'qn-1',
@@ -103,13 +100,6 @@ beforeEach(() => {
 });
 
 describe('POST …/duplicate — gate and auth', () => {
-  it('404s when the app flag is off, before any work', async () => {
-    (isFeatureEnabled as Mock).mockResolvedValue(false);
-    const res = await POST(req({}), ctx('qn-1'));
-    expect(res.status).toBe(404);
-    expect(prisma.appQuestionnaire.findUnique).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
     expect((await POST(req({}), ctx('qn-1'))).status).toBe(401);

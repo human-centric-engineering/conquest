@@ -22,13 +22,6 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isQuestionnairesEnabled: vi.fn(),
-  isDataSlotsEnabled: vi.fn(),
-  isGenerativeAuthoringEnabled: vi.fn(),
-  isAdaptiveDataSlotSelectionEnabled: vi.fn(),
-}));
-
 vi.mock('@/lib/api/server-fetch', () => ({
   serverFetch: vi.fn(),
   parseApiResponse: vi.fn(),
@@ -63,12 +56,6 @@ vi.mock('@/components/admin/cq-stat-tiles', () => ({
 }));
 
 import QuestionnairesListPage from '@/app/admin/questionnaires/page';
-import {
-  isQuestionnairesEnabled,
-  isDataSlotsEnabled,
-  isGenerativeAuthoringEnabled,
-  isAdaptiveDataSlotSelectionEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { serverFetch, parseApiResponse } from '@/lib/api/server-fetch';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
@@ -107,10 +94,6 @@ function tileValue(label: string): string {
 describe('QuestionnairesListPage stat tiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(true);
-    vi.mocked(isDataSlotsEnabled).mockResolvedValue(false);
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(false);
-    vi.mocked(isAdaptiveDataSlotSelectionEnabled).mockResolvedValue(false);
 
     // serverFetch tags the response with its URL so parseApiResponse can branch.
     vi.mocked(serverFetch).mockImplementation(
@@ -395,22 +378,10 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
   });
 
-  it('renders the page with generativeAuthoringEnabled=true when the sub-flag is on', async () => {
-    // Arrange: generative authoring flag returns true.
-    vi.mocked(isGenerativeAuthoringEnabled).mockResolvedValue(true);
-
+  it('renders the New Questionnaire menu (generative authoring is always available)', async () => {
     render(await QuestionnairesListPage());
 
-    // The NewQuestionnaireMenu stub must be present — the page passed the flag through.
     expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
-  });
-
-  it('calls notFound when the questionnaires feature flag is off', async () => {
-    // Covers the !(await isQuestionnairesEnabled()) branch at line 112.
-    vi.mocked(isQuestionnairesEnabled).mockResolvedValue(false);
-
-    // The notFound mock throws 'NEXT_NOT_FOUND' so the page aborts rendering.
-    await expect(QuestionnairesListPage()).rejects.toThrow('NEXT_NOT_FOUND');
   });
 
   it('counts draft questionnaires correctly when the list has drafts only', async () => {
@@ -433,17 +404,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(tileValue('Archived')).toBe('0');
   });
 
-  it('hides the data-slot embedding explainer when data slots are disabled', async () => {
-    // Default beforeEach disables data slots — the dashboard must not advertise the dark feature.
-    render(await QuestionnairesListPage());
-
-    expect(screen.queryByText('About data-slot embedding')).not.toBeInTheDocument();
-  });
-
-  it('shows the data-slot embedding explainer (with live flag status) when data slots are enabled', async () => {
-    vi.mocked(isDataSlotsEnabled).mockResolvedValue(true);
-    vi.mocked(isAdaptiveDataSlotSelectionEnabled).mockResolvedValue(true);
-
+  it('shows the data-slot embedding explainer (with live status)', async () => {
     render(await QuestionnairesListPage());
 
     // The explainer renders and its consumer use-cases are listed.

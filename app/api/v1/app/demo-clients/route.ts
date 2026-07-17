@@ -25,7 +25,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createDemoClientSchema, slugifyDemoClient } from '@/lib/app/questionnaire/demo-clients';
 import {
   DEMO_CLIENT_SELECT,
@@ -96,16 +95,5 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
   }
 });
 
-export async function GET(request: NextRequest): Promise<Response> {
-  // Flag gate first — a switched-off app is indistinguishable from a missing route.
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleList(request);
-}
-
-export async function POST(request: NextRequest): Promise<Response> {
-  // Flag gate first — a switched-off app is indistinguishable from a missing route.
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleCreate(request);
-}
+export const GET = handleList;
+export const POST = handleCreate;

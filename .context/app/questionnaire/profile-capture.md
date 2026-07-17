@@ -131,6 +131,7 @@ FKs — see [`../../privacy/data-erasure.md`](../../privacy/data-erasure.md)).
 
 ## No platform flag
 
-Capture is gated purely by per-version config (like `profileFields` itself), not a platform feature
-flag — there is no `APP_QUESTIONNAIRES_CAPTURE_*` row. See [[feature-flags-are-db-rows]] for how the
-platform flags that DO gate the surrounding surfaces (live sessions, etc.) work.
+Capture is gated purely by per-version config (like `profileFields` itself). The questionnaire
+`APP_QUESTIONNAIRES_*` feature-flag layer has been retired — every questionnaire feature is
+permanently on — so there is no platform flag gating capture or the surrounding surfaces; the only
+runtime toggles left are the per-version config settings.

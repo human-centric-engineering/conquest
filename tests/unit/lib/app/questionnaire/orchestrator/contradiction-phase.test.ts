@@ -174,35 +174,6 @@ describe('runContradictionPhase — resolution path (pending present)', () => {
     expect(slugs(result.toolCalls)).toContain(REFINE_ANSWER_CAPABILITY_SLUG);
   });
 
-  it('clears pending but skips refineAnswer when refinement flag is off', async () => {
-    // Even when refinement is disabled, the pending state is cleared after a resolution turn.
-    const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
-    const s = {
-      ...state({
-        userMessage: 'confirm',
-        questions: [q({ id: 'a', key: 'a' })],
-        config: { contradictionMode: 'probe' },
-        existingAnswers: TWO_ANSWERS,
-        flags: { refinement: false },
-      }),
-      pendingContradiction: {
-        slotKeys: ['a'],
-        explanation: 'conflict',
-        statement: 'contradicting message',
-        raisedAtTurnIndex: 1,
-      },
-    };
-
-    const result = await runPhase(s, inv);
-
-    // Refiner was NOT called — flag is off.
-    expect(inv.calls.refine).toHaveLength(0);
-    // Pending is still cleared — the respondent has had their say regardless.
-    expect(result.pendingContradiction).toBeNull();
-    // No refine tool-call slug.
-    expect(slugs(result.toolCalls)).not.toContain(REFINE_ANSWER_CAPABILITY_SLUG);
-  });
-
   it('includes code on a failed refine (diagnostic set) in the resolution path', async () => {
     // The refine invoker returns a diagnostic — the tool-call record must carry it.
     const inv = stubInvokers({ refine: { decisions: [], diagnostic: 'REFINE_ERROR' } });
@@ -359,24 +330,6 @@ describe('runContradictionPhase — resolution path (pending present)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('runContradictionPhase — detection gate', () => {
-  it('returns the base result immediately when contradiction flag is off', async () => {
-    // flags.contradiction = false → canDetect is false; detectContradictions is never called.
-    const inv = stubInvokers({ detect: { findings: [finding()] } });
-    const s = state({
-      userMessage: 'x',
-      questions: [q({ id: 'a' })],
-      config: { contradictionMode: 'flag' },
-      existingAnswers: TWO_ANSWERS,
-      flags: { contradiction: false },
-    });
-
-    const result = await runPhase(s, inv);
-
-    expect(inv.calls.detect).toHaveLength(0);
-    expect(result.contradictions).toHaveLength(0);
-    expect(result.toolCalls).toHaveLength(0);
-  });
-
   it('returns the base result immediately when shouldRunDetection returns run=false', async () => {
     // every_n_turns cadence: round=1 with everyNTurns=2 → decision.run = false.
     const inv = stubInvokers({ detect: { findings: [finding()] } });
@@ -639,27 +592,6 @@ describe('runContradictionPhase — flag mode (immediate refine)', () => {
     ]);
     expect(result.probe).toBeUndefined();
     expect(result.suppressWrites).toBe(false);
-  });
-
-  it('skips refine in flag mode when refinement flag is off', async () => {
-    const inv = stubInvokers({
-      detect: { findings: [finding({ slotKeys: ['a'] })] },
-    });
-    const s = state({
-      userMessage: 'x',
-      questions: [q({ id: 'a', key: 'a' })],
-      config: { contradictionMode: 'flag' },
-      existingAnswers: TWO_ANSWERS,
-      flags: { refinement: false },
-    });
-
-    const result = await runPhase(s, inv);
-
-    // Events still emitted (passive surface), refine is not called.
-    expect(result.events).toHaveLength(1);
-    expect(inv.calls.refine).toHaveLength(0);
-    expect(result.answerRefinements).toHaveLength(0);
-    expect(slugs(result.toolCalls)).not.toContain(REFINE_ANSWER_CAPABILITY_SLUG);
   });
 
   it('records a failed refine tool-call with diagnostic code and latencyMs in flag mode', async () => {
@@ -1027,36 +959,6 @@ describe('runContradictionPhase — raised-contradiction ledger (never re-raise)
     const result = await runPhase(s, inv);
 
     expect(result.raisedContradictions?.[0]).toMatchObject({ key: 'a', resolution: 'kept' });
-  });
-
-  it('marks the ledger entry unresolved (not kept) when refinement is disabled on the resolution turn', async () => {
-    // Refinement OFF → the refiner never runs, so we cannot claim the answer was 'kept' after weighing
-    // the confirmation. The honest label is 'unresolved' — raised, never reconciled. Still suppressed.
-    const inv = stubInvokers({ refine: { decisions: [decision({ slotKey: 'a' })] } });
-    const s = {
-      ...state({
-        userMessage: 'yes, change it',
-        questions: [q({ id: 'a', key: 'a' })],
-        config: { contradictionMode: 'probe' },
-        existingAnswers: TWO_ANSWERS,
-        flags: { refinement: false },
-      }),
-      pendingContradiction: {
-        slotKeys: ['a'],
-        explanation: 'conflict',
-        statement: 'trigger',
-        raisedAtTurnIndex: 1,
-      },
-      raisedContradictions: [raised(['a'])],
-    };
-
-    const result = await runPhase(s, inv);
-
-    // The refiner was never called (flag off)…
-    expect(inv.calls.refine).toHaveLength(0);
-    // …so the outcome is honest about never having reconciled, and pending is still cleared.
-    expect(result.pendingContradiction).toBeNull();
-    expect(result.raisedContradictions?.[0]).toMatchObject({ key: 'a', resolution: 'unresolved' });
   });
 
   it('appends a resolved entry defensively when the pending conflict predates the ledger', async () => {

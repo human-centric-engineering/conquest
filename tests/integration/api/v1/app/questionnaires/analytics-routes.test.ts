@@ -17,7 +17,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -43,9 +42,7 @@ import { GET as getDistributions } from '@/app/api/v1/app/questionnaires/[id]/ve
 import { GET as getFunnel } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/funnel/route';
 import { GET as getCost } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/cost/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -91,9 +88,6 @@ const ROUTES = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -108,14 +102,6 @@ beforeEach(() => {
 
 describe.each(ROUTES)('GET analytics/$name', ({ name, handler, agg, payload }) => {
   const path = name;
-
-  it('404s when the master flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    setAuth(null);
-    const res = await handler(req(path), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(agg).not.toHaveBeenCalled();
-  });
 
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());

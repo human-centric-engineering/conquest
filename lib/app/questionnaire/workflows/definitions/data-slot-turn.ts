@@ -20,13 +20,7 @@ import {
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const dataSlotTurnWorkflow = diagram({
   slug: 'data-slot-turn',
@@ -278,9 +272,6 @@ export const dataSlotTurnWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.dataSlots) {
-      return unavailable('Data slots are not enabled.');
-    }
     if (ctx.dataSlotCount === 0) {
       return inactive('This version has no data slots.');
     }

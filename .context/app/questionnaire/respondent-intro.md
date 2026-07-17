@@ -8,18 +8,17 @@ LLM turn is spent until they do.
 
 Off by default, so existing launched questionnaires are unchanged.
 
-## Two gates, plus a fresh-session rule
+## One gate, plus a fresh-session rule
 
-The splash appears only when **all** of these hold:
+The intro screen is **always on** — there is no platform flag (see
+[`feature-flags.md`](./feature-flags.md)). The splash appears only when **both** of these hold:
 
-1. **Platform flag** `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED` is on (`isIntroScreenEnabled()` =
-   master AND the sub-flag — see [`feature-flags.md`](./feature-flags.md)).
-2. **Per-version toggle** `config.intro.enabled` is on (the admin opted this version in).
-3. **Fresh session** — `autoStart` is true. A resume drops straight back into the conversation
+1. **Per-version toggle** `config.intro.enabled` is on (the admin opted this version in).
+2. **Fresh session** — `autoStart` is true. A resume drops straight back into the conversation
    (mirrors the `animateOpening` rule); the splash is a once-at-the-start screen, not a gate on every
    reload.
 
-When any gate is off, the respondent goes straight into the questionnaire exactly as before.
+When either condition is off, the respondent goes straight into the questionnaire exactly as before.
 
 ## What's stored vs derived
 
@@ -101,11 +100,11 @@ splash must sit **before** it — the workspace only mounts after the respondent
 Both respondent surfaces render `SessionEntry` instead of the workspace directly:
 
 - **Authenticated** (`app/(protected)/questionnaires/[sessionId]/page.tsx`) — resolves the intro
-  server-side via `resolveSessionIntro` (only when the platform flag is on) and passes it down.
+  server-side via `resolveSessionIntro` and passes it down (the resolver returns an intro only when
+  the version's `config.intro.enabled` is on).
 - **Anonymous** (`anonymous-session-boot.tsx`) — the session is created client-side, so it fetches
   the resolved intro from `GET /api/v1/app/questionnaire-sessions/:id/intro` (token-authed, validated
-  with Zod, fresh-session only). The public page passes `introScreenEnabled` so the fetch is skipped
-  when the platform flag is off.
+  with Zod, fresh-session only). The route returns the intro only when the version opted in.
 
 `QuestionnaireSplash` is white-labelled: it inherits the client's brand via the page's
 `BrandThemeProvider` CSS vars (`--app-accent-color`, `--app-cta-color`, `--app-cta-gradient`) and
@@ -113,8 +112,8 @@ renders the background markdown with the same `react-markdown` + `prose` treatme
 
 ## Admin surface
 
-- **Settings tab → Intro screen card** (`config-editor.tsx`, gated on the `introScreen` workspace
-  flag): enable toggle, the background editor (see below), the intro-video link input, and the
+- **Settings tab → Intro screen card** (`config-editor.tsx`, always shown): enable toggle, the
+  background editor (see below), the intro-video link input, and the
   button-label input. Saved whole in the config PATCH (like the tone block).
 - **Cohort form** (`cohort-form.tsx`): the same background editor as the "Intro background override"
   (wired into react-hook-form via `watch`/`setValue`).
@@ -137,23 +136,23 @@ Both author modes dispatch the **`app_author_intro_background`** capability
 `{ background }` (trimmed + capped) and reuses the seeded **composer agent** (the same authoring
 binding as compose / refine-structure — no new agent). The prompts
 (`lib/app/questionnaire/intro/authoring-prompt.ts`) fix a warm, plain, British-English respondent
-voice and the JSON contract. Routes are gated by `withIntroScreenEnabled`, admin-auth, and a
-per-admin LLM/upload sub-cap (the compose / ingest limiters).
+voice and the JSON contract. Routes are gated by admin-auth and a per-admin LLM/upload sub-cap (the
+compose / ingest limiters) — no platform flag.
 
 ## Where the code lives
 
-| Concern                 | Location                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Settings type/default   | `lib/app/questionnaire/types.ts` (`IntroSettings`)                                                                    |
-| Narrow / copy / resolve | `lib/app/questionnaire/intro/{settings,copy,resolve}.ts`                                                              |
-| Intro video resolver    | `lib/app/questionnaire/intro/video.ts` (`resolveIntroVideo`)                                                          |
-| Intro video embed UI    | `components/app/questionnaire/intro/intro-video.tsx`                                                                  |
-| Authoring prompts       | `lib/app/questionnaire/intro/authoring-prompt.ts`                                                                     |
-| Authoring capability    | `lib/app/questionnaire/capabilities/author-intro-background.ts`                                                       |
-| Read endpoint           | `app/api/v1/app/questionnaire-sessions/[id]/intro/route.ts`                                                           |
-| Authoring endpoints     | `app/api/v1/app/questionnaires/intro-background/{author,parse}/route.ts`                                              |
-| Gate + splash UI        | `components/app/questionnaire/intro/{session-entry,questionnaire-splash}.tsx`                                         |
-| Admin config card       | `components/admin/questionnaires/config-editor.tsx`                                                                   |
-| Background editor       | `components/admin/questionnaires/intro-background-field.tsx`                                                          |
-| Cohort override field   | `components/admin/cohorts/cohort-form.tsx`                                                                            |
-| Flag                    | `APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG`; seeds `048-intro-screen-flag.ts`, `049-author-intro-background-capability.ts` |
+| Concern                 | Location                                                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Settings type/default   | `lib/app/questionnaire/types.ts` (`IntroSettings`)                                                                                                                      |
+| Narrow / copy / resolve | `lib/app/questionnaire/intro/{settings,copy,resolve}.ts`                                                                                                                |
+| Intro video resolver    | `lib/app/questionnaire/intro/video.ts` (`resolveIntroVideo`)                                                                                                            |
+| Intro video embed UI    | `components/app/questionnaire/intro/intro-video.tsx`                                                                                                                    |
+| Authoring prompts       | `lib/app/questionnaire/intro/authoring-prompt.ts`                                                                                                                       |
+| Authoring capability    | `lib/app/questionnaire/capabilities/author-intro-background.ts`                                                                                                         |
+| Read endpoint           | `app/api/v1/app/questionnaire-sessions/[id]/intro/route.ts`                                                                                                             |
+| Authoring endpoints     | `app/api/v1/app/questionnaires/intro-background/{author,parse}/route.ts`                                                                                                |
+| Gate + splash UI        | `components/app/questionnaire/intro/{session-entry,questionnaire-splash}.tsx`                                                                                           |
+| Admin config card       | `components/admin/questionnaires/config-editor.tsx`                                                                                                                     |
+| Background editor       | `components/admin/questionnaires/intro-background-field.tsx`                                                                                                            |
+| Cohort override field   | `components/admin/cohorts/cohort-form.tsx`                                                                                                                              |
+| Capability seed         | `049-author-intro-background-capability.ts` (the `app_author_intro_background` capability). No platform flag — always on; see [`feature-flags.md`](./feature-flags.md). |

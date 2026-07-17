@@ -23,10 +23,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import {
-  isDesignEvaluationEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { evaluationApplyLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
@@ -43,10 +39,6 @@ const handleApply = withAdminAuth<Params>(async (request, session, { params }) =
   const clientIp = getClientIP(request);
   const { id, vid, runId, findingId } = await params;
   const adminId = session.user.id;
-
-  if (!(await isDesignEvaluationEnabled())) {
-    throw new NotFoundError('Questionnaire design-time evaluation is not enabled');
-  }
 
   const rl = evaluationApplyLimiter.check(adminId);
   if (!rl.success) {
@@ -112,4 +104,4 @@ const handleApply = withAdminAuth<Params>(async (request, session, { params }) =
   );
 });
 
-export const POST = withQuestionnairesEnabled(handleApply);
+export const POST = handleApply;

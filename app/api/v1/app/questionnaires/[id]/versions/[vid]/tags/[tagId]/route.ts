@@ -15,7 +15,6 @@ import { prisma } from '@/lib/db/client';
 import { Prisma } from '@prisma/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateTagSchema, normalizeTagLabel } from '@/lib/app/questionnaire/tagging';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -120,6 +119,6 @@ const handleDelete = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse({ id: targetId, deleted: true }, forkMeta(fork));
 });
 
-export const PATCH = withQuestionnairesEnabled(handlePatch);
+export const PATCH = handlePatch;
 
-export const DELETE = withQuestionnairesEnabled(handleDelete);
+export const DELETE = handleDelete;

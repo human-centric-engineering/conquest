@@ -2,7 +2,6 @@
  * Invitations tab page (`/admin/questionnaires/[id]/v/[vid]/invitations`) tests.
  *
  * The page is an async Server Component that:
- *  - gates on isQuestionnairesEnabled()
  *  - calls getQuestionnaireDetailCached(id) and notFound() when it returns null
  *  - finds the newest launched version for cost estimation
  *  - fetches invitations via serverFetch (capped at 100)
@@ -40,14 +39,6 @@ vi.mock('next/navigation', () => ({
   notFound: mockNotFound,
   redirect: vi.fn(),
 }));
-
-// ─── Feature-flag mock ────────────────────────────────────────────────────────
-
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-  isInvitationImportEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
 
 // ─── workspace-data mock (for getQuestionnaireDetailCached + getVersionGraphCached) ───
 
@@ -169,8 +160,6 @@ function renderPage(opts: { id?: string; vid?: string } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
-  flagMock.isInvitationImportEnabled.mockResolvedValue(true);
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(null); // → default invitee fields
   apiMock.serverFetch.mockResolvedValue({ ok: true });
@@ -184,16 +173,6 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('InvitationsTab', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires feature flag is off', async () => {
-      // Arrange
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-
-      // Act + Assert
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
   describe('detail gating', () => {
     it('calls notFound when getQuestionnaireDetailCached returns null', async () => {
       // Arrange

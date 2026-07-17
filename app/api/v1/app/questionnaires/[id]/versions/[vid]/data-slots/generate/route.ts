@@ -21,10 +21,6 @@ import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
-  isDataSlotsEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
@@ -45,10 +41,6 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const { id, vid } = await params;
     const adminId = session.user.id;
-
-    if (!(await isDataSlotsEnabled())) {
-      throw new NotFoundError('Data slots are not enabled');
-    }
 
     const rl = dataSlotsGenerationLimiter.check(adminId);
     if (!rl.success) {
@@ -141,4 +133,4 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleGenerate);
+export const POST = handleGenerate;

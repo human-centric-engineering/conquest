@@ -41,9 +41,13 @@ touch them to re-skin — they carry no vertical-specific assumptions:
 - **The theming module** (`lib/app/questionnaire/theming/**`) and the **demo-client
   infrastructure** — kept, but its _content_ is replaced (see A.4) and the demo tenancy
   itself is replaced (see A.5).
-- **The feature-flag pattern** — DB-row flags in the `feature_flag` table, gated
-  through `lib/app/questionnaire/feature-flag.ts`. Keep the mechanism; you'll rename
-  the flag _names_ (A.3).
+- **No questionnaire feature-flag layer to inherit.** ConQuest's per-feature flags
+  (`APP_QUESTIONNAIRES_*_ENABLED` and `lib/app/questionnaire/feature-flag.ts`) were
+  removed (2026-07) — every questionnaire feature is permanently on, so there is
+  nothing to rename here. The **generic Sunrise** feature-flag infrastructure
+  (`lib/feature-flags/`, `isFeatureEnabled`, the `/admin/features` page,
+  site-wide `MAINTENANCE_MODE`) is untouched and still available if your fork wants
+  to gate a new feature deliberately.
 
 The rename surface below changes _identifiers and copy_, not behaviour. Resist editing
 engine logic to fit a vertical — if the engine genuinely can't express your vertical,
@@ -55,15 +59,14 @@ A new vertical replaces the word "questionnaire" and the "ConQuest" brand. Count
 are live as of this writing (`grep -rIo <token> lib app components prisma`) — treat them
 as orders of magnitude, re-run before you start:
 
-| Token                             | ~Occurrences      | Where it lives                                            |
-| --------------------------------- | ----------------- | --------------------------------------------------------- |
-| `questionnaire` (lowercase)       | ~2100             | code, routes, config keys, slugs, docs                    |
-| `Questionnaire` (PascalCase)      | ~800              | model names, type names, component names                  |
-| `App*` Prisma models              | **18 models**     | `prisma/schema/app-questionnaire.prisma` (+ ~340 TS refs) |
-| `app_*` table names               | **18 `@@map`**    | same schema file                                          |
-| `APP_QUESTIONNAIRES_*` flag names | **11 `_ENABLED`** | `lib/app/questionnaire/constants.ts` + 11 seed units      |
-| `ConQuest`                        | ~55               | brand in docs, comments, seed copy                        |
-| `conquest`                        | ~70               | brand in slugs, URLs, `package.json` name                 |
+| Token                        | ~Occurrences   | Where it lives                                            |
+| ---------------------------- | -------------- | --------------------------------------------------------- |
+| `questionnaire` (lowercase)  | ~2100          | code, routes, config keys, slugs, docs                    |
+| `Questionnaire` (PascalCase) | ~800           | model names, type names, component names                  |
+| `App*` Prisma models         | **18 models**  | `prisma/schema/app-questionnaire.prisma` (+ ~340 TS refs) |
+| `app_*` table names          | **18 `@@map`** | same schema file                                          |
+| `ConQuest`                   | ~55            | brand in docs, comments, seed copy                        |
+| `conquest`                   | ~70            | brand in slugs, URLs, `package.json` name                 |
 
 The 18 models: `AppQuestionnaire`, `AppQuestionnaireVersion`,
 `AppQuestionnaireInvitation`, `AppQuestionnaireConfig`, `AppQuestionnaireSection`,
@@ -91,21 +94,18 @@ SCOPE="lib/app app/api/v1/app app/admin/questionnaires app/(protected)/questionn
        tests/unit/lib/app tests/unit/components/app tests/integration/lib/app \
        tests/fixtures/app .context/app"
 
-# 1. Feature-flag names FIRST (most specific — all-caps, unambiguous).
-grep -rIl "APP_QUESTIONNAIRES" $SCOPE | xargs sed -i '' 's/APP_QUESTIONNAIRES/APP_SURVEYS/g'
-
-# 2. Table prefix BEFORE the bare word (the critical ordering).
+# 1. Table prefix BEFORE the bare word (the critical ordering).
 sed -i '' 's/app_questionnaire/app_survey/g' prisma/schema/app-questionnaire.prisma
 
-# 3. Prisma model prefix (PascalCase compound) before the bare PascalCase word.
+# 2. Prisma model prefix (PascalCase compound) before the bare PascalCase word.
 grep -rIl "AppQuestionnaire" $SCOPE | xargs sed -i '' 's/AppQuestionnaire/AppSurvey/g'
 grep -rIl "AppQuestion"      $SCOPE | xargs sed -i '' 's/AppQuestion/AppSurveyQuestion/g'  # AppQuestionSlot etc.
 
-# 4. The bare words last.
+# 3. The bare words last.
 grep -rIl "Questionnaire" $SCOPE | xargs sed -i '' 's/Questionnaire/Survey/g'
 grep -rIl "questionnaire" $SCOPE | xargs sed -i '' 's/questionnaire/survey/g'
 
-# 5. Brand.
+# 4. Brand.
 grep -rIl "ConQuest" $SCOPE | xargs sed -i '' 's/ConQuest/Polaris/g'
 grep -rIl "conquest" $SCOPE | xargs sed -i '' 's/conquest/polaris/g'   # also package.json "name"
 ```

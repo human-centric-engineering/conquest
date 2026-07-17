@@ -17,13 +17,7 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const respondentReportWorkflow = diagram({
   slug: 'respondent-report',
@@ -247,9 +241,6 @@ export const respondentReportWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.respondentReport) {
-      return unavailable('Respondent reports are not enabled.');
-    }
     if (!ctx.config.respondentReport.enabled) {
       return inactive('Respondent reports are turned off for this questionnaire.');
     }

@@ -10,10 +10,7 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 
-import {
-  getQuestionnaireDetailCached,
-  resolveQuestionnaireWorkspaceFlags,
-} from '@/lib/app/questionnaire/workspace-data';
+import { getQuestionnaireDetailCached } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 
 export const metadata: Metadata = {
@@ -29,11 +26,7 @@ export default async function QuestionnaireEntryPage({ params, searchParams }: P
   const { id } = await params;
   const { v } = await searchParams;
 
-  const [detail, flags] = await Promise.all([
-    getQuestionnaireDetailCached(id),
-    resolveQuestionnaireWorkspaceFlags(),
-  ]);
-  if (!flags.master) notFound();
+  const detail = await getQuestionnaireDetailCached(id);
   if (!detail) notFound();
 
   const target = detail.versions.find((ver) => ver.id === v)?.id ?? detail.versions[0]?.id ?? null;

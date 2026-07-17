@@ -11,7 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -62,7 +61,6 @@ const rlMock = vi.hoisted(() => ({ turnLimiter: { check: vi.fn() } }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rlMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/submit/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
@@ -148,7 +146,6 @@ function loadedContext(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
   sessionsMock.markSessionCompleted.mockResolvedValue('completed');
@@ -168,13 +165,6 @@ beforeEach(() => {
 });
 
 describe('gate order', () => {
-  it('404s when the live-sessions flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await POST(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(ctxMock.buildTurnContext).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist (before access)', async () => {
     ctxMock.buildTurnContext.mockResolvedValue(null);
     const res = await POST(req(), ctx);

@@ -18,19 +18,13 @@ place: a launched questionnaire attributed to a demo client, ready to invite aga
 
 1. **App running against a real Postgres.** `docker-compose up` (or a local Postgres), then
    `npm run db:migrate:deploy && npm run db:seed`, then `npm run dev`.
-2. **Feature flags are ON.** The questionnaire surface is gated by feature flags that are
-   **database rows in the `feature_flag` table, not env vars** — the `APP_*_ENABLED` names look
-   like env vars but are not. `npm run db:seed` turns the master flag (`APP_QUESTIONNAIRES_ENABLED`)
-   on, but several capability sub-flags **dark-launch OFF** and must be enabled for the demo to show
-   them. If a route 404s — or a configured behaviour (safeguarding, contradiction) doesn't fire —
-   the flag is off; see [feature-flags.md] for the full matrix and how to toggle one. For the seeded
-   demo, enable these `feature_flag` rows:
-   - `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` — the respondent chat surface.
-   - `APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED` — the "I noticed something" callout.
-   - `APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED` — safeguarding (tone-softening + support
-     signpost on a sensitive disclosure). The demo questionnaire already opts in via its config and
-     authors the support copy; this flag is the runtime gate that lets it run.
-   - `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED` — the live "watch it think" reasoning feed.
+2. **All questionnaire features are on — nothing to toggle.** The questionnaire product no
+   longer has per-feature flags; every capability (the respondent chat surface, contradiction
+   detection, safeguarding, the reasoning stream, …) is **permanently on**. Whether a given
+   questionnaire actually _uses_ a behaviour is decided by that version's own **config toggles**
+   (e.g. contradiction mode, safeguarding opt-in, reasoning-stream placement), not by any platform
+   flag. See [feature-flags.md]. For the seeded demo the relevant behaviours are already opted into
+   by the demo questionnaire's config — you don't enable anything.
 3. **At least one LLM provider key** (e.g. `ANTHROPIC_API_KEY` in `.env.local`) — the manual
    upload path runs the extractor agent, and every respondent turn calls a model. The seeded
    fast path needs a key only once you start a session, not to seed.
@@ -56,8 +50,8 @@ This creates (idempotently — safe to re-run):
   its real no-login surface) with **contradiction flagging** on (give inconsistent answers and the
   chat surfaces an "I noticed something" callout) and **safeguarding** on (disclose something
   sensitive — e.g. "I'm being abused by my boss" — and the agent softens its tone and signposts
-  support once). Both need their sub-flags + the live-sessions flag on at runtime: the
-  **contradiction-detection**, **sensitivity-awareness**, and **live-sessions** DB flags — see §0.
+  support once). Both behaviours are governed only by the demo questionnaire's own config (it opts
+  into contradiction flagging and safeguarding) — there are no flags to toggle.
 
 > **Preview as respondent** (on a launched version's admin page) always works, anonymous or not.
 > An anonymous-mode version opens its real `/q/<versionId>` no-login surface; an invitation-gated
@@ -168,8 +162,7 @@ Walk this yourself with the invited email to rehearse the prospect's experience:
 2. **`/questionnaires/start`** bootstraps the session. If profile fields are configured (and
    not anonymous mode), you fill them here; they're snapshotted onto the session.
 3. **`/questionnaires/[sessionId]`** — the live chat. The agent asks the first question; answer
-   conversationally and watch answers land in the side panel. This needs
-   `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED`. See [per-turn-orchestrator.md] and
+   conversationally and watch answers land in the side panel. See [per-turn-orchestrator.md] and
    [answer-slot-panel.md].
 
 ---
@@ -187,15 +180,15 @@ After a demo, wipe respondent data so the next prospect starts clean:
 
 ## 6. Troubleshooting
 
-| Symptom                                                    | Cause / fix                                                                                                                                                                                            |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Admin route or page **404s**                               | A feature flag is off — they're DB rows, not env vars. See [feature-flags.md].                                                                                                                         |
-| Demo content didn't load after the seed                    | Seed no-op'd earlier — clear its `SeedHistory` row and re-seed (see **§1A** gotcha).                                                                                                                   |
-| **409** when sending an invitation                         | The version isn't launched / has no launched version — launch it (**§2.3**).                                                                                                                           |
-| Chat page loads but won't stream                           | `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED` off, or no LLM provider key configured.                                                                                                                     |
-| Upload returns **422**                                     | Scanned PDF with no extractable text — use a text-based source.                                                                                                                                        |
-| Upload returns **409**                                     | Exact bytes already ingested (SHA-256 dedup) — change the file or re-ingest the draft.                                                                                                                 |
-| Selector ignores the **deepen-low-confidence** instruction | Its system prompt changed in seed `005-selection-agent` but re-seeding only re-asserts `isSystem`. Run `npm run db:seed` on a fresh DB, or admin-edit the Questionnaire Selector agent's instructions. |
+| Symptom                                                    | Cause / fix                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin route or page **404s**                               | Not signed in as an admin, or the DB wasn't seeded (`npm run db:seed`) so the agents/config the page needs are missing — questionnaire features are always on, there's no flag to check. Or the questionnaire/version simply doesn't exist. |
+| Demo content didn't load after the seed                    | Seed no-op'd earlier — clear its `SeedHistory` row and re-seed (see **§1A** gotcha).                                                                                                                                                        |
+| **409** when sending an invitation                         | The version isn't launched / has no launched version — launch it (**§2.3**).                                                                                                                                                                |
+| Chat page loads but won't stream                           | No LLM provider key configured (e.g. `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in `.env.local`) — every respondent turn calls a model.                                                                                                         |
+| Upload returns **422**                                     | Scanned PDF with no extractable text — use a text-based source.                                                                                                                                                                             |
+| Upload returns **409**                                     | Exact bytes already ingested (SHA-256 dedup) — change the file or re-ingest the draft.                                                                                                                                                      |
+| Selector ignores the **deepen-low-confidence** instruction | Its system prompt changed in seed `005-selection-agent` but re-seeding only re-asserts `isSystem`. Run `npm run db:seed` on a fresh DB, or admin-edit the Questionnaire Selector agent's instructions.                                      |
 
 ---
 
@@ -207,7 +200,7 @@ in the **Notes** column and fold the correction back into this doc.
 | ✓   | Step               | Expected                                                                | Notes |
 | --- | ------------------ | ----------------------------------------------------------------------- | ----- |
 |     | Setup              | `docker-compose up`, migrate, seed, `npm run dev` come up clean         |       |
-|     | Flags on           | `/admin/questionnaires` loads (no 404)                                  |       |
+|     | Admin loads        | `/admin/questionnaires` loads (no 404)                                  |       |
 |     | Seeded fast path   | `LOAD_DEMO_CONTENT=1 npm run db:seed` → Northwind client + launched q'n |       |
 |     | Manual client      | create a demo client with branding; preview renders                     |       |
 |     | Duplicate          | Duplicate (row ⋯ / header / export menu) copies into a "— Copy" draft   |       |

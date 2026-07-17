@@ -9,20 +9,15 @@
  * conversation. It's built to later grow a full per-version session list above the lookup.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { SessionRefLookup } from '@/components/admin/questionnaires/sessions/session-ref-lookup';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 export const metadata: Metadata = {
   title: 'Sessions · Questionnaire',
   description: 'Look up and view a respondent session by its support reference.',
 };
 
-export default async function SessionsTab() {
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.liveSessions) notFound();
-
+export default function SessionsTab() {
   return (
     <div className="space-y-4">
       <p className="text-muted-foreground max-w-2xl text-sm">

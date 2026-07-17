@@ -29,26 +29,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { chatAttachmentsArraySchema } from '@/lib/validations/orchestration';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import {
-  isAdaptiveSelectionEnabled,
-  isAdaptiveDataSlotSelectionEnabled,
-  isAnswerExtractionEnabled,
-  isAnswerRefinementEnabled,
-  isCompletionEnabled,
-  isAttachmentInputEnabled,
-  isContradictionDetectionEnabled,
-  isCostCapEnforcementEnabled,
-  isDataSlotsEnabled,
-  isLearningModeEnabled,
-  isQuestionPhrasingEnabled,
-  isReasoningStreamEnabled,
-  isRoundContextEnabled,
-  isSeriousnessGateEnabled,
-  isSensitivityAwarenessEnabled,
-  isToneEnabled,
-  isPersonaSelectionEnabled,
-  withLiveSessionsEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { resolveSessionTone } from '@/lib/app/questionnaire/persona/settings';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
 import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
@@ -213,7 +193,7 @@ async function handleMessage(
     // and writes the soft marker once. Gated by its own sub-flag and a configured budget.
     const capUsd = loaded.base.config.costBudgetUsd;
     let costPressure: 'soft' | undefined;
-    if (capUsd !== null && (await isCostCapEnforcementEnabled())) {
+    if (capUsd !== null) {
       const spentUsd = await sumSessionTurnCost(sessionId);
       const tier = classifyCostCap(spentUsd, capUsd);
       if (tier === 'hard') {
@@ -264,43 +244,6 @@ async function handleMessage(
       }
     }
 
-    // Resolve the per-step flags (async DB reads) up front, so the pure core stays sync.
-    const [
-      extraction,
-      contradiction,
-      refinement,
-      completion,
-      adaptive,
-      attachmentInput,
-      questionPhrasing,
-      dataSlotsFlag,
-      seriousnessGate,
-      sensitivityAwarenessFlag,
-      reasoningStreamFlag,
-      toneFlag,
-      personaSelectionFlag,
-      dataSlotAdaptive,
-      roundContextFlag,
-      learningModeFlag,
-    ] = await Promise.all([
-      isAnswerExtractionEnabled(),
-      isContradictionDetectionEnabled(),
-      isAnswerRefinementEnabled(),
-      isCompletionEnabled(),
-      isAdaptiveSelectionEnabled(),
-      isAttachmentInputEnabled(),
-      isQuestionPhrasingEnabled(),
-      isDataSlotsEnabled(),
-      isSeriousnessGateEnabled(),
-      isSensitivityAwarenessEnabled(),
-      isReasoningStreamEnabled(),
-      isToneEnabled(),
-      isPersonaSelectionEnabled(),
-      isAdaptiveDataSlotSelectionEnabled(),
-      isRoundContextEnabled(),
-      isLearningModeEnabled(),
-    ]);
-
     // Adaptive selection ranks unanswered questions by vector similarity, which needs each slot's
     // embedding — and nothing in the authoring flow generates them, so an `adaptive` version would
     // otherwise rank against an empty set and silently degrade to `weighted` (sequential-looking)
@@ -308,7 +251,7 @@ async function handleMessage(
     // (a single COUNT short-circuits), so only the first session of a fresh/edited version pays.
     // Fail-soft: a missing/misconfigured embedder must never break a turn — adaptive already falls
     // back to weighted without embeddings, so we log and carry on.
-    if (adaptive && loaded.base.config.selectionStrategy === 'adaptive') {
+    if (loaded.base.config.selectionStrategy === 'adaptive') {
       try {
         await ensureVersionSlotsEmbedded(loaded.session.versionId);
       } catch (err) {
@@ -323,31 +266,28 @@ async function handleMessage(
       }
     }
 
-    // Sensitivity awareness runs only when the platform flag AND the per-questionnaire config
-    // toggle are both on (the second gate is the version author's opt-in).
-    const sensitivityAware = sensitivityAwarenessFlag && loaded.base.config.sensitivityAwareness;
+    // Sensitivity awareness runs only when the version author opted in via config.
+    const sensitivityAware = loaded.base.config.sensitivityAwareness;
 
-    // Data Slots feature: run in data-slot mode when the flag is on AND the version actually has
-    // data slots (the conversation targets data slots; questions fill in the background).
+    // Data Slots feature: run in data-slot mode when the version actually has data slots (the
+    // conversation targets data slots; questions fill in the background).
     const dataSlots = loaded.base.dataSlots ?? [];
-    const dataSlotMode = dataSlotsFlag && dataSlots.length > 0;
+    const dataSlotMode = dataSlots.length > 0;
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
-    // version once per turn. `null` when the platform flag is off, the session isn't round-scoped, or
-    // the round's per-round `contextEnabled` toggle is off — in every case nothing is injected. The
-    // entries are filtered down to the asked question by `selectBriefingLines` at phrasing time.
-    const briefingEntries =
-      roundContextFlag && loaded.session.roundId
-        ? await loadRoundBriefing(loaded.session.roundId, loaded.session.versionId)
-        : null;
+    // version once per turn. `null` when the session isn't round-scoped or the round's per-round
+    // `contextEnabled` toggle is off — in every case nothing is injected. The entries are filtered
+    // down to the asked question by `selectBriefingLines` at phrasing time.
+    const briefingEntries = loaded.session.roundId
+      ? await loadRoundBriefing(loaded.session.roundId, loaded.session.versionId)
+      : null;
 
-    // Learning Mode: load this round's peer-theme digest once per turn (null when the flag is off,
-    // the session isn't round-scoped, or the round's learningEnabled toggle is off). Indexed by
-    // `${kind}:${key}` for the phraser, plus a question-key → divergence map for adaptive probing.
-    const peerInsights =
-      learningModeFlag && loaded.session.roundId
-        ? await loadRoundPeerDigest(loaded.session.roundId, loaded.session.versionId)
-        : null;
+    // Learning Mode: load this round's peer-theme digest once per turn (null when the session isn't
+    // round-scoped or the round's learningEnabled toggle is off). Indexed by `${kind}:${key}` for the
+    // phraser, plus a question-key → divergence map for adaptive probing.
+    const peerInsights = loaded.session.roundId
+      ? await loadRoundPeerDigest(loaded.session.roundId, loaded.session.versionId)
+      : null;
     const peerInsightByKey = new Map(
       (peerInsights ?? []).map((p) => [`${p.slotKind}:${p.slotKey}`, p])
     );
@@ -385,7 +325,7 @@ async function handleMessage(
     // question-slot path, ensure the data slots are embedded the first time such a session runs — a
     // cheap no-op once embedded. Fail-soft: a missing embedder degrades to the deterministic
     // topic-local pick, so a failure here must never break a turn.
-    const dataSlotAdaptiveActive = dataSlotMode && dataSlotAdaptive;
+    const dataSlotAdaptiveActive = dataSlotMode;
     if (dataSlotAdaptiveActive) {
       try {
         await ensureVersionDataSlotsEmbedded(loaded.session.versionId);
@@ -407,7 +347,7 @@ async function handleMessage(
     // data-slot embeddings regardless of selection strategy — ensure them here (cheap no-op once
     // embedded; fail-soft, since the pre-filter degrades to the full set without embeddings).
     // Per-questionnaire Settings toggle (not a platform flag) — recommended for large surveys.
-    const prefilterActive = loaded.base.config.extractionPrefilter && extraction && !body.kickoff;
+    const prefilterActive = loaded.base.config.extractionPrefilter && !body.kickoff;
     const activeDataSlotKey = loaded.base.activeDataSlotKey ?? null;
     const activeTheme = activeDataSlotKey
       ? (dataSlots.find((s) => s.key === activeDataSlotKey)?.theme ?? null)
@@ -433,7 +373,7 @@ async function handleMessage(
     // Live "watch it think" reasoning stream (demo feature): the platform flag AND the per-version
     // config toggle. `persist` additionally requires the version opt-in — when off the trace streams
     // live but isn't saved, so resumed turns show nothing. Both inert when the flag is off.
-    const reasoningStreamOn = reasoningStreamFlag && loaded.base.config.reasoningStreamEnabled;
+    const reasoningStreamOn = loaded.base.config.reasoningStreamEnabled;
     const reasoningPersist = reasoningStreamOn && loaded.base.config.reasoningStreamPersist;
 
     // Turn Inspector traces. We now capture the per-turn agent-call traces for EVERY session and
@@ -449,27 +389,21 @@ async function handleMessage(
     };
 
     // Selectable interviewer persona (F-persona): the governing tone with the full persona gate applied
-    // (platform kill-switch AND the per-version toggle AND — for honouring the respondent's own choice —
-    // allowRespondentSwitch). When persona mode isn't active the version's own tone prevails unchanged
-    // (byte-for-byte the F-tone behaviour below). See `resolveSessionTone`. `personaModeActive` mirrors
-    // its internal gate, used only for the tone-active OR below.
-    const personaModeActive = personaSelectionFlag && loaded.base.config.personaSelection.enabled;
+    // (the per-version toggle AND — for honouring the respondent's own choice — allowRespondentSwitch).
+    // When persona mode isn't active the version's own tone prevails unchanged (byte-for-byte the F-tone
+    // behaviour below). See `resolveSessionTone`.
     const toneConfig = resolveSessionTone({
       toneConfig: loaded.base.config.tone,
       personas: loaded.base.config.personas,
       personaSelection: loaded.base.config.personaSelection,
       selectedPersonaKey: loaded.session.selectedPersonaKey,
-      personaFlagEnabled: personaSelectionFlag,
     });
 
-    // Interviewer tone & persona (F-tone): tone shapes the turn when EITHER the F-tone flag is on
-    // (the version's own sliders/persona) OR respondent persona selection is on (a chosen persona's
-    // voice, already folded into `toneConfig` above). It's only actually applied when the resolved
-    // tone has the persona or at least one dimension enabled — so a tone with nothing enabled (the
-    // all-off default) keeps today's voice and we omit `tone` from the phraser input.
+    // Interviewer tone & persona (F-tone): tone shapes the turn only when the resolved tone has the
+    // persona or at least one dimension enabled — so a tone with nothing enabled (the all-off default)
+    // keeps today's voice and we omit `tone` from the phraser input.
     const toneActive =
-      (toneFlag || personaModeActive) &&
-      (toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled));
+      toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled);
     const tonePhraserInput = toneActive ? { tone: toneConfig } : {};
 
     // Interviewer strategy (questioning approach): per-questionnaire, gated only on its own `enabled`
@@ -478,31 +412,21 @@ async function handleMessage(
     const strategyConfig = loaded.base.config.interviewerStrategy;
     const strategyActive = strategyConfig.enabled;
 
-    // Attachments only flow when the platform sub-flag is on (dark-launch) AND this questionnaire
-    // opted in via config: with either off, a client that sends attachments anyway gets a
-    // text-only turn — the paid multimodal path stays shut. This server gate mirrors the composer
-    // hiding the paperclip, so a crafted request can't bypass an author's "attachments off".
-    const attachmentsAllowed = attachmentInput && loaded.base.config.attachmentsEnabled;
+    // Attachments only flow when this questionnaire opted in via config: with it off, a client that
+    // sends attachments anyway gets a text-only turn — the paid multimodal path stays shut. This
+    // server gate mirrors the composer hiding the paperclip, so a crafted request can't bypass an
+    // author's "attachments off".
+    const attachmentsAllowed = loaded.base.config.attachmentsEnabled;
     const attachments =
       attachmentsAllowed && body.attachments && body.attachments.length > 0
         ? body.attachments
         : undefined;
 
+    // A kickoff carries no respondent message (`userMessage` is `''`), so the core's `hasMessage`
+    // guard already skips extraction / seriousness / sensitivity — no per-step disabling needed here.
     const state: TurnState = {
       ...loaded.base,
       userMessage,
-      // A kickoff carries no answer — force extraction off so a restored session (which has an
-      // active question) doesn't fire a pointless extraction call against the empty message.
-      flags: {
-        extraction: body.kickoff ? false : extraction,
-        contradiction,
-        refinement,
-        completion,
-        // A kickoff has no answer to judge; otherwise the gate runs when its flag is on.
-        seriousnessGate: body.kickoff ? false : seriousnessGate,
-        // A kickoff carries no disclosure; otherwise detection runs when flag + config opt-in.
-        sensitivityAwareness: body.kickoff ? false : sensitivityAware,
-      },
       ...(attachments ? { attachments } : {}),
       ...(costPressure ? { costPressure } : {}),
     };
@@ -615,12 +539,11 @@ async function handleMessage(
       // detector + refiner keep the full `slots` above so their coverage is unchanged.
       ...(prefilterActive ? { extractionCandidateSlots: extractionQuestionSlots } : {}),
       activeQuestionKey: loaded.activeQuestionKey,
-      adaptiveEnabled: adaptive,
       // Learning Mode (adaptive probing): per-question-key peer divergence, so the adaptive selector
       // can lean toward topics where earlier respondents split. Empty unless learning is active.
       ...(Object.keys(peerDivergenceByKey).length > 0 ? { peerDivergenceByKey } : {}),
-      // Adaptive data-slot selection: wire the embedding-ranked LLM selector only in data-slot mode
-      // with the sub-flag on; otherwise the orchestrator keeps its deterministic topic-local pick.
+      // Adaptive data-slot selection: wire the embedding-ranked LLM selector only in data-slot mode;
+      // otherwise the orchestrator keeps its deterministic topic-local pick.
       dataSlotAdaptiveEnabled: dataSlotAdaptiveActive,
       // Adaptive-selector framing: the version goal, so the LLM picks the question that advances it.
       ...(loaded.meta.goal ? { goal: loaded.meta.goal } : {}),
@@ -883,7 +806,7 @@ async function handleMessage(
         extraCostUsd = phrased.costUsd;
         persistedTargetedId = r.dataSlotId;
         targetedDataSlotId = r.dataSlotId;
-      } else if (result.response.kind === 'question' && (questionPhrasing || dataSlotMode)) {
+      } else if (result.response.kind === 'question') {
         // Conversational interviewer pass: acknowledge the prior answer + ask the targeted
         // question naturally. Re-ask = this turn re-selected the question the previous turn
         // asked (its answer wasn't captured); opening = the first turn of the session.
@@ -1152,4 +1075,4 @@ async function handleMessage(
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleMessage);
+export const POST = handleMessage;

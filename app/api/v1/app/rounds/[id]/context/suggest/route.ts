@@ -24,7 +24,6 @@ import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
-import { withRoundContextEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import type { SuggestRoundBriefingData } from '@/lib/app/questionnaire/capabilities';
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -174,4 +173,4 @@ const handleSuggest = withAdminAuth<Params>(async (request: NextRequest, session
   return successResponse({ entries });
 });
 
-export const POST = withRoundContextEnabled(handleSuggest);
+export const POST = handleSuggest;

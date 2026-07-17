@@ -20,7 +20,6 @@ import { validateQueryParams } from '@/lib/api/validation';
 import { prisma } from '@/lib/db/client';
 import { exportLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { buildInstrumentModel } from '@/lib/app/questionnaire/export/build-instrument-model';
 import { buildInstrumentText } from '@/lib/app/questionnaire/export/build-instrument-text';
 import { buildInstrumentCsv } from '@/lib/app/questionnaire/export/build-instrument-csv';
@@ -103,4 +102,4 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

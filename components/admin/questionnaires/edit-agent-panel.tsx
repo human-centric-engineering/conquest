@@ -8,10 +8,9 @@
  * the user asked for. Two modes: `precise` (deterministic edit-ops, shown as before→after rows) is the
  * default; `rewrite` (whole-doc LLM regenerate, shown as a new outline) is offered for broader edits.
  *
- * Hidden entirely unless the edit-agent flag is on (the parent gates on `editAgentEnabled`). Edits
- * require a draft with no respondent sessions; on a non-draft the panel shows a disabled hint and the
- * server is the final guard (409) either way. On apply success it calls `onApplied` so the parent can
- * refetch the SSR graph.
+ * Edits require a draft with no respondent sessions; on a non-draft the panel shows a disabled hint
+ * and the server is the final guard (409) either way. On apply success it calls `onApplied` so the
+ * parent can refetch the SSR graph.
  */
 
 import { useState } from 'react';

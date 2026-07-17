@@ -1,9 +1,7 @@
 /**
  * Admin Questionnaire Entry Page (redirector) tests.
  *
- * The page is now a thin redirector: it fetches the questionnaire detail + resolves
- * workspace flags, then:
- *  - calls notFound() when the master flag is off
+ * The page is now a thin redirector: it fetches the questionnaire detail, then:
  *  - calls notFound() when the detail fetch returns null
  *  - redirects to the newest version's workspace base when no ?v= is given
  *  - honours ?v= when the named version exists in the detail's versions list
@@ -20,7 +18,6 @@ import type {
   QuestionnaireDetail,
   QuestionnaireVersionSummary,
 } from '@/lib/app/questionnaire/views';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 // ─── Navigation mocks ────────────────────────────────────────────────────────
 
@@ -42,7 +39,6 @@ vi.mock('next/navigation', () => ({
 
 const workspaceDataMock = vi.hoisted(() => ({
   getQuestionnaireDetailCached: vi.fn<() => Promise<QuestionnaireDetail | null>>(),
-  resolveQuestionnaireWorkspaceFlags: vi.fn<() => Promise<QuestionnaireWorkspaceFlags>>(),
 }));
 
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
@@ -79,25 +75,6 @@ function makeDetail(over: Partial<QuestionnaireDetail> = {}): QuestionnaireDetai
   };
 }
 
-function makeFlags(over: Partial<QuestionnaireWorkspaceFlags> = {}): QuestionnaireWorkspaceFlags {
-  return {
-    master: true,
-    dataSlots: false,
-    designEval: false,
-    liveSessions: true,
-    adaptive: false,
-    adaptiveDataSlots: false,
-    respondentReport: false,
-    cohortReport: false,
-    reportWebSearch: false,
-    introScreen: false,
-    personaSelection: false,
-    advisor: false,
-    editAgent: false,
-    ...over,
-  };
-}
-
 // ─── Page import ──────────────────────────────────────────────────────────────
 
 // Import after vi.mock declarations so mocks are in place.
@@ -115,20 +92,12 @@ function renderPage(opts: { id?: string; v?: string } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(makeDetail());
-  workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(makeFlags());
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('QuestionnaireEntryPage (redirector)', () => {
-  describe('flag and detail gating', () => {
-    it('calls notFound when the master feature flag is off', async () => {
-      workspaceDataMock.resolveQuestionnaireWorkspaceFlags.mockResolvedValue(
-        makeFlags({ master: false })
-      );
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-
+  describe('detail gating', () => {
     it('calls notFound when the detail fetch returns null', async () => {
       workspaceDataMock.getQuestionnaireDetailCached.mockResolvedValue(null);
       await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');

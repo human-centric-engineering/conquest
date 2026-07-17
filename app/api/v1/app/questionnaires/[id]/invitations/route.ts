@@ -17,8 +17,6 @@
  * `inviteLimiter` sub-cap (email-bombing guard) on top of the section limiter.
  */
 
-import type { NextRequest } from 'next/server';
-
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { validateRequestBody, parsePaginationParams } from '@/lib/api/validation';
@@ -28,7 +26,6 @@ import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { inviteLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import {
   APP_INVITATION_STATUSES,
@@ -215,20 +212,6 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
   return successResponse({ results }, undefined, { status: 201 });
 });
 
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }
-): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleList(request, context);
-}
+export const GET = handleList;
 
-export async function POST(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }
-): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleCreate(request, context);
-}
+export const POST = handleCreate;

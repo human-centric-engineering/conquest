@@ -25,7 +25,6 @@ import { ConflictError } from '@/lib/api/errors';
 import { getClientIP } from '@/lib/security/ip';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { planRevert } from '@/lib/app/questionnaire/extraction-review';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -125,4 +124,4 @@ const handleRevert = withAdminAuth<Params>(async (request, session, { params }) 
   );
 });
 
-export const POST = withQuestionnairesEnabled(handleRevert);
+export const POST = handleRevert;

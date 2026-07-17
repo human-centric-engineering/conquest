@@ -29,7 +29,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withGenerativeAuthoringEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import {
   composeFromBrief,
@@ -146,4 +145,4 @@ const handleCompose = withAdminAuth(async (request: NextRequest, session) => {
   );
 });
 
-export const POST = withGenerativeAuthoringEnabled(handleCompose);
+export const POST = handleCompose;

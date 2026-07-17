@@ -22,7 +22,6 @@ import type { NextRequest } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
 
@@ -55,4 +54,4 @@ async function handleGetStatus(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetStatus);
+export const GET = handleGetStatus;

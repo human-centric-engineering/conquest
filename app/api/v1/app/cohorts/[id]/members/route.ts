@@ -19,7 +19,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { createCohortMemberSchema } from '@/lib/app/questionnaire/rounds';
 import { listCohortMembers, toCohortMemberView } from '@/app/api/v1/app/cohorts/_lib/read';
 
@@ -89,5 +88,5 @@ const handleCreate = withAdminAuth<{ id: string }>(async (request, session, { pa
   }
 });
 
-export const GET = withCohortsEnabled(handleList);
-export const POST = withCohortsEnabled(handleCreate);
+export const GET = handleList;
+export const POST = handleCreate;

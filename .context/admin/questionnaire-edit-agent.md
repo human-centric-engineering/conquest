@@ -60,8 +60,8 @@ and ships with empty `model`/`provider` (resolved at runtime via `agent-resolver
 It is registered in `AGENT_RECOMMENDATIONS`, so it appears on the admin **Agent Settings** page
 automatically (no extra wiring) with its recommended temperature / maxTokens / reasoning effort.
 
-## Flags
+## Availability
 
-`APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED` (DB `feature_flag` row, seeded disabled) ANDed with the master
-`APP_QUESTIONNAIRES_ENABLED`. When off, both routes 404 and the panel is hidden — gated server-side in
-`feature-flag.ts` (`withEditAgentEnabled`) and surfaced to the editor via `resolveQuestionnaireWorkspaceFlags().editAgent`.
+Always on — there is no feature flag. Both routes and the editor panel are permanently available.
+(Questionnaire features are always on; see
+[`../app/questionnaire/feature-flags.md`](../app/questionnaire/feature-flags.md).)

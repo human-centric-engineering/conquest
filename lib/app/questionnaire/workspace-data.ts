@@ -1,6 +1,6 @@
 /**
- * Shared server-side data + flag resolution for the questionnaire admin
- * **workspace** (the tabbed `[id]/v/[vid]/…` surface).
+ * Shared server-side data fetchers for the questionnaire admin **workspace**
+ * (the tabbed `[id]/v/[vid]/…` surface).
  *
  * The workspace layout and each tab page both need the questionnaire detail and
  * (often) the selected version's graph. `serverFetch` is `cache: 'no-store'`, so
@@ -18,24 +18,7 @@ import { cache } from 'react';
 
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { logger } from '@/lib/logging';
-import {
-  APP_QUESTIONNAIRES_ADAPTIVE_FLAG,
-  APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_DATA_SLOTS_FLAG,
-  APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG,
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG,
-  APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
-  APP_QUESTIONNAIRES_COHORTS_FLAG,
-  APP_QUESTIONNAIRES_COHORT_REPORT_FLAG,
-  APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG,
-  APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG,
-  APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG,
-  APP_QUESTIONNAIRES_ADVISOR_FLAG,
-  APP_QUESTIONNAIRES_EDIT_AGENT_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import type {
   EvaluationRunDetail,
@@ -85,7 +68,7 @@ export const getVersionGraphCached = cache(
 /**
  * How many data slots the selected version has — drives the launch gate and the
  * "Data slots" tab badge. `cache()`-wrapped; degrades to `0` on any failure.
- * Only meaningful when the data-slots flag is on (callers gate on that first).
+ * Only meaningful when the version actually has data slots.
  */
 export const getVersionDataSlotCountCached = cache(
   async (id: string, versionId: string): Promise<number> => {
@@ -160,7 +143,7 @@ export const getVersionDataSlotEmbeddingCoverageCached = cache(
  * the run detail (HTTP, admin-scoped), finds the finding, and — only when its effective op is a
  * still-actionable `add_question` draft — returns the {@link EvaluationSeed} the composer pre-fills.
  * Returns `null` on any miss (bad ref, finding gone, not an add_question, already terminal), so the
- * editor just opens normally. The caller gates on the design-eval flag before calling.
+ * editor just opens normally.
  */
 export async function getEvaluationAddQuestionSeed(
   id: string,
@@ -204,96 +187,3 @@ export async function getEvaluationAddQuestionSeed(
     return null;
   }
 }
-
-/** Resolved feature-flag state for the workspace. Sub-flags are already ANDed
- *  with the master flag, so a caller can read them directly. */
-export interface QuestionnaireWorkspaceFlags {
-  /** Master app flag. When `false` the whole surface should `notFound()`. */
-  master: boolean;
-  /** Data-slots tab + launch requirement. */
-  dataSlots: boolean;
-  /** Design-time evaluation tab. */
-  designEval: boolean;
-  /** "Preview as respondent" affordance (also requires a launched version). */
-  liveSessions: boolean;
-  /** Adaptive selection strategy offered in the config editor. */
-  adaptive: boolean;
-  /** Adaptive data-slot selection (embedding-ranked next-slot pick) — gates the data-slot embed step + launch check. */
-  adaptiveDataSlots: boolean;
-  /** Respondent Report tab (report kind `respondent`) — per-respondent post-completion summary. */
-  respondentReport: boolean;
-  /** Report web-search rounds — the Research tab on the report editors (respondent now, cohort later). */
-  reportWebSearch: boolean;
-  /** Scoring tab (report kind `cohort`) — the deterministic scoring builder (needs cohorts too). */
-  cohortReport: boolean;
-  /** Respondent intro / splash screen — the Intro card in the config editor. */
-  introScreen: boolean;
-  /** Selectable interviewer personas — the Interviewer personas card in the config editor. */
-  personaSelection: boolean;
-  /** Config Advisor panel on the Settings tab — admin-triggered AI config review. */
-  advisor: boolean;
-  /** Structure Edit Agent panel on the Structure editor — instruction-driven whole-doc edits. */
-  editAgent: boolean;
-}
-
-/**
- * Resolve every workspace flag in a single `Promise.all`.
- *
- * The per-feature helpers in `feature-flag.ts` each re-resolve the master flag
- * internally, so calling four of them would query the master flag four times.
- * The workspace layout needs all of them at once, so it resolves the raw flag
- * constants once here and ANDs the sub-flags with the master locally.
- */
-export const resolveQuestionnaireWorkspaceFlags = cache(
-  async (): Promise<QuestionnaireWorkspaceFlags> => {
-    const [
-      master,
-      dataSlots,
-      designEval,
-      liveSessions,
-      adaptive,
-      adaptiveDataSlots,
-      respondentReport,
-      cohorts,
-      cohortReport,
-      reportWebSearch,
-      introScreen,
-      personaSelection,
-      advisor,
-      editAgent,
-    ] = await Promise.all([
-      isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_DATA_SLOTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_COHORTS_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_COHORT_REPORT_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_ADVISOR_FLAG),
-      isFeatureEnabled(APP_QUESTIONNAIRES_EDIT_AGENT_FLAG),
-    ]);
-    return {
-      master,
-      dataSlots: master && dataSlots,
-      designEval: master && designEval,
-      liveSessions: master && liveSessions,
-      adaptive: master && adaptive,
-      // Adaptive data-slot selection also depends on the data-slots + live-sessions flags (it only
-      // runs in live data-slot mode); AND them here so the workspace flag matches the runtime gate.
-      adaptiveDataSlots: master && dataSlots && liveSessions && adaptiveDataSlots,
-      respondentReport: master && respondentReport,
-      // Cohort report (incl. the Scoring tab) is round-scoped, so it also requires the cohorts flag.
-      cohortReport: master && cohorts && cohortReport,
-      reportWebSearch: master && reportWebSearch,
-      introScreen: master && introScreen,
-      personaSelection: master && personaSelection,
-      advisor: master && advisor,
-      editAgent: master && editAgent,
-    };
-  }
-);

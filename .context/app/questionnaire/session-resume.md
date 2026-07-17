@@ -45,8 +45,7 @@ Admin toggle lives on the **Settings** tab of the config editor ("Resume in-prog
 
 ## B. Cross-device by ref
 
-`POST /api/v1/app/questionnaire-sessions/resume-by-ref` — public, `withLiveSessionsEnabled`, no
-`withAuth`. Body `{ ref }`. On a match, re-mints a fresh `accessToken` for the existing session;
+`POST /api/v1/app/questionnaire-sessions/resume-by-ref` — public, no `withAuth`. Body `{ ref }`. On a match, re-mints a fresh `accessToken` for the existing session;
 returns `{ session: { id, versionId }, accessToken, expiresAt, ref }`. Reached from the welcome-back
 gate ("Started on another device?") and a subtle footer entry on the public page
 (`resume-by-ref-entry.tsx`); on success the form writes the durable creds, sets the tab marker, and

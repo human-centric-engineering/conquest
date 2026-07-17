@@ -389,7 +389,7 @@ describe('AnonymousSessionBoot', () => {
 
   describe('intro splash on resume', () => {
     // With a valid stored token the boot fetches in order: transcript first (replay-vs-fresh), then
-    // — when the platform flag is on — the intro. So ordered once-mocks map cleanly to that sequence.
+    // the intro. So ordered once-mocks map cleanly to that sequence.
 
     it('still resolves and forwards the intro on a resumed session so the tab persists across a refresh', async () => {
       // A refresh mid-session finds a stored token whose transcript has turns (resume). The intro
@@ -403,7 +403,7 @@ describe('AnonymousSessionBoot', () => {
         )
         .mockResolvedValueOnce(jsonResponse(introResponse(true)));
 
-      render(<AnonymousSessionBoot versionId={VERSION_ID} introScreenEnabled />);
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
       await waitFor(() => {
         expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
       });
@@ -412,28 +412,6 @@ describe('AnonymousSessionBoot', () => {
       expect(chat).toHaveAttribute('data-intro-enabled', 'true');
       // Resume still suppresses the kickoff — the prior conversation is already on screen.
       expect(chat).toHaveAttribute('data-auto-start', 'false');
-    });
-
-    it('does NOT fetch the intro when the platform flag is off (no wasted round-trip)', async () => {
-      fakeStorage.setItem(STORAGE_KEY, storedSession('resume-sess', 'resume-tok', futureExpiry()));
-      fakeFetch.mockResolvedValueOnce(
-        jsonResponse(transcriptResponse([{ role: 'assistant', content: 'Earlier question?' }]))
-      );
-
-      // Default: introScreenEnabled prop omitted (false).
-      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
-      await waitFor(() => {
-        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
-      });
-
-      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
-        'data-intro-enabled',
-        'false'
-      );
-      const introCalls = fakeFetch.mock.calls.filter(
-        (c) => typeof c[0] === 'string' && c[0].includes('/intro')
-      );
-      expect(introCalls).toHaveLength(0);
     });
   });
 

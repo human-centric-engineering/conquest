@@ -4,8 +4,7 @@
 > **F1.1** ([`../planning/features/f1.1.md`](../planning/features/f1.1.md)); the
 > review/edit UI is P2. Admins drive ingestion from the `UploadQuestionnaireDialog`
 > on `/admin/questionnaires` (header button + empty-state CTA), which POSTs to the
-> endpoint below. Every surface here is gated by `APP_QUESTIONNAIRES_ENABLED`
-> (seeded off).
+> endpoint below. Every surface here is always on.
 
 ## The endpoint
 
@@ -22,8 +21,8 @@ idle timeout; streaming keeps the socket alive (the `sseResponse` bridge emits k
 frames on an independent timer) and hands back the draft's ids on a terminal `done` event.
 Pre-stream validation (rate-limit, upload guard, demo-client check) still returns a normal
 JSON error envelope; once the stream opens, a failure is a terminal `error` event (never a
-5xx). Events: `phase` (`extracting` → `verifying` → `repairing` → `saving` — the middle two
-only when the verify+repair sub-flag is on), then `done { questionnaireId, versionId, counts }`
+5xx). Events: `phase` (`extracting` → `verifying` → `repairing` → `saving`), then
+`done { questionnaireId, versionId, counts }`
 or `error { code, message }`. Mirrors `compose/stream`'s `drive()` pattern; the route drives
 `orchestrateExtraction` (which wraps the shared `extractFromDocument` + the optional
 verify/repair pass) and reuses `parseAndGuardUpload` / `persistIngestion`, so the streaming and
@@ -88,26 +87,24 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
 
 `route.ts` runs these in sequence; each can short-circuit with a typed envelope:
 
-1. **Flag gate** — `ensureQuestionnairesEnabled()` first. Off ⇒ `404` (the app is
-   indistinguishable from a missing route), before any auth or work.
-2. **Auth** — `withAdminAuth`. `401` unauth, `403` non-admin.
-3. **Per-admin sub-cap** — `ingestLimiter` (10/min keyed on the admin id). Each
+1. **Auth** — `withAdminAuth`. `401` unauth, `403` non-admin.
+2. **Per-admin sub-cap** — `ingestLimiter` (10/min keyed on the admin id). Each
    ingest is ≥1 reasoning-model call, so this is far tighter than the inherited
    100/min `api` section cap (which the middleware already applied). `429` on trip.
-4. **Body-size guard** — pre-parse `Content-Length` check, then a post-parse
+3. **Body-size guard** — pre-parse `Content-Length` check, then a post-parse
    `file.size` check. 25 MB cap. `413 FILE_TOO_LARGE`.
-5. **Extension allowlist** — `400 UNSUPPORTED_FORMAT` for anything off-list.
-6. **Admin metadata** — `parseAdminMetadata` (Zod). `400` on an invalid audience
+4. **Extension allowlist** — `400 UNSUPPORTED_FORMAT` for anything off-list.
+5. **Admin metadata** — `parseAdminMetadata` (Zod). `400` on an invalid audience
    field (bad enum, unknown key, non-positive duration) or an over-cap `title`.
-7. **Demo-client existence** — DEMO-ONLY: when `demoClientId` is supplied, a cheap
+6. **Demo-client existence** — DEMO-ONLY: when `demoClientId` is supplied, a cheap
    `findUnique` pre-check (before the expensive extract) returns
    `404 DEMO_CLIENT_NOT_FOUND` for an unknown id rather than a foreign-key `500` at
    persist time — mirrors the `PATCH …/:id` attribution guard.
-8. **SHA-256 dedup** — `409 DUPLICATE_DOCUMENT` (with the existing ids) when the
+7. **SHA-256 dedup** — `409 DUPLICATE_DOCUMENT` (with the existing ids) when the
    exact bytes were already ingested. This is the **global** new-ingest dedup;
    re-ingest-into-an-existing-draft is **F2.4**, which scopes its dedup to the
    target version and short-circuits to a `200` no-op ([`reingest.md`](./reingest.md)).
-9. **Parse** — for `.xlsx`, the app-tier `flattenWorkbook(buffer, fileName)`
+8. **Parse** — for `.xlsx`, the app-tier `flattenWorkbook(buffer, fileName)`
    (`lib/app/questionnaire/ingestion/xlsx-flatten.ts`); for every other format,
    `parseDocument(buffer, fileName, { extractTables })` directly (not the knowledge
    KB's `previewDocument`/`confirmPreview`, which chunk + embed into RAG). Either
@@ -121,9 +118,9 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
    parser actually finds them (`tablesRendered > 0`), so it's a no-op on prose PDFs.
    The dialog checkbox is an **override** (default checked), not a prerequisite the
    admin must know to tick.
-10. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
-    report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
-11. **Dispatch** — load the seeded extractor agent, then
+9. **Scanned / empty detection** — `422 SCANNED_DOCUMENT` for a PDF whose pages all
+   report `hasText: false` (or no extractable text); `422 EMPTY_DOCUMENT` otherwise.
+10. **Dispatch** — load the seeded extractor agent, then
     `capabilityDispatcher.dispatch('app_extract_questionnaire_structure', …)` with
     the agent's provider-agnostic binding in `entityContext.extractorAgent`. The
     capability owns the LLM call + cost log; see
@@ -132,14 +129,14 @@ pre-existing` (P2-ready; a fresh ingest never produces `pre-existing`).
     `no_provider_configured`/`provider_unavailable`/`capability_inactive` `→ 503`,
     everything else `→ 502 EXTRACTION_FAILED` (the upstream LLM step failed). The
     underlying capability error code rides in `error.details.capabilityError`.
-12. **Coherence check** — `assertPersistable`: every question's `sectionOrdinal`
+11. **Coherence check** — `assertPersistable`: every question's `sectionOrdinal`
     must resolve to a declared section. A dangling reference is
     `422 EXTRACTION_INCOHERENT` (with the orphan ordinals) **before** any write —
     never a half-written graph, never a silently-dropped question.
-13. **Persist** — `persistIngestion` in one `executeTransaction` (below). The
+12. **Persist** — `persistIngestion` in one `executeTransaction` (below). The
     resolved `title` and (when supplied) `demoClientId` are written onto the new
     `AppQuestionnaire` row.
-14. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
+13. **Audit** — `logAdminAction({ action: 'questionnaire.ingest', entityType:
 'questionnaire', entityId: versionId, metadata: { counts, fileName, fileHash, demoClientId } })`.
 
 ## Streaming ingest + the verify / repair pass
@@ -151,9 +148,7 @@ dialog) does not call `extractFromDocument` directly — it drives
 `PipelineResult` the non-streaming route uses. The non-streaming `POST /questionnaires` and
 `reingest` routes keep the single synchronous extractor pass unchanged.
 
-When the **`APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_ENABLED`** sub-flag is on
-(`isIngestVerifyRepairEnabled()`, AND-ed with the master flag), the orchestrator inserts a
-critic + repair pass between extract and coherence:
+The orchestrator **always** inserts a critic + repair pass between extract and coherence:
 
 1. **Verify** — dispatch `app_verify_extraction_structure` (the Extraction Verifier agent)
    once over all questions + the source. It returns per-question verdicts (`ok` / `suspect`
@@ -171,9 +166,8 @@ critic + repair pass between extract and coherence:
 
 **Fail-soft throughout:** a missing/failing verifier or repair agent, a repair that doesn't
 validate, or > 20 flags (systemic) all fall back to persisting the raw extraction — the
-draft is never worse than the single-extractor pass. Both agents seed **disabled** with the
-sub-flag; when off, ingestion is exactly today's behaviour. The agents/capabilities are
-seeded by `065`–`068`; the flag by `064`. The verifier + repair prompts (load-bearing) live
+draft is never worse than the single-extractor pass. The agents/capabilities are
+seeded by `065`–`068`. The verifier + repair prompts (load-bearing) live
 in `ingestion/verify-prompt.ts` and `ingestion/repair-prompt.ts`; both appear in the Prompt
 Library and the "Questionnaire ingestion" workflow diagram (a "Fidelity check & repair"
 group). **Scoring of matrix rows is out of scope for v1** — a composite answer contributes
@@ -228,8 +222,7 @@ no progress events — the admin still sees the opener message and the live elap
 Extraction is a Sunrise **capability** dispatched **programmatically** from the
 route (not exposed to a chat tool-loop) — `app_extract_questionnaire_structure`,
 an `AppExtractQuestionnaireStructureCapability` in
-`lib/app/questionnaire/capabilities/`. Two seeds back it (idempotent, both
-inert until the flag is on):
+`lib/app/questionnaire/capabilities/`. Two seeds back it (idempotent):
 
 - **Agent** `app-questionnaire-extractor` (`002-extractor-agent`) — empty
   `model`/`provider` (resolves dynamically), a `monthlyBudgetUsd` cap,
@@ -436,8 +429,8 @@ remains a privacy surface the plan defers (open question #5). `extractedText`
 
 ## Manual verification
 
-With the flag on and a real dev provider:
+With a real dev provider:
 `curl -F file=@tests/fixtures/app/questionnaire/sample-questionnaire.md
 http://localhost:3000/api/v1/app/questionnaires` (authenticated as admin) →
 populated graph + complete change log + `AiCostLog` + `AiAdminAuditLog` rows.
-Flag off → `404`. Non-admin → `403`. A scanned PDF → `SCANNED_DOCUMENT`.
+Non-admin → `403`. A scanned PDF → `SCANNED_DOCUMENT`.

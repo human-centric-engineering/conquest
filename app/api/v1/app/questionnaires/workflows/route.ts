@@ -14,7 +14,6 @@ import { z } from 'zod';
 import { logger } from '@/lib/logging';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { listWorkflowSummaries } from '@/lib/app/questionnaire/workflows/registry';
 import {
   buildApplicabilityContext,
@@ -49,4 +48,4 @@ const handleGet = withAdminAuth(async (request: NextRequest) => {
   return successResponse({ workflows: summaries });
 });
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

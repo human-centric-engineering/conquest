@@ -24,7 +24,6 @@ import type { NextRequest } from 'next/server';
 import { errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import {
   loadSessionExport,
@@ -92,4 +91,4 @@ async function handleExportPdf(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleExportPdf);
+export const GET = handleExportPdf;

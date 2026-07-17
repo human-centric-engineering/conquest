@@ -30,7 +30,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 
 import { prisma } from '@/lib/db/client';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 import {
   abandonSession,
@@ -115,4 +114,4 @@ const handleTransition = withAdminAuth<{ id: string; vid: string; sessionId: str
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleTransition);
+export const POST = handleTransition;

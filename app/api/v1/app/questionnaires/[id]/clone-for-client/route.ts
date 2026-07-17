@@ -27,7 +27,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { duplicateQuestionnaire } from '@/app/api/v1/app/questionnaires/_lib/duplicate-questionnaire';
 
 const cloneForClientSchema = z.object({
@@ -105,4 +104,4 @@ const handleClone = withAdminAuth<{ id: string }>(async (request, session, { par
   );
 });
 
-export const POST = withQuestionnairesEnabled(handleClone);
+export const POST = handleClone;

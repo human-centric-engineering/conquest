@@ -18,17 +18,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   buildTurnContext: vi.fn(),
-  isCostCapEnforcementEnabled: vi.fn(),
-  isDataSlotsEnabled: vi.fn(),
   sumSessionTurnCost: vi.fn(),
 }));
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turn-context', () => ({
   buildTurnContext: mocks.buildTurnContext,
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isCostCapEnforcementEnabled: mocks.isCostCapEnforcementEnabled,
-  isDataSlotsEnabled: mocks.isDataSlotsEnabled,
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({
   sumSessionTurnCost: mocks.sumSessionTurnCost,
@@ -116,8 +110,6 @@ function ctx(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.isCostCapEnforcementEnabled.mockResolvedValue(false);
-  mocks.isDataSlotsEnabled.mockResolvedValue(false);
   mocks.sumSessionTurnCost.mockResolvedValue(0);
 });
 
@@ -165,17 +157,6 @@ describe('loadSessionStatus', () => {
 
   it('reports cost null when no budget is configured (spend is never read)', async () => {
     mocks.buildTurnContext.mockResolvedValue(ctx({ config: { costBudgetUsd: null } }));
-    mocks.isCostCapEnforcementEnabled.mockResolvedValue(true);
-
-    const loaded = await loadSessionStatus('sess-1');
-
-    expect(loaded?.view.cost).toBeNull();
-    expect(mocks.sumSessionTurnCost).not.toHaveBeenCalled();
-  });
-
-  it('reports cost null when a budget is set but enforcement is disabled', async () => {
-    mocks.buildTurnContext.mockResolvedValue(ctx({ config: { costBudgetUsd: 5 } }));
-    mocks.isCostCapEnforcementEnabled.mockResolvedValue(false);
 
     const loaded = await loadSessionStatus('sess-1');
 
@@ -185,7 +166,6 @@ describe('loadSessionStatus', () => {
 
   it('reports cost null when the configured budget is not positive', async () => {
     mocks.buildTurnContext.mockResolvedValue(ctx({ config: { costBudgetUsd: 0 } }));
-    mocks.isCostCapEnforcementEnabled.mockResolvedValue(true);
 
     const loaded = await loadSessionStatus('sess-1');
 
@@ -193,9 +173,8 @@ describe('loadSessionStatus', () => {
     expect(mocks.sumSessionTurnCost).not.toHaveBeenCalled();
   });
 
-  it('grades the cost tier when a positive budget is set AND enforcement is enabled', async () => {
+  it('grades the cost tier when a positive budget is set', async () => {
     mocks.buildTurnContext.mockResolvedValue(ctx({ config: { costBudgetUsd: 5 } }));
-    mocks.isCostCapEnforcementEnabled.mockResolvedValue(true);
     mocks.sumSessionTurnCost.mockResolvedValue(10); // spent >= cap → hard
 
     const loaded = await loadSessionStatus('sess-1');
@@ -204,9 +183,8 @@ describe('loadSessionStatus', () => {
     expect(mocks.sumSessionTurnCost).toHaveBeenCalledWith('sess-1');
   });
 
-  it('reports cost { tier: none } when spend is under threshold (budget set, enforcement on)', async () => {
+  it('reports cost { tier: none } when spend is under threshold (budget set)', async () => {
     mocks.buildTurnContext.mockResolvedValue(ctx({ config: { costBudgetUsd: 5 } }));
-    mocks.isCostCapEnforcementEnabled.mockResolvedValue(true);
     mocks.sumSessionTurnCost.mockResolvedValue(0); // under soft threshold
 
     const loaded = await loadSessionStatus('sess-1');
@@ -245,7 +223,6 @@ describe('loadSessionStatus', () => {
         ],
       })
     );
-    mocks.isDataSlotsEnabled.mockResolvedValue(true);
 
     const loaded = await loadSessionStatus('sess-1');
 
@@ -277,45 +254,11 @@ describe('loadSessionStatus', () => {
         answered: [{ questionId: 'q1', confidence: 0.9 }],
       })
     );
-    mocks.isDataSlotsEnabled.mockResolvedValue(true);
 
     const loaded = await loadSessionStatus('sess-1');
 
     // The data-slot gate must not offer submission until every question is answered.
     expect(loaded?.view.completion.kind).toBe('not_ready');
-  });
-
-  it('skips the data-slot override when the feature flag is disabled even with slots present', async () => {
-    // Arrange: slots present, all questions answered — but flag is off.
-    // The seam must not enter the override block, so the kind comes from assessCompletion.
-    const oneSlot: DataSlotTarget = {
-      id: 'ds1',
-      key: 'satisfaction',
-      name: 'Satisfaction',
-      description: 'Overall satisfaction',
-      theme: 'Wellbeing',
-      ordinal: 0,
-      weight: 1,
-    };
-    mocks.buildTurnContext.mockResolvedValue(
-      ctx({
-        dataSlots: [oneSlot],
-        questions: [{ id: 'q1', key: 'role', required: true }],
-        answered: [{ questionId: 'q1', confidence: 0.9 }],
-      })
-    );
-    mocks.isDataSlotsEnabled.mockResolvedValue(false);
-
-    const loaded = await loadSessionStatus('sess-1');
-
-    // With flag off, the real assessCompletion result passes through unchanged — for one
-    // required question fully answered the kind should be 'offer' from the pure logic,
-    // but the important thing is the data-slot override did NOT run (which would have done
-    // the same thing here) — we verify this by observing that sumSessionTurnCost was not
-    // called (cost branch also off), and the kind is whatever assessCompletion computed.
-    expect(loaded?.view.completion.kind).toBeDefined();
-    // The flag was off, so isDataSlotsEnabled was called but returned false.
-    expect(mocks.isDataSlotsEnabled).toHaveBeenCalled();
   });
 
   it('keeps not_ready in data-slot mode when there are no questions (total=0)', async () => {
@@ -337,7 +280,6 @@ describe('loadSessionStatus', () => {
         answered: [], // answeredCount = 0
       })
     );
-    mocks.isDataSlotsEnabled.mockResolvedValue(true);
 
     const loaded = await loadSessionStatus('sess-1');
 

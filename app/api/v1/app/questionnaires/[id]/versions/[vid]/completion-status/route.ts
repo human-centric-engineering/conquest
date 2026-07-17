@@ -35,10 +35,6 @@ import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
-  isCompletionEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG,
   QUESTIONNAIRE_COMPLETION_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
@@ -86,7 +82,7 @@ const handleCompletionStatus = withAdminAuth<{ id: string; vid: string }>(
     // assessment alone is the useful, free result.
     let offer: CompletionOffer | undefined;
     let diagnostic: string | undefined;
-    if (assessment.kind === 'offer' && (await isCompletionEnabled())) {
+    if (assessment.kind === 'offer') {
       const rl = completionLimiter.check(adminId);
       if (!rl.success) {
         log.warn('Completion rate limit exceeded', { adminId, reset: rl.reset });
@@ -175,4 +171,4 @@ const handleCompletionStatus = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleCompletionStatus);
+export const POST = handleCompletionStatus;

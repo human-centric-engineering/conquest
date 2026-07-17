@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -22,7 +21,6 @@ vi.mock('@/lib/app/questionnaire/report/revision', () => ({
 }));
 
 import { GET, POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/report/revisions/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import {
@@ -30,7 +28,6 @@ import {
   getRespondentReportRevisionsView,
 } from '@/lib/app/questionnaire/report/revision';
 import { reportRerunLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
-import { APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -54,7 +51,6 @@ const ADMIN_ID = 'cmjbv4i3x00003wsloputgwul';
 beforeEach(() => {
   vi.clearAllMocks();
   reportRerunLimiter.reset(ADMIN_ID);
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (prisma.appQuestionnaireSession.findUnique as unknown as Mock).mockResolvedValue({
     id: 'sess-1',
@@ -71,21 +67,6 @@ beforeEach(() => {
 });
 
 describe('POST …/report/revisions', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req({ config: { mode: 'narrative' } }), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
-  it('404s when the respondent-report flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation(
-      async (flag) => flag !== APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG
-    );
-    const res = await POST(req({ config: { mode: 'narrative' } }), ctx);
-    expect(res.status).toBe(404);
-  });
-
   it('401s when unauthenticated', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
     expect((await POST(req({ config: { mode: 'narrative' } }), ctx)).status).toBe(401);

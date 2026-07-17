@@ -36,10 +36,6 @@ import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
-  isAnswerExtractionEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG,
   QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
@@ -67,13 +63,6 @@ const handleExtractAnswer = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const { id, vid } = await params;
     const adminId = session.user.id;
-
-    // Sub-flag gate: extraction always spends an LLM call, so it's opt-in on top
-    // of the master flag. Off → 404 (a disabled sub-feature looks like a missing
-    // route, consistent with the master gate).
-    if (!(await isAnswerExtractionEnabled())) {
-      throw new NotFoundError('Questionnaire answer extraction is not enabled');
-    }
 
     const body = await validateRequestBody(request, bodySchema);
 
@@ -184,4 +173,4 @@ const handleExtractAnswer = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleExtractAnswer);
+export const POST = handleExtractAnswer;

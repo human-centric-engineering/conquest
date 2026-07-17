@@ -19,8 +19,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
-
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -71,7 +69,6 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaires/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
@@ -157,7 +154,6 @@ function setAdmin() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as Mock).mockResolvedValue(true); // flag on by default
   setAdmin();
   (ingestLimiter.check as Mock).mockReturnValue({
     success: true,
@@ -188,19 +184,6 @@ beforeEach(() => {
 // ─── Gate + auth ──────────────────────────────────────────────────────────────
 
 describe('POST /api/v1/app/questionnaires — gate and auth', () => {
-  it('returns 404 NOT_FOUND when the questionnaire app is disabled (gate runs first)', async () => {
-    (isFeatureEnabled as Mock).mockResolvedValue(false);
-
-    const res = await POST(makeRequest('form.md'));
-
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error.code).toBe('NOT_FOUND');
-    // Gate short-circuits before auth or any work.
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
   it('returns 401 when unauthenticated', async () => {
     (auth.api.getSession as unknown as Mock).mockResolvedValue(mockUnauthenticatedUser());
 

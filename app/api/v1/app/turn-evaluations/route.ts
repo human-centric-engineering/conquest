@@ -19,7 +19,6 @@ import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   listTurnEvaluations,
   listTurnEvaluationsQuerySchema,
@@ -41,4 +40,4 @@ const handleList = withAdminAuth(async (request: NextRequest) => {
   return paginatedResponse(items, { page: query.page, limit: query.limit, total });
 });
 
-export const GET = withTurnEvaluationEnabled(handleList);
+export const GET = handleList;

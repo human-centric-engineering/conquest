@@ -8,11 +8,6 @@
  */
 
 import { prisma } from '@/lib/db/client';
-import { isFeatureEnabled } from '@/lib/feature-flags';
-import {
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import {
   isAiRespondentReportMode,
   type AudienceShape,
@@ -156,12 +151,10 @@ export async function buildRespondentReportClientView(
   });
   if (!session) return null;
 
-  const [master, sub] = await Promise.all([
-    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
-    isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
-  ]);
   const settings = narrowRespondentReportSettings(session.version?.config?.respondentReport);
-  const enabled = master && sub && settings.enabled;
+  // The questionnaire feature flags have been retired (features always on), so
+  // availability now depends only on the version's respondent-report config.
+  const enabled = settings.enabled;
 
   const base = {
     enabled,

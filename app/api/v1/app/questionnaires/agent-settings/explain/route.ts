@@ -16,7 +16,6 @@ import { logger } from '@/lib/logging';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { settingsAdvisorLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { explainAgentSettings } from '@/lib/app/questionnaire/agent-advisory/explain';
 
@@ -50,4 +49,4 @@ const handlePost = withAdminAuth(async (request: NextRequest, session) => {
   return successResponse(result.value);
 });
 
-export const POST = withQuestionnairesEnabled(handlePost);
+export const POST = handlePost;

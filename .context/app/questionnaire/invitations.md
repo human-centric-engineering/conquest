@@ -1,8 +1,8 @@
 # Invitations (P3 / F3.2)
 
 How an admin invites respondents to a launched questionnaire, how the tokenised
-link binds them to an account, and how a live invitation pins its version. API-first,
-gated by `APP_QUESTIONNAIRES_ENABLED` (404 when off).
+link binds them to an account, and how a live invitation pins its version. API-first;
+the invitations surface is always on.
 
 ## Model — `AppQuestionnaireInvitation`
 
@@ -72,8 +72,8 @@ The admin adds invitees through a two-step **Import → Verify & send** wizard
 - **CSV** upload — `parseCsvInvitees` (header-synonym column mapping, client-side).
 - **PDF / image** upload — `POST …/invitations/import/extract` (multipart) runs the AI
   people-extractor (`extract/extract-people.ts`: PDF→text, image→vision; structured output,
-  cost-logged). Gated by `APP_QUESTIONNAIRES_INVITE_IMPORT_ENABLED` (paid + PII); the two AI
-  method buttons are hidden when off.
+  cost-logged). Always on — note this path is paid + touches PII, so it carries its own
+  cost/rate-limit caveat, but there is no flag gating it.
 
 All methods produce `ParsedInvitee[]`; the **verify grid** renders a column per _shown_
 `inviteeField`, lets the admin edit/add/remove rows, then sends via `POST …/invitations`
@@ -82,8 +82,8 @@ passing the grid. (The earlier single-textarea `InviteForm` is superseded but re
 
 ## Frictionless invite links (Phase B)
 
-Gated by `APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_ENABLED` (+ live-sessions). A per-invitee
-token boots a **no-login** session — the respondent answers without creating an account:
+Always on. A per-invitee token boots a **no-login** session — the respondent answers
+without creating an account:
 
 - `POST /api/v1/app/questionnaire-sessions/from-invite { inviteToken }` →
   `createSessionFromInviteToken` resolves the invitation by `tokenHash`, validates
@@ -98,8 +98,8 @@ token boots a **no-login** session — the respondent answers without creating a
 - **No profile snapshot** is written — the admin captured invitee details at invite time
   (`invitation.profile`); identity lives on the invitation and is read only for STATUS
   (the completion-tracking-only invariant, `invitations/linkage.ts`).
-- The account-registration accept flow still works (optional, for cross-device resume); when
-  off, invitations fall back to it. **Cross-device upgrade:** a frictionless invitee (status
+- The account-registration accept flow still works (optional, for cross-device resume).
+  **Cross-device upgrade:** a frictionless invitee (status
   `started`, no account) can register via the accept route — it keeps `started` (doesn't rewind
   the lifecycle), binds the account, and **adopts the in-flight no-account session** (sets its
   `respondentUserId`) so signing in elsewhere resumes it. An already account-bound invite is
@@ -129,7 +129,7 @@ The seam splits across the `lib/app` boundary:
 
 ## API
 
-Admin (flag-gate → `withAdminAuth` → audit):
+Admin (`withAdminAuth` → audit):
 
 | Route                                                   | Method | Purpose                                                        |
 | ------------------------------------------------------- | ------ | -------------------------------------------------------------- |

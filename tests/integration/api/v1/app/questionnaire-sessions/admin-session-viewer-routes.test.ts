@@ -12,7 +12,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({
   resolveApiKey: vi.fn(() => Promise.resolve(null)),
@@ -40,7 +39,6 @@ vi.mock('@/lib/db/client', () => dbMock);
 import { GET as getTranscript } from '@/app/api/v1/app/questionnaires/[id]/sessions/[sessionId]/transcript/route';
 import { POST as postPreviewToken } from '@/app/api/v1/app/questionnaires/[id]/sessions/[sessionId]/preview-token/route';
 import { GET as getByRef } from '@/app/api/v1/app/questionnaires/sessions/by-ref/[ref]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -82,7 +80,6 @@ function adminView(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAdminUser());
   viewMock.loadAdminSessionView.mockResolvedValue(adminView());
   transcriptMock.loadTranscript.mockResolvedValue([
@@ -96,14 +93,6 @@ beforeEach(() => {
 });
 
 describe('GET admin transcript', () => {
-  it('404s when the app flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await getTranscript(req(), transcriptCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(viewMock.loadAdminSessionView).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await getTranscript(req(), transcriptCtx);

@@ -13,8 +13,6 @@ import { InvitationDiagnosticsView } from '@/components/admin/questionnaires/dia
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import type { InvitationDiagnosticsResult } from '@/lib/app/questionnaire/analytics';
 
 export const metadata: Metadata = {
@@ -45,10 +43,6 @@ async function getInvitation(
 }
 
 export default async function InvitationDiagnosticsPage({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.liveSessions) notFound();
-
   const { id, vid, invitationId } = await params;
   const data = await getInvitation(id, vid, invitationId);
   if (!data) notFound();

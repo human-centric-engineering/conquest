@@ -23,7 +23,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { sessionStartLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { createPreviewSession } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
@@ -59,4 +58,4 @@ const handlePreviewCreate = withAdminAuth(async (request, session) => {
   );
 });
 
-export const POST = withLiveSessionsEnabled(handlePreviewCreate);
+export const POST = handlePreviewCreate;

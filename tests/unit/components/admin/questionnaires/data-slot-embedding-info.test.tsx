@@ -3,7 +3,7 @@
  *
  * DataSlotEmbeddingInfo is a static, server-renderable explainer (a native `<details>` card) shown on
  * the Questionnaires dashboard. It carries no fetch or hooks — the only behaviour worth pinning is
- * that the three use-cases render and that each consumer's on/off pill reflects the flag passed in.
+ * that the three use-cases render and that the adaptive-selection row shows its live On pill.
  *
  * @see components/admin/questionnaires/data-slot-embedding-info.tsx
  */
@@ -27,7 +27,7 @@ function pillFor(title: string | RegExp): string | null {
 
 describe('DataSlotEmbeddingInfo', () => {
   it('renders the three use-cases (large surveys, adaptive selection, extraction pre-filter)', () => {
-    render(<DataSlotEmbeddingInfo adaptiveDataSlotsEnabled={false} />);
+    render(<DataSlotEmbeddingInfo />);
 
     expect(screen.getByText('Large questionnaires')).toBeInTheDocument();
     expect(screen.getByText('Adaptive question selection')).toBeInTheDocument();
@@ -36,18 +36,13 @@ describe('DataSlotEmbeddingInfo', () => {
     expect(screen.getAllByText(/Generate\s+embeddings/).length).toBeGreaterThan(0);
   });
 
-  it('shows the live On pill for adaptive selection when its flag is enabled', () => {
-    render(<DataSlotEmbeddingInfo adaptiveDataSlotsEnabled />);
+  it('shows the live On pill for adaptive selection', () => {
+    render(<DataSlotEmbeddingInfo />);
     expect(pillFor('Adaptive question selection')).toBe('On');
   });
 
-  it('shows an Off pill for adaptive selection when its flag is disabled', () => {
-    render(<DataSlotEmbeddingInfo adaptiveDataSlotsEnabled={false} />);
-    expect(pillFor('Adaptive question selection')).toBe('Off');
-  });
-
   it('does not attach a status pill to the flagless rows (large surveys, extraction pre-filter)', () => {
-    render(<DataSlotEmbeddingInfo adaptiveDataSlotsEnabled />);
+    render(<DataSlotEmbeddingInfo />);
 
     expect(pillFor('Large questionnaires')).toBeNull();
     // The pre-filter is now a per-questionnaire Settings toggle, not a global flag → no pill.

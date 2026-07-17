@@ -90,10 +90,8 @@ time (the pure core has no live graph), the F2.3 revert-planner posture.
 
 ## Gating & limits
 
-- Master flag `APP_QUESTIONNAIRES_ENABLED` **and** sub-flag
-  `APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED` (seeded **off**). Either off → **404**.
-  Unlike completion, the whole route is paid LLM work, so there is no free deterministic
-  half to return when the sub-flag is off.
+- Always on — no flag to check. The route is admin-only paid LLM work, gated only by auth
+  and the rate-limit cap below.
 - Per-admin sub-cap `designEvaluationLimiter` (20 runs/min): one run is seven judge
   calls, the most expensive questionnaire sub-flow per request.
 - **Fail-soft per judge**: a dimension whose judge errors or is unseeded returns a
@@ -105,7 +103,6 @@ time (the pure core has no live graph), the F2.3 revert-planner posture.
 - `018-design-evaluation-judges.ts` — the seven `kind='judge'` agents (`isSystem: false`,
   app-owned, `restricted` KB, `internal` visibility, `temperature 0.2`), via a registry
   loop. Re-seed re-asserts only `kind`/`isSystem` (never clobbers operator edits).
-- `019-design-evaluation-flag.ts` — the sub-flag, disabled by default.
 - `020-design-evaluation-capability.ts` — the `app_evaluate_structure` `AiCapability`
   row. **Not** bound to any one agent — it's dispatched against a different judge each
   call, so there is no `aiAgentCapability` row.
@@ -158,18 +155,15 @@ GET  …/evaluations                 → run headers, newest-first, paginated
 GET  …/evaluations/:runId          → one run with its findings (version-scoped)
 ```
 
-The **POST** is paid LLM work, so it keeps the F5.1 gating verbatim: sub-flag 404, the
+The **POST** is paid LLM work, so it keeps the F5.1 gating verbatim: the
 `designEvaluationLimiter` 429 (reused — same seven-call cost), version-scope 404, and a
-not-configured 404 when zero judges are seeded. The two **GETs are read-only**: master-flag
-
-- version-scope only, no sub-flag 404, so persisted history stays readable even if the
-  sub-feature is later switched off (the `changes`-list posture).
+not-configured 404 when zero judges are seeded. The two **GETs are read-only**:
+version-scope only (the `changes`-list posture).
 
 Admin UI (`app/admin/questionnaires/[id]/v/[vid]/evaluations/**`): the **Evaluations**
 workspace tab with a "Run evaluation" button, and a read-only run-detail page
 (`…/evaluations/[runId]`) grouping findings by dimension. The version is the `[vid]` path
-segment (the shared workspace selector switches it). The tab is hidden — and the POST 404s —
-when the sub-flag is off. No accept/decline yet — that's F5.3.
+segment (the shared workspace selector switches it). No accept/decline yet — that's F5.3.
 
 ## F5.3 — suggestion review
 
@@ -245,7 +239,7 @@ An unapplicable apply returns **409** with a reason the UI acts on: `stale` (re-
 The one-click apply lands the drafted question as-is; when the wording (or a choice list) needs work
 first, the card's secondary **"Open in editor"** deep-links the structure editor with
 `?edit=1&seedFinding=<runId>:<findingId>`. The structure page resolves that ref
-(`getEvaluationAddQuestionSeed`, gated on the design-eval flag) into an `EvaluationSeed` and renders
+(`getEvaluationAddQuestionSeed`) into an `EvaluationSeed` and renders
 a highlighted, pre-filled `EvaluationSeedComposer` at the top of the editor. The admin tweaks
 prompt/type/section/guidelines and clicks "Add to questionnaire": the question is created through the
 ordinary authoring route (forking a launched version like any edit), then the finding is stamped via
@@ -271,10 +265,10 @@ structure mutates under the findings.
   `AppQuestionnaireEvaluationRun.structureSnapshot`. The detail GET is now staleness-aware (no new
   read endpoint).
 - `PATCH …/evaluations/:runId/findings/:findingId` — accept / decline / edit / `mark_applied`
-  (sub-flag gated; `applied` is terminal → 409). `mark_applied` validates `appliedToVersionId`
+  (`applied` is terminal → 409). `mark_applied` validates `appliedToVersionId`
   belongs to this questionnaire and records the terminal state for the editor refine path — it does
-  **not** mutate structure. `POST …/findings/:findingId/apply` — apply (sub-flag gated +
-  `evaluationApplyLimiter` 60/min; may fork; handles `add_question` too). Accept is triage, **not**
+  **not** mutate structure. `POST …/findings/:findingId/apply` — apply
+  (`evaluationApplyLimiter` 60/min; may fork; handles `add_question` too). Accept is triage, **not**
   apply — kept distinct so an admin can agree across a run, then apply against one consistent fork
   lineage.
 - The run-detail admin component is the interactive queue. Each card leads with the **primary
@@ -283,7 +277,6 @@ structure mutates under the findings.
   (with an inline edit-override mini-form for text ops + type + ordinal) for other structured ops;
   **"Open in editor"** for prose-only — with **Accept / Dismiss** kept as quiet secondary triage so
   the work-action is never mistaken for "do it". Plus a status filter and a fork banner pointing at
-  the new draft when an apply forks a launched version. Reads stay master-flag; apply buttons gate on
-  the sub-flag (`canApply`).
+  the new draft when an apply forks a launched version.
 - `EvaluationSeedComposer` (`components/admin/questionnaires/`) renders the pre-filled new-question
   form for the "Open in editor" deep-link; the structure page resolves the seed and forces edit mode.

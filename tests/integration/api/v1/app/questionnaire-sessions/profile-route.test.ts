@@ -14,7 +14,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -51,9 +50,7 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { GET, PUT } from '@/app/api/v1/app/questionnaire-sessions/[id]/profile/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG } from '@/lib/app/questionnaire/constants';
 import { mockAuthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -90,7 +87,6 @@ function session(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   dbMock.findUnique.mockResolvedValue(session());
   captureMock.resolveSessionCapture.mockResolvedValue(CAPTURE);
@@ -106,15 +102,6 @@ beforeEach(() => {
 });
 
 describe('GET — capture config read', () => {
-  it('404s when the live-sessions flag is off, before load', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation(async (f) =>
-      f === APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG ? false : true
-    );
-    const res = await GET(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(dbMock.findUnique).not.toHaveBeenCalled();
-  });
-
   it('returns the resolved capture to the owner', async () => {
     const res = await GET(req(), ctx);
     expect(res.status).toBe(200);

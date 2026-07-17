@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -31,7 +30,6 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-list', asy
 
 import { GET as LIST } from '@/app/api/v1/app/turn-evaluations/route';
 import { GET as DETAIL } from '@/app/api/v1/app/turn-evaluations/[evalId]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -56,15 +54,12 @@ function detailReq(): NextRequest {
 function detailCtx(evalId: string): { params: Promise<{ evalId: string }> } {
   return { params: Promise.resolve({ evalId }) };
 }
-/** The list route takes no route params; the wrapped handler still expects a context arg. */
-const listCtx = { params: Promise.resolve({}) } as never;
 function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
   (auth.api.getSession as unknown as Mock).mockResolvedValue(session);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   listMock.listTurnEvaluations.mockResolvedValue({
     items: [
@@ -85,32 +80,24 @@ beforeEach(() => {
 });
 
 describe('GET /turn-evaluations (list)', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null);
-    const res = await LIST(listReq(), listCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
-    expect((await LIST(listReq(), listCtx)).status).toBe(401);
+    expect((await LIST(listReq())).status).toBe(401);
   });
 
   it('403s for a non-admin', async () => {
     setAuth(mockAuthenticatedUser());
-    expect((await LIST(listReq(), listCtx)).status).toBe(403);
+    expect((await LIST(listReq())).status).toBe(403);
   });
 
   it('400s on an invalid query (inverted score range)', async () => {
-    const res = await LIST(listReq('?minScore=90&maxScore=10'), listCtx);
+    const res = await LIST(listReq('?minScore=90&maxScore=10'));
     expect(res.status).toBe(400);
     expect(listMock.listTurnEvaluations).not.toHaveBeenCalled();
   });
 
   it('200s with the paginated envelope and threads filters to the read model', async () => {
-    const res = await LIST(listReq('?flagStatus=flagged&minScore=50&sortBy=overallScore'), listCtx);
+    const res = await LIST(listReq('?flagStatus=flagged&minScore=50&sortBy=overallScore'));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
@@ -131,14 +118,6 @@ describe('GET /turn-evaluations (list)', () => {
 });
 
 describe('GET /turn-evaluations/:id (detail)', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null);
-    const res = await DETAIL(detailReq(), detailCtx('eval-1'));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('403s for a non-admin', async () => {
     setAuth(mockAuthenticatedUser());
     expect((await DETAIL(detailReq(), detailCtx('eval-1'))).status).toBe(403);

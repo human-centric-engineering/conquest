@@ -3,9 +3,9 @@
  *
  * One row per tab in the sub-navigation bar, in display order. The client
  * `<QuestionnaireSubNav>` builds hrefs from these and applies active-state
- * detection; the server layout filters them by resolved feature flags. Kept as
- * plain data (not the runtime sidebar registry) so it stays SSR-safe and inside
- * the framework-agnostic `lib/app/**` boundary.
+ * detection; the server layout renders them all. Kept as plain data (not the
+ * runtime sidebar registry) so it stays SSR-safe and inside the
+ * framework-agnostic `lib/app/**` boundary.
  *
  * Every tab is nested under `/admin/questionnaires/[id]/v/[vid]/<segment>`.
  * Invitations is version-agnostic in its logic but lives under the version
@@ -13,7 +13,6 @@
  * ignores `vid` and targets the newest launched version, as before.
  */
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
-import type { QuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 
 export interface WorkspaceTab {
   /** Stable id (also used as the React key). */
@@ -24,33 +23,24 @@ export interface WorkspaceTab {
   segment: string;
   /** Overview must match exactly so it isn't active on every sub-route. */
   exact?: boolean;
-  /**
-   * Flag field that must be `true` for the tab to show. Omitted = always shown
-   * (the master flag is already enforced by the layout before any tab renders).
-   */
-  flag?: keyof QuestionnaireWorkspaceFlags;
 }
 
 export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
   { id: 'overview', label: 'Overview', segment: '', exact: true },
   { id: 'structure', label: 'Structure', segment: 'structure' },
-  { id: 'data-slots', label: 'Data slots', segment: 'data-slots', flag: 'dataSlots' },
+  { id: 'data-slots', label: 'Data slots', segment: 'data-slots' },
   { id: 'invitations', label: 'Invitations', segment: 'invitations' },
-  // Sessions only exist once the live respondent surface is on, so gate the tab on it.
-  { id: 'sessions', label: 'Sessions', segment: 'sessions', flag: 'liveSessions' },
+  { id: 'sessions', label: 'Sessions', segment: 'sessions' },
   {
     id: 'respondent-report',
     label: 'Respondent report',
     segment: 'respondent-report',
-    flag: 'respondentReport',
   },
-  { id: 'scoring', label: 'Scoring', segment: 'scoring', flag: 'cohortReport' },
-  { id: 'cohort-report', label: 'Report', segment: 'cohort-report', flag: 'cohortReport' },
+  { id: 'scoring', label: 'Scoring', segment: 'scoring' },
+  { id: 'cohort-report', label: 'Report', segment: 'cohort-report' },
   { id: 'analytics', label: 'Analytics', segment: 'analytics' },
-  // Diagnostics surfaces per-invitation telemetry + the error log — meaningless without live
-  // respondent sessions, so it shares the `liveSessions` gate (error CAPTURE is always-on regardless).
-  { id: 'diagnostics', label: 'Diagnostics', segment: 'diagnostics', flag: 'liveSessions' },
-  { id: 'evaluations', label: 'Evaluations', segment: 'evaluations', flag: 'designEval' },
+  { id: 'diagnostics', label: 'Diagnostics', segment: 'diagnostics' },
+  { id: 'evaluations', label: 'Evaluations', segment: 'evaluations' },
   { id: 'extraction-changes', label: 'Extraction log', segment: 'extraction-changes' },
   { id: 'settings', label: 'Settings', segment: 'settings' },
 ];
@@ -66,9 +56,9 @@ export function workspaceTabHref(id: string, versionId: string, tab: WorkspaceTa
   return tab.segment ? `${base}/${tab.segment}` : base;
 }
 
-/** Filter the tab list to those enabled by the resolved flags. */
-export function visibleWorkspaceTabs(flags: QuestionnaireWorkspaceFlags): readonly WorkspaceTab[] {
-  return QUESTIONNAIRE_WORKSPACE_TABS.filter((tab) => !tab.flag || flags[tab.flag]);
+/** The workspace tab list. Every questionnaire feature is permanently on, so all tabs show. */
+export function visibleWorkspaceTabs(): readonly WorkspaceTab[] {
+  return QUESTIONNAIRE_WORKSPACE_TABS;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -135,16 +125,12 @@ export interface ResolvedWorkspaceGroup {
 }
 
 /**
- * Project the flag-filtered tabs into their lifecycle groups, dropping any group
- * left empty by feature flags (e.g. Results collapses to a single tab — or
- * vanishes — when the report flags are off). Intra-group order follows
- * `QUESTIONNAIRE_WORKSPACE_GROUPS`; the flag filter is the single one in
- * `visibleWorkspaceTabs`, so the two stay in lock-step.
+ * Project the tabs into their lifecycle groups. Intra-group order follows
+ * `QUESTIONNAIRE_WORKSPACE_GROUPS`. Every questionnaire feature is permanently
+ * on, so no group is dropped for being empty.
  */
-export function visibleWorkspaceGroups(
-  flags: QuestionnaireWorkspaceFlags
-): readonly ResolvedWorkspaceGroup[] {
-  const byId = new Map(visibleWorkspaceTabs(flags).map((tab) => [tab.id, tab]));
+export function visibleWorkspaceGroups(): readonly ResolvedWorkspaceGroup[] {
+  const byId = new Map(visibleWorkspaceTabs().map((tab) => [tab.id, tab]));
   const resolved: ResolvedWorkspaceGroup[] = [];
   for (const group of QUESTIONNAIRE_WORKSPACE_GROUPS) {
     const tabs = group.tabIds

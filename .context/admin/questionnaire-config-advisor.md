@@ -10,15 +10,13 @@
 
 Only when the admin presses **Run advisor** / **Re-run**. There is no GET, no auto-run on tab
 visit, on apply, or on settings change. Each run is two reasoning LLM calls (a streamed narrative +
-a structured analysis), so it is flag-gated and rate-limited like the other paid sub-flows.
+a structured analysis), so it is rate-limited like the other paid sub-flows.
 
-## Flag + agent
+## Agent
 
-- **Flag** `APP_QUESTIONNAIRES_ADVISOR_ENABLED` (DB row, seeded **disabled** by
-  `prisma/seeds/app-questionnaire/056-advisor-flag.ts`). Resolved by `isAdvisorEnabled()` /
-  gated by `withAdvisorEnabled()` in `lib/app/questionnaire/feature-flag.ts`. ANDs with the master
-  `APP_QUESTIONNAIRES_ENABLED`. The workspace flag is surfaced as `flags.advisor`
-  (`resolveQuestionnaireWorkspaceFlags`), which the Settings page reads to decide whether to render.
+- The advisor is **always available** — there is no feature flag. (Questionnaire features are
+  permanently on; see [`../app/questionnaire/feature-flags.md`](../app/questionnaire/feature-flags.md).)
+  The Settings page always renders the panel.
 - **Agent** slug `app-questionnaire-advisor` (`QUESTIONNAIRE_ADVISOR_AGENT_SLUG`), seeded by
   `057-advisor-agent.ts` with empty `model`/`provider` (resolved at runtime via `agent-resolver.ts`),
   `visibility: 'internal'`, a monthly budget cap. Loaded by slug in the route for the provider
@@ -28,7 +26,7 @@ a structured analysis), so it is flag-gated and rate-limited like the other paid
 
 1. **Route** `POST /api/v1/app/questionnaires/:id/versions/:vid/advisor/stream`
    (`app/api/v1/app/questionnaires/[id]/versions/[vid]/advisor/stream/route.ts`):
-   `withAdminAuth` → `withAdvisorEnabled` (404 when off) → per-admin `advisorLimiter` (20/min) →
+   `withAdminAuth` → per-admin `advisorLimiter` (20/min) →
    load the advisor agent (503 if not seeded) → assemble context (404 if the version isn't under the
    questionnaire) → `sseResponse(drive())`. Writes the `questionnaire.advisor` admin-audit action.
 2. **Context** `loadAdvisorContext()` (`_lib/advisor-context.ts`) reuses `getVersionGraph` (config +
@@ -80,7 +78,4 @@ and invites a re-run.
 - `tests/unit/components/admin/questionnaires/advisor/advisor-panel.test.tsx` — panel behaviour:
   idle-on-mount (no fetch), narrative streaming, conflicts/suggestions render, apply → `authoringMutate`
   with fork redirect, error states.
-- `tests/unit/lib/app/questionnaire/feature-flag.test.ts` — the advisor flag's truth table,
-  independence, and `ensure*`/`with*` gate wrappers.
-- `tests/unit/prisma/seeds/app-questionnaire/advisor-flag.test.ts`,
-  `tests/unit/prisma/seeds/app-questionnaire/advisor-agent.test.ts` — seed shape.
+- `tests/unit/prisma/seeds/app-questionnaire/advisor-agent.test.ts` — seed shape.

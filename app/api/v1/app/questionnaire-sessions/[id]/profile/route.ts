@@ -29,7 +29,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { prisma } from '@/lib/db/client';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { profileCaptureLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { resolveSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
@@ -158,5 +157,5 @@ async function handlePutProfile(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetProfile);
-export const PUT = withLiveSessionsEnabled(handlePutProfile);
+export const GET = handleGetProfile;
+export const PUT = handlePutProfile;

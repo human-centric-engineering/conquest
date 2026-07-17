@@ -17,7 +17,6 @@ import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { reorderSchema } from '@/lib/app/questionnaire/authoring';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -83,4 +82,4 @@ const handleReorderSections = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const PATCH = withQuestionnairesEnabled(handleReorderSections);
+export const PATCH = handleReorderSections;

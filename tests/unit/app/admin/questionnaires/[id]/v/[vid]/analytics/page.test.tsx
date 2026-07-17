@@ -2,7 +2,6 @@
  * Analytics tab page (`/admin/questionnaires/[id]/v/[vid]/analytics`) tests.
  *
  * The page is an async Server Component that:
- *  - gates on isQuestionnairesEnabled()
  *  - reads `id`, `vid`, and optional `searchParams` (from/to/tagIds)
  *  - calls getVersionGraphCached for the tag vocabulary
  *  - fetches distributions, funnel, and cost via serverFetch in parallel
@@ -46,22 +45,10 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn(),
 }));
 
-// ─── Feature-flag mock ────────────────────────────────────────────────────────
-
-const flagMock = vi.hoisted(() => ({
-  isQuestionnairesEnabled: vi.fn(),
-  // Cohorts & Rounds: the analytics page gates the round-scope selector on this flag.
-  isCohortsEnabled: vi.fn(),
-}));
-vi.mock('@/lib/app/questionnaire/feature-flag', () => flagMock);
-
 // ─── workspace-data mock (for getVersionGraphCached) ─────────────────────────
 
 const workspaceDataMock = vi.hoisted(() => ({
   getVersionGraphCached: vi.fn<() => Promise<VersionGraphView | null>>(),
-  // The analytics page resolves workspace flags to gate the version-wide-report teaser
-  // (`flags.cohortReport`). Default to off so the teaser is hidden in these tests.
-  resolveQuestionnaireWorkspaceFlags: vi.fn(async () => ({ cohortReport: false })),
 }));
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
 
@@ -277,9 +264,6 @@ function renderPage({ id = 'qn-1', vid = 'ver-1', searchParams = {} }: RenderPag
 
 beforeEach(() => {
   vi.clearAllMocks();
-  flagMock.isQuestionnairesEnabled.mockResolvedValue(true);
-  // Cohorts off by default for these tests — the round selector is absent unless a test opts in.
-  flagMock.isCohortsEnabled.mockResolvedValue(false);
   roundsReadMock.listRoundsForVersion.mockResolvedValue({ rounds: [], hasOpenEnded: false });
   workspaceDataMock.getVersionGraphCached.mockResolvedValue(makeGraph());
 
@@ -299,16 +283,6 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('AnalyticsTab', () => {
-  describe('feature-flag gating', () => {
-    it('calls notFound when the questionnaires feature flag is off', async () => {
-      // Arrange
-      flagMock.isQuestionnairesEnabled.mockResolvedValue(false);
-
-      // Act + Assert
-      await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
-    });
-  });
-
   describe('happy path — child component props', () => {
     // No extra setup needed — the global beforeEach wires parseApiResponse to return
     // the correct fixture per endpoint URL, so call order in Promise.all is irrelevant.

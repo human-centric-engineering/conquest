@@ -19,7 +19,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
 
-import { withRoundContextEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { parseUploadGuard } from '@/app/api/v1/app/questionnaires/intro-background/_lib/input';
 
@@ -68,4 +67,4 @@ const handleParse = withAdminAuth(async (request: NextRequest, session) => {
   return successResponse({ text: trimmed.slice(0, BRIEFING_PARSE_MAX) });
 });
 
-export const POST = withRoundContextEnabled(handleParse);
+export const POST = handleParse;

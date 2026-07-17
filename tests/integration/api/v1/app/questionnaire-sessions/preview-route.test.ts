@@ -12,7 +12,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -26,9 +25,7 @@ const tokenMock = vi.hoisted(() => ({ mintSessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/preview/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import { mockAdminUser, mockAuthenticatedUser } from '@/tests/helpers/auth';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -50,7 +47,6 @@ const SESSION = { id: 'sess-preview', status: 'active', versionId: 'v1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAdminUser());
   rateMock.sessionStartLimiter.check.mockReturnValue({ success: true });
   createMock.createPreviewSession.mockResolvedValue({
@@ -65,26 +61,16 @@ beforeEach(() => {
 });
 
 describe('preview create', () => {
-  it('404s when the live-sessions flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req({ versionId: 'v1' }), undefined);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(createMock.createPreviewSession).not.toHaveBeenCalled();
-  });
-
   it('401s an unauthenticated caller (this surface is admin-only, unlike /anonymous)', async () => {
     setAuth(null);
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(401);
     expect(createMock.createPreviewSession).not.toHaveBeenCalled();
   });
 
   it('403s a non-admin authenticated caller', async () => {
     setAuth(mockAuthenticatedUser('USER'));
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(403);
     expect(createMock.createPreviewSession).not.toHaveBeenCalled();
   });
@@ -96,12 +82,12 @@ describe('preview create', () => {
       remaining: 0,
       reset: 0,
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(429);
   });
 
   it('creates a preview session and returns the minted access token (201)', async () => {
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(201);
     expect(createMock.createPreviewSession).toHaveBeenCalledWith('v1');
     expect(tokenMock.mintSessionToken).toHaveBeenCalledWith('sess-preview');
@@ -110,7 +96,7 @@ describe('preview create', () => {
   });
 
   it('keys the sub-cap on the admin user id', async () => {
-    await POST(req({ versionId: 'v1' }), undefined);
+    await POST(req({ versionId: 'v1' }));
     expect(rateMock.sessionStartLimiter.check).toHaveBeenCalledWith(
       `preview:${mockAdminUser().user.id}`
     );
@@ -123,7 +109,7 @@ describe('preview create', () => {
       code: 'NOT_FOUND',
       message: 'Questionnaire not found',
     });
-    const res = await POST(req({ versionId: 'v1' }), undefined);
+    const res = await POST(req({ versionId: 'v1' }));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.success).toBe(false);
@@ -132,7 +118,7 @@ describe('preview create', () => {
   });
 
   it('400s on a missing versionId', async () => {
-    const res = await POST(req({}), undefined);
+    const res = await POST(req({}));
     expect(res.status).toBe(400);
   });
 });

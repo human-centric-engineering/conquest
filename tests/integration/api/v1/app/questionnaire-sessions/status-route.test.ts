@@ -11,7 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('@/lib/auth/api-keys', () => ({ resolveApiKey: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
@@ -23,7 +22,6 @@ const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
 import { GET } from '@/app/api/v1/app/questionnaire-sessions/[id]/status/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
@@ -66,20 +64,11 @@ function loaded(respondentUserId: string | null, v: SessionStatusView = view()) 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAuthenticatedUser());
   statusMock.loadSessionStatus.mockResolvedValue(loaded(USER));
 });
 
 describe('gate order', () => {
-  it('404s when the live-sessions flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await GET(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(statusMock.loadSessionStatus).not.toHaveBeenCalled();
-  });
-
   it('404s when the session does not exist (before access)', async () => {
     statusMock.loadSessionStatus.mockResolvedValue(null);
     const res = await GET(req(), ctx);

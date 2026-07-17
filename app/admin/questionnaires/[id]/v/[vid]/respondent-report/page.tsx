@@ -11,14 +11,12 @@
  * client editor.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { RespondentReportEditor } from '@/components/admin/questionnaires/report/respondent-report-editor';
 import { DEFAULT_RESPONDENT_REPORT_SETTINGS } from '@/lib/app/questionnaire/types';
 import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 
 export const metadata: Metadata = {
@@ -31,9 +29,6 @@ interface PageProps {
 }
 
 export default async function RespondentReportTab({ params }: PageProps) {
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.respondentReport) notFound();
-
   const { id, vid } = await params;
   const [graph, detail] = await Promise.all([
     getVersionGraphCached(id, vid),
@@ -59,9 +54,9 @@ export default async function RespondentReportTab({ params }: PageProps) {
         questionnaireId={id}
         versionId={vid}
         initial={settings}
-        dataSlotsEnabled={flags.dataSlots}
+        dataSlotsEnabled={true}
         client={client}
-        webSearchEnabled={flags.reportWebSearch}
+        webSearchEnabled={true}
       />
     </div>
   );

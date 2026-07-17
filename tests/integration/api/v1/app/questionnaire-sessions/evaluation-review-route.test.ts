@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -20,7 +19,6 @@ const storeMock = vi.hoisted(() => ({
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store', () => storeMock);
 
 import { PATCH } from '@/app/api/v1/app/questionnaire-sessions/[id]/evaluations/[evalId]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -61,20 +59,11 @@ const OK_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   storeMock.updateTurnEvaluationReview.mockResolvedValue({ ok: true, row: OK_ROW });
 });
 
 describe('PATCH evaluation review', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null);
-    const res = await PATCH(req({ flagStatus: 'flagged' }), ctx('sess-1', 'eval-1'));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await PATCH(req({ flagStatus: 'flagged' }), ctx('sess-1', 'eval-1'));

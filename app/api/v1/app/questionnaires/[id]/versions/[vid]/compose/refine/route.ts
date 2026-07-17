@@ -22,7 +22,6 @@ import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatche
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withGenerativeAuthoringEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import type { RefineQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -184,4 +183,4 @@ const handleRefine = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withGenerativeAuthoringEnabled(handleRefine);
+export const POST = handleRefine;

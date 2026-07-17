@@ -8,7 +8,7 @@ in place.
 | You're adding…      | Put it in                                    | Notes                                                                      |
 | ------------------- | -------------------------------------------- | -------------------------------------------------------------------------- |
 | Domain logic        | `lib/app/questionnaire/**`                   | Platform-agnostic; respects the `lib/app/**` boundary (below).             |
-| An API route        | `app/api/v1/app/<resource>/route.ts`         | Flag-gate first; inherits the 100/min `api` cap automatically.             |
+| An API route        | `app/api/v1/app/<resource>/route.ts`         | Inherits the 100/min `api` cap automatically.                              |
 | Admin page          | `app/admin/questionnaires/**`                | Add the nav entry via `lib/app/admin-nav.ts`.                              |
 | End-user page       | `app/(protected)/questionnaires/**`          |                                                                            |
 | A model             | `prisma/schema/app-questionnaire.prisma`     | See [`schema.md`](./schema.md).                                            |
@@ -27,29 +27,28 @@ override in `eslint.config.mjs`, locked by
   `app/` route handlers or a `lib/app/questionnaire/server/` module.
 - **No `prisma` / `@prisma/*`** runtime imports (type-only allowed). DB access
   flows through `app/` handlers or `lib/` services. A helper that transitively
-  hits Prisma (e.g. the feature-flag wrapper) is **server-only** even though it
-  passes lint — only call it from server contexts.
+  hits Prisma is **server-only** even though it passes lint — only call it from
+  server contexts.
 - **No `react-dom`**, **no node built-ins** (`fs`, `path`, `node:*`).
 - `@/` alias only — the relative-import ban is restated for this surface.
 
 Full rationale: [`../../architecture/lint-toolchain.md`](../../architecture/lint-toolchain.md).
 
-## Feature-flag gating
+## No feature-flag gating
 
-Every questionnaire surface is gated by `APP_QUESTIONNAIRES_ENABLED` (DB-backed,
-seeded `false`). Use the helpers in `lib/app/questionnaire/feature-flag.ts`:
-
-- `isQuestionnairesEnabled(): Promise<boolean>` — wraps Sunrise's
-  `isFeatureEnabled(APP_QUESTIONNAIRES_FLAG)`.
-- `ensureQuestionnairesEnabled(): Promise<Response | null>` — the **gating
-  template**: returns a 404 when the flag is off, else `null`. Call it first in
-  every app route:
+Questionnaire surfaces are **always on** — there is no flag to check and no
+404-when-off path. The old master + sub-flag layer
+(`APP_QUESTIONNAIRES_*_ENABLED`, `lib/app/questionnaire/feature-flag.ts`, the
+`with*Enabled` / `is*Enabled` / `ensure*Enabled` gates) was removed; routes and
+pages go straight to `withAuth` / `withAdminAuth` and their handler work. The
+only remaining per-feature gates are each version's own **config toggles** (e.g.
+`respondentReport.enabled`, `research.enabled`, `reasoningStreamEnabled`), and
+the only site-wide runtime toggle is generic Sunrise `MAINTENANCE_MODE`. See
+[`feature-flags.md`](./feature-flags.md).
 
 ```ts
 export async function GET() {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked; // 404 while the flag is off
-  // …then withAuth / withAdminAuth / handler work…
+  // no flag gate — straight to auth / handler work
   return successResponse({ status: 'ok' });
 }
 ```
@@ -70,8 +69,7 @@ npm run db:studio              # Prisma Studio
 ## Testing conventions
 
 - Tests mirror source under `tests/unit/**` and `tests/integration/**`.
-- Unit: pure functions, the flag wrapper (mock `@/lib/feature-flags`), schema shape
-  (via `Prisma.dmmf`).
+- Unit: pure functions, schema shape (via `Prisma.dmmf`).
 - Integration: route handlers exercised with **mocked Prisma** (happy-dom, fake
   `DATABASE_URL`) — see existing `tests/integration/**` for the pattern. Real-DB
   guarantees come from CI's `migrate deploy` + drift-check jobs, not the Vitest run.

@@ -14,18 +14,13 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manager';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
-import {
-  APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG,
-  APP_REPORT_FORMATTER_FLAG,
-  RESPONDENT_REPORT_AGENT_SLUG,
-} from '@/lib/app/questionnaire/constants';
+import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
@@ -95,18 +90,8 @@ const GROUNDING_RULES =
   'this respondent. Never invent facts.';
 
 /**
- * Paragraph discipline applied to `summary` and every section `body`, regardless of style — the fix
- * for reports that arrive as a single wall of text. Paragraphs are separated by a blank line so the
- * renderers can lay them out with real spacing.
- */
-const PARAGRAPH_RULES =
-  'Write in sensible, readable paragraphs. Break `summary` and every section `body` into several ' +
-  'short paragraphs (roughly 2–4 sentences each), separated by a blank line. Never emit one large ' +
-  'block of text. Start a new paragraph for each distinct point.';
-
-/**
- * Lighter paragraph guidance used when the Report Formatter second pass is enabled — layout is the
- * formatter's job, so agent 1 focuses on well-organised substance rather than exact spacing.
+ * Paragraph guidance for agent 1 — layout is the Report Formatter second pass's job, so agent 1
+ * focuses on well-organised substance rather than exact spacing.
  */
 const PARAGRAPH_RULES_LIGHT =
   'Write in natural paragraphs, one idea per paragraph. A separate formatting pass refines the final ' +
@@ -190,8 +175,6 @@ function buildReportMessages(opts: {
   knowledge: string;
   /** External web-research context (from a `before` round) folded in when `informNarrative`. */
   research: string;
-  /** When the Report Formatter second pass runs, agent 1 sheds its layout/bullet responsibilities. */
-  formatterEnabled: boolean;
   /**
    * True when the delivered report will be accompanied by the respondent's own questionnaire data
    * (config `rawIncludes.questionsAsPresented` and/or `rawIncludes.dataSlots`) — the agent is told
@@ -206,7 +189,6 @@ function buildReportMessages(opts: {
     dataSlotContext,
     knowledge,
     research,
-    formatterEnabled,
     includesAppendedData,
   } = opts;
   const gen = settings.generation;
@@ -251,9 +233,9 @@ function buildReportMessages(opts: {
         'behind; never present a low-confidence inference as an established fact about the respondent.'
     );
   }
-  system.push(formatterEnabled ? PARAGRAPH_RULES_LIGHT : PARAGRAPH_RULES);
+  system.push(PARAGRAPH_RULES_LIGHT);
   system.push(
-    formatterEnabled && gen.narrativeStyle === 'structured'
+    gen.narrativeStyle === 'structured'
       ? STRUCTURED_STYLE_NO_BULLETS
       : NARRATIVE_STYLE_RULES[gen.narrativeStyle]
   );
@@ -447,16 +429,11 @@ export async function generateReportFromInputs(
   // report research loop): a primary-provider outage or open circuit fails over instead of throwing.
   const { provider } = await getProviderWithFallbacks(providerSlug, fallbacks);
 
-  // The optional second-pass formatter owns final layout when enabled, so agent 1 sheds its
-  // paragraph/bullet responsibilities (resolved once; gates both the prompt thinning and the pass).
-  const formatterEnabled = await isFeatureEnabled(APP_REPORT_FORMATTER_FLAG);
-
-  // 4b. Optional web-search rounds. Gated by the version toggle AND the platform flag; the search
-  // backend being unconfigured degrades gracefully inside `runReportResearch` (never fails a report).
+  // 4b. Optional web-search rounds. Gated by the version toggle; the search backend being
+  // unconfigured degrades gracefully inside `runReportResearch` (never fails a report).
   // `before` gathers external context to inform the prose; `after` researches the finished report.
   const researchCfg = settings.research;
-  const researchEnabled =
-    researchCfg.enabled && (await isFeatureEnabled(APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG));
+  const researchEnabled = researchCfg.enabled;
   // Only run a phase whose output can actually surface, so a config that surfaces nothing never pays
   // for discarded LLM + web calls. Findings surface three ways: the displayed sources section, the
   // grounded prose (`before` only, when `informNarrative`), and the synthesized appendix (either phase,
@@ -497,7 +474,6 @@ export async function generateReportFromInputs(
     // as the standalone Research section (attached below), never mixed into the narrative.
     research:
       beforeResearch && researchCfg.informNarrative ? researchToPromptBlock(beforeResearch) : '',
-    formatterEnabled,
     // Match what actually renders — narrative reports never append the Q&A recap (see
     // `resolveReportRawIncludes`), so don't tell the writer data is appended when it isn't.
     includesAppendedData: (() => {
@@ -532,15 +508,10 @@ export async function generateReportFromInputs(
   // 6. Optional second pass: reshape form (paragraphs, bullets, de-slop) without touching substance.
   // Best-effort — `formatReportContent` never throws and falls back to the unformatted content on any
   // drift or failure, so a formatter problem can never fail an otherwise-valid report.
-  let content: RespondentReportContent = agentContent;
-  let baseCostUsd = result.costUsd;
-  let formatted = false;
-  if (formatterEnabled) {
-    const formattedResult = await formatReportContent(agentContent, { format: 'plaintext' });
-    content = formattedResult.content;
-    baseCostUsd = result.costUsd + formattedResult.costUsd;
-    formatted = formattedResult.formatted;
-  }
+  const formattedResult = await formatReportContent(agentContent, { format: 'plaintext' });
+  let content: RespondentReportContent = formattedResult.content;
+  const baseCostUsd = result.costUsd + formattedResult.costUsd;
+  const formatted = formattedResult.formatted;
 
   // 6b. Optional `after` round — research the finished report to enrich / verify it, then attach the
   // combined findings as the report's Research section (unless the admin chose to hide it).

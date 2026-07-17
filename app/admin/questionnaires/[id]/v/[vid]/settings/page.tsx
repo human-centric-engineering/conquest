@@ -15,11 +15,9 @@ import { VersionSettingsPanel } from '@/components/admin/questionnaires/version-
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 
@@ -50,15 +48,12 @@ async function getActiveDemoClients(): Promise<AttributedDemoClient[]> {
 }
 
 export default async function SettingsTab({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const { id, vid } = await params;
 
-  const [detail, demoClientOptions, graph, flags] = await Promise.all([
+  const [detail, demoClientOptions, graph] = await Promise.all([
     getQuestionnaireDetailCached(id),
     getActiveDemoClients(),
     getVersionGraphCached(id, vid),
-    resolveQuestionnaireWorkspaceFlags(),
   ]);
   if (!detail) notFound();
 
@@ -79,20 +74,11 @@ export default async function SettingsTab({ params }: PageProps) {
 
       {/* Config Advisor (admin-triggered AI review of the whole config). Sits above the editor so the
           advice is read before tweaking; applying a suggestion PATCHes the same config endpoint. */}
-      {graph && flags.advisor && <AdvisorPanel questionnaireId={id} graph={graph} />}
+      {graph && <AdvisorPanel questionnaireId={id} graph={graph} />}
 
       {/* Version-scoped run-time config (F3.1 + F9.7). Editing a launched version forks a new
           draft (the panel surfaces the notice). Goal & audience are edited on the Structure tab. */}
-      {graph && (
-        <VersionSettingsPanel
-          questionnaireId={id}
-          graph={graph}
-          adaptiveEnabled={flags.adaptive}
-          adaptiveDataSlotsEnabled={flags.adaptiveDataSlots}
-          introScreenEnabled={flags.introScreen}
-          personaSelectionEnabled={flags.personaSelection}
-        />
-      )}
+      {graph && <VersionSettingsPanel questionnaireId={id} graph={graph} />}
 
       {/* DEMO-ONLY (F2.5.1): demo-client attribution. */}
       <section className="space-y-3">

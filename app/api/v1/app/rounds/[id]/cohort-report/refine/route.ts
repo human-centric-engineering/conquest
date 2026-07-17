@@ -16,7 +16,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { refineCohortReportSection } from '@/lib/app/questionnaire/cohort-report';
 import { cohortReportGenerateLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
@@ -60,4 +59,4 @@ const handleRefine = withAdminAuth<Params>(async (request, session, { params }) 
   }
 });
 
-export const POST = withCohortReportEnabled(handleRefine);
+export const POST = handleRefine;

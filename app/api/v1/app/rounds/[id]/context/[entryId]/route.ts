@@ -18,7 +18,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withRoundContextEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateRoundContextEntrySchema } from '@/lib/app/questionnaire/rounds';
 import { assertSlotInVersion, getRoundContextEntry } from '@/app/api/v1/app/rounds/_lib/context';
 
@@ -116,5 +115,5 @@ const handleDelete = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse({ id: entryId, deleted: true });
 });
 
-export const PATCH = withRoundContextEnabled(handleUpdate);
-export const DELETE = withRoundContextEnabled(handleDelete);
+export const PATCH = handleUpdate;
+export const DELETE = handleDelete;

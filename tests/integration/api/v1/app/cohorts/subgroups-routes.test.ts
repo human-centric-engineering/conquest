@@ -7,7 +7,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 import { Prisma } from '@prisma/client';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -34,7 +33,6 @@ import {
   PATCH as updatePATCH,
   DELETE as deleteDELETE,
 } from '@/app/api/v1/app/cohorts/[id]/subgroups/[subgroupId]/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { listCohortSubgroups } from '@/app/api/v1/app/cohorts/_lib/read';
 import { mockAdminUser } from '@/tests/helpers/auth';
@@ -69,7 +67,6 @@ const SUBGROUP_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true); // master AND cohorts AND round-phases on
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   prismaMock.appCohort.findUnique.mockResolvedValue({ id: 'c-1' });
   prismaMock.appCohortSubgroup.create.mockResolvedValue(SUBGROUP_ROW);
@@ -80,13 +77,6 @@ beforeEach(() => {
 });
 
 describe('GET /cohorts/:id/subgroups', () => {
-  it('404s before auth when the round-phases flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await listGET(getReq(), collCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('lists the cohort subgroups', async () => {
     (listCohortSubgroups as Mock).mockResolvedValue([{ id: 'sg-1', name: 'SLT' }]);
     const res = await listGET(getReq(), collCtx);
@@ -151,13 +141,6 @@ describe('PATCH /cohorts/:id/subgroups/:subgroupId', () => {
     expect(res.status).toBe(404);
   });
 
-  it('404s before auth when the round-phases flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await updatePATCH(jsonReq({ name: 'X' }), itemCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('409s a rename collision', async () => {
     prismaMock.appCohortSubgroup.update.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: '7' })
@@ -181,14 +164,6 @@ describe('DELETE /cohorts/:id/subgroups/:subgroupId', () => {
     prismaMock.appCohortSubgroup.findFirst.mockResolvedValue(null);
     const res = await deleteDELETE(getReq(), itemCtx);
     expect(res.status).toBe(404);
-    expect(prismaMock.appCohortSubgroup.delete).not.toHaveBeenCalled();
-  });
-
-  it('404s before auth when the round-phases flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await deleteDELETE(getReq(), itemCtx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
     expect(prismaMock.appCohortSubgroup.delete).not.toHaveBeenCalled();
   });
 });

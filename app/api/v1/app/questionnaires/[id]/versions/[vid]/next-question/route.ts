@@ -34,10 +34,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import {
-  isAdaptiveSelectionEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { SELECTION_STRATEGIES } from '@/lib/app/questionnaire/types';
 import { getStrategy, type StrategyDeps } from '@/lib/app/questionnaire/selection';
 import { buildSelectionContext } from '@/app/api/v1/app/questionnaires/_lib/selection-context';
@@ -81,11 +77,9 @@ const handleNextQuestion = withAdminAuth<{ id: string; vid: string }>(
     const { context, byId } = built;
     const strategySlug = body.strategyOverride ?? context.config.selectionStrategy;
 
-    // Adaptive's real embedding + LLM path runs only when its sub-flag is on; that
-    // path takes a per-admin sub-cap. With the flag off we pass no deps, so the
-    // adaptive strategy degrades to `weighted` via its own fallback.
+    // Adaptive's real embedding + LLM path takes a per-admin sub-cap.
     let deps: StrategyDeps | undefined;
-    if (strategySlug === 'adaptive' && (await isAdaptiveSelectionEnabled())) {
+    if (strategySlug === 'adaptive') {
       const rl = adaptiveSelectionLimiter.check(adminId);
       if (!rl.success) {
         log.warn('Adaptive selection rate limit exceeded', { adminId, reset: rl.reset });
@@ -117,4 +111,4 @@ const handleNextQuestion = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleNextQuestion);
+export const POST = handleNextQuestion;

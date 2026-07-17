@@ -17,7 +17,6 @@ import { z } from 'zod';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { handleAPIError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { prisma } from '@/lib/db/client';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 
@@ -71,4 +70,4 @@ async function handleNotifyReport(
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleNotifyReport);
+export const POST = handleNotifyReport;

@@ -23,7 +23,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { sseResponse } from '@/lib/api/sse';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withAdvisorEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { QUESTIONNAIRE_ADVISOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { advisorLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { loadAdvisorContext } from '@/app/api/v1/app/questionnaires/_lib/advisor-context';
@@ -113,4 +112,4 @@ const handleAdvisorStream = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withAdvisorEnabled(handleAdvisorStream);
+export const POST = handleAdvisorStream;

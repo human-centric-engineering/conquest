@@ -20,7 +20,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateCohortMemberSchema } from '@/lib/app/questionnaire/rounds';
 import { toCohortMemberView } from '@/app/api/v1/app/cohorts/_lib/read';
 
@@ -126,5 +125,5 @@ const handleDelete = withAdminAuth<Params>(async (request, session, { params }) 
   return successResponse(toCohortMemberView(updated));
 });
 
-export const PATCH = withCohortsEnabled(handleUpdate);
-export const DELETE = withCohortsEnabled(handleDelete);
+export const PATCH = handleUpdate;
+export const DELETE = handleDelete;

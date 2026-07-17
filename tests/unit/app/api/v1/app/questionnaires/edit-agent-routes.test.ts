@@ -16,9 +16,6 @@ import { NextRequest } from 'next/server';
 
 // ─── Module mocks (hoisted) ───────────────────────────────────────────────────
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withEditAgentEnabled: (handler: unknown) => handler,
-}));
 vi.mock('@/lib/auth/guards', () => ({ withAdminAuth: (handler: unknown) => handler }));
 vi.mock('@/lib/api/context', () => ({
   getRouteLogger: vi.fn(async () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })),

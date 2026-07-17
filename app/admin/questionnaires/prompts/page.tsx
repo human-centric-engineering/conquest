@@ -1,11 +1,9 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { PromptLibrary } from '@/components/admin/questionnaires/prompt-library';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { PromptAgentApiView } from '@/app/api/v1/app/questionnaires/_lib/prompt-catalog';
 
 export const metadata: Metadata = {
@@ -23,8 +21,6 @@ export const metadata: Metadata = {
  * master flag (404 when off), pre-fetches the catalog, hands to the client view.
  */
 export default async function PromptLibraryPage() {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   let agents: PromptAgentApiView[] = [];
   try {
     const res = await serverFetch(API.APP.QUESTIONNAIRES.prompts);

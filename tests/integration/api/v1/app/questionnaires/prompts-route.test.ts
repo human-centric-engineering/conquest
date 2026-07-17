@@ -11,7 +11,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -21,7 +20,6 @@ const prismaMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -43,10 +41,6 @@ function req(): NextRequest {
   } as unknown as NextRequest;
 }
 
-// The flag wrapper composes to a 2-arg handler (`context` inferred as `unknown`);
-// this no-param route ignores it, but the signature still requires it.
-const ROUTE_CTX = { params: Promise.resolve({}) };
-
 function setAuth(session: ReturnType<typeof mockAdminUser> | null) {
   (auth.api.getSession as unknown as Mock).mockResolvedValue(session);
 }
@@ -61,7 +55,6 @@ interface AgentView {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   // One seeded row with an empty (runtime-resolved) binding; the rest are absent.
   prismaMock.aiAgent.findMany.mockResolvedValue([
@@ -80,27 +73,20 @@ beforeEach(() => {
 });
 
 describe('GET /api/v1/app/questionnaires/prompts', () => {
-  it('404s when the questionnaires flag is off', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await GET(req(), ROUTE_CTX);
-    expect(res.status).toBe(404);
-    expect(prismaMock.aiAgent.findMany).not.toHaveBeenCalled();
-  });
-
   it('rejects a non-admin user', async () => {
     setAuth(mockAuthenticatedUser());
-    const res = await GET(req(), ROUTE_CTX);
+    const res = await GET(req());
     expect(res.status).toBe(403);
   });
 
   it('rejects an unauthenticated request', async () => {
     setAuth(mockUnauthenticatedUser());
-    const res = await GET(req(), ROUTE_CTX);
+    const res = await GET(req());
     expect(res.status).toBe(401);
   });
 
   it('returns the catalog merged with seeded bindings', async () => {
-    const res = await GET(req(), ROUTE_CTX);
+    const res = await GET(req());
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: { agents: AgentView[] } };
     expect(body.success).toBe(true);
@@ -126,7 +112,7 @@ describe('GET /api/v1/app/questionnaires/prompts', () => {
 
   it('falls back to seeded:false for agents with no DB row', async () => {
     prismaMock.aiAgent.findMany.mockResolvedValue([]);
-    const res = await GET(req(), ROUTE_CTX);
+    const res = await GET(req());
     const body = (await res.json()) as { success: boolean; data: { agents: AgentView[] } };
     expect(body.data.agents.every((a) => a.seeded === false)).toBe(true);
     expect(body.data.agents.every((a) => a.binding === null)).toBe(true);

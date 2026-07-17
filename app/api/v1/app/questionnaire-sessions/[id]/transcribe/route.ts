@@ -33,7 +33,6 @@ import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { ProviderError } from '@/lib/orchestration/llm/provider';
 import { enforceContentLengthCap } from '@/lib/validations/transcribe';
 
-import { withVoiceInputEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { validateAudioUpload } from '@/app/api/v1/app/questionnaire-sessions/_lib/audio-upload';
 
@@ -152,4 +151,4 @@ async function handleTranscribe(
   }
 }
 
-export const POST = withVoiceInputEnabled(handleTranscribe);
+export const POST = handleTranscribe;

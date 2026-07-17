@@ -7,7 +7,7 @@
  * The plain-text twin of the admin `transcript.pdf`: the same intro + labelled, timestamped
  * turns as a readable `.txt`. Nested under the questionnaire so the route enforces ownership
  * (the session's version must belong to questionnaire `:id`; 404 otherwise). Admin-authenticated
- * (`withAdminAuth`); the feature-flag gate runs first (`withQuestionnairesEnabled`).
+ * (`withAdminAuth`).
  *
  * Mirrors the respondent text export (F7.6) but with admin auth instead of `resolveTurnAccess`.
  * Anonymous-mode redaction lives in the model builder. No logo fetch (text has no branding) and
@@ -18,7 +18,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   loadTranscriptExport,
   assembleTranscriptExportModel,
@@ -56,4 +55,4 @@ const handleAdminTranscriptText = withAdminAuth<{ id: string; sessionId: string 
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleAdminTranscriptText);
+export const GET = handleAdminTranscriptText;

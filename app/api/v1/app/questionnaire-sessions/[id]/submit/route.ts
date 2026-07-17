@@ -38,11 +38,6 @@ import { ConflictError, handleAPIError } from '@/lib/api/errors';
 import { Prisma } from '@prisma/client';
 
 import {
-  withLiveSessionsEnabled,
-  isLearningModeEnabled,
-  isContradictionDetectionEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   assessCompletion,
   resolveCompletion,
 } from '@/lib/app/questionnaire/completion/completion-logic';
@@ -239,7 +234,7 @@ async function handleSubmit(
       }
 
       const mode = loaded.base.config.contradictionMode;
-      if (mode !== 'off' && (await isContradictionDetectionEnabled())) {
+      if (mode !== 'off') {
         // Per-flow sub-cap on the paid sweep — checked only on the path that actually dispatches the
         // detector LLM (mirrors the messages route's per-turn guard), so a held session can't be
         // re-POSTed to hammer detection.
@@ -354,7 +349,7 @@ async function handleSubmit(
       // never blocks THIS respondent's submit confirmation behind an LLM call that only benefits
       // the next respondent, yet still completes on serverless (a bare `void` would be frozen).
       // A missed rebuild self-heals on the next completion (or a manual admin Rebuild). Fail-soft.
-      if (loaded.session.roundId && (await isLearningModeEnabled())) {
+      if (loaded.session.roundId) {
         const roundId = loaded.session.roundId;
         after(() =>
           refreshRoundLearningDigest(roundId, loaded.session.versionId).catch((err) => {
@@ -378,4 +373,4 @@ async function handleSubmit(
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleSubmit);
+export const POST = handleSubmit;

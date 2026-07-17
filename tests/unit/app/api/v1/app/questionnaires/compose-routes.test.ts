@@ -16,10 +16,6 @@ import { NextRequest } from 'next/server';
 
 // ─── Module mocks (hoisted before imports) ───────────────────────────────────
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  withGenerativeAuthoringEnabled: (handler: unknown) => handler,
-}));
-
 vi.mock('@/lib/auth/guards', () => ({
   withAdminAuth: (handler: unknown) => handler,
 }));
@@ -234,30 +230,6 @@ beforeEach(() => {
         },
       ],
     },
-  });
-});
-
-// ─── withGenerativeAuthoringEnabled feature-flag gate ─────────────────────────
-//
-// The feature-flag gate is tested in feature-flag.ts itself (isGenerativeAuthoringEnabled
-// + ensureGenerativeAuthoringEnabled + withGenerativeAuthoringEnabled). Here we verify
-// that our route mocks are wired correctly: when withGenerativeAuthoringEnabled is
-// replaced with the identity mock, the route handler is invoked directly and the
-// rate-limit path confirms the handler body actually runs (proving the gate is transparent
-// in tests, not accidentally blocking all requests).
-
-describe('feature-flag gate (withGenerativeAuthoringEnabled mock wiring)', () => {
-  it('allows the handler to run when the flag mock is the identity function', async () => {
-    // The flag mock is (handler) => handler, so any request that passes auth
-    // and rate-limit should reach handler body. Verify by triggering rate-limit.
-    (composeLimiter.check as Mock).mockReturnValue({ success: false, reset: 0 });
-
-    const req = makeRequest({ brief: 'Build a survey' });
-    await composePost(req, ADMIN_SESSION);
-
-    // If the gate were blocking, createRateLimitResponse would NOT be called.
-    // It IS called → the handler body ran → the identity mock is correctly transparent.
-    expect(createRateLimitResponse).toHaveBeenCalledOnce();
   });
 });
 
@@ -1029,9 +1001,9 @@ function makeRefineRequest(body: unknown, id = 'qn-1', vid = 'ver-1') {
 }
 
 /**
- * Invoke the refine POST handler. Because withAdminAuth and withGenerativeAuthoringEnabled
- * are both mocked to identity functions, POST is the bare handler with signature
- * (request, session, context). We call it with all three arguments.
+ * Invoke the refine POST handler. Because withAdminAuth is mocked to an identity
+ * function, POST is the bare handler with signature (request, session, context).
+ * We call it with all three arguments.
  */
 async function callRefine(
   req: NextRequest,

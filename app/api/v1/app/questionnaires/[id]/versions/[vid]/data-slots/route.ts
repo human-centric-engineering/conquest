@@ -13,16 +13,11 @@
 
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
-import { NotFoundError } from '@/lib/api/errors';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import {
-  isDataSlotsEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { saveDataSlotsSchema } from '@/lib/app/questionnaire/data-slots';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -36,9 +31,6 @@ import {
 const handleList = withAdminAuth<{ id: string; vid: string }>(
   async (_request, _session, { params }) => {
     const { id, vid } = await params;
-    if (!(await isDataSlotsEnabled())) {
-      throw new NotFoundError('Data slots are not enabled');
-    }
     const scoped = await loadScopedVersion(id, vid);
     if (!scoped) {
       return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
@@ -53,10 +45,6 @@ const handleSave = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const clientIp = getClientIP(request);
     const { id, vid } = await params;
-
-    if (!(await isDataSlotsEnabled())) {
-      throw new NotFoundError('Data slots are not enabled');
-    }
 
     const scoped = await loadScopedVersion(id, vid);
     if (!scoped) {
@@ -89,5 +77,5 @@ const handleSave = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleList);
-export const PUT = withQuestionnairesEnabled(handleSave);
+export const GET = handleList;
+export const PUT = handleSave;

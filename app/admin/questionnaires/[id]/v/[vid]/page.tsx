@@ -21,7 +21,6 @@ import {
   getVersionDataSlotEmbeddingCoverageCached,
   getVersionEmbeddingCoverageCached,
   getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
@@ -42,17 +41,16 @@ interface PageProps {
 export default async function OverviewTab({ params }: PageProps) {
   const { id, vid } = await params;
 
-  const [detail, graph, flags] = await Promise.all([
+  const [detail, graph] = await Promise.all([
     getQuestionnaireDetailCached(id),
     getVersionGraphCached(id, vid),
-    resolveQuestionnaireWorkspaceFlags(),
   ]);
   if (!detail) notFound();
 
   const selected = detail.versions.find((ver) => ver.id === vid);
   if (!selected) notFound();
 
-  const dataSlotCount = flags.dataSlots ? await getVersionDataSlotCountCached(id, vid) : 0;
+  const dataSlotCount = await getVersionDataSlotCountCached(id, vid);
 
   const base = workspaceVersionBase(id, vid);
   const isDraft = selected.status === 'draft';
@@ -61,7 +59,7 @@ export default async function OverviewTab({ params }: PageProps) {
   // Adaptive launch gate: an adaptive version must have its question slots embedded before launch
   // (the live turn loop embeds lazily as a backstop, so this gates launch only — never preview).
   // Only fetch coverage when it's actually an adaptive draft.
-  const adaptiveStrategy = flags.adaptive && graph?.config.selectionStrategy === 'adaptive';
+  const adaptiveStrategy = graph?.config.selectionStrategy === 'adaptive';
   const embeddingCoverage =
     adaptiveStrategy && isDraft ? await getVersionEmbeddingCoverageCached(id, vid) : null;
   const embeddingsReady =
@@ -69,7 +67,7 @@ export default async function OverviewTab({ params }: PageProps) {
 
   // Adaptive data-slot launch gate: required when the feature is on AND the version has data slots
   // (the live loop embeds lazily as a backstop, so this gates launch only — never preview).
-  const dataSlotEmbeddingsRequired = flags.adaptiveDataSlots && dataSlotCount > 0;
+  const dataSlotEmbeddingsRequired = dataSlotCount > 0;
   const dataSlotEmbeddingCoverage =
     dataSlotEmbeddingsRequired && isDraft
       ? await getVersionDataSlotEmbeddingCoverageCached(id, vid)
@@ -99,7 +97,7 @@ export default async function OverviewTab({ params }: PageProps) {
   // `createPreviewSession` enforces the same rule.
   const previewAvailable = isPreviewAvailable({
     status: selected.status,
-    liveSessions: flags.liveSessions,
+    liveSessions: true,
     graphPresent: graph !== null,
     ...(isDraft && graph
       ? {
@@ -109,7 +107,7 @@ export default async function OverviewTab({ params }: PageProps) {
             sectionCount: selected.sectionCount,
             questionCount: selected.questionCount,
             configSaved: graph.config.saved,
-            dataSlotsRequired: flags.dataSlots,
+            dataSlotsRequired: true,
             dataSlotsReady: dataSlotCount > 0,
           },
         }
@@ -118,20 +116,18 @@ export default async function OverviewTab({ params }: PageProps) {
 
   const stats: CqStat[] = [
     { label: 'Sections', value: selected.sectionCount },
-    // Data slots are the abstraction layer over the questions, so when the feature is on the two
-    // counts share one tile: a single "Questions / Data slots" title over a "5 / 4" figure.
-    flags.dataSlots
-      ? {
-          label: 'Questions / Data slots',
-          value: (
-            <span>
-              <span className="text-[color:var(--cq-accent)]">{selected.questionCount}</span>
-              <span className="text-muted-foreground/50"> / </span>
-              <span>{selected.dataSlotCount}</span>
-            </span>
-          ),
-        }
-      : { label: 'Questions', value: selected.questionCount, accent: true },
+    // Data slots are the abstraction layer over the questions, so the two counts share one tile:
+    // a single "Questions / Data slots" title over a "5 / 4" figure.
+    {
+      label: 'Questions / Data slots',
+      value: (
+        <span>
+          <span className="text-[color:var(--cq-accent)]">{selected.questionCount}</span>
+          <span className="text-muted-foreground/50"> / </span>
+          <span>{selected.dataSlotCount}</span>
+        </span>
+      ),
+    },
     {
       label: 'Versions',
       value: detail.versions.length,
@@ -166,7 +162,7 @@ export default async function OverviewTab({ params }: PageProps) {
               matrixCount={matrixSlots.length}
               misconfiguredMatrixCount={misconfiguredMatrixCount}
               configSaved={graph.config.saved}
-              dataSlotsRequired={flags.dataSlots}
+              dataSlotsRequired={true}
               dataSlotsReady={dataSlotCount > 0}
               embeddingsRequired={adaptiveStrategy}
               embeddingsReady={embeddingsReady}
@@ -232,10 +228,6 @@ export default async function OverviewTab({ params }: PageProps) {
                 </Link>
               </Button>
             </div>
-          ) : !flags.liveSessions ? (
-            <p className="text-muted-foreground text-sm">
-              Preview is unavailable while live respondent sessions are switched off.
-            </p>
           ) : selected.status === 'archived' ? (
             <p className="text-muted-foreground text-sm">Archived versions can’t be previewed.</p>
           ) : isDraft && !graph ? (
@@ -251,8 +243,7 @@ export default async function OverviewTab({ params }: PageProps) {
               <p className="text-foreground text-sm font-medium">Not available yet</p>
               <p className="text-muted-foreground max-w-prose text-sm">
                 You can preview this draft before launching — as soon as it’s ready. Complete the
-                launch checklist above
-                {flags.dataSlots ? ', including confirming its data slots' : ''}; you don’t need to
+                launch checklist above, including confirming its data slots; you don’t need to
                 actually launch.
               </p>
             </div>
@@ -282,10 +273,8 @@ export default async function OverviewTab({ params }: PageProps) {
                 </Link>
                 <div className="text-muted-foreground flex items-center gap-3 text-xs">
                   <span>
-                    {ver.sectionCount} sections · {ver.questionCount} questions
-                    {flags.dataSlots
-                      ? ` · ${ver.dataSlotCount} data slot${ver.dataSlotCount === 1 ? '' : 's'}`
-                      : ''}
+                    {ver.sectionCount} sections · {ver.questionCount} questions ·{' '}
+                    {ver.dataSlotCount} data slot{ver.dataSlotCount === 1 ? '' : 's'}
                   </span>
                   <Badge variant="outline">{ver.status}</Badge>
                 </div>

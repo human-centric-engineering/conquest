@@ -14,13 +14,7 @@ import {
   REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const generativeAuthoringWorkflow = diagram({
   slug: 'generative-authoring',
@@ -116,9 +110,6 @@ export const generativeAuthoringWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.generativeAuthoring) {
-      return unavailable('Generative authoring is not enabled.');
-    }
     if (ctx.sourceDocumentCount === 0 && ctx.goalProvenance === 'inferred') {
       return applies('This version was composed from a brief.');
     }

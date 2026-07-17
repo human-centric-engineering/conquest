@@ -22,10 +22,6 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
 
 vi.mock('@/lib/orchestration/capabilities', () => ({ registerBuiltInCapabilities: vi.fn() }));
 
-vi.mock('@/lib/app/questionnaire/feature-flag', () => ({
-  isIngestVerifyRepairEnabled: vi.fn(),
-}));
-
 // Only extractFromDocument is mocked here; assertPersistable/IncoherentExtractionError
 // (imported by orchestrate-extraction.ts from `_lib/persist`, NOT from this module) stay
 // real, so the post-repair coherence branch is genuinely exercised, not stubbed away.
@@ -38,7 +34,6 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/extract-pipeline', () => ({
 import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orchestrate-extraction';
 import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
-import { isIngestVerifyRepairEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { extractFromDocument } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
 import type {
   GuardedUpload,
@@ -174,35 +169,14 @@ beforeEach(() => {
     ok: true,
     value: { extraction: structuredClone(COHERENT_EXTRACTION), parsed: PARSED_DOC },
   });
-  (isIngestVerifyRepairEnabled as Mock).mockResolvedValue(true);
-});
-
-// ─── Sub-flag off ────────────────────────────────────────────────────────────
-
-describe('orchestrateExtraction — sub-flag off', () => {
-  it('returns the raw extraction unchanged, with no verify/repair dispatch or phase events', async () => {
-    (isIngestVerifyRepairEnabled as Mock).mockResolvedValue(false);
-    const { ctx } = makeCtx();
-
-    const { phases, result } = await drain(UPLOAD, ctx);
-
-    expect(result).toEqual({
-      ok: true,
-      value: { extraction: COHERENT_EXTRACTION, parsed: PARSED_DOC },
-    });
-    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-    expect(prisma.aiAgent.findUnique).not.toHaveBeenCalled();
-    // Only the initial "extracting" phase — no verifying/repairing phase ever yielded.
-    expect(phases.map((p) => p.phase)).toEqual(['extracting']);
-  });
 });
 
 // ─── Live extraction progress bridge ────────────────────────────────────────
 
 describe('orchestrateExtraction — live extraction progress', () => {
   it('re-yields the extractor question counts as extracting-progress phase events', async () => {
-    // Isolate the extract phase — verify/repair off so nothing else emits events.
-    (isIngestVerifyRepairEnabled as Mock).mockResolvedValue(false);
+    // No verifier/repair agent is seeded, so verify is fail-soft — the only phases that
+    // carry progress are the extractor's own extracting-progress events, which we assert on.
     (extractFromDocument as ExtractMock).mockImplementation(async (_upload, ctx) => {
       // The real extractor fires these from inside the streamed capability call.
       ctx.onExtractionProgress?.(1);
@@ -233,16 +207,16 @@ describe('orchestrateExtraction — live extraction progress', () => {
   });
 
   it('completes cleanly when the extractor reports no counts (blocking fallback)', async () => {
-    (isIngestVerifyRepairEnabled as Mock).mockResolvedValue(false);
     // The default beforeEach mock resolves without calling onExtractionProgress.
     const { ctx } = makeCtx();
 
     const { phases, result } = await drain(UPLOAD, ctx);
 
     expect(result.ok).toBe(true);
-    // Just the opener extracting event — no progress events fabricated.
+    // No progress events fabricated, and only the single opener "extracting" phase is emitted
+    // (the extractor never streamed a count — later verify phases are a separate phase kind).
     expect(phases.filter((p) => p.progress).length).toBe(0);
-    expect(phases.map((p) => p.phase)).toEqual(['extracting']);
+    expect(phases.filter((p) => p.phase === 'extracting')).toHaveLength(1);
   });
 });
 

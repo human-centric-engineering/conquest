@@ -213,23 +213,7 @@ describe('resolveSessionTone (full session gate)', () => {
     selectedPersonaKey: 'b' as string | null,
   };
 
-  it('returns the version tone unchanged when the platform flag is OFF, even if the version toggle is on', () => {
-    // Kill-switch: a version left with personaSelection.enabled true must NOT hijack the tone when the
-    // platform flag is off — the version's own tone prevails (the documented contract).
-    const out = resolveSessionTone({
-      ...base,
-      personaSelection: {
-        enabled: true,
-        defaultPersonaKey: 'a',
-        allowRespondentSwitch: true,
-        switcher: 'page',
-      },
-      personaFlagEnabled: false,
-    });
-    expect(out).toBe(versionTone);
-  });
-
-  it('returns the version tone when the flag is on but the version toggle is off', () => {
+  it('returns the version tone when the version toggle is off', () => {
     const out = resolveSessionTone({
       ...base,
       personaSelection: {
@@ -238,12 +222,11 @@ describe('resolveSessionTone (full session gate)', () => {
         allowRespondentSwitch: true,
         switcher: 'page',
       },
-      personaFlagEnabled: true,
     });
     expect(out).toBe(versionTone);
   });
 
-  it('applies the chosen persona when flag + toggle + switching are all on', () => {
+  it('applies the chosen persona when the toggle + switching are both on', () => {
     const out = resolveSessionTone({
       ...base,
       personaSelection: {
@@ -252,7 +235,6 @@ describe('resolveSessionTone (full session gate)', () => {
         allowRespondentSwitch: true,
         switcher: 'page',
       },
-      personaFlagEnabled: true,
     });
     expect(out.persona.text).toBe('voice-b');
   });
@@ -269,7 +251,6 @@ describe('resolveSessionTone (full session gate)', () => {
         allowRespondentSwitch: false,
         switcher: 'page',
       },
-      personaFlagEnabled: true,
     });
     expect(out.persona.text).toBe('voice-a');
   });

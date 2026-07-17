@@ -16,7 +16,6 @@ import { after } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { handleAPIError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { prisma } from '@/lib/db/client';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { requestRespondentReportRetry } from '@/lib/app/questionnaire/report/retry';
@@ -63,4 +62,4 @@ async function handleRetryReport(
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleRetryReport);
+export const POST = handleRetryReport;

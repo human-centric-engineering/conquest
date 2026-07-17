@@ -12,7 +12,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 
-import { withTurnEvaluationEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getTurnEvaluationDetail } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-list';
 
 const handleDetail = withAdminAuth<{ evalId: string }>(async (request, _session, { params }) => {
@@ -28,4 +27,4 @@ const handleDetail = withAdminAuth<{ evalId: string }>(async (request, _session,
   return successResponse({ evaluation });
 });
 
-export const GET = withTurnEvaluationEnabled(handleDetail);
+export const GET = handleDetail;

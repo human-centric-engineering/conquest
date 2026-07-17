@@ -11,7 +11,6 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { Plus } from 'lucide-react';
 
 import { DemoClientsTable } from '@/components/admin/demo-clients/demo-clients-table';
@@ -21,7 +20,6 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import type { DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 
 export const metadata: Metadata = {
@@ -42,8 +40,6 @@ async function getDemoClients(): Promise<DemoClientView[]> {
 }
 
 export default async function DemoClientsListPage() {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const clients = await getDemoClients();
 
   const statTiles: CqStat[] = [

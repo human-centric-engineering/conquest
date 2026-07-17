@@ -30,7 +30,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
   dataSlotEmbeddingCoverage,
@@ -86,5 +85,5 @@ const handleEmbedDataSlots = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleCoverage);
-export const POST = withQuestionnairesEnabled(handleEmbedDataSlots);
+export const GET = handleCoverage;
+export const POST = handleEmbedDataSlots;

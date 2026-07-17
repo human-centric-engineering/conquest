@@ -18,21 +18,19 @@ questionnaires, versions, and config are untouched — only respondent run data 
 
 ## Gate order
 
-The route is `withQuestionnairesEnabled(withAdminAuth(...))` — the **master flag only**,
-consistent with the other demo-client routes. There is no F6.4 sub-flag: it's a free,
-synchronous, admin-only DB op (no LLM cost, no respondent surface), already triple-gated
-by admin auth + the typed confirmation + the anonymousMode refusal.
+The route is `withAdminAuth(...)` — admin-only, consistent with the other demo-client
+routes. It's a free, synchronous, admin-only DB op (no LLM cost, no respondent surface),
+already triple-gated by admin auth + the typed confirmation + the anonymousMode refusal.
 
-1. **Master flag off** → `404 NOT_FOUND` (before auth; a disabled feature looks absent).
-2. **Unauthenticated / non-admin** → `401` / `403`. "403 on ownership" _is_ the admin-role
+1. **Unauthenticated / non-admin** → `401` / `403`. "403 on ownership" _is_ the admin-role
    guard — `AppDemoClient` has no per-user owner column; it's a global admin fixture.
-3. **Unknown client id** → `404 NOT_FOUND`.
-4. **Malformed body** (missing / non-kebab `confirmSlug`) → `400 VALIDATION_ERROR`.
-5. **Any version runs `anonymousMode`** → `409 ANONYMOUS_MODE_PROTECTED`. Too destructive
+2. **Unknown client id** → `404 NOT_FOUND`.
+3. **Malformed body** (missing / non-kebab `confirmSlug`) → `400 VALIDATION_ERROR`.
+4. **Any version runs `anonymousMode`** → `409 ANONYMOUS_MODE_PROTECTED`. Too destructive
    for research-sensitive data. **This is a structural block and wins over a correct slug** —
    it's evaluated before the confirmation, so a valid `confirmSlug` is still refused here.
-6. **`confirmSlug` ≠ client slug** → `400 CONFIRM_SLUG_MISMATCH`.
-7. **Success** → `200` with `{ id, deletedCounts, resetInvitations }`.
+5. **`confirmSlug` ≠ client slug** → `400 CONFIRM_SLUG_MISMATCH`.
+6. **Success** → `200` with `{ id, deletedCounts, resetInvitations }`.
 
 ## What gets deleted
 

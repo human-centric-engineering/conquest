@@ -13,7 +13,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { validateQueryParams } from '@/lib/api/validation';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   questionnaireAnalyticsQuerySchema,
   resolveAnalyticsScope,
@@ -45,4 +44,4 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

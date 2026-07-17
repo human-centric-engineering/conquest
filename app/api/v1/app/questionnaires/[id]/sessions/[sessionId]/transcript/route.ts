@@ -8,8 +8,7 @@
  * The admin-side read of any respondent's conversation, nested under the questionnaire so the route
  * enforces ownership the same way the session export PDF does: the session's version must belong to
  * questionnaire `:id` (404 otherwise — never confirm a session under a questionnaire it doesn't
- * belong to). Admin-authenticated (`withAdminAuth`) with the feature-flag gate first
- * (`withQuestionnairesEnabled`) so a disabled app looks like a missing route.
+ * belong to). Admin-authenticated (`withAdminAuth`).
  *
  * Distinct from the respondent `/questionnaire-sessions/:id/transcript` (token / owner gated via
  * `resolveTurnAccess`): this is the admin path, so its authz mirrors the admin export, not the
@@ -21,7 +20,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { loadAdminSessionView } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
 
@@ -63,4 +61,4 @@ const handleAdminTranscript = withAdminAuth<{ id: string; sessionId: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleAdminTranscript);
+export const GET = handleAdminTranscript;

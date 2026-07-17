@@ -27,7 +27,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { duplicateQuestionnaire } from '@/app/api/v1/app/questionnaires/_lib/duplicate-questionnaire';
 
 const duplicateSchema = z.object({
@@ -81,4 +80,4 @@ const handleDuplicate = withAdminAuth<{ id: string }>(async (request, session, {
   );
 });
 
-export const POST = withQuestionnairesEnabled(handleDuplicate);
+export const POST = handleDuplicate;

@@ -17,7 +17,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { exportLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { buildDefinitionExport } from '@/lib/app/questionnaire/authoring';
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
@@ -88,4 +87,4 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

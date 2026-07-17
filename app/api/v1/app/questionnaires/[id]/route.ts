@@ -17,8 +17,6 @@
  *   Section/question/version edits live on the version path.
  */
 
-import type { NextRequest } from 'next/server';
-
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { NotFoundError } from '@/lib/api/errors';
@@ -28,10 +26,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import {
-  ensureQuestionnairesEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import {
   assignDemoClientSchema,
   type AttributedDemoClient,
@@ -141,14 +135,6 @@ const handlePatch = withAdminAuth<{ id: string }>(async (request, session, { par
   return successResponse({ id, demoClient: attached });
 });
 
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }
-): Promise<Response> {
-  // Flag gate first — a switched-off app is indistinguishable from a missing route.
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleDetail(request, context);
-}
+export const GET = handleDetail;
 
-export const PATCH = withQuestionnairesEnabled(handlePatch);
+export const PATCH = handlePatch;

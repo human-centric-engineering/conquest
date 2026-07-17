@@ -7,20 +7,16 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 
 export const metadata: Metadata = {
   title: 'New demo client',
   description: 'Create a demo client to attribute questionnaires to a prospect.',
 };
 
-export default async function NewDemoClientPage() {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
+export default function NewDemoClientPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">

@@ -147,7 +147,7 @@ full `CompletionOffer` takes precedence when both are available. The submit rout
 `early: true` resolves via `finish_early` and completes with reason
 `respondent_early_finish` (vs `respondent_submit`).
 
-## The offer composer (capability, agent, sub-flag)
+## The offer composer (capability, agent)
 
 - **`AppComposeCompletionOfferCapability`** (`capabilities/compose-completion-offer.ts`)
   — a `BaseCapability` running one provider-agnostic structured LLM call (call → parse →
@@ -161,36 +161,35 @@ coveredSummary, remainingNote? }`. The recap is built from question **prompts on
   than extracting or judging, with its own persona and `monthlyBudgetUsd`. Resolves the
   `chat` tier; ships with empty model/provider (dynamic resolution).
   `visibility: 'internal'`.
-- **Sub-flag** `APP_QUESTIONNAIRES_COMPLETION_ENABLED` (seed 017, disabled) on top of the
-  master flag — composing the offer spends an LLM call. `isCompletionEnabled()` requires
-  both. **Unlike the other sub-flags it does not 404 its route** — see below.
+- **Always on.** Composing the offer spends an LLM call, but there is no feature flag to
+  check — the composer runs whenever the deterministic assessment is `offer` (see below).
 
 The completion-sweep itself adds **no new capability**: it reuses F4.3's
-`app_detect_contradictions`, gated by `APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED`.
+`app_detect_contradictions`, which runs per the version's `contradictionMode` config.
 
 ## The two routes
 
-Both admin-only, both gated by the master flag via `withQuestionnairesEnabled`.
+Both admin-only.
 
 ### `POST …/versions/:vid/completion-status` — read-only assessment (+ optional offer)
 
-Gate order: `withQuestionnairesEnabled` (404 master-off, before auth) → `withAdminAuth`
+Gate order: `withAdminAuth`
 (401/403) → `validateRequestBody` (400) → `buildSelectionContext` (404 version) →
-`assessCompletion`. When the assessment is `offer` AND `isCompletionEnabled()`:
+`assessCompletion`. When the assessment is `offer`:
 `completionLimiter` (429, 60/min per admin) → load the completion agent (404 if
 unseeded) → dispatch the composer (fail-soft) → include the `offer`.
 
 Body: `{ answered: [{ key, confidence? }], recentMessages?, sessionId? }`. Response:
 `{ assessment, offer?, diagnostic? }`. **Persists nothing.**
 
-**The sub-flag does not 404 this route.** The deterministic assessment is free and
-useful on its own, so a disabled completion sub-flag simply returns the assessment
-without a composed `offer` — only the paid LLM phrasing is gated. A failed composition is
-fail-soft (assessment + `diagnostic`, no offer, never a 5xx).
+The deterministic assessment is free and useful on its own, so when the assessment isn't
+`offer` the route simply returns the assessment without a composed `offer` — only the paid
+LLM phrasing is skipped. A failed composition is fail-soft (assessment + `diagnostic`, no
+offer, never a 5xx).
 
 ### `POST …/versions/:vid/complete` — the accept/hold action (persists)
 
-Gate order: `withQuestionnairesEnabled` → `withAdminAuth` → `validateRequestBody` →
+Gate order: `withAdminAuth` → `validateRequestBody` →
 `completionLimiter` → `buildSelectionContext` (404 version) → `assessCompletion` → seed
 the supplied answers into the preview session (idempotent) → on an eligible `accept`,
 run the sweep → `resolveCompletion` → on `submit`, `markSessionCompleted`.
@@ -202,8 +201,8 @@ sessionId, status, findings?, diagnostic? }`.
 **The completion-sweep** runs only on an eligible `accept` (assessment `offer`):
 `buildContradictionContext` over the supplied answers → `shouldRunDetection(mode,
 windowN, 'completion-sweep')` (which always compares **all** answers for modes
-flag/probe) → if it should run AND `isContradictionDetectionEnabled()`, dispatch
-`app_detect_contradictions`. A failed or disabled sweep is **fail-soft: treated as
+flag/probe) → if it should run, dispatch
+`app_detect_contradictions`. A failed or `off`-mode sweep is **fail-soft: treated as
 clean** so a wrap-up never 5xxs (a `diagnostic` is returned). Fewer than two resolvable
 answers → no sweep (nothing can contradict). The dispatch sends **only the answered
 slots** (an unanswered slot can't contradict and is never rendered into the detector

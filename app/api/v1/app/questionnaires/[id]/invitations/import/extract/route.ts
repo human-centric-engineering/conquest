@@ -10,18 +10,12 @@
  * extraction itself logs cost and may fail soft (an unconfigured/over-budget provider → 502).
  */
 
-import type { NextRequest } from 'next/server';
-
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { getClientIP } from '@/lib/security/ip';
 import { inviteLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
-import {
-  ensureQuestionnairesEnabled,
-  isInvitationImportEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { parsePdf } from '@/lib/orchestration/knowledge/parsers/pdf-parser';
 import {
   extractPeopleFromImage,
@@ -37,10 +31,6 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const handleExtract = withAdminAuth<Params>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id } = await params;
-
-  if (!(await isInvitationImportEnabled())) {
-    return errorResponse('Not found', { code: 'NOT_FOUND', status: 404 });
-  }
 
   const rateLimit = inviteLimiter.check(getClientIP(request));
   if (!rateLimit.success) return createRateLimitResponse(rateLimit);
@@ -108,11 +98,4 @@ const handleExtract = withAdminAuth<Params>(async (request, _session, { params }
   }
 });
 
-export async function POST(
-  request: NextRequest,
-  context: { params: Promise<Params> }
-): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-  return handleExtract(request, context);
-}
+export const POST = handleExtract;

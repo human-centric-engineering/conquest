@@ -10,11 +10,6 @@
 
 import { prisma } from '@/lib/db/client';
 import {
-  isAdaptiveDataSlotSelectionEnabled,
-  isAdaptiveSelectionEnabled,
-  isDataSlotsEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   launchReadinessChecks,
   type LaunchReadinessCheck,
 } from '@/lib/app/questionnaire/launch/readiness';
@@ -51,48 +46,34 @@ export async function loadLaunchReadiness(
 ): Promise<VersionLaunchReadiness> {
   const includeEmbeddings = options.includeEmbeddings ?? true;
 
-  const [
-    version,
-    sectionCount,
-    questionCount,
-    scaleSlots,
-    config,
-    dataSlotsEnabled,
-    dataSlotCount,
-    adaptiveEnabled,
-    dataSlotAdaptiveEnabled,
-  ] = await Promise.all([
-    prisma.appQuestionnaireVersion.findUnique({
-      where: { id: versionId },
-      select: { goal: true, audience: true },
-    }),
-    prisma.appQuestionnaireSection.count({ where: { versionId } }),
-    prisma.appQuestionSlot.count({ where: { versionId } }),
-    // Likert + matrix configs, to enforce "every rating scale is labelled" before launch (a
-    // complete per-point labels array OR both endpoint labels — see isLikertLabelled /
-    // isMatrixLabelled; a matrix also needs ≥1 row).
-    prisma.appQuestionSlot.findMany({
-      where: { versionId, type: { in: ['likert', 'matrix'] } },
-      select: { type: true, typeConfig: true },
-    }),
-    prisma.appQuestionnaireConfig.findUnique({
-      where: { versionId },
-      select: { selectionStrategy: true },
-    }),
-    isDataSlotsEnabled(),
-    prisma.appDataSlot.count({ where: { versionId } }),
-    isAdaptiveSelectionEnabled(),
-    isAdaptiveDataSlotSelectionEnabled(),
-  ]);
+  const [version, sectionCount, questionCount, scaleSlots, config, dataSlotCount] =
+    await Promise.all([
+      prisma.appQuestionnaireVersion.findUnique({
+        where: { id: versionId },
+        select: { goal: true, audience: true },
+      }),
+      prisma.appQuestionnaireSection.count({ where: { versionId } }),
+      prisma.appQuestionSlot.count({ where: { versionId } }),
+      // Likert + matrix configs, to enforce "every rating scale is labelled" before launch (a
+      // complete per-point labels array OR both endpoint labels — see isLikertLabelled /
+      // isMatrixLabelled; a matrix also needs ≥1 row).
+      prisma.appQuestionSlot.findMany({
+        where: { versionId, type: { in: ['likert', 'matrix'] } },
+        select: { type: true, typeConfig: true },
+      }),
+      prisma.appQuestionnaireConfig.findUnique({
+        where: { versionId },
+        select: { selectionStrategy: true },
+      }),
+      prisma.appDataSlot.count({ where: { versionId } }),
+    ]);
 
-  // Question embeddings are a launch requirement only for an adaptive version while the sub-flag is
-  // on — otherwise adaptive degrades to weighted at runtime and embeddings are irrelevant.
-  const embeddingsRequired =
-    includeEmbeddings && adaptiveEnabled && config?.selectionStrategy === 'adaptive';
-  // Data-slot embeddings are required only when adaptive data-slot selection is on AND the version
-  // actually has data slots (else the deterministic topic-local pick runs and embeddings are moot).
-  const dataSlotEmbeddingsRequired =
-    includeEmbeddings && dataSlotAdaptiveEnabled && dataSlotCount >= 1;
+  // Question embeddings are a launch requirement only for an adaptive version — otherwise adaptive
+  // degrades to weighted at runtime and embeddings are irrelevant.
+  const embeddingsRequired = includeEmbeddings && config?.selectionStrategy === 'adaptive';
+  // Data-slot embeddings are required only when the version actually has data slots (else the
+  // deterministic topic-local pick runs and embeddings are moot).
+  const dataSlotEmbeddingsRequired = includeEmbeddings && dataSlotCount >= 1;
 
   const [coverage, dataSlotCoverage] = await Promise.all([
     embeddingsRequired ? slotEmbeddingCoverage(versionId) : Promise.resolve(null),
@@ -116,7 +97,7 @@ export async function loadLaunchReadiness(
     matrixCount: matrixSlots.length,
     misconfiguredMatrixCount,
     configSaved: config !== null,
-    dataSlotsRequired: dataSlotsEnabled,
+    dataSlotsRequired: true,
     dataSlotsReady: dataSlotCount >= 1,
     embeddingsRequired,
     embeddingsReady: coverage !== null && coverage.total > 0 && coverage.missing === 0,

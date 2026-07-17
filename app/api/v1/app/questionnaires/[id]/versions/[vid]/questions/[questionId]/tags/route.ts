@@ -18,7 +18,6 @@ import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { setQuestionTagsSchema } from '@/lib/app/questionnaire/tagging';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
@@ -115,4 +114,4 @@ const handlePut = withAdminAuth<Params>(async (request, session, { params }) => 
   return successResponse({ id: targetQuestionId, tags }, forkMeta(fork));
 });
 
-export const PUT = withQuestionnairesEnabled(handlePut);
+export const PUT = handlePut;

@@ -18,13 +18,7 @@ import {
   VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 /** The verify + repair nodes render inside one labelled container — the optional fidelity pass. */
 const FIDELITY_GROUP = { id: 'fidelity-check', label: 'Fidelity check & repair · optional' };
@@ -143,7 +137,6 @@ export const ingestionWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.master) return unavailable('The questionnaires surface is not enabled.');
     if (ctx.sourceDocumentCount > 0) {
       return applies('This version was built by ingesting an uploaded document.');
     }

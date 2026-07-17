@@ -10,9 +10,10 @@
  * **Pure by design**, like F4.1–F4.5. {@link runTurn} reads a caller-assembled
  * {@link TurnState} and returns a {@link TurnResult} — no Prisma, no Next, no clock, no
  * direct LLM. The impure work is injected as {@link CapabilityInvokers} (wired to the
- * real capabilities at the route seam in PR4; stubbed in unit tests). The feature flags
- * are resolved by the route (async DB reads) and passed in as {@link TurnFlags}, so the
- * core stays synchronous in its branching. The offer *prose* is intentionally NOT
+ * real capabilities at the route seam in PR4; stubbed in unit tests). Optional steps are
+ * gated per-turn by the version's {@link TurnState.config} (e.g. `contradictionMode`,
+ * `abuseThreshold`, `sensitivityAwareness`), so the core stays synchronous in its
+ * branching. The offer *prose* is intentionally NOT
  * produced here — for an offer turn the core returns the composer input and the route
  * streams the tokens (the user-chosen real-token-streaming path); the core only decides
  * *whether* to offer.
@@ -55,36 +56,6 @@ export interface ExistingAnswerView {
   confidence?: number;
   rationale?: string;
   turnIndex?: number;
-}
-
-/**
- * Which optional sub-features are enabled for this turn — resolved by the route from the
- * `feature_flag` rows (async) and passed in so the core's branching stays pure/sync.
- * Gating is **per-step**: a disabled step is skipped gracefully and the turn continues
- * with whatever is on (not a whole-turn 404). Adaptive selection degrades inside the
- * `selectNext` invoker, so it isn't a flag here.
- */
-export interface TurnFlags {
-  /** F4.2 answer extraction. */
-  extraction: boolean;
-  /** F4.3 contradiction detection (also gated by `config.contradictionMode`). */
-  contradiction: boolean;
-  /** F4.4 answer refinement. */
-  refinement: boolean;
-  /** F4.5 completion-offer phrasing (the deterministic gate is always free). */
-  completion: boolean;
-  /**
-   * Seriousness / abuse gate (platform sub-flag). When on AND `config.abuseThreshold > 0`,
-   * a turn the extractor flags as suspicious is judged; a non-serious verdict is disregarded,
-   * strikes the session, and (at the threshold) abandons it.
-   */
-  seriousnessGate: boolean;
-  /**
-   * Sensitivity awareness / safeguarding (platform sub-flag AND per-questionnaire toggle). When on,
-   * the extractor emits a `sensitivity` assessment; the core remembers it (running-max level +
-   * notes), softens later phrasing, and signposts support once on a serious disclosure.
-   */
-  sensitivityAwareness: boolean;
 }
 
 /** One base64-encoded attachment on a turn (mirrors the platform `chatAttachmentSchema`). */
@@ -191,8 +162,6 @@ export interface TurnState {
    */
   sensitivityLevel?: SensitivitySeverity | null;
   sensitivityNotes?: string[];
-  /** Which sub-features are enabled this turn. */
-  flags: TurnFlags;
   /**
    * Probe-confirm contradiction flow: a `probe`-mode contradiction raised on a PRIOR turn that is
    * awaiting the respondent's confirmation, loaded from `AppQuestionnaireSession.pendingContradiction`.

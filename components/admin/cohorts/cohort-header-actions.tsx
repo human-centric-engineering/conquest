@@ -37,15 +37,9 @@ import { cohortsTabHref, type CohortDetail } from '@/lib/app/questionnaire/round
 export interface CohortHeaderActionsProps {
   demoClientId: string;
   cohort: CohortDetail;
-  /** Platform intro-screen sub-flag — threaded to the edit form's intro override. */
-  introScreenEnabled?: boolean;
 }
 
-export function CohortHeaderActions({
-  demoClientId,
-  cohort,
-  introScreenEnabled = false,
-}: CohortHeaderActionsProps) {
+export function CohortHeaderActions({ demoClientId, cohort }: CohortHeaderActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -82,7 +76,6 @@ export function CohortHeaderActions({
             <CohortForm
               demoClientId={demoClientId}
               cohort={cohort}
-              introScreenEnabled={introScreenEnabled}
               onSuccess={() => setEditOpen(false)}
               onCancel={() => setEditOpen(false)}
             />

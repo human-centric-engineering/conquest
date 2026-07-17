@@ -36,24 +36,12 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import {
-  isCohortsEnabled,
-  isCohortReportEnabled,
-  isLearningModeEnabled,
-  isRoundContextEnabled,
-  isRoundPhasesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   listBriefableQuestionnaires,
   listRoundContextEntries,
 } from '@/app/api/v1/app/rounds/_lib/context';
 import { listRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 import { listCohortSubgroups } from '@/app/api/v1/app/cohorts/_lib/read';
-import {
-  cohortDetailHref,
-  roundsTabHref,
-  type CohortSubgroupView,
-  type RoundDetail,
-} from '@/lib/app/questionnaire/rounds';
+import { cohortDetailHref, roundsTabHref, type RoundDetail } from '@/lib/app/questionnaire/rounds';
 import type { QuestionnaireListItem } from '@/lib/app/questionnaire/views';
 
 export const metadata: Metadata = {
@@ -105,32 +93,19 @@ async function getAttachable(demoClientId: string): Promise<AttachableQuestionna
 }
 
 export default async function RoundDetailPage({ params }: PageProps) {
-  if (!(await isCohortsEnabled())) notFound();
-
   const { id, roundId } = await params;
   const round = await getRound(roundId);
   if (!round) notFound();
 
   const attachable = await getAttachable(id);
 
-  // Round Additional Context + Learning Mode — each gated by its own flag; the sections hide entirely
-  // when off. Reads go straight through the `_lib` (server component), no extra HTTP. `briefable` is
-  // shared (both panels need version titles), loaded once when either feature is on.
-  const [roundContextOn, learningOn, phasesOn, cohortReportOn] = await Promise.all([
-    isRoundContextEnabled(),
-    isLearningModeEnabled(),
-    isRoundPhasesEnabled(),
-    isCohortReportEnabled(),
-  ]);
+  // Round Additional Context + Learning Mode. Reads go straight through the `_lib` (server
+  // component), no extra HTTP. `briefable` is shared (both panels need version titles).
   const [briefable, contextEntries, learningDigest, subgroups] = await Promise.all([
-    roundContextOn || learningOn || cohortReportOn
-      ? listBriefableQuestionnaires(roundId)
-      : Promise.resolve([]),
-    roundContextOn ? listRoundContextEntries(roundId) : Promise.resolve([]),
-    learningOn ? listRoundLearningDigest(roundId) : Promise.resolve([]),
-    phasesOn
-      ? listCohortSubgroups(round.cohortId)
-      : Promise.resolve<CohortSubgroupView[] | null>([]),
+    listBriefableQuestionnaires(roundId),
+    listRoundContextEntries(roundId),
+    listRoundLearningDigest(roundId),
+    listCohortSubgroups(round.cohortId),
   ]);
 
   const statTiles: CqStat[] = [
@@ -162,7 +137,7 @@ export default async function RoundDetailPage({ params }: PageProps) {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-xl font-semibold tracking-tight">{round.name}</h1>
             <RoundStatusBadge status={round.status} />
-            {learningOn && round.learningEnabled && (
+            {round.learningEnabled && (
               <span
                 className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
                 title="Learning Mode is on — later respondents are influenced by earlier ones, so results carry intentional bias."
@@ -221,91 +196,83 @@ export default async function RoundDetailPage({ params }: PageProps) {
             />
           </section>
 
-          {phasesOn && (
-            <section
-              id="phases"
-              data-section-rail
-              data-section-label="Phases"
-              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
-            >
-              <SectionHeading title="Phases">
-                Stagger access by subgroup so one group can go before the rest — for example, a
-                leadership team in week one, everyone else from week two. Each phase&rsquo;s window
-                must sit inside the round window; members with no phase use the round&rsquo;s own
-                window.
-              </SectionHeading>
-              <RoundPhasesPanel
-                roundId={round.id}
-                roundOpensAt={round.opensAt}
-                roundClosesAt={round.closesAt}
-                phases={round.phases}
-                subgroups={subgroups ?? []}
-              />
-            </section>
-          )}
+          <section
+            id="phases"
+            data-section-rail
+            data-section-label="Phases"
+            className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+          >
+            <SectionHeading title="Phases">
+              Stagger access by subgroup so one group can go before the rest — for example, a
+              leadership team in week one, everyone else from week two. Each phase&rsquo;s window
+              must sit inside the round window; members with no phase use the round&rsquo;s own
+              window.
+            </SectionHeading>
+            <RoundPhasesPanel
+              roundId={round.id}
+              roundOpensAt={round.opensAt}
+              roundClosesAt={round.closesAt}
+              phases={round.phases}
+              subgroups={subgroups ?? []}
+            />
+          </section>
 
-          {roundContextOn && (
-            <section
-              id="context"
-              data-section-rail
-              data-section-label="Additional context"
-              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
-            >
-              <SectionHeading title="Additional context">
-                Brief the interviewer with facts, figures, and background for this round&rsquo;s
-                questions — attach a note to one question or keep it general. The interviewer draws
-                on these quietly; it never reads them aloud.
-              </SectionHeading>
-              <RoundContextPanel
-                roundId={round.id}
-                contextEnabled={round.contextEnabled}
-                entries={contextEntries}
-                briefable={briefable}
-              />
-            </section>
-          )}
+          <section
+            id="context"
+            data-section-rail
+            data-section-label="Additional context"
+            className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+          >
+            <SectionHeading title="Additional context">
+              Brief the interviewer with facts, figures, and background for this round&rsquo;s
+              questions — attach a note to one question or keep it general. The interviewer draws on
+              these quietly; it never reads them aloud.
+            </SectionHeading>
+            <RoundContextPanel
+              roundId={round.id}
+              contextEnabled={round.contextEnabled}
+              entries={contextEntries}
+              briefable={briefable}
+            />
+          </section>
 
-          {learningOn && (
-            <section
-              id="learning"
-              data-section-rail
-              data-section-label="Learning mode"
-              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
-            >
-              <SectionHeading title="Learning mode">
-                Let the interviewer draw on what earlier respondents in this round have said to
-                enrich later conversations. Powerful for depth &mdash; but it introduces bias, so it
-                stays off until you opt in.
-              </SectionHeading>
-              <RoundLearningPanel
-                roundId={round.id}
-                learningEnabled={round.learningEnabled}
-                learningConfig={round.learningConfig}
-                digest={learningDigest}
-                briefable={briefable}
-              />
-            </section>
-          )}
+          <section
+            id="learning"
+            data-section-rail
+            data-section-label="Learning mode"
+            className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+          >
+            <SectionHeading title="Learning mode">
+              Let the interviewer draw on what earlier respondents in this round have said to enrich
+              later conversations. Powerful for depth &mdash; but it introduces bias, so it stays
+              off until you opt in.
+            </SectionHeading>
+            <RoundLearningPanel
+              roundId={round.id}
+              learningEnabled={round.learningEnabled}
+              learningConfig={round.learningConfig}
+              digest={learningDigest}
+              briefable={briefable}
+            />
+          </section>
 
-          {cohortReportOn && (
-            <section
-              id="cohort-report"
-              data-section-rail
-              data-section-label="Cohort report"
-              className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
-            >
-              <SectionHeading title="Cohort report">
-                Analyse this round across all respondents — segmented by the questionnaire&rsquo;s
-                own demographics — and generate a narrative report with charts, recommendations and
-                actions. Review and (soon) edit it here; privacy thresholds hide any group that is
-                too small.
-              </SectionHeading>
-              <RoundCohortReportPanel
-                roundId={round.id}
-                versions={briefable.map((b) => ({ versionId: b.versionId, title: b.title }))}
-              />
-            </section>
-          )}
+          <section
+            id="cohort-report"
+            data-section-rail
+            data-section-label="Cohort report"
+            className="scroll-mt-24 space-y-3 rounded-xl border px-4 py-4"
+          >
+            <SectionHeading title="Cohort report">
+              Analyse this round across all respondents — segmented by the questionnaire&rsquo;s own
+              demographics — and generate a narrative report with charts, recommendations and
+              actions. Review and (soon) edit it here; privacy thresholds hide any group that is too
+              small.
+            </SectionHeading>
+            <RoundCohortReportPanel
+              roundId={round.id}
+              versions={briefable.map((b) => ({ versionId: b.versionId, title: b.title }))}
+            />
+          </section>
 
           <section
             id="invitations"

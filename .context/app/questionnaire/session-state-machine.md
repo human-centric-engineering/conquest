@@ -85,8 +85,8 @@ no drift probe.
 `POST …/versions/:vid/sessions/:sessionId/transition` — admin-only, body
 `{ action: 'pause' | 'resume' | 'abandon', reason? }`.
 
-- Gate order: master flag (`withQuestionnairesEnabled`, 404 before auth) → `withAdminAuth`
-  → body validation → **scope check** (the session must belong to this version, and the
+- Gate order: `withAdminAuth` → body validation → **scope check** (the session must belong
+  to this version, and the
   version to this questionnaire — else 404) → seam call.
 - **The scope excludes the preview session (`isPreview: false`).** The F4.4/F4.5 preview
   singleton is admin-exercise scaffolding whose lifecycle is intentionally minimal

@@ -1,7 +1,8 @@
 # Round Additional Context & Learning Mode
 
-Two independently-flagged, **round-level** capabilities that enrich the live interviewer. Both hang
-off `AppQuestionnaireRound` (see [cohorts.md](./cohorts.md)) and are **off by default** at every level.
+Two independently-toggled, **round-level** capabilities that enrich the live interviewer. Both hang
+off `AppQuestionnaireRound` (see [cohorts.md](./cohorts.md)) and are **off by default**, each gated
+solely by its own per-round toggle.
 
 > **Status:** Both features complete. Additional Context (phases 1–3): foundation, backend (CRUD +
 > runtime injection), admin UI with upload + AI suggest. Learning Mode (phases 1, 4–5): foundation,
@@ -18,9 +19,8 @@ to a single question. Think of it as briefing an interviewer before they walk in
 - **Retrieval (no vector DB):** direct FK lookup. When the interviewer selects the next question, the
   entries for that `questionSlotId` **plus** the round's general entries for that `versionId` are
   injected verbatim into the phrasing prompt. Deterministic, auditable, zero per-turn embedding cost.
-- **Gating:** the platform flag `APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED`
-  (`isRoundContextEnabled()` — master AND cohorts AND this sub-flag) **AND** the per-round
-  `contextEnabled` toggle. Both must be on before anything reaches the prompt.
+- **Gating:** the per-round `contextEnabled` toggle is the only gate — it must be on before anything
+  reaches the prompt.
 
 ### API
 
@@ -34,7 +34,7 @@ to a single question. Think of it as briefing an interviewer before they walk in
 Plus two AI-authoring routes: `POST …/context/suggest` (the composer agent proposes briefing notes
 from a version's questions + optional source material — returns `{ entries }` the admin reviews) and
 `POST …/context/parse` (multipart → extracts text from an uploaded doc for the content field). All
-gated by `withRoundContextEnabled` + `withAdminAuth`, audited. Create/PATCH validate that the
+admin-only (`withAdminAuth`), audited. Create/PATCH validate that the
 `versionId` is one the round bundles and any `questionSlotId` belongs to that version (else 400).
 
 ### Admin UI
@@ -45,7 +45,7 @@ provenance badge + the attached question or "General"), an add/edit form with an
 (questionnaire → General or a specific question), a per-entry delete, **Upload document** (→ parse →
 fills content), and **Suggest with AI** (proposals the admin accepts one at a time). The
 `AppSuggestRoundBriefingCapability` (composer-agent-bound, seed `052`) backs the suggest flow; the
-section is hidden whenever the round-context flag is off.
+section is hidden whenever the per-round `contextEnabled` toggle is off.
 
 ### Runtime injection
 
@@ -72,10 +72,9 @@ that?") and, under the `adaptive` strategy, probing divergent topics harder.
 - **k-anonymity:** `learningConfig.minRespondents` (default 3, floor 2 — see `resolveLearningConfig`)
   suppresses every theme until enough respondents have completed, at both round and per-slot level.
 - **Bias:** Learning Mode **introduces bias by design** (later answers are influenced by earlier
-  ones). The admin UI warns; the flag, the per-round toggle, and the k-anonymity gate keep it opt-in.
-- **Gating:** the platform flag `APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED` (`isLearningModeEnabled()`
-  — master AND cohorts AND this sub-flag) **AND** the per-round `learningEnabled` toggle **AND** the
-  k-anonymity threshold being met.
+  ones). The admin UI warns; the per-round toggle and the k-anonymity gate keep it opt-in.
+- **Gating:** the per-round `learningEnabled` toggle **AND** the k-anonymity threshold being met —
+  there is no platform flag.
 
 ### Runtime (backend)
 
@@ -109,7 +108,7 @@ precise bias-audit signal.
 `components/admin/cohorts/round-learning-panel.tsx` on the round detail page: a **prominent, always-on
 bias warning**, the `learningEnabled` toggle, the `minRespondents` (k-anonymity) control, a preview of
 the current themes (insight + respondent count + a divergence band + last-built time), and a manual
-**Rebuild** (`POST …/learning/rebuild`, gated by `withLearningModeEnabled`, rebuilds every bundled
+**Rebuild** (`POST …/learning/rebuild`, admin-only, rebuilds every bundled
 version). The round header shows a `Learning · biased` pill whenever the round has learning on, so the
 caveat travels with any results view. The interviewer's injected peer context is already visible in
 the Preview Turn Inspector (it's part of the phrasing prompt the inspector records).
@@ -138,11 +137,9 @@ the partial `learningConfig` is merged onto the stored JSON.
 
 ## Key files
 
-| Concern                       | Path                                                                                                                  |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Flag constants                | `lib/app/questionnaire/constants.ts`                                                                                  |
-| Flag resolvers / gates        | `lib/app/questionnaire/feature-flag.ts` (`isRoundContextEnabled`, `isLearningModeEnabled`, `withRoundContextEnabled`) |
-| Round config types + resolver | `lib/app/questionnaire/rounds/types.ts` (`LearningConfigShape`, `resolveLearningConfig`)                              |
-| PATCH schema                  | `lib/app/questionnaire/rounds/schemas.ts` (`updateRoundSchema`, `learningConfigSchema`)                               |
-| Models                        | `prisma/schema/app-questionnaire.prisma` (`AppRoundContextEntry`, `AppRoundLearningDigest`)                           |
-| Flag seeds                    | `prisma/seeds/app-questionnaire/050-round-context-flag.ts`, `051-learning-mode-flag.ts`                               |
+| Concern                       | Path                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Round config types + resolver | `lib/app/questionnaire/rounds/types.ts` (`LearningConfigShape`, `resolveLearningConfig`)                      |
+| PATCH schema                  | `lib/app/questionnaire/rounds/schemas.ts` (`updateRoundSchema`, `learningConfigSchema`)                       |
+| Models                        | `prisma/schema/app-questionnaire.prisma` (`AppRoundContextEntry`, `AppRoundLearningDigest`)                   |
+| Feature-flag removal note     | [`./feature-flags.md`](./feature-flags.md) (the old platform sub-flags are gone; both features are always on) |

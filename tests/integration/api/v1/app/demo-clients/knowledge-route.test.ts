@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -21,7 +20,6 @@ const kbMock = vi.hoisted(() => ({ getClientKnowledgeViewForClient: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/report/client-knowledge', () => kbMock);
 
 import { GET } from '@/app/api/v1/app/demo-clients/[id]/knowledge/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import {
@@ -45,21 +43,12 @@ const VIEW = { client: { id: 'clt-1', name: 'Acme' }, knowledgeTagId: 'tag-1', d
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (prisma.appDemoClient.findUnique as unknown as Mock).mockResolvedValue({ id: 'clt-1' });
   kbMock.getClientKnowledgeViewForClient.mockResolvedValue(VIEW);
 });
 
 describe('GET demo-clients/:id/knowledge', () => {
-  it('404s when the questionnaires flag is off, before auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await GET(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(kbMock.getClientKnowledgeViewForClient).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await GET(req(), ctx);

@@ -21,7 +21,7 @@ lib/app/questionnaire/workflows/
 app/api/v1/app/questionnaires/workflows/route.ts        # GET list (+ ?versionId= lens)
 app/api/v1/app/questionnaires/workflows/[slug]/route.ts # GET one diagram + enrichment (+ lens)
 
-app/admin/questionnaires/behind-the-scenes/page.tsx     # server: flag-gate + prefetch summaries
+app/admin/questionnaires/behind-the-scenes/page.tsx     # server: prefetch summaries
 components/app/questionnaire/behind-the-scenes/          # client: explorer, canvas, picker, lens, panel
 ```
 
@@ -65,15 +65,15 @@ Leaf behaviours (intro/kickoff, voice transcription, interviewer personas/tone, 
 
 **Agent coverage.** Every seeded questionnaire agent is represented in a diagram: the authoring/live/report agents in their pipelines; the seven **design-evaluation judges** each as their own node in `design-evaluation`, fanned out from the structure snapshot and wrapped in a single **"Judge panel"** container box (their slugs live in `evaluation/dimensions.ts`, so the integrity test unions them into the known-agent set); the **Report Research** agent (`app-report-researcher`) in the respondent-report diagram's optional before/after web-search nodes, driving a bounded `web_search` tool-loop (the appendix synthesis reuses the report writer, not a dedicated agent); the **Config Advisor** in `config-advisor`; the **Agent Settings Advisor** in `agent-settings-advisor`; the **Report Design Assistant** (`app-respondent-report-assistant`) in `report-config-assistant` (a multi-turn chat that drafts report-generation config, modelled as gather → draft → apply); and the **turn evaluator** in `turn-evaluation`. A step can carry `_meta.group = { id, label }`; the read-only canvas (`buildGroupNodes`) then synthesises a labelled container node **behind** every member of that group so related steps read as one unit (the seven judges as a "Judge panel"). It is pure presentation — the box is not a DAG node, is non-selectable, and is click-through. The support agents whose prompts are built in code (the Config Advisor, Agent Settings Advisor, Report Research, and Report Design Assistant) carry no Prompt tab and are allowlisted in the integrity test.
 
-`turn-inspector` and `turn-evaluation` are the **admin diagnostic** pair (preview-only): the Inspector is pure observability (every node deterministic except the violet vector-capture step) that records a turn's agent + embedding calls and streams them to the drawer; from there the Evaluator runs a single structured reasoning judge (`turn-evaluator` agent, rubric in `turn-evaluation/prompt.ts`) over the serialized turn. The Inspector's applicability gates on `liveSessions` + `config.previewInspectorEnabled`; the Evaluator gates on the `turnEvaluation` flag (`isTurnEvaluationEnabled`) + the same inspector toggle. The `turn-evaluator` agent slug is canonically defined in `constants.ts` (re-exported from `agent-advisory/recommendations.ts`) so the integrity test pins it.
+`turn-inspector` and `turn-evaluation` are the **admin diagnostic** pair (preview-only): the Inspector is pure observability (every node deterministic except the violet vector-capture step) that records a turn's agent + embedding calls and streams them to the drawer; from there the Evaluator runs a single structured reasoning judge (`turn-evaluator` agent, rubric in `turn-evaluation/prompt.ts`) over the serialized turn. Live sessions and turn evaluation are always on, so the Inspector's and Evaluator's applicability now gates only on the per-version `config.previewInspectorEnabled` toggle. The `turn-evaluator` agent slug is canonically defined in `constants.ts` (re-exported from `agent-advisory/recommendations.ts`) so the integrity test pins it.
 
 ## The questionnaire lens (applicability)
 
-With a `?versionId=` lens, `buildApplicabilityContext(versionId)` combines the resolved feature flags (via `resolveQuestionnaireWorkspaceFlags` + a few extra `is*Enabled` helpers), the version's saved config (`CONFIG_SELECT`/`toConfigView`), its status + `goalProvenance`, and three relation counts (source documents, data slots, round items). Each diagram's pure `applicability(ctx)` predicate returns one of:
+With a `?versionId=` lens, `buildApplicabilityContext(versionId)` combines the version's saved config (`CONFIG_SELECT`/`toConfigView`), its status + `goalProvenance`, and three relation counts (source documents, data slots, round items) — it no longer resolves any feature flags (the questionnaire flag layer was removed). Each diagram's pure `applicability(ctx)` predicate returns one of:
 
-- **`applies`** — flag on and the per-version gate satisfied (highlighted).
-- **`inactive`** — flag on but the config/relation gate is off, e.g. cohort reporting enabled workspace-wide but `config.cohortReport.enabled` false, or no data slots (dimmed, with a reason tooltip).
-- **`unavailable`** — the platform flag is off in this workspace (heavily dimmed).
+- **`applies`** — the per-version config/relation gate is satisfied (highlighted).
+- **`inactive`** — the per-version config/relation gate is off, e.g. `config.cohortReport.enabled` false, or no data slots (dimmed, with a reason tooltip).
+- **`unavailable`** — heavily dimmed. This state used to mean "the platform flag is off in this workspace"; with the flag layer removed there is no longer a platform-flag trigger for it, so in practice diagrams resolve to `applies` or `inactive`.
 
 ## Drift risk
 
@@ -88,4 +88,4 @@ The diagram _shape_ still needs manual upkeep; treat these as curated demo artef
 
 ## Gating & access
 
-Admin-only (`withAdminAuth`), flag-gated by the master `APP_QUESTIONNAIRES_ENABLED` via `withQuestionnairesEnabled` (the page `notFound()`s and the routes 404 when off). No new flag was added.
+Admin-only (`withAdminAuth`), and **always on** — the questionnaire feature-flag layer was removed (2026-07), so there is no flag gate and no 404/`notFound()`-when-off path. See [`feature-flags.md`](./feature-flags.md).

@@ -20,7 +20,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logging';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
@@ -83,4 +82,4 @@ const handleCraft = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleCraft);
+export const POST = handleCraft;

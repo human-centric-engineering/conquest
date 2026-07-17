@@ -27,7 +27,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateVersionStatusSchema } from '@/lib/app/questionnaire/authoring';
 import {
   countLaunchBlockers,
@@ -136,4 +135,4 @@ const handleStatusPatch = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const PATCH = withQuestionnairesEnabled(handleStatusPatch);
+export const PATCH = handleStatusPatch;

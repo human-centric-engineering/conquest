@@ -4,8 +4,8 @@
  *
  * Stub invokers (no capability, no DB): the extractor's `sensitivity` assessment becomes a
  * `TurnResult.sensitivity` outcome with a running-max level; the support frame fires once on the
- * first high disclosure and only when a support message is configured; nothing happens when the
- * flag is off or when the abuse gate disregarded the turn.
+ * first high disclosure and only when a support message is configured; nothing happens when
+ * `config.sensitivityAwareness` is off or when the abuse gate disregarded the turn.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,10 +15,15 @@ import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/
 import { DEFAULT_SUPPORT_MESSAGE } from '@/lib/app/questionnaire/sensitivity';
 import {
   intent,
-  state,
+  state as configState,
   stubInvokers,
   q,
 } from '@/tests/unit/lib/app/questionnaire/orchestrator/_fixtures';
+
+// Sensitivity awareness is off by default in the version config; this whole file exercises it ON, so
+// default it on and let any per-case `config` (e.g. the explicit "feature off" tests) override.
+const state = (input: Parameters<typeof configState>[0]) =>
+  configState({ ...input, config: { sensitivityAwareness: true, ...input.config } });
 
 const Q = [q({ id: 'a', prompt: 'How is work going?' })];
 const HIGH: SensitivityAssessment = {
@@ -107,10 +112,10 @@ describe('runTurn — sensitivity awareness', () => {
     expect(supportEvent(result.events)).toBeUndefined();
   });
 
-  it('produces no sensitivity outcome when the feature flag is off', async () => {
+  it('produces no sensitivity outcome when the feature is off for this questionnaire', async () => {
     const { invokers } = stubInvokers({ extract: { sensitivity: HIGH } });
     const result = await runTurn(
-      state({ userMessage: 'x', questions: Q, flags: { sensitivityAwareness: false } }),
+      state({ userMessage: 'x', questions: Q, config: { sensitivityAwareness: false } }),
       invokers
     );
     expect(result.sensitivity).toBeUndefined();
@@ -201,7 +206,7 @@ describe('runTurn — dedicated sensitivity detector + keyword net (defence-in-d
   it('does NOT run the detector (no call, no tool record) when the feature is off', async () => {
     const { invokers, calls } = stubInvokers({ sensitivity: { assessment: HIGH } });
     const result = await runTurn(
-      state({ userMessage: 'x', questions: Q, flags: { sensitivityAwareness: false } }),
+      state({ userMessage: 'x', questions: Q, config: { sensitivityAwareness: false } }),
       invokers
     );
     expect(calls.sensitivity).toHaveLength(0);
@@ -333,5 +338,29 @@ describe('runDataSlotTurn — sensitivity awareness', () => {
     expect(seriousnessEvent(result.events)).toBeUndefined();
     expect(result.sensitivity?.signpost).toBe(true);
     expect(supportEvent(result.events)?.message).toBe('Help.');
+  });
+
+  it('produces no sensitivity outcome and skips the detector when the feature is off', async () => {
+    const { invokers, calls } = stubInvokers({ extract: { sensitivity: HIGH } });
+    const s = withSlots({
+      userMessage: 'x',
+      questions: Q,
+      config: { sensitivityAwareness: false },
+    });
+    s.dataSlots = [
+      {
+        id: 'd1',
+        key: 'ds',
+        name: 'Wellbeing',
+        description: 'how they feel',
+        theme: 'WB',
+        ordinal: 0,
+        weight: 1,
+      },
+    ];
+    const result = await runDataSlotTurn(s, invokers);
+    expect(result.sensitivity).toBeUndefined();
+    expect(calls.sensitivity).toHaveLength(0);
+    expect(result.toolCalls.some((t) => t.slug === 'app_detect_sensitivity')).toBe(false);
   });
 });

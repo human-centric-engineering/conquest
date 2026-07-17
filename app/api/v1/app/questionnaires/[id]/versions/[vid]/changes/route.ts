@@ -15,7 +15,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { validateQueryParams } from '@/lib/api/validation';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { listChangesQuerySchema } from '@/lib/app/questionnaire/extraction-review';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { listVersionChanges } from '@/app/api/v1/app/questionnaires/_lib/extraction-review-routes';
@@ -43,4 +42,4 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleList);
+export const GET = handleList;

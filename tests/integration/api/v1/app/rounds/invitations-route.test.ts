@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -26,7 +25,6 @@ const genMock = vi.hoisted(() => ({ generateRoundInvitations: vi.fn() }));
 vi.mock('@/app/api/v1/app/rounds/_lib/invites', () => genMock);
 
 import { POST } from '@/app/api/v1/app/rounds/[id]/invitations/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { mockAdminUser } from '@/tests/helpers/auth';
@@ -47,7 +45,6 @@ function jsonReq(body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue({ id: 'r-1', name: 'Round' });
   genMock.generateRoundInvitations.mockResolvedValue({
@@ -61,14 +58,6 @@ beforeEach(() => {
 });
 
 describe('POST /api/v1/app/rounds/:id/invitations', () => {
-  it('404s when the cohorts flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await POST(req(), ctx);
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(genMock.generateRoundInvitations).not.toHaveBeenCalled();
-  });
-
   it('404s an unknown round', async () => {
     prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue(null);
     const res = await POST(req(), ctx);

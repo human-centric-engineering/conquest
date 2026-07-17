@@ -20,7 +20,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveSessionRefLocation } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
 
 const handleSessionByRef = withAdminAuth<{ ref: string }>(async (request, _session, { params }) => {
@@ -48,4 +47,4 @@ const handleSessionByRef = withAdminAuth<{ ref: string }>(async (request, _sessi
   }
 });
 
-export const GET = withQuestionnairesEnabled(handleSessionByRef);
+export const GET = handleSessionByRef;

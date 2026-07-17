@@ -15,7 +15,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -52,12 +51,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/answer-slots', () => slotsMock);
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/complete/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG,
-  APP_QUESTIONNAIRES_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -192,12 +186,6 @@ function acceptBody(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Master + contradiction-detection flag on by default (the sweep needs the latter).
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(
-      flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG
-    )
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(versionRow());
   prismaMock.aiAgent.findUnique.mockResolvedValue(AGENT_ROW);
@@ -214,13 +202,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req(acceptBody()), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req(acceptBody()), ctx(PARAMS))).status).toBe(401);
@@ -342,17 +323,6 @@ describe('accept → fail-soft + sub-flag', () => {
     expect(body.data.status).toBe('completed');
     expect(body.data.diagnostic).toBe('detection_failed');
     expect(slotsMock.markSessionCompleted).toHaveBeenCalled();
-  });
-
-  it('skips the sweep (treated clean → submit) when the contradiction sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req(acceptBody({ mode: 'flag' })), ctx(PARAMS));
-    const body = await res.json();
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-    expect(body.data.resolution.kind).toBe('submit');
-    expect(body.data.status).toBe('completed');
   });
 
   it('404s when the detector agent is missing on an eligible flag-mode accept', async () => {

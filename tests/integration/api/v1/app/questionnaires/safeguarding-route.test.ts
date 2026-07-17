@@ -22,7 +22,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -44,9 +43,7 @@ vi.mock('@/lib/app/questionnaire/analytics', async (importOriginal) => ({
 
 import { GET } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/safeguarding/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import { APP_QUESTIONNAIRES_FLAG } from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -85,10 +82,7 @@ const HAPPY_PAYLOAD = {
 beforeEach(() => {
   vi.clearAllMocks();
 
-  // Default: master flag on, admin session, version found, aggregator returns a payload.
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-  );
+  // Default: admin session, version found, aggregator returns a payload.
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
     id: 'v1',
@@ -106,19 +100,6 @@ beforeEach(() => {
 });
 
 describe('GET analytics/safeguarding', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    setAuth(null);
-
-    const res = await GET(req(), ctx(PARAMS));
-
-    expect(res.status).toBe(404);
-    // Auth must NOT have been consulted — the app should look absent.
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    // Aggregator must not have been called.
-    expect(analyticsMock.getSafeguardingSummary).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
 

@@ -1,9 +1,8 @@
 # Cohorts & Rounds
 
-> Gated by the `APP_QUESTIONNAIRES_COHORTS` feature flag (a `feature_flag` DB row, seeded
-> disabled by `prisma/seeds/app-questionnaire/047-cohorts-flag.ts`). Opt-in on top of
-> `APP_QUESTIONNAIRES_ENABLED`. When off: the admin routes/tabs `404`/hide and the respondent
-> access guard is inert (no session ever carries a `roundId`).
+> Cohorts & Rounds is **always on**. The admin routes/tabs are always available; the respondent
+> access guard runs whenever a session actually carries a `roundId` (a session started outside a
+> round carries none and stays open-ended).
 
 ## What it is
 
@@ -22,8 +21,8 @@ per-cohort, with no global email uniqueness, so cohorts freely overlap.
 > can be **scoped to a round** (`?roundId=`) — distributions, funnel, cost, and safeguarding all
 > filter to one round's sessions, so a cohort's run is analysed in isolation rather than blended with
 > another cohort's round on the same questionnaire. A generated **cross-respondent Cohort Report**
-> (`cohort` report kind) — a single narrative over a whole round — remains a later stage with its
-> own flag; this phase ships the per-round scoping + completion counts.
+> (`cohort` report kind) — a single narrative over a whole round — is a separate feature (see
+> [cohort-report.md](./cohort-report.md)); this phase ships the per-round scoping + completion counts.
 
 ## Data model
 
@@ -61,7 +60,7 @@ first):
 1. `QUESTIONNAIRE_NOT_IN_ROUND` (409) — the session's questionnaire isn't bundled in the round.
 2. `ROUND_NOT_OPEN` (409) — status not `open`, or now is before `opensAt`.
 3. `ROUND_WINDOW_CLOSED` (409) — now is after `closesAt`, **even if status is still `open`** (the
-   window is the time-bound, independent of the flag).
+   window is the time-bound).
 4. `PHASE_NOT_YET_OPEN` / `PHASE_WINDOW_CLOSED` (409) — when the member has a [round phase](#round-phases-staggered-subgroups),
    the check runs against their EFFECTIVE window (round, narrowed by the phase); a phase-scoped denial
    gets its own code/message ("your group opens later"). No phase → the round-level codes above.
@@ -111,9 +110,9 @@ it `pending → sent`; omitted, it mints copy/paste links only.
 
 ## Round phases (staggered subgroups)
 
-> Gated by `APP_QUESTIONNAIRES_ROUND_PHASES_ENABLED` (sub-flag of cohorts, seed `053`,
-> `isRoundPhasesEnabled` / `withRoundPhasesEnabled`). Off → the subgroup/phase surfaces 404/hide and
-> the access guard uses the round window for everyone (today's behaviour). See [F13.3](../planning/features/f13.3.md).
+> Round phasing is **always on**. The subgroup/phase surfaces are always available; a round with no
+> phases simply has the access guard use the round window for everyone (a member with no phase falls
+> back to the round-level codes). See [F13.3](../planning/features/f13.3.md).
 
 A round can stagger access by cohort **subgroup** so one group (e.g. the Senior Leadership Team) goes
 before the rest — for a pilot ahead of a wider rollout, or to SEED [Learning Mode](./round-context-and-learning.md)
@@ -130,7 +129,7 @@ naturally feeds later ones — no extra wiring).
   mode — `relaxed` defers to the round close (the phase close is then just a notification target). No
   phase → the round window unchanged. Phase windows must **nest** inside the round window
   (`validatePhaseWindowNesting`, enforced at the admin seam).
-- **Enforcement** — `assertRoundAccess` loads the member's subgroup + its phase (flag-gated) and
+- **Enforcement** — `assertRoundAccess` loads the member's subgroup + its phase and
   passes it to `evaluateRoundAccess`; same start/continue/resume seams as the round window.
 - **Staggered send** — round invites store only a token hash, so "sending" is folded into generation:
   `generateRoundInvitations(roundId, by, { subgroupId, send })` emails just that subgroup's
@@ -148,8 +147,8 @@ Admin: a **Subgroups** panel on the cohort page (+ a per-member subgroup selecto
 
 ## Admin surface
 
-Two flag-gated tabs are appended to the [demo-client detail](./demo-clients.md) sub-nav
-(`demoClientTabs({ cohortsEnabled })` in `demo-clients/nav.ts`):
+Two tabs are appended to the [demo-client detail](./demo-clients.md) sub-nav
+(`demoClientTabs` in `demo-clients/nav.ts`):
 
 - **Cohorts** (`/admin/demo-clients/[id]/cohorts`) — searchable table (members, rounds, completion
   rate). Drill-in: roster management (add / soft-remove / reactivate) + the cohort's rounds.
@@ -157,17 +156,17 @@ Two flag-gated tabs are appended to the [demo-client detail](./demo-clients.md) 
   (status, window, members, started/completed, completion rate), with a manual **Close** action.
   Drill-in: bundled questionnaires (attach/detach), editable window, close/reopen.
 
-The **round detail** page is a long, flag-gated single scroll (Bundled questionnaires · Phases ·
+The **round detail** page is a long single scroll (Bundled questionnaires · Phases ·
 Additional context · Learning mode · Cohort report · Member invitations). On wide screens a sticky
 scroll-spy rail (`components/admin/section-rail.tsx`, shared with the questionnaire
 [settings panel](./configuration.md#ui)) sits beside it for wayfinding — each `<section>` carries
 `id` + `data-section-rail` + `data-section-label`, and the rail lists those inside
-`#round-sections`, so sections appear in the rail exactly when their flag renders them. The
+`#round-sections`, so a section appears in the rail exactly when it renders. The
 demo-client tab bar itself stays a flat single tier — only 4–6 tabs, no secondary nav needed.
 
 ## API
 
-Admin, `withAdminAuth`, flag-gated (404 when off). Registry: `API.APP.COHORTS`, `API.APP.ROUNDS`.
+Admin, `withAdminAuth`. Registry: `API.APP.COHORTS`, `API.APP.ROUNDS`.
 
 | Route                                             | Verb             | Purpose                                                                    |
 | ------------------------------------------------- | ---------------- | -------------------------------------------------------------------------- |

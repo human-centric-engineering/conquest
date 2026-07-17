@@ -10,10 +10,6 @@ import { EvaluationRunsTable } from '@/components/admin/questionnaires/evaluatio
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import {
-  isDesignEvaluationEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { getQuestionnaireDetailCached } from '@/lib/app/questionnaire/workspace-data';
 import type { EvaluationRunListItem } from '@/lib/app/questionnaire/views';
 
@@ -43,15 +39,9 @@ async function getRuns(id: string, versionId: string): Promise<EvaluationRunList
 }
 
 export default async function EvaluationsTab({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const { id, vid } = await params;
 
-  const [detail, runs, canRun] = await Promise.all([
-    getQuestionnaireDetailCached(id),
-    getRuns(id, vid),
-    isDesignEvaluationEnabled(),
-  ]);
+  const [detail, runs] = await Promise.all([getQuestionnaireDetailCached(id), getRuns(id, vid)]);
   if (!detail) notFound();
   const selected = detail.versions.find((ver) => ver.id === vid);
   if (!selected) notFound();
@@ -69,7 +59,7 @@ export default async function EvaluationsTab({ params }: PageProps) {
         versionId={vid}
         versionNumber={selected.versionNumber}
         runs={runs}
-        canRun={canRun}
+        canRun={true}
       />
     </div>
   );

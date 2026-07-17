@@ -158,34 +158,8 @@ export function nodeRetrievalKind(config: Record<string, unknown>): RetrievalKin
 // Questionnaire lens — applicability
 // ---------------------------------------------------------------------------
 
-/**
- * Normalised feature-flag set the applicability predicates read. Deliberately
- * decoupled from the platform `QuestionnaireWorkspaceFlags` (which uses
- * different field names and omits a few flags) so predicates stay pure and
- * trivially testable. Every sub-flag here is already ANDed with the master flag
- * by `buildApplicabilityContext`.
- */
-export interface WorkflowFlags {
-  master: boolean;
-  generativeAuthoring: boolean;
-  editAgent: boolean;
-  liveSessions: boolean;
-  answerExtraction: boolean;
-  dataSlots: boolean;
-  respondentReport: boolean;
-  cohortReport: boolean;
-  introScreen: boolean;
-  voiceInput: boolean;
-  personaSelection: boolean;
-  adaptiveSelection: boolean;
-  turnEvaluation: boolean;
-  designEvaluation: boolean;
-  advisor: boolean;
-}
-
 /** Everything a diagram's `applicability` predicate reads. Built per version, server-side. */
 export interface ApplicabilityContext {
-  flags: WorkflowFlags;
   config: QuestionnaireConfigShape;
   versionStatus: AppQuestionnaireStatus;
   /** `'admin-supplied' | 'inferred' | 'pre-existing'` — `inferred` marks a composed version. */

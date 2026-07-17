@@ -100,8 +100,8 @@ userMessage, recentMessages?, sessionId }`, all in memory. `ExtractionSlotView`
 - **Extraction candidate pre-filter (50+-slot scale).** By default the extractor is
   handed the FULL candidate set every turn (all question slots + all data slots),
   which at 50+ data slots / 70+ questions is thousands of candidate tokens per turn.
-  It's a **per-questionnaire Settings toggle** (`config.extractionPrefilter`, in the Settings tab —
-  not a platform feature flag; consistent with `answerFitMode` / `contradictionMode`), **off by
+  It's a **per-questionnaire Settings toggle** (`config.extractionPrefilter`, in the Settings tab,
+  alongside `answerFitMode` / `contradictionMode`), **off by
   default** and **recommended for large (50+ slot / 70+ question) surveys** where the full candidate
   list is expensive; for smaller ones leave it off, since sending everything is cheap and maximises
   capture accuracy. When on, the live `/messages` route embeds the respondent's last message and
@@ -226,14 +226,13 @@ changes the data-slot fill, which keeps the respondent's natural words (see
 ## The preview route
 
 `POST /api/v1/app/questionnaires/:id/versions/:vid/extract-answer` —
-`withQuestionnairesEnabled(withAdminAuth(…))`.
+`withAdminAuth(…)`.
 
 - Body: `{ activeQuestionKey, userMessage, answered?: { key, confidence? }[],
 recentMessages? }`.
-- **Sub-flag gate** — `APP_QUESTIONNAIRES_ANSWER_EXTRACTION_ENABLED` (seed 008,
-  off by default), on top of the master flag, because every call spends an LLM
-  completion. Off → 404 (looks like a missing route, consistent with the master
-  gate). Same opt-in shape as adaptive selection.
+- **Always on** — extraction is a permanent capability; there is no flag to check and
+  no route that 404s when off. Each call still spends an LLM completion, which is why the
+  per-admin sub-cap below exists.
 - **Per-admin LLM sub-cap** — `answerExtractionLimiter` (60/min), keyed on the
   admin who owns the spend; the section 100/min is too loose for a paid per-turn
   call.

@@ -17,7 +17,6 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   buildCohortReportView,
   setCohortReportPublish,
@@ -108,5 +107,5 @@ const handleUnpublish = withAdminAuth<Params>(async (request, session, { params 
   return successResponse(await buildCohortReportView({ scope: resolved.scope }));
 });
 
-export const POST = withCohortReportEnabled(handlePublish);
-export const DELETE = withCohortReportEnabled(handleUnpublish);
+export const POST = handlePublish;
+export const DELETE = handleUnpublish;

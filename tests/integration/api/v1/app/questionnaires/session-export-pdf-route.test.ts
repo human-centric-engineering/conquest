@@ -11,7 +11,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -29,7 +28,6 @@ const reportViewMock = vi.hoisted(() => ({ buildRespondentReportClientView: vi.f
 vi.mock('@/lib/app/questionnaire/report/view', () => reportViewMock);
 
 import { GET } from '@/app/api/v1/app/questionnaires/[id]/sessions/[sessionId]/export.pdf/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -85,7 +83,6 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isFeatureEnabled).mockResolvedValue(true);
   setAuth(mockAdminUser());
   exportMock.loadSessionExport.mockResolvedValue({
     session: { id: 'sess-1', respondentUserId: 'u1' },
@@ -97,14 +94,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the app flag is off, before admin auth or load', async () => {
-    vi.mocked(isFeatureEnabled).mockResolvedValue(false);
-    const res = await GET(req(), ctx({ id: 'qn-1', sessionId: 'sess-1' }));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(exportMock.loadSessionExport).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await GET(req(), ctx({ id: 'qn-1', sessionId: 'sess-1' }));

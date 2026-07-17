@@ -4,10 +4,10 @@ The admin surface for browsing and (PR2) editing questionnaires. This doc covers
 the **read surface** shipped in F2.1 PR1; the authoring/edit surface and the
 version-fork lifecycle land in PR2 and extend this doc.
 
-Every route and page here is gated by `APP_QUESTIONNAIRES_ENABLED`: the API 404s
-when off, and the pages call `isQuestionnairesEnabled()` and `notFound()` so a
-disabled app is indistinguishable from a missing feature. The nav entry itself is
-always registered (it can't be async/DB-driven) — only the destinations are dark.
+Every route and page here is **always on** — the questionnaire feature-flag layer
+was removed (2026-07), so there is no flag to check and no 404-when-off path. The
+nav entry is always registered and its destinations always resolve. See
+[`feature-flags.md`](./feature-flags.md).
 
 ## Read API
 
@@ -75,19 +75,19 @@ must render the version selector and highlight the active version against `[vid]
 /admin/questionnaires/[id]                  → redirector → newest version's Overview (honours ?v=)
 /admin/questionnaires/[id]/v/[vid]          → Overview tab (default landing)
             …/v/[vid]/structure             → Structure (goal/audience + sections/questions/tags; editor/graph, ?edit=1 toggle)
-            …/v/[vid]/data-slots            → (flag: data-slots)
+            …/v/[vid]/data-slots
             …/v/[vid]/invitations           → questionnaire-scoped; vid ignored, targets newest launched
             …/v/[vid]/analytics
-            …/v/[vid]/evaluations[/[runId]] → (flag: design-evaluation)
+            …/v/[vid]/evaluations[/[runId]]
             …/v/[vid]/extraction-changes
             …/v/[vid]/settings              → questionnaire Name (rename) + run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
 ```
 
 - **`[id]/v/[vid]/layout.tsx`** owns the breadcrumb, sticky header (title + status +
   `VersionSelector`), and the `QuestionnaireSubNav` tab bar. It resolves the detail
-  and feature flags **once** via `lib/app/questionnaire/workspace-data.ts` and
-  `notFound()`s when the master flag is off, the questionnaire is missing, or `[vid]`
-  isn't a real version. Switching version preserves the active tab segment.
+  **once** via `lib/app/questionnaire/workspace-data.ts` and `notFound()`s when the
+  questionnaire is missing or `[vid]` isn't a real version. Switching version
+  preserves the active tab segment.
 - **Two-tier lifecycle nav.** The thirteen tabs are grouped by the questionnaire's
   life-stage so nothing scrolls off-screen: a top row of **Overview · Build ·
   Distribute · Results · Settings**, and — for the active group — a second row of its
@@ -104,17 +104,14 @@ must render the version selector and highlight the active version against `[vid]
 
 - **`workspace-data.ts`** wraps the detail / graph / data-slot-count fetchers in
   React `cache()` so the layout and the active tab share one HTTP call per render
-  (`serverFetch` is `no-store`). `resolveQuestionnaireWorkspaceFlags()` resolves all
-  workspace flags in one `Promise.all` (sub-flags ANDed with the master), instead of
-  the layered per-helper re-queries in `feature-flag.ts`.
-- **`workspace-nav.ts`** is the declarative tab registry; `visibleWorkspaceTabs(flags)`
-  filters by flag (Data slots / Evaluations hidden when their sub-flag is off — the
-  master flag is already enforced by the layout). Each moved tab keeps its own
-  `notFound()` flag gate as defense-in-depth. The lifecycle grouping lives alongside it:
-  `QUESTIONNAIRE_WORKSPACE_GROUPS` (the partition) and `visibleWorkspaceGroups(flags)`
-  (groups projected to their flag-visible tabs, empty groups dropped) — the flat tab
-  list stays the single source of truth for hrefs/flags/order. A unit test asserts every
-  tab id belongs to exactly one group, so a new tab can't silently fall out of the nav.
+  (`serverFetch` is `no-store`).
+- **`workspace-nav.ts`** is the declarative tab registry; every tab is always shown
+  (Data slots and Evaluations are no longer flag-gated — the questionnaire flag layer
+  was removed). The lifecycle grouping lives alongside it:
+  `QUESTIONNAIRE_WORKSPACE_GROUPS` (the partition) and its group projection
+  (empty groups dropped) — the flat tab list stays the single source of truth for
+  hrefs/order. A unit test asserts every tab id belongs to exactly one group, so a new
+  tab can't silently fall out of the nav.
 - **`components/admin/grouped-sub-nav.tsx`** is the shared presentational two-tier strip
   (`GroupedSubNav`), used by both `QuestionnaireSubNav` and the demo-client
   `DemoClientSubNav`. Given one group it renders a flat single row (demo clients, 4–6
@@ -148,7 +145,7 @@ and `app/admin/demo-clients/layout.tsx` wrappers and used by
 
 A per-version **tag vocabulary** plus **M:N assignment to questions**, layered onto
 the `?edit=1` authoring surface. Every write follows the same F2.1 mutation pipeline
-(flag-gate → `withAdminAuth` → scope-404 → `forkVersionIfLaunched` → validate → tx →
+(`withAdminAuth` → scope-404 → `forkVersionIfLaunched` → validate → tx →
 P2002→400 → `logAdminAction` → `successResponse(data, { forked })`), so editing a
 launched version's tags forks a new draft exactly like a structural edit.
 
@@ -254,7 +251,7 @@ the per-agent note accordingly. Only its per-turn **user** message is code-built
   inline error instead of 500ing the page. The seven evaluation judges are generated
   from `EVALUATION_DIMENSION_SPECS` (same source the panel uses), so they can't drift.
 - **API** — `GET /api/v1/app/questionnaires/prompts` (`API.APP.QUESTIONNAIRES.prompts`).
-  `withQuestionnairesEnabled(withAdminAuth(...))`. Merges the catalog with each agent's
+  `withAdminAuth(...)`. Merges the catalog with each agent's
   seeded `AiAgent` row (provider/model binding, budget, the inert stored instructions)
   and returns `{ agents }`. `resolvesAtRuntime` is true when provider+model are empty
   (the agent-resolver picks at run time); `seeded: false` when no row exists.

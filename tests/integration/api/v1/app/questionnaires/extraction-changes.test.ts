@@ -17,7 +17,6 @@ import { Prisma } from '@prisma/client';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -66,7 +65,6 @@ vi.mock('@/lib/db/utils', () => ({
 import { GET as listGET } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/changes/route';
 import { POST as revertPOST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/changes/[changeId]/revert/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
@@ -140,7 +138,6 @@ function snapshotRow(over?: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   (forkVersionIfLaunched as unknown as Mock).mockResolvedValue(noFork());
   // loadScopedVersion succeeds by default.
@@ -171,13 +168,6 @@ beforeEach(() => {
 // ─── Gate + auth ──────────────────────────────────────────────────────────────
 
 describe('gate + auth', () => {
-  it('returns 404 when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await listGET(req(), ctx(VERSION_PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('returns 403 for a non-admin', async () => {
     setAuth(mockAuthenticatedUser());
     const res = await listGET(req(), ctx(VERSION_PARAMS));

@@ -22,11 +22,6 @@ import { CompletionBar, SectionHeading } from '@/components/admin/cohorts/cohort
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import {
-  isCohortsEnabled,
-  isIntroScreenEnabled,
-  isRoundPhasesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { cohortsTabHref, type CohortDetail, type RoundView } from '@/lib/app/questionnaire/rounds';
 
 export const metadata: Metadata = {
@@ -63,17 +58,11 @@ async function getCohortRounds(cohortId: string): Promise<RoundView[]> {
 }
 
 export default async function CohortDetailPage({ params }: PageProps) {
-  if (!(await isCohortsEnabled())) notFound();
-
   const { id, cohortId } = await params;
   const cohort = await getCohort(cohortId);
   if (!cohort) notFound();
 
-  const [rounds, introScreenEnabled, roundPhasesEnabled] = await Promise.all([
-    getCohortRounds(cohortId),
-    isIntroScreenEnabled(),
-    isRoundPhasesEnabled(),
-  ]);
+  const rounds = await getCohortRounds(cohortId);
 
   return (
     <div className="space-y-6">
@@ -115,23 +104,17 @@ export default async function CohortDetailPage({ params }: PageProps) {
             )}
           </div>
         </div>
-        <CohortHeaderActions
-          demoClientId={id}
-          cohort={cohort}
-          introScreenEnabled={introScreenEnabled}
-        />
+        <CohortHeaderActions demoClientId={id} cohort={cohort} />
       </header>
 
-      {roundPhasesEnabled && (
-        <section className="space-y-3 rounded-xl border px-4 py-4">
-          <SectionHeading title="Subgroups">
-            Reusable partitions of this cohort&rsquo;s roster. A round can give each subgroup its
-            own access window so one group (e.g. a leadership team) takes it before the rest. Assign
-            members to a subgroup in the roster below.
-          </SectionHeading>
-          <CohortSubgroupsPanel cohortId={cohort.id} subgroups={cohort.subgroups} />
-        </section>
-      )}
+      <section className="space-y-3 rounded-xl border px-4 py-4">
+        <SectionHeading title="Subgroups">
+          Reusable partitions of this cohort&rsquo;s roster. A round can give each subgroup its own
+          access window so one group (e.g. a leadership team) takes it before the rest. Assign
+          members to a subgroup in the roster below.
+        </SectionHeading>
+        <CohortSubgroupsPanel cohortId={cohort.id} subgroups={cohort.subgroups} />
+      </section>
 
       <section className="space-y-3 rounded-xl border px-4 py-4">
         <SectionHeading title="Roster">
@@ -141,7 +124,7 @@ export default async function CohortDetailPage({ params }: PageProps) {
         <CohortMembersPanel
           cohortId={cohort.id}
           members={cohort.members}
-          subgroups={roundPhasesEnabled ? cohort.subgroups : []}
+          subgroups={cohort.subgroups}
         />
       </section>
 

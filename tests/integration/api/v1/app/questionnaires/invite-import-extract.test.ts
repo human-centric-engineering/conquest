@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -28,7 +27,6 @@ const extractMock = vi.hoisted(() => ({
 vi.mock('@/lib/app/questionnaire/invitations/extract/extract-people', () => extractMock);
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/invitations/import/extract/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { inviteLimiter } from '@/lib/security/rate-limit';
 import { mockAdminUser } from '@/tests/helpers/auth';
@@ -50,7 +48,6 @@ function req(file: File | null): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   parsersMock.parsePdf.mockResolvedValue({ fullText: 'Ada <ada@x.com>', warnings: [] });
   extractMock.extractPeopleFromText.mockResolvedValue([{ email: 'ada@x.com', firstName: 'Ada' }]);
@@ -58,12 +55,6 @@ beforeEach(() => {
 });
 
 describe('POST invitations/import/extract', () => {
-  it('404s when the invite-import sub-flag is off', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req(new File(['x'], 'a.pdf', { type: 'application/pdf' })), ctx);
-    expect(res.status).toBe(404);
-  });
-
   it('400s when no file is supplied', async () => {
     const res = await POST(req(null), ctx);
     expect(res.status).toBe(400);

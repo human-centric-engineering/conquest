@@ -1,23 +1,16 @@
 /**
  * Data slots tab — generate / review the semantic abstraction layer for a version.
  *
- * Lifted into the workspace (header + version selector come from the layout). Keeps
- * its own `isDataSlotsEnabled()` guard as defense-in-depth even though the tab is
- * hidden when the flag is off. Reads `vid` from the path.
+ * Lifted into the workspace (header + version selector come from the layout).
+ * Reads `vid` from the path.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { DataSlotsReview } from '@/components/admin/questionnaires/data-slots-review';
 import { DataSlotEmbeddingStep } from '@/components/admin/questionnaires/data-slot-embedding-step';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import {
-  isAdaptiveDataSlotSelectionEnabled,
-  isDataSlotsEnabled,
-  isQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
 import type { DataSlotView, DataSlotDraftView } from '@/lib/app/questionnaire/data-slots';
 
@@ -50,16 +43,9 @@ async function getSlots(id: string, versionId: string): Promise<LoadedSlots> {
 }
 
 export default async function DataSlotsTab({ params }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-  if (!(await isDataSlotsEnabled())) notFound();
-
   const { id, vid } = await params;
 
-  const [graph, loaded, dataSlotAdaptive] = await Promise.all([
-    getVersionGraphCached(id, vid),
-    getSlots(id, vid),
-    isAdaptiveDataSlotSelectionEnabled(),
-  ]);
+  const [graph, loaded] = await Promise.all([getVersionGraphCached(id, vid), getSlots(id, vid)]);
 
   const questions = graph
     ? graph.sections.flatMap((s) => s.questions.map((q) => ({ key: q.key, prompt: q.prompt })))
@@ -87,12 +73,10 @@ export default async function DataSlotsTab({ params }: PageProps) {
         />
       )}
 
-      {/* Adaptive data-slot selection (50+-slot scale): the explicit embedding step + coverage,
-          shown only when the feature is on. Embeddings rank unfilled slots by similarity so the
-          conversation flows naturally rather than following a fixed order. */}
-      {dataSlotAdaptive && loaded.slots.length > 0 && (
-        <DataSlotEmbeddingStep questionnaireId={id} versionId={vid} />
-      )}
+      {/* Adaptive data-slot selection (50+-slot scale): the explicit embedding step + coverage.
+          Embeddings rank unfilled slots by similarity so the conversation flows naturally rather
+          than following a fixed order. */}
+      {loaded.slots.length > 0 && <DataSlotEmbeddingStep questionnaireId={id} versionId={vid} />}
     </div>
   );
 }

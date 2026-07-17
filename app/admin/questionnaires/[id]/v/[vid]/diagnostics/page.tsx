@@ -6,14 +6,11 @@
  * tab's visibility in `workspace-nav.ts`) — diagnostics is meaningless without respondent sessions.
  */
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 
 import { DiagnosticsView } from '@/components/admin/questionnaires/diagnostics/diagnostics-view';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import { getAnalyticsDefaultDateInputs } from '@/lib/app/questionnaire/analytics';
 import type { VersionDiagnosticsResult } from '@/lib/app/questionnaire/analytics';
 
@@ -54,10 +51,6 @@ async function getDiagnostics(
 }
 
 export default async function DiagnosticsTab({ params, searchParams }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!flags.liveSessions) notFound();
-
   const { id, vid } = await params;
   const sp = await searchParams;
 

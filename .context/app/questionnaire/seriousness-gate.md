@@ -5,8 +5,8 @@ Non-genuine answers (preposterous, abusive, off-topic — e.g. "**543 years**" o
 **disregarded** (never persisted), **strike** the session, escalate a polite warning, and at the
 questionnaire's `abuseThreshold` **abort** the session (terminal status `aborted`). Colloquial / lazy / brief answers
 ("very unlikely", "prefer not to say") are tolerated. Mirrors contradiction detection (F4.3)
-end-to-end: a per-turn judge whose result becomes a `warning` SSE frame, gated by a platform
-flag + a per-questionnaire config knob, rendered as a side-band notice.
+end-to-end: a per-turn judge whose result becomes a `warning` SSE frame, gated by a per-questionnaire
+config knob (`abuseThreshold`; `0` = off), rendered as a side-band notice.
 
 ## Two layers: a deterministic floor + the LLM judge
 
@@ -107,9 +107,9 @@ and every later turn 409s. `seriousnessGate` is forced off on a kickoff turn.
 
 ## Config & gating
 
-- **Platform flag** `APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED` — dark-launch, default off
-  (`isSeriousnessGateEnabled()`; requires master + live-sessions flags). Seeded by
-  `prisma/seeds/app-questionnaire/029-seriousness-gate-flag.ts`.
+The gate is **always on** — there is no platform flag. It is governed solely by the per-questionnaire
+config knob:
+
 - **Per-questionnaire** `AppQuestionnaireConfig.abuseThreshold` (Int, default **4**; **0 = off**) —
   non-genuine answers tolerated before abort. Edited in the config editor ("Abuse threshold").
   Escalation at the default: strikes 1–2 warn gently (amber), strike 3 is the firm bold last-chance
@@ -144,7 +144,7 @@ Pure core: `lib/app/questionnaire/seriousness/**` (incl. `abuse-net.ts` — the 
 `orchestrator/{orchestrator,data-slot-orchestrator,types}.ts`,
 `types.ts` (`abuseThreshold`, `ABUSE_ABANDON_REASON`). Capability/suspicion:
 `capabilities/extract-answer-slots.ts`, `extraction/extraction-{schema,prompt}.ts`. Route seam:
-`turn-invokers.ts`, `turn-context.ts`, `messages/route.ts`, `feature-flag.ts`,
+`turn-invokers.ts`, `turn-context.ts`, `messages/route.ts`,
 `authoring/config-schema.ts`, `_lib/{detail,sessions}.ts`. UI:
 `components/admin/questionnaires/config-editor.tsx`,
 `components/app/questionnaire/chat/{seriousness-notice,questionnaire-chat}.tsx`.

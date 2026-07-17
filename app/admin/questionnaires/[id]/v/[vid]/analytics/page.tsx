@@ -8,7 +8,6 @@
  */
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { ArrowRight } from 'lucide-react';
 
 import { AnalyticsView } from '@/components/admin/questionnaires/analytics/analytics-view';
@@ -16,12 +15,8 @@ import { ExportButtons } from '@/components/admin/questionnaires/analytics/expor
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
-import { isQuestionnairesEnabled, isCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { getAnalyticsDefaultDateInputs } from '@/lib/app/questionnaire/analytics';
-import {
-  getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
-} from '@/lib/app/questionnaire/workspace-data';
+import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
 import { listRoundsForVersion } from '@/app/api/v1/app/rounds/_lib/read';
 import type {
   CompletionFunnelResult,
@@ -124,8 +119,6 @@ async function getSafeguarding(
 }
 
 export default async function AnalyticsTab({ params, searchParams }: PageProps) {
-  if (!(await isQuestionnairesEnabled())) notFound();
-
   const { id, vid } = await params;
   const sp = await searchParams;
 
@@ -138,16 +131,11 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
   };
   const query = buildQuery(sp);
 
-  const [graph, flags] = await Promise.all([
-    getVersionGraphCached(id, vid),
-    resolveQuestionnaireWorkspaceFlags(),
-  ]);
+  const graph = await getVersionGraphCached(id, vid);
   const tagVocabulary: TagView[] = graph?.tags ?? [];
-  // Round-scope options (Cohorts & Rounds): only when the feature is on, and only rounds that
-  // actually produced sessions for this version — so the selector appears just when it's useful.
-  const roundScope = (await isCohortsEnabled())
-    ? await listRoundsForVersion(vid)
-    : { rounds: [], hasOpenEnded: false };
+  // Round-scope options (Cohorts & Rounds): only rounds that actually produced sessions for this
+  // version — so the selector appears just when it's useful.
+  const roundScope = await listRoundsForVersion(vid);
   const [distributions, funnel, cost, safeguarding] = await Promise.all([
     getDistributions(id, vid, query),
     getFunnel(id, vid, query),
@@ -181,21 +169,17 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
       )}
 
       {/* Narrative teaser — the synthesis report turns these aggregates into a written narrative with
-          recommendations. Only linked when the cohort-report tab is actually available. */}
-      {flags.cohortReport && (
-        <Link
-          href={`/admin/questionnaires/${id}/v/${vid}/cohort-report`}
-          className="hover:border-foreground/30 hover:bg-muted/40 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm transition-colors"
-        >
-          <span className="text-foreground font-medium">
-            Want the narrative?{' '}
-            <span className="text-muted-foreground font-normal">
-              Generate a version-wide report
-            </span>
-          </span>
-          <ArrowRight className="text-muted-foreground h-4 w-4 shrink-0" />
-        </Link>
-      )}
+          recommendations. */}
+      <Link
+        href={`/admin/questionnaires/${id}/v/${vid}/cohort-report`}
+        className="hover:border-foreground/30 hover:bg-muted/40 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm transition-colors"
+      >
+        <span className="text-foreground font-medium">
+          Want the narrative?{' '}
+          <span className="text-muted-foreground font-normal">Generate a version-wide report</span>
+        </span>
+        <ArrowRight className="text-muted-foreground h-4 w-4 shrink-0" />
+      </Link>
 
       <AnalyticsView
         tagVocabulary={tagVocabulary}

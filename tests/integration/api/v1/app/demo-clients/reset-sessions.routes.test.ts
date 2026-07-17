@@ -12,7 +12,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
@@ -37,7 +36,6 @@ vi.mock('@/app/api/v1/app/demo-clients/_lib/reset', () => ({
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { POST as resetPOST } from '@/app/api/v1/app/demo-clients/[id]/reset-sessions/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { loadResetTargets, performReset } from '@/app/api/v1/app/demo-clients/_lib/reset';
@@ -69,7 +67,6 @@ const COUNTS = { sessions: 2, answerSlots: 5, turns: 4, events: 6, invitations: 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   prismaMock.appDemoClient.findUnique.mockResolvedValue(CLIENT);
   (loadResetTargets as unknown as Mock).mockResolvedValue({
@@ -80,14 +77,6 @@ beforeEach(() => {
 });
 
 describe('POST /api/v1/app/demo-clients/:id/reset-sessions (F6.4)', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await resetPOST(jsonReq({ confirmSlug: 'acme-bank' }), ctx());
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-    expect(performReset).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await resetPOST(jsonReq({ confirmSlug: 'acme-bank' }), ctx())).status).toBe(401);

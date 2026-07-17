@@ -18,7 +18,6 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/report/format', () => ({ formatReportContent: vi.fn() }));
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
   resolveAgentProviderAndModel: vi.fn(),
@@ -39,7 +38,6 @@ vi.mock('@/lib/app/questionnaire/report/appendix', async (importActual) => ({
 }));
 
 import { prisma } from '@/lib/db/client';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manager';
@@ -48,7 +46,6 @@ import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/repor
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import { runReportResearch } from '@/lib/app/questionnaire/report/research';
 import { synthesiseReportAppendix } from '@/lib/app/questionnaire/report/appendix';
-import { APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG } from '@/lib/app/questionnaire/constants';
 import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -128,8 +125,8 @@ beforeEach(() => {
   });
   (searchKnowledge as Mock).mockResolvedValue([]);
   (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue([]);
-  // Formatter off by default — the existing suite asserts the un-thinned prompt + unformatted output.
-  (isFeatureEnabled as Mock).mockResolvedValue(false);
+  // Default formatter mock echoes the writer output unchanged (formatted:false) so tests that don't
+  // exercise the formatter see the writer content pass straight through.
   (formatReportContent as Mock).mockImplementation((content: unknown) => ({
     content,
     costUsd: 0,
@@ -524,20 +521,6 @@ describe('generateRespondentReport', () => {
     expect(system?.content).toMatch(/never invent facts/i);
   });
 
-  it('instructs the model to write in short, blank-line-separated paragraphs', async () => {
-    const { provider, chat } = fakeProvider(VALID_RESPONSE);
-    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
-
-    await generateRespondentReport('sess-1');
-    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
-      (m) => m.role === 'system'
-    );
-    expect(system?.content).toMatch(/readable paragraphs/i);
-    expect(system?.content).toMatch(/never emit one large block of text/i);
-    // The JSON-shape directive also spells out the blank-line paragraph separator.
-    expect(system?.content).toContain('separate paragraphs with a blank line');
-  });
-
   // One case per style (not a single loop) so a failure in one style doesn't mask the others, and
   // each relies on the shared beforeEach setup rather than re-typing the mocks inline.
   it.each([
@@ -591,16 +574,6 @@ describe('generateRespondentReport', () => {
     expect(user?.content).not.toContain('Audience: Line managers');
   });
 
-  it('does not run the formatter and returns formatted:false when the flag is off', async () => {
-    const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
-
-    const result = await generateRespondentReport('sess-1');
-
-    expect(formatReportContent).not.toHaveBeenCalled();
-    expect(result.formatted).toBe(false);
-  });
-
   it('reports 100% completion when every slot was answered', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
     (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
@@ -639,10 +612,6 @@ describe('generateRespondentReport with the Report Formatter enabled', () => {
     sections: [{ heading: 'Strengths', body: 'Consistent positivity.' }],
     actions: ['Keep it up'],
   };
-
-  beforeEach(() => {
-    (isFeatureEnabled as Mock).mockResolvedValue(true);
-  });
 
   it('runs the formatter on the writer output and sums both costs', async () => {
     const { provider } = fakeProvider(VALID_RESPONSE);
@@ -752,23 +721,8 @@ describe('generateRespondentReport — web-search research', () => {
   }
 
   beforeEach(() => {
-    // Web-search platform flag on; formatter flag stays off.
-    (isFeatureEnabled as Mock).mockImplementation(
-      (flag: string) => flag === APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG
-    );
     // Appendix opt-in is off in most tests; default the pass to a no-op so cost sums stay clean.
     (synthesiseReportAppendix as Mock).mockResolvedValue({ appendix: null, costUsd: 0 });
-  });
-
-  it('does not run research when the platform flag is off (even if config enables it)', async () => {
-    (isFeatureEnabled as Mock).mockResolvedValue(false);
-    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(researchConfig());
-    const { provider } = fakeProvider(VALID_RESPONSE);
-    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
-
-    const result = await generateRespondentReport('sess-1');
-    expect(runReportResearch).not.toHaveBeenCalled();
-    expect(result.content).not.toHaveProperty('research');
   });
 
   it('runs a before round, folds it into the prompt, and attaches the research section', async () => {

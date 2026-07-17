@@ -1,7 +1,7 @@
 # Data Slots — the semantic abstraction layer over questions
 
-> **Sub-flag.** `APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED` (`isDataSlotsEnabled`). Off by default.
-> The runtime mode additionally requires `APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED`.
+> **Always on.** Data slots are a permanent capability — there is no flag to check. A version
+> runs in data-slot mode once it has ≥1 saved data slot (see the runtime section below).
 
 ## The idea
 
@@ -117,7 +117,7 @@ below for the draft lifecycle (generate persists it, save promotes + clears it, 
    add-a-question paths (the design-evaluation finding card's one-click "Add to questionnaire" and
    the structure editor's seed composer — both shown only when the version already has slots), and a
    catch-all **"Assign … with AI"** button on this review surface's unslotted-questions banner.
-4. **Launch gate:** when the flag is on, "Data slots generated" is a launch-checklist item
+4. **Launch gate:** "Data slots generated" is a launch-checklist item
    (client `LaunchChecklist` + server `assertLaunchable`), counting only **saved** `AppDataSlot`
    rows — a pending draft does not satisfy the gate — so every launched questionnaire runs in
    data-slot mode.
@@ -142,7 +142,8 @@ Two callers:
   backfills each; idempotent (skips versions that already have slots; `--force` regenerates).
   Flags: `--dry-run`, `--force`, `--version=<id>`, `--questionnaire=<id>`, `--granularity=<level>`.
   Per-version fail-soft — one broken version never aborts the batch. Needs an LLM provider
-  configured. WARNS if the data-slots flag is off (backfilled slots stay dormant until it's on).
+  configured. Backfilled slots are live immediately (a version with ≥1 saved slot runs in
+  data-slot mode).
 - **Demo seed** — `prisma/seeds/app-questionnaire/025-demo-content.ts` calls it once **after** its
   transaction commits (an LLM call must not run inside a DB transaction), so a fresh
   `LOAD_DEMO_CONTENT=1` seed produces a demo that already has slots. Fail-soft: with no provider it
@@ -150,7 +151,7 @@ Two callers:
 
 ## Runtime: the data-slot conversation (`runDataSlotTurn`)
 
-Data-slot mode is active when the flag is on AND the version has ≥1 data slot. The `/messages`
+Data-slot mode is active when the version has ≥1 data slot. The `/messages`
 route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) instead of `runTurn`:
 
 1. **Combined extraction (re-scan + enrich)** — the F4.2 extractor, given `dataSlotCandidates`
@@ -236,7 +237,7 @@ data-slot turn (the loader resolves it to the active data slot for re-ask/transi
 
 **Contradiction detection + refinement (F4.3/F4.4) run in data-slot mode** (parity with question
 mode) via the shared `runContradictionPhase`: gated by the questionnaire's `contradictionMode` +
-`contradictionEveryNTurns` cadence and the platform flag, with a ≥1-stored-answer floor (a single
+`contradictionEveryNTurns` cadence, with a ≥1-stored-answer floor (a single
 answer can contradict the latest message; ≥2 only when there's no message). They compare the **background question answers** — and, crucially, the respondent's
 **latest message** (`currentStatement`) — so a _same-slot reversal_ across turns ("I hate the job"
 → "I love my job") is caught even when extraction didn't overwrite the stored answer. Under `flag`
@@ -287,19 +288,17 @@ question slots) and asks the seeded **selector agent** which to pursue next.
   sessions and silently fell back to the deterministic order. That short-circuit is gone.) The
   `anonymous` flag still threads from `resolveTurnAccess` → `/messages` → `buildTurnInvokers` for
   caller compatibility but **no longer gates** selection.
-- **Gating.** Sub-flag `APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED`
-  (`isAdaptiveDataSlotSelectionEnabled` = master AND data-slots AND live-sessions AND this sub-flag),
-  off by default. The `/messages` route wires the invoker only in data-slot mode with the flag on,
-  and lazily ensures the slots are embedded the first time such a session runs (cheap no-op once
-  embedded; fail-soft).
+- **Gating.** Always on — there is no flag to check. The `/messages` route wires the invoker
+  whenever the session runs in data-slot mode, and lazily ensures the slots are embedded the first
+  time such a session runs (cheap no-op once embedded; fail-soft).
 - **Admin surfaces.** The **Data slots tab** shows an explicit "Generate embeddings" step + coverage
-  when the feature is on (`GET/POST …/versions/:vid/embed-data-slots`). The **Settings tab** surfaces
+  (`GET/POST …/versions/:vid/embed-data-slots`). The **Settings tab** surfaces
   the same `DataSlotEmbeddingStep` in the "Questions & completion" group beside the data-slot config
-  (gated on the `adaptiveDataSlots` workspace flag, threaded settings page → `VersionSettingsPanel` →
-  `ConfigEditor`) — the data-slot analogue of the question-embeddings step under Selection strategy,
+  (threaded settings page → `VersionSettingsPanel` → `ConfigEditor`) — the data-slot analogue of the
+  question-embeddings step under Selection strategy,
   so an admin can re-embed after editing slot wording without leaving Settings. The **Review & Launch**
-  checklist adds a "Data slots embedded for adaptive selection" check — required when the feature is
-  on AND the version has data slots, **launch-only** (the preview gate opts out; the lazy backstop
+  checklist adds a "Data slots embedded for adaptive selection" check — required when the version has
+  data slots, **launch-only** (the preview gate opts out; the lazy backstop
   covers rehearsal). Mirrors the question-slot embedding operability.
 
 ### Deepen a volunteered tangent (be led by the respondent)

@@ -27,7 +27,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   resetSessionsSchema,
   resetSessionsQuerySchema,
@@ -89,4 +88,4 @@ const handleResetSessions = withAdminAuth<{ id: string }>(async (request, sessio
   return successResponse({ id, deletedCounts, resetInvitations });
 });
 
-export const POST = withQuestionnairesEnabled(handleResetSessions);
+export const POST = handleResetSessions;

@@ -10,13 +10,7 @@
 
 import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const cohortReportWorkflow = diagram({
   slug: 'cohort-report',
@@ -126,9 +120,6 @@ export const cohortReportWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.cohortReport) {
-      return unavailable('Cohort reporting is not enabled.');
-    }
     if (!ctx.config.cohortReport.enabled) {
       return inactive('Cohort reporting is turned off for this questionnaire.');
     }

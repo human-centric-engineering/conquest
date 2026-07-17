@@ -7,8 +7,7 @@
  * The admin-side export of any respondent's session, nested under the questionnaire so
  * the route enforces ownership: the session's version must belong to questionnaire `:id`
  * (404 otherwise — don't confirm a session exists under a questionnaire it doesn't).
- * Admin-authenticated (`withAdminAuth`); the feature-flag gate runs first
- * (`withQuestionnairesEnabled`) so a disabled app looks like a missing route.
+ * Admin-authenticated (`withAdminAuth`).
  *
  * No admin UI triggers this yet — the P8 admin session views will wire a button to it.
  * Built now (per F7.4) so that work is pure front-end. Anonymous-mode redaction is the
@@ -22,7 +21,6 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   loadSessionExport,
   buildSessionExportPdfModel,
@@ -80,4 +78,4 @@ const handleAdminExportPdf = withAdminAuth<{ id: string; sessionId: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleAdminExportPdf);
+export const GET = handleAdminExportPdf;

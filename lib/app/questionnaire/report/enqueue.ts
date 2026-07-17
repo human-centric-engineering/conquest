@@ -9,11 +9,6 @@
  */
 
 import { prisma } from '@/lib/db/client';
-import { isFeatureEnabled } from '@/lib/feature-flags';
-import {
-  APP_QUESTIONNAIRES_FLAG,
-  APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 
@@ -22,12 +17,6 @@ import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
  * `false` when the feature is off / the version isn't in insights mode (the common case).
  */
 export async function enqueueRespondentReport(sessionId: string): Promise<boolean> {
-  const [master, sub] = await Promise.all([
-    isFeatureEnabled(APP_QUESTIONNAIRES_FLAG),
-    isFeatureEnabled(APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG),
-  ]);
-  if (!master || !sub) return false;
-
   const meta = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
     select: { version: { select: { config: { select: { respondentReport: true } } } } },

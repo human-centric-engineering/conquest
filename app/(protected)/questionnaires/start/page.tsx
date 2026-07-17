@@ -1,11 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound, redirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
-import { isLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   createOrResumeAuthedSession,
   type AuthedSessionRequest,
@@ -32,8 +31,6 @@ export default async function StartQuestionnairePage({
 }: {
   searchParams: Promise<{ invitationToken?: string; versionId?: string }>;
 }) {
-  if (!(await isLiveSessionsEnabled())) notFound();
-
   const sp = await searchParams;
   const request: AuthedSessionRequest | null = sp.invitationToken
     ? { invitationToken: sp.invitationToken }

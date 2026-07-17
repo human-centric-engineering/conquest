@@ -14,7 +14,6 @@ import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '203.0.113.7') }));
 
@@ -38,7 +37,6 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
 import { GET as metadataGET } from '@/app/api/v1/app/invitations/metadata/route';
 import { POST as acceptPOST } from '@/app/api/v1/app/invitations/accept/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -79,7 +77,6 @@ function invitationRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(invitationRow());
   prismaMock.appQuestionnaireInvitation.update.mockResolvedValue({});
   prismaMock.appQuestionnaireSession.updateMany.mockResolvedValue({ count: 0 });
@@ -92,11 +89,6 @@ beforeEach(() => {
 });
 
 describe('GET metadata', () => {
-  it('404s when the flag is off', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    expect((await metadataGET(metaReq(TOKEN))).status).toBe(404);
-  });
-
   it('400s without a token', async () => {
     expect((await metadataGET(metaReq())).status).toBe(400);
   });

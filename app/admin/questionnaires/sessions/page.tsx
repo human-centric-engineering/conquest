@@ -17,7 +17,6 @@ import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
 import { IS_ALPHA } from '@/lib/app/release-stage';
-import { resolveQuestionnaireWorkspaceFlags } from '@/lib/app/questionnaire/workspace-data';
 import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
 import type { PaginationMeta } from '@/types/api';
 
@@ -46,9 +45,8 @@ async function getSessions(): Promise<{ items: AdminSessionRefItem[]; meta: Pagi
 }
 
 export default async function AlphaSessionRefsPage() {
-  // Alpha-only surface: hidden entirely unless the product is in the alpha stage AND live-sessions is on.
-  const flags = await resolveQuestionnaireWorkspaceFlags();
-  if (!IS_ALPHA || !flags.liveSessions) notFound();
+  // Alpha-only surface: hidden entirely unless the product is in the alpha stage.
+  if (!IS_ALPHA) notFound();
 
   const { items, meta } = await getSessions();
 

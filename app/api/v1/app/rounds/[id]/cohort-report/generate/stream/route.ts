@@ -22,7 +22,6 @@ import { sseResponse } from '@/lib/api/sse';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   narrowCohortReportSettings,
   buildCohortDataset,
@@ -89,4 +88,4 @@ const handleGenerateStream = withAdminAuth<Params>(async (request, session, { pa
   );
 });
 
-export const POST = withCohortReportEnabled(handleGenerateStream);
+export const POST = handleGenerateStream;

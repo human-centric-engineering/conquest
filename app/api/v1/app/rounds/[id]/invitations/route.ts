@@ -23,7 +23,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withCohortsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { generateRoundInvitationsSchema } from '@/lib/app/questionnaire/rounds';
 import { generateRoundInvitations } from '@/app/api/v1/app/rounds/_lib/invites';
 
@@ -74,4 +73,4 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
   return successResponse(result, undefined, { status: 201 });
 });
 
-export const POST = withCohortsEnabled(handleGenerate);
+export const POST = handleGenerate;

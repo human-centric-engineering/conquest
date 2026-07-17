@@ -14,7 +14,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
 
 import { promoteRespondentReportRevision } from '@/lib/app/questionnaire/report/revision';
-import { withRespondentReportEnabled } from '@/app/api/v1/app/questionnaire-sessions/_lib/report-flag';
 
 const handlePromote = withAdminAuth<{ id: string; rev: string }>(
   async (request, session, { params }) => {
@@ -48,4 +47,4 @@ const handlePromote = withAdminAuth<{ id: string; rev: string }>(
   }
 );
 
-export const POST = withRespondentReportEnabled(handlePromote);
+export const POST = handlePromote;

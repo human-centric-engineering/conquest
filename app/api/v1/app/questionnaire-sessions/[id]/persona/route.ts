@@ -27,11 +27,6 @@ import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { prisma } from '@/lib/db/client';
-import {
-  withLiveSessionsEnabled,
-  isPersonaSelectionEnabled,
-  ensurePersonaSelectionEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { PERSONA_KEY_MAX_LENGTH } from '@/lib/app/questionnaire/types';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import { resolveSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
@@ -60,11 +55,6 @@ async function handleGetPersona(
       return errorResponse(access.message, { code: access.code, status: access.status });
     }
 
-    // Platform flag off → no picker (the per-version toggle is the second gate, but the flag wins).
-    if (!(await isPersonaSelectionEnabled())) {
-      return successResponse({ persona: null });
-    }
-
     const persona = await resolveSessionPersonas(sessionId);
     log.info('Session persona menu read', { sessionId, enabled: persona?.enabled ?? false });
     return successResponse({ persona });
@@ -80,10 +70,6 @@ async function handleSetPersona(
   try {
     const log = await getRouteLogger(request);
     const { id: sessionId } = await context.params;
-
-    // Persona selection must be on to record a choice (GET degrades to null; PATCH 404s).
-    const blocked = await ensurePersonaSelectionEnabled();
-    if (blocked) return blocked;
 
     const session = await prisma.appQuestionnaireSession.findUnique({
       where: { id: sessionId },
@@ -131,5 +117,5 @@ async function handleSetPersona(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetPersona);
-export const PATCH = withLiveSessionsEnabled(handleSetPersona);
+export const GET = handleGetPersona;
+export const PATCH = handleSetPersona;

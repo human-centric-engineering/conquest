@@ -29,7 +29,6 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resumeByRefLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { resolveAnonymousResumeByRef } from '@/app/api/v1/app/questionnaire-sessions/_lib/resume-by-ref';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
@@ -78,4 +77,4 @@ async function handleResumeByRef(request: NextRequest): Promise<Response> {
   }
 }
 
-export const POST = withLiveSessionsEnabled(handleResumeByRef);
+export const POST = handleResumeByRef;

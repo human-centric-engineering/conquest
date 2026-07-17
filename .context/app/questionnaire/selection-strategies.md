@@ -19,7 +19,7 @@ of truth; the config Zod schema, the editor's picker, and the registry all deriv
 from it. Default is `adaptive` (`DEFAULT_QUESTIONNAIRE_CONFIG` + the
 `AppQuestionnaireConfig.selectionStrategy` column default, set by migration
 `20260618143001_app_config_default_adaptive_strategy`) — new questionnaires get
-respondent-led selection out of the box, gated by the adaptive sub-flag below.
+respondent-led selection out of the box.
 
 ## Architecture — pure core + injected deps
 
@@ -112,8 +112,10 @@ completes via the weighted `coverageRatio`.
 
 ## Adaptive (LLM + pgvector)
 
-Gated behind the `APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED` sub-flag (opt-in
-on top of the master app flag, because it spends per turn). Flow:
+Always available — a version runs adaptive selection when its `selectionStrategy` config
+is set to `adaptive` (the per-version selection-strategy setting). It spends per turn, so
+it's an author's choice, not the default for a version pinned to a deterministic strategy.
+Flow:
 
 1. Empty history / no deps → fall back to `weighted`.
 2. Embed the last user message (`embedText`, knowledge embedder, query mode).
@@ -126,9 +128,9 @@ on top of the master app flag, because it spends per turn). Flow:
    unparseable pick — degrades to `weighted`, never throws. A respondent never
    sees a turn break because the LLM was down.
 
-When the sub-flag is off, the route simply withholds deps, which lands here as the
-no-deps fallback; the config editor also hides `adaptive` from the picker (unless
-it's the already-saved value).
+On any version whose `selectionStrategy` is not `adaptive`, none of this runs — the
+deterministic strategy picks directly. The empty-history / no-deps case above still lands
+on the `weighted` fallback within the adaptive path itself.
 
 **What the selector sees.** The agent's **system prompt is load-bearing** — unlike
 the capability-dispatched agents, the selector runs as a direct structured completion
@@ -173,7 +175,7 @@ backfill route below (idempotent; `force` re-embeds after prompt edits).
 | `GET .../versions/:vid/embed-questions`                      | Embedding coverage `{ total, embedded, missing }` (Settings step + launch gate). |
 | `POST .../versions/:vid/embed-questions` (body `{ force? }`) | Generate/backfill slot embeddings for adaptive selection.                        |
 
-Both are admin-only and 404 behind the master flag. `next-question` runs the
+Both are admin-only. `next-question` runs the
 deterministic strategies with no sub-cap (section 100/min); the `adaptive` path
 takes a per-admin sub-cap (`adaptiveSelectionLimiter`), and the embedding backfill
 takes its own (`embedSlotsLimiter`).
@@ -197,7 +199,7 @@ round?, sessionId?, strategyOverride? }` → `{ strategy, decision, question? }`
 Nothing in the authoring flow generates embeddings, so a version configured for
 `adaptive` would otherwise rank against an empty set and silently degrade to
 `weighted` (sequential-looking) forever. The live turn route closes that gap: when
-the adaptive sub-flag is on **and** the version's `selectionStrategy === 'adaptive'`,
+the version's `selectionStrategy === 'adaptive'`,
 `POST .../questionnaire-sessions/:id/messages` calls `ensureVersionSlotsEmbedded`
 (`_lib/slot-embeddings.ts`) before the turn runs. A single `COUNT(… IS NULL)`
 short-circuits to a no-op once the version is fully embedded, so only the **first**
@@ -219,13 +221,12 @@ backstop alone:
   After a generate it refetches coverage and `router.refresh()`es so the launch checklist updates.
 
 - **Review & Launch — "Questions embedded" check.** `launchReadinessChecks` adds an `embeddings`
-  check **only** when `embeddingsRequired` (the version is `adaptive` and the sub-flag is on). The
+  check **only** when `embeddingsRequired` (the version's `selectionStrategy` is `adaptive`). The
   launch gate (`status` route → `loadLaunchReadiness`) blocks `draft → launched` until every slot
   is embedded; the checklist row links to the Settings tab. This is **launch-only** — the _preview_
   gate (`createPreviewSession` → `loadLaunchReadiness(vid, { includeEmbeddings: false })`) skips it,
   so an admin can still rehearse a draft before embedding (the lazy backstop covers the turn loop).
-  A non-adaptive version never sees this check; a version whose adaptive sub-flag is off doesn't
-  either (it degrades to `weighted` at runtime, so embeddings are irrelevant).
+  A non-adaptive version never sees this check.
 
 ### Embedding staleness (operator caveat)
 

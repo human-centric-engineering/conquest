@@ -16,7 +16,6 @@ import type { NextRequest } from 'next/server';
 
 // ─── Mocks (hoisted) ──────────────────────────────────────────────────────────
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -46,12 +45,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => rateLimitMock);
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/completion-status/route';
 
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
-import {
-  APP_QUESTIONNAIRES_COMPLETION_FLAG,
-  APP_QUESTIONNAIRES_FLAG,
-} from '@/lib/app/questionnaire/constants';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -158,10 +152,6 @@ const COMPLETE_BODY = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Master + completion sub-flag both on by default.
-  vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-    Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG || flag === APP_QUESTIONNAIRES_COMPLETION_FLAG)
-  );
   setAuth(mockAdminUser());
   prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue(versionRow());
   prismaMock.aiAgent.findUnique.mockResolvedValue(AGENT_ROW);
@@ -175,13 +165,6 @@ beforeEach(() => {
 });
 
 describe('gate order + auth', () => {
-  it('404s when the master flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    const res = await POST(req(COMPLETE_BODY), ctx(PARAMS));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     expect((await POST(req(COMPLETE_BODY), ctx(PARAMS))).status).toBe(401);
@@ -239,18 +222,6 @@ describe('assessment', () => {
 });
 
 describe('sub-flag + fail-soft', () => {
-  it('returns the assessment without an offer (NOT 404) when the completion sub-flag is off', async () => {
-    vi.mocked(isFeatureEnabled).mockImplementation((flag) =>
-      Promise.resolve(flag === APP_QUESTIONNAIRES_FLAG)
-    );
-    const res = await POST(req(COMPLETE_BODY), ctx(PARAMS));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data.assessment.kind).toBe('offer');
-    expect(body.data.offer).toBeUndefined();
-    expect(dispatchMock.capabilityDispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
   it('is fail-soft: a composer error yields the assessment + a diagnostic, no offer', async () => {
     dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue({
       success: false,

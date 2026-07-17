@@ -31,7 +31,6 @@ import {
 } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 
-import { ensureQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   acceptInvitationSchema,
   isInvitationTransitionAllowed,
@@ -42,9 +41,6 @@ import {
 } from '@/app/api/v1/app/invitations/_lib/resolve';
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const blocked = await ensureQuestionnairesEnabled();
-  if (blocked) return blocked;
-
   const log = await getRouteLogger(request);
   const clientIp = getClientIP(request);
 

@@ -10,15 +10,10 @@
 
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
-import { NotFoundError } from '@/lib/api/errors';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import {
-  isDataSlotsEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { deleteDataSlotDraft } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 
@@ -27,10 +22,6 @@ const handleDiscard = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const clientIp = getClientIP(request);
     const { id, vid } = await params;
-
-    if (!(await isDataSlotsEnabled())) {
-      throw new NotFoundError('Data slots are not enabled');
-    }
 
     const scoped = await loadScopedVersion(id, vid);
     if (!scoped) {
@@ -53,4 +44,4 @@ const handleDiscard = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const DELETE = withQuestionnairesEnabled(handleDiscard);
+export const DELETE = handleDiscard;

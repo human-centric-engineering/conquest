@@ -19,7 +19,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { parseDocument } from '@/lib/orchestration/knowledge/parsers';
 
-import { withIntroScreenEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { INTRO_BACKGROUND_MAX_LENGTH } from '@/lib/app/questionnaire/types';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { parseUploadGuard } from '@/app/api/v1/app/questionnaires/intro-background/_lib/input';
@@ -74,4 +73,4 @@ const handleParse = withAdminAuth(async (request: NextRequest, session) => {
   return successResponse({ text, truncated: trimmed.length > text.length });
 });
 
-export const POST = withIntroScreenEnabled(handleParse);
+export const POST = handleParse;

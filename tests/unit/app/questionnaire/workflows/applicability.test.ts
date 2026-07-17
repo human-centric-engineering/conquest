@@ -2,42 +2,20 @@
  * Unit tests: per-questionnaire applicability predicates.
  *
  * Drives each diagram's `applicability(ctx)` across representative contexts so
- * the questionnaire lens stays honest: a flag off ⇒ `unavailable`, a flag on but
- * the per-version gate off ⇒ `inactive`, both on ⇒ `applies`. Also pins the
- * distinctive gates (ingested-vs-composed provenance, launched-only live flows,
- * the cohort round gate, the respondent-report AI-mode gate) so a renamed flag
- * or config field fails CI.
+ * the questionnaire lens stays honest: a per-version gate off ⇒ `inactive`, the
+ * gate on ⇒ `applies`. Also pins the distinctive gates (ingested-vs-composed
+ * provenance, launched-only live flows, the cohort round gate, the
+ * respondent-report AI-mode gate) so a renamed config field fails CI.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
-import { WORKFLOW_DIAGRAMS, getWorkflowDiagram } from '@/lib/app/questionnaire/workflows/registry';
-import type { ApplicabilityContext, WorkflowFlags } from '@/lib/app/questionnaire/workflows/types';
-
-function flags(value: boolean): WorkflowFlags {
-  return {
-    master: value,
-    generativeAuthoring: value,
-    editAgent: value,
-    liveSessions: value,
-    answerExtraction: value,
-    dataSlots: value,
-    respondentReport: value,
-    cohortReport: value,
-    introScreen: value,
-    voiceInput: value,
-    personaSelection: value,
-    adaptiveSelection: value,
-    turnEvaluation: value,
-    designEvaluation: value,
-    advisor: value,
-  };
-}
+import { getWorkflowDiagram } from '@/lib/app/questionnaire/workflows/registry';
+import type { ApplicabilityContext } from '@/lib/app/questionnaire/workflows/types';
 
 function makeCtx(overrides: Partial<ApplicabilityContext> = {}): ApplicabilityContext {
   return {
-    flags: flags(true),
     config: DEFAULT_QUESTIONNAIRE_CONFIG,
     versionStatus: 'launched',
     goalProvenance: 'inferred',
@@ -55,13 +33,6 @@ function statusOf(slug: string, ctx: ApplicabilityContext): string {
 }
 
 describe('workflow applicability', () => {
-  it('every workflow is unavailable when all flags are off', () => {
-    const ctx = makeCtx({ flags: flags(false) });
-    for (const diagram of WORKFLOW_DIAGRAMS) {
-      expect(diagram.applicability(ctx).status, diagram.slug).toBe('unavailable');
-    }
-  });
-
   it('document ingestion applies only to versions with source documents', () => {
     expect(statusOf('document-ingestion', makeCtx({ sourceDocumentCount: 2 }))).toBe('applies');
     expect(statusOf('document-ingestion', makeCtx({ sourceDocumentCount: 0 }))).toBe('inactive');
@@ -82,27 +53,18 @@ describe('workflow applicability', () => {
     expect(statusOf('conversation-turn', makeCtx({ versionStatus: 'draft' }))).toBe('inactive');
   });
 
-  it('answer extraction applies on launched versions, inactive on drafts, off without the flag', () => {
+  it('answer extraction applies on launched versions, inactive on drafts', () => {
     expect(statusOf('answer-extraction', makeCtx({ versionStatus: 'launched' }))).toBe('applies');
     expect(statusOf('answer-extraction', makeCtx({ versionStatus: 'draft' }))).toBe('inactive');
-    expect(
-      statusOf('answer-extraction', makeCtx({ flags: { ...flags(true), answerExtraction: false } }))
-    ).toBe('unavailable');
   });
 
-  it('structure edit applies on drafts, inactive once launched, off without the flag', () => {
+  it('structure edit applies on drafts, inactive once launched', () => {
     expect(statusOf('structure-edit', makeCtx({ versionStatus: 'draft' }))).toBe('applies');
     expect(statusOf('structure-edit', makeCtx({ versionStatus: 'launched' }))).toBe('inactive');
-    expect(
-      statusOf('structure-edit', makeCtx({ flags: { ...flags(true), editAgent: false } }))
-    ).toBe('unavailable');
   });
 
-  it('data-slot generation applies on any version, off without the flag', () => {
+  it('data-slot generation applies on any version', () => {
     expect(statusOf('data-slot-generation', makeCtx())).toBe('applies');
-    expect(
-      statusOf('data-slot-generation', makeCtx({ flags: { ...flags(true), dataSlots: false } }))
-    ).toBe('unavailable');
   });
 
   it('data-slot turn needs both a launched version and data slots', () => {
@@ -154,66 +116,37 @@ describe('workflow applicability', () => {
     expect(statusOf('cohort-report', noRound)).toBe('inactive');
   });
 
-  it('turn inspector needs live sessions and the inspector toggle on', () => {
+  it('turn inspector needs the inspector toggle on', () => {
     const on = makeCtx({
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
     });
     expect(statusOf('turn-inspector', on)).toBe('applies');
-    // Toggle off → inactive (flag on, per-version config gate off).
+    // Toggle off → inactive (per-version config gate off).
     expect(
       statusOf(
         'turn-inspector',
         makeCtx({ config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: false } })
       )
     ).toBe('inactive');
-    // Live sessions off → unavailable.
-    expect(
-      statusOf(
-        'turn-inspector',
-        makeCtx({
-          flags: { ...flags(true), liveSessions: false },
-          config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
-        })
-      )
-    ).toBe('unavailable');
   });
 
-  it('design evaluation and config advisor gate purely on their flags', () => {
+  it('design evaluation, config advisor, and report config assistant apply on any version', () => {
     expect(statusOf('design-evaluation', makeCtx())).toBe('applies');
-    expect(
-      statusOf('design-evaluation', makeCtx({ flags: { ...flags(true), designEvaluation: false } }))
-    ).toBe('unavailable');
     expect(statusOf('config-advisor', makeCtx())).toBe('applies');
-    expect(statusOf('config-advisor', makeCtx({ flags: { ...flags(true), advisor: false } }))).toBe(
-      'unavailable'
-    );
+    expect(statusOf('report-config-assistant', makeCtx())).toBe('applies');
   });
 
-  it('agent settings advisor applies workspace-wide, gating only on the master flag', () => {
+  it('agent settings advisor applies workspace-wide', () => {
     // Workspace-level (not version-specific): available whenever the surface is on.
     expect(statusOf('agent-settings-advisor', makeCtx())).toBe('applies');
-    // The master-off case is also covered by the "all flags off" sweep above; pin it explicitly.
-    expect(
-      statusOf('agent-settings-advisor', makeCtx({ flags: { ...flags(true), master: false } }))
-    ).toBe('unavailable');
   });
 
-  it('turn evaluation needs the turn-evaluation flag and captured turns', () => {
+  it('turn evaluation needs captured turns', () => {
     const on = makeCtx({
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
     });
     expect(statusOf('turn-evaluation', on)).toBe('applies');
-    // Flag off → unavailable.
-    expect(
-      statusOf(
-        'turn-evaluation',
-        makeCtx({
-          flags: { ...flags(true), turnEvaluation: false },
-          config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, previewInspectorEnabled: true },
-        })
-      )
-    ).toBe('unavailable');
-    // Flag on but no inspector (no captured turns) → inactive.
+    // No inspector (no captured turns) → inactive.
     expect(
       statusOf(
         'turn-evaluation',

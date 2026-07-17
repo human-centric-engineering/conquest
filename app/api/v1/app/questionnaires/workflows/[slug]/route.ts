@@ -15,7 +15,6 @@ import { z } from 'zod';
 import { logger } from '@/lib/logging';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse, errorResponse } from '@/lib/api/responses';
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { enrichWorkflow } from '@/lib/app/questionnaire/workflows/enrich';
 import {
   buildApplicabilityContext,
@@ -52,4 +51,4 @@ const handleGet = withAdminAuth<{ slug: string }>(
   }
 );
 
-export const GET = withQuestionnairesEnabled(handleGet);
+export const GET = handleGet;

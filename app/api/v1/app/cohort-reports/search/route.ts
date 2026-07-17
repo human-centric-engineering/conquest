@@ -14,7 +14,6 @@ import { validateQueryParams } from '@/lib/api/validation';
 import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { validateCohortReportContent } from '@/lib/app/questionnaire/cohort-report';
 import { htmlToParagraphs } from '@/lib/app/questionnaire/cohort-report/pdf-model';
 
@@ -110,4 +109,4 @@ const handleSearch = withAdminAuth(async (request) => {
   return successResponse({ results });
 });
 
-export const GET = withCohortReportEnabled(handleSearch);
+export const GET = handleSearch;

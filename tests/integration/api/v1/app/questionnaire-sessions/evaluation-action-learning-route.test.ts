@@ -10,7 +10,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-vi.mock('@/lib/feature-flags', () => ({ isFeatureEnabled: vi.fn() }));
 vi.mock('@/lib/auth/config', () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Headers())) }));
 
@@ -18,7 +17,6 @@ const storeMock = vi.hoisted(() => ({ actionTurnEvaluationForLearning: vi.fn() }
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store', () => storeMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/evaluations/[evalId]/action-learning/route';
-import { isFeatureEnabled } from '@/lib/feature-flags';
 import { auth } from '@/lib/auth/config';
 import {
   mockAdminUser,
@@ -59,7 +57,6 @@ const OK_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (isFeatureEnabled as unknown as Mock).mockResolvedValue(true);
   setAuth(mockAdminUser());
   storeMock.actionTurnEvaluationForLearning.mockResolvedValue({
     ok: true,
@@ -69,14 +66,6 @@ beforeEach(() => {
 });
 
 describe('POST action-learning', () => {
-  it('404s when the flag is off, before auth', async () => {
-    (isFeatureEnabled as unknown as Mock).mockResolvedValue(false);
-    setAuth(null);
-    const res = await POST(req({ datasetId: 'ds-1' }), ctx('sess-1', 'eval-1'));
-    expect(res.status).toBe(404);
-    expect(auth.api.getSession).not.toHaveBeenCalled();
-  });
-
   it('401s when unauthenticated', async () => {
     setAuth(mockUnauthenticatedUser());
     const res = await POST(req({ datasetId: 'ds-1' }), ctx('sess-1', 'eval-1'));

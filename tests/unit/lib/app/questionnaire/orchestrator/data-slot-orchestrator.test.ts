@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   runDataSlotTurn,
-  DATA_SLOT_COMPLETE_MESSAGE,
   DATA_SLOT_SELECTION_TOOL_SLUG,
   PROVISIONAL_FLOOR_CONFIDENCE,
   type DataSlotTarget,
@@ -52,7 +51,6 @@ function dsState(input: {
   existingAnswers?: TurnState['existingAnswers'];
   selectionRound?: number;
   config?: Partial<TurnState['config']>;
-  flags?: Partial<TurnState['flags']>;
 }): TurnState {
   return {
     ...state({
@@ -62,7 +60,6 @@ function dsState(input: {
       ...(input.existingAnswers ? { existingAnswers: input.existingAnswers } : {}),
       ...(input.selectionRound !== undefined ? { selectionRound: input.selectionRound } : {}),
       ...(input.config ? { config: input.config } : {}),
-      ...(input.flags ? { flags: input.flags } : {}),
     }),
     dataSlots: input.dataSlots,
     dataSlotAnswered: input.dataSlotAnswered ?? [],
@@ -272,28 +269,6 @@ describe('runDataSlotTurn — sweep + completion', () => {
     expect(result.assessment.kind).toBe('offer');
   });
 
-  it('emits DATA_SLOT_COMPLETE_MESSAGE when all questions answered but completion flag is off', async () => {
-    // When flags.completion is false the offer-prose path is disabled, so the orchestrator falls
-    // through to the deterministic DATA_SLOT_COMPLETE_MESSAGE terminal frame instead of invoking
-    // the streaming offer composer. This is a distinct constant from question-mode COMPLETE_MESSAGE.
-    const { invokers } = stubInvokers();
-    const result = await runDataSlotTurn(
-      dsState({
-        questions: [q({ id: 'q1' })],
-        answered: [{ questionId: 'q1', confidence: 0.9 }],
-        dataSlots: [ds({ id: 'd1', theme: 'A' })],
-        dataSlotAnswered: [],
-        flags: { completion: false },
-      }),
-      invokers
-    );
-    expect(result.response.kind).toBe('complete');
-    if (result.response.kind === 'complete') {
-      expect(result.response.text).toBe(DATA_SLOT_COMPLETE_MESSAGE);
-    }
-    expect(result.assessment.kind).toBe('offer');
-  });
-
   it('includes costWrapUp in the offer input when soft cost pressure is active', async () => {
     // When state.costPressure === 'soft' and all questions are answered, buildOfferInput adds
     // costWrapUp: true to the OfferComposeInput so the prose composer can hint the user to wrap up.
@@ -496,6 +471,29 @@ describe('runDataSlotTurn — seriousness / abuse gate', () => {
     expect(result.sideEffects.dataSlotFills).toHaveLength(0);
     // No side-band notices on the terminal turn (the extraction diagnostic is dropped).
     expect(result.events).toEqual([]);
+  });
+
+  it('does not run the judge when abuseThreshold is 0 (off for this questionnaire)', async () => {
+    const { invokers, calls } = stubInvokers({
+      extract: { intents: [intent({ slotKey: 'a' })], dataSlotFills: [fill('d1')] },
+      serious: { verdict: { serious: false, reason: 'hostile' } },
+    });
+
+    const result = await runDataSlotTurn(
+      dsState({
+        userMessage: 'screw you',
+        questions: [q({ id: 'a' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A' })],
+        config: { abuseThreshold: 0 },
+      }),
+      invokers
+    );
+
+    // Gate off → no judge, no strike; the answer + fill are kept.
+    expect(calls.serious).toHaveLength(0);
+    expect(result.abuse).toBeUndefined();
+    expect(result.sideEffects.answerUpserts).toHaveLength(1);
+    expect(result.sideEffects.dataSlotFills).toHaveLength(1);
   });
 });
 

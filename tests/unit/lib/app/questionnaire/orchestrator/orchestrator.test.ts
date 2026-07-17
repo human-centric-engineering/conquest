@@ -2,7 +2,7 @@
  * Unit tests for the pure per-turn orchestrator (F6.1).
  *
  * Exhaustive over the pipeline's branch matrix with stub invokers (no capability, no DB):
- * which steps run given the message/flags/config, how extracted intents merge into the
+ * which steps run given the message/config, how extracted intents merge into the
  * downstream state, the offer-vs-question response, terminal branches, fail-soft warnings,
  * and cost summing. The capabilities themselves and the live wiring are tested elsewhere.
  */
@@ -79,16 +79,6 @@ describe('runTurn — extraction', () => {
     expect(calls.extract).toHaveLength(1);
     expect(result.sideEffects.answerUpserts).toHaveLength(1);
     expect(slugs(result.toolCalls)).toContain(EXTRACT_ANSWER_SLOTS_CAPABILITY_SLUG);
-  });
-
-  it('skips extraction when the flag is off, even with a message', async () => {
-    const { invokers, calls } = stubInvokers();
-    const result = await runTurn(
-      state({ userMessage: 'hi', questions: [q({ id: 'a' })], flags: { extraction: false } }),
-      invokers
-    );
-    expect(calls.extract).toHaveLength(0);
-    expect(result.sideEffects.answerUpserts).toHaveLength(0);
   });
 
   it('emits a warning and a failed tool-call when extraction returns a diagnostic', async () => {
@@ -170,21 +160,6 @@ describe('runTurn — contradiction detection', () => {
       })
     );
     expect(slugs(result.toolCalls)).toContain(DETECT_CONTRADICTIONS_CAPABILITY_SLUG);
-  });
-
-  it('skips detection when the contradiction flag is off (config on)', async () => {
-    const { invokers, calls } = stubInvokers();
-    await runTurn(
-      state({
-        userMessage: 'x',
-        questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'flag' },
-        flags: { contradiction: false },
-        existingAnswers: TWO_ANSWERS,
-      }),
-      invokers
-    );
-    expect(calls.detect).toHaveLength(0);
   });
 
   it('honours the every_n_turns cadence — skips an off-boundary turn, runs on a boundary', async () => {
@@ -295,22 +270,6 @@ describe('runTurn — refinement', () => {
     expect(calls.refine[0]?.trigger.contradiction).toBeDefined();
     expect(result.sideEffects.answerRefinements).toHaveLength(1);
     expect(slugs(result.toolCalls)).toContain(REFINE_ANSWER_CAPABILITY_SLUG);
-  });
-
-  it('does not refine when contradictions exist but refinement is off', async () => {
-    const { invokers, calls } = stubInvokers({ detect: { findings: [finding()] } });
-    const result = await runTurn(
-      state({
-        userMessage: 'x',
-        questions: [q({ id: 'a' })],
-        config: { contradictionMode: 'flag' },
-        flags: { refinement: false },
-        existingAnswers: TWO_ANSWERS,
-      }),
-      invokers
-    );
-    expect(calls.refine).toHaveLength(0);
-    expect(result.sideEffects.answerRefinements).toHaveLength(0);
   });
 
   it('does not refine when no contradiction was found', async () => {
@@ -445,17 +404,6 @@ describe('runTurn — completion offer', () => {
     expect(result.targetedQuestionId).toBeNull();
     expect(calls.select).toHaveLength(0);
     expect(slugs(result.toolCalls)).toContain(COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG);
-  });
-
-  it('falls back to a plain completion message when offer phrasing is disabled', async () => {
-    const { invokers, calls } = stubInvokers();
-    const s = offerState();
-    s.flags.completion = false;
-    const result = await runTurn(s, invokers);
-
-    expect(result.response).toEqual({ kind: 'complete', text: COMPLETE_MESSAGE });
-    expect(calls.select).toHaveLength(0);
-    expect(slugs(result.toolCalls)).not.toContain(COMPOSE_COMPLETION_OFFER_CAPABILITY_SLUG);
   });
 });
 

@@ -13,13 +13,7 @@ import {
   QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
-import {
-  applies,
-  diagram,
-  inactive,
-  node,
-  unavailable,
-} from '@/lib/app/questionnaire/workflows/types';
+import { applies, diagram, inactive, node } from '@/lib/app/questionnaire/workflows/types';
 
 export const answerExtractionWorkflow = diagram({
   slug: 'answer-extraction',
@@ -124,9 +118,6 @@ export const answerExtractionWorkflow = diagram({
     }),
   ],
   applicability: (ctx) => {
-    if (!ctx.flags.answerExtraction) {
-      return unavailable('Answer extraction is not enabled.');
-    }
     if (ctx.versionStatus === 'launched') {
       return applies('This version is launched — extraction runs on every reply.');
     }

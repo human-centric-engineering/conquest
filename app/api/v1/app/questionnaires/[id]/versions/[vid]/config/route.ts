@@ -25,7 +25,6 @@ import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-import { withQuestionnairesEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { updateConfigSchema } from '@/lib/app/questionnaire/authoring';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
@@ -110,4 +109,4 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const PATCH = withQuestionnairesEnabled(handleConfigPatch);
+export const PATCH = handleConfigPatch;

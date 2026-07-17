@@ -24,7 +24,6 @@ import { logger } from '@/lib/logging';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { z } from 'zod';
 
-import { withCohortReportEnabled } from '@/lib/app/questionnaire/feature-flag';
 import {
   scoringSchemaContentSchema,
   narrowScoringSchemaContent,
@@ -142,7 +141,7 @@ const handlePut = withAdminAuth<Params>(async (request, session, { params }) => 
   return successResponse({ ...(await buildSchemaView(editId)), ...forkMeta(fork) });
 });
 
-export const GET = withCohortReportEnabled(handleGet);
+export const GET = handleGet;
 // PATCH (not PUT): the editor always sends the full schema, but the platform apiClient exposes
 // patch/post/get/delete — PATCH keeps the client call idiomatic for a whole-resource save.
-export const PATCH = withCohortReportEnabled(handlePut);
+export const PATCH = handlePut;

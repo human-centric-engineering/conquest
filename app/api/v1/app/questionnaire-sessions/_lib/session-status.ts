@@ -25,10 +25,6 @@ import {
   type CostCapTier,
   type SessionStatusView,
 } from '@/lib/app/questionnaire/session';
-import {
-  isCostCapEnforcementEnabled,
-  isDataSlotsEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 
@@ -64,7 +60,7 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
   // learning" header all report one question-completeness figure. Coverage and kind are consumed
   // independently downstream (bar vs `canSubmitSession`), so overriding only the gate is safe.
   const dataSlots = loaded.base.dataSlots ?? [];
-  if (dataSlots.length > 0 && (await isDataSlotsEnabled())) {
+  if (dataSlots.length > 0) {
     const total = loaded.base.questions.length;
     const allAnswered = total > 0 && assessment.answeredCount >= total;
     assessment = {
@@ -79,7 +75,7 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
   const capUsd = loaded.base.config.costBudgetUsd;
   let costTier: CostCapTier = 'none';
   let capped = false;
-  if (capUsd !== null && capUsd > 0 && (await isCostCapEnforcementEnabled())) {
+  if (capUsd !== null && capUsd > 0) {
     capped = true;
     const spentUsd = await sumSessionTurnCost(sessionId);
     costTier = classifyCostCap(spentUsd, capUsd);

@@ -141,10 +141,9 @@ export async function buildTurnInvokers(opts: {
    */
   extractionCandidateSlots?: CapabilitySlotView[];
   activeQuestionKey: string | null;
-  adaptiveEnabled: boolean;
   /**
    * Data Slots feature: when true, wire the adaptive data-slot `selectDataSlot` invoker (embedding
-   * pre-filter + LLM selector). The route sets it from `isAdaptiveDataSlotSelectionEnabled()` AND
+   * pre-filter + LLM selector). The route sets it from adaptive data-slot mode being active AND
    * data-slot mode being active. When false/absent, the invoker is omitted and the data-slot
    * orchestrator keeps its deterministic topic-local pick.
    */
@@ -204,7 +203,6 @@ export async function buildTurnInvokers(opts: {
     slots,
     extractionCandidateSlots,
     activeQuestionKey,
-    adaptiveEnabled,
     dataSlotAdaptiveEnabled,
     goal,
     peerDivergenceByKey,
@@ -499,10 +497,10 @@ export async function buildTurnInvokers(opts: {
         ...(goal ? { goal } : {}),
         ...(peerDivergenceByKey ? { peerDivergenceByKey } : {}),
       };
-      // Adaptive's embedding + LLM path runs only when its sub-flag is on; otherwise it
+      // Adaptive's embedding + LLM path runs only for an `adaptive` version; otherwise it
       // degrades to `weighted` via the strategy's own fallback (no deps passed).
       let deps: StrategyDeps | undefined;
-      if (state.config.selectionStrategy === 'adaptive' && adaptiveEnabled) {
+      if (state.config.selectionStrategy === 'adaptive') {
         deps = buildAdaptiveDeps({
           userId,
           ...(anonymous ? { anonymous } : {}),

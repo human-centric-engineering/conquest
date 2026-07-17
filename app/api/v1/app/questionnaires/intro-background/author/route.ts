@@ -21,7 +21,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
-import { withIntroScreenEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import type { AuthorIntroBackgroundData } from '@/lib/app/questionnaire/capabilities';
 import { composeLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
@@ -135,4 +134,4 @@ const handleAuthor = withAdminAuth(async (request: NextRequest, session) => {
   return successResponse({ background: data.background });
 });
 
-export const POST = withIntroScreenEnabled(handleAuthor);
+export const POST = handleAuthor;

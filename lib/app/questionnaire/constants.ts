@@ -1,21 +1,12 @@
 /**
  * Dependency-light constants for the questionnaire app module.
  *
- * Kept runtime-import-free so leaf consumers (e.g. the flag seed) can reference a
- * value like the feature-flag name without pulling in the HTTP/DB-bearing helpers
- * in `feature-flag.ts`. The single type-only import below is erased at compile
- * time, so this stays runtime-dependency-free.
+ * Kept runtime-import-free so leaf consumers (e.g. seeds) can reference values
+ * without pulling in HTTP/DB-bearing helpers. The single type-only import below
+ * is erased at compile time, so this stays runtime-dependency-free.
  */
 
 import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilities/types';
-
-/**
- * Feature-flag name gating every questionnaire surface. DB-backed (seeded
- * disabled by `prisma/seeds/app-questionnaire/001-questionnaires-flag.ts`), so
- * it can be toggled at runtime without a redeploy. See `feature-flag.ts` for the
- * resolver and route gate.
- */
-export const APP_QUESTIONNAIRES_FLAG = 'APP_QUESTIONNAIRES_ENABLED';
 
 /**
  * Upper bound (characters) on the admin-supplied free-text extraction
@@ -26,28 +17,6 @@ export const APP_QUESTIONNAIRES_FLAG = 'APP_QUESTIONNAIRES_ENABLED';
  * bounded so a pasted essay can't crowd the document out of the prompt.
  */
 export const MAX_INSTRUCTIONS_LENGTH = 4_000;
-
-/**
- * Sub-flag gating the F4.1 **adaptive** selection strategy (LLM + pgvector).
- * Disabled by default: adaptive spends on embeddings + an LLM call per turn, so
- * an operator opts in deliberately. When off, the config editor hides the
- * `adaptive` option and any version persisted with `selectionStrategy: 'adaptive'`
- * degrades to `weighted` at run time. Independent of {@link APP_QUESTIONNAIRES_FLAG}
- * (the master gate); both must be on for adaptive to run. Seeded by
- * `prisma/seeds/app-questionnaire/004-adaptive-selection-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_ADAPTIVE_FLAG = 'APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED';
-
-/**
- * Sub-flag gating F4.2 **answer extraction** (the per-turn LLM call that turns a
- * respondent's message into typed slot values). Disabled by default: every turn
- * spends an LLM call, so an operator opts in deliberately — the same reasoning as
- * the adaptive-selection sub-flag above. Independent of {@link APP_QUESTIONNAIRES_FLAG}
- * (the master gate); both must be on for the extract-answer route to run.
- * Seeded by `prisma/seeds/app-questionnaire/008-answer-extraction-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_ANSWER_EXTRACTION_FLAG =
-  'APP_QUESTIONNAIRES_ANSWER_EXTRACTION_ENABLED';
 
 /**
  * Slug of the seeded selection `AiAgent` (F4.1 / adaptive). Drives the "which of
@@ -215,18 +184,6 @@ export const EXTRACT_ANSWER_SLOTS_FUNCTION_DEFINITION: CapabilityFunctionDefinit
 };
 
 /**
- * Sub-flag gating F4.3 **contradiction detection** (the LLM call that compares a
- * respondent's answers across slots and surfaces logical conflicts). Disabled by
- * default: it spends an LLM call per detection pass, so an operator opts in
- * deliberately — the same reasoning as the answer-extraction sub-flag above.
- * Independent of {@link APP_QUESTIONNAIRES_FLAG} (the master gate); both must be on
- * for the detect-contradictions route to run. Seeded by
- * `prisma/seeds/app-questionnaire/011-contradiction-detection-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_FLAG =
-  'APP_QUESTIONNAIRES_CONTRADICTION_DETECTION_ENABLED';
-
-/**
  * Slug of the contradiction-detector capability (F4.3). One source of truth shared
  * by the `BaseCapability` subclass, its `AiCapability` seed row, and the preview
  * route that dispatches it. Same naming convention as the extractors above —
@@ -301,18 +258,6 @@ export const DETECT_CONTRADICTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefini
 };
 
 /**
- * Sub-flag gating F4.4 **answer refinement** (the LLM call that decides whether a
- * respondent's already-captured answer should be updated in light of new context).
- * Disabled by default: it spends an LLM call per refinement pass, so an operator
- * opts in deliberately — the same reasoning as the contradiction-detection sub-flag
- * above. Independent of {@link APP_QUESTIONNAIRES_FLAG} (the master gate); both must
- * be on for the refine-answer route to run. Seeded by
- * `prisma/seeds/app-questionnaire/014-answer-refinement-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_ANSWER_REFINEMENT_FLAG =
-  'APP_QUESTIONNAIRES_ANSWER_REFINEMENT_ENABLED';
-
-/**
  * Slug of the answer-refiner capability (F4.4). One source of truth shared by the
  * `BaseCapability` subclass, its `AiCapability` seed row, and the refine-answer route
  * that dispatches it. Same naming convention as the extractors/detector above —
@@ -382,18 +327,6 @@ export const REFINE_ANSWER_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
     required: ['slots', 'existingAnswers'],
   },
 };
-
-/**
- * Sub-flag gating F4.5 **completion-offer composition** (the LLM call that phrases the
- * offer-to-submit message once the deterministic gate decides the questionnaire is
- * done enough). Disabled by default: it spends an LLM call per offer, so an operator
- * opts in deliberately — the same reasoning as the sub-flags above. Independent of
- * {@link APP_QUESTIONNAIRES_FLAG} (the master gate); both must be on for the
- * completion-status route to compose an offer. The deterministic assessment itself is
- * always available under the master flag — only the LLM phrasing is gated. Seeded by
- * `prisma/seeds/app-questionnaire/017-completion-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_COMPLETION_FLAG = 'APP_QUESTIONNAIRES_COMPLETION_ENABLED';
 
 /**
  * Slug of the completion-offer composer capability (F4.5). One source of truth shared
@@ -473,108 +406,6 @@ export const COMPOSE_COMPLETION_OFFER_FUNCTION_DEFINITION: CapabilityFunctionDef
 };
 
 /**
- * Sub-flag gating the F5.1 **design-time evaluation** judges (the LLM panel that
- * scores a version's structure against its goal/audience and proposes edits). Disabled
- * by default: a run spends seven LLM calls, so an operator opts in deliberately — the
- * same reasoning as the F4 sub-flags above. Independent of {@link APP_QUESTIONNAIRES_FLAG}
- * (the master gate); both must be on for the evaluate-preview route to run. Seeded by
- * `prisma/seeds/app-questionnaire/019-design-evaluation-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_DESIGN_EVALUATION_FLAG =
-  'APP_QUESTIONNAIRES_DESIGN_EVALUATION_ENABLED';
-
-/**
- * Sub-flag gating the **ingest verify + repair** pass (the extraction critic that scores
- * each extracted question's type/config fidelity against the source, and the scales-&-matrix
- * repair specialist that re-extracts only the flagged ones). Disabled by default: it spends
- * one extra reasoning call to verify, and a second only when questions are flagged, so an
- * operator opts in deliberately. Independent of {@link APP_QUESTIONNAIRES_FLAG} (the master
- * gate); both must be on for the streaming ingest route to run it. When off, ingestion is
- * exactly today's single-extractor behaviour. Seeded disabled by
- * `prisma/seeds/app-questionnaire/037-ingest-verify-repair-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_FLAG =
-  'APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR_ENABLED';
-
-/**
- * Sub-flag gating the **turn evaluation** agent — the admin-only "interview-quality
- * evaluator" the Preview Turn Inspector runs over a single completed turn, judging
- * instruction compliance, interviewing/extraction/selection quality, information gain,
- * missed opportunities, prompt drift, and cost/efficiency. Disabled by default: each run
- * spends one reasoning-model call, so an operator opts in deliberately — the same reasoning
- * as the design-evaluation sub-flag. Independent of {@link APP_QUESTIONNAIRES_FLAG} (the
- * master gate); both must be on for the evaluate-turn route to run. The route, like the
- * inspector it serves, additionally requires the session to be a preview. Seeded by
- * `prisma/seeds/app-questionnaire/042-turn-evaluation-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_TURN_EVALUATION_FLAG = 'APP_QUESTIONNAIRES_TURN_EVALUATION_ENABLED';
-
-/**
- * Sub-flag gating the F6.1 **live respondent sessions** surface — the streaming turn
- * loop a real respondent drives (create a session, send messages, get a streamed reply).
- * Disabled by default so the live surface dark-launches independently of the admin
- * preview routes (which run under the master flag alone): a master-on app shouldn't expose
- * respondent sessions until an operator deliberately turns them on. Independent of
- * {@link APP_QUESTIONNAIRES_FLAG}; both must be on for the session-create + messages routes
- * to run. Seeded by `prisma/seeds/app-questionnaire/021-live-sessions-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_LIVE_SESSIONS_FLAG = 'APP_QUESTIONNAIRES_LIVE_SESSIONS_ENABLED';
-
-/**
- * Sub-flag gating F6.2 **voice input** — the respondent transcribe endpoint
- * (`POST /api/v1/app/questionnaire-sessions/:id/transcribe`) that turns recorded audio into
- * text via Sunrise's audio provider (OpenAI Whisper). Disabled by default: every call spends
- * per-minute transcription cost, so an operator turns it on deliberately. The transcribe route
- * requires the master flag, the live-sessions flag, AND this voice sub-flag — voice *depends on*
- * live-sessions (a transcript is only useful if the respondent can then send it through the live
- * `/messages` turn loop), so it's an opt-in on top of that prerequisite, not an independent
- * surface. When any of the three is off the route returns 404, so a disabled sub-feature looks
- * like a missing route rather than a 401. Seeded by
- * `prisma/seeds/app-questionnaire/022-voice-input-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_VOICE_INPUT_FLAG = 'APP_QUESTIONNAIRES_VOICE_INPUT_ENABLED';
-
-/**
- * Sub-flag gating F6.3 **cost-cap enforcement** — the per-session USD budget enforced at the
- * turn boundary (soft nudge at ≥90%, hard 402 + auto-pause at ≥100%). Disabled by default so
- * enforcement dark-launches independently: a live-sessions deployment runs unmetered until an
- * operator deliberately turns the cap on, and it can be switched off again without touching the
- * live surface. Requires the master flag AND the live-sessions flag (the cap only applies to the
- * live `/messages` turn loop) AND this sub-flag; when off, turns run with no budget check even if
- * a version sets `costBudgetUsd`. Seeded by `prisma/seeds/app-questionnaire/023-cost-cap-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_COST_CAP_FLAG = 'APP_QUESTIONNAIRES_COST_CAP_ENABLED';
-
-/**
- * Sub-flag gating **attachment input** — letting a respondent attach images/documents to a
- * `/messages` turn so the answer-extractor reads them alongside the text. Disabled by default:
- * multimodal turns spend more and require a vision/document-capable model. Requires the master
- * flag AND the live-sessions flag (attachments only apply to the live turn loop) AND this
- * sub-flag; when off, the chat surface hides the affordance and the route ignores any attachments
- * a client sends (text-only turn), so the paid multimodal path can't be reached. Seeded by
- * `prisma/seeds/app-questionnaire/024-attachment-input-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_ATTACHMENT_INPUT_FLAG =
-  'APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED';
-
-/**
- * Sub-flag gating **conversational question phrasing** — the interviewer pass that renders the
- * next question as warm, natural prose (acknowledging the prior answer, calibrating tone to the
- * audience/locale, and re-asking conversationally) instead of surfacing the raw question prompt
- * verbatim. This restores the originally-planned "warm conversational interviewer" voice that
- * F6.1's deterministic orchestrator dropped when it chose the app-native pipeline over
- * `streamChat`. Disabled by default: it spends one extra LLM call per asked question, so an
- * operator opts in deliberately — the same reasoning as the F4 sub-flags. Requires the master
- * flag AND the live-sessions flag (phrasing only applies inside the live `/messages` turn loop)
- * AND this sub-flag; when off, the route falls back to the verbatim prompt (no extra spend, no
- * behaviour change). Fail-soft at runtime too: a missing agent/provider or a stream error drops
- * back to the verbatim prompt, so a question is never lost. Seeded by
- * `prisma/seeds/app-questionnaire/027-question-phrasing-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG =
-  'APP_QUESTIONNAIRES_QUESTION_PHRASING_ENABLED';
-
-/**
  * Slug of the conversational **interviewer** agent that phrases asked questions (the question
  * analogue of {@link QUESTIONNAIRE_COMPLETION_AGENT_SLUG}). Dispatched programmatically by the
  * live `/messages` route's question-stream helper — never a chat tool loop. Carries its own
@@ -583,68 +414,6 @@ export const APP_QUESTIONNAIRES_QUESTION_PHRASING_FLAG =
  * `prisma/seeds/app-questionnaire/026-interviewer-agent.ts`.
  */
 export const QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG = 'app-questionnaire-interviewer';
-
-/**
- * Sub-flag gating the **data slots** feature — the semantic abstraction layer over questions.
- * When on: the admin can generate + review data slots, every launch requires them, and a
- * launched questionnaire with data slots runs its live session in "data-slot mode" (the
- * conversation targets data slots; questions fill in the background). Disabled by default;
- * gates both the admin generation surface (master flag) and the runtime mode (additionally
- * requires the live-sessions flag, enforced by the `/messages` route). Seeded by
- * `prisma/seeds/app-questionnaire/028-data-slots-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_DATA_SLOTS_FLAG = 'APP_QUESTIONNAIRES_DATA_SLOTS_ENABLED';
-
-/**
- * Sub-flag gating **adaptive data-slot selection** — the embedding-ranked LLM selector that picks
- * the next data slot to pursue in data-slot mode, instead of the deterministic topic-local order.
- * A paid (embedding + LLM) sub-feature aimed at large questionnaires (50+ data slots): it depends
- * on the data-slots feature AND live-sessions, and is an independent opt-in on top. When off, the
- * data-slot turn loop keeps today's deterministic `pickNextDataSlot`. Disabled by default
- * (dark-launch). Seeded by `prisma/seeds/app-questionnaire/041-adaptive-data-slots-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_FLAG =
-  'APP_QUESTIONNAIRES_ADAPTIVE_DATA_SLOTS_ENABLED';
-
-/**
- * Sub-flag gating the **seriousness / abuse gate** — per answered turn, a respondent answer the
- * extractor flags as non-genuine is judged; a non-serious verdict is disregarded, strikes the
- * session, and (at `config.abuseThreshold`) abandons it. Disabled by default (dark-launch);
- * requires the master app flag AND the live-sessions flag (the gate only runs inside the live
- * `/messages` turn loop) AND this sub-flag. Seeded by
- * `prisma/seeds/app-questionnaire/029-seriousness-gate-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_SERIOUSNESS_GATE_FLAG =
-  'APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED';
-
-/**
- * Sub-flag gating **sensitivity awareness / safeguarding** — per answered turn, the extractor also
- * flags a genuine sensitive/contentious disclosure; the core remembers it (running-max level +
- * notes), softens later phrasing, and signposts support once on a serious disclosure. Disabled by
- * default (dark-launch); requires the master app flag AND the live-sessions flag (it only runs in
- * the live `/messages` turn loop) AND this sub-flag, AND the per-questionnaire `sensitivityAwareness`
- * config toggle. Seeded by `prisma/seeds/app-questionnaire/030-sensitivity-awareness-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_FLAG =
-  'APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED';
-
-/**
- * Sub-flag gating **frictionless invite links** — a per-invitee token that boots a no-login session
- * directly (the respondent answers without registering an account; optional account creation stays
- * for cross-device resume). Requires the master app flag AND the live-sessions flag AND this
- * sub-flag. When off, invitations fall back to the account-registration accept flow. Seeded by
- * `prisma/seeds/app-questionnaire/033-frictionless-invites-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_FLAG =
-  'APP_QUESTIONNAIRES_FRICTIONLESS_INVITES_ENABLED';
-
-/**
- * Sub-flag gating **invitee import + AI extraction** — the import wizard's CSV/PDF/image methods and
- * the paid LLM people-extraction capability. Requires the master app flag AND this sub-flag (the
- * AI paths spend per call and handle PII). When off, the admin can still add invitees by typing them
- * directly. Seeded by `prisma/seeds/app-questionnaire/034-invite-import-flag.ts`.
- */
-export const APP_QUESTIONNAIRES_INVITE_IMPORT_FLAG = 'APP_QUESTIONNAIRES_INVITE_IMPORT_ENABLED';
 
 /**
  * Slug of the **data-slot generator** agent. Dispatched programmatically by the
@@ -932,127 +701,8 @@ export const REPAIR_QUESTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefinition 
 // capabilities reuse the extractor's `extractionSchema` output contract.
 // ---------------------------------------------------------------------------
 
-/**
- * Sub-flag gating the generative-authoring surface (compose-from-brief + refine).
- * DB-backed, seeded disabled by `035-generative-authoring-flag.ts`. Opt-in on top
- * of {@link APP_QUESTIONNAIRES_FLAG}; both must be on. Each compose/refine run is
- * ≥1 reasoning LLM call, so it dark-launches independently of document ingestion.
- */
-export const APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_FLAG =
-  'APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED';
-
-/**
- * Platform feature flag gating the live "watch it think" **reasoning stream** (demo feature) —
- * the per-turn reasoning trace shown beside the respondent chat. DB-backed, seeded disabled by
- * `036-reasoning-stream-flag.ts`. Depends on live-sessions (it only matters inside the `/messages`
- * turn loop) and ANDs with the per-version `reasoningStreamEnabled` config toggle. Carries no extra
- * LLM cost — the trace is derived from work the turn already did — but it's a respondent-facing
- * surface, so it dark-launches behind its own flag.
- */
-export const APP_QUESTIONNAIRES_REASONING_STREAM_FLAG =
-  'APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED';
-
-/**
- * Platform feature flag gating **interviewer tone & persona** (F-tone) — the per-version sliders
- * (empathy, mirroring, formality, mimicry, verbosity, warmth, curiosity, reading complexity,
- * humour) plus the free-text persona that shape how the conversational interviewer responds.
- * DB-backed, seeded disabled by `037-tone-flag.ts`. ANDs with each per-version dimension toggle;
- * when off the phraser keeps today's default voice (`buildToneInstructions` is never consulted).
- */
-export const APP_QUESTIONNAIRES_TONE_FLAG = 'APP_QUESTIONNAIRES_TONE_ENABLED';
-
-/**
- * Platform feature flag gating **built-in interviewer personas** (F-persona) — the fixed persona
- * library and the respondent-facing picker/switcher. DB-backed, seeded disabled by
- * `063-persona-selection-flag.ts`. ANDs with the per-version `personaSelection.enabled` toggle (which
- * side of the tone-vs-persona either/or the version is on); when off, the version's own tone prevails
- * (`resolveEffectiveTone` returns it unchanged). The picker/switcher additionally require the
- * per-version `personaSelection.allowRespondentSwitch` opt-in.
- */
-export const APP_QUESTIONNAIRES_PERSONA_SELECTION_FLAG =
-  'APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED';
-
-/**
- * Platform feature flag gating the **Respondent Report** (report kind `respondent`) — the
- * per-respondent summary delivered after a respondent completes the questionnaire, configured from
- * its own workspace tab. The first of two report kinds; the later cross-respondent **Cohort Report**
- * (`cohort`) gets its own flag when built. DB-backed, seeded disabled by `044-respondent-report-flag.ts`.
- * Opt-in on top of APP_QUESTIONNAIRES_ENABLED. When off, the workspace tab is hidden and the page
- * `notFound()`s.
- */
-export const APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG =
-  'APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED';
-
-/**
- * Platform feature flag gating **Cohorts & Rounds** — grouping people into cohorts under a demo
- * client and delivering questionnaires to them as time-bound rounds (the only way to make a
- * questionnaire time-bound; a roundless session stays open-ended). DB-backed, seeded disabled by
- * `047-cohorts-flag.ts`. Opt-in on top of APP_QUESTIONNAIRES_ENABLED. When off, the admin
- * cohort/round routes + demo-client tabs `404`/hide, and the respondent session guard is inert
- * (no session carries a `roundId`). This is the *feature* flag — distinct from the future
- * cross-respondent **Cohort Report** (`cohort`), which gets its own flag when built.
- */
-export const APP_QUESTIONNAIRES_COHORTS_FLAG = 'APP_QUESTIONNAIRES_COHORTS_ENABLED';
-
-/**
- * Platform feature flag gating the **Cohort Report** (report kind `cohort`) — the cross-respondent
- * analysis/charting/narrative report an admin generates over one round's submissions, segmented by
- * the questionnaire's own demographics. The sibling of the per-respondent Respondent Report
- * (`APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`); see {@link APP_QUESTIONNAIRES_RESPONDENT_REPORT_FLAG}
- * and the `ReportKind` enum. A cohort report is round-scoped, so it requires Cohorts & Rounds:
- * APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED AND this flag. DB-backed, seeded
- * disabled by `054-cohort-report-flag.ts`. When off, the round cohort-report tab/routes 404/hide.
- */
-export const APP_QUESTIONNAIRES_COHORT_REPORT_FLAG = 'APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED';
-
 /** Slug of the seeded Cohort Report agent (report kind `cohort`); loaded by the generation pipeline. */
 export const COHORT_REPORT_AGENT_SLUG = 'app-cohort-report';
-
-/**
- * Platform feature flag gating the **respondent intro / splash screen** — an admin opt-in screen
- * shown before the questionnaire starts that explains how it works (adapts to the presentation mode),
- * what the respondent will receive at the end (adapts to the respondent-report settings), and an
- * admin-authored "about this questionnaire" background section (optionally overridden per cohort).
- * DB-backed, seeded disabled by `048-intro-screen-flag.ts`. Opt-in on top of
- * APP_QUESTIONNAIRES_ENABLED, AND per-version (`config.intro.enabled`) — the respondent surface ANDs
- * them, so the splash stays off until both the flag and the version toggle are on.
- */
-export const APP_QUESTIONNAIRES_INTRO_SCREEN_FLAG = 'APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED';
-
-/**
- * Platform feature flag gating **Round Additional Context** (the "interviewer briefing") — per-round
- * admin-authored facts/figures/background the interviewer draws on when asking, optionally attributed
- * to a single question. Round-level, off by default per round (`AppQuestionnaireRound.contextEnabled`);
- * this flag is the platform-wide master gate on top of which the per-round toggle ANDs. Requires
- * APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED (briefings hang off rounds, which
- * only exist when cohorts are on). DB-backed, seeded disabled by `050-round-context-flag.ts`. When off,
- * the authoring routes/panel 404/hide and no briefing is ever injected into the interviewer prompt.
- */
-export const APP_QUESTIONNAIRES_ROUND_CONTEXT_FLAG = 'APP_QUESTIONNAIRES_ROUND_CONTEXT_ENABLED';
-
-/**
- * Platform feature flag gating **Learning Mode** — the interviewer is given generalised, anonymised
- * themes from prior respondents *in the same round* and uses them subtly to colour phrasing AND
- * (under the `adaptive` strategy) to probe divergent topics harder. Round-level, off by default per
- * round (`AppQuestionnaireRound.learningEnabled`); this flag is the platform-wide master gate the
- * per-round toggle ANDs. Requires APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED.
- * **Introduces bias by design** (later answers are influenced by earlier ones) — the admin UI warns,
- * and a k-anonymity threshold suppresses learning until enough respondents have completed. DB-backed,
- * seeded disabled by `051-learning-mode-flag.ts`. When off, no peer context is ever aggregated or injected.
- */
-export const APP_QUESTIONNAIRES_LEARNING_MODE_FLAG = 'APP_QUESTIONNAIRES_LEARNING_MODE_ENABLED';
-
-/**
- * Platform feature flag gating **Round Phases** — staggered access windows for cohort subgroups, so
- * one subgroup (e.g. the Senior Leadership Team) can take a round before the rest of the cohort. A
- * subgroup is reusable cohort config (`AppCohortSubgroup`); a round attaches a window + end mode to it
- * (`AppRoundPhase`). Requires APP_QUESTIONNAIRES_ENABLED AND APP_QUESTIONNAIRES_COHORTS_ENABLED
- * (phases hang off rounds). DB-backed, seeded disabled by `052-round-phases-flag.ts`. When off, the
- * subgroup/phase authoring routes + panels 404/hide and the respondent access guard falls back to the
- * round's own window for everyone (today's behaviour). The per-member window is otherwise the member's
- * subgroup phase, narrowed within the round window.
- */
-export const APP_QUESTIONNAIRES_ROUND_PHASES_FLAG = 'APP_QUESTIONNAIRES_ROUND_PHASES_ENABLED';
 
 /**
  * Slug of the seeded Respondent Report `AiAgent` — assembles the per-respondent insights section
@@ -1083,28 +733,6 @@ export const RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG = 'app-respondent-report-ass
  * the cheaper `chat` tier — formatting is largely mechanical); seeded by `061-report-formatter-agent.ts`.
  */
 export const REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter';
-
-/**
- * Platform feature flag gating the **Report Formatter** second pass (see {@link REPORT_FORMATTER_AGENT_SLUG}).
- * When on, respondent report generation runs the formatter over the writer's output and stores the
- * result as pre-laid-out prose (`AppRespondentReport.formatted = true`), which the renderers honour
- * verbatim instead of applying the deterministic sentence-regrouping fallback. When off (the default),
- * generation is unchanged and the deterministic `splitReportParagraphs` split still runs at render.
- * DB-backed, seeded disabled by `062-report-formatter-flag.ts`. Independent of
- * {@link APP_QUESTIONNAIRES_FLAG}; ship-dark toggle so the two-agent output can be compared before rollout.
- */
-export const APP_REPORT_FORMATTER_FLAG = 'APP_REPORT_FORMATTER_ENABLED';
-
-/**
- * Platform feature flag gating **report web-search rounds** — the optional pre/post-generation web
- * research that brings live external context into a report (respondent now, cohort later). Opt-in on
- * top of {@link APP_QUESTIONNAIRES_FLAG} and the per-report-kind flag, AND additionally requires the
- * search backend to be configured (Brave key + allowlisted host) — inert and skipped otherwise, never
- * failing a report. DB-backed, seeded disabled by `069-report-web-search-flag.ts`. When off, the
- * Research config tab is hidden and generation never runs a search round.
- */
-export const APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG =
-  'APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED';
 
 /**
  * Slug of the seeded **Report Research** `AiAgent` — the web-research assistant that runs the report's
@@ -1174,17 +802,6 @@ export const WEB_SEARCH_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
 export const QUESTIONNAIRE_COMPOSER_AGENT_SLUG = 'app-questionnaire-composer';
 
 /**
- * Sub-flag gating the **Config Advisor** — the admin-triggered AI panel on the version Settings
- * tab that reads the whole questionnaire (structure, goal/audience, run-time config, data slots,
- * scoring), then streams a narrative of the respondent experience + the current lifecycle state and
- * proposes one-click config tweaks. DB-backed, seeded disabled by `056-advisor-flag.ts`. Opt-in on
- * top of {@link APP_QUESTIONNAIRES_FLAG}; both must be on. Each run is two reasoning LLM calls
- * (narrative + structured suggestions), so it dark-launches independently. When off, the advisor
- * route 404s and the Settings-tab panel is hidden.
- */
-export const APP_QUESTIONNAIRES_ADVISOR_FLAG = 'APP_QUESTIONNAIRES_ADVISOR_ENABLED';
-
-/**
  * Slug of the seeded Config Advisor `AiAgent`. A distinct agent from the composer/extractor:
  * the advisor evaluates an existing configuration rather than authoring structure, and carries its
  * own budget + persona. Ships with empty `model`/`provider` so it resolves dynamically via
@@ -1192,17 +809,6 @@ export const APP_QUESTIONNAIRES_ADVISOR_FLAG = 'APP_QUESTIONNAIRES_ADVISOR_ENABL
  * core agents. Seeded by `057-advisor-agent.ts`.
  */
 export const QUESTIONNAIRE_ADVISOR_AGENT_SLUG = 'app-questionnaire-advisor';
-
-/**
- * Sub-flag gating the **Structure Edit Agent** — the admin-triggered AI panel on the version
- * Structure editor that takes a plain-English instruction for the WHOLE questionnaire ("renumber
- * the sections", "CAPS every section title", "remove required from all free-text fields") and
- * applies it across every matching section/question. DB-backed, seeded disabled by
- * `059-edit-agent-flag.ts`. Opt-in on top of {@link APP_QUESTIONNAIRES_FLAG}; both must be on. Each
- * plan run is one reasoning LLM call (instruction → structured edit-ops), so it dark-launches
- * independently. When off, the plan/apply routes 404 and the editor panel is hidden.
- */
-export const APP_QUESTIONNAIRES_EDIT_AGENT_FLAG = 'APP_QUESTIONNAIRES_EDIT_AGENT_ENABLED';
 
 /**
  * Slug of the seeded Structure Edit Agent `AiAgent`. A distinct agent from the composer/advisor:

@@ -4,10 +4,9 @@
  *
  * Owns the three things every tab used to re-implement: the breadcrumb, the
  * sticky header (title + status + version selector), and the sub-navigation tab
- * bar. Resolves the questionnaire detail and feature flags once — `cache()` means
- * the child tab pages reuse the same detail fetch for free — and `notFound()`s
- * when the app flag is off, the questionnaire is missing, or the version id in
- * the URL doesn't exist.
+ * bar. Resolves the questionnaire detail once — `cache()` means the child tab
+ * pages reuse the same detail fetch for free — and `notFound()`s when the
+ * questionnaire is missing or the version id in the URL doesn't exist.
  *
  * Why the version is a path segment (`/v/[vid]`) and not `?v=`: a layout can read
  * `params` but never `searchParams`, and this layout must render the version
@@ -32,7 +31,6 @@ import {
   getQuestionnaireDetailCached,
   getVersionDataSlotCountCached,
   getVersionGraphCached,
-  resolveQuestionnaireWorkspaceFlags,
 } from '@/lib/app/questionnaire/workspace-data';
 import { visibleWorkspaceGroups } from '@/lib/app/questionnaire/workspace-nav';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
@@ -50,27 +48,25 @@ interface LayoutProps {
 export default async function QuestionnaireWorkspaceLayout({ params, children }: LayoutProps) {
   const { id, vid } = await params;
 
-  const [detail, flags, graph] = await Promise.all([
+  const [detail, graph] = await Promise.all([
     getQuestionnaireDetailCached(id),
-    resolveQuestionnaireWorkspaceFlags(),
     getVersionGraphCached(id, vid),
   ]);
 
-  if (!flags.master) notFound();
   if (!detail) notFound();
 
   const selected = detail.versions.find((ver) => ver.id === vid);
   if (!selected) notFound();
 
-  const groups = visibleWorkspaceGroups(flags);
+  const groups = visibleWorkspaceGroups();
 
   // "Preview as respondent" lives in the header so it's reachable from every tab (not just Overview).
   // Same availability rule as the Overview section + the server boot — shared `isPreviewAvailable`.
   // The graph + data-slot count are `cache()`d, so tabs that already load them pay nothing extra.
-  const dataSlotCount = flags.dataSlots && graph ? await getVersionDataSlotCountCached(id, vid) : 0;
+  const dataSlotCount = graph ? await getVersionDataSlotCountCached(id, vid) : 0;
   const previewAvailable = isPreviewAvailable({
     status: selected.status,
-    liveSessions: flags.liveSessions,
+    liveSessions: true,
     graphPresent: graph !== null,
     ...(selected.status === 'draft' && graph
       ? {
@@ -80,7 +76,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
             sectionCount: selected.sectionCount,
             questionCount: selected.questionCount,
             configSaved: graph.config.saved,
-            dataSlotsRequired: flags.dataSlots,
+            dataSlotsRequired: true,
             dataSlotsReady: dataSlotCount > 0,
           },
         }
@@ -114,7 +110,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
             {viewingLive && <Badge variant={liveBadge.variant}>{liveBadge.label}</Badge>}
             <div className="ml-auto flex items-center gap-2">
               {/* Quick "view a session by reference" — present wherever sessions can exist. */}
-              {flags.liveSessions && <SessionRefLookup compact />}
+              <SessionRefLookup compact />
               {previewAvailable && <PreviewRespondentButton versionId={selected.id} />}
               <DuplicateQuestionnaireButton questionnaireId={id} />
               <VersionSelector

@@ -22,7 +22,6 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
-import { withEditAgentEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import type { RefineQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import { planEditOps } from '@/lib/app/questionnaire/edit-agent/translate';
@@ -192,4 +191,4 @@ const handlePlan = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withEditAgentEnabled(handlePlan);
+export const POST = handlePlan;

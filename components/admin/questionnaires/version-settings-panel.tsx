@@ -32,24 +32,9 @@ import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 export interface VersionSettingsPanelProps {
   questionnaireId: string;
   graph: VersionGraphView;
-  /** Adaptive selection sub-flag state, threaded to the strategy picker. */
-  adaptiveEnabled: boolean;
-  /** Adaptive data-slot selection state, threaded to the data-slot embeddings step. */
-  adaptiveDataSlotsEnabled: boolean;
-  /** Respondent intro / splash sub-flag state, threaded to the Intro card. */
-  introScreenEnabled: boolean;
-  /** Selectable-persona sub-flag state, threaded to the Interviewer personas card. */
-  personaSelectionEnabled: boolean;
 }
 
-export function VersionSettingsPanel({
-  questionnaireId,
-  graph,
-  adaptiveEnabled,
-  adaptiveDataSlotsEnabled,
-  introScreenEnabled,
-  personaSelectionEnabled,
-}: VersionSettingsPanelProps) {
+export function VersionSettingsPanel({ questionnaireId, graph }: VersionSettingsPanelProps) {
   const router = useRouter();
   const versionId = graph.id;
   const questionCount = graph.sections.reduce((n, s) => n + s.questions.length, 0);
@@ -120,10 +105,6 @@ export function VersionSettingsPanel({
           versionId={versionId}
           config={graph.config}
           questionCount={questionCount}
-          adaptiveEnabled={adaptiveEnabled}
-          adaptiveDataSlotsEnabled={adaptiveDataSlotsEnabled}
-          introScreenEnabled={introScreenEnabled}
-          personaSelectionEnabled={personaSelectionEnabled}
           isVersionLaunched={graph.status === 'launched'}
           run={run}
           busy={busy}

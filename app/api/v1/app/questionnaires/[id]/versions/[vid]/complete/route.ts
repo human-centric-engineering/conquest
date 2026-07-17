@@ -43,10 +43,6 @@ import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 import {
-  isContradictionDetectionEnabled,
-  withQuestionnairesEnabled,
-} from '@/lib/app/questionnaire/feature-flag';
-import {
   DETECT_CONTRADICTIONS_CAPABILITY_SLUG,
   QUESTIONNAIRE_CONTRADICTION_DETECTOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
@@ -160,7 +156,7 @@ const handleComplete = withAdminAuth<{ id: string; vid: string }>(
           sweepBuilt.context.windowN,
           'completion-sweep'
         );
-        if (decision.run && (await isContradictionDetectionEnabled())) {
+        if (decision.run) {
           // The detector only reasons over slots that carry an answer — an unanswered
           // slot has nothing to compare and is never rendered into the prompt. Trim the
           // version's full slot set to just the answered ones so the detector's
@@ -284,4 +280,4 @@ const handleComplete = withAdminAuth<{ id: string; vid: string }>(
   }
 );
 
-export const POST = withQuestionnairesEnabled(handleComplete);
+export const POST = handleComplete;

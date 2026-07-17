@@ -18,7 +18,6 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { handleAPIError } from '@/lib/api/errors';
 import { prisma } from '@/lib/db/client';
-import { withLiveSessionsEnabled } from '@/lib/app/questionnaire/feature-flag';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
 import {
   loadTranscript,
@@ -72,4 +71,4 @@ async function handleGetTranscript(
   }
 }
 
-export const GET = withLiveSessionsEnabled(handleGetTranscript);
+export const GET = handleGetTranscript;
