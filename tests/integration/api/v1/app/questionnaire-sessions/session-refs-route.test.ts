@@ -51,6 +51,10 @@ const ITEM = {
   questionnaireTitle: 'Onboarding',
   versionId: 'v-1',
   versionNumber: 3,
+  turns: 4,
+  answeredCount: 6,
+  totalQuestions: 10,
+  percentComplete: 60,
 };
 
 beforeEach(() => {

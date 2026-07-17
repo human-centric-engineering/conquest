@@ -33,6 +33,17 @@ export interface AdminSessionRefItem {
   questionnaireTitle: string;
   versionId: string;
   versionNumber: number;
+  /** Number of respondent turns taken in the session (one per exchanged message). */
+  turns: number;
+  /** Answered question slots for this session. */
+  answeredCount: number;
+  /** Total question slots in the session's version. */
+  totalQuestions: number;
+  /**
+   * Completion percentage — answered slots ÷ total question slots, rounded. Matches the report
+   * generator's `completionPct` (a version with no slots reports 100).
+   */
+  percentComplete: number;
 }
 
 /** Query params for the browser: pagination, optional ref search, optional status filter. */
@@ -83,16 +94,36 @@ export async function listAdminSessionRefs(
             questionnaire: { select: { title: true } },
           },
         },
+        // Turn count (one row per respondent exchange) and answered-slot count, both derived — the
+        // session stores neither. Answered feeds the completion percentage below.
+        _count: { select: { turns: true, answers: true } },
       },
     }),
     prisma.appQuestionnaireSession.count({ where }),
   ]);
+
+  // Total question slots per version — the denominator for completion. One grouped count over the
+  // versions on this page (slot rows carry a denormalised `versionId`), so no per-row query.
+  const versionIds = [...new Set(rows.map((r) => r.versionId))];
+  const slotCounts = versionIds.length
+    ? await prisma.appQuestionSlot.groupBy({
+        by: ['versionId'],
+        where: { versionId: { in: versionIds } },
+        _count: { _all: true },
+      })
+    : [];
+  const totalByVersion = new Map(slotCounts.map((g) => [g.versionId, g._count._all]));
 
   const items: AdminSessionRefItem[] = [];
   for (const r of rows) {
     // `publicRef` is filtered non-null above; `version` is a required relation. Guard defensively so a
     // malformed row is skipped rather than crashing the whole page.
     if (!r.publicRef || !r.version) continue;
+    const answeredCount = r._count.answers;
+    const totalQuestions = totalByVersion.get(r.versionId) ?? 0;
+    // Same formula as the report generator's `completionPct`: a version with no slots reports 100.
+    const percentComplete =
+      totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 100;
     items.push({
       sessionId: r.id,
       ref: r.publicRef,
@@ -104,6 +135,10 @@ export async function listAdminSessionRefs(
       questionnaireTitle: r.version.questionnaire.title,
       versionId: r.versionId,
       versionNumber: r.version.versionNumber,
+      turns: r._count.turns,
+      answeredCount,
+      totalQuestions,
+      percentComplete,
     });
   }
 
