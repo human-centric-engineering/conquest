@@ -30,11 +30,12 @@ const dataSlotGroupBy = prisma.appDataSlot.groupBy as unknown as Mock;
 const D1 = new Date('2026-01-01T00:00:00.000Z');
 const D2 = new Date('2026-01-02T00:00:00.000Z');
 
-function row(id: string, latestVersionId: string | null) {
+function row(id: string, latestVersionId: string | null, archivedAt: Date | null = null) {
   return {
     id,
     title: `Q ${id}`,
     status: 'draft',
+    archivedAt,
     createdAt: D1,
     updatedAt: D2,
     _count: { versions: latestVersionId ? 2 : 0 },
@@ -130,5 +131,47 @@ describe('listQuestionnaires', () => {
     expect(arg.skip).toBe(20); // (3 - 1) * 10
     expect(arg.take).toBe(10);
     expect(arg.orderBy).toEqual({ title: 'asc' });
+  });
+
+  it('excludes archived rows by default (archivedAt: null)', async () => {
+    findMany.mockResolvedValue([]);
+    count.mockResolvedValue(0);
+
+    await listQuestionnaires({ page: 1, limit: 25, sortBy: 'updatedAt', sortOrder: 'desc' });
+
+    // Both the page query and the count share the same gate.
+    expect(findMany.mock.calls[0][0].where.archivedAt).toBeNull();
+    expect(count.mock.calls[0][0].where.archivedAt).toBeNull();
+  });
+
+  it('shows only archived rows when archived=true (archivedAt: { not: null })', async () => {
+    findMany.mockResolvedValue([]);
+    count.mockResolvedValue(0);
+
+    await listQuestionnaires({
+      page: 1,
+      limit: 25,
+      archived: 'true',
+      sortBy: 'updatedAt',
+      sortOrder: 'desc',
+    });
+
+    expect(findMany.mock.calls[0][0].where.archivedAt).toEqual({ not: null });
+    expect(count.mock.calls[0][0].where.archivedAt).toEqual({ not: null });
+  });
+
+  it('serialises a present archivedAt to an ISO string on the row', async () => {
+    findMany.mockResolvedValue([row('qn-1', null, D2)]);
+    count.mockResolvedValue(1);
+
+    const { items } = await listQuestionnaires({
+      page: 1,
+      limit: 25,
+      archived: 'true',
+      sortBy: 'updatedAt',
+      sortOrder: 'desc',
+    });
+
+    expect(items[0].archivedAt).toBe('2026-01-02T00:00:00.000Z');
   });
 });

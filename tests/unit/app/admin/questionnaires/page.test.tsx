@@ -72,6 +72,7 @@ function makeItem(status: AppQuestionnaireStatus, id: string): QuestionnaireList
     questionCount: 1,
     dataSlotCount: 0,
     demoClient: null,
+    archivedAt: null,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-06-13T00:00:00.000Z',
   };
@@ -104,7 +105,16 @@ describe('QuestionnairesListPage stat tiles', () => {
       if (url.includes('demo-clients')) {
         return { success: true as const, data: [] };
       }
-      // Both the table (limit=25) and stats (limit=100) hit the questionnaires list.
+      // The archived-count sweep (`?archived=true`) is a separate slice — no archived
+      // rows by default. Its meta.total drives the Archived tile.
+      if (url.includes('archived=true')) {
+        return {
+          success: true as const,
+          data: [],
+          meta: { page: 1, limit: 1, total: 0, totalPages: 1 },
+        };
+      }
+      // Both the table (limit=25) and active stats (limit=100) hit the questionnaires list.
       return {
         success: true as const,
         data: ITEMS,
@@ -294,26 +304,34 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
   });
 
-  it('counts archived questionnaires in the Archived tile', async () => {
-    // Arrange: include an archived item so the else-if branch at line 54 runs.
-    const withArchived = [...ITEMS, makeItem('archived', 'e')];
+  it('counts archived (soft-deleted) questionnaires in the Archived tile from the archived sweep', async () => {
+    // Archived is a separate slice the default list excludes — the tile reads the
+    // `?archived=true` sweep's meta.total, NOT a status tally of the active rows.
     vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
       const url = (res as { _url: string })._url;
       if (url.includes('demo-clients')) {
         return { success: true as const, data: [] };
       }
+      if (url.includes('archived=true')) {
+        // Two archived questionnaires exist — the tile must show 2.
+        return {
+          success: true as const,
+          data: [],
+          meta: { page: 1, limit: 1, total: 2, totalPages: 2 },
+        };
+      }
       return {
         success: true as const,
-        data: withArchived,
-        meta: { page: 1, limit: 100, total: withArchived.length, totalPages: 1 },
+        data: ITEMS,
+        meta: { page: 1, limit: 100, total: ITEMS.length, totalPages: 1 },
       };
     });
 
     render(await QuestionnairesListPage());
 
-    // The archived tile must reflect the count the reduce computed — not a mock value.
-    expect(tileValue('Archived')).toBe('1');
-    expect(tileValue('Questionnaires')).toBe('5');
+    // Archived tile = archived sweep total (2); Questionnaires tile = active total (4).
+    expect(tileValue('Archived')).toBe('2');
+    expect(tileValue('Questionnaires')).toBe('4');
   });
 
   it('degrades to empty table + zero tiles when the initial questionnaires fetch throws', async () => {
@@ -390,6 +408,13 @@ describe('QuestionnairesListPage stat tiles', () => {
     vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
       const url = (res as { _url: string })._url;
       if (url.includes('demo-clients')) return { success: true as const, data: [] };
+      if (url.includes('archived=true')) {
+        return {
+          success: true as const,
+          data: [],
+          meta: { page: 1, limit: 1, total: 0, totalPages: 1 },
+        };
+      }
       return {
         success: true as const,
         data: draftsOnly,

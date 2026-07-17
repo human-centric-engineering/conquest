@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('next/navigation', () => ({
@@ -34,6 +34,23 @@ vi.mock('@/components/admin/questionnaires/use-duplicate-questionnaire', () => (
   useDuplicateQuestionnaire: () => mockUseDuplicate(),
 }));
 
+// The Archive / Restore row actions drive the shared archive hook — mock it so the
+// archive()/restore() calls and the pending/error state are controllable per test.
+const mockArchive = vi.fn();
+const mockRestore = vi.fn();
+const mockUseArchive = vi.fn();
+vi.mock('@/components/admin/questionnaires/use-archive-questionnaire', () => ({
+  useArchiveQuestionnaire: () => mockUseArchive(),
+}));
+
+// parseApiResponse is what fetchPage feeds the fetch Response through on a view
+// switch / page change. Controlling it lets the Archived-view test populate rows
+// without a real network round-trip.
+const mockParseApiResponse = vi.fn();
+vi.mock('@/lib/api/parse-response', () => ({
+  parseApiResponse: (...args: unknown[]) => mockParseApiResponse(...args),
+}));
+
 beforeEach(() => {
   // Clear accumulated call history on every mock (incl. mockUseDuplicate itself), then
   // re-arm the default state — otherwise the hook factory's call log persists across tests.
@@ -43,6 +60,25 @@ beforeEach(() => {
     isDuplicating: false,
     error: null,
     clearError: vi.fn(),
+  });
+  mockArchive.mockResolvedValue(true);
+  mockRestore.mockResolvedValue(true);
+  mockUseArchive.mockReturnValue({
+    archive: mockArchive,
+    restore: mockRestore,
+    isPending: false,
+    error: null,
+    clearError: vi.fn(),
+  });
+  // Default fetch → a successful empty page; individual tests override parseApiResponse.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true }) as unknown as Response)
+  );
+  mockParseApiResponse.mockResolvedValue({
+    success: true,
+    data: [],
+    meta: { page: 1, limit: 25, total: 0, totalPages: 1 },
   });
 });
 
@@ -66,6 +102,7 @@ function item(over: Partial<QuestionnaireListItem> = {}): QuestionnaireListItem 
     questionCount: 9,
     dataSlotCount: 0,
     demoClient: null,
+    archivedAt: null,
     createdAt: '2026-06-05T00:00:00.000Z',
     updatedAt: '2026-06-05T00:00:00.000Z',
     ...over,
@@ -184,5 +221,223 @@ describe('QuestionnairesTable row actions (Duplicate)', () => {
     render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
 
     expect(screen.getByText(/could not duplicate the questionnaire/i)).toBeInTheDocument();
+  });
+});
+
+describe('QuestionnairesTable archive / restore', () => {
+  it('archiving asks for confirmation before calling archive()', async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ id: 'qn-42', title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+
+    // A confirm dialog appears — archive() is NOT called yet.
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getByText(/archive this questionnaire\?/i)).toBeInTheDocument();
+    expect(mockArchive).not.toHaveBeenCalled();
+  });
+
+  it('calls archive() with the row id after the confirmation is accepted', async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ id: 'qn-42', title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    // The dialog's confirm button (not the menu item) commits the archive.
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^archive$/i }));
+
+    expect(mockArchive).toHaveBeenCalledExactlyOnceWith('qn-42');
+  });
+
+  it('shows Active / Archived view toggles with Active pressed by default', () => {
+    render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
+
+    expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Archived' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+  });
+
+  it('switching to the Archived view fetches archived rows and offers Restore, not Archive', async () => {
+    const user = userEvent.setup();
+    // When the Archived toggle fires its fetch, return one archived row.
+    mockParseApiResponse.mockResolvedValue({
+      success: true,
+      data: [
+        item({
+          id: 'qn-arch',
+          title: 'Old survey',
+          archivedAt: '2026-06-01T00:00:00.000Z',
+        }),
+      ],
+      meta: { page: 1, limit: 25, total: 1, totalPages: 1 },
+    });
+
+    render(<QuestionnairesTable initialItems={[]} initialMeta={META} />);
+    await user.click(screen.getByRole('button', { name: 'Archived' }));
+
+    // The archived row surfaces, and its only action is Restore.
+    const trigger = await screen.findByRole('button', { name: /actions for old survey/i });
+    await user.click(trigger);
+    expect(await screen.findByRole('menuitem', { name: /restore/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /archive/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /duplicate/i })).not.toBeInTheDocument();
+
+    // The fetch carried the archived=true slice selector (first arg is the URL string).
+    const lastCallArg = vi.mocked(fetch).mock.calls.at(-1)?.[0];
+    const fetchUrl = typeof lastCallArg === 'string' ? lastCallArg : '';
+    expect(fetchUrl).toContain('archived=true');
+  });
+
+  it('restores an archived row via the Restore action', async () => {
+    const user = userEvent.setup();
+    mockParseApiResponse.mockResolvedValue({
+      success: true,
+      data: [item({ id: 'qn-arch', title: 'Old survey', archivedAt: '2026-06-01T00:00:00.000Z' })],
+      meta: { page: 1, limit: 25, total: 1, totalPages: 1 },
+    });
+
+    render(<QuestionnairesTable initialItems={[]} initialMeta={META} />);
+    await user.click(screen.getByRole('button', { name: 'Archived' }));
+    await user.click(await screen.findByRole('button', { name: /actions for old survey/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /restore/i }));
+
+    expect(mockRestore).toHaveBeenCalledExactlyOnceWith('qn-arch');
+  });
+
+  it('surfaces an archive error from the hook', () => {
+    mockUseArchive.mockReturnValue({
+      archive: mockArchive,
+      restore: mockRestore,
+      isPending: false,
+      error: 'Could not archive the questionnaire.',
+      clearError: vi.fn(),
+    });
+    render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
+
+    expect(screen.getByText(/could not archive the questionnaire/i)).toBeInTheDocument();
+  });
+
+  it('cancelling the confirm dialog closes it without calling archive()', async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ id: 'qn-42', title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+    expect(mockArchive).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('does not refresh the list when archive() reports failure', async () => {
+    const user = userEvent.setup();
+    mockArchive.mockResolvedValue(false); // hook already surfaced the error; no refetch
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ id: 'qn-42', title: 'Onboarding survey' })]}
+        initialMeta={{ ...META, total: 1 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^archive$/i }));
+
+    expect(mockArchive).toHaveBeenCalledExactlyOnceWith('qn-42');
+    // refreshAfterMutation() drives the only post-hydration fetch — a failed archive skips it.
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});
+
+describe('QuestionnairesTable filters, paging, and columns', () => {
+  it('filters by status — issues a fetch carrying the status param', async () => {
+    const user = userEvent.setup();
+    render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
+
+    await user.click(screen.getByRole('combobox', { name: /filter by status/i }));
+    await user.click(await screen.findByRole('option', { name: /launched/i }));
+
+    const url = vi.mocked(fetch).mock.calls.at(-1)?.[0];
+    expect(typeof url === 'string' ? url : '').toContain('status=launched');
+  });
+
+  it('paging Next requests the next page', async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnairesTable
+        initialItems={[item()]}
+        initialMeta={{ page: 1, limit: 25, total: 30, totalPages: 2 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /next page/i }));
+
+    const url = vi.mocked(fetch).mock.calls.at(-1)?.[0];
+    expect(typeof url === 'string' ? url : '').toContain('page=2');
+  });
+
+  it('surfaces a load error when a fetch fails', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false }) as unknown as Response)
+    );
+    render(
+      <QuestionnairesTable
+        initialItems={[item()]}
+        initialMeta={{ page: 1, limit: 25, total: 30, totalPages: 2 }}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /next page/i }));
+
+    expect(await screen.findByText(/could not load questionnaires/i)).toBeInTheDocument();
+  });
+
+  it('debounced search eventually issues a fetch with the q param', async () => {
+    const user = userEvent.setup();
+    render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
+
+    await user.type(screen.getByLabelText(/search questionnaires by title/i), 'onboarding');
+
+    // The 300ms debounce fires the fetch on the trailing edge — waitFor polls past it.
+    await waitFor(() => {
+      const url = vi.mocked(fetch).mock.calls.at(-1)?.[0];
+      expect(typeof url === 'string' ? url : '').toContain('q=onboarding');
+    });
+  });
+
+  it('renders the Data slots column when enabled', () => {
+    render(
+      <QuestionnairesTable
+        initialItems={[item({ dataSlotCount: 7 })]}
+        initialMeta={{ ...META, total: 1 }}
+        showDataSlots
+      />
+    );
+
+    expect(screen.getByRole('columnheader', { name: /data slots/i })).toBeInTheDocument();
+    expect(screen.getByText('7')).toBeInTheDocument();
   });
 });

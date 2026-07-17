@@ -15,6 +15,13 @@
  *       `null` (audited `questionnaire.assign_demo_client`; a real client engagement
  *       strips demo tenancy — see forking.md § "Replacing demo tenancy").
  *   Section/question/version edits live on the version path.
+ *
+ * DELETE /api/v1/app/questionnaires/:id
+ *   Soft-delete (archive): stamps `archivedAt`, hiding the questionnaire from the
+ *   default admin list while keeping every row recoverable. Idempotent — archiving
+ *   an already-archived questionnaire 200s without re-stamping or re-auditing.
+ *   Reversed by POST `…/:id/restore`. Audited `questionnaire.archive`.
+ *   See .context/app/questionnaire/archiving.md.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';
@@ -135,6 +142,48 @@ const handlePatch = withAdminAuth<{ id: string }>(async (request, session, { par
   return successResponse({ id, demoClient: attached });
 });
 
+// Soft-delete (archive): stamp `archivedAt` so the questionnaire drops out of the
+// default list but stays fully recoverable. Idempotent — a second archive is a
+// no-op 200 (no re-stamp, no duplicate audit), mirroring the rename no-op path.
+const handleArchive = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
+  const log = await getRouteLogger(request);
+  const clientIp = getClientIP(request);
+  const { id } = await params;
+
+  const before = await prisma.appQuestionnaire.findUnique({
+    where: { id },
+    select: { id: true, title: true, archivedAt: true },
+  });
+  if (!before) {
+    throw new NotFoundError('Questionnaire not found');
+  }
+
+  // Already archived → idempotent success, no second stamp/audit.
+  if (before.archivedAt) {
+    return successResponse({ id, archivedAt: before.archivedAt.toISOString() });
+  }
+
+  const updated = await prisma.appQuestionnaire.update({
+    where: { id },
+    data: { archivedAt: new Date() },
+    select: { archivedAt: true },
+  });
+
+  logAdminAction({
+    userId: session.user.id,
+    action: 'questionnaire.archive',
+    entityType: 'questionnaire',
+    entityId: id,
+    entityName: before.title,
+    clientIp,
+  });
+  log.info('Questionnaire archived', { questionnaireId: id });
+
+  return successResponse({ id, archivedAt: updated.archivedAt?.toISOString() ?? null });
+});
+
 export const GET = handleDetail;
 
 export const PATCH = handlePatch;
+
+export const DELETE = handleArchive;

@@ -164,6 +164,7 @@ function makeListItem(over: Partial<QuestionnaireListItem> = {}): QuestionnaireL
     questionCount: 0,
     dataSlotCount: 0,
     demoClient: null,
+    archivedAt: null,
     createdAt: '',
     updatedAt: '',
     ...over,

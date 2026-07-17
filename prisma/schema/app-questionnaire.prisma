@@ -18,6 +18,13 @@ model AppQuestionnaire {
   id           String   @id @default(cuid())
   title        String
   status       String   @default("draft")
+  // Soft-delete / archive dimension — ORTHOGONAL to `status` (which stays the
+  // draft/launched/archived lifecycle). Non-null = archived: the questionnaire is
+  // hidden from the default admin list but fully recoverable (Restore nulls it,
+  // restoring the exact prior state). The timestamp records *when* it was archived
+  // (shown in the Archived view). Indexed because the list query filters on it on
+  // every page load. See .context/app/questionnaire/archiving.md.
+  archivedAt   DateTime?
   // DEMO-ONLY (F2.5.1): which demo client this questionnaire is attributed to.
   // null = "Generic Sunrise demo" (defaults end-to-end); no backfill on older rows.
   // SetNull, not Cascade: a questionnaire outlives its demo client — attribution
@@ -35,6 +42,7 @@ model AppQuestionnaire {
 
   @@index([status])
   @@index([demoClientId])
+  @@index([archivedAt])
   @@map("app_questionnaire")
 }
 
