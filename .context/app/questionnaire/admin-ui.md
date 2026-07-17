@@ -50,11 +50,11 @@ writes it.
 
 ## Read UI
 
-| Page                                              | What it shows                                                                                                     |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `app/admin/questionnaires/page.tsx`               | List: summary stat tiles, debounced title search, status filter, pagination, demo-client owner column (DEMO-ONLY) |
-| `app/admin/questionnaires/[id]/v/[vid]/page.tsx`  | **Overview** tab — status, launch readiness, quick actions, version timeline                                      |
-| `app/admin/questionnaires/[id]/v/[vid]/structure` | **Structure** tab — goal/audience with `inferred` badges, section/question tree/editor                            |
+| Page                                              | What it shows                                                                                                                             |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/admin/questionnaires/page.tsx`               | List: summary stat tiles, debounced title search, status filter, Active/Archived toggle, pagination, demo-client owner column (DEMO-ONLY) |
+| `app/admin/questionnaires/[id]/v/[vid]/page.tsx`  | **Overview** tab — status, launch readiness, quick actions, version timeline                                                              |
+| `app/admin/questionnaires/[id]/v/[vid]/structure` | **Structure** tab — goal/audience with `inferred` badges, section/question tree/editor                                                    |
 
 The list page is a thin server component (`serverFetch` the first page → client
 `QuestionnairesTable` for search/filter/pagination, model on the orchestration
@@ -63,6 +63,11 @@ presentational render of the graph.
 
 The nav entry is registered in `lib/app/admin-nav.ts` via `registerNavSection()`
 (seam 4 — no edit to `admin-sidebar.tsx`).
+
+The list-row actions menu offers **Duplicate**, **Archive** (a reversible
+soft-delete, confirmed via a dialog), and — in the Archived view — **Restore**. See
+[`archiving.md`](./archiving.md) for the `archivedAt` model, the `DELETE` / restore
+API, and the list filter.
 
 ## Workspace layout (tabbed)
 

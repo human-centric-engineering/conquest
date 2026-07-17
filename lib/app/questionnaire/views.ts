@@ -62,6 +62,8 @@ export interface QuestionnaireListItem {
   dataSlotCount: number;
   /** DEMO-ONLY (F2.5.1): the attributed demo client, or null for a generic Sunrise demo. */
   demoClient: AttributedDemoClient | null;
+  /** Soft-delete marker — ISO timestamp when archived, or null when active. */
+  archivedAt: string | null;
   createdAt: string;
   /** Last activity — the questionnaire row's `updatedAt`. */
   updatedAt: string;
@@ -91,6 +93,8 @@ export interface QuestionnaireDetail {
   status: AppQuestionnaireStatus;
   /** DEMO-ONLY (F2.5.1): the attributed demo client, or null for a generic Sunrise demo. */
   demoClient: AttributedDemoClient | null;
+  /** Soft-delete marker — ISO timestamp when archived, or null when active. */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   /** Versions newest-first (highest `versionNumber` first). */

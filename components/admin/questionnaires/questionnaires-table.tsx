@@ -16,11 +16,30 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Copy, Loader2, MoreHorizontal, Search } from 'lucide-react';
+import {
+  Archive,
+  ArchiveRestore,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Loader2,
+  MoreHorizontal,
+  Search,
+} from 'lucide-react';
 
 import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +55,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useDuplicateQuestionnaire } from '@/components/admin/questionnaires/use-duplicate-questionnaire';
+import { useArchiveQuestionnaire } from '@/components/admin/questionnaires/use-archive-questionnaire';
 import {
   Table,
   TableBody,
@@ -54,6 +74,9 @@ import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients'
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 
 const STATUS_FILTER_ALL = '__all__';
+
+/** Which slice of the list to show: live rows or the archived (soft-deleted) trash. */
+type ListView = 'active' | 'archived';
 
 function formatDate(iso: string): string {
   // Locale date only — the table doesn't need time-of-day precision.
@@ -84,10 +107,19 @@ export function QuestionnairesTable({
   const [meta, setMeta] = useState(initialMeta);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>(STATUS_FILTER_ALL);
+  const [view, setView] = useState<ListView>('active');
   const [isLoading, setIsLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  // The row awaiting archive confirmation (id + title for the dialog copy), or null.
+  const [pendingArchive, setPendingArchive] = useState<{ id: string; title: string } | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { duplicate, isDuplicating, error: duplicateError } = useDuplicateQuestionnaire();
+  const {
+    archive,
+    restore,
+    isPending: isArchivePending,
+    error: archiveError,
+  } = useArchiveQuestionnaire();
 
   useEffect(() => {
     return () => {
@@ -102,16 +134,18 @@ export function QuestionnairesTable({
   // (`prev`) for the same reason.
   const limit = initialMeta.limit;
   const fetchPage = useCallback(
-    async (page = 1, overrides?: { search?: string; statusFilter?: string }) => {
+    async (page = 1, overrides?: { search?: string; statusFilter?: string; view?: ListView }) => {
       setIsLoading(true);
       setListError(null);
       try {
         const searchValue = overrides?.search !== undefined ? overrides.search : search;
         const statusValue =
           overrides?.statusFilter !== undefined ? overrides.statusFilter : statusFilter;
+        const viewValue = overrides?.view !== undefined ? overrides.view : view;
         const params = new URLSearchParams({ page: String(page), limit: String(limit) });
         if (searchValue) params.set('q', searchValue);
         if (statusValue && statusValue !== STATUS_FILTER_ALL) params.set('status', statusValue);
+        if (viewValue === 'archived') params.set('archived', 'true');
 
         const res = await fetch(`${API.APP.QUESTIONNAIRES.ROOT}?${params.toString()}`, {
           credentials: 'same-origin',
@@ -129,7 +163,7 @@ export function QuestionnairesTable({
         setIsLoading(false);
       }
     },
-    [search, statusFilter, limit]
+    [search, statusFilter, view, limit]
   );
 
   const handleSearchChange = (value: string) => {
@@ -143,6 +177,32 @@ export function QuestionnairesTable({
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
     void fetchPage(1, { statusFilter: value });
+  };
+
+  const handleViewChange = (nextView: ListView) => {
+    if (nextView === view) return;
+    setView(nextView);
+    // Reset to page 1 — the two slices have independent pagination.
+    void fetchPage(1, { view: nextView });
+  };
+
+  // Refresh the current page after a mutation, and re-run the server component so
+  // the stat tiles (active / archived counts) update too.
+  const refreshAfterMutation = () => {
+    void fetchPage(meta.page);
+    router.refresh();
+  };
+
+  const handleConfirmArchive = async () => {
+    if (!pendingArchive) return;
+    const ok = await archive(pendingArchive.id);
+    setPendingArchive(null);
+    if (ok) refreshAfterMutation();
+  };
+
+  const handleRestore = async (id: string) => {
+    const ok = await restore(id);
+    if (ok) refreshAfterMutation();
   };
 
   const goToPage = (page: number) => {
@@ -179,12 +239,40 @@ export function QuestionnairesTable({
             ))}
           </SelectContent>
         </Select>
+        {/* Active / Archived slice toggle — the soft-delete dimension, separate from
+            the `status` filter above. */}
+        <div
+          className="inline-flex rounded-md border p-0.5"
+          role="group"
+          aria-label="Active or archived"
+        >
+          <Button
+            type="button"
+            variant={view === 'active' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-7"
+            aria-pressed={view === 'active'}
+            onClick={() => handleViewChange('active')}
+          >
+            Active
+          </Button>
+          <Button
+            type="button"
+            variant={view === 'archived' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-7"
+            aria-pressed={view === 'archived'}
+            onClick={() => handleViewChange('archived')}
+          >
+            Archived
+          </Button>
+        </div>
         {isLoading && <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />}
       </div>
 
-      {(listError || duplicateError) && (
+      {(listError || duplicateError || archiveError) && (
         <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm">
-          {listError ?? duplicateError}
+          {listError ?? duplicateError ?? archiveError}
         </div>
       )}
 
@@ -209,12 +297,19 @@ export function QuestionnairesTable({
             {items.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={showDataSlots ? 9 : 8} className="py-10 text-center">
-                  <div className="flex flex-col items-center gap-3">
+                  {view === 'archived' ? (
                     <p className="text-muted-foreground">
-                      No questionnaires yet. Upload a document to create your first one.
+                      No archived questionnaires. Archived questionnaires are hidden from the active
+                      list and can be restored here.
                     </p>
-                    <UploadQuestionnaireDialog demoClientOptions={demoClientOptions} />
-                  </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <p className="text-muted-foreground">
+                        No questionnaires yet. Upload a document to create your first one.
+                      </p>
+                      <UploadQuestionnaireDialog demoClientOptions={demoClientOptions} />
+                    </div>
+                  )}
                 </TableCell>
               </TableRow>
             ) : (
@@ -259,20 +354,41 @@ export function QuestionnairesTable({
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            disabled={isDuplicating}
+                            disabled={isDuplicating || isArchivePending}
                             aria-label={`Actions for ${item.title}`}
                           >
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onSelect={() => void duplicate(item.id)}
-                            disabled={isDuplicating}
-                          >
-                            <Copy className="mr-2 h-4 w-4" />
-                            Duplicate
-                          </DropdownMenuItem>
+                          {view === 'archived' ? (
+                            <DropdownMenuItem
+                              onSelect={() => void handleRestore(item.id)}
+                              disabled={isArchivePending}
+                            >
+                              <ArchiveRestore className="mr-2 h-4 w-4" />
+                              Restore
+                            </DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem
+                                onSelect={() => void duplicate(item.id)}
+                                disabled={isDuplicating}
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Duplicate
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  setPendingArchive({ id: item.id, title: item.title })
+                                }
+                                disabled={isArchivePending}
+                              >
+                                <Archive className="mr-2 h-4 w-4" />
+                                Archive
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -311,6 +427,40 @@ export function QuestionnairesTable({
           </button>
         </div>
       </div>
+
+      {/* Archive confirmation — soft-delete is reversible, but it disappears from the
+          active list, so a confirm avoids accidental clicks. */}
+      <AlertDialog
+        open={pendingArchive !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingArchive(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive this questionnaire?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingArchive
+                ? `“${pendingArchive.title}” will be hidden from the active list. Nothing is deleted — you can restore it any time from the Archived view.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isArchivePending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                // Keep the dialog logic in our handler (async archive → refetch) rather
+                // than letting the default close race the mutation.
+                e.preventDefault();
+                void handleConfirmArchive();
+              }}
+              disabled={isArchivePending}
+            >
+              {isArchivePending ? 'Archiving…' : 'Archive'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

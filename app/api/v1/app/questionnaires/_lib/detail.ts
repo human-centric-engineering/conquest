@@ -331,6 +331,7 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
       id: true,
       title: true,
       status: true,
+      archivedAt: true,
       createdAt: true,
       updatedAt: true,
       // DEMO-ONLY (F2.5.1): attributed demo client, or null for a generic demo.
@@ -400,6 +401,7 @@ export async function getQuestionnaireDetail(id: string): Promise<QuestionnaireD
     title: questionnaire.title,
     status: questionnaire.status as AppQuestionnaireStatus,
     demoClient: questionnaire.demoClient,
+    archivedAt: questionnaire.archivedAt ? questionnaire.archivedAt.toISOString() : null,
     createdAt: questionnaire.createdAt.toISOString(),
     updatedAt: questionnaire.updatedAt.toISOString(),
     versions,

@@ -30,26 +30,39 @@ interface QuestionnaireStats {
 /**
  * Status breakdown for the summary tiles. Fetches the widest page the list endpoint
  * allows (its `limit` is capped at 100 — asking for more 400s and the tiles silently
- * read zero) so the launched / draft / archived split is accurate at demo scale;
- * `total` comes from the pagination meta so it stays correct even past the sample.
- * Degrades to zeros.
+ * read zero) so the launched / draft split is accurate at demo scale; `total` comes
+ * from the pagination meta so it stays correct even past the sample. The `archived`
+ * tile counts soft-deleted questionnaires — a separate slice the default list
+ * excludes — via a 1-row `?archived=true` fetch read for its meta `total`. Degrades
+ * to zeros.
  */
 async function getQuestionnaireStats(): Promise<QuestionnaireStats> {
   const empty: QuestionnaireStats = { total: 0, launched: 0, draft: 0, archived: 0 };
   try {
-    const res = await serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=100`);
-    if (!res.ok) return empty;
-    const body = await parseApiResponse<QuestionnaireListItem[]>(res);
-    if (!body.success) return empty;
+    const [activeRes, archivedRes] = await Promise.all([
+      serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?page=1&limit=100`),
+      serverFetch(`${API.APP.QUESTIONNAIRES.ROOT}?archived=true&page=1&limit=1`),
+    ]);
+
+    let archived = 0;
+    if (archivedRes.ok) {
+      const archivedBody = await parseApiResponse<QuestionnaireListItem[]>(archivedRes);
+      if (archivedBody.success) {
+        archived = parsePaginationMeta(archivedBody.meta)?.total ?? 0;
+      }
+    }
+
+    if (!activeRes.ok) return { ...empty, archived };
+    const body = await parseApiResponse<QuestionnaireListItem[]>(activeRes);
+    if (!body.success) return { ...empty, archived };
     const total = parsePaginationMeta(body.meta)?.total ?? body.data.length;
     return body.data.reduce<QuestionnaireStats>(
       (acc, q) => {
         if (q.status === 'launched') acc.launched += 1;
         else if (q.status === 'draft') acc.draft += 1;
-        else if (q.status === 'archived') acc.archived += 1;
         return acc;
       },
-      { ...empty, total }
+      { ...empty, total, archived }
     );
   } catch (err) {
     logger.error('questionnaires list page: stats fetch failed', err);

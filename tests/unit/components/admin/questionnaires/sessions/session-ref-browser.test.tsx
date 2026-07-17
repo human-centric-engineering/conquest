@@ -28,6 +28,10 @@ function item(over: Partial<AdminSessionRefItem> = {}): AdminSessionRefItem {
     questionnaireTitle: 'Onboarding',
     versionId: 'v-1',
     versionNumber: 3,
+    turns: 4,
+    answeredCount: 6,
+    totalQuestions: 10,
+    percentComplete: 60,
     ...over,
   };
 }
@@ -58,6 +62,21 @@ describe('SessionRefBrowser', () => {
 
     const analyticsLink = screen.getByRole('link', { name: /analytics/i });
     expect(analyticsLink).toHaveAttribute('href', '/admin/questionnaires/q-1/v/v-1/analytics');
+  });
+
+  it('shows the turn count and completion percentage', () => {
+    render(
+      <SessionRefBrowser
+        initialItems={[
+          item({ turns: 4, answeredCount: 6, totalQuestions: 10, percentComplete: 60 }),
+        ]}
+        initialMeta={META}
+      />
+    );
+    expect(screen.getByText('4')).toBeInTheDocument();
+    const pct = screen.getByText('60%');
+    expect(pct).toBeInTheDocument();
+    expect(pct).toHaveAttribute('title', '6 of 10 questions answered');
   });
 
   it('marks preview sessions', () => {

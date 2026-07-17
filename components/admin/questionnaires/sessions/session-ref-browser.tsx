@@ -159,6 +159,8 @@ export function SessionRefBrowser({ initialItems, initialMeta }: SessionRefBrows
               <th className="px-3 py-2 font-medium">Reference</th>
               <th className="px-3 py-2 font-medium">Questionnaire</th>
               <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Turns</th>
+              <th className="px-3 py-2 font-medium">Complete</th>
               <th className="px-3 py-2 font-medium">Created</th>
               <th className="px-3 py-2 font-medium">Analytics</th>
             </tr>
@@ -166,7 +168,7 @@ export function SessionRefBrowser({ initialItems, initialMeta }: SessionRefBrows
           <tbody className="divide-y">
             {items.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-muted-foreground px-3 py-8 text-center">
+                <td colSpan={7} className="text-muted-foreground px-3 py-8 text-center">
                   {loading ? 'Loading…' : 'No sessions found.'}
                 </td>
               </tr>
@@ -197,6 +199,16 @@ export function SessionRefBrowser({ initialItems, initialMeta }: SessionRefBrows
                     </td>
                     <td className="px-3 py-2">
                       <Badge variant={STATUS_BADGE[item.status]}>{item.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{item.turns}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      <span
+                        title={`${item.answeredCount} of ${item.totalQuestions} question${
+                          item.totalQuestions === 1 ? '' : 's'
+                        } answered`}
+                      >
+                        {item.percentComplete}%
+                      </span>
                     </td>
                     <td className="text-muted-foreground px-3 py-2 tabular-nums">
                       {new Date(item.createdAt).toLocaleString()}

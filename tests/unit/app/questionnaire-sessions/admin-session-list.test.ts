@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   prisma: {
     appQuestionnaireSession: { findMany: vi.fn(), count: vi.fn() },
+    appQuestionSlot: { groupBy: vi.fn() },
   },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
@@ -23,6 +24,7 @@ import {
 type Mock = ReturnType<typeof vi.fn>;
 const findMany = mocks.prisma.appQuestionnaireSession.findMany as Mock;
 const count = mocks.prisma.appQuestionnaireSession.count as Mock;
+const slotGroupBy = mocks.prisma.appQuestionSlot.groupBy as Mock;
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -37,6 +39,7 @@ function row(over: Record<string, unknown> = {}) {
       questionnaireId: 'q-1',
       questionnaire: { title: 'Onboarding' },
     },
+    _count: { turns: 4, answers: 6 },
     ...over,
   };
 }
@@ -45,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   findMany.mockResolvedValue([row()]);
   count.mockResolvedValue(1);
+  slotGroupBy.mockResolvedValue([{ versionId: 'v-1', _count: { _all: 10 } }]);
 });
 
 describe('adminSessionListQuerySchema', () => {
@@ -89,7 +93,18 @@ describe('listAdminSessionRefs', () => {
       questionnaireTitle: 'Onboarding',
       versionId: 'v-1',
       versionNumber: 3,
+      turns: 4,
+      answeredCount: 6,
+      totalQuestions: 10,
+      percentComplete: 60,
     });
+  });
+
+  it('computes completion as answered ÷ total version slots, and reports 100 when a version has no slots', async () => {
+    slotGroupBy.mockResolvedValue([]); // version 'v-1' has no question slots
+    const { items } = await listAdminSessionRefs({ page: 1, limit: 25 });
+    expect(items[0].totalQuestions).toBe(0);
+    expect(items[0].percentComplete).toBe(100);
   });
 
   it('paginates via skip/take', async () => {

@@ -385,8 +385,10 @@ export const API = {
       introBackgroundParse: '/api/v1/app/questionnaires/intro-background/parse',
       /** Generate / refine the intro background markdown with AI (POST JSON). */
       introBackgroundAuthor: '/api/v1/app/questionnaires/intro-background/author',
-      /** Questionnaire detail (GET); rename or demo-client attribution (PATCH). */
+      /** Questionnaire detail (GET); rename or demo-client attribution (PATCH); soft-delete archive (DELETE). */
       byId: (id: string): string => `/api/v1/app/questionnaires/${id}`,
+      /** Restore a soft-deleted (archived) questionnaire to the active list (POST). */
+      restore: (id: string): string => `/api/v1/app/questionnaires/${id}/restore`,
       /** One version's full section/question graph (GET); version-meta edit (PATCH). */
       versionGraph: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}`,

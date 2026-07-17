@@ -30,6 +30,13 @@ export const listQuestionnairesQuerySchema = z.object({
   q: z.string().trim().min(1).max(200).optional(),
   // Status vocabulary is the single-source tuple in the domain types module.
   status: z.enum(APP_QUESTIONNAIRE_STATUSES).optional(),
+  /**
+   * Soft-delete view. Omitted / `false` → only active (non-archived) rows; `true`
+   * → only archived rows (the "Archived" trash view). String enum, not a coerced
+   * boolean: `z.coerce.boolean('false')` is truthy, which would silently flip the
+   * default. See .context/app/questionnaire/archiving.md.
+   */
+  archived: z.enum(['true', 'false']).optional(),
   /** DEMO-ONLY (F2.5.1): restrict to questionnaires attributed to this demo client. */
   demoClientId: z.string().trim().min(1).max(64).optional(),
   sortBy: z.enum(['updatedAt', 'createdAt', 'title']).default('updatedAt'),
@@ -52,10 +59,13 @@ export interface ListQuestionnairesResult {
 export async function listQuestionnaires(
   query: ListQuestionnairesQuery
 ): Promise<ListQuestionnairesResult> {
-  const { page, limit, q, status, demoClientId, sortBy, sortOrder } = query;
+  const { page, limit, q, status, archived, demoClientId, sortBy, sortOrder } = query;
   const skip = (page - 1) * limit;
 
   const where: Prisma.AppQuestionnaireWhereInput = {};
+  // Soft-delete gate: active view (default) hides archived rows; archived view
+  // shows only them. This is the one filter applied on every list read.
+  where.archivedAt = archived === 'true' ? { not: null } : null;
   if (status) where.status = status;
   if (q) where.title = { contains: q, mode: 'insensitive' };
   if (demoClientId) where.demoClientId = demoClientId;
@@ -70,6 +80,7 @@ export async function listQuestionnaires(
         id: true,
         title: true,
         status: true,
+        archivedAt: true,
         createdAt: true,
         updatedAt: true,
         _count: { select: { versions: true } },
@@ -135,6 +146,7 @@ export async function listQuestionnaires(
       questionCount: latest ? (questionCountByVersion.get(latest.id) ?? 0) : 0,
       dataSlotCount: latest ? (dataSlotCountByVersion.get(latest.id) ?? 0) : 0,
       demoClient: row.demoClient,
+      archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
