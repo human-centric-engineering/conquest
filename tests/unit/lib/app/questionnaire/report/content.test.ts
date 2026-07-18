@@ -9,6 +9,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildAnswerTranscript,
   buildDataSlotContextBlock,
+  buildUnansweredQuestionsBlock,
+  COVERAGE_MAX_LISTED_QUESTIONS,
   partialReportCaveat,
   splitReportParagraphs,
   validateRespondentReportContent,
@@ -308,6 +310,78 @@ describe('buildAnswerTranscript', () => {
     expect(
       buildAnswerTranscript({ ...base, sections: noConf }, { includeConfidence: true })
     ).not.toContain('confidence');
+  });
+});
+
+describe('buildUnansweredQuestionsBlock', () => {
+  it('lists only the unanswered prompts, grouped under their section', () => {
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Wellbeing',
+        slots: [
+          slot({ slotKey: 'q1', prompt: 'How are you?', answered: true, value: 'Good' }),
+          slot({ slotKey: 'q2', prompt: 'How is your workload?', answered: false, value: null }),
+        ],
+      },
+    ];
+    const block = buildUnansweredQuestionsBlock(sections);
+    expect(block).toContain('## Wellbeing');
+    expect(block).toContain('- How is your workload?');
+    // The answered question and its value must never appear — the transcript owns those.
+    expect(block).not.toContain('How are you?');
+    expect(block).not.toContain('Good');
+  });
+
+  it('returns an empty string when every slot was answered, so no coverage block is emitted', () => {
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Wellbeing',
+        slots: [slot({ answered: true, value: 'Good' })],
+      },
+    ];
+    expect(buildUnansweredQuestionsBlock(sections)).toBe('');
+  });
+
+  it('drops sections in which everything was answered', () => {
+    const sections: PanelSectionView[] = [
+      {
+        sectionId: 's1',
+        title: 'Fully answered',
+        slots: [slot({ answered: true, value: 'Good' })],
+      },
+      {
+        sectionId: 's2',
+        title: 'Skipped',
+        slots: [slot({ slotKey: 'q9', prompt: 'Anything else?', answered: false, value: null })],
+      },
+    ];
+    const block = buildUnansweredQuestionsBlock(sections);
+    expect(block).not.toContain('Fully answered');
+    expect(block).toContain('## Skipped');
+  });
+
+  it('caps the listing and states how many further questions were omitted', () => {
+    const slots = Array.from({ length: COVERAGE_MAX_LISTED_QUESTIONS + 3 }, (_, i) =>
+      slot({ slotKey: `q${i}`, prompt: `Question ${i}?`, answered: false, value: null })
+    );
+    const block = buildUnansweredQuestionsBlock([{ sectionId: 's1', title: 'Long', slots }]);
+    expect(block).toContain('Question 0?');
+    expect(block).not.toContain(`Question ${COVERAGE_MAX_LISTED_QUESTIONS + 2}?`);
+    expect(block).toContain('(and 3 further unanswered questions)');
+  });
+
+  it('singularises the omitted-count tail', () => {
+    const slots = Array.from({ length: COVERAGE_MAX_LISTED_QUESTIONS + 1 }, (_, i) =>
+      slot({ slotKey: `q${i}`, prompt: `Question ${i}?`, answered: false, value: null })
+    );
+    const block = buildUnansweredQuestionsBlock([{ sectionId: 's1', title: 'Long', slots }]);
+    expect(block).toContain('(and 1 further unanswered question)');
+  });
+
+  it('returns an empty string for no sections at all', () => {
+    expect(buildUnansweredQuestionsBlock([])).toBe('');
   });
 });
 

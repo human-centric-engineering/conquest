@@ -142,6 +142,7 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
         dataSlotContext: sample.dataSlotContext,
         // Sample answers cover the questionnaire — no partial-completion caveat in a preview.
         completionPct: 100,
+        coverage: sample.coverage,
         demoClientId: null,
         sessionId: `preview:${vid}`,
       });

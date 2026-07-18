@@ -195,7 +195,30 @@ from the delivered report: a re-run never changes what the respondent sees until
    `estimatedDurationMinutes`, `locale`, `sensitivity`, `notes`), each rendered as its own labelled
    line by `describeAudience` (`report/content.ts`), not a one-line summary.
 
-   The DB load (steps + transcript + data-slot block + completion %) is split from the generation core:
+   **Answer coverage (the negative-space block).** The transcript is answered-only by construction —
+   `buildAnswerTranscript` filters on `slot.answered` and skips sections with no answers, and
+   `buildDataSlotContextBlock` skips unfilled slots. That guarantees no unanswered question can ever be
+   presented to the writer as if it had an answer, but on its own it also makes a 25 %-complete session
+   read exactly like a complete one: the writer cannot see what it is _not_ seeing, which leaves the
+   grounding rule "where their answers are thin, say less rather than inferring" unactionable.
+
+   So the system prompt carries a separate **coverage block** (`coverageRules` in
+   `report/generate.ts`, listing built by `buildUnansweredQuestionsBlock` in `report/content.ts`):
+   the answered/total counts and the prompts of the questions the respondent skipped, grouped by
+   section and capped at `COVERAGE_MAX_LISTED_QUESTIONS` (60, with an "(and N further…)" tail).
+
+   The framing around that listing is load-bearing, not decorative — a bare list of questions in a
+   prompt is an invitation to answer them. The block states that the writer knows **nothing** about the
+   respondent's position on anything listed, must not answer/guess/imply what they might have said or
+   treat the topic as covered, and may only reference a gap _as_ a gap (e.g. recommending the topic as
+   a next step). Never edit the listing without preserving that fencing.
+
+   The block is emitted only when something was actually skipped: a fully-answered session produces
+   `''` from the builder and the prompt is byte-identical to what it was before this existed. Note this
+   is distinct from `completionPct`, which drives the deterministic
+   [partial-report caveat](#storage-ai-modes) and is still never given to the model.
+
+   The DB load (steps + transcript + data-slot block + completion % + coverage) is split from the generation core:
    `generateRespondentReport(sessionId)` builds the inputs, then delegates to the exported
    `generateReportFromInputs(inputs)` (KB → agent → research rounds → completion → formatter → appendix).
    The [config preview](#config-preview-ai-synthesised) reuses that core with synthesised sample answers,

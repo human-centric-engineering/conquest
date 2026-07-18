@@ -136,6 +136,83 @@ beforeEach(() => {
   (runReportResearch as Mock).mockResolvedValue({ findings: [], costUsd: 0 });
 });
 
+describe('generateRespondentReport — answer coverage (negative space)', () => {
+  /** The default export with two extra questions the respondent never answered. */
+  function partialExport() {
+    const base = loadedExport();
+    return {
+      ...base,
+      sections: [
+        {
+          ...base.sections[0],
+          slots: [
+            ...base.sections[0].slots,
+            { slotKey: 'q2', prompt: 'How is your workload?', type: 'free_text', required: false },
+          ],
+        },
+        {
+          sectionId: 's2',
+          title: 'Career',
+          slots: [
+            {
+              slotKey: 'q3',
+              prompt: 'Where do you want to be?',
+              type: 'free_text',
+              required: false,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  async function systemPromptFor(exportModel: unknown): Promise<string> {
+    (loadSessionExport as Mock).mockResolvedValue(exportModel);
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+    await generateRespondentReport('sess-1');
+    return (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    )!.content;
+  }
+
+  it('lists the unanswered questions with the real answered/total counts', async () => {
+    const system = await systemPromptFor(partialExport());
+    expect(system).toContain('answered 1 of 3 questions (33%)');
+    expect(system).toContain('- How is your workload?');
+    expect(system).toContain('- Where do you want to be?');
+  });
+
+  it('fences the listing so the writer treats it as context, never as questions to answer', async () => {
+    const system = await systemPromptFor(partialExport());
+    // The load-bearing guard: without this framing a bare list of questions invites the model to
+    // answer them, which is exactly the hallucination this block would otherwise cause.
+    expect(system).toContain("You know NOTHING about this respondent's position");
+    expect(system).toContain('Do NOT answer them, guess at them');
+    expect(system).toContain('write less rather than inferring more');
+  });
+
+  it('never places an unanswered question in the user message alongside the real answers', async () => {
+    (loadSessionExport as Mock).mockResolvedValue(partialExport());
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+    await generateRespondentReport('sess-1');
+    const user = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'user'
+    )!.content;
+    // The transcript stays answered-only — an unanswered prompt here would read as a Q&A pair.
+    expect(user).toContain('Q: Mood?');
+    expect(user).not.toContain('How is your workload?');
+    expect(user).not.toContain('Where do you want to be?');
+  });
+
+  it('emits no coverage block at all when every question was answered', async () => {
+    const system = await systemPromptFor(loadedExport());
+    expect(system).not.toContain('COVERAGE.');
+    expect(system).not.toContain('Questions with NO answer');
+  });
+});
+
 describe('generateRespondentReport', () => {
   it('builds the transcript into the prompt and returns the parsed content + cost', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);

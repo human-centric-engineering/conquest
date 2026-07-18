@@ -41,6 +41,7 @@ import {
 import {
   buildAnswerTranscript,
   buildDataSlotContextBlock,
+  buildUnansweredQuestionsBlock,
   validateRespondentReportContent,
   type RespondentReportContent,
   type RespondentReportResearch,
@@ -88,6 +89,32 @@ const GROUNDING_RULES =
   'inferring. You may bring in general context or an illustrative example, but frame it explicitly ' +
   'as general (e.g. "in many organisations…") — never state an unsupported example as a fact about ' +
   'this respondent. Never invent facts.';
+
+/**
+ * The framing that turns the unanswered-question list into context rather than hallucination fodder.
+ *
+ * The transcript is answered-only by construction (`buildAnswerTranscript`), so without this the
+ * writer has no idea what it is NOT seeing and a 25%-complete session reads exactly like a complete
+ * one. Listing the skipped prompts fixes that — but a bare list of questions in a prompt is an
+ * invitation to answer them, so every use here is fenced: the writer is told it knows nothing about
+ * the respondent's position on any listed item, may reference a gap as a gap, and may never imply
+ * what the missing answer would have been.
+ */
+function coverageRules(answered: number, total: number, unansweredBlock: string): string {
+  const pct = total > 0 ? Math.round((answered / total) * 100) : 100;
+  return (
+    `COVERAGE. This respondent answered ${answered} of ${total} questions (${pct}%). The questions ` +
+    'they did NOT answer are listed below. They are given ONLY so you know the shape of the ' +
+    'questionnaire and which topics you have no information about — they are NOT material to write ' +
+    "about. You know NOTHING about this respondent's position on any question listed below. Do NOT " +
+    'answer them, guess at them, state or imply what the respondent might have said, or treat their ' +
+    'topic as covered. You MAY note that a topic was not covered, and MAY recommend completing it as ' +
+    'a next step where that genuinely helps the reader. Where coverage is thin, write less rather ' +
+    `than inferring more — a short report grounded in ${answered} answers is worth far more than a ` +
+    'long one padded with speculation.\n\n' +
+    `Questions with NO answer from this respondent:\n${unansweredBlock}`
+  );
+}
 
 /**
  * Paragraph guidance for agent 1 — layout is the Report Formatter second pass's job, so agent 1
@@ -181,6 +208,12 @@ function buildReportMessages(opts: {
    * not to merely restate answers the reader can already see.
    */
   includesAppendedData: boolean;
+  /**
+   * Answer coverage — the counts and the unanswered-question listing. Omitted (or with an empty
+   * `unansweredBlock`) when every slot was answered: there is no gap to describe, so no coverage
+   * block is emitted and the prompt is exactly as it was before.
+   */
+  coverage?: { answered: number; total: number; unansweredBlock: string };
 }): LlmMessage[] {
   const {
     agentInstructions,
@@ -190,6 +223,7 @@ function buildReportMessages(opts: {
     knowledge,
     research,
     includesAppendedData,
+    coverage,
   } = opts;
   const gen = settings.generation;
   const narrative = settings.mode === 'narrative';
@@ -207,6 +241,10 @@ function buildReportMessages(opts: {
           'Address the respondent directly (second person). ' +
           GROUNDING_RULES
   );
+  // Negative space, immediately after the grounding contract it makes actionable: what the respondent
+  // did NOT answer, fenced so the list reads as context and never as questions to answer.
+  if (coverage && coverage.unansweredBlock.trim())
+    system.push(coverageRules(coverage.answered, coverage.total, coverage.unansweredBlock.trim()));
   if (includesAppendedData) system.push(APPENDED_DATA_RULES);
   // Contextual data-slot understanding + the weighting that balances it against the direct answers.
   // Only present when the version has data slots — otherwise the report is answers-only, as before.
@@ -297,6 +335,13 @@ export interface ReportGenerationInputs {
   dataSlotContext: string;
   /** Completion % at generation — drives the partial-report caveat. */
   completionPct: number;
+  /**
+   * Answer coverage for the writer's negative-space block: how many slots were answered out of how
+   * many, and the unanswered prompts themselves (from {@link buildUnansweredQuestionsBlock}).
+   * Optional — a caller that omits it, or whose `unansweredBlock` is '' because everything was
+   * answered, produces the same prompt as before.
+   */
+  coverage?: { answered: number; total: number; unansweredBlock: string };
   /** Attributed client for optional KB grounding; null disables it (e.g. preview). */
   demoClientId: string | null;
   /** The session id (or a `preview:<vid>` sentinel) — used for research logging + KB warnings. */
@@ -374,6 +419,14 @@ export async function generateRespondentReportWithSettings(
     transcript,
     dataSlotContext,
     completionPct,
+    // Negative space: the questions this respondent skipped, so the writer can see which topics it
+    // has no information about instead of reading a partial session as a complete one. The panel is
+    // built at `full_progress` above, so it carries the unanswered slots this needs.
+    coverage: {
+      answered: panel.answeredCount,
+      total: panel.totalCount,
+      unansweredBlock: buildUnansweredQuestionsBlock(panel.sections),
+    },
     demoClientId: meta.version.questionnaire?.demoClientId ?? null,
     sessionId,
   });
@@ -388,8 +441,16 @@ export async function generateRespondentReportWithSettings(
 export async function generateReportFromInputs(
   inputs: ReportGenerationInputs
 ): Promise<GeneratedReport> {
-  const { settings, goal, transcript, dataSlotContext, completionPct, demoClientId, sessionId } =
-    inputs;
+  const {
+    settings,
+    goal,
+    transcript,
+    dataSlotContext,
+    completionPct,
+    demoClientId,
+    sessionId,
+    coverage,
+  } = inputs;
 
   // 3. Optional client-KB grounding — strictly scoped to the client's documents.
   let knowledge = '';
@@ -480,6 +541,7 @@ export async function generateReportFromInputs(
       const includes = resolveReportRawIncludes(settings);
       return includes.questions || includes.dataSlots;
     })(),
+    ...(coverage ? { coverage } : {}),
   });
   const result = await runStructuredCompletion<RespondentReportContent>({
     provider,
