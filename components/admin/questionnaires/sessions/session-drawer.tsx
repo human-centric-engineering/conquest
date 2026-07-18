@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { ExternalLink, FlaskConical, Loader2, Split, X } from 'lucide-react';
+import { ExternalLink, FileText, FlaskConical, Loader2, Split, X } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { formatCompactDuration } from '@/lib/utils/format-duration';
 import { formatCompactDateTime } from '@/lib/utils/format-datetime';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
@@ -35,6 +36,7 @@ import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
 import type { RespondentReportRevisionsView } from '@/lib/app/questionnaire/report/revision';
 import type { RespondentReportClientView } from '@/lib/app/questionnaire/report/view';
+import type { AdminReportAvailability } from '@/lib/app/questionnaire/report/availability';
 
 /** The `/admin-view` payload the drawer mounts both tabs from. */
 interface AdminViewData {
@@ -45,6 +47,7 @@ interface AdminViewData {
     initialView: RespondentReportRevisionsView;
   };
   report: RespondentReportClientView | null;
+  availability: AdminReportAvailability;
 }
 
 export interface SessionDrawerProps {
@@ -77,6 +80,20 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
     }
   }, []);
 
+  // Silent refresh — refetch without clearing the current view (used to poll a generating report so the
+  // Report tab updates in place rather than flashing the whole drawer).
+  const silentReload = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const view = await apiClient.get<AdminViewData>(
+        API.APP.QUESTIONNAIRE_SESSIONS.adminView(sessionId)
+      );
+      setData(view);
+    } catch {
+      // Transient — keep the last good view.
+    }
+  }, [sessionId]);
+
   // (Re)load whenever the drawer opens on a session; clear when it closes so a reopen never flashes
   // the previous session's transcript.
   useEffect(() => {
@@ -86,6 +103,15 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
       setError(null);
     }
   }, [open, sessionId, load]);
+
+  // Poll while a report is generating so a just-triggered "Generate report" resolves in place.
+  const reportStatus = data?.report?.insights?.status;
+  const reportGenerating = reportStatus === 'queued' || reportStatus === 'processing';
+  useEffect(() => {
+    if (!open || !reportGenerating) return;
+    const timer = setInterval(() => void silentReload(), 4000);
+    return () => clearInterval(timer);
+  }, [open, reportGenerating, silentReload]);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -192,6 +218,8 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
                       sessionId={item.sessionId}
                       report={data.report}
                       panel={data.reportPanel}
+                      availability={data.availability}
+                      onGenerated={() => void silentReload()}
                     />
                   </TabsContent>
                 </Tabs>
@@ -218,19 +246,44 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
   );
 }
 
-/** The Report tab: the delivered report (when generated) above the re-run history + trigger. */
+/**
+ * The Report tab, gated on availability:
+ *  - `disabled` / `not_yet` → an explanation, no action;
+ *  - `generate` → a "Generate report" prompt (unless a generation is already in flight);
+ *  - `exists` → the delivered report above the re-run / revert / compare panel.
+ */
 function ReportTab({
   sessionId,
   report,
   panel,
+  availability,
+  onGenerated,
 }: {
   sessionId: string;
   report: RespondentReportClientView | null;
   panel: AdminViewData['reportPanel'];
+  availability: AdminReportAvailability;
+  onGenerated: () => void;
 }) {
   const insights = report?.insights ?? null;
   const status = insights?.status ?? null;
+  const generating = status === 'queued' || status === 'processing';
 
+  if (availability.state === 'disabled' || availability.state === 'not_yet') {
+    return <EmptyReportState message={availability.message} />;
+  }
+  // A report can be generated and none is in flight yet → offer generation.
+  if (availability.state === 'generate' && !generating) {
+    return (
+      <GeneratePrompt
+        sessionId={sessionId}
+        message={availability.message}
+        onGenerated={onGenerated}
+      />
+    );
+  }
+
+  // 'exists' (or a generation now in flight) → the report + the re-run/revert/compare panel.
   return (
     <div className="space-y-4 py-3">
       <div className="flex items-center justify-between gap-2">
@@ -258,16 +311,63 @@ function ReportTab({
           The report failed to generate{insights?.error ? `: ${insights.error}` : '.'} Use “Re-run
           report” to try again.
         </p>
-      ) : status === 'queued' || status === 'processing' ? (
+      ) : generating ? (
         <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-          The report is being generated — check back shortly, or open “Re-run report” to watch its
-          status.
+          The report is being generated — this updates automatically when it’s ready.
         </p>
       ) : (
         <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-          No AI report has been generated for this session. Use “Re-run report” to generate one.
+          A re-run is ready in the history — open “Re-run report” to view or promote it.
         </p>
       )}
+    </div>
+  );
+}
+
+/** An informational empty state (reports disabled, or not available yet) — no action. */
+function EmptyReportState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-8 text-center">
+      <FileText className="text-muted-foreground h-6 w-6" aria-hidden="true" />
+      <p className="text-muted-foreground max-w-md text-sm">{message}</p>
+    </div>
+  );
+}
+
+/** The "Generate report" prompt for a session that can have a report but doesn't yet. */
+function GeneratePrompt({
+  sessionId,
+  message,
+  onGenerated,
+}: {
+  sessionId: string;
+  message: string;
+  onGenerated: () => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const generate = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      await apiClient.post(API.APP.QUESTIONNAIRE_SESSIONS.reportGenerate(sessionId));
+      onGenerated(); // parent reload picks up the queued report and shows the generating state
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Could not start report generation.');
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-8 text-center">
+      <FileText className="text-muted-foreground h-6 w-6" aria-hidden="true" />
+      <p className="text-muted-foreground max-w-md text-sm">{message}</p>
+      <Button type="button" onClick={() => void generate()} disabled={generating}>
+        {generating && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+        Generate report
+      </Button>
+      {error && <p className="text-destructive text-sm">{error}</p>}
     </div>
   );
 }

@@ -661,6 +661,9 @@ export const API = {
       report: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report`,
       /** Re-queue + kick a stuck/failed respondent report ("Check again", POST). */
       reportRetry: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report/retry`,
+      /** ALPHA admin: generate the delivered report for a session that has none yet (POST → 202). */
+      reportGenerate: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/generate`,
       /** Opt in to a report-ready email (POST `{ email }`). */
       reportNotify: (id: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/report/notify`,

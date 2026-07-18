@@ -140,6 +140,11 @@ export async function enqueueRespondentReportRevision(params: {
   const note = instructions?.trim().slice(0, RESPONDENT_REPORT_RERUN_NOTE_MAX_LENGTH) || null;
 
   return prisma.$transaction(async (tx) => {
+    // Snapshot the currently-delivered (original) report as revision 0 the first time a re-run is
+    // queued — a promote would otherwise overwrite it, and the admin must be able to revert to / diff
+    // against the original. Idempotent + no-op when there is no delivered content to preserve.
+    await ensureOriginalBaselineRevisionTx(tx, reportId);
+
     const last = await tx.appRespondentReportRevision.findFirst({
       where: { reportId },
       orderBy: { revisionNumber: 'desc' },
@@ -161,6 +166,46 @@ export async function enqueueRespondentReportRevision(params: {
     });
 
     return { revisionNumber, revisionId: created.id };
+  });
+}
+
+/**
+ * Capture the currently-delivered report as **revision 0** — the immutable "Original" baseline the admin
+ * can revert to and diff against. Idempotent (skips when revision 0 already exists) and a no-op when the
+ * header has no delivered content yet (nothing to preserve). Runs inside the enqueue transaction so the
+ * baseline is snapshotted before the first re-run can ever be promoted over the original.
+ */
+async function ensureOriginalBaselineRevisionTx(
+  tx: Prisma.TransactionClient,
+  reportId: string
+): Promise<void> {
+  const existing = await tx.appRespondentReportRevision.findUnique({
+    where: { reportId_revisionNumber: { reportId, revisionNumber: 0 } },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const header = await tx.appRespondentReport.findUnique({
+    where: { id: reportId },
+    select: { content: true, formatted: true, completionPct: true, mode: true, generatedAt: true },
+  });
+  if (!header || header.content == null) return;
+
+  await tx.appRespondentReportRevision.create({
+    data: {
+      reportId,
+      revisionNumber: 0,
+      status: 'ready',
+      content: header.content ?? undefined,
+      formatted: header.formatted,
+      completionPct: header.completionPct,
+      // Minimal snapshot — only `.mode` is read back (for the history label); the original was AI-authored.
+      settingsSnapshot: { mode: header.mode },
+      instructions: null,
+      authoredBy: 'ai',
+      createdBy: null,
+      generatedAt: header.generatedAt ?? new Date(),
+    },
   });
 }
 

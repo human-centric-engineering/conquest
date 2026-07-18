@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Columns2, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/dialog';
 import { FieldHelp } from '@/components/ui/field-help';
 import { ReportBody, ReportPaperHeader } from '@/components/app/questionnaire/report/report-body';
+import { ReportCompareView } from '@/components/admin/questionnaires/sessions/report-compare-view';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 import type {
   DeliveredReportSummary,
@@ -122,6 +123,8 @@ export function SessionReportRerun({
   const [viewing, setViewing] = useState<RevisionDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [promoting, setPromoting] = useState<number | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [reverting, setReverting] = useState(false);
 
   const gen = settings.generation;
   const patchGen = (next: Partial<RespondentReportSettings['generation']>) =>
@@ -198,7 +201,34 @@ export function SessionReportRerun({
     }
   };
 
-  const revisionCount = view.revisions.length;
+  // Revert = promote the Original baseline (revision 0) back into the delivered report.
+  const revert = async () => {
+    setReverting(true);
+    setError(null);
+    try {
+      await apiClient.post(API.APP.QUESTIONNAIRE_SESSIONS.reportRevisionPromote(sessionId, 0));
+      await refresh();
+    } catch (err) {
+      setError(err instanceof APIClientError ? err.message : 'Could not revert to the original.');
+    } finally {
+      setReverting(false);
+    }
+  };
+
+  // Revisions excluding the Original baseline (revision 0) — what "N re-runs" counts.
+  const reRuns = view.revisions.filter((r) => r.revisionNumber !== 0);
+  const hasOriginal = view.revisions.some((r) => r.revisionNumber === 0);
+  const deliveredRevision = view.revisions.find((r) => r.delivered) ?? null;
+  // The delivered report is the original when nothing has been promoted, or the Original (rev 0) is.
+  const deliveredIsOriginal = !deliveredRevision || deliveredRevision.revisionNumber === 0;
+  // Ready versions the diff can compare (Original + ready re-runs), oldest first for the selectors.
+  const compareEntries = view.revisions
+    .filter((r) => r.status === 'ready')
+    .map((r) => ({
+      revisionNumber: r.revisionNumber,
+      label: r.revisionNumber === 0 ? 'Original' : `Re-run #${r.revisionNumber}`,
+    }))
+    .sort((x, y) => x.revisionNumber - y.revisionNumber);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -206,9 +236,9 @@ export function SessionReportRerun({
         <Button type="button" variant="outline" size="sm" className={className}>
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
           Re-run report
-          {revisionCount > 0 && (
+          {reRuns.length > 0 && (
             <Badge variant="secondary" className="ml-1.5">
-              {revisionCount}
+              {reRuns.length}
             </Badge>
           )}
         </Button>
@@ -222,17 +252,36 @@ export function SessionReportRerun({
               replace what the respondent sees.
             </DialogDescription>
           </div>
-          {viewing && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setViewing(null)}>
+          {viewing || comparing ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => (viewing ? setViewing(null) : setComparing(false))}
+            >
               <ArrowLeft className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
               Back
             </Button>
+          ) : (
+            compareEntries.length >= 2 && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setComparing(true)}>
+                <Columns2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                Compare
+              </Button>
+            )
           )}
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {viewing ? (
             <RevisionContentView detail={viewing} />
+          ) : comparing ? (
+            <ReportCompareView
+              sessionId={sessionId}
+              entries={compareEntries}
+              initialA={compareEntries[0]?.revisionNumber ?? 0}
+              initialB={compareEntries[compareEntries.length - 1]?.revisionNumber ?? 0}
+            />
           ) : (
             <div className="space-y-6 p-5">
               {/* ── New re-run form ─────────────────────────────────────────── */}
@@ -410,8 +459,30 @@ export function SessionReportRerun({
                     Refresh
                   </Button>
                 </div>
-                <DeliveredLine delivered={view.delivered} />
-                {revisionCount === 0 ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <DeliveredLine
+                    delivered={view.delivered}
+                    deliveredIsOriginal={deliveredIsOriginal}
+                  />
+                  {hasOriginal && !deliveredIsOriginal && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => void revert()}
+                      disabled={reverting}
+                    >
+                      {reverting ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Undo2 className="mr-1 h-3 w-3" aria-hidden="true" />
+                      )}
+                      Revert to original
+                    </Button>
+                  )}
+                </div>
+                {view.revisions.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
                     No re-runs yet. Adjust the settings above and re-run to create one.
                   </p>
@@ -443,7 +514,13 @@ function normaliseStart(settings: RespondentReportSettings): RespondentReportSet
   return settings.mode === 'raw' ? { ...settings, mode: 'narrative' } : settings;
 }
 
-function DeliveredLine({ delivered }: { delivered: DeliveredReportSummary | null }) {
+function DeliveredLine({
+  delivered,
+  deliveredIsOriginal,
+}: {
+  delivered: DeliveredReportSummary | null;
+  deliveredIsOriginal: boolean;
+}) {
   if (!delivered) {
     return (
       <p className="text-muted-foreground text-xs">This session has no delivered report yet.</p>
@@ -454,10 +531,10 @@ function DeliveredLine({ delivered }: { delivered: DeliveredReportSummary | null
     <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
       <span>Delivered report:</span>
       <Badge variant={badge.variant}>{badge.label}</Badge>
-      {delivered.deliveredRevisionId ? (
-        <span>currently showing a promoted re-run.</span>
-      ) : (
+      {deliveredIsOriginal ? (
         <span>currently showing the original generation.</span>
+      ) : (
+        <span>currently showing a promoted re-run.</span>
       )}
     </div>
   );
@@ -477,9 +554,16 @@ function RevisionRow({
   onPromote: () => void;
 }) {
   const badge = STATUS_BADGE[revision.status];
+  const isOriginal = revision.revisionNumber === 0;
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm">
-      <span className="font-mono text-xs font-semibold">#{revision.revisionNumber}</span>
+      {isOriginal ? (
+        <Badge variant="secondary" className="text-[10px]">
+          Original
+        </Badge>
+      ) : (
+        <span className="font-mono text-xs font-semibold">#{revision.revisionNumber}</span>
+      )}
       <Badge variant={badge.variant}>{badge.label}</Badge>
       {revision.delivered && <Badge variant="outline">Delivered</Badge>}
       <span className="text-muted-foreground text-xs">{MODE_LABELS[revision.mode]}</span>
@@ -516,7 +600,7 @@ function RevisionRow({
               disabled={promoting}
             >
               {promoting && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-              Promote
+              {isOriginal ? 'Restore' : 'Promote'}
             </Button>
           )}
         </div>
@@ -542,7 +626,12 @@ function RevisionContentView({ detail }: { detail: RevisionDetail }) {
     <div className="bg-muted/40 p-4 sm:p-8">
       <div className="mx-auto w-full max-w-[210mm]">
         <div className="rounded-sm bg-white px-[9%] py-[8%] text-neutral-900 shadow-xl ring-1 ring-black/5 sm:px-[12%] sm:py-[10%]">
-          <ReportPaperHeader title={`Re-run #${detail.revisionNumber}`} header={null} />
+          <ReportPaperHeader
+            title={
+              detail.revisionNumber === 0 ? 'Original report' : `Re-run #${detail.revisionNumber}`
+            }
+            header={null}
+          />
           <ReportBody
             content={detail.content}
             formatted={detail.formatted}

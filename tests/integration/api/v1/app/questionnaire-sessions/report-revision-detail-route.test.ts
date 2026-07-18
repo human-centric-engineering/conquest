@@ -76,10 +76,10 @@ describe('GET …/report/revisions/:rev', () => {
     expect(getRespondentReportRevisionDetail).not.toHaveBeenCalled();
   });
 
-  it('400s a zero/negative revision number', async () => {
+  it('resolves revision 0 (the Original baseline)', async () => {
     const res = await GET(req(), ctx('0'));
-    expect(res.status).toBe(400);
-    expect(getRespondentReportRevisionDetail).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(getRespondentReportRevisionDetail).toHaveBeenCalledWith('sess-1', 0);
   });
 
   it('400s a numeric-prefixed but non-numeric segment (does not coerce to 2)', async () => {

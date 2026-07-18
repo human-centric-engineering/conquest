@@ -35,7 +35,8 @@ vi.mock('@/lib/db/client', () => {
     prisma: {
       appRespondentReport,
       appRespondentReportRevision,
-      $transaction: async (fn: (tx: unknown) => unknown) => fn({ appRespondentReportRevision }),
+      $transaction: async (fn: (tx: unknown) => unknown) =>
+        fn({ appRespondentReportRevision, appRespondentReport }),
     },
   };
 });
@@ -83,6 +84,8 @@ describe('enqueueRespondentReportRevision', () => {
     });
 
     expect(out).toEqual({ revisionNumber: 3, revisionId: 'rev-new' });
+    // Only the re-run row is created — the mock header carries no content, so no rev-0 baseline snapshot.
+    expect(revCreate).toHaveBeenCalledTimes(1);
     expect(revCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -111,6 +114,36 @@ describe('enqueueRespondentReportRevision', () => {
     expect(out.revisionNumber).toBe(1);
     expect(revCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ instructions: null }) })
+    );
+  });
+
+  it('captures the delivered report as the Original (revision 0) on the first re-run', async () => {
+    revFindUnique.mockResolvedValueOnce(null); // no rev 0 yet
+    headerFindUnique.mockResolvedValueOnce({
+      content,
+      formatted: true,
+      completionPct: 80,
+      mode: 'narrative',
+      generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    // After the baseline (0) is created, the "last" revision is 0 → the re-run becomes #1.
+    revFindFirst.mockResolvedValue({ revisionNumber: 0 });
+
+    await enqueueRespondentReportRevision({ sessionId: 'sess-1', settings, adminId: 'admin-1' });
+
+    // Two creates: the Original baseline (rev 0, ready, AI-authored) then the queued re-run (rev 1).
+    expect(revCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          revisionNumber: 0,
+          status: 'ready',
+          content,
+          authoredBy: 'ai',
+        }),
+      })
+    );
+    expect(revCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ revisionNumber: 1 }) })
     );
   });
 });

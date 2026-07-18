@@ -24,6 +24,8 @@ import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/tra
 import { loadAdminReportRerunPanel } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-report-rerun-view';
 import { withAlphaSessionToolsEnabled } from '@/app/api/v1/app/questionnaire-sessions/_lib/alpha-gate';
 import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
+import { resolveAdminReportAvailability } from '@/lib/app/questionnaire/report/availability';
+import { SESSION_STATUSES, narrowToEnum } from '@/lib/app/questionnaire/types';
 
 const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
@@ -31,7 +33,12 @@ const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, 
 
   const session = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
-    select: { versionId: true },
+    select: {
+      versionId: true,
+      status: true,
+      _count: { select: { answers: true } },
+      version: { select: { config: { select: { allowEarlyFinish: true } } } },
+    },
   });
   if (!session) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
 
@@ -41,9 +48,24 @@ const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, 
     buildRespondentReportClientView(sessionId),
   ]);
 
+  // What the Report tab offers: a report exists (delivered content or a ready revision), can be
+  // generated, or isn't available yet — gated on the questionnaire's early-report setting.
+  const reportStatus = report?.insights?.status;
+  const hasReport =
+    report?.insights?.content != null ||
+    reportPanel.initialView.revisions.some((r) => r.status === 'ready');
+  const availability = resolveAdminReportAvailability({
+    enabled: report?.enabled ?? false,
+    hasReport,
+    reportInFlight: reportStatus === 'queued' || reportStatus === 'processing',
+    sessionStatus: narrowToEnum(session.status, SESSION_STATUSES, 'active'),
+    answeredCount: session._count.answers,
+    allowEarlyFinish: session.version?.config?.allowEarlyFinish ?? false,
+  });
+
   log.info('Alpha session admin-view loaded', { sessionId, turnCount: turns.length });
 
-  return successResponse({ turns, reportPanel, report });
+  return successResponse({ turns, reportPanel, report, availability });
 });
 
 export const GET = withAlphaSessionToolsEnabled(handleAdminView);
