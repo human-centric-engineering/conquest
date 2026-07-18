@@ -67,6 +67,9 @@ describe('GET …/report/revisions/:rev', () => {
     const res = await GET(req(), ctx('9'));
     expect(res.status).toBe(404);
     const body = await res.json();
+    // Assert the whole error envelope — `success: false` alongside the code, so a regression that
+    // flipped `success` while leaving `error.code` intact can't pass green.
+    expect(body.success).toBe(false);
     expect(body.error.code).toBe('NOT_FOUND');
   });
 
@@ -76,10 +79,10 @@ describe('GET …/report/revisions/:rev', () => {
     expect(getRespondentReportRevisionDetail).not.toHaveBeenCalled();
   });
 
-  it('400s a zero/negative revision number', async () => {
+  it('resolves revision 0 (the Original baseline)', async () => {
     const res = await GET(req(), ctx('0'));
-    expect(res.status).toBe(400);
-    expect(getRespondentReportRevisionDetail).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(getRespondentReportRevisionDetail).toHaveBeenCalledWith('sess-1', 0);
   });
 
   it('400s a numeric-prefixed but non-numeric segment (does not coerce to 2)', async () => {

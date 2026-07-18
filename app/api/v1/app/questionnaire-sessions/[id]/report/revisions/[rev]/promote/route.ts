@@ -25,8 +25,10 @@ const handlePromote = withAdminAuth<{ id: string; rev: string }>(
     if (!/^\d+$/.test(rev)) {
       return errorResponse('Invalid revision number', { code: 'BAD_REQUEST', status: 400 });
     }
+    // Revision 0 is the "Original" baseline; promoting it is how "Revert to original" restores the
+    // respondent-facing report, so 0 is valid.
     const revisionNumber = Number.parseInt(rev, 10);
-    if (revisionNumber < 1) {
+    if (revisionNumber < 0) {
       return errorResponse('Invalid revision number', { code: 'BAD_REQUEST', status: 400 });
     }
 

@@ -140,6 +140,11 @@ export async function enqueueRespondentReportRevision(params: {
   const note = instructions?.trim().slice(0, RESPONDENT_REPORT_RERUN_NOTE_MAX_LENGTH) || null;
 
   return prisma.$transaction(async (tx) => {
+    // Snapshot the currently-delivered (original) report as revision 0 the first time a re-run is
+    // queued — a promote would otherwise overwrite it, and the admin must be able to revert to / diff
+    // against the original. Idempotent + no-op when there is no delivered content to preserve.
+    await ensureOriginalBaselineRevisionTx(tx, reportId);
+
     const last = await tx.appRespondentReportRevision.findFirst({
       where: { reportId },
       orderBy: { revisionNumber: 'desc' },
@@ -161,6 +166,46 @@ export async function enqueueRespondentReportRevision(params: {
     });
 
     return { revisionNumber, revisionId: created.id };
+  });
+}
+
+/**
+ * Capture the currently-delivered report as **revision 0** — the immutable "Original" baseline the admin
+ * can revert to and diff against. Idempotent (skips when revision 0 already exists) and a no-op when the
+ * header has no delivered content yet (nothing to preserve). Runs inside the enqueue transaction so the
+ * baseline is snapshotted before the first re-run can ever be promoted over the original.
+ */
+async function ensureOriginalBaselineRevisionTx(
+  tx: Prisma.TransactionClient,
+  reportId: string
+): Promise<void> {
+  const existing = await tx.appRespondentReportRevision.findUnique({
+    where: { reportId_revisionNumber: { reportId, revisionNumber: 0 } },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const header = await tx.appRespondentReport.findUnique({
+    where: { id: reportId },
+    select: { content: true, formatted: true, completionPct: true, mode: true, generatedAt: true },
+  });
+  if (!header || header.content == null) return;
+
+  await tx.appRespondentReportRevision.create({
+    data: {
+      reportId,
+      revisionNumber: 0,
+      status: 'ready',
+      content: header.content ?? undefined,
+      formatted: header.formatted,
+      completionPct: header.completionPct,
+      // Minimal snapshot — only `.mode` is read back (for the history label); the original was AI-authored.
+      settingsSnapshot: { mode: header.mode },
+      instructions: null,
+      authoredBy: 'ai',
+      createdBy: null,
+      generatedAt: header.generatedAt ?? new Date(),
+    },
   });
 }
 
@@ -303,22 +348,35 @@ export async function promoteRespondentReportRevision(params: {
   if (!rev || rev.status !== 'ready' || rev.content == null) return { promoted: false };
 
   const mode = narrowRespondentReportSettings(rev.settingsSnapshot).mode;
+  // Bind the narrowed (non-null, guarded above) content before the closure — TS drops property
+  // narrowing inside a callback since it can't prove `rev` wasn't mutated.
+  const promotedContent = rev.content;
 
-  await prisma.appRespondentReport.update({
-    where: { id: header.id },
-    data: {
-      status: 'ready',
-      content: rev.content,
-      formatted: rev.formatted,
-      completionPct: rev.completionPct,
-      mode,
-      generatedAt: new Date(),
-      error: null,
-      deliveredRevisionId: rev.id,
-      lockedBy: null,
-      lockedAt: null,
-      notifyEmail: null,
-    },
+  await prisma.$transaction(async (tx) => {
+    // LAST SAFE MOMENT to preserve the Original. The enqueue-time snapshot no-ops when the delivered
+    // report has no content yet — which happens when the admin queues a re-run while the original is
+    // still generating. Without this, the worker later fills in the original and THIS promote would
+    // overwrite it with no baseline, permanently losing it (and hiding "Revert to original").
+    // Idempotent: skipped once revision 0 exists, so a later promote never mis-captures a promoted
+    // re-run as the "Original".
+    await ensureOriginalBaselineRevisionTx(tx, header.id);
+
+    await tx.appRespondentReport.update({
+      where: { id: header.id },
+      data: {
+        status: 'ready',
+        content: promotedContent,
+        formatted: rev.formatted,
+        completionPct: rev.completionPct,
+        mode,
+        generatedAt: new Date(),
+        error: null,
+        deliveredRevisionId: rev.id,
+        lockedBy: null,
+        lockedAt: null,
+        notifyEmail: null,
+      },
+    });
   });
 
   return { promoted: true };

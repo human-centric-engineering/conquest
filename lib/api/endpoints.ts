@@ -613,8 +613,10 @@ export const API = {
       PREVIEW: '/api/v1/app/questionnaire-sessions/preview',
       /** Cross-device resume of an anonymous in-progress session by its support ref (POST `{ ref }` → `{ session, accessToken, expiresAt, ref }`); re-mints a fresh token. Public, hard rate-limited, anonymous+resumable only. */
       RESUME_BY_REF: '/api/v1/app/questionnaire-sessions/resume-by-ref',
-      /** ALPHA admin: paginated cross-questionnaire session-ref browser (GET `?page&limit&q&status`). Gated by the alpha release stage. */
+      /** ALPHA admin: paginated cross-questionnaire session-ref browser (GET `?page&limit&q&status&…`). Gated by the alpha release stage. */
       REFS: '/api/v1/app/questionnaire-sessions/refs',
+      /** ALPHA admin: KPI + chart aggregates over the same filter set as the browser (GET). */
+      REFS_STATS: '/api/v1/app/questionnaire-sessions/refs/stats',
       /** Respondent turn — SSE stream (POST `{ message }`). */
       messages: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/messages`,
       /** Voice transcription (POST multipart `{ audio, language? }`). */
@@ -659,9 +661,14 @@ export const API = {
       report: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report`,
       /** Re-queue + kick a stuck/failed respondent report ("Check again", POST). */
       reportRetry: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/report/retry`,
+      /** ALPHA admin: generate the delivered report for a session that has none yet (POST → 202). */
+      reportGenerate: (id: string): string =>
+        `/api/v1/app/questionnaire-sessions/${id}/report/generate`,
       /** Opt in to a report-ready email (POST `{ email }`). */
       reportNotify: (id: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/report/notify`,
+      /** ALPHA admin: the Sessions drawer read model — transcript + delivered report + re-run panel state (GET). */
+      adminView: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/admin-view`,
       /** Admin re-run history + enqueue a re-run (GET → revisions view / POST `{ config?, instructions? }`). */
       reportRevisions: (id: string): string =>
         `/api/v1/app/questionnaire-sessions/${id}/report/revisions`,

@@ -12,7 +12,7 @@
  * normalisation lives server-side, so a dash, lower-case, or an O/0 slip still resolves.
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Search, Gauge, ChevronDown, ChevronRight, ScanSearch } from 'lucide-react';
 
 import { apiClient } from '@/lib/api/client';
@@ -37,8 +37,21 @@ type TurnEvalState =
     }
   | { status: 'error'; message: string };
 
-export function RefLookupPanel() {
-  const [refInput, setRefInput] = useState('');
+export interface RefLookupPanelProps {
+  /**
+   * Resolve this reference on mount instead of waiting for the admin to type one — used when the
+   * session is already known (e.g. embedded in the Sessions drawer's Evaluations tab).
+   */
+  initialRef?: string;
+  /**
+   * Embedded mode: drop the card chrome, the heading and the lookup form, leaving just the resolved
+   * turns + their evaluate/verdict controls. Requires {@link initialRef}.
+   */
+  embedded?: boolean;
+}
+
+export function RefLookupPanel({ initialRef, embedded = false }: RefLookupPanelProps = {}) {
+  const [refInput, setRefInput] = useState(initialRef ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RefLookupResult | null>(null);
@@ -48,8 +61,8 @@ export function RefLookupPanel() {
   // Which turns have their raw agent calls (prompts + responses) expanded (keyed by ordinal).
   const [callsExpanded, setCallsExpanded] = useState<Record<number, boolean>>({});
 
-  async function lookup() {
-    const ref = refInput.trim();
+  const lookupRef = useCallback(async (raw: string) => {
+    const ref = raw.trim();
     if (!ref) return;
     setLoading(true);
     setError(null);
@@ -65,7 +78,14 @@ export function RefLookupPanel() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  // Auto-resolve when the caller already knows the session (embedded use).
+  useEffect(() => {
+    if (initialRef) void lookupRef(initialRef);
+  }, [initialRef, lookupRef]);
+
+  const lookup = () => lookupRef(refInput);
 
   async function evaluateTurn(ordinal: number) {
     if (!result) return;
@@ -100,38 +120,54 @@ export function RefLookupPanel() {
   }
 
   return (
-    <div className="bg-card space-y-4 rounded-lg border p-4">
-      <div className="space-y-1">
-        <h2 className="text-sm font-semibold">Look up a chat by reference</h2>
-        <p className="text-muted-foreground text-xs">
-          Paste the reference a respondent quoted (e.g. <span className="font-mono">7F3K-9M2P</span>
-          ) to open their conversation and re-evaluate any turn against the calls it actually ran.
-        </p>
-      </div>
+    <div className={embedded ? 'space-y-4' : 'bg-card space-y-4 rounded-lg border p-4'}>
+      {!embedded && (
+        <>
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold">Look up a chat by reference</h2>
+            <p className="text-muted-foreground text-xs">
+              Paste the reference a respondent quoted (e.g.{' '}
+              <span className="font-mono">7F3K-9M2P</span>) to open their conversation and
+              re-evaluate any turn against the calls it actually ran.
+            </p>
+          </div>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void lookup();
-        }}
-        className="flex items-center gap-2"
-      >
-        <input
-          value={refInput}
-          onChange={(e) => setRefInput(e.target.value)}
-          placeholder="7F3K-9M2P"
-          aria-label="Support reference"
-          className="w-48 rounded border px-2 py-1.5 font-mono text-sm"
-        />
-        <button
-          type="submit"
-          disabled={loading || !refInput.trim()}
-          className="bg-muted hover:bg-muted/70 inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          Look up
-        </button>
-      </form>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void lookup();
+            }}
+            className="flex items-center gap-2"
+          >
+            <input
+              value={refInput}
+              onChange={(e) => setRefInput(e.target.value)}
+              placeholder="7F3K-9M2P"
+              aria-label="Support reference"
+              className="w-48 rounded border px-2 py-1.5 font-mono text-sm"
+            />
+            <button
+              type="submit"
+              disabled={loading || !refInput.trim()}
+              className="bg-muted hover:bg-muted/70 inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+              Look up
+            </button>
+          </form>
+        </>
+      )}
+
+      {embedded && loading && (
+        <div className="text-muted-foreground flex items-center gap-2 py-6 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Loading turns…
+        </div>
+      )}
 
       {error && (
         <p className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -141,22 +177,27 @@ export function RefLookupPanel() {
 
       {result && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            <span className="font-mono font-semibold">{formatSessionRef(result.session.ref)}</span>
-            <span className="text-muted-foreground">
-              {result.session.questionnaireTitle ?? '—'}
-              {result.session.versionNumber !== null && ` · v${result.session.versionNumber}`}
-            </span>
-            <span className="bg-muted rounded px-2 py-0.5 text-xs">{result.session.status}</span>
-            {result.session.isPreview && (
-              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
-                preview
+          {/* The drawer's own header already identifies the session, so skip this when embedded. */}
+          {!embedded && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <span className="font-mono font-semibold">
+                {formatSessionRef(result.session.ref)}
               </span>
-            )}
-            <span className="text-muted-foreground text-xs">
-              {new Date(result.session.createdAt).toLocaleString()}
-            </span>
-          </div>
+              <span className="text-muted-foreground">
+                {result.session.questionnaireTitle ?? '—'}
+                {result.session.versionNumber !== null && ` · v${result.session.versionNumber}`}
+              </span>
+              <span className="bg-muted rounded px-2 py-0.5 text-xs">{result.session.status}</span>
+              {result.session.isPreview && (
+                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                  preview
+                </span>
+              )}
+              <span className="text-muted-foreground text-xs">
+                {new Date(result.session.createdAt).toLocaleString()}
+              </span>
+            </div>
+          )}
 
           {result.turns.length === 0 ? (
             <p className="text-muted-foreground text-sm">This chat has no recorded turns.</p>

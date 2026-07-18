@@ -47,7 +47,8 @@ describe('initAppNav — alpha session-ref entry', () => {
       const sections = await loadNav(isAlpha);
       const hrefs = sections.find((s) => s.title === 'Questionnaires')?.items?.map((i) => i.href);
       expect(hrefs).toContain('/admin/questionnaires');
-      expect(hrefs).toContain('/admin/questionnaires/turn-evaluations');
+      // Turn evaluations is no longer a top-level menu item — it lives within a session (the drawer).
+      expect(hrefs).not.toContain('/admin/questionnaires/turn-evaluations');
     }
   });
 });

@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatDuration } from '@/lib/utils/format-duration';
+import { formatDuration, formatCompactDuration } from '@/lib/utils/format-duration';
 
 describe('formatDuration', () => {
   afterEach(() => {
@@ -74,5 +74,47 @@ describe('formatDuration', () => {
     const start = '2025-01-01T10:00:00.000Z';
     const end = '2025-01-01T10:00:00.999Z';
     expect(formatDuration(start, end)).toBe('999 ms');
+  });
+});
+
+/**
+ * Compact span formatter used for session length ("beginning to end"). Each unit boundary is pinned
+ * from both sides so a `<`/`<=` slip in the cascade is caught.
+ */
+describe('formatCompactDuration', () => {
+  const S = 1000;
+  const M = 60 * S;
+  const H = 60 * M;
+  const D = 24 * H;
+
+  it('returns an em-dash for null, negative, and sub-second spans', () => {
+    expect(formatCompactDuration(null)).toBe('—');
+    expect(formatCompactDuration(undefined)).toBe('—');
+    expect(formatCompactDuration(-1)).toBe('—');
+    expect(formatCompactDuration(0)).toBe('—');
+    expect(formatCompactDuration(999)).toBe('—');
+  });
+
+  it('formats seconds below one minute', () => {
+    expect(formatCompactDuration(S)).toBe('1s');
+    expect(formatCompactDuration(45 * S)).toBe('45s');
+    expect(formatCompactDuration(59 * S)).toBe('59s');
+  });
+
+  it('formats whole minutes below one hour', () => {
+    expect(formatCompactDuration(M)).toBe('1m');
+    expect(formatCompactDuration(23 * M)).toBe('23m');
+    expect(formatCompactDuration(59 * M)).toBe('59m');
+  });
+
+  it('formats hours (with minutes only when non-zero) below one day', () => {
+    expect(formatCompactDuration(H)).toBe('1h');
+    expect(formatCompactDuration(H + 5 * M)).toBe('1h 5m');
+    expect(formatCompactDuration(23 * H + 59 * M)).toBe('23h 59m');
+  });
+
+  it('formats days (with hours only when non-zero) from one day up', () => {
+    expect(formatCompactDuration(D)).toBe('1d');
+    expect(formatCompactDuration(2 * D + 3 * H)).toBe('2d 3h');
   });
 });
