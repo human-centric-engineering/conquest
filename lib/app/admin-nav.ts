@@ -17,7 +17,6 @@ import { createElement } from 'react';
 import {
   Building2,
   ClipboardList,
-  Gauge,
   MessageSquareText,
   SlidersHorizontal,
   TicketCheck,
@@ -73,12 +72,10 @@ export function initAppNav(): void {
         icon: SlidersHorizontal,
         description: 'Review and tune agent models, temperatures and cost trade-offs',
       },
-      {
-        href: '/admin/questionnaires/turn-evaluations',
-        label: 'Turn evaluations',
-        icon: Gauge,
-        description: 'Search, review, and flag persisted interview-turn evaluations',
-      },
+      // NOTE: no standalone "Turn evaluations" nav item — turn evaluations live WITHIN a session (the
+      // Sessions drawer's Evaluations tab). The cross-session Turn Evaluations page still exists at
+      // `/admin/questionnaires/turn-evaluations` and is reached from that drawer's "Open Turn
+      // evaluations" link; it is intentionally not surfaced as a top-level menu entry.
       // ALPHA-ONLY: the Sessions console — browse/filter sessions, open one (transcript + report +
       // its turn evaluations). Present only while the product is in the alpha release stage; the page +
       // API 404 otherwise, so the entry hides to match.

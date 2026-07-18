@@ -261,10 +261,11 @@ export function SessionRefBrowser({
                     <Link
                       href={`${workspaceVersionBase(item.questionnaireId, item.versionId)}/analytics`}
                       onClick={(e) => e.stopPropagation()}
-                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
+                      title="Analytics"
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center text-xs"
                     >
-                      <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Analytics
+                      <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                      <span className="sr-only">Analytics</span>
                     </Link>
                   </TableCell>
                 </TableRow>

@@ -16,7 +16,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { ExternalLink, FileText, FlaskConical, Loader2, Split, X } from 'lucide-react';
+import {
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  FlaskConical,
+  Loader2,
+  Split,
+  X,
+} from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -30,7 +38,15 @@ import { SessionWorkspace } from '@/components/app/questionnaire/session-workspa
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { SessionDownloads } from '@/components/admin/questionnaires/sessions/session-downloads';
 import { ReportBody } from '@/components/app/questionnaire/report/report-body';
+import { TurnEvaluationVerdict } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-verdict';
+import {
+  TurnEvaluationReview,
+  type ReviewFlagStatus,
+} from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-review';
+import { RefLookupPanel } from '@/components/admin/questionnaires/ref-lookup-panel';
+import { validateTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
+import type { TurnEvaluationDetail } from '@/lib/app/questionnaire/views';
 import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
@@ -247,7 +263,11 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
                     value="evaluations"
                     className="mt-0 min-h-0 flex-1 overflow-y-auto px-5 pb-4"
                   >
-                    <EvaluationsTab evaluations={data.evaluations} />
+                    <EvaluationsTab
+                      sessionRef={item.ref}
+                      evaluations={data.evaluations}
+                      onChanged={() => void silentReload()}
+                    />
                   </TabsContent>
                 </Tabs>
               ) : null}
@@ -408,37 +428,75 @@ const EFFECTIVENESS_COLOUR: Record<string, string> = {
   Poor: 'bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300',
 };
 
-/** The Evaluations tab: this session's persisted turn evaluations, linking out to the full surface. */
-function EvaluationsTab({ evaluations }: { evaluations: SessionEvaluationItem[] }) {
+/**
+ * The Evaluations tab: this session's turn evaluations, read and reviewed IN PLACE. Each row expands to
+ * the full verdict (the same authoritative renderer the Turn Evaluations surface uses) plus the
+ * flag/comment review controls — nothing to navigate away to.
+ */
+function EvaluationsTab({
+  sessionRef,
+  evaluations,
+  onChanged,
+}: {
+  sessionRef: string;
+  evaluations: SessionEvaluationItem[];
+  onChanged: () => void;
+}) {
   return (
-    <div className="space-y-4 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-muted-foreground text-sm">
-          {evaluations.length > 0
-            ? `${evaluations.length} turn evaluation${evaluations.length === 1 ? '' : 's'} for this session`
-            : 'Turn evaluations'}
-        </p>
-        <Link
-          href="/admin/questionnaires/turn-evaluations"
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-        >
-          Open Turn evaluations
-          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-        </Link>
-      </div>
+    <div className="space-y-6 py-3">
+      {/* Existing verdicts (if any) — read + review in place. */}
+      {evaluations.length > 0 && (
+        <section className="space-y-2">
+          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+            Saved evaluations
+          </h3>
+          <SavedEvaluationsList evaluations={evaluations} onChanged={onChanged} />
+        </section>
+      )}
 
-      {evaluations.length === 0 ? (
-        <p className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
-          No turn evaluations for this session yet. Evaluate turns from the Preview Turn Inspector,
-          or look this session up by its reference in Turn evaluations.
+      {/* Run an evaluation on any of this session's turns — the same evaluator the Turn Evaluations
+          surface uses, embedded here so it can be driven without leaving the session. */}
+      <section className="space-y-2">
+        <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+          Run an evaluation
+        </h3>
+        <p className="text-muted-foreground text-sm">
+          Score any turn against the exact calls it actually ran. The verdict appears inline and is
+          saved to this session.
         </p>
-      ) : (
-        <ul className="divide-y rounded-lg border">
-          {evaluations.map((e) => (
-            <li
-              key={e.id}
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm"
+        <RefLookupPanel initialRef={sessionRef} embedded />
+      </section>
+    </div>
+  );
+}
+
+/** The session's already-persisted verdicts, each expandable to the full verdict + review controls. */
+function SavedEvaluationsList({
+  evaluations,
+  onChanged,
+}: {
+  evaluations: SessionEvaluationItem[];
+  onChanged: () => void;
+}) {
+  // Open the first evaluation by default so a verdict is on screen without a click.
+  const [expanded, setExpanded] = useState<string | null>(evaluations[0]?.id ?? null);
+
+  return (
+    <div className="space-y-2">
+      {evaluations.map((e) => {
+        const isOpen = expanded === e.id;
+        return (
+          <div key={e.id} className="overflow-hidden rounded-lg border">
+            <button
+              type="button"
+              onClick={() => setExpanded(isOpen ? null : e.id)}
+              aria-expanded={isOpen}
+              className="hover:bg-muted/40 flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left text-sm transition-colors"
             >
+              <ChevronRight
+                className={cn('h-4 w-4 shrink-0 transition-transform', isOpen && 'rotate-90')}
+                aria-hidden="true"
+              />
               <span className="text-muted-foreground font-mono text-xs">Turn {e.turnOrdinal}</span>
               <span className="font-semibold tabular-nums">{e.overallScore}</span>
               <span
@@ -454,17 +512,73 @@ function EvaluationsTab({ evaluations }: { evaluations: SessionEvaluationItem[] 
                   {e.flagStatus}
                 </Badge>
               )}
-              {e.commentPreview && (
-                <span className="text-muted-foreground max-w-[20rem] truncate text-xs italic">
-                  “{e.commentPreview}”
-                </span>
-              )}
               <span className="text-muted-foreground ml-auto text-xs">
                 {formatCompactDateTime(e.createdAt).date}
               </span>
-            </li>
-          ))}
-        </ul>
+            </button>
+            {isOpen && <EvaluationDetailPanel evalId={e.id} onChanged={onChanged} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One evaluation's full verdict + review controls, fetched on expand. */
+function EvaluationDetailPanel({ evalId, onChanged }: { evalId: string; onChanged: () => void }) {
+  const [detail, setDetail] = useState<TurnEvaluationDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const data = await apiClient.get<{ evaluation: TurnEvaluationDetail }>(
+          API.APP.TURN_EVALUATIONS.byId(evalId)
+        );
+        if (active) setDetail(data.evaluation);
+      } catch (err) {
+        if (active) {
+          setError(err instanceof APIClientError ? err.message : 'Could not load this evaluation.');
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [evalId]);
+
+  if (error) return <p className="text-destructive border-t p-3 text-sm">{error}</p>;
+  if (!detail) {
+    return (
+      <div className="text-muted-foreground flex items-center gap-2 border-t p-3 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Loading verdict…
+      </div>
+    );
+  }
+
+  // Validate the opaque verdict JSON before rendering it (external data → never `as`).
+  const verdict = validateTurnEvaluation(detail.verdict);
+
+  return (
+    <div className="space-y-4 border-t p-4">
+      <TurnEvaluationReview
+        sessionId={detail.sessionId}
+        evaluationId={detail.id}
+        initialFlagStatus={detail.flagStatus as ReviewFlagStatus}
+        initialComment={detail.comment}
+        datasetId={detail.datasetId}
+        onUpdated={onChanged}
+      />
+      {verdict.ok ? (
+        <TurnEvaluationVerdict
+          verdict={verdict.value}
+          model={detail.evaluatorModel}
+          turnIndex={detail.turnOrdinal - 1}
+        />
+      ) : (
+        <p className="text-muted-foreground text-sm">This verdict could not be read.</p>
       )}
     </div>
   );
