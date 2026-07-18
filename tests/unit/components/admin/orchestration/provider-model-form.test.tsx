@@ -318,6 +318,29 @@ describe('ProviderModelForm', () => {
     });
   });
 
+  it('cancels the "Saved" auto-dismiss timer on unmount', async () => {
+    // Regression: the 2s auto-dismiss used a bare setTimeout with no cleanup, so unmounting inside
+    // the window left a pending setSaved on a torn-down tree. Under test it fired after the jsdom
+    // environment was disposed and threw `ReferenceError: window is not defined` — surfacing as an
+    // intermittent unhandled error in whichever suite was running when it expired.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const { unmount } = render(<ProviderModelForm model={makeModel()} />);
+
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Saved')).toBeInTheDocument();
+      });
+
+      unmount();
+      // Nothing may still be scheduled once the component is gone.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // ── Submit error ──────────────────────────────────────────────────────────
 
   it('shows error message when submit throws', async () => {
