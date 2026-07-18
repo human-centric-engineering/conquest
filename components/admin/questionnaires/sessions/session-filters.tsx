@@ -173,20 +173,20 @@ export function SessionFilters({ options }: SessionFiltersProps) {
           htmlFor="type-filter"
           help={{
             title: 'Real vs preview',
-            body: 'Preview sessions are admin rehearsals (excluded from analytics); real sessions are respondent runs.',
+            body: 'Preview sessions are admin rehearsals (excluded from analytics) and are hidden by default. Switch to “Preview only” or “All” to include them.',
           }}
         >
           <Select
-            value={get('isPreview') || ALL}
-            onValueChange={(v) => setParam('isPreview', v, ALL)}
+            value={get('isPreview') || 'false'}
+            onValueChange={(v) => setParam('isPreview', v, 'false')}
           >
-            <SelectTrigger id="type-filter" className="w-32">
+            <SelectTrigger id="type-filter" className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL}>All</SelectItem>
               <SelectItem value="false">Real only</SelectItem>
               <SelectItem value="true">Preview only</SelectItem>
+              <SelectItem value="all">All (incl. preview)</SelectItem>
             </SelectContent>
           </Select>
         </FilterField>

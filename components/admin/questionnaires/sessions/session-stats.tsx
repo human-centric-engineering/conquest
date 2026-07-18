@@ -58,7 +58,8 @@ export interface SessionStatsProps {
 }
 
 export function SessionStats({ stats, loading }: SessionStatsProps) {
-  const [open, setOpen] = useState(true);
+  // Charts are collapsed by default so the table is front-and-centre; the KPI tiles stay visible.
+  const [open, setOpen] = useState(false);
 
   const kpis: CqStat[] = [
     { label: 'Sessions', value: stats.total.toLocaleString(), accent: true },
@@ -77,7 +78,7 @@ export function SessionStats({ stats, loading }: SessionStatsProps) {
           aria-expanded={open}
         >
           <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
-          Overview
+          {open ? 'Hide charts' : 'Show charts'}
           <ChevronDown
             className={cn('h-3.5 w-3.5 transition-transform', !open && '-rotate-90')}
             aria-hidden="true"

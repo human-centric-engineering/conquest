@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     appQuestionnaireRound: { findMany: vi.fn() },
     appCohortMember: { findMany: vi.fn() },
     appCohort: { findMany: vi.fn() },
+    appQuestionnaireTurn: { findMany: vi.fn() },
   },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
@@ -34,6 +35,7 @@ const slotGroupBy = mocks.prisma.appQuestionSlot.groupBy as Mock;
 const roundFindMany = mocks.prisma.appQuestionnaireRound.findMany as Mock;
 const memberFindMany = mocks.prisma.appCohortMember.findMany as Mock;
 const cohortFindMany = mocks.prisma.appCohort.findMany as Mock;
+const turnFindMany = mocks.prisma.appQuestionnaireTurn.findMany as Mock;
 
 /** Build a fully-defaulted query from a partial (mirrors what the route validation produces). */
 const query = (over: Partial<Record<string, unknown>> = {}): AdminSessionListQuery =>
@@ -67,6 +69,7 @@ beforeEach(() => {
   roundFindMany.mockResolvedValue([]);
   memberFindMany.mockResolvedValue([]);
   cohortFindMany.mockResolvedValue([]);
+  turnFindMany.mockResolvedValue([]);
 });
 
 describe('adminSessionListQuerySchema', () => {
@@ -96,16 +99,25 @@ describe('adminSessionListQuerySchema', () => {
 });
 
 describe('buildAdminSessionWhere', () => {
-  it('is the bare ref filter with no filters', async () => {
-    expect(await buildAdminSessionWhere(query())).toEqual({ publicRef: { not: null } });
+  it('hides preview sessions by default (bare ref filter + isPreview false)', async () => {
+    expect(await buildAdminSessionWhere(query())).toEqual({
+      publicRef: { not: null },
+      isPreview: false,
+    });
   });
 
-  it('adds status + preview + date-window clauses', async () => {
+  it('honours the preview toggle: false/omitted → real only, true → preview only, all → both', async () => {
+    expect((await buildAdminSessionWhere(query({ isPreview: 'false' }))).isPreview).toBe(false);
+    expect((await buildAdminSessionWhere(query({ isPreview: 'true' }))).isPreview).toBe(true);
+    // `all` opts into both — no isPreview clause at all.
+    expect((await buildAdminSessionWhere(query({ isPreview: 'all' }))).isPreview).toBeUndefined();
+  });
+
+  it('adds status + date-window clauses', async () => {
     const where = await buildAdminSessionWhere(
-      query({ status: 'active', isPreview: 'true', from: '2026-07-01', to: '2026-07-31' })
+      query({ status: 'active', from: '2026-07-01', to: '2026-07-31' })
     );
     expect(where.status).toBe('active');
-    expect(where.isPreview).toBe(true);
     expect(where.createdAt).toEqual({
       gte: new Date('2026-07-01T00:00:00.000Z'),
       lte: new Date('2026-07-31T23:59:59.999Z'),
@@ -148,7 +160,7 @@ describe('listAdminSessionRefs', () => {
 
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { publicRef: { not: null } },
+        where: { publicRef: { not: null }, isPreview: false },
         orderBy: { createdAt: 'desc' },
         skip: 0,
         take: 25,
@@ -176,7 +188,24 @@ describe('listAdminSessionRefs', () => {
       answeredCount: 6,
       totalQuestions: 10,
       percentComplete: 60,
+      // No turns mocked → timing is unknown.
+      durationMs: null,
+      activeMs: null,
+      sittings: null,
     });
+  });
+
+  it('derives duration + sittings from turn timestamps (a >30m gap starts a new sitting)', async () => {
+    const t = (min: number) => ({
+      sessionId: 'sess-1',
+      createdAt: new Date(2026, 6, 16, 10, min, 0),
+    });
+    // Two turns 5m apart, then a 60m gap, then two more 5m apart → 2 sittings, ~10m active, 70m elapsed.
+    turnFindMany.mockResolvedValue([t(0), t(5), t(65), t(70)]);
+    const { items } = await listAdminSessionRefs(query());
+    expect(items[0].durationMs).toBe(70 * 60 * 1000);
+    expect(items[0].activeMs).toBe(10 * 60 * 1000);
+    expect(items[0].sittings).toBe(2);
   });
 
   it('resolves the round name + cohort for a round-linked session', async () => {
@@ -217,7 +246,7 @@ describe('listAdminSessionRefs', () => {
     // normalizeSessionRef('o1-lo') → strip dash, O→0, I/L→1 ⇒ '0110'
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { publicRef: { contains: '0110', mode: 'insensitive' } },
+        where: { publicRef: { contains: '0110', mode: 'insensitive' }, isPreview: false },
       })
     );
   });

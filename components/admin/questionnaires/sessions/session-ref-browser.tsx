@@ -16,11 +16,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowDown, ArrowUp, BarChart3, ChevronsUpDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, BarChart3, ChevronsUpDown, FlaskConical, Split } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { parsePaginationMeta } from '@/lib/validations/common';
+import { formatCompactDuration } from '@/lib/utils/format-duration';
+import { formatCompactDateTime } from '@/lib/utils/format-datetime';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -151,9 +153,9 @@ export function SessionRefBrowser({
 
   return (
     <div className="space-y-6">
-      <SessionStats stats={stats} loading={loading} />
-
       <SessionFilters options={options} />
+
+      <SessionStats stats={stats} loading={loading} />
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
@@ -169,7 +171,7 @@ export function SessionRefBrowser({
               <TableHead>Reference</TableHead>
               <TableHead>Questionnaire</TableHead>
               <TableHead>Client</TableHead>
-              <TableHead>Cohort / round</TableHead>
+              <TableHead>Cohort</TableHead>
               <TableHead>Status</TableHead>
               <SortHeader
                 label="Turns"
@@ -180,6 +182,7 @@ export function SessionRefBrowser({
                 className="text-right"
               />
               <TableHead className="text-right">Complete</TableHead>
+              <TableHead className="text-right">Duration</TableHead>
               <SortHeader
                 label="Created"
                 col="createdAt"
@@ -193,7 +196,7 @@ export function SessionRefBrowser({
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-muted-foreground py-12 text-center">
+                <TableCell colSpan={10} className="text-muted-foreground py-12 text-center">
                   {loading ? 'Loading…' : 'No sessions match these filters.'}
                 </TableCell>
               </TableRow>
@@ -209,9 +212,13 @@ export function SessionRefBrowser({
                       {item.refFormatted}
                     </span>
                     {item.isPreview && (
-                      <Badge variant="secondary" className="ml-2">
+                      <span
+                        title="Preview — admin rehearsal (excluded from analytics)"
+                        className="ml-2 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                      >
+                        <FlaskConical className="h-3 w-3" aria-hidden="true" />
                         Preview
-                      </Badge>
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -227,9 +234,9 @@ export function SessionRefBrowser({
                     {item.cohortName ? (
                       <span className="text-foreground">{item.cohortName}</span>
                     ) : (
-                      <span className="italic">No cohort</span>
+                      <span>—</span>
                     )}
-                    <span className="block">{item.roundName ?? 'Open-ended'}</span>
+                    {item.roundName && <span className="block">{item.roundName}</span>}
                   </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_BADGE[item.status]}>{item.status}</Badge>
@@ -244,8 +251,11 @@ export function SessionRefBrowser({
                       {item.percentComplete}%
                     </span>
                   </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
-                    {new Date(item.createdAt).toLocaleString()}
+                  <TableCell className="text-right tabular-nums">
+                    <DurationCell item={item} />
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">
+                    <CreatedCell iso={item.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     <Link
@@ -292,6 +302,44 @@ export function SessionRefBrowser({
 
       <SessionDrawer item={selected} open={drawerOpen} onOpenChange={setDrawerOpen} />
     </div>
+  );
+}
+
+/**
+ * The session duration cell: the beginning-to-end span, plus a split marker + sitting count when the
+ * session was completed across more than one sitting (the tooltip breaks down active vs elapsed time).
+ */
+function DurationCell({ item }: { item: AdminSessionRefItem }) {
+  if (item.durationMs == null) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const staged = (item.sittings ?? 1) > 1;
+  const title = staged
+    ? `${item.sittings} sittings · ~${formatCompactDuration(item.activeMs)} active over ${formatCompactDuration(
+        item.durationMs
+      )} elapsed`
+    : 'Completed in one sitting';
+  return (
+    <span title={title} className="inline-flex items-center justify-end gap-1.5">
+      {formatCompactDuration(item.durationMs)}
+      {staged && (
+        <span className="text-muted-foreground inline-flex items-center gap-0.5 text-xs">
+          <Split className="h-3 w-3" aria-hidden="true" />
+          {item.sittings}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The Created cell: a compact two-tone stamp — date foreground, time muted, full value on hover. */
+function CreatedCell({ iso }: { iso: string }) {
+  const { date, time, full } = formatCompactDateTime(iso);
+  return (
+    <span title={full} className="inline-flex items-baseline gap-1.5">
+      <span className="text-foreground">{date}</span>
+      <span className="text-muted-foreground text-xs">{time}</span>
+    </span>
   );
 }
 

@@ -16,11 +16,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { ExternalLink, Loader2, X } from 'lucide-react';
+import { ExternalLink, FlaskConical, Loader2, Split, X } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { cn } from '@/lib/utils';
+import { formatCompactDuration } from '@/lib/utils/format-duration';
+import { formatCompactDateTime } from '@/lib/utils/format-datetime';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
@@ -104,18 +106,34 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
                     <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                       {item.status}
                     </Badge>
-                    {item.isPreview && <Badge variant="outline">Preview</Badge>}
+                    {item.isPreview && (
+                      <span
+                        title="Preview — admin rehearsal (excluded from analytics)"
+                        className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                      >
+                        <FlaskConical className="h-3 w-3" aria-hidden="true" />
+                        Preview
+                      </span>
+                    )}
                   </div>
                   <DialogPrimitive.Description className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                     <span className="font-medium">{item.questionnaireTitle}</span>
                     <span>· v{item.versionNumber}</span>
                     <span>· {item.percentComplete}% complete</span>
-                    <span>· {new Date(item.createdAt).toLocaleString()}</span>
+                    {(() => {
+                      const { date, time, full } = formatCompactDateTime(item.createdAt);
+                      return (
+                        <span title={full}>
+                          · {date} · {time}
+                        </span>
+                      );
+                    })()}
                   </DialogPrimitive.Description>
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                     <ContextChip label="Client" value={item.clientName ?? 'Unassigned'} />
                     <ContextChip label="Cohort" value={item.cohortName ?? '—'} />
-                    <ContextChip label="Round" value={item.roundName ?? 'Open-ended'} />
+                    <ContextChip label="Round" value={item.roundName ?? '—'} />
+                    <DurationChip item={item} />
                   </div>
                 </div>
                 <DialogPrimitive.Close className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-md p-1.5 transition-colors">
@@ -274,6 +292,34 @@ function ReportStatusLine({ report }: { report: RespondentReportClientView | nul
         </span>
       )}
     </div>
+  );
+}
+
+/** Duration chip: beginning-to-end span, with a sittings marker when the session was staged. */
+function DurationChip({ item }: { item: AdminSessionRefItem }) {
+  const staged = (item.sittings ?? 1) > 1;
+  const value =
+    item.durationMs == null
+      ? '—'
+      : staged
+        ? `${formatCompactDuration(item.durationMs)} · ${item.sittings} sittings`
+        : `${formatCompactDuration(item.durationMs)} · one sitting`;
+  const title =
+    item.durationMs != null && staged
+      ? `~${formatCompactDuration(item.activeMs)} active over ${formatCompactDuration(item.durationMs)} elapsed`
+      : undefined;
+  return (
+    <span
+      title={title}
+      className="bg-muted/60 text-muted-foreground inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs"
+    >
+      {staged ? (
+        <Split className="h-3 w-3" aria-hidden="true" />
+      ) : (
+        <span className="font-medium">Duration</span>
+      )}
+      <span className="text-foreground">{value}</span>
+    </span>
   );
 }
 

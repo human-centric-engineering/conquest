@@ -58,6 +58,21 @@ export interface AdminSessionRefItem {
    * generator's `completionPct` (a version with no slots reports 100).
    */
   percentComplete: number;
+  /**
+   * Wall-clock span from the first to the last turn (ms) — how long the session took beginning to
+   * end, INCLUDING any idle gaps between sittings. Null with fewer than two turns (nothing to span).
+   */
+  durationMs: number | null;
+  /**
+   * Engaged time (ms) — the beginning-to-end span with the idle gaps between sittings removed. For an
+   * all-at-once session this equals `durationMs`; for a staged one it's the sum of the active blocks.
+   */
+  activeMs: number | null;
+  /**
+   * How many distinct sittings the session was completed in: 1 = all at once, >1 = returned across
+   * multiple sittings (a gap over the sitting threshold starts a new one). Null when unknown (no turns).
+   */
+  sittings: number | null;
 }
 
 /**
@@ -70,8 +85,12 @@ export const adminSessionListQuerySchema = z.object({
   /** Case-insensitive substring match on the support reference (normalised first). */
   q: z.string().trim().min(1).max(64).optional(),
   status: z.enum(SESSION_STATUSES).optional(),
-  /** `true`/`false` string toggle for real-vs-preview; omitted shows both. */
-  isPreview: z.enum(['true', 'false']).optional(),
+  /**
+   * Real-vs-preview toggle. Preview (admin rehearsal) sessions are HIDDEN by default, so an omitted
+   * value — like the explicit `false` — shows real sessions only. `true` shows preview sessions only;
+   * `all` shows both.
+   */
+  isPreview: z.enum(['all', 'true', 'false']).optional(),
   questionnaireId: z.string().trim().min(1).max(64).optional(),
   versionId: z.string().trim().min(1).max(64).optional(),
   /** Demo-client id, or the `unassigned` sentinel for questionnaires with no client. */
@@ -117,7 +136,10 @@ export async function buildAdminSessionWhere(
 
   const where: Prisma.AppQuestionnaireSessionWhereInput = { publicRef: { not: null } };
   if (status) where.status = status;
-  if (isPreview) where.isPreview = isPreview === 'true';
+  // Preview (admin rehearsal) sessions are hidden by default: an omitted or `false` value shows real
+  // sessions only, `true` shows preview only, and `all` opts into showing both.
+  if (isPreview === 'true') where.isPreview = true;
+  else if (isPreview !== 'all') where.isPreview = false;
   if (q) {
     // The stored ref is the normalised (separator-free, upper) form; normalise the query the same way
     // so a pasted `7F3K-9M2P` matches. Substring so a partial ref still finds its session.
@@ -224,6 +246,10 @@ export async function listAdminSessionRefs(
   // relation), so resolve them in batched lookups keyed on the page's distinct ids.
   const cohortBySession = await resolveCohortRound(rows);
 
+  // Session timing (duration + sittings) is derived from the turn timestamps — the session stores
+  // neither. One batched read over the page's sessions, grouped in memory.
+  const timingBySession = await resolveTiming(rows.map((r) => r.id));
+
   const items: AdminSessionRefItem[] = [];
   for (const r of rows) {
     // `publicRef` is filtered non-null above; `version` is a required relation. Guard defensively so a
@@ -235,6 +261,11 @@ export async function listAdminSessionRefs(
     const percentComplete =
       totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 100;
     const cr = cohortBySession.get(r.id);
+    const timing = timingBySession.get(r.id) ?? {
+      durationMs: null,
+      activeMs: null,
+      sittings: null,
+    };
     items.push({
       sessionId: r.id,
       ref: r.publicRef,
@@ -256,10 +287,76 @@ export async function listAdminSessionRefs(
       answeredCount,
       totalQuestions,
       percentComplete,
+      durationMs: timing.durationMs,
+      activeMs: timing.activeMs,
+      sittings: timing.sittings,
     });
   }
 
   return { items, total };
+}
+
+/**
+ * A gap longer than this between two consecutive turns is read as the respondent leaving and coming
+ * back — i.e. a new sitting. 30 minutes comfortably clears normal thinking/typing pauses.
+ */
+const SITTING_GAP_MS = 30 * 60 * 1000;
+
+/** Session-level timing derived from a session's turn timestamps. */
+interface SessionTiming {
+  durationMs: number | null;
+  activeMs: number | null;
+  sittings: number | null;
+}
+
+/**
+ * Batch-derive each session's duration + sittings from its turn timestamps. `durationMs` is the
+ * first→last span (idle gaps included); `activeMs` removes the inter-sitting gaps; `sittings` counts
+ * the continuous blocks (a gap over {@link SITTING_GAP_MS} starts a new one).
+ */
+async function resolveTiming(sessionIds: string[]): Promise<Map<string, SessionTiming>> {
+  const out = new Map<string, SessionTiming>();
+  if (sessionIds.length === 0) return out;
+
+  const turns = await prisma.appQuestionnaireTurn.findMany({
+    where: { sessionId: { in: sessionIds } },
+    select: { sessionId: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const bySession = new Map<string, number[]>();
+  for (const t of turns) {
+    const arr = bySession.get(t.sessionId);
+    if (arr) arr.push(t.createdAt.getTime());
+    else bySession.set(t.sessionId, [t.createdAt.getTime()]);
+  }
+
+  for (const [sessionId, times] of bySession) {
+    out.set(sessionId, computeTiming(times));
+  }
+  return out;
+}
+
+/** Compute duration + active time + sittings from a session's ascending turn timestamps (ms). */
+function computeTiming(times: number[]): SessionTiming {
+  if (times.length < 2) {
+    // Nothing (or a lone kickoff turn) to span — one sitting at most, no meaningful duration.
+    return { durationMs: null, activeMs: null, sittings: times.length === 1 ? 1 : null };
+  }
+  const durationMs = times[times.length - 1] - times[0];
+  let sittings = 1;
+  let activeMs = 0;
+  let sittingStart = times[0];
+  for (let i = 1; i < times.length; i++) {
+    const gap = times[i] - times[i - 1];
+    if (gap > SITTING_GAP_MS) {
+      activeMs += times[i - 1] - sittingStart; // close the block at the last turn before the gap
+      sittings += 1;
+      sittingStart = times[i];
+    }
+  }
+  activeMs += times[times.length - 1] - sittingStart;
+  return { durationMs, activeMs, sittings };
 }
 
 /** Resolved cohort/round labels for one session, keyed by session id. */

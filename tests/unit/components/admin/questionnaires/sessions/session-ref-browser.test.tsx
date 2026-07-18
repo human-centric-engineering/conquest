@@ -53,6 +53,9 @@ function item(over: Partial<AdminSessionRefItem> = {}): AdminSessionRefItem {
     answeredCount: 6,
     totalQuestions: 10,
     percentComplete: 60,
+    durationMs: 23 * 60 * 1000,
+    activeMs: 23 * 60 * 1000,
+    sittings: 1,
     ...over,
   };
 }
@@ -132,9 +135,27 @@ describe('SessionRefBrowser', () => {
     expect(screen.getByText('Acme')).toBeInTheDocument();
     expect(screen.getByText('Leadership Team')).toBeInTheDocument();
     expect(screen.getByText('Q3 Leadership')).toBeInTheDocument();
+    expect(screen.getByText('23m')).toBeInTheDocument(); // duration
 
     const analyticsLink = screen.getByRole('link', { name: /analytics/i });
     expect(analyticsLink).toHaveAttribute('href', '/admin/questionnaires/q-1/v/v-1/analytics');
+  });
+
+  it('flags a staged session with its sitting count', () => {
+    renderBrowser({
+      initialItems: [
+        item({ durationMs: 2 * 60 * 60 * 1000, activeMs: 20 * 60 * 1000, sittings: 3 }),
+      ],
+    });
+    expect(screen.getByText('2h')).toBeInTheDocument();
+    // The split indicator shows the number of sittings.
+    expect(screen.getByText('3')).toBeInTheDocument();
+  });
+
+  it('marks a preview session with the preview symbol when one is shown', () => {
+    renderBrowser({ initialItems: [item({ isPreview: true })] });
+    expect(screen.getByText('Preview')).toBeInTheDocument();
+    expect(screen.getByTitle(/admin rehearsal/i)).toBeInTheDocument();
   });
 
   it('shows the turn count and completion percentage with an accessible title', () => {
@@ -144,10 +165,10 @@ describe('SessionRefBrowser', () => {
     expect(pct).toHaveAttribute('title', '6 of 10 questions answered');
   });
 
-  it('marks preview sessions and shows open-ended when there is no round', () => {
+  it('marks preview sessions and omits the round line when there is no round', () => {
     renderBrowser({ initialItems: [item({ isPreview: true, roundId: null, roundName: null })] });
     expect(screen.getByText('Preview')).toBeInTheDocument();
-    expect(screen.getByText('Open-ended')).toBeInTheDocument();
+    expect(screen.queryByText(/open-ended/i)).not.toBeInTheDocument();
   });
 
   it('renders an empty state when there are no sessions', () => {
