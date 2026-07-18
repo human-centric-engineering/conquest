@@ -292,6 +292,7 @@ function makeEvaluationFindingView(
     dimension: 'clarity',
     ordinal: 0,
     targetKey: 'housing_type',
+    target: null,
     severity: 'minor',
     proposedChange: 'Rephrase to be more neutral',
     rationale: 'The wording implies a preferred answer',

@@ -258,6 +258,27 @@ no snapshot reads as not-stale (best-effort). For a launched (frozen) version th
 equals the live structure, so staleness is meaningful only for drafts — which is exactly where the
 structure mutates under the findings.
 
+### Target resolution — which question a judgement is about
+
+`targetKey` is the right _machine_ handle (stable across reordering, what apply reconciles
+against) but a useless _label_: a card reading "`q_role` · Rewrite the question prompt" forces the
+reviewer into the structure editor to find out what is being judged. So the read seam resolves the
+key to its subject — `_lib/evaluation-target.ts` (`resolveFindingTarget`) projects a `target`
+onto each finding view: `{ kind, key, label, sectionTitle, position, removed }`, where `label` is
+the question's prompt (or the section title, or "Questionnaire goal" / "Target audience").
+
+Same posture as staleness — **derived at read time, never stored** (a persisted prompt would rot
+the moment the question was reworded) — with two differences worth knowing:
+
+- Resolution prefers the **live** structure and falls back to the run's `structureSnapshot`, so a
+  question deleted since the run is still named, flagged `removed: true`, rather than showing a
+  bare key.
+- It is resolved for **terminal** findings too (staleness is not): an applied finding must still
+  say which question it changed.
+
+An unresolvable key (a judge occasionally invents one) degrades to `kind: 'unknown'` with the key
+as its label — the card renders, the raw-key chip still identifies it, fail-cleanly like apply.
+
 ### Models, routes, UI
 
 - Columns added (additive, nullable migration): `AppQuestionnaireEvaluationFinding.proposedEdit`,
@@ -271,7 +292,9 @@ structure mutates under the findings.
   (`evaluationApplyLimiter` 60/min; may fork; handles `add_question` too). Accept is triage, **not**
   apply — kept distinct so an admin can agree across a run, then apply against one consistent fork
   lineage.
-- The run-detail admin component is the interactive queue. Each card leads with the **primary
+- The run-detail admin component is the interactive queue. Each card names its subject first —
+  a context chip ("Question 2 · Background", "Goal") and the question prompt quoted beneath the
+  badges, from the resolved `target` — then leads with the **primary
   work-action** sized by the effective op — **"Add to questionnaire"** for an `add_question`
   (one-click apply) plus a secondary **"Open in editor"** (the seeded refine deep-link); **"Apply"**
   (with an inline edit-override mini-form for text ops + type + ordinal) for other structured ops;

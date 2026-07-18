@@ -38,15 +38,18 @@ export interface DerivedFindingState {
   applicable: FindingApplicability;
 }
 
-/** A slot located within a structure, with the position fields a `reorder` cares about. */
-interface LocatedSlot {
+/**
+ * A slot located within a structure, with the position fields a `reorder` cares about — and
+ * that `resolveFindingTarget` reuses to name the question a finding is about.
+ */
+export interface LocatedSlot {
   question: StructureQuestion;
   sectionTitle: string;
   indexInSection: number;
 }
 
 /** Find a slot by its stable `key` anywhere in the structure, with its position. */
-function locateSlot(structure: VersionStructureInput, key: string): LocatedSlot | null {
+export function locateSlot(structure: VersionStructureInput, key: string): LocatedSlot | null {
   for (const section of structure.sections) {
     const idx = section.questions.findIndex((q) => q.key === key);
     if (idx !== -1) {

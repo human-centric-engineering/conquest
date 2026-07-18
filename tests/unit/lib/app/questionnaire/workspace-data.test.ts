@@ -734,6 +734,7 @@ function makeFinding(over: Partial<EvaluationFindingView> = {}): EvaluationFindi
     dimension: 'coverage',
     ordinal: 0,
     targetKey: 'section:Background',
+    target: null,
     severity: 'minor',
     proposedChange: 'Add a team-size question.',
     rationale: 'The goal segments by org size.',

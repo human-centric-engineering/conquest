@@ -179,6 +179,29 @@ export interface EvaluationDimensionSummary {
   diagnostic: string | null;
 }
 
+/**
+ * What a finding's `targetKey` actually refers to, resolved at read time against the live
+ * structure (falling back to the run's snapshot). Never stored — a persisted prompt would rot
+ * the moment the question was reworded. This is what lets the review queue say *which question*
+ * a judgement is about instead of showing a bare slot key.
+ */
+export type FindingTargetKind = 'question' | 'section' | 'goal' | 'audience' | 'unknown';
+
+/** The resolved subject of a finding (see {@link FindingTargetKind}). */
+export interface FindingTargetView {
+  kind: FindingTargetKind;
+  /** The raw `targetKey`, unchanged — still the handle apply reconciles against. */
+  key: string;
+  /** Human label: the question prompt, the section title, or the version-level target's name. */
+  label: string;
+  /** Containing section title when `kind === 'question'`; `null` otherwise. */
+  sectionTitle: string | null;
+  /** 1-based position within its section when `kind === 'question'`; `null` otherwise. */
+  position: number | null;
+  /** The target exists only in the run's snapshot — it was removed from the live structure since. */
+  removed: boolean;
+}
+
 /** One persisted finding (F5.2 + F5.3) — client-safe projection of `AppQuestionnaireEvaluationFinding`. */
 export interface EvaluationFindingView {
   id: string;
@@ -187,6 +210,12 @@ export interface EvaluationFindingView {
   ordinal: number;
   /** The slot `key`, `section:<title>`, `goal`, or `audience` this finding addresses. */
   targetKey: string;
+  /**
+   * `targetKey` resolved to its subject for display (F5.3) — the question prompt and where it
+   * sits, so a reviewer can see which question a judgement is about without leaving the page.
+   * Derived at read time, never stored; `null` when no structure was loadable to resolve against.
+   */
+  target: FindingTargetView | null;
   severity: FindingSeverity;
   proposedChange: string;
   rationale: string;

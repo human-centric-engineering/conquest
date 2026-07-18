@@ -36,6 +36,7 @@ import {
   deriveApplicability,
   deriveFindingState,
 } from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
+import { resolveFindingTarget } from '@/app/api/v1/app/questionnaires/_lib/evaluation-target';
 import type {
   EvaluationDimensionSummary,
   EvaluationFindingView,
@@ -155,6 +156,10 @@ export function effectiveOp(
  * the op (applicability) and default `stale: false`; the detail read re-stamps `stale` against
  * the live structure for non-terminal findings (it has the structures; this row-only path does
  * not). Terminal (`applied`/`declined`) findings keep `stale: false`.
+ *
+ * `target` likewise defaults to `null` here and is stamped by the structure-carrying paths —
+ * unlike `stale`, it is resolved for terminal findings too: an applied finding still needs to
+ * say which question it was about.
  */
 function toFindingView(row: FindingRow): EvaluationFindingView {
   const proposedEdit = coerceProposedEdit(row.proposedEdit);
@@ -177,6 +182,7 @@ function toFindingView(row: FindingRow): EvaluationFindingView {
     appliedToVersionId: row.appliedToVersionId,
     stale: false,
     applicable: deriveApplicability(editedOverride ?? proposedEdit),
+    target: null,
   };
 }
 
@@ -396,15 +402,19 @@ export async function buildScopedFindingView(
   scoped: ScopedFinding
 ): Promise<EvaluationFindingView> {
   const view = toFindingView(scoped.row);
-  if (view.status === 'applied' || view.status === 'declined') return view;
+  // The live structure is loaded even for a terminal finding: staleness is meaningless there,
+  // but naming the target isn't — an applied finding must still say which question it changed.
   const current = await loadCurrentStructureSafe(scoped.questionnaireId, scoped.versionId);
-  if (!current) return view;
+  const target = resolveFindingTarget(view.targetKey, current, scoped.snapshot);
+  if (!current || view.status === 'applied' || view.status === 'declined') {
+    return { ...view, target };
+  }
   const derived = deriveFindingState(
     { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
     scoped.snapshot,
     current
   );
-  return { ...view, stale: derived.stale, applicable: derived.applicable };
+  return { ...view, stale: derived.stale, applicable: derived.applicable, target };
 }
 
 /**
@@ -436,13 +446,17 @@ export async function getEvaluationRunDetail(
   const current = await loadCurrentStructureSafe(row.questionnaireId, versionId);
   const findings = row.findings.map((f) => {
     const view = toFindingView(f);
-    if (!current || view.status === 'applied' || view.status === 'declined') return view;
+    // Resolve the target for every finding (terminal ones included — see `buildScopedFindingView`).
+    const target = resolveFindingTarget(view.targetKey, current, snapshot);
+    if (!current || view.status === 'applied' || view.status === 'declined') {
+      return { ...view, target };
+    }
     const derived = deriveFindingState(
       { targetKey: view.targetKey, op: view.editedOverride ?? view.proposedEdit },
       snapshot,
       current
     );
-    return { ...view, stale: derived.stale, applicable: derived.applicable };
+    return { ...view, stale: derived.stale, applicable: derived.applicable, target };
   });
 
   return {
