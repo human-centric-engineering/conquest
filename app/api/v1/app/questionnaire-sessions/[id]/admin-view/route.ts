@@ -42,11 +42,35 @@ const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, 
   });
   if (!session) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
 
-  const [turns, reportPanel, report] = await Promise.all([
+  const [turns, reportPanel, report, evaluationRows] = await Promise.all([
     loadTranscript(sessionId),
     loadAdminReportRerunPanel(session.versionId, sessionId),
     buildRespondentReportClientView(sessionId),
+    // This session's persisted turn evaluations (lightweight) for the drawer's Evaluations tab.
+    prisma.appQuestionnaireTurnEvaluation.findMany({
+      where: { sessionId },
+      orderBy: { turnOrdinal: 'asc' },
+      select: {
+        id: true,
+        turnOrdinal: true,
+        overallScore: true,
+        effectiveness: true,
+        flagStatus: true,
+        comment: true,
+        createdAt: true,
+      },
+    }),
   ]);
+
+  const evaluations = evaluationRows.map((e) => ({
+    id: e.id,
+    turnOrdinal: e.turnOrdinal,
+    overallScore: e.overallScore,
+    effectiveness: e.effectiveness,
+    flagStatus: e.flagStatus,
+    commentPreview: e.comment ? e.comment.slice(0, 100) : null,
+    createdAt: e.createdAt.toISOString(),
+  }));
 
   // What the Report tab offers: a report exists (delivered content or a ready revision), can be
   // generated, or isn't available yet — gated on the questionnaire's early-report setting.
@@ -65,7 +89,7 @@ const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, 
 
   log.info('Alpha session admin-view loaded', { sessionId, turnCount: turns.length });
 
-  return successResponse({ turns, reportPanel, report, availability });
+  return successResponse({ turns, reportPanel, report, availability, evaluations });
 });
 
 export const GET = withAlphaSessionToolsEnabled(handleAdminView);

@@ -38,7 +38,18 @@ import type { RespondentReportRevisionsView } from '@/lib/app/questionnaire/repo
 import type { RespondentReportClientView } from '@/lib/app/questionnaire/report/view';
 import type { AdminReportAvailability } from '@/lib/app/questionnaire/report/availability';
 
-/** The `/admin-view` payload the drawer mounts both tabs from. */
+/** One of this session's persisted turn evaluations, for the drawer's Evaluations tab. */
+interface SessionEvaluationItem {
+  id: string;
+  turnOrdinal: number;
+  overallScore: number;
+  effectiveness: string;
+  flagStatus: string;
+  commentPreview: string | null;
+  createdAt: string;
+}
+
+/** The `/admin-view` payload the drawer mounts its tabs from. */
 interface AdminViewData {
   turns: QuestionnaireTurn[];
   reportPanel: {
@@ -48,6 +59,7 @@ interface AdminViewData {
   };
   report: RespondentReportClientView | null;
   availability: AdminReportAvailability;
+  evaluations: SessionEvaluationItem[];
 }
 
 export interface SessionDrawerProps {
@@ -190,6 +202,14 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
                     <TabsList>
                       <TabsTrigger value="transcript">Transcript</TabsTrigger>
                       <TabsTrigger value="report">Report</TabsTrigger>
+                      <TabsTrigger value="evaluations">
+                        Evaluations
+                        {data.evaluations.length > 0 && (
+                          <Badge variant="secondary" className="ml-1.5">
+                            {data.evaluations.length}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
                     </TabsList>
                   </div>
 
@@ -221,6 +241,13 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
                       availability={data.availability}
                       onGenerated={() => void silentReload()}
                     />
+                  </TabsContent>
+
+                  <TabsContent
+                    value="evaluations"
+                    className="mt-0 min-h-0 flex-1 overflow-y-auto px-5 pb-4"
+                  >
+                    <EvaluationsTab evaluations={data.evaluations} />
                   </TabsContent>
                 </Tabs>
               ) : null}
@@ -368,6 +395,77 @@ function GeneratePrompt({
         Generate report
       </Button>
       {error && <p className="text-destructive text-sm">{error}</p>}
+    </div>
+  );
+}
+
+/** Effectiveness band → chip colour (mirrors the Turn Evaluations surface's bands). */
+const EFFECTIVENESS_COLOUR: Record<string, string> = {
+  Excellent: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
+  Good: 'bg-teal-100 text-teal-800 dark:bg-teal-950/50 dark:text-teal-300',
+  Mixed: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
+  Weak: 'bg-orange-100 text-orange-800 dark:bg-orange-950/50 dark:text-orange-300',
+  Poor: 'bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300',
+};
+
+/** The Evaluations tab: this session's persisted turn evaluations, linking out to the full surface. */
+function EvaluationsTab({ evaluations }: { evaluations: SessionEvaluationItem[] }) {
+  return (
+    <div className="space-y-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted-foreground text-sm">
+          {evaluations.length > 0
+            ? `${evaluations.length} turn evaluation${evaluations.length === 1 ? '' : 's'} for this session`
+            : 'Turn evaluations'}
+        </p>
+        <Link
+          href="/admin/questionnaires/turn-evaluations"
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+        >
+          Open Turn evaluations
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
+      </div>
+
+      {evaluations.length === 0 ? (
+        <p className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
+          No turn evaluations for this session yet. Evaluate turns from the Preview Turn Inspector,
+          or look this session up by its reference in Turn evaluations.
+        </p>
+      ) : (
+        <ul className="divide-y rounded-lg border">
+          {evaluations.map((e) => (
+            <li
+              key={e.id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm"
+            >
+              <span className="text-muted-foreground font-mono text-xs">Turn {e.turnOrdinal}</span>
+              <span className="font-semibold tabular-nums">{e.overallScore}</span>
+              <span
+                className={cn(
+                  'rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                  EFFECTIVENESS_COLOUR[e.effectiveness] ?? 'bg-muted text-muted-foreground'
+                )}
+              >
+                {e.effectiveness}
+              </span>
+              {e.flagStatus && e.flagStatus !== 'none' && (
+                <Badge variant="outline" className="text-[10px]">
+                  {e.flagStatus}
+                </Badge>
+              )}
+              {e.commentPreview && (
+                <span className="text-muted-foreground max-w-[20rem] truncate text-xs italic">
+                  “{e.commentPreview}”
+                </span>
+              )}
+              <span className="text-muted-foreground ml-auto text-xs">
+                {formatCompactDateTime(e.createdAt).date}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -79,8 +79,9 @@ export function initAppNav(): void {
         icon: Gauge,
         description: 'Search, review, and flag persisted interview-turn evaluations',
       },
-      // ALPHA-ONLY: browse session refs → open a session → regenerate its report. Present only while
-      // the product is in the alpha release stage; the page + API 404 otherwise, so the entry hides to match.
+      // ALPHA-ONLY: the Sessions console — browse/filter sessions, open one (transcript + report +
+      // its turn evaluations). Present only while the product is in the alpha release stage; the page +
+      // API 404 otherwise, so the entry hides to match.
       ...(IS_ALPHA
         ? [
             {
@@ -88,7 +89,7 @@ export function initAppNav(): void {
               label: 'Sessions',
               icon: TicketCheck,
               description:
-                'Alpha: browse session references, open a session, regenerate its report',
+                'Alpha: browse and filter respondent sessions, open a conversation + report',
             },
           ]
         : []),
