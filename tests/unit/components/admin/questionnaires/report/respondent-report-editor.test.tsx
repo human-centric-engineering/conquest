@@ -309,6 +309,7 @@ describe('RespondentReportEditor', () => {
     fireEvent.click(sw('rr-dataslots')); // false → true
     fireEvent.click(sw('rr-onscreen')); // true → false
     fireEvent.click(sw('rr-download')); // true → false
+    fireEvent.click(sw('rr-explain-method')); // false → true
     fireEvent.click(sw('rr-kb')); // false → true
     fireEvent.change(screen.getByPlaceholderText(/Warm and encouraging/i), {
       target: { value: 'Be warm.' },
@@ -318,7 +319,7 @@ describe('RespondentReportEditor', () => {
     const rr = (apiClient.patch as unknown as Mock).mock.calls[0][1].body.respondentReport;
     expect(rr.enabled).toBe(true);
     expect(rr.rawIncludes).toEqual({ dataSlots: true, questionsAsPresented: false });
-    expect(rr.delivery).toEqual({ onScreen: false, download: false });
+    expect(rr.delivery).toEqual({ onScreen: false, download: false, explainMethod: true });
     expect(rr.generation.instructions).toBe('Be warm.');
     expect(rr.generation.useClientKnowledge).toBe(true);
   });

@@ -96,9 +96,8 @@ async function claimNextReport(workerId: string): Promise<ClaimedReport | null> 
 /** Generate + persist one claimed report. Returns whether it succeeded. */
 async function driveReport(claimed: ClaimedReport): Promise<boolean> {
   try {
-    const { content, costUsd, formatted, completionPct } = await generateRespondentReport(
-      claimed.sessionId
-    );
+    const { content, costUsd, formatted, completionPct, methodRecord } =
+      await generateRespondentReport(claimed.sessionId);
     // Re-read notifyEmail: generation takes tens of seconds, during which the respondent may have
     // just opted in (the notify route matches `processing` rows). Using the claim-time value would
     // miss that late opt-in AND the ready-write below clears the column — so read the fresh value
@@ -117,6 +116,9 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
         formatted,
         completionPct,
         costUsd,
+        // `?? undefined` (not null): Prisma rejects a literal null for a Json column, and the
+        // `as unknown as` cast below would hide it until runtime. Undefined leaves it unset.
+        methodRecord: methodRecord ?? undefined,
         generatedAt: new Date(),
         error: null,
         lockedBy: null,
@@ -242,7 +244,7 @@ type RevisionUpdateData = Parameters<
 async function driveRevision(claimed: ClaimedRevision): Promise<boolean> {
   try {
     const settings = narrowRespondentReportSettings(claimed.settingsSnapshot);
-    const { content, costUsd, formatted, completionPct } =
+    const { content, costUsd, formatted, completionPct, methodRecord } =
       await generateRespondentReportWithSettings(claimed.sessionId, settings);
     await prisma.appRespondentReportRevision.updateMany({
       where: { id: claimed.id, status: 'processing' },
@@ -252,6 +254,9 @@ async function driveRevision(claimed: ClaimedRevision): Promise<boolean> {
         formatted,
         completionPct,
         costUsd,
+        // `?? undefined` (not null): Prisma rejects a literal null for a Json column, and the
+        // `as unknown as` cast below would hide it until runtime. Undefined leaves it unset.
+        methodRecord: methodRecord ?? undefined,
         generatedAt: new Date(),
         error: null,
         lockedBy: null,

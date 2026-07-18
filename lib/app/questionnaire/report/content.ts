@@ -240,8 +240,13 @@ function trimTo(value: unknown, max: number): string | null {
  * A finding's URL must be a syntactically-valid `http`/`https` link — findings are rendered as
  * clickable links, so a non-web scheme (`javascript:`, `data:`, `mailto:`) or garbage is dropped
  * rather than surfaced. Length-capped defensively.
+ *
+ * Exported so the method record's read path (`method-record.ts`) applies the SAME guard to the
+ * sources it renders. Both are stored JSON re-read from a Json column and rendered into an `href`;
+ * validating one on read and not the other is the asymmetry that lets a future write path (a second
+ * search backend, an import) reach an unguarded sink.
  */
-function validHttpUrl(value: unknown): string | null {
+export function validHttpUrl(value: unknown): string | null {
   const raw = trimTo(value, REPORT_RESEARCH_URL_MAX);
   if (!raw) return null;
   try {

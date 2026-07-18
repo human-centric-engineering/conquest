@@ -15,6 +15,9 @@
 
 import { prisma } from '@/lib/db/client';
 import type { Prisma } from '@prisma/client';
+// The DB-NULL sentinel comes from `lib/db` rather than `@prisma/client`: `lib/app/**` is the
+// fork-extension surface and must not take a runtime Prisma dependency (see eslint.config.mjs).
+import { DB_JSON_NULL } from '@/lib/db/json';
 
 import {
   RESPONDENT_REPORT_AUTHORS,
@@ -342,6 +345,7 @@ export async function promoteRespondentReportRevision(params: {
       content: true,
       formatted: true,
       completionPct: true,
+      methodRecord: true,
       settingsSnapshot: true,
     },
   });
@@ -351,6 +355,14 @@ export async function promoteRespondentReportRevision(params: {
   // Bind the narrowed (non-null, guarded above) content before the closure — TS drops property
   // narrowing inside a callback since it can't prove `rev` wasn't mutated.
   const promotedContent = rev.content;
+  // The method record travels with the content it describes. Leaving the delivered report's old record
+  // in place would leave the "How this report was created" panel describing a run that produced
+  // different prose — an explanation that is worse than none. `null` for a revision generated before
+  // this shipped, which correctly retires the panel for that report rather than mis-describing it.
+  // `DbNull` rather than skipping the field: leaving the previous record in place is the one outcome
+  // that must not happen, so a record-less revision explicitly clears it.
+  const promotedMethodRecord =
+    rev.methodRecord == null ? DB_JSON_NULL : (rev.methodRecord as Prisma.InputJsonValue);
 
   await prisma.$transaction(async (tx) => {
     // LAST SAFE MOMENT to preserve the Original. The enqueue-time snapshot no-ops when the delivered
@@ -368,6 +380,7 @@ export async function promoteRespondentReportRevision(params: {
         content: promotedContent,
         formatted: rev.formatted,
         completionPct: rev.completionPct,
+        methodRecord: promotedMethodRecord,
         mode,
         generatedAt: new Date(),
         error: null,

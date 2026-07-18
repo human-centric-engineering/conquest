@@ -745,6 +745,18 @@ export const REPORT_FORMATTER_AGENT_SLUG = 'app-report-formatter';
 export const REPORT_RESEARCHER_AGENT_SLUG = 'app-report-researcher';
 
 /**
+ * Slug of the seeded **Report Method Explainer** `AiAgent` — the meta-agent behind the respondent-facing
+ * "How this report was created" panel. It never sees the report, the answers, or the sources: it is
+ * handed only the observed {@link ReportMethodRecord} digest (counts + flags) and rewrites it as 2–4
+ * plain sentences. Its output is machine-checked before it is trusted — every number must appear in the
+ * record, no URLs or citation markers — and rejected output falls back to the deterministic template
+ * (`report/method-record.ts`), so the explanation can never claim diligence the run didn't perform.
+ * Report-kind-agnostic. Empty `model`/`provider` (runtime-resolved at the cheaper `chat` tier — this is
+ * a constrained rewrite, not reasoning); seeded by `072-report-method-explainer-agent.ts`.
+ */
+export const REPORT_METHOD_EXPLAINER_AGENT_SLUG = 'app-report-method-explainer';
+
+/**
  * Slug of the **web_search** capability — a thin, provider-agnostic web-search tool (Brave backend
  * today; Tavily is a drop-in second backend behind the same normalized result shape). Query-in /
  * clean-results-out, with the query length-guarded under Brave's 400-char `q` cap. Registered via the

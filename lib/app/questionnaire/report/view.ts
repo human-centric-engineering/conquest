@@ -22,6 +22,11 @@ import {
   validateRespondentReportContent,
   type RespondentReportContent,
 } from '@/lib/app/questionnaire/report/content';
+import { narrowMethodRecord } from '@/lib/app/questionnaire/report/method-record';
+import {
+  buildReportMethodView,
+  type ReportMethodClientView,
+} from '@/lib/app/questionnaire/report/method-view';
 import { resolveTheme } from '@/lib/app/questionnaire/theming';
 import { summariseAudience } from '@/lib/app/questionnaire/export/build-session-export-model';
 
@@ -63,6 +68,13 @@ export interface RespondentReportClientView {
   includeData: { questions: boolean; dataSlots: boolean };
   /** Branded header for the on-screen preview (AI modes only); `null` for raw / disabled. */
   header: RespondentReportHeader | null;
+  /**
+   * The "How this report was created" panel, or `null` when it should not be offered — because the
+   * version didn't opt in (`delivery.explainMethod`), or because this report has no method record
+   * (generated before the feature shipped). A null here means the UI shows no link at all: we would
+   * rather offer nothing than narrate a run nobody observed.
+   */
+  method: ReportMethodClientView | null;
   /** Insights state for the AI modes (`raw_plus_insights`, `narrative`); `null` for raw / disabled. */
   insights: {
     status: RespondentReportStatus;
@@ -90,6 +102,27 @@ export interface RespondentReportClientView {
     /** Whether the respondent has opted in to an email when the report is ready. */
     notifyRequested: boolean;
   } | null;
+}
+
+/**
+ * The admin projection of a session's report method record — the operational detail behind the
+ * "How this report was created" panel (model, timings, cost, search queries, contributing documents,
+ * and every stage including skipped ones).
+ *
+ * Deliberately NOT gated on `delivery.explainMethod`: that setting governs what the *respondent* is
+ * shown. An operator inspecting a session should always be able to see how its report was produced —
+ * indeed the admin view is most useful precisely when the respondent wasn't shown one. Returns `null`
+ * only when the session, the report, or the record is absent (reports predating the feature).
+ */
+export async function buildAdminReportMethodView(
+  sessionId: string
+): Promise<ReportMethodClientView | null> {
+  const row = await prisma.appRespondentReport.findUnique({
+    where: { sessionId },
+    select: { methodRecord: true },
+  });
+  const record = narrowMethodRecord(row?.methodRecord);
+  return record ? buildReportMethodView(record, 'admin') : null;
 }
 
 /** Cast a stored `audience` Json column to the structured shape (null when absent). */
@@ -135,6 +168,7 @@ export async function buildRespondentReportClientView(
           content: true,
           formatted: true,
           completionPct: true,
+          methodRecord: true,
           generatedAt: true,
           error: true,
           notifyEmail: true,
@@ -168,7 +202,7 @@ export async function buildRespondentReportClientView(
   };
 
   if (!enabled || !isAiRespondentReportMode(settings.mode)) {
-    return { ...base, header: null, insights: null };
+    return { ...base, header: null, method: null, insights: null };
   }
 
   // Branded header — the on-screen preview's masthead, matching the downloadable PDF. Identity is
@@ -198,9 +232,16 @@ export async function buildRespondentReportClientView(
   };
 
   const row = session.respondentReport;
+  // Both conditions must hold: the version opted in, AND this particular run recorded how it went.
+  // `narrowMethodRecord` returns null for absent, malformed, or future-schema records.
+  const methodRecord = settings.delivery.explainMethod
+    ? narrowMethodRecord(row?.methodRecord)
+    : null;
+
   return {
     ...base,
     header,
+    method: methodRecord ? buildReportMethodView(methodRecord, 'respondent') : null,
     insights: {
       // No row yet (submitted, worker hasn't claimed it) reads as still-queued.
       status: (row?.status as RespondentReportStatus | undefined) ?? 'queued',

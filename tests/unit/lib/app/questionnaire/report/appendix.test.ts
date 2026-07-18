@@ -29,10 +29,16 @@ import { logger } from '@/lib/logging';
 type Mock = ReturnType<typeof vi.fn>;
 
 const FINDING = { title: 'Benchmark', url: 'https://bench.test', snippet: 'A stat' };
-const BEFORE: ReportResearchResult = { findings: [FINDING], note: 'before note', costUsd: 0 };
+const BEFORE: ReportResearchResult = {
+  findings: [FINDING],
+  note: 'before note',
+  searches: [],
+  costUsd: 0,
+};
 const AFTER: ReportResearchResult = {
   findings: [{ title: 'New', url: 'https://new.test', snippet: 's' }],
   note: 'after note',
+  searches: [],
   costUsd: 0,
 };
 
@@ -60,7 +66,7 @@ describe('hasResearchFindings', () => {
   it('is true when either phase has findings, false otherwise', () => {
     expect(hasResearchFindings(BEFORE, null)).toBe(true);
     expect(hasResearchFindings(null, AFTER)).toBe(true);
-    expect(hasResearchFindings({ findings: [], costUsd: 0 }, null)).toBe(false);
+    expect(hasResearchFindings({ findings: [], searches: [], costUsd: 0 }, null)).toBe(false);
     expect(hasResearchFindings(null, null)).toBe(false);
   });
 });
@@ -68,7 +74,7 @@ describe('hasResearchFindings', () => {
 describe('synthesiseReportAppendix', () => {
   it('short-circuits (no LLM call) when there are no findings', async () => {
     const result = await synthesiseReportAppendix(
-      baseOpts({ before: { findings: [], costUsd: 0 }, after: null })
+      baseOpts({ before: { findings: [], searches: [], costUsd: 0 }, after: null })
     );
     expect(runStructuredCompletion).not.toHaveBeenCalled();
     expect(result).toEqual({ appendix: null, costUsd: 0 });
@@ -116,6 +122,7 @@ describe('synthesiseReportAppendix', () => {
         // before has no note and shares a URL with after (dedup); after supplies the note.
         before: {
           findings: [{ title: 'Shared', url: 'https://dup.test', snippet: 's' }],
+          searches: [],
           costUsd: 0,
         },
         after: {
@@ -124,6 +131,7 @@ describe('synthesiseReportAppendix', () => {
             { title: 'NoSnippet', url: 'https://nosnip.test', snippet: '' }, // empty snippet branch
           ],
           note: 'after only note',
+          searches: [],
           costUsd: 0,
         },
       })
@@ -143,6 +151,7 @@ describe('synthesiseReportAppendix', () => {
         before: null, // null source → `?? []` branch in the loop
         after: {
           findings: [{ title: 'Solo', url: 'https://solo.test', snippet: 'x' }],
+          searches: [],
           costUsd: 0,
         },
       })

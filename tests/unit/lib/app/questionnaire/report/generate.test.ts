@@ -1084,3 +1084,286 @@ describe('generateRespondentReport — web-search research', () => {
     });
   });
 });
+
+describe('generateRespondentReport — method record', () => {
+  /** A config with the "explain how this was created" panel switched on. */
+  function explainConfig(over: Record<string, unknown> = {}) {
+    return sessionMeta({
+      respondentReport: {
+        enabled: true,
+        mode: 'raw_plus_insights',
+        delivery: { onScreen: true, download: true, explainMethod: true },
+        ...over,
+      },
+    });
+  }
+
+  it('captures a record on every run, even when the panel is switched off', async () => {
+    // Capture is free and unconditional; only the agent-written narration is gated. This is what lets
+    // an admin enable the panel later and still get a truthful explanation with no backfill.
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(result.methodRecord).not.toBeNull();
+    expect(result.methodRecord!.answers).toMatchObject({ answered: 1, total: 1 });
+    // Not narrated — the version didn't opt in, so no explainer call was paid for.
+    expect(result.methodRecord!.summary).toBeNull();
+  });
+
+  it('records the model and the stages that ran', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.model).toEqual({ provider: 'openai', model: 'test-model', tier: 'reasoning' });
+    const ran = record.stages.filter((s) => s.ran).map((s) => s.key);
+    expect(ran).toContain('answers');
+    expect(ran).toContain('write');
+  });
+
+  it('records knowledge grounding as disabled when the config never asked for it', async () => {
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.stages).toContainEqual({ key: 'knowledge', ran: false, skipReason: 'disabled' });
+    expect(record.knowledge.consulted).toBe(false);
+  });
+
+  it('records which documents contributed, not just that a search happened', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'raw_plus_insights',
+          generation: { useClientKnowledge: true },
+        },
+        demoClientId: 'client-1',
+      })
+    );
+    (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue(['doc-1', 'doc-2', 'doc-3']);
+    (searchKnowledge as Mock).mockResolvedValue([
+      { chunk: { documentId: 'doc-1', content: 'A passage.' }, documentName: 'Handbook' },
+      { chunk: { documentId: 'doc-1', content: 'Another passage.' }, documentName: 'Handbook' },
+      { chunk: { documentId: 'doc-2', content: 'Elsewhere.' }, documentName: 'Policy' },
+    ]);
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    // Three documents were in scope; only two actually grounded anything.
+    expect(record.knowledge.documentsInScope).toBe(3);
+    expect(record.knowledge.snippetCount).toBe(3);
+    expect(record.knowledge.documentsUsed).toEqual([
+      { id: 'doc-1', name: 'Handbook', snippets: 2 },
+      { id: 'doc-2', name: 'Policy', snippets: 1 },
+    ]);
+  });
+
+  it('records a KB search failure as failed, not as disabled', async () => {
+    // "We didn't look" and "we looked and it broke" are different claims about our own diligence.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionMeta({
+        respondentReport: {
+          enabled: true,
+          mode: 'raw_plus_insights',
+          generation: { useClientKnowledge: true },
+        },
+        demoClientId: 'client-1',
+      })
+    );
+    (resolveClientKnowledgeDocumentIds as Mock).mockResolvedValue(['doc-1']);
+    (searchKnowledge as Mock).mockRejectedValue(new Error('pgvector down'));
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.stages).toContainEqual({ key: 'knowledge', ran: false, skipReason: 'failed' });
+    expect(record.knowledge.documentsUsed).toEqual([]);
+  });
+
+  it('records the searches issued and the sources kept', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      explainConfig({
+        research: {
+          enabled: true,
+          timing: 'before',
+          rounds: 2,
+          maxResults: 5,
+          before: { instructions: 'Find benchmarks.' },
+          after: { instructions: '' },
+          display: 'list',
+          informNarrative: true,
+          appendix: false,
+        },
+      })
+    );
+    (runReportResearch as Mock).mockResolvedValue({
+      findings: [{ title: 'Benchmark', url: 'https://bench.test', snippet: 's' }],
+      costUsd: 0.01,
+      searches: [
+        { query: 'engagement benchmarks', resultCount: 5 },
+        { query: 'engagement benchmarks 2026', resultCount: 3 },
+      ],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.research.ran).toBe(true);
+    expect(record.research.searches).toEqual([
+      { phase: 'before', query: 'engagement benchmarks', resultCount: 5 },
+      { phase: 'before', query: 'engagement benchmarks 2026', resultCount: 3 },
+    ]);
+    expect(record.research.sources).toEqual([{ title: 'Benchmark', url: 'https://bench.test' }]);
+    expect(record.research.informedNarrative).toBe(true);
+  });
+
+  it('records sources even when the sources section is hidden from the report', async () => {
+    // `display: 'hidden'` is a presentation choice about the report body; the method panel's entire
+    // purpose is to disclose what informed the report, so it still accounts for them.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      explainConfig({
+        research: {
+          enabled: true,
+          timing: 'before',
+          rounds: 1,
+          maxResults: 5,
+          before: { instructions: 'Find benchmarks.' },
+          after: { instructions: '' },
+          display: 'hidden',
+          informNarrative: true,
+          appendix: false,
+        },
+      })
+    );
+    (runReportResearch as Mock).mockResolvedValue({
+      findings: [{ title: 'Benchmark', url: 'https://bench.test', snippet: 's' }],
+      costUsd: 0,
+      searches: [{ query: 'q', resultCount: 1 }],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const result = await generateRespondentReport('sess-1');
+
+    expect(result.content).not.toHaveProperty('research');
+    expect(result.methodRecord!.research.sources).toEqual([
+      { title: 'Benchmark', url: 'https://bench.test' },
+    ]);
+  });
+
+  it('records the provider that actually served the request, not the intended primary', async () => {
+    // On failover (primary breaker open / provider disabled) getProviderWithFallbacks returns a
+    // different usedSlug. Recording the intended slug would name a provider that did not write it.
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'anthropic' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.model).toEqual({
+      provider: 'anthropic',
+      model: 'test-model',
+      tier: 'reasoning',
+    });
+  });
+
+  it('does not claim the narrative was informed when the before round returned no findings', async () => {
+    // informNarrative is on, but an empty findings list feeds an empty block to the writer — nothing
+    // informed the prose, so the record must not say otherwise.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      explainConfig({
+        research: {
+          enabled: true,
+          timing: 'before',
+          rounds: 1,
+          maxResults: 5,
+          before: { instructions: 'Find benchmarks.' },
+          after: { instructions: '' },
+          display: 'list',
+          informNarrative: true,
+          appendix: false,
+        },
+      })
+    );
+    (runReportResearch as Mock).mockResolvedValue({
+      findings: [],
+      costUsd: 0,
+      searches: [{ query: 'q', resultCount: 0 }],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.research.ran).toBe(true);
+    expect(record.research.sources).toEqual([]);
+    expect(record.research.informedNarrative).toBe(false);
+  });
+
+  it('records the formatter pass only when it actually produced the delivered prose', async () => {
+    (formatReportContent as Mock).mockResolvedValue({
+      content: VALID_RESPONSE,
+      costUsd: 0.01,
+      formatted: true,
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.passes.formatter).toBe(true);
+    expect(record.stages).toContainEqual({ key: 'format', ran: true });
+  });
+
+  it('does not claim a formatting pass when the fidelity guard rejected it', async () => {
+    // `formatted: false` means the writer's own prose was delivered — the record must say so.
+    (formatReportContent as Mock).mockResolvedValue({
+      content: VALID_RESPONSE,
+      costUsd: 0.01,
+      formatted: false,
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.passes.formatter).toBe(false);
+    expect(record.stages).toContainEqual({
+      key: 'format',
+      ran: false,
+      skipReason: 'not_applicable',
+    });
+  });
+
+  it('reports coverage counts and the number of gaps shown to the writer', async () => {
+    const base = loadedExport();
+    (loadSessionExport as Mock).mockResolvedValue({
+      ...base,
+      sections: [
+        {
+          ...base.sections[0],
+          slots: [
+            ...base.sections[0].slots,
+            { slotKey: 'q2', prompt: 'Workload?', type: 'free_text', required: false },
+            { slotKey: 'q3', prompt: 'Support?', type: 'free_text', required: false },
+          ],
+        },
+      ],
+    });
+    const { provider } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    const record = (await generateRespondentReport('sess-1')).methodRecord!;
+
+    expect(record.answers).toMatchObject({ answered: 1, total: 3, unansweredListed: 2 });
+    expect(record.passes.coverageFence).toBe(true);
+  });
+});

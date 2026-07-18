@@ -33,7 +33,7 @@ describe('narrowRespondentReportSettings', () => {
         dataSlotInfluence: 70,
         discountLowConfidence: false,
       },
-      delivery: { onScreen: false, download: true },
+      delivery: { onScreen: false, download: true, explainMethod: true },
       research: {
         enabled: true,
         timing: 'both' as const,

@@ -145,6 +145,9 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
         coverage: sample.coverage,
         demoClientId: null,
         sessionId: `preview:${vid}`,
+        // Marks the method record as a sample run, so neither the explainer agent nor the
+        // deterministic template can describe it as having read a real respondent's answers.
+        preview: true,
       });
       log.info('Report preview generated', {
         adminId,

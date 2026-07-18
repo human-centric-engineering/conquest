@@ -982,6 +982,12 @@ model AppRespondentReport {
   formatted           Boolean   @default(false) // true when the Report Formatter second pass produced the stored prose (renderers honour its paragraphs verbatim); false = deterministic split at render
   completionPct       Int? // questionnaire completion % at generation (answered/total slots); drives the partial-report caveat below PARTIAL_REPORT_THRESHOLD_PCT. Null for legacy rows (no caveat).
   costUsd             Float? // generation cost actual; null until ready
+  /// ReportMethodRecord (report/method-record.ts) — the observed account of how this run was produced:
+  /// answers read, unanswered questions fenced, KB documents that contributed, searches issued, sources
+  /// kept, passes applied, plus the plain-English summary. Backs the "How this report was created"
+  /// panel. Null for reports generated before the feature shipped — the read path treats null as "don't
+  /// offer the explanation" rather than reconstructing a run nobody observed (no backfill).
+  methodRecord        Json?
   error               String? // failure message when status = failed
   notifyEmail         String? // respondent opted in to be emailed when ready; null = no notify. Sent best-effort by the worker on status→ready, then cleared.
   lockedBy            String? // worker host holding the lease; null when idle
@@ -1024,6 +1030,10 @@ model AppRespondentReportRevision {
   settingsSnapshot Json // the RespondentReportSettings this re-run used (defensively narrowed on read); the "new instructions/settings" for this run
   instructions     String? // the admin's short free-text note for this re-run (why / what changed), shown in the history
   authoredBy       String    @default("admin") // RESPONDENT_REPORT_AUTHORS (types.ts): admin (re-run) | ai (reserved)
+  /// ReportMethodRecord for THIS re-run (see AppRespondentReport.methodRecord). Per-revision because a
+  /// re-run may use different settings (`settingsSnapshot`) and so take different steps — promoting a
+  /// revision carries its record onto the delivered report, keeping the explanation true to the content.
+  methodRecord     Json?
   costUsd          Float? // generation cost actual; null until ready
   error            String? // failure message when status = failed
   lockedBy         String? // worker host holding the lease; null when idle

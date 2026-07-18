@@ -47,6 +47,11 @@ import {
   type RespondentReportResearch,
   type RespondentReportResearchFinding,
 } from '@/lib/app/questionnaire/report/content';
+import {
+  MethodRecorder,
+  type ReportMethodRecord,
+} from '@/lib/app/questionnaire/report/method-record';
+import { summariseReportMethod } from '@/lib/app/questionnaire/report/method-summary';
 
 /** Result of one generation run. */
 export interface GeneratedReport {
@@ -64,6 +69,16 @@ export interface GeneratedReport {
    * there are no slots to answer.
    */
   completionPct: number;
+  /**
+   * The observed account of how this run was produced — what was read, retrieved, searched, and
+   * checked. Persisted alongside the content and rendered by the "How this report was created" panel
+   * when the version opts in (`delivery.explainMethod`).
+   *
+   * Always captured (it costs nothing but bookkeeping); only the plain-English `summary` is
+   * agent-written, and only when the version opted in. Never null in practice — the field is nullable
+   * so a caller can distinguish "this run recorded nothing" from a run that predates the feature.
+   */
+  methodRecord: ReportMethodRecord | null;
 }
 
 /** Generation tuning — generous token budget for a multi-section narrative; 60s LLM ceiling. */
@@ -182,6 +197,21 @@ const APPENDED_DATA_RULES =
   'questions-and-answers recap and/or a list of the information captured from them. So do NOT ' +
   'simply re-list or restate their answers: assume the reader can see them. Add value beyond the raw ' +
   'data — synthesis, interpretation, patterns across answers, and advice.';
+
+/**
+ * How many unanswered questions were actually listed to the writer.
+ *
+ * Not simply `total - answered`: `buildUnansweredQuestionsBlock` caps its listing at
+ * `COVERAGE_MAX_LISTED_QUESTIONS`, so on a long questionnaire the writer sees fewer gaps than exist.
+ * The method record states what was shown, not what was skipped.
+ *
+ * Counts only the `- ` question rows, mirroring how that builder composes the block — it also emits
+ * `## Section` headings and a trailing "(and N further…)" line, neither of which is a listed question.
+ * A multi-line prompt still contributes exactly one row, so this stays exact.
+ */
+function countListedQuestions(block: string): number {
+  return block.split('\n').filter((line) => line.startsWith('- ')).length;
+}
 
 /** Clamp the stored data-slot influence to a whole 0–100 percent (defensive; the narrower bounds it). */
 function clampInfluence(value: number): number {
@@ -346,6 +376,12 @@ export interface ReportGenerationInputs {
   demoClientId: string | null;
   /** The session id (or a `preview:<vid>` sentinel) — used for research logging + KB warnings. */
   sessionId: string;
+  /**
+   * True for the admin preview flow, whose respondent is synthesised and whose KB + web search are
+   * forced off. Recorded on the method record so a preview run can never be described — by the
+   * explainer agent or the deterministic template — as if it had read a real person's answers.
+   */
+  preview?: boolean;
 }
 
 /**
@@ -450,7 +486,26 @@ export async function generateReportFromInputs(
     demoClientId,
     sessionId,
     coverage,
+    preview = false,
   } = inputs;
+
+  // Provenance capture runs alongside every stage below. Report generation is hand-rolled
+  // orchestration, so nothing records itself the way a workflow step would — each stage reports what
+  // it did as it does it, and the result is what the "How this report was created" panel renders.
+  const recorder = new MethodRecorder(settings.mode, preview);
+  recorder.stageRan('answers');
+  recorder.recordAnswers({
+    answered: coverage?.answered ?? 0,
+    total: coverage?.total ?? 0,
+    completionPct,
+    unansweredListed: countListedQuestions(coverage?.unansweredBlock ?? ''),
+    confidenceWeighted: settings.generation.discountLowConfidence,
+    usedDataSlots: dataSlotContext.trim().length > 0,
+  });
+  const coverageFenced = Boolean(coverage && coverage.unansweredBlock.trim());
+  recorder.recordPass('coverageFence', coverageFenced);
+  if (coverageFenced) recorder.stageRan('coverage');
+  else recorder.stageSkipped('coverage', 'not_applicable');
 
   // 3. Optional client-KB grounding — strictly scoped to the client's documents.
   let knowledge = '';
@@ -461,14 +516,44 @@ export async function generateReportFromInputs(
         const query = [goal, transcript].filter(Boolean).join('\n').slice(0, 2000);
         const results = await searchKnowledge(query, { documentIds }, KB_SNIPPET_LIMIT);
         knowledge = results.map((r, i) => `[${i + 1}] ${r.chunk.content}`).join('\n\n');
+        // Which documents actually contributed — previously discarded when the chunks were flattened
+        // into prose, leaving no record of what grounded the report.
+        const byDocument = new Map<string, { id: string; name: string; snippets: number }>();
+        for (const r of results) {
+          const id = r.chunk.documentId;
+          const existing = byDocument.get(id);
+          if (existing) existing.snippets += 1;
+          else byDocument.set(id, { id, name: r.documentName ?? 'Untitled document', snippets: 1 });
+        }
+        recorder.stageRan('knowledge');
+        recorder.recordKnowledge({
+          consulted: true,
+          documentsInScope: documentIds.length,
+          documentsUsed: [...byDocument.values()],
+          snippetCount: results.length,
+        });
       } catch (err) {
         // Grounding is best-effort — a search failure must not fail the whole report.
         logger.warn('respondent report: KB search failed; continuing ungrounded', {
           sessionId,
           error: errorMessage(err),
         });
+        // Recorded as `failed`, not `disabled`: the admin asked for grounding and didn't get it, and
+        // the explanation must not imply the corpus was deliberately left out.
+        recorder.stageSkipped('knowledge', 'failed');
+        recorder.recordKnowledge({
+          consulted: true,
+          documentsInScope: documentIds.length,
+          documentsUsed: [],
+          snippetCount: 0,
+        });
       }
+    } else {
+      // Configured, but the client has no corpus yet.
+      recorder.stageSkipped('knowledge', 'unavailable');
     }
+  } else {
+    recorder.stageSkipped('knowledge', 'disabled');
   }
 
   // 4. Resolve the report agent + provider.
@@ -488,7 +573,11 @@ export async function generateReportFromInputs(
   const { providerSlug, model, fallbacks } = await resolveAgentProviderAndModel(agent, 'reasoning');
   // Honor the agent's resolved fallback providers (matches the workflow `agent_call` executor and the
   // report research loop): a primary-provider outage or open circuit fails over instead of throwing.
-  const { provider } = await getProviderWithFallbacks(providerSlug, fallbacks);
+  const { provider, usedSlug } = await getProviderWithFallbacks(providerSlug, fallbacks);
+  // `usedSlug`, not `providerSlug`: on a failover (primary circuit-breaker open or provider disabled)
+  // these differ, and recording the intended provider would name one that did not write this report.
+  // The record's contract is observed-never-inferred, and this is the field most likely to drift.
+  recorder.recordModel({ provider: usedSlug, model, tier: 'reasoning' });
 
   // 4b. Optional web-search rounds. Gated by the version toggle; the search backend being
   // unconfigured degrades gracefully inside `runReportResearch` (never fails a report).
@@ -522,6 +611,10 @@ export async function generateReportFromInputs(
       sessionId,
     });
     researchCostUsd += beforeResearch.costUsd;
+    recorder.stageRan('research_before');
+    recorder.recordSearches('before', beforeResearch.searches);
+  } else {
+    recorder.stageSkipped('research_before', researchEnabled ? 'not_applicable' : 'disabled');
   }
 
   // 5. Structured completion (parse → retry-once-at-temp-0 → cost sum).
@@ -570,10 +663,16 @@ export async function generateReportFromInputs(
   // 6. Optional second pass: reshape form (paragraphs, bullets, de-slop) without touching substance.
   // Best-effort — `formatReportContent` never throws and falls back to the unformatted content on any
   // drift or failure, so a formatter problem can never fail an otherwise-valid report.
+  recorder.stageRan('write');
   const formattedResult = await formatReportContent(agentContent, { format: 'plaintext' });
   let content: RespondentReportContent = formattedResult.content;
   const baseCostUsd = result.costUsd + formattedResult.costUsd;
   const formatted = formattedResult.formatted;
+  // `formatted: false` covers both "disabled" and "ran but the fidelity guard rejected it". Either
+  // way the delivered prose is the writer's, so the record must not claim a formatting pass shaped it.
+  recorder.recordPass('formatter', formatted);
+  if (formatted) recorder.stageRan('format');
+  else recorder.stageSkipped('format', 'not_applicable');
 
   // 6b. Optional `after` round — research the finished report to enrich / verify it, then attach the
   // combined findings as the report's Research section (unless the admin chose to hide it).
@@ -588,12 +687,39 @@ export async function generateReportFromInputs(
       sessionId,
     });
     researchCostUsd += afterResearch.costUsd;
+    recorder.stageRan('research_after');
+    recorder.recordSearches('after', afterResearch.searches);
+  } else {
+    recorder.stageSkipped('research_after', researchEnabled ? 'not_applicable' : 'disabled');
   }
 
-  if (researchEnabled && researchCfg.display !== 'hidden') {
-    const research = buildResearchBlock(beforeResearch, afterResearch, researchCfg.display);
-    if (research) content = { ...content, research };
+  // Merge once and use it for both jobs — the block attached to the report (when the admin shows a
+  // sources section) and the method record (always). `display` only affects how the report renders it.
+  // `hidden` is not a render mode for the block itself — it means "don't attach it". Fall back to
+  // `list` so the merge still runs for the method record; the block is simply never attached below.
+  const mergedResearch = buildResearchBlock(
+    beforeResearch,
+    afterResearch,
+    researchCfg.display === 'hidden' ? 'list' : researchCfg.display
+  );
+
+  if (researchEnabled && researchCfg.display !== 'hidden' && mergedResearch) {
+    content = { ...content, research: mergedResearch };
   }
+
+  // Sources are recorded regardless of `display`: hiding the sources section is a presentation choice,
+  // and the method panel's whole purpose is to disclose what informed the report. Recorded after the
+  // merge so the count matches what actually survived deduplication.
+  //
+  // `informedNarrative` tracks whether findings REACHED the prose, not merely whether the admin opted
+  // in: a `before` round that returned nothing feeds an empty block to the writer, and claiming the
+  // narrative was informed by sources that don't exist is exactly the unearned claim this record
+  // exists to prevent.
+  recorder.recordSources(
+    mergedResearch?.findings.map((f) => ({ title: f.title, url: f.url })) ?? [],
+    Boolean(researchCfg.informNarrative && beforeResearch && beforeResearch.findings.length > 0),
+    researchCfg.display === 'hidden'
+  );
 
   // 6c. Optional appendix — when the admin opted in and any findings were gathered, ask the writer to
   // synthesize a short supporting appendix (drawing on before AND after findings + the finished report).
@@ -615,9 +741,37 @@ export async function generateReportFromInputs(
     });
     researchCostUsd += appendixResult.costUsd;
     if (appendixResult.appendix) content = { ...content, appendix: appendixResult.appendix };
+    // The appendix pass is the agent's choice — it declines on most reports. Record whether one was
+    // actually produced, not merely that the pass ran.
+    recorder.recordPass('appendix', Boolean(appendixResult.appendix));
+    if (appendixResult.appendix) recorder.stageRan('appendix');
+    else recorder.stageSkipped('appendix', 'not_applicable');
+  } else {
+    recorder.stageSkipped('appendix', appendixEnabled ? 'not_applicable' : 'disabled');
   }
 
-  return { content, costUsd: baseCostUsd + researchCostUsd, formatted, completionPct };
+  const totalCostUsd = baseCostUsd + researchCostUsd;
+  recorder.addCost(totalCostUsd);
+  const methodRecord = recorder.build();
+
+  // The plain-English narration is the only part of the record that costs anything, so it is written
+  // only when the version actually surfaces it. When the setting is off the record is still stored
+  // with a null summary — the read path renders the deterministic template from it, so an admin who
+  // enables the panel later gets a truthful explanation for those reports too, with no backfill.
+  if (settings.delivery.explainMethod) {
+    const summary = await summariseReportMethod(methodRecord);
+    methodRecord.summary = { text: summary.text, source: summary.source };
+    methodRecord.costUsd = Number((methodRecord.costUsd + summary.costUsd).toFixed(6));
+    return {
+      content,
+      costUsd: totalCostUsd + summary.costUsd,
+      formatted,
+      completionPct,
+      methodRecord,
+    };
+  }
+
+  return { content, costUsd: totalCostUsd, formatted, completionPct, methodRecord };
 }
 
 /**

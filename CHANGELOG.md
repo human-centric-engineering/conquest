@@ -16,6 +16,14 @@ release process.
 
 ## [Unreleased]
 
+### Added
+
+- **`lib/db/json.ts`** — `DB_JSON_NULL` / `DB_JSON_LITERAL_NULL`, re-exporting Prisma's `Json` null
+  sentinels from `lib/`. Clearing a nullable `Json` column requires `Prisma.DbNull` (a plain `null` is
+  rejected), which `lib/app/**` cannot reach: the app-extension boundary bans runtime `@prisma/client`
+  imports there so fork code stays storage-agnostic. This gives app code the sentinel without the
+  dependency, and localises the swap if the storage layer ever changes.
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new

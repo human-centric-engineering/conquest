@@ -25,7 +25,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Download, Loader2, Maximize2 } from 'lucide-react';
+import { CheckCircle2, Download, Info, Loader2, Maximize2 } from 'lucide-react';
 
 import { cn, slugify } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,7 @@ import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion'
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
 import type { RespondentReportHeader } from '@/lib/app/questionnaire/report/view';
+import type { ReportMethodClientView } from '@/lib/app/questionnaire/report/method-view';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
 import {
   REVEAL,
@@ -53,6 +54,7 @@ import {
   ReportPaperHeader,
   ReportDataAppendix,
 } from '@/components/app/questionnaire/report/report-body';
+import { ReportMethodPanel } from '@/components/app/questionnaire/report/report-method';
 
 const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 
@@ -96,6 +98,9 @@ export function SessionComplete({
   const [error, setError] = useState(false);
   // Full-page ("A4") preview of the finished report, opened from the report toolbar's expand control.
   const [previewOpen, setPreviewOpen] = useState(false);
+  // "How this report was created" — offered only when the version opted in AND this run recorded a
+  // method record (`view.method` is null otherwise, so the control simply isn't rendered).
+  const [methodOpen, setMethodOpen] = useState(false);
   // Guard against a double-click kicking off two concurrent renders.
   const inFlightRef = useRef(false);
 
@@ -226,16 +231,30 @@ export function SessionComplete({
                 <p className="text-muted-foreground/70 text-[11px] font-semibold tracking-wide uppercase">
                   Your personalised report
                 </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground -mr-2 h-7 gap-1.5 px-2 text-xs"
-                  onClick={() => setPreviewOpen(true)}
-                >
-                  <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Expand
-                </Button>
+                <div className="flex items-center gap-1">
+                  {view.method && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground h-7 gap-1.5 px-2 text-xs"
+                      onClick={() => setMethodOpen(true)}
+                    >
+                      <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                      How this was created
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground -mr-2 h-7 gap-1.5 px-2 text-xs"
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Expand
+                  </Button>
+                </div>
               </div>
             )}
             {/* The one region that scrolls. `flex-auto` sizes it to its content when the card fits and
@@ -306,6 +325,10 @@ export function SessionComplete({
         </div>
       </div>
 
+      {view?.method && (
+        <ReportMethodDialog open={methodOpen} onOpenChange={setMethodOpen} view={view.method} />
+      )}
+
       {reportReady && view?.insights?.content && (
         <ReportPreviewDialog
           open={previewOpen}
@@ -374,6 +397,39 @@ function ReportPreviewDialog({
             />
             <ReportDataAppendix captured={captured} include={include} variant="paper" />
           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * "How this report was created" — the optional transparency panel, opened from the report toolbar.
+ *
+ * A modest centred dialog rather than the full-viewport paper sheet: this is a short explanation the
+ * respondent reads and dismisses, not a document. Only ever mounted when `view.method` is non-null,
+ * which requires both the version opting in and the run having actually recorded a method record.
+ */
+function ReportMethodDialog({
+  open,
+  onOpenChange,
+  view,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  view: ReportMethodClientView;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[calc(100dvh-4rem)] w-[calc(100vw-2rem)] max-w-[560px] flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
+        <DialogHeader className="space-y-1 border-b px-5 py-4 text-left">
+          <DialogTitle className="text-base font-semibold">How this report was created</DialogTitle>
+          <DialogDescription className="text-xs">
+            A summary of what was used to write your report, and the checks that were applied.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">
+          <ReportMethodPanel view={view} variant="screen" />
         </div>
       </DialogContent>
     </Dialog>

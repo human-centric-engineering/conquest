@@ -776,6 +776,17 @@ export type RespondentReportSettings = {
     onScreen: boolean;
     /** Offer a downloadable PDF. */
     download: boolean;
+    /**
+     * Offer the respondent a "How this report was created" panel explaining, in plain English, what
+     * was read, retrieved, searched, and checked to produce their report.
+     *
+     * Governs two things: whether the panel is offered on the respondent's completion screen, and
+     * whether the explainer meta-agent is paid for at generation time. The underlying method record is
+     * captured on every run regardless (it is free), and the admin session drawer always shows it —
+     * an operator inspecting a session should see how it was made whether or not the respondent was
+     * shown the same. Off by default: no existing questionnaire starts disclosing anything new.
+     */
+    explainMethod: boolean;
   };
   /**
    * Optional web-search rounds that bring live external context into the report. Additionally gated
@@ -831,7 +842,7 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
     dataSlotInfluence: DEFAULT_DATA_SLOT_INFLUENCE,
     discountLowConfidence: true,
   },
-  delivery: { onScreen: true, download: true },
+  delivery: { onScreen: true, download: true, explainMethod: false },
   research: {
     enabled: false,
     timing: 'before',
