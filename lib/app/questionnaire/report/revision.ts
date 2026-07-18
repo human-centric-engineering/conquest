@@ -348,22 +348,35 @@ export async function promoteRespondentReportRevision(params: {
   if (!rev || rev.status !== 'ready' || rev.content == null) return { promoted: false };
 
   const mode = narrowRespondentReportSettings(rev.settingsSnapshot).mode;
+  // Bind the narrowed (non-null, guarded above) content before the closure — TS drops property
+  // narrowing inside a callback since it can't prove `rev` wasn't mutated.
+  const promotedContent = rev.content;
 
-  await prisma.appRespondentReport.update({
-    where: { id: header.id },
-    data: {
-      status: 'ready',
-      content: rev.content,
-      formatted: rev.formatted,
-      completionPct: rev.completionPct,
-      mode,
-      generatedAt: new Date(),
-      error: null,
-      deliveredRevisionId: rev.id,
-      lockedBy: null,
-      lockedAt: null,
-      notifyEmail: null,
-    },
+  await prisma.$transaction(async (tx) => {
+    // LAST SAFE MOMENT to preserve the Original. The enqueue-time snapshot no-ops when the delivered
+    // report has no content yet — which happens when the admin queues a re-run while the original is
+    // still generating. Without this, the worker later fills in the original and THIS promote would
+    // overwrite it with no baseline, permanently losing it (and hiding "Revert to original").
+    // Idempotent: skipped once revision 0 exists, so a later promote never mis-captures a promoted
+    // re-run as the "Original".
+    await ensureOriginalBaselineRevisionTx(tx, header.id);
+
+    await tx.appRespondentReport.update({
+      where: { id: header.id },
+      data: {
+        status: 'ready',
+        content: promotedContent,
+        formatted: rev.formatted,
+        completionPct: rev.completionPct,
+        mode,
+        generatedAt: new Date(),
+        error: null,
+        deliveredRevisionId: rev.id,
+        lockedBy: null,
+        lockedAt: null,
+        notifyEmail: null,
+      },
+    });
   });
 
   return { promoted: true };

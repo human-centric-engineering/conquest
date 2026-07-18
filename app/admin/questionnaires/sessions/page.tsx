@@ -6,7 +6,8 @@
  * table. Each row opens a slide-over with the conversation transcript + generated report (and a
  * regenerate action) WITHOUT navigating away, so the list never loses position. Deliberately ALPHA-ONLY
  * — the surface exposes respondent-shaped data that is protected once alpha ends, so it `notFound()`s
- * unless the product is in the alpha stage AND the live-sessions flag is on (mirrors the API gate).
+ * unless the product is in the alpha stage (mirrors the API gate — the alpha stage is the only gate;
+ * there is no separate feature flag on this surface).
  *
  * All list/stats state lives in the URL: this server page reads `searchParams`, seeds the already-
  * filtered first page + stats + filter options, and the client re-fetches on any URL change.

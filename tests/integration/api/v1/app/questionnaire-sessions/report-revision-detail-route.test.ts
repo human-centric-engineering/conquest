@@ -67,6 +67,9 @@ describe('GET …/report/revisions/:rev', () => {
     const res = await GET(req(), ctx('9'));
     expect(res.status).toBe(404);
     const body = await res.json();
+    // Assert the whole error envelope — `success: false` alongside the code, so a regression that
+    // flipped `success` while leaving `error.code` intact can't pass green.
+    expect(body.success).toBe(false);
     expect(body.error.code).toBe('NOT_FOUND');
   });
 

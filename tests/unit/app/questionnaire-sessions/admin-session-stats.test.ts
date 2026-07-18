@@ -115,4 +115,25 @@ describe('loadAdminSessionStats', () => {
     expect(stats.overTime).toHaveLength(30);
     expect(stats.overTime.every((p) => p.count === 0)).toBe(true);
   });
+
+  it('spans the query date window, not a fixed 30 days, and buckets sessions by UTC day', async () => {
+    // The fixture sessions are all created on 2026-07-16; the window brackets that date.
+    const stats = await loadAdminSessionStats(query({ from: '2026-07-10', to: '2026-07-20' }));
+
+    expect(stats.overTime).toHaveLength(11); // 10th–20th inclusive
+    expect(stats.overTime[0].date).toBe('2026-07-10');
+    expect(stats.overTime.at(-1)?.date).toBe('2026-07-20');
+
+    // All three fixtures land in the 16th's bucket; every other day is zero.
+    const day16 = stats.overTime.find((p) => p.date === '2026-07-16');
+    expect(day16?.count).toBe(3);
+    expect(stats.overTime.filter((p) => p.count > 0)).toHaveLength(1);
+  });
+
+  it('clamps an over-wide window to the most recent buckets', async () => {
+    sessionFindMany.mockResolvedValue([]);
+    const stats = await loadAdminSessionStats(query({ from: '2020-01-01', to: '2026-07-20' }));
+    expect(stats.overTime).toHaveLength(180);
+    expect(stats.overTime.at(-1)?.date).toBe('2026-07-20');
+  });
 });

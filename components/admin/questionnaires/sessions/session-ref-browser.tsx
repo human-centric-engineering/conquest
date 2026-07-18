@@ -84,7 +84,14 @@ export function SessionRefBrowser({
   const sort = searchParams.get('sort') ?? 'createdAt';
   const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc';
 
+  // Monotonic request id — two URL changes in quick succession (debounced search + a select) overlap,
+  // and without this the slower/older response could paint over the newer one, leaving the table
+  // showing data that matches neither the URL nor the visible filters.
+  const reqIdRef = useRef(0);
+
   const refetch = useCallback(async (qs: string) => {
+    const reqId = ++reqIdRef.current;
+    const isStale = () => reqId !== reqIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -99,13 +106,16 @@ export function SessionRefBrowser({
       const listBody = await parseApiResponse<AdminSessionRefItem[]>(listRes);
       const statsBody = await parseApiResponse<AdminSessionStats>(statsRes);
       if (!listBody.success || !statsBody.success) throw new Error('Request failed');
+      if (isStale()) return; // superseded by a newer filter/page change
       setItems(listBody.data);
       setMeta((prev) => parsePaginationMeta(listBody.meta) ?? prev);
       setStats(statsBody.data);
     } catch (err) {
+      if (isStale()) return;
       setError(err instanceof Error ? err.message : 'Could not load sessions');
     } finally {
-      setLoading(false);
+      // Only the newest request owns the spinner, so an older one settling can't clear it early.
+      if (!isStale()) setLoading(false);
     }
   }, []);
 

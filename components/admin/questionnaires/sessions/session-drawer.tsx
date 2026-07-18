@@ -45,6 +45,7 @@ import {
 } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-review';
 import { RefLookupPanel } from '@/components/admin/questionnaires/ref-lookup-panel';
 import { validateTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
+import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { TurnEvaluationDetail } from '@/lib/app/questionnaire/views';
 import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
@@ -402,6 +403,10 @@ function GeneratePrompt({
       onGenerated(); // parent reload picks up the queued report and shows the generating state
     } catch (err) {
       setError(err instanceof APIClientError ? err.message : 'Could not start report generation.');
+    } finally {
+      // Always release the button. On success the parent's reload swaps this branch out anyway; if
+      // that reload silently fails, the admin gets a usable button back rather than a stuck spinner
+      // (a re-click is safe — the endpoint 409s when a report already exists or is in flight).
       setGenerating(false);
     }
   };
@@ -418,6 +423,18 @@ function GeneratePrompt({
     </div>
   );
 }
+
+/**
+ * The learning-flag vocabulary, mirroring {@link ReviewFlagStatus}. The API returns `flagStatus` as a
+ * plain string, so it is narrowed against this at the boundary rather than cast.
+ */
+const REVIEW_FLAG_STATUSES: readonly ReviewFlagStatus[] = [
+  'none',
+  'flagged',
+  'reviewed',
+  'actioned',
+  'dismissed',
+];
 
 /** Effectiveness band → chip colour (mirrors the Turn Evaluations surface's bands). */
 const EFFECTIVENESS_COLOUR: Record<string, string> = {
@@ -566,7 +583,7 @@ function EvaluationDetailPanel({ evalId, onChanged }: { evalId: string; onChange
       <TurnEvaluationReview
         sessionId={detail.sessionId}
         evaluationId={detail.id}
-        initialFlagStatus={detail.flagStatus as ReviewFlagStatus}
+        initialFlagStatus={narrowToEnum(detail.flagStatus, REVIEW_FLAG_STATUSES, 'none')}
         initialComment={detail.comment}
         datasetId={detail.datasetId}
         onUpdated={onChanged}

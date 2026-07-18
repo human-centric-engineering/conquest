@@ -78,15 +78,34 @@ export function SessionFilters({ options }: SessionFiltersProps) {
   // Support-reference search: live local input, debounced into the URL so we don't push per keystroke.
   const [refSearch, setRefSearch] = useState(get('q'));
   const urlQ = get('q');
-  // Keep the input in sync when the URL changes externally (Clear all, back-button).
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The last value THIS component pushed. Our own debounced push echoes back through the URL a few
+  // hundred ms later (it's a server round-trip); without this guard the sync effect below would
+  // overwrite whatever the user typed in the meantime, visibly snapping characters away.
+  const lastPushed = useRef<string | null>(null);
+
+  // Keep the input in sync when the URL changes EXTERNALLY (Clear all, back-button) — not when it
+  // changes because of our own push.
   useEffect(() => {
+    if (lastPushed.current !== null && urlQ === lastPushed.current) return;
     setRefSearch(urlQ);
   }, [urlQ]);
-  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Don't leave a pending push to fire after unmount.
+  useEffect(
+    () => () => {
+      if (debounce.current) clearTimeout(debounce.current);
+    },
+    []
+  );
+
   const onRefChange = (value: string) => {
     setRefSearch(value);
     if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => setParam('q', value.trim(), ''), 350);
+    debounce.current = setTimeout(() => {
+      lastPushed.current = value.trim();
+      setParam('q', value.trim(), '');
+    }, 350);
   };
 
   const cohortId = get('cohortId');

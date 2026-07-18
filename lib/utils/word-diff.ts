@@ -17,8 +17,14 @@ export interface DiffSegment {
   type: DiffType;
 }
 
-/** Above this token count on either side, skip the O(n·m) table and emit a whole-block replace. */
-export const MAX_TOKENS = 4000;
+/**
+ * Above this token count on either side, skip the O(n·m) table and emit a whole-block replace.
+ *
+ * The LCS table is a `number[][]` of (n+1)·(m+1) entries allocated in the browser, so the cap bounds
+ * worst-case memory: 1500² ≈ 2.25M entries (~18 MB), versus ~128 MB at 4000. Reports run to a few
+ * hundred–low thousand words, so this still diffs real content precisely and only degrades on outliers.
+ */
+export const MAX_TOKENS = 1500;
 
 function tokenize(s: string): string[] {
   return s.split(/(\s+)/).filter((t) => t.length > 0);

@@ -74,6 +74,10 @@ describe('ensureRespondentReportHeader', () => {
 
 describe('enqueueRespondentReportRevision', () => {
   it('appends the next revision number and stores the settings snapshot + note', async () => {
+    // Explicit: no rev-0 baseline exists AND there is no delivered header to snapshot, so the
+    // baseline step is skipped for a stated reason rather than incidentally (an unset mock).
+    revFindUnique.mockResolvedValue(null);
+    headerFindUnique.mockResolvedValue(null);
     revFindFirst.mockResolvedValue({ revisionNumber: 2 });
 
     const out = await enqueueRespondentReportRevision({
@@ -84,7 +88,8 @@ describe('enqueueRespondentReportRevision', () => {
     });
 
     expect(out).toEqual({ revisionNumber: 3, revisionId: 'rev-new' });
-    // Only the re-run row is created — the mock header carries no content, so no rev-0 baseline snapshot.
+    // Only the re-run row is created — there is no delivered header row to snapshot, so the rev-0
+    // baseline step short-circuits.
     expect(revCreate).toHaveBeenCalledTimes(1);
     expect(revCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -102,6 +107,8 @@ describe('enqueueRespondentReportRevision', () => {
   });
 
   it('starts at revision 1 when there is no prior revision, and nulls an empty note', async () => {
+    revFindUnique.mockResolvedValue(null); // no rev-0 baseline
+    headerFindUnique.mockResolvedValue(null); // nothing delivered to snapshot
     revFindFirst.mockResolvedValue(null);
 
     const out = await enqueueRespondentReportRevision({
@@ -149,6 +156,51 @@ describe('enqueueRespondentReportRevision', () => {
 });
 
 describe('promoteRespondentReportRevision', () => {
+  it('captures the Original baseline before overwriting, when the enqueue could not', async () => {
+    // Regression: a re-run queued while the ORIGINAL was still generating finds `content: null`, so
+    // enqueue snapshots nothing. The worker then fills the original in. Promoting the re-run must
+    // capture that original as revision 0 first, or it is lost and "Revert to original" never appears.
+    headerFindUnique
+      .mockResolvedValueOnce({ id: 'rep1' }) // promote's own header lookup
+      .mockResolvedValueOnce({
+        // the baseline helper's lookup — the original has landed by now
+        content,
+        formatted: true,
+        completionPct: 80,
+        mode: 'narrative',
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      });
+    revFindUnique
+      .mockResolvedValueOnce({
+        id: 'rev-1',
+        status: 'ready',
+        content: { summary: 'rerun' },
+        formatted: true,
+        completionPct: 80,
+        settingsSnapshot: settings,
+      }) // the revision being promoted
+      .mockResolvedValueOnce(null); // no rev-0 baseline exists yet
+    headerUpdate.mockResolvedValue({});
+
+    await promoteRespondentReportRevision({ sessionId: 'sess-1', revisionNumber: 1 });
+
+    // The pre-promote delivered content was snapshotted as revision 0 ("Original").
+    expect(revCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ revisionNumber: 0, status: 'ready', content }),
+      })
+    );
+    // …and the promote still landed.
+    expect(headerUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: { summary: 'rerun' },
+          deliveredRevisionId: 'rev-1',
+        }),
+      })
+    );
+  });
+
   it('copies a `ready` revision onto the delivered report and records deliveredRevisionId', async () => {
     headerFindUnique.mockResolvedValue({ id: 'rep1' });
     revFindUnique.mockResolvedValue({

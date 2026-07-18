@@ -7,8 +7,9 @@
  *   browser's stats strip always tracks the active filters. Accepts the full list query (page/limit/sort
  *   are ignored here).
  *
- *   Gate order mirrors the list: master flag → live-sessions flag → alpha release stage (404 before
- *   auth) → withAdminAuth → read. Inherits the 100/min `api` section cap; no sub-cap (a read).
+ *   Gate order mirrors the list: alpha release stage (404 before auth) → withAdminAuth → read. The
+ *   alpha stage is the ONLY gate on this surface — there is no separate feature flag. Inherits the
+ *   100/min `api` section cap; no sub-cap (a read).
  */
 
 import type { NextRequest } from 'next/server';

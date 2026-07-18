@@ -19,8 +19,36 @@ import {
   type AdminSessionListQuery,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
 
-/** How many days the over-time trend covers, ending today (UTC). */
+/** Default trend span (days, UTC) when the query carries no date window. */
 const TREND_DAYS = 30;
+
+/** Hard cap on trend buckets so a very wide `from`/`to` can't allocate an unbounded series. */
+const MAX_TREND_DAYS = 180;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The `YYYY-MM-DD` buckets the over-time series covers, derived from the query's date window so the
+ * trend tracks the same filter as every other figure. With no window it is the last {@link TREND_DAYS}
+ * days ending today; with one it spans `from`→`to` (either end defaulting), clamped to the most recent
+ * {@link MAX_TREND_DAYS} days of that range.
+ */
+function buildTrendDays(from?: string, to?: string): string[] {
+  const end = to ? new Date(`${to}T00:00:00.000Z`) : new Date();
+  const start = from
+    ? new Date(`${from}T00:00:00.000Z`)
+    : new Date(end.getTime() - (TREND_DAYS - 1) * MS_PER_DAY);
+
+  const spanDays = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY) + 1;
+  const days = Math.min(Math.max(spanDays, 1), MAX_TREND_DAYS);
+  const first = new Date(end.getTime() - (days - 1) * MS_PER_DAY);
+
+  const out: string[] = [];
+  for (let i = 0; i < days; i++) {
+    out.push(new Date(first.getTime() + i * MS_PER_DAY).toISOString().slice(0, 10));
+  }
+  return out;
+}
 
 /** Completion-distribution buckets (inclusive upper bound), low → high. */
 const COMPLETION_BUCKETS = [
@@ -100,13 +128,9 @@ export async function loadAdminSessionStats(
   // Status tallies (zero-filled across every status).
   const statusTally = new Map<SessionStatus, number>(SESSION_STATUSES.map((s) => [s, 0]));
 
-  // Over-time: bucket by UTC day, seeded with the full window so gaps render as zero.
-  const dayTally = new Map<string, number>();
-  const today = new Date();
-  for (let i = TREND_DAYS - 1; i >= 0; i--) {
-    const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
-    dayTally.set(d.toISOString().slice(0, 10), 0);
-  }
+  // Over-time: bucket by UTC day, seeded across the query's window so gaps render as zero AND the
+  // trend covers the same range the other figures were filtered to.
+  const dayTally = new Map<string, number>(buildTrendDays(query.from, query.to).map((d) => [d, 0]));
 
   const bucketTally = COMPLETION_BUCKETS.map((b) => ({ label: b.label, count: 0 }));
   const clientTally = new Map<string, number>();

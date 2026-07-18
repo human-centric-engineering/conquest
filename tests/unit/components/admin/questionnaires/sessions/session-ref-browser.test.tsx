@@ -166,9 +166,12 @@ describe('SessionRefBrowser', () => {
   });
 
   it('marks preview sessions and omits the round line when there is no round', () => {
+    // The default fixture has roundName 'Q3 Leadership'; with no round, that line must not render.
     renderBrowser({ initialItems: [item({ isPreview: true, roundId: null, roundName: null })] });
     expect(screen.getByText('Preview')).toBeInTheDocument();
-    expect(screen.queryByText(/open-ended/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Q3 Leadership')).not.toBeInTheDocument();
+    // The cohort cell still renders (it falls back to a dash), so the row isn't simply blank.
+    expect(screen.getByText('Leadership Team')).toBeInTheDocument();
   });
 
   it('renders an empty state when there are no sessions', () => {

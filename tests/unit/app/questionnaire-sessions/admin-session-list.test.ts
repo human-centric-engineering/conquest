@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
     appCohortMember: { findMany: vi.fn() },
     appCohort: { findMany: vi.fn() },
     appQuestionnaireTurn: { findMany: vi.fn() },
+    appDemoClient: { findMany: vi.fn() },
+    appQuestionnaire: { findMany: vi.fn(), count: vi.fn() },
   },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
@@ -24,6 +26,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
 import {
   listAdminSessionRefs,
   buildAdminSessionWhere,
+  loadAdminSessionFilterOptions,
   adminSessionListQuerySchema,
   type AdminSessionListQuery,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
@@ -36,6 +39,9 @@ const roundFindMany = mocks.prisma.appQuestionnaireRound.findMany as Mock;
 const memberFindMany = mocks.prisma.appCohortMember.findMany as Mock;
 const cohortFindMany = mocks.prisma.appCohort.findMany as Mock;
 const turnFindMany = mocks.prisma.appQuestionnaireTurn.findMany as Mock;
+const demoClientFindMany = mocks.prisma.appDemoClient.findMany as Mock;
+const questionnaireFindMany = mocks.prisma.appQuestionnaire.findMany as Mock;
+const questionnaireCount = mocks.prisma.appQuestionnaire.count as Mock;
 
 /** Build a fully-defaulted query from a partial (mirrors what the route validation produces). */
 const query = (over: Partial<Record<string, unknown>> = {}): AdminSessionListQuery =>
@@ -265,5 +271,56 @@ describe('listAdminSessionRefs', () => {
     findMany.mockResolvedValue([row({ status: 'weird' })]);
     const { items } = await listAdminSessionRefs(query());
     expect(items[0].status).toBe('active');
+  });
+});
+
+describe('loadAdminSessionFilterOptions', () => {
+  beforeEach(() => {
+    demoClientFindMany.mockResolvedValue([{ id: 'dc-1', name: 'Acme' }]);
+    questionnaireFindMany.mockResolvedValue([{ id: 'q-1', title: 'Onboarding' }]);
+    cohortFindMany.mockResolvedValue([
+      { id: 'c-1', name: 'Leadership', demoClient: { name: 'Acme' } },
+    ]);
+    roundFindMany.mockResolvedValue([{ id: 'r-1', name: 'Q3 Leadership', cohortId: 'c-1' }]);
+  });
+
+  it('loads the dropdown lists, flattening each cohort onto its client name', async () => {
+    count.mockResolvedValue(0);
+    questionnaireCount.mockResolvedValue(0);
+
+    const options = await loadAdminSessionFilterOptions();
+
+    expect(options.clients).toEqual([{ id: 'dc-1', name: 'Acme' }]);
+    expect(options.questionnaires).toEqual([{ id: 'q-1', title: 'Onboarding' }]);
+    // The nested demoClient is flattened to `clientName` for the "Cohort · Client" select label.
+    expect(options.cohorts).toEqual([{ id: 'c-1', name: 'Leadership', clientName: 'Acme' }]);
+    expect(options.rounds).toEqual([{ id: 'r-1', name: 'Q3 Leadership', cohortId: 'c-1' }]);
+  });
+
+  it('derives the sentinel flags from the counts (both present)', async () => {
+    count.mockResolvedValue(2); // ref-carrying sessions with no round exist
+    questionnaireCount.mockResolvedValue(1); // a questionnaire with no client exists
+
+    const options = await loadAdminSessionFilterOptions();
+    expect(options.hasOpenEnded).toBe(true);
+    expect(options.hasUnassignedClient).toBe(true);
+  });
+
+  it('clears the sentinel flags when nothing qualifies', async () => {
+    count.mockResolvedValue(0);
+    questionnaireCount.mockResolvedValue(0);
+
+    const options = await loadAdminSessionFilterOptions();
+    expect(options.hasOpenEnded).toBe(false);
+    expect(options.hasUnassignedClient).toBe(false);
+  });
+
+  it('counts open-ended sessions as ref-carrying sessions with no round', async () => {
+    count.mockResolvedValue(0);
+    questionnaireCount.mockResolvedValue(0);
+
+    await loadAdminSessionFilterOptions();
+    expect(count).toHaveBeenCalledWith({ where: { publicRef: { not: null }, roundId: null } });
+    expect(questionnaireCount).toHaveBeenCalledWith({ where: { demoClientId: null } });
   });
 });

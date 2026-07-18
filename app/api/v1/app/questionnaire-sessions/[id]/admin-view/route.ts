@@ -11,8 +11,9 @@
  *   admin doesn't hold), so this admin-authed endpoint reads the models directly instead — the same
  *   trust boundary the viewer page relies on.
  *
- *   Gate order mirrors the browser: master flag → live-sessions flag → alpha release stage (404 before
- *   auth) → withAdminAuth → read. Inherits the 100/min `api` section cap; no sub-cap (a read).
+ *   Gate order mirrors the browser: alpha release stage (404 before auth) → withAdminAuth → read. The
+ *   alpha stage is the ONLY gate on this surface — there is no separate feature flag, so do not assume
+ *   a flag can close it. Inherits the 100/min `api` section cap; no sub-cap (a read).
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

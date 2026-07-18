@@ -16,14 +16,26 @@ import { after } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { withAdminAuth } from '@/lib/auth/guards';
+import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { generateDeliveredRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { withAlphaSessionToolsEnabled } from '@/app/api/v1/app/questionnaire-sessions/_lib/alpha-gate';
+import { reportRerunLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
+  const adminId = session.user.id;
   const { id: sessionId } = await params;
+
+  // Paid flow (a full report generation) — per-admin sub-cap on top of the section limit, matching the
+  // sibling re-run + evaluate-saved routes. Per-session clobbering is refused downstream, so the cap is
+  // what bounds fan-out ACROSS sessions.
+  const rl = reportRerunLimiter.check(adminId);
+  if (!rl.success) {
+    log.warn('Report generate rate limit exceeded', { adminId, reset: rl.reset });
+    return createRateLimitResponse(rl);
+  }
 
   const queued = await generateDeliveredRespondentReport(sessionId);
   if (!queued) {
@@ -33,7 +45,7 @@ const handleGenerate = withAdminAuth<{ id: string }>(async (request, session, { 
     );
   }
 
-  log.info('Admin generated respondent report', { adminId: session.user.id, sessionId });
+  log.info('Admin generated respondent report', { adminId, sessionId });
 
   // Kick the worker after the response (serverless-safe) so it generates within seconds.
   after(async () => {
