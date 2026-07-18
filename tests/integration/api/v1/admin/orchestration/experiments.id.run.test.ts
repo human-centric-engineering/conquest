@@ -314,11 +314,19 @@ describe('POST /api/v1/admin/orchestration/experiments/:id/run', () => {
   });
 
   describe('Dataset-driven path (Phase 2.4)', () => {
+    // Variants must resolve to DIFFERENT agent configs (distinct agentVersionId
+    // pins) — see the "F14.15 — undifferentiated variant guard" describe block
+    // below. Fixtures here pin two distinct versions so these tests exercise
+    // the normal dataset-driven create path, not the guard.
     function datasetDrivenExperiment(overrides: Record<string, unknown> = {}) {
       return makeExperiment({
         datasetId: 'ds-1',
         metricConfigs: [{ slug: 'judge_agent', config: { agentSlug: 'eval-judge-relevance' } }],
         dataset: { id: 'ds-1', userId: ADMIN_ID, contentHash: 'h-abc', caseCount: 12 },
+        variants: [
+          { id: 'v1', label: 'Control', agentVersionId: 'agent-ver-a' },
+          { id: 'v2', label: 'Variant A', agentVersionId: 'agent-ver-b' },
+        ],
         ...overrides,
       });
     }
@@ -359,6 +367,23 @@ describe('POST /api/v1/admin/orchestration/experiments/:id/run', () => {
       );
     });
 
+    it("copies each variant's own agentVersionId onto the AiEvaluationRun it creates", async () => {
+      // F14.15 fix #2: AiExperimentVariant.agentVersionId was written at
+      // create time but read nowhere — every variant's run silently pinned
+      // to nothing, so a 2-arm version comparison scored the live agent
+      // against itself. The run route must copy the PER-VARIANT pin onto
+      // the run it creates for that variant, not a single shared value.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      mockTxFindUnique.mockResolvedValue(datasetDrivenExperiment());
+
+      await POST(makePostRequest(), makeContext());
+
+      const createdRunPins = mockEvalRunCreate.mock.calls.map(
+        (call) => (call[0] as { data: { agentVersionId: string | null } }).data.agentVersionId
+      );
+      expect(createdRunPins.sort()).toEqual(['agent-ver-a', 'agent-ver-b']);
+    });
+
     it('falls back to the legacy session path when datasetId is null', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
       // datasetId omitted, dataset relation null
@@ -388,6 +413,109 @@ describe('POST /api/v1/admin/orchestration/experiments/:id/run', () => {
           metadata: expect.objectContaining({ mode: 'dataset_driven' }),
         })
       );
+    });
+  });
+
+  describe('F14.15 — undifferentiated dataset-driven variant guard', () => {
+    // Fix #2: every variant's run used to be created against the live agent
+    // regardless of `agentVersionId`, so a 2-arm comparison scored identical
+    // config twice and reported the Welch/Cohen "winner" from pure sampling
+    // noise. The route must refuse to run when no variant is differentiated.
+    function undifferentiatedExperiment(variants: Array<Record<string, unknown>>) {
+      return makeExperiment({
+        datasetId: 'ds-1',
+        metricConfigs: [{ slug: 'judge_agent', config: { agentSlug: 'eval-judge-relevance' } }],
+        dataset: { id: 'ds-1', userId: ADMIN_ID, contentHash: 'h-abc', caseCount: 12 },
+        variants,
+      });
+    }
+
+    it('returns 400 and creates no run when every variant has agentVersionId=null (all live)', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      mockTxFindUnique.mockResolvedValue(
+        undifferentiatedExperiment([
+          { id: 'v1', label: 'Control', agentVersionId: null },
+          { id: 'v2', label: 'Variant A', agentVersionId: null },
+        ])
+      );
+
+      const response = await POST(makePostRequest(), makeContext());
+
+      expect(response.status).toBe(400);
+      const data = await parseJson<{ success: boolean; error: { code: string } }>(response);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('VALIDATION_ERROR');
+      expect(mockEvalRunCreate).not.toHaveBeenCalled();
+      expect(mockVariantUpdate).not.toHaveBeenCalled();
+      expect(mockTxUpdate).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 and creates no run when every variant pins the SAME non-null agentVersionId', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      mockTxFindUnique.mockResolvedValue(
+        undifferentiatedExperiment([
+          { id: 'v1', label: 'Control', agentVersionId: 'agent-ver-x' },
+          { id: 'v2', label: 'Variant A', agentVersionId: 'agent-ver-x' },
+        ])
+      );
+
+      const response = await POST(makePostRequest(), makeContext());
+
+      expect(response.status).toBe(400);
+      expect(mockEvalRunCreate).not.toHaveBeenCalled();
+      expect(mockTxUpdate).not.toHaveBeenCalled();
+    });
+
+    it('proceeds when two variants pin DIFFERENT agent versions', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      mockTxFindUnique.mockResolvedValue(
+        undifferentiatedExperiment([
+          { id: 'v1', label: 'Control', agentVersionId: 'agent-ver-a' },
+          { id: 'v2', label: 'Variant A', agentVersionId: 'agent-ver-b' },
+        ])
+      );
+
+      const response = await POST(makePostRequest(), makeContext());
+
+      expect(response.status).toBe(200);
+      expect(mockEvalRunCreate).toHaveBeenCalledTimes(2);
+    });
+
+    it('proceeds when one variant is live (null) and the other is pinned — still 2 distinct configs', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      mockTxFindUnique.mockResolvedValue(
+        undifferentiatedExperiment([
+          { id: 'v1', label: 'Control', agentVersionId: null },
+          { id: 'v2', label: 'Variant A', agentVersionId: 'agent-ver-b' },
+        ])
+      );
+
+      const response = await POST(makePostRequest(), makeContext());
+
+      expect(response.status).toBe(200);
+      expect(mockEvalRunCreate).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not apply the guard to the legacy session path (no dataset bound)', async () => {
+      // datasetDriven is false when there's no dataset — the guard is scoped
+      // to the dataset-driven branch only; the legacy session-scoring path
+      // never compared against `stats/winner.ts`, so it has nothing to guard.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      mockTxFindUnique.mockResolvedValue(
+        makeExperiment({
+          datasetId: null,
+          dataset: null,
+          variants: [
+            { id: 'v1', label: 'Control', agentVersionId: null },
+            { id: 'v2', label: 'Variant A', agentVersionId: null },
+          ],
+        })
+      );
+
+      const response = await POST(makePostRequest(), makeContext());
+
+      expect(response.status).toBe(200);
+      expect(mockEvalSessionCreate).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -433,9 +561,12 @@ describe('POST /api/v1/admin/orchestration/experiments/:id/run', () => {
           contentHash: 'h',
           caseCount: 12,
         },
+        // Distinct pins — this fixture exercises the ownership defence-in-depth
+        // check, not the F14.15 undifferentiated-variant guard (which runs first
+        // and would otherwise mask the 404 this test is asserting).
         variants: [
-          { id: 'v1', label: 'Control' },
-          { id: 'v2', label: 'Variant A' },
+          { id: 'v1', label: 'Control', agentVersionId: 'agent-ver-a' },
+          { id: 'v2', label: 'Variant A', agentVersionId: 'agent-ver-b' },
         ],
       });
 

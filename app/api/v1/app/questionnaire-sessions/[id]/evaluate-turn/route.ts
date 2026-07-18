@@ -127,7 +127,12 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
     // Persist the verdict + a snapshot of the input it judged. Failure here must not lose the
     // verdict the admin is waiting on — log it and return a null id so the drawer still renders
     // (the comment/flag affordances simply stay disabled until a successful persist).
+    //
+    // F14.15: the failure is also reported to the client as `persistError`. It used to be
+    // invisible — the review affordances just quietly didn't render, so an admin had no way to
+    // know the verdict they were reading had not been saved and would vanish on close.
     let evaluationId: string | null = null;
+    let persistError: string | null = null;
     try {
       const persisted = await persistTurnEvaluation({
         sessionId: id,
@@ -142,6 +147,7 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
       });
       evaluationId = persisted.id;
     } catch (persistErr) {
+      persistError = 'This verdict could not be saved — it will be lost when you close the drawer.';
       log.error('Turn evaluation persist failed', {
         sessionId: id,
         turnIndex: body.turn.turnIndex,
@@ -159,7 +165,7 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
       evaluationId,
     });
 
-    return successResponse({ verdict, costUsd, model, evaluationId });
+    return successResponse({ verdict, costUsd, model, evaluationId, persistError });
   } catch (err) {
     log.error('Turn evaluation failed', {
       sessionId: id,

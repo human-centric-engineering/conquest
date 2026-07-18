@@ -203,7 +203,7 @@ describe('GET changes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.data.counts).toEqual({ applied: 1, reverted: 0 });
+    expect(body.data.counts).toEqual({ applied: 1, reverted: 0, superseded: 0 });
     expect(body.data.changes).toHaveLength(1);
     // goalProvenance is 'inferred' in the snapshot → this infer_goal is revertable.
     expect(body.data.changes[0].revertable).toBe(true);
@@ -397,7 +397,29 @@ describe('POST revert', () => {
     );
     const res = await revertPOST(req(), ctx(REVERT_PARAMS));
     expect(res.status).toBe(409);
+    // The message is asserted, not just the status: both terminal statuses are 409, so a
+    // regression collapsing them to one message is invisible without this.
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.message).toBe('This change has already been reverted');
     expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 with a distinct message when the change was superseded', async () => {
+    // A superseded change was never reverted — its graph was rewritten wholesale. Telling the
+    // admin "already reverted" sends them hunting for a revert that never happened.
+    prismaMock.appQuestionnaireExtractionChange.findFirst.mockResolvedValue(
+      changeRow({ id: 'chg-1', changeType: 'infer_goal', status: 'superseded' })
+    );
+    const res = await revertPOST(req(), ctx(REVERT_PARAMS));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.message).toBe(
+      'This change was superseded by a full-structure rewrite and can no longer be reverted'
+    );
+    expect(forkVersionIfLaunched).not.toHaveBeenCalled();
+    expect(prismaMock.appQuestionnaireExtractionChange.update).not.toHaveBeenCalled();
   });
 
   it('on a launched version, forks and flips the source row, returning fork meta', async () => {
@@ -788,7 +810,7 @@ describe('GET changes · enrichment over a populated snapshot', () => {
     const res = await listGET(req(), ctx(VERSION_PARAMS));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data.counts).toEqual({ applied: 6, reverted: 1 });
+    expect(body.data.counts).toEqual({ applied: 6, reverted: 1, superseded: 0 });
     const byId = Object.fromEntries(body.data.changes.map((c: { id: string }) => [c.id, c]));
     expect(byId['c-aud'].resolvedTargetLabel).toBe('Audience');
     expect(byId['c-edit'].resolvedTargetLabel).toBe('q1');

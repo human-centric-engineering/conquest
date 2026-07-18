@@ -5,8 +5,11 @@
  *   Admin-only SSE. Assembles the whole-questionnaire snapshot (structure, goal/audience, run-time
  *   config, data slots, scoring, lifecycle/session state) and drives the two-phase advisor:
  *   a streamed narrative review followed by structured conflicts + one-click config suggestions.
- *   Nothing is persisted — the advisor is ephemeral and re-runnable. ADMIN-TRIGGERED ONLY: there is
- *   no GET and no auto-run; the client POSTs this when the admin presses "Run advisor".
+ *   The advice itself is advisory and re-runnable, but since F14.15 each run is RECORDED as an
+ *   `AppAiRun` (`kind: 'config_advice'`) — an admin acts on these recommendations, so "what did the
+ *   advisor tell me last week, and against which config" has to be answerable. ADMIN-TRIGGERED
+ *   ONLY: there is no GET and no auto-run; the client POSTs this when the admin presses
+ *   "Run advisor".
  *
  * Auth: admin only. Flag: 404 when the master OR advisor sub-flag is off. Rate limit: per-admin
  * advisor sub-cap (two reasoning calls per run). Mirrors the compose `stream` route's `drive()`.
@@ -26,6 +29,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { QUESTIONNAIRE_ADVISOR_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { advisorLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { loadAdvisorContext } from '@/app/api/v1/app/questionnaires/_lib/advisor-context';
+import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import { streamAdvisor } from '@/lib/app/questionnaire/advisor/stream-advisor';
 import type { AdvisorGenEvent } from '@/lib/app/questionnaire/advisor/advisor-events';
 
@@ -93,11 +97,43 @@ const handleAdvisorStream = withAdminAuth<{ id: string; vid: string }>(
         agentId: advisorAgent.id,
       });
 
+      // F14.15: observe the stream so the advice becomes durable. This surface produced
+      // authoritative-reading admin recommendations and wrote nothing at all — the only DB call
+      // in the whole route was loading the agent. Accumulated here rather than inside
+      // `streamAdvisor` so the pure generator stays free of persistence concerns.
+      const startedAt = Date.now();
+      let narrative = '';
+      let analysis: { conflicts: unknown; suggestions: unknown } | null = null;
+      let failure: string | null = null;
+
       let fatal = false;
       for await (const ev of gen) {
-        if (ev.type === 'error') fatal = true;
+        if (ev.type === 'error') {
+          fatal = true;
+          failure = ev.message;
+        }
+        if (ev.type === 'narrative_delta') narrative += ev.text;
+        if (ev.type === 'analysis') {
+          analysis = { conflicts: ev.conflicts, suggestions: ev.suggestions };
+        }
         yield ev;
       }
+
+      void recordAiRun({
+        subjectKind: 'version',
+        subjectId: vid,
+        versionId: vid,
+        kind: 'config_advice',
+        status: fatal ? 'failed' : 'succeeded',
+        provider: advisorAgent.provider,
+        model: advisorAgent.model,
+        outputSnapshot: narrative,
+        durationMs: Date.now() - startedAt,
+        detail: analysis,
+        error: failure,
+        triggeredByUserId: adminId,
+      });
+
       if (fatal) return;
 
       log.info('Questionnaire advisor run complete', {

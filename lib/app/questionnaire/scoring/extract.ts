@@ -15,6 +15,7 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring/schema-validation';
 import type { ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 
@@ -56,6 +57,7 @@ export async function extractScoringSchema(
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: COHORT_REPORT_AGENT_SLUG },
     select: {
+      id: true,
       provider: true,
       model: true,
       fallbackProviders: true,
@@ -108,6 +110,15 @@ export async function extractScoringSchema(
     retryUserMessage:
       'Respond with ONLY the JSON object {"scales":[],"items":[],"bands":[],"method":"mean"} — no prose, no code fence.',
     onFinalFailure: () => new Error('Scoring schema response was not valid JSON after retry'),
+  });
+
+  logAppLlmCost({
+    agentId: agent.id,
+    provider: providerSlug,
+    model,
+    tokenUsage: result.tokenUsage,
+    capability: 'app_scoring_extract',
+    versionId,
   });
 
   return result.value;

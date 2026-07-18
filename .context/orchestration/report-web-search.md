@@ -82,6 +82,8 @@ The **narrative** use has no separate render surface — it lands inside the rep
 - **Latency vs the worker.** Report generation runs in the fire-and-forget maintenance-tick worker (`report/worker.ts`) and an opportunistic post-response `after()` kick on submit — neither blocks the respondent's submit. A research-enabled report may run minutes; the per-phase budget keeps it under the lease, and the cron is the lease-based backstop if a kick is cut off.
 - **Cost.** Research cost sums into `AppRespondentReport.costUsd`; the research agent's `monthlyBudgetUsd` caps spend; Brave calls are subject to the existing per-host outbound rate limiter.
 
+  > **Note (F14.15).** The `monthlyBudgetUsd` cap only became real in F14.15. Report-side calls previously invoked `getProvider` directly and never called `logCost`, so their spend reached neither `cost-reports.ts` nor per-agent budget enforcement — the cap documented here could not fire. They now route through `logAppLlmCost` (`lib/app/questionnaire/llm/log-app-cost.ts`). See [`ai-run-provenance.md`](../app/questionnaire/ai-run-provenance.md#cost-attribution).
+
 ## Files
 
 - Config/type: `lib/app/questionnaire/types.ts`, `report/settings.ts`, `authoring/config-schema.ts`

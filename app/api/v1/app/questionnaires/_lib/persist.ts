@@ -366,10 +366,24 @@ export async function replaceVersionStructure(
   extraction: ExtractQuestionnaireStructureData
 ): Promise<GraphCounts> {
   return executeTransaction(async (tx) => {
-    // Clear the prior graph. Order: change log + sections (cascades slots →
-    // slot-tag joins) first, then the now-unreferenced tag vocabulary — the same
-    // order the re-ingest writer uses.
-    await tx.appQuestionnaireExtractionChange.deleteMany({ where: { versionId } });
+    // Supersede — do NOT delete — the change log. These rows are the editorial
+    // audit trail for an *extracted* questionnaire: every `sourceQuote` and
+    // `beforeJson` that makes revert possible. Deleting them (as this did before
+    // F14.15) permanently disabled revert for the version, silently, on the first
+    // "make it shorter". They no longer describe the live graph after the rewrite,
+    // so they stop being revert candidates — but they stay queryable.
+    //
+    // Re-ingest still deletes (`reingest.ts`), and correctly so: that replaces the
+    // source document, so the prior extraction's rationale no longer refers to
+    // anything. A rewrite keeps the same source document.
+    await tx.appQuestionnaireExtractionChange.updateMany({
+      where: { versionId, status: 'applied' },
+      data: { status: 'superseded', supersededAt: new Date() },
+    });
+
+    // Clear the prior graph. Order: sections (cascades slots → slot-tag joins)
+    // first, then the now-unreferenced tag vocabulary — the same order the
+    // re-ingest writer uses.
     await tx.appQuestionnaireSection.deleteMany({ where: { versionId } });
     await tx.appQuestionTag.deleteMany({ where: { versionId } });
 

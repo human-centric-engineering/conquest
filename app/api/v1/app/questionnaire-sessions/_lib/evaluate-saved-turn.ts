@@ -44,6 +44,11 @@ export type RunSavedTurnEvaluationResult =
       costUsd: number;
       model: string;
       evaluationId: string | null;
+      /**
+       * F14.15: set when the verdict was produced but could not be saved. Surfaced to the
+       * admin — a silently-unsaved verdict reads exactly like a saved one.
+       */
+      persistError: string | null;
     }
   | {
       ok: false;
@@ -137,6 +142,7 @@ export async function runSavedTurnEvaluation(
   }
 
   let evaluationId: string | null = null;
+  let persistError: string | null = null;
   try {
     const persisted = await persistTurnEvaluation({
       sessionId: params.sessionId,
@@ -151,6 +157,7 @@ export async function runSavedTurnEvaluation(
     });
     evaluationId = persisted.id;
   } catch (err) {
+    persistError = 'This verdict could not be saved — it will be lost when you close the drawer.';
     logger.error('evaluate_saved_turn: persist failed', {
       sessionId: params.sessionId,
       ordinal: params.ordinal,
@@ -158,5 +165,5 @@ export async function runSavedTurnEvaluation(
     });
   }
 
-  return { ok: true, verdict, costUsd, model, evaluationId };
+  return { ok: true, verdict, costUsd, model, evaluationId, persistError };
 }

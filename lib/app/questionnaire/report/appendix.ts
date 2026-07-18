@@ -14,6 +14,9 @@
 
 import { logger } from '@/lib/logging';
 import { isRecord } from '@/lib/utils';
+import { prisma } from '@/lib/db/client';
+import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import type { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
@@ -158,6 +161,25 @@ export async function synthesiseReportAppendix(
         'Respond with ONLY the JSON object {"appendix": {"heading","body"}} or {"appendix": null} — no prose, no code fence.',
       phase: 'report-appendix',
     });
+
+    // The caller hands over a resolved provider/model but not the agent row, so the id is looked up
+    // here rather than widening the options contract; `.catch` keeps a DB blip from costing an
+    // already-paid-for appendix. `provider.name` is the slug the provider was resolved under.
+    // `versionId` is null — this pass sees only the finished report and the findings.
+    const agent = await prisma.aiAgent
+      .findUnique({ where: { slug: RESPONDENT_REPORT_AGENT_SLUG }, select: { id: true } })
+      .catch(() => null);
+    if (agent) {
+      logAppLlmCost({
+        agentId: agent.id,
+        provider: opts.provider.name,
+        model: opts.model,
+        tokenUsage: result.tokenUsage,
+        capability: 'app_report_appendix',
+        versionId: null,
+      });
+    }
+
     return { appendix: result.value.appendix, costUsd: result.costUsd };
   } catch (err) {
     // Best-effort: an appendix failure must never fail the report.

@@ -34,6 +34,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
 import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orchestrate-extraction';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import type { ExtractionStreamEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
 /**
@@ -116,7 +117,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
       yield await errorEventFromResponse(orchestrated.response);
       return;
     }
-    const { extraction, parsed } = orchestrated.value;
+    const { extraction, parsed, fidelity } = orchestrated.value;
 
     yield { type: 'phase', phase: 'saving', message: 'Saving the questionnaire…' };
     try {
@@ -137,6 +138,35 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
           extractedText: parsed.fullText,
         },
       });
+
+      // F14.15: record what the fidelity critic concluded, now that the version it describes
+      // exists. Best-effort — a provenance write must never fail a completed ingest.
+      if (fidelity) {
+        void recordAiRun({
+          subjectKind: 'version',
+          subjectId: result.versionId,
+          versionId: result.versionId,
+          kind: 'extraction_verify',
+          status: fidelity.repairOutcome === 'verifier_unavailable' ? 'failed' : 'succeeded',
+          provider: fidelity.provider,
+          model: fidelity.model,
+          outputSnapshot: fidelity.verdicts,
+          durationMs: fidelity.durationMs,
+          detail: {
+            flaggedCount: fidelity.flaggedCount,
+            totalCount: fidelity.totalCount,
+            repairOutcome: fidelity.repairOutcome,
+            fileName: file.name,
+          },
+          ...(fidelity.repairOutcome === 'verifier_unavailable'
+            ? {
+                error:
+                  'Fidelity critic did not run — agent unavailable or returned an unusable result',
+              }
+            : {}),
+          triggeredByUserId: adminId,
+        });
+      }
 
       logAdminAction({
         userId: adminId,

@@ -19,6 +19,7 @@ import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-comp
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import {
   buildAnswerPanelView,
   type PanelAnswerInput,
@@ -168,7 +169,7 @@ export async function synthesiseSampleReportInputs(
 ): Promise<SampleReportInputs> {
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: RESPONDENT_REPORT_AGENT_SLUG },
-    select: { provider: true, model: true, fallbackProviders: true, temperature: true },
+    select: { id: true, provider: true, model: true, fallbackProviders: true, temperature: true },
   });
   if (!agent) throw new Error('Respondent report agent is not seeded');
 
@@ -191,6 +192,18 @@ export async function synthesiseSampleReportInputs(
       new Error('Sample answer synthesis did not return valid JSON after retry'),
     phase: 'report-preview-sample',
   });
+
+  // `versionId` is null — the preview runs against an in-memory structure (possibly an unsaved draft),
+  // so there is no version row to attribute to.
+  logAppLlmCost({
+    agentId: agent.id,
+    provider: providerSlug,
+    model,
+    tokenUsage: result.tokenUsage,
+    capability: 'app_report_preview_sample',
+    versionId: null,
+  });
+
   const sample = result.value;
 
   // Map the sample onto the panel view exactly as generation does (structure + answers → panel),

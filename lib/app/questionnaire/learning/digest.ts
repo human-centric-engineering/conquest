@@ -31,6 +31,7 @@ import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-comp
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { QUESTIONNAIRE_COMPOSER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { resolveLearningConfig } from '@/lib/app/questionnaire/rounds/types';
+import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 
 const DIGEST_MAX_TOKENS = 4_000;
 const DIGEST_TIMEOUT_MS = 60_000;
@@ -101,9 +102,14 @@ async function clearDigest(roundId: string, versionId: string): Promise<void> {
  * composer agent. Returns `null` on any failure (no agent, no provider, bad JSON) so the caller
  * leaves the existing digest untouched rather than wiping it on a transient error.
  */
-async function generaliseThemes(
-  slots: SlotSamples[]
-): Promise<Array<{ key: string; insight: string; divergence: number | null }> | null> {
+interface GeneralisedThemes {
+  themes: Array<{ key: string; insight: string; divergence: number | null }>;
+  /** Resolved binding that produced them — carried out for the F14.15 run record. */
+  provider: string;
+  model: string;
+}
+
+async function generaliseThemes(slots: SlotSamples[]): Promise<GeneralisedThemes | null> {
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: QUESTIONNAIRE_COMPOSER_AGENT_SLUG },
     select: { id: true, provider: true, model: true, fallbackProviders: true },
@@ -196,13 +202,17 @@ async function generaliseThemes(
     }).catch(() => {});
 
     const valid = new Set(slots.map((s) => s.key));
-    return completion.value.themes
-      .filter((t) => valid.has(t.key) && t.insight.trim().length > 0)
-      .map((t) => ({
-        key: t.key,
-        insight: t.insight.trim(),
-        divergence: typeof t.divergence === 'number' ? t.divergence : null,
-      }));
+    return {
+      themes: completion.value.themes
+        .filter((t) => valid.has(t.key) && t.insight.trim().length > 0)
+        .map((t) => ({
+          key: t.key,
+          insight: t.insight.trim(),
+          divergence: typeof t.divergence === 'number' ? t.divergence : null,
+        })),
+      provider: providerSlug,
+      model,
+    };
   } catch (err) {
     logger.warn('learning digest: generalisation failed', {
       error: err instanceof Error ? err.message : String(err),
@@ -305,8 +315,10 @@ export async function refreshRoundLearningDigest(
     // Only the first MAX_SLOTS are sent to the model; key/count lookups below must use the SAME set
     // so a theme can never resolve a kind/count from a slot the model never saw.
     const sent = slots.slice(0, MAX_SLOTS);
-    const themes = await generaliseThemes(sent);
-    if (themes === null) return { built: false, reason: 'generalisation_failed' };
+    const generalised = await generaliseThemes(sent);
+    if (generalised === null) return { built: false, reason: 'generalisation_failed' };
+    const { themes } = generalised;
+    const digestBinding = { provider: generalised.provider, model: generalised.model };
     if (themes.length === 0) {
       await clearDigest(roundId, versionId);
       return { built: false, reason: 'no_themes' };
@@ -336,11 +348,40 @@ export async function refreshRoundLearningDigest(
       return { built: false, reason: 'no_themes' };
     }
 
-    // Replace wholesale so a shrunk corpus (e.g. after erasure) can't leave stale rows.
+    // Replace wholesale so a shrunk corpus (e.g. after erasure) can't leave stale rows. The
+    // wholesale replace is deliberate and stays — a k-anonymity digest MUST NOT retain themes its
+    // current corpus no longer supports.
     await prisma.$transaction([
       prisma.appRoundLearningDigest.deleteMany({ where: { roundId, versionId } }),
       prisma.appRoundLearningDigest.createMany({ data: rows }),
     ]);
+
+    // F14.15: the replace above erased whatever the previous digest said, so "how did this round's
+    // learning evolve" was unanswerable. Recording the build keeps that history OUTSIDE the live
+    // table, so the privacy semantics above are untouched — the digest rows still reflect only the
+    // current corpus, while the run log explains how they got there.
+    void recordAiRun({
+      subjectKind: 'version',
+      subjectId: versionId,
+      versionId,
+      kind: 'learning_digest',
+      provider: digestBinding.provider,
+      model: digestBinding.model,
+      outputSnapshot: rows.map((r) => ({
+        slotKind: r.slotKind,
+        slotKey: r.slotKey,
+        insight: r.insight,
+        respondentCount: r.respondentCount,
+        divergence: r.divergence,
+      })),
+      detail: {
+        roundId,
+        slotCount: rows.length,
+        sessionsCovered: sessions.length,
+        slotsConsidered: slots.length,
+        slotsSent: sent.length,
+      },
+    });
 
     return { built: true, slotCount: rows.length };
   } catch (err) {

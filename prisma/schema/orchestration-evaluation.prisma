@@ -144,6 +144,12 @@ model AiEvaluationRun {
   // 'agent' | 'workflow' — drives the worker's per-case dispatch.
   subjectKind           String
   agentId               String?
+  // F14.15: the `AiAgentVersion.id` this run's subject is pinned to, or null to
+  // run the agent's live config. Without this a score is un-attributable — edit
+  // the agent's prompt after a run and the historical numbers silently describe a
+  // configuration that no longer exists. Mirrors `AiWorkflowExecution.versionId`.
+  // Plain String, no FK: the run must outlive the version row it names.
+  agentVersionId        String?
   workflowId            String?
   datasetId             String
   // Dataset content hash captured at submit time. The worker validates

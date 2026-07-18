@@ -37,6 +37,7 @@ import {
   type RespondentReportResearchFinding,
 } from '@/lib/app/questionnaire/report/content';
 import type { WebSearchResult } from '@/lib/app/questionnaire/capabilities/web-search';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import { isRecord } from '@/lib/utils';
 
 /** Which side of generation a research round runs on. */
@@ -190,6 +191,18 @@ export async function runReportResearch(
         signal: AbortSignal.timeout(RESEARCH_CALL_TIMEOUT_MS),
       });
       costUsd += callCost(model, response);
+      // One row per tool-loop turn — the round count is what makes research spend worth capping, so
+      // logging the phase total would hide it. `versionId` is null: research is handed a session, not
+      // a version.
+      logAppLlmCost({
+        agentId: agent.id,
+        provider: providerSlug,
+        model,
+        tokenUsage: { input: response.usage.inputTokens, output: response.usage.outputTokens },
+        capability: 'app_report_research',
+        versionId: null,
+        extra: { phase: opts.phase, sessionId: opts.sessionId, round: searchesUsed },
+      });
 
       if (typeof response.content === 'string' && response.content.trim()) {
         lastAssistantText = response.content.trim();
@@ -261,6 +274,20 @@ export async function runReportResearch(
       const synth = await synthesiseNote(provider, model, agent, messages);
       costUsd += synth.costUsd;
       note = synth.note;
+      // Separate capability from the search turns: this is the closing write-up, and it only runs on
+      // the minority of phases where the agent didn't already produce one. Zero usage means the call
+      // threw before billing — no row for it.
+      if (synth.tokenUsage.input > 0 || synth.tokenUsage.output > 0) {
+        logAppLlmCost({
+          agentId: agent.id,
+          provider: providerSlug,
+          model,
+          tokenUsage: synth.tokenUsage,
+          capability: 'app_report_research_note',
+          versionId: null,
+          extra: { phase: opts.phase, sessionId: opts.sessionId },
+        });
+      }
     }
     note = note.slice(0, REPORT_RESEARCH_NOTE_MAX).trim();
 
@@ -328,13 +355,17 @@ async function dispatchSearch(
   };
 }
 
-/** One final, tool-free turn to get a synthesis note when the agent didn't already write one. */
+/**
+ * One final, tool-free turn to get a synthesis note when the agent didn't already write one. Reports
+ * its token usage alongside the cost so the caller (which holds the agent id + provider slug) can
+ * attribute the spend.
+ */
 async function synthesiseNote(
   provider: LlmProvider,
   model: string,
   agent: { temperature: number; maxTokens: number },
   messages: LlmMessage[]
-): Promise<{ note: string; costUsd: number }> {
+): Promise<{ note: string; costUsd: number; tokenUsage: { input: number; output: number } }> {
   try {
     const response = await provider.chat(
       [
@@ -356,9 +387,13 @@ async function synthesiseNote(
       }
     );
     const note = typeof response.content === 'string' ? response.content.trim() : '';
-    return { note, costUsd: callCost(model, response) };
+    return {
+      note,
+      costUsd: callCost(model, response),
+      tokenUsage: { input: response.usage.inputTokens, output: response.usage.outputTokens },
+    };
   } catch {
-    return { note: '', costUsd: 0 };
+    return { note: '', costUsd: 0, tokenUsage: { input: 0, output: 0 } };
   }
 }
 

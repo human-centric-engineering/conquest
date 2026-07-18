@@ -28,6 +28,7 @@ function finding(over: Partial<EvaluationFindingView> = {}): EvaluationFindingVi
     dimension: 'duplicates',
     ordinal: 0,
     targetKey: 'q_dupe',
+    target: null,
     severity: 'minor',
     proposedChange: 'Remove the duplicate question.',
     rationale: 'Same as q_role.',
@@ -111,6 +112,63 @@ describe('EvaluationRunDetail review queue', () => {
     renderQueue([finding()]);
     expect(screen.getByText('Remove the duplicate question.')).toBeInTheDocument();
     expect(screen.getByText('Delete this question')).toBeInTheDocument();
+  });
+
+  it('names the question a judgement is about, with its section and position', () => {
+    renderQueue([
+      finding({
+        target: {
+          kind: 'question',
+          key: 'q_dupe',
+          label: 'What is your role?',
+          sectionTitle: 'Background',
+          position: 2,
+          removed: false,
+        },
+      }),
+    ]);
+    expect(screen.getByText('“What is your role?”')).toBeInTheDocument();
+    expect(screen.getByText('Question 2 · Background')).toBeInTheDocument();
+  });
+
+  it('marks a target that was removed from the structure since the run', () => {
+    renderQueue([
+      finding({
+        target: {
+          kind: 'question',
+          key: 'q_dupe',
+          label: 'What is your role?',
+          sectionTitle: 'Background',
+          position: 1,
+          removed: true,
+        },
+      }),
+    ]);
+    expect(screen.getByText('· removed since this run')).toBeInTheDocument();
+  });
+
+  it('falls back to the raw key chip when the target could not be resolved', () => {
+    renderQueue([finding({ target: null })]);
+    expect(screen.getByText('q_dupe')).toBeInTheDocument();
+    expect(screen.getByText('Target')).toBeInTheDocument();
+  });
+
+  it('labels a version-level goal finding without quoting it as a question', () => {
+    renderQueue([
+      finding({
+        targetKey: 'goal',
+        target: {
+          kind: 'goal',
+          key: 'goal',
+          label: 'Questionnaire goal',
+          sectionTitle: null,
+          position: null,
+          removed: false,
+        },
+      }),
+    ]);
+    expect(screen.getByText('Questionnaire goal')).toBeInTheDocument();
+    expect(screen.getByText('Goal')).toBeInTheDocument();
   });
 
   it('accept calls the PATCH review endpoint with { action: "accept" } and updates the card', async () => {

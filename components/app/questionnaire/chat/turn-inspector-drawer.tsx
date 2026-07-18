@@ -371,6 +371,8 @@ type EvalState =
       model: string;
       /** The persisted row id (null when the verdict was returned but the write failed). */
       evaluationId: string | null;
+      /** Set when the write failed — shown inline so an unsaved verdict can't read as saved. */
+      persistError: string | null;
     };
 
 /** How many prior conversation lines to send as recent context (keeps the payload lean). */
@@ -453,6 +455,7 @@ function TurnEvaluationSection({
         costUsd: number;
         model: string;
         evaluationId: string | null;
+        persistError: string | null;
       }>(API.APP.QUESTIONNAIRE_SESSIONS.evaluateTurn(sessionId), {
         body: { turn, ...deriveTurnContext(messages, turn.turnIndex) },
       });
@@ -462,6 +465,7 @@ function TurnEvaluationSection({
         costUsd: data.costUsd,
         model: data.model,
         evaluationId: data.evaluationId,
+        persistError: data.persistError ?? null,
       });
     } catch (err) {
       setState({
@@ -512,6 +516,14 @@ function TurnEvaluationSection({
               </button>
             }
           />
+          {state.persistError && (
+            <p
+              role="status"
+              className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[0.7rem] text-amber-200"
+            >
+              {state.persistError}
+            </p>
+          )}
           {state.evaluationId && (
             <TurnEvaluationReview
               sessionId={sessionId}

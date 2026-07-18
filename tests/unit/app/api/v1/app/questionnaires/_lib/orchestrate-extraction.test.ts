@@ -117,8 +117,20 @@ const PARSED_DOC = {
 
 const UPLOAD = { file: { name: 'form.md' } } as unknown as GuardedUpload;
 
-const VERIFIER_AGENT = { id: 'verifier-1', provider: '', model: '', fallbackProviders: [] };
-const REPAIR_AGENT = { id: 'repair-1', provider: '', model: '', fallbackProviders: [] };
+// Real-looking bindings: the fidelity record (F14.15) stores the resolved provider/model, so
+// empty strings here would let an attribution regression pass unnoticed.
+const VERIFIER_AGENT = {
+  id: 'verifier-1',
+  provider: 'openai',
+  model: 'gpt-5.4',
+  fallbackProviders: [],
+};
+const REPAIR_AGENT = {
+  id: 'repair-1',
+  provider: 'openai',
+  model: 'gpt-5.4-mini',
+  fallbackProviders: [],
+};
 
 /** Build a fresh ctx (adminId + a log whose spies stay reachable for assertions). */
 function makeCtx(adminId = 'admin-1') {
@@ -324,6 +336,136 @@ describe('orchestrateExtraction — repair applied', () => {
       expect.objectContaining({ userId: 'admin-1', agentId: 'repair-1' })
     );
     expect(phases.some((p) => p.phase === 'repairing')).toBe(true);
+  });
+});
+
+// ─── Fidelity record (F14.15) ─────────────────────────────────────────────────
+
+describe('orchestrateExtraction — fidelity record repairOutcome', () => {
+  it('records none_flagged with the resolved verifier binding when the critic is clean', async () => {
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: { result: { verdicts: [{ key: 'name', verdict: 'ok' }], matrixGroups: [] } },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.fidelity).toMatchObject({
+        repairOutcome: 'none_flagged',
+        flaggedCount: 0,
+        provider: 'openai',
+      });
+    }
+  });
+
+  it('records repaired only when the repair pass actually returned repairs', async () => {
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: {
+            verdicts: [{ key: 'name', verdict: 'suspect', issue: 'type_mismatch' }],
+            matrixGroups: [],
+          },
+        },
+      },
+      [REPAIR_QUESTIONS_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: {
+            repairs: [
+              {
+                originalKeys: ['name'],
+                action: 'correct',
+                questions: [q('name', 'likert', goodLikert)],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.repairOutcome).toBe('repaired');
+  });
+
+  it('records repair_failed — not repaired — when the repair dispatch fails', async () => {
+    // `runRepair` is fail-soft: a failed dispatch returns zero repairs and the flagged questions
+    // persist untouched. Filing that as 'repaired' would reproduce the exact blind spot this
+    // record exists to close — a suspect question indistinguishable from a confirmed one.
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: {
+            verdicts: [{ key: 'name', verdict: 'suspect', issue: 'type_mismatch' }],
+            matrixGroups: [],
+          },
+        },
+      },
+      [REPAIR_QUESTIONS_CAPABILITY_SLUG]: { success: false, error: { code: 'PROVIDER_DOWN' } },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.fidelity?.repairOutcome).toBe('repair_failed');
+      // The flag itself is still recorded, so the unrepaired question stays traceable.
+      expect(result.value.fidelity?.flaggedCount).toBe(1);
+    }
+  });
+
+  it('records verifier_unavailable with an n/a binding when the verifier agent is not seeded', async () => {
+    (prisma.aiAgent.findUnique as FindUniqueMock).mockImplementation(async () => null);
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.fidelity).toMatchObject({
+        repairOutcome: 'verifier_unavailable',
+        provider: 'n/a',
+        model: 'n/a',
+      });
+    }
+  });
+
+  it('records skipped_systemic when the flag count exceeds the repair ceiling', async () => {
+    seedAgents();
+    mockDispatch({
+      [VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG]: {
+        success: true,
+        data: {
+          result: {
+            verdicts: Array.from({ length: 21 }, (_, i) => ({
+              key: `q${i}`,
+              verdict: 'suspect' as const,
+            })),
+            matrixGroups: [],
+          },
+        },
+      },
+    });
+    const { ctx } = makeCtx();
+
+    const { result } = await drain(UPLOAD, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.fidelity?.repairOutcome).toBe('skipped_systemic');
   });
 });
 

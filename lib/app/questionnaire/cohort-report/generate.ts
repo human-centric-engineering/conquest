@@ -21,6 +21,7 @@ import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-comp
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import type { CohortReportSettings } from '@/lib/app/questionnaire/types';
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { markdownToHtml } from '@/lib/app/questionnaire/cohort-report/richtext';
@@ -262,6 +263,7 @@ export async function* streamGenerateCohortReport(params: {
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: COHORT_REPORT_AGENT_SLUG },
     select: {
+      id: true,
       provider: true,
       model: true,
       fallbackProviders: true,
@@ -304,6 +306,15 @@ export async function* streamGenerateCohortReport(params: {
     retryUserMessage:
       'Respond with ONLY the JSON object {"summary","sections":[{"heading","body","chartIds"}],"charts":[],"recommendations":[],"actions":[]} — no prose, no code fence.',
     onFinalFailure: () => new Error('Cohort report response was not valid JSON after retry'),
+  });
+
+  logAppLlmCost({
+    agentId: agent.id,
+    provider: providerSlug,
+    model,
+    tokenUsage: result.tokenUsage,
+    capability: 'app_cohort_report_generate',
+    versionId,
   });
 
   // Sections are stored as HTML (one format for the editor + read view + PDF). The agent writes

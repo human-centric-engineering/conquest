@@ -13,6 +13,7 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { COHORT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import { isRecord } from '@/lib/utils';
 
 export interface RefinedSection {
@@ -34,6 +35,7 @@ export async function refineCohortReportSection(params: {
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: COHORT_REPORT_AGENT_SLUG },
     select: {
+      id: true,
       provider: true,
       model: true,
       fallbackProviders: true,
@@ -78,6 +80,16 @@ export async function refineCohortReportSection(params: {
     retryUserMessage:
       'Respond with ONLY {"heading": string, "body": string} — no prose, no code fence.',
     onFinalFailure: () => new Error('Section refine response was not valid JSON after retry'),
+  });
+
+  // `versionId` is null — a refine turn is scoped to one section's text, with no version in scope.
+  logAppLlmCost({
+    agentId: agent.id,
+    provider: providerSlug,
+    model,
+    tokenUsage: result.tokenUsage,
+    capability: 'app_cohort_report_refine',
+    versionId: null,
   });
 
   return result.value;

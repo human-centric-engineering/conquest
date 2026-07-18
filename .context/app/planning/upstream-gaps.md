@@ -391,3 +391,80 @@ divergence retires **conflict-free** when a Sunrise release includes it and we s
 **References.**
 [sunrise#314](https://github.com/human-centric-engineering/sunrise/issues/314) ·
 `.github/workflows/ci.yml` · `.context/architecture/ci.md` · ConQuest PR #102 / #101.
+
+---
+
+### UG-12 — Chat handler cannot execute a pinned agent version snapshot
+
+_Status:_ open · _Opened:_ 2026-07-18 · _Surfaced by:_ F14.15 (AI run provenance audit)
+
+**Gap.** `AiAgentVersion.snapshot` stores an agent's full config at a point in time,
+and `AiExperimentVariant.agentVersionId` lets an experiment pin a variant to one. But
+nothing can _execute_ a snapshot. `drainStreamChat` → `streamChat` resolves an agent by
+**slug** (`loadAgent(request.agentSlug)`, `lib/orchestration/chat/streaming-handler.ts`),
+which always returns the **live** config. There is no seam to say "run this agent with
+_this_ configuration".
+
+The consequence was a live correctness bug, not just a missing feature: the experiment
+run route created every variant's `AiEvaluationRun` against `experiment.agentId`
+(the live agent) and ignored `variant.agentVersionId` entirely — the field was written at
+create time and **read nowhere in any execution path**. A 2-arm "version A vs version B"
+experiment therefore evaluated identical config twice, and `stats/winner.ts` reported the
+resulting sampling noise as a winner with a Welch t-test and Cohen's d.
+
+**Why upstream.** The seam is in the platform's chat handler, and every consumer of it
+benefits: experiments (version A/B), evaluation runs (reproducible historical scores),
+regression testing a prompt change before publishing, and workflow steps that want to
+pin an agent the way `AiWorkflowExecution.versionId` already pins a workflow. Forking
+`streaming-handler.ts` — a ~2,000-line file upstream actively maintains, with ~20
+`agentSlug` references — would guarantee merge conflicts on every sync.
+
+**Proposed fix.** Widen the chat request so the agent can be supplied as a resolved
+config rather than only a slug — e.g. `agentConfig?: AgentSnapshot` taking precedence
+over `agentSlug` in `loadAgent`, with the snapshot validated against the same Zod schema
+the agent form uses. `AiAgentVersion.snapshot` is already the right shape. Then
+`runAgentCase` passes the pin through and evaluation runs become reproducible.
+
+**Interim mitigation.** **Carried patch applied locally** (F14.15), deliberately minimal
+so it retires cleanly:
+
+1. `AiEvaluationRun.agentVersionId` — new nullable column; the run route now copies
+   `variant.agentVersionId` onto the run, so the pin is **recorded** even though it can't
+   yet be honoured. When the upstream seam lands, the worker just reads it.
+2. The run worker **fails a pinned run loudly** (`agent_version_pinning_unsupported`)
+   rather than silently scoring the live agent under a pinned label.
+3. The experiment run route **refuses a dataset-driven experiment whose variants all
+   resolve to the same configuration** — the case that produced the meaningless winner.
+
+Net effect: version-comparison experiments are blocked with a clear message instead of
+returning confident, wrong numbers. Non-pinned single-config runs are unaffected.
+
+**Consequence while this stays open: a dataset-driven experiment cannot complete.** The
+two refusals above are exhaustive, and they surface at _different_ points:
+
+| Variant config        | Refused where | What the admin sees                                                         |
+| --------------------- | ------------- | --------------------------------------------------------------------------- |
+| All variants unpinned | Run route     | 400 at press-time — "resolves to the same agent configuration"              |
+| Any variant pinned    | Run worker    | The pinned arm fails on the next tick — `agent_version_pinning_unsupported` |
+
+Since a variant's only differentiator is `agentVersionId`, every dataset-driven
+experiment falls into one of those rows. The pinned case is deliberately left to the
+worker rather than refused at the route: hoisting it into the route would make the
+run-creation block unreachable and cost the regression net that has to work again the
+moment this lands. The trade is that the admin learns one tick late — acceptable while
+the worker's failure detail explains itself, and resolved outright when the seam ships.
+
+**When implementing, also close this:** the run route copies `variant.agentVersionId`
+onto the run **without checking the version belongs to `experiment.agentId`**
+(`experiments/[id]/run/route.ts`). Harmless today — the route is admin-only and the
+worker hard-fails every pinned run before execution — but the moment pinning becomes
+executable, an admin could pin a variant to another agent's version and score a
+comparison that is silently measuring the wrong agent. Validate the pin against the
+experiment's agent in the same change that makes pins executable.
+
+**References.** `lib/orchestration/chat/streaming-handler.ts` (`loadAgent`) ·
+`lib/orchestration/evaluations/run-cases/agent-case.ts` ·
+`lib/orchestration/evaluations/run-worker.ts` ·
+`app/api/v1/admin/orchestration/experiments/[id]/run/route.ts` ·
+`lib/orchestration/evaluations/stats/winner.ts` ·
+[[development-plan#Carried Sunrise patches]] · `.context/app/planning/features/f14.15.md`.

@@ -74,6 +74,26 @@ export const POST = withAdminAuth<Params>(async (request, session, { params }) =
 
     const datasetDriven = !!experiment.dataset && !!experiment.metricConfigs;
 
+    // F14.15 guard — a dataset-driven experiment whose variants are not actually
+    // differentiated produces a statistically meaningless "winner".
+    //
+    // A variant's ONLY differentiator is `agentVersionId`. Until the chat handler
+    // can execute a pinned `AiAgentVersion.snapshot` (see UG-12), every variant
+    // resolves to the same live agent, so the arms draw from one distribution and
+    // `stats/winner.ts` reports sampling noise as a result. Refuse the run rather
+    // than emit numbers nobody can trust.
+    if (datasetDriven) {
+      const pins = experiment.variants.map((v) => v.agentVersionId);
+      const distinctPins = new Set(pins.map((p) => p ?? '__live__'));
+      if (distinctPins.size < 2) {
+        throw new ValidationError(
+          'Every variant in this experiment resolves to the same agent configuration, so a ' +
+            'comparison between them would measure sampling noise, not a real difference. ' +
+            'Pin a distinct agent version on at least one variant.'
+        );
+      }
+    }
+
     // Defence in depth: the dataset bound to this experiment must
     // belong to the caller. Create-time validation at
     // `POST /experiments` already enforces this, but checking again
@@ -94,6 +114,11 @@ export const POST = withAdminAuth<Params>(async (request, session, { params }) =
             description: `Experiment ${id}, variant ${variant.id}`,
             subjectKind: 'agent',
             agentId: experiment.agentId,
+            // Carry the variant's pin onto the run. The worker refuses to execute
+            // a pinned run until the chat handler can load a version snapshot
+            // (UG-12) — but recording it here means the run is attributable, and
+            // the feature starts working the moment upstream lands.
+            agentVersionId: variant.agentVersionId,
             datasetId: experiment.dataset.id,
             datasetContentHash: experiment.dataset.contentHash,
             metricConfigs: experiment.metricConfigs,

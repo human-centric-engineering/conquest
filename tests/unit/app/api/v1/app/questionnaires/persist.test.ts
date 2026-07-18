@@ -45,6 +45,7 @@ const tx = {
   appQuestionnaireExtractionChange: {
     createMany: vi.fn(async () => ({ count: 0 })),
     deleteMany: vi.fn(async () => ({ count: 0 })),
+    updateMany: vi.fn(async () => ({ count: 0 })),
   },
   appQuestionnaireSourceDocument: { create: vi.fn(async () => ({ id: 'src-1' })) },
   appQuestionTag: { deleteMany: vi.fn(async () => ({ count: 0 })) },
@@ -607,7 +608,7 @@ describe('briefSource', () => {
 // ─── replaceVersionStructure ──────────────────────────────────────────────────
 
 describe('replaceVersionStructure', () => {
-  it('clears the prior graph before writing the new one', async () => {
+  it('clears the prior section/slot graph before writing the new one', async () => {
     // Arrange: a fresh extraction with 1 section and 1 question.
     const freshExtraction = extraction({
       sections: [{ ordinal: 0, title: 'New Section' }],
@@ -625,16 +626,33 @@ describe('replaceVersionStructure', () => {
 
     await replaceVersionStructure('ver-replace-1', freshExtraction);
 
-    // Assert: all three delete operations ran before the new graph was written.
-    expect(tx.appQuestionnaireExtractionChange.deleteMany).toHaveBeenCalledWith({
-      where: { versionId: 'ver-replace-1' },
-    });
+    // Assert: the graph-clearing deletes ran (sections cascade to slots, then tags).
     expect(tx.appQuestionnaireSection.deleteMany).toHaveBeenCalledWith({
       where: { versionId: 'ver-replace-1' },
     });
     expect(tx.appQuestionTag.deleteMany).toHaveBeenCalledWith({
       where: { versionId: 'ver-replace-1' },
     });
+  });
+
+  it('F14.15 regression guard: supersedes the extraction change log instead of deleting it', async () => {
+    // A rewrite must not silently destroy the revert audit trail — see persist.ts
+    // header comment on replaceVersionStructure. Before F14.15 this called
+    // deleteMany on appQuestionnaireExtractionChange, permanently disabling
+    // revert for the version on the first "make it shorter".
+    const freshExtraction = extraction({ changes: [] });
+
+    await replaceVersionStructure('ver-replace-1', freshExtraction);
+
+    // The prior extraction's `applied` change rows are marked superseded —
+    // sourceQuote/beforeJson survive and stay queryable.
+    expect(tx.appQuestionnaireExtractionChange.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'ver-replace-1', status: 'applied' },
+      data: { status: 'superseded', supersededAt: expect.any(Date) },
+    });
+
+    // The regression guard: the change log must NEVER be deleted by a rewrite.
+    expect(tx.appQuestionnaireExtractionChange.deleteMany).not.toHaveBeenCalled();
   });
 
   it('returns structural counts from the freshly-written graph', async () => {

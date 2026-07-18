@@ -87,6 +87,33 @@ function describeOp(op: ProposedEdit): string {
   }
 }
 
+/**
+ * Where the finding's subject sits, as a short chip ("Question 3 · Background", "Section",
+ * "Goal"). Falls back to "Question" when the target couldn't be resolved server-side — the raw
+ * key chip beside it still identifies it.
+ */
+function targetContext(finding: EvaluationFindingView): string {
+  const target = finding.target;
+  if (!target) return 'Target';
+  switch (target.kind) {
+    case 'question':
+      return [
+        target.position === null ? 'Question' : `Question ${target.position}`,
+        target.sectionTitle,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    case 'section':
+      return 'Section';
+    case 'goal':
+      return 'Goal';
+    case 'audience':
+      return 'Audience';
+    case 'unknown':
+      return 'Target';
+  }
+}
+
 async function sendJson(
   url: string,
   method: 'PATCH' | 'POST',
@@ -209,6 +236,7 @@ export function FindingReviewCard({
         <Badge variant={sev.variant} className="text-xs">
           {sev.label}
         </Badge>
+        <span className="text-muted-foreground text-xs">{targetContext(finding)}</span>
         <code className="bg-muted rounded px-1.5 py-0.5 text-xs">{finding.targetKey}</code>
         <Badge variant={statusBadge.variant} className="text-xs">
           {statusBadge.label}
@@ -219,6 +247,21 @@ export function FindingReviewCard({
           </Badge>
         )}
       </div>
+
+      {/* What this judgement is *about*, quoted — without it the card names only the slot key,
+          and the reviewer has to open the structure editor to know which question is meant. */}
+      {finding.target && finding.target.kind !== 'unknown' && (
+        <p className="mt-2 text-sm">
+          <span className="italic">
+            {finding.target.kind === 'question'
+              ? `“${finding.target.label}”`
+              : finding.target.label}
+          </span>
+          {finding.target.removed && (
+            <span className="text-muted-foreground"> · removed since this run</span>
+          )}
+        </p>
+      )}
 
       <p className="mt-2 text-sm font-medium">{finding.proposedChange}</p>
       <p className="text-muted-foreground mt-1 text-sm">{finding.rationale}</p>

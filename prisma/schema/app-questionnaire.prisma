@@ -15,9 +15,9 @@
 
 /// The top-level container an admin authors, configures, and launches.
 model AppQuestionnaire {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   title        String
-  status       String   @default("draft")
+  status       String    @default("draft")
   // Soft-delete / archive dimension — ORTHOGONAL to `status` (which stays the
   // draft/launched/archived lifecycle). Non-null = archived: the questionnaire is
   // hidden from the default admin list but fully recoverable (Restore nulls it,
@@ -31,8 +31,8 @@ model AppQuestionnaire {
   // just clears. The admin DELETE refuses (409) while attributed, so this is the
   // schema-honest backstop, not the happy path. See .context/app/questionnaire/demo-clients.md.
   demoClientId String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   versions   AppQuestionnaireVersion[]
   demoClient AppDemoClient?              @relation(fields: [demoClientId], references: [id], onDelete: SetNull)
@@ -54,10 +54,10 @@ model AppQuestionnaire {
 /// are inferred by the F1.1 extractor (recorded as infer_goal / infer_audience
 /// change records) or admin-set, with admin-wins-per-field merge.
 model AppQuestionnaireVersion {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   questionnaireId    String
-  versionNumber      Int      @default(1)
-  status             String   @default("draft")
+  versionNumber      Int       @default(1)
+  status             String    @default("draft")
   // Per-version soft-archive — ORTHOGONAL to `status` (mirrors AppQuestionnaire.archivedAt).
   // Non-null = archived: the version is hidden from the default admin version list (selector +
   // history) but fully recoverable (Restore nulls it). Deliberately NOT a `status` value: the
@@ -71,8 +71,8 @@ model AppQuestionnaireVersion {
   audience           Json? // structured AudienceShape (types.ts); inferred or admin-set
   goalProvenance     String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
   audienceProvenance Json? // AudienceProvenance (types.ts): per-field FieldProvenance map
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   questionnaire   AppQuestionnaire                   @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
   sections        AppQuestionnaireSection[]
@@ -465,9 +465,14 @@ model AppQuestionnaireExtractionChange {
   afterJson        Json? // post-change state (null for prune_*)
   rationale        String?
   confidence       Float?
-  status           String    @default("applied") // applied | reverted
+  status           String    @default("applied") // applied | reverted | superseded
   revertedAt       DateTime? // set in F2.3
   revertedByUserId String? // plain String, no FK (UG-1); set in F2.3
+  // Set in F14.15 when a whole-structure rewrite (edit-agent rewrite / compose-refine)
+  // replaced the graph these rows describe. The rows are KEPT — deleting them silently
+  // destroyed the revert audit trail — but they no longer describe the live graph, so
+  // they are not revert candidates.
+  supersededAt     DateTime?
   createdAt        DateTime  @default(now())
 
   version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
@@ -1079,6 +1084,14 @@ model AppCohortReport {
   publishStatus           String    @default("draft") // COHORT_REPORT_PUBLISH_STATUSES: draft | published
   publishedRevisionNumber Int? // the AppCohortReportRevision.revisionNumber pinned as published; null when draft
   costUsd                 Float? // cumulative generation cost actual; null until first generation
+  /// F14.15 — CohortReportMethodRecord: the observed account of how this cohort report was produced
+  /// (sessions in the cohort, data slots aggregated, charts derived, KB documents that contributed,
+  /// searches issued, passes applied, plus the plain-English summary). The cohort sibling of
+  /// AppRespondentReport.methodRecord — without it a cohort report was undefendable: the dataset
+  /// digest, chart catalog and KB snippets were all discarded and `summary` was hardcoded
+  /// 'AI generation'. Null for reports generated before this shipped (no backfill — the read path
+  /// treats null as "don't offer the explanation" rather than reconstructing an unobserved run).
+  methodRecord            Json?
   error                   String? // failure message when status = failed
   lockedBy                String? // worker host holding the lease; null when idle
   lockedAt                DateTime? // lease acquired-at; stale after the worker threshold (claimable again)
@@ -1109,6 +1122,10 @@ model AppCohortReportRevision {
   authoredBy     String   @default("ai") // COHORT_REPORT_AUTHORS (types.ts): ai | admin | ai_assist
   summary        String? // short generation/change note shown in the revision history
   costUsd        Float? // generation cost for an AI revision; null for a manual edit
+  /// F14.15 — CohortReportMethodRecord for THIS revision (see AppCohortReport.methodRecord).
+  /// Per-revision because a re-run reads a different cohort snapshot and may issue different
+  /// searches; null for manual admin edits (no generation run to describe).
+  methodRecord   Json?
   createdBy      String? // admin User.id who created it; plain String, no FK (UG-1)
   createdAt      DateTime @default(now())
 
@@ -1637,4 +1654,93 @@ model AppQuestionnaireTurnEvaluation {
   @@index([flagStatus, createdAt]) // learning queue: flagged/reviewed first
   @@index([overallScore])
   @@map("app_questionnaire_turn_evaluation")
+}
+
+/// F14.15 — one durable record per AI run that judges, verifies, or generates something
+/// an admin later relies on.
+///
+/// The audit that produced this model found the app already had an excellent run-capture
+/// pattern — `AppQuestionnaireTurn.inspectorCalls` and `AppQuestionnaireTurnEvaluation` —
+/// applied ONLY to the respondent conversation path. Every authoring, report, and
+/// config-advising surface persisted the *artifact* and discarded the *run*: the fidelity
+/// critic's verdicts, the Config Advisor's recommendations, the edit-agent's precise-mode
+/// edits, the report preview's method record, and each learning digest's predecessor were
+/// all unrecoverable the moment the response was sent.
+///
+/// A run belongs here when a human later acts on its verdict, it changed durable config,
+/// you would need to defend the output to a client, or it is a calibration signal worth a
+/// trend. Interactive previews, mid-workflow control flow, and the regex guards are
+/// deliberately NOT recorded — see f14.15.md for the full preserve/ephemeral rule.
+///
+/// Deliberately polymorphic rather than one nullable FK per subject: the capturing surfaces
+/// span three subject types across two tiers, so per-subject columns would be six columns
+/// with five always null. This mirrors how `AppQuestionnaireTurnEvaluation` already
+/// denormalises `questionnaireVersionId`.
+///
+/// This does NOT supersede `inspectorCalls`, which stays the per-turn deep-dive record for
+/// the respondent path. `AppAiRun` covers the surfaces that run *outside* the turn pipeline.
+model AppAiRun {
+  id String @id @default(cuid())
+
+  /// What this run acted on. APP_AI_RUN_SUBJECTS (ai-run/types.ts):
+  /// version | session | respondent_report | cohort_report.
+  subjectKind String
+  /// The subject row's id. Plain String, no FK (UG-1) — polymorphic, and the run must
+  /// outlive a deleted subject long enough to explain what happened to it.
+  subjectId   String
+  /// The questionnaire version in scope, denormalised for the primary version-scoped
+  /// search even when `subjectKind` is a session or report. Null when not version-scoped.
+  versionId   String?
+
+  /// What kind of run this was. APP_AI_RUN_KINDS (ai-run/types.ts) — e.g.
+  /// extraction_verify | config_advice | edit_precise | report_preview | learning_digest.
+  kind   String
+  /// succeeded | failed — a failed run is still worth keeping; "the critic errored" is an
+  /// answer to "why does this questionnaire look wrong".
+  status String @default("succeeded")
+
+  /// Resolved provider slug + model id that actually served the run (post-fallback), so a
+  /// run stays attributable after the agent's configured model changes.
+  provider String
+  model    String
+
+  /// The fully interpolated prompt as sent, and the raw output as received — capped at
+  /// AI_RUN_SNAPSHOT_MAX_CHARS and marked truncated rather than stored unbounded.
+  /// Interpolated (not template + variables) because the debugging question is always
+  /// "what did the model actually see"; the workflow engine's trace notably stores the raw
+  /// template instead and is harder to debug for it.
+  promptSnapshot Json?
+  outputSnapshot Json?
+  truncated      Boolean @default(false)
+
+  /// Spend + shape of the call. Null when the provider didn't report usage.
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  durationMs   Int?
+
+  /// Free-form per-kind detail: the critic's per-question verdicts, the advisor's suggestion
+  /// set, the edit-agent's ops. Typed per `kind` at the read seam, not here.
+  detail Json?
+
+  /// Why the run failed, when status = failed.
+  error String? @db.Text
+
+  /// Multi-dimensional version stamp — the same discipline as
+  /// AppQuestionnaireTurnEvaluation, so a run stays interpretable after prompts and app
+  /// builds move on.
+  promptVersion String? // the calling surface's prompt/rubric version constant at run time
+  appVersion    String // APP_VERSION (fork build) at run time
+
+  /// Who triggered it. Null for worker/background runs with no admin in the loop.
+  triggeredByUserId String? // admin User.id; plain String, no FK (UG-1)
+
+  createdAt DateTime @default(now())
+
+  @@index([subjectKind, subjectId, createdAt]) // "everything that ran against this subject"
+  @@index([versionId, createdAt]) // version-scoped newest-first (primary search)
+  @@index([kind, createdAt]) // "every fidelity-critic run", cross-subject
+  @@index([status, createdAt]) // failure triage
+  @@index([createdAt]) // retention pruning
+  @@map("app_ai_run")
 }

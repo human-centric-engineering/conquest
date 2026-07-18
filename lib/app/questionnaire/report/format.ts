@@ -36,6 +36,7 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { REPORT_FORMATTER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import {
   validateRespondentReportContent,
   type RespondentReportContent,
@@ -163,6 +164,7 @@ export async function formatReportContent(
     const agent = await prisma.aiAgent.findUnique({
       where: { slug: REPORT_FORMATTER_AGENT_SLUG },
       select: {
+        id: true,
         provider: true,
         model: true,
         fallbackProviders: true,
@@ -195,6 +197,18 @@ export async function formatReportContent(
       parse: (raw) => tryParseJson(raw, validateRespondentReportContent),
       retryUserMessage:
         'Respond with ONLY the JSON object {"summary","sections":[{"heading","body"}],"actions":[]} — no prose, no code fence.',
+    });
+
+    // Logged before the fidelity guard: a rejected reformat still spent the tokens.
+    // `versionId` is null — the formatter is handed content + a format, never the version.
+    logAppLlmCost({
+      agentId: agent.id,
+      provider: providerSlug,
+      model,
+      tokenUsage: result.tokenUsage,
+      capability: 'app_report_format',
+      versionId: null,
+      extra: { format: opts.format },
     });
 
     if (!preservesStructure(content, result.value)) {

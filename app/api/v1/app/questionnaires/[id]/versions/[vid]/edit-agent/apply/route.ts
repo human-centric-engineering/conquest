@@ -39,6 +39,7 @@ import {
   IncoherentExtractionError,
   replaceVersionStructure,
 } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import { editApplyRequestSchema } from '@/app/api/v1/app/questionnaires/_lib/edit-agent-input';
 
 const handleApply = withAdminAuth<{ id: string; vid: string }>(
@@ -113,6 +114,28 @@ const handleApply = withAdminAuth<{ id: string; vid: string }>(
         questionCount: graph.questionCount,
       };
     }
+
+    // F14.15: record the edit. Precise mode writes no `AppQuestionnaireExtractionChange` rows at
+    // all (the deterministic ops aren't extraction decisions), so before this the only durable
+    // trace of an AI-authored structure change was an admin-audit row whose `entityName` was the
+    // literal string "precise". The ops themselves — what actually changed — were unrecoverable.
+    void recordAiRun({
+      subjectKind: 'version',
+      subjectId: editId,
+      versionId: editId,
+      kind: mode === 'precise' ? 'edit_precise' : 'edit_rewrite',
+      // The applied plan, not the model call: the LLM that produced these ops ran in the preview
+      // step, so provider/model are not resolvable here. Recorded as the apply seam it is.
+      provider: 'n/a',
+      model: 'n/a',
+      outputSnapshot: body.data.mode === 'precise' ? body.data.operations : null,
+      detail: {
+        mode,
+        forked: fork.forked,
+        ...counts,
+      },
+      triggeredByUserId: adminId,
+    });
 
     logAdminAction({
       userId: adminId,

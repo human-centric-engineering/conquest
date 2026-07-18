@@ -49,6 +49,7 @@ import type { ExtractionPhaseEvent } from '@/lib/app/questionnaire/ingestion/ext
 import {
   extractFromDocument,
   type ExtractedDocument,
+  type FidelityRecord,
   type GuardedUpload,
   type PipelineResult,
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
@@ -164,8 +165,14 @@ export async function* orchestrateExtraction(
     phase: 'verifying',
     message: `Fidelity critic — checking all ${total} question${total === 1 ? '' : 's'} against the source…`,
   };
-  const flags = await runVerification(extraction, documentText, fileName, ctx);
+  const verification = await runVerification(extraction, documentText, fileName, ctx);
+  const flags = verification.result;
   const flagged = flags.verdicts.filter((v) => v.verdict === 'suspect');
+
+  // F14.15: what the critic actually concluded, and what was done about it. Persisted against
+  // the version by the caller (the version doesn't exist yet at this point in the pipeline).
+  let repairOutcome: FidelityRecord['repairOutcome'] =
+    verification.provider === null ? 'verifier_unavailable' : 'none_flagged';
 
   if (flagged.length === 0) {
     // Verifier clean → no repair call at all (the common, cheap case).
@@ -175,6 +182,9 @@ export async function* orchestrateExtraction(
       message: 'All questions look faithful — no repairs needed.',
     };
   } else if (flagged.length > REPAIR_FLAG_CEILING) {
+    // Systemic extractor failure. This used to be a log line and nothing else — the questions
+    // stayed flagged-but-unrepaired in the persisted version with no trace of the bail-out.
+    repairOutcome = 'skipped_systemic';
     ctx.log.warn('ingest verify flagged too many questions; skipping repair', {
       flagged: flagged.length,
       total,
@@ -188,6 +198,11 @@ export async function* orchestrateExtraction(
       progress: { done: 0, total: flagged.length },
     };
     const repairs = await runRepair(extraction, flags, flagged, documentText, fileName, ctx);
+    // Set AFTER the call, from what came back. `runRepair` is fail-soft — an unseeded agent, a
+    // failed dispatch, or a throw all return zero repairs — so claiming 'repaired' up front would
+    // record the exact fiction this record exists to prevent: flagged-but-untouched questions
+    // filed as repaired.
+    repairOutcome = repairs.repairs.length > 0 ? 'repaired' : 'repair_failed';
     extraction = mergeRepairs(extraction, repairs, ctx.log);
   }
 
@@ -211,19 +226,52 @@ export async function* orchestrateExtraction(
     throw err;
   }
 
-  return { ok: true, value: { extraction, parsed } };
+  return {
+    ok: true,
+    value: {
+      extraction,
+      parsed,
+      fidelity: {
+        // 'n/a' is the codebase's existing sentinel for a provider/model-less run (see the
+        // evaluation rollup in run-worker.ts and the edit-agent apply seam). Using a second
+        // spelling here would split any "runs by provider" grouping in two.
+        provider: verification.provider ?? 'n/a',
+        model: verification.model ?? 'n/a',
+        verdicts: flags.verdicts,
+        flaggedCount: flagged.length,
+        totalCount: total,
+        repairOutcome,
+        durationMs: verification.durationMs,
+      },
+    },
+  };
 }
 
 /**
  * Dispatch the verifier over all questions + the source. Fail-soft: a missing/failing verifier
  * agent returns empty verdicts, so persist proceeds on the raw extraction (never blocked).
  */
+interface VerificationOutcome {
+  result: VerifyResult;
+  /** Resolved verifier binding; null when the agent wasn't available. */
+  provider: string | null;
+  model: string | null;
+  durationMs: number;
+}
+
 async function runVerification(
   extraction: ExtractQuestionnaireStructureData,
   documentText: string,
   fileName: string,
   ctx: ExtractCtx
-): Promise<VerifyResult> {
+): Promise<VerificationOutcome> {
+  const startedAt = Date.now();
+  const unavailable = (): VerificationOutcome => ({
+    result: EMPTY_VERIFY,
+    provider: null,
+    model: null,
+    durationMs: Date.now() - startedAt,
+  });
   try {
     const agent = await prisma.aiAgent.findUnique({
       where: { slug: QUESTIONNAIRE_EXTRACTION_VERIFIER_AGENT_SLUG },
@@ -233,7 +281,7 @@ async function runVerification(
       ctx.log.warn('ingest verifier agent not seeded; skipping verification', {
         slug: QUESTIONNAIRE_EXTRACTION_VERIFIER_AGENT_SLUG,
       });
-      return EMPTY_VERIFY;
+      return unavailable();
     }
     registerBuiltInCapabilities();
     const questions = extraction.questions.map((q) => ({
@@ -265,7 +313,7 @@ async function runVerification(
       ctx.log.warn('ingest verification failed; persisting raw extraction', {
         code: dispatch.error?.code,
       });
-      return EMPTY_VERIFY;
+      return unavailable();
     }
     // Validate the capability payload rather than trust its shape: a malformed `result` must
     // fall back to "no flags" (fail-soft), never crash the generator and abort the whole ingest.
@@ -277,14 +325,19 @@ async function runVerification(
           issues: validated.issues,
         }
       );
-      return EMPTY_VERIFY;
+      return unavailable();
     }
-    return validated.value;
+    return {
+      result: validated.value,
+      provider: agent.provider,
+      model: agent.model,
+      durationMs: Date.now() - startedAt,
+    };
   } catch (err) {
     ctx.log.warn('ingest verification threw; persisting raw extraction', {
       error: errorMessage(err),
     });
-    return EMPTY_VERIFY;
+    return unavailable();
   }
 }
 
