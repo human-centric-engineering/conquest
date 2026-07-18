@@ -529,6 +529,35 @@ describe('AnonymousSessionBoot', () => {
       });
     });
 
+    it('renders the archived notice (not the retryable error) on a VERSION_ARCHIVED response', async () => {
+      // Arrange: the create route refused because the version is archived (410 + distinct code).
+      fakeFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            success: false,
+            error: {
+              code: 'VERSION_ARCHIVED',
+              message: 'This questionnaire has been archived and is no longer available.',
+            },
+          },
+          false
+        )
+      );
+
+      // Act
+      render(<AnonymousSessionBoot versionId={VERSION_ID} />);
+
+      // Assert: the dedicated archived heading + message, and NO "Try again" (archiving is terminal).
+      await waitFor(() => {
+        expect(screen.getByText('This questionnaire has been archived')).toBeInTheDocument();
+      });
+      expect(
+        screen.getByText('This questionnaire has been archived and is no longer available.')
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /try again/i })).toBeNull();
+      expect(screen.queryByText(/couldn.*t start the questionnaire/i)).toBeNull();
+    });
+
     it('renders the error heading when body.success is false even if res.ok is true', async () => {
       // Arrange: a 200 response with a success=false body (shouldn't happen in practice,
       // but the component checks both `res.ok` and `body.success`).

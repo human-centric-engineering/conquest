@@ -15,24 +15,28 @@ import { useEffect, useRef, useState } from 'react';
 
 import {
   registerForkConfirmHandler,
+  type ForkConfirmChoice,
   type ForkConfirmDetails,
 } from '@/components/admin/questionnaires/fork-confirm-bridge';
 import { LaunchedEditConfirmDialog } from '@/components/admin/questionnaires/launched-edit-confirm-dialog';
 
+/** A declined prompt — the shared "nothing forks, nothing is archived" answer. */
+const DECLINED: ForkConfirmChoice = { confirmed: false, archiveSource: false };
+
 export function ForkConfirmProvider({ children }: { children: React.ReactNode }) {
   const [details, setDetails] = useState<ForkConfirmDetails | null>(null);
-  const resolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const resolveRef = useRef<((choice: ForkConfirmChoice) => void) | null>(null);
 
   useEffect(() => {
     const unregister = registerForkConfirmHandler(
       (next) =>
-        new Promise<boolean>((resolve) => {
+        new Promise<ForkConfirmChoice>((resolve) => {
           // Only one dialog can be shown at a time. If a second forking edit lands while a
           // confirmation is already open (co-mounted runners saving near-simultaneously), decline
           // the newcomer rather than overwrite the pending resolver — otherwise the first mutation's
           // promise never settles and its runner's busy lock sticks forever.
           if (resolveRef.current) {
-            resolve(false);
+            resolve(DECLINED);
             return;
           }
           resolveRef.current = resolve;
@@ -43,16 +47,16 @@ export function ForkConfirmProvider({ children }: { children: React.ReactNode })
       unregister();
       // Provider unmounting (e.g. navigation) with a dialog still open → settle the awaiting
       // mutation as cancelled so it unwinds instead of hanging with busy locked.
-      resolveRef.current?.(false);
+      resolveRef.current?.(DECLINED);
       resolveRef.current = null;
     };
   }, []);
 
-  const settle = (confirmed: boolean) => {
+  const settle = (choice: ForkConfirmChoice) => {
     setDetails(null);
     const resolve = resolveRef.current;
     resolveRef.current = null;
-    resolve?.(confirmed);
+    resolve?.(choice);
   };
 
   return (
@@ -64,8 +68,8 @@ export function ForkConfirmProvider({ children }: { children: React.ReactNode })
           currentVersionNumber={details.sourceVersionNumber}
           nextVersionNumber={details.nextVersionNumber}
           versions={details.versions}
-          onConfirm={() => settle(true)}
-          onCancel={() => settle(false)}
+          onConfirm={(archiveSource) => settle({ confirmed: true, archiveSource })}
+          onCancel={() => settle(DECLINED)}
         />
       )}
     </>

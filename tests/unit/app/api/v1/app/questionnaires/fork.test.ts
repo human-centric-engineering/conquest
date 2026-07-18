@@ -24,15 +24,24 @@ const prismaMock = vi.hoisted(() => ({
   appQuestionnaireVersion: { findMany: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
-// Fork confirmation reads the `x-fork-confirm` request header. Default (null) → no header → the
-// legacy "fork silently" path, so every pre-existing fork test is unchanged.
-const headerState = vi.hoisted(() => ({ value: null as string | null }));
+// Fork confirmation reads the `x-fork-confirm` request header; the archive-on-fork opt-in reads
+// `x-fork-archive-source`. Defaults (null / false) → no headers → the legacy "fork silently, don't
+// archive" path, so every pre-existing fork test is unchanged.
+const headerState = vi.hoisted(() => ({ value: null as string | null, archiveSource: false }));
 vi.mock('next/headers', () => ({
-  headers: vi.fn(
-    async () => new Headers(headerState.value ? { 'x-fork-confirm': headerState.value } : {})
-  ),
+  headers: vi.fn(async () => {
+    const h = new Headers();
+    if (headerState.value) h.set('x-fork-confirm', headerState.value);
+    if (headerState.archiveSource) h.set('x-fork-archive-source', 'true');
+    return h;
+  }),
 }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
+// The archive-on-fork opt-in delegates to the shared soft-archive writer (its own unit test covers
+// the idempotency + audit). Here we assert the fork wires it correctly (source id, archived=true).
+vi.mock('@/app/api/v1/app/questionnaires/_lib/version-archive', () => ({
+  setVersionArchived: vi.fn(),
+}));
 // The fork trigger reads the route-local (Prisma) blocker counter (F3.2). Stub only the
 // Prisma-touching `countLaunchBlockers`; keep the REAL `hasLaunchBlockers` predicate (a pure
 // re-export) via importOriginal so the fork decision can't silently drift from production.
@@ -46,6 +55,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/launch-blockers', async (importOri
 
 import { executeTransaction } from '@/lib/db/utils';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { setVersionArchived } from '@/app/api/v1/app/questionnaires/_lib/version-archive';
 import {
   forkVersionIfLaunched,
   ForkConfirmationRequiredError,
@@ -181,6 +191,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   sectionSeq = 0;
   headerState.value = null; // default: legacy fork-through
+  headerState.archiveSource = false; // default: don't archive the source version
   mockCountLaunchBlockers.mockResolvedValue({ sessions: 0, invitations: 0 });
   prismaMock.appQuestionnaireVersion.findMany.mockResolvedValue([]);
   (executeTransaction as unknown as Mock).mockImplementation((cb: (t: typeof tx) => unknown) =>
@@ -502,5 +513,44 @@ describe('forkVersionIfLaunched — fork', () => {
     // no-config draft (both resolve to defaults on read).
     await forkVersionIfLaunched(scoped());
     expect(tx.appQuestionnaireConfig.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('forkVersionIfLaunched — archive the source (opt-in)', () => {
+  it('soft-archives the branched-from version when x-fork-archive-source is set', async () => {
+    headerState.value = 'confirmed';
+    headerState.archiveSource = true;
+
+    const result = await forkVersionIfLaunched(scoped(), {
+      userId: 'admin-1',
+      clientIp: '203.0.113.7',
+    });
+
+    expect(result.forked).toBe(true);
+    // The SOURCE version (v1) is archived, not the new draft (v2); audit context threads through.
+    expect(setVersionArchived).toHaveBeenCalledWith('v1', true, {
+      userId: 'admin-1',
+      clientIp: '203.0.113.7',
+    });
+  });
+
+  it('does not archive the source when the header is absent (default fork)', async () => {
+    headerState.value = 'confirmed';
+
+    await forkVersionIfLaunched(scoped(), { userId: 'admin-1' });
+
+    expect(setVersionArchived).not.toHaveBeenCalled();
+  });
+
+  it('does not archive on the no-fork path even if the header is set', async () => {
+    // A draft edit doesn't fork, so there's no superseded version to archive — the archive
+    // opt-in is inert. (An errant header on a non-forking mutation must never archive anything.)
+    headerState.value = 'confirmed';
+    headerState.archiveSource = true;
+
+    const result = await forkVersionIfLaunched(scoped({ status: 'draft', versionNumber: 1 }));
+
+    expect(result.forked).toBe(false);
+    expect(setVersionArchived).not.toHaveBeenCalled();
   });
 });

@@ -63,7 +63,7 @@ export async function resolveAnonymousResumeByRef(
       respondentUserId: true,
       invitationId: true,
       versionId: true,
-      version: { select: { config: { select: { sessionResumeEnabled: true } } } },
+      version: { select: { archivedAt: true, config: { select: { sessionResumeEnabled: true } } } },
     },
   });
   if (!row || !row.publicRef) return null;
@@ -74,6 +74,9 @@ export async function resolveAnonymousResumeByRef(
   if (row.invitationId !== null) return null;
   if (row.isPreview) return null;
   if (!(RESUMABLE_STATUSES as readonly string[]).includes(row.status)) return null;
+  // An archived version is retired from respondents — its sessions are no longer resumable (folds
+  // into the same generic 404 as every other guard, so it reveals nothing extra).
+  if (row.version.archivedAt) return null;
 
   // The version must have resume turned on (config is 1:1 and lazy — an absent row means the
   // default, which is ON). Only an explicit `false` opts this questionnaire out.

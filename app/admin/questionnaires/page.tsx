@@ -125,7 +125,7 @@ export default async function QuestionnairesListPage() {
     { label: 'Questionnaires', value: stats.total },
     { label: 'Launched', value: stats.launched, accent: true },
     { label: 'Drafts', value: stats.draft },
-    { label: 'Archived', value: stats.archived },
+    { label: 'Deleted', value: stats.archived },
   ];
 
   return (

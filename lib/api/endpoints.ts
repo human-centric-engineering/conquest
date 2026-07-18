@@ -395,6 +395,12 @@ export const API = {
       /** Version status transition (PATCH launch/archive/un-launch). */
       versionStatus: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/status`,
+      /** Per-version soft-archive — hide from the default version list, orthogonal to status (POST). */
+      versionArchive: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/archive`,
+      /** Restore a soft-archived version to the default version list (POST). */
+      versionRestore: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/restore`,
       /** Re-ingest a replacement source doc into a draft version (POST multipart). */
       versionReingest: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/reingest`,

@@ -74,6 +74,8 @@ export interface QuestionnaireVersionSummary {
   id: string;
   versionNumber: number;
   status: AppQuestionnaireStatus;
+  /** Per-version soft-archive marker — ISO timestamp when archived, or null when active. */
+  archivedAt: string | null;
   goal: string | null;
   audience: AudienceShape | null;
   sectionCount: number;

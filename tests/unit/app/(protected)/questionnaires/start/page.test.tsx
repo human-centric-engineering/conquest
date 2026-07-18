@@ -4,7 +4,6 @@
  * Tests the authenticated respondent entry point (F7.1) Server Component.
  *
  * Test Coverage:
- * - Feature flag off → notFound()
  * - No invitationToken and no versionId in searchParams → renders StartError "This link is incomplete"
  * - Token present but no session → clearInvalidSession called with returnUrl containing the token
  * - versionId present but no session → clearInvalidSession called with returnUrl containing versionId
@@ -332,6 +331,29 @@ describe('StartQuestionnairePage', () => {
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
         'We couldn’t start your questionnaire'
       );
+    });
+
+    it('renders the archived notice (distinct heading) when bootstrap returns VERSION_ARCHIVED', async () => {
+      // The version was archived — a terminal state, not a transient "couldn't start" failure.
+      vi.mocked(createOrResumeAuthedSession).mockResolvedValue({
+        ok: false,
+        code: 'VERSION_ARCHIVED',
+        message: 'This questionnaire has been archived and is no longer available.',
+      });
+
+      const Component = await StartQuestionnairePage({
+        searchParams: makeSearchParams({ versionId: 'ver_archived' }),
+      });
+      render(Component);
+
+      // Dedicated archived heading + the server message — NOT the generic "couldn't start" copy.
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+        'This questionnaire has been archived'
+      );
+      expect(
+        screen.getByText('This questionnaire has been archived and is no longer available.')
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/couldn.*t start your questionnaire/i)).toBeNull();
     });
 
     it('still renders StartError when bootstrap message is a long descriptive string', async () => {

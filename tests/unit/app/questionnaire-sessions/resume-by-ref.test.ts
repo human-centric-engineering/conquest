@@ -99,6 +99,13 @@ describe('resolveAnonymousResumeByRef', () => {
     expect(await resolveAnonymousResumeByRef('7F3K9M2P')).toBeNull();
   });
 
+  it('returns null for an archived version (retired from respondents)', async () => {
+    findSession.mockResolvedValue(
+      resumableRow({ version: { archivedAt: new Date(), config: { sessionResumeEnabled: true } } })
+    );
+    expect(await resolveAnonymousResumeByRef('7F3K9M2P')).toBeNull();
+  });
+
   it('resolves when the version has no config row (lazy default is ON)', async () => {
     findSession.mockResolvedValue(resumableRow({ version: { config: null } }));
     const target = await resolveAnonymousResumeByRef('7F3K9M2P');

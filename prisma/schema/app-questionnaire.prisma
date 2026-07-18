@@ -58,6 +58,15 @@ model AppQuestionnaireVersion {
   questionnaireId    String
   versionNumber      Int      @default(1)
   status             String   @default("draft")
+  // Per-version soft-archive — ORTHOGONAL to `status` (mirrors AppQuestionnaire.archivedAt).
+  // Non-null = archived: the version is hidden from the default admin version list (selector +
+  // history) but fully recoverable (Restore nulls it). Deliberately NOT a `status` value: the
+  // `status: 'archived'` lifecycle state is terminal and blocked while a launched version has live
+  // sessions/invitations, whereas this marker never touches `status`, so archiving a version leaves
+  // in-flight respondent sessions pinned to it untouched. Set on demand, or offered when an edit to a
+  // launched version forks a new draft (archive the superseded version). Respondent-facing resolution
+  // is intentionally unchanged. See .context/app/questionnaire/archiving.md.
+  archivedAt         DateTime?
   goal               String? // inferred (infer_goal change) or admin-set
   audience           Json? // structured AudienceShape (types.ts); inferred or admin-set
   goalProvenance     String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
@@ -81,6 +90,7 @@ model AppQuestionnaireVersion {
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
+  @@index([archivedAt])
   @@map("app_questionnaire_version")
 }
 

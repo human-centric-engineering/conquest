@@ -66,6 +66,16 @@ vi.mock('@/components/admin/questionnaires/launch-checklist', () => ({
   ),
 }));
 
+// The version-timeline Archive/Restore control is a client component with its own test; stub it so
+// the server-component page test doesn't need next/navigation's useRouter or the API client.
+vi.mock('@/components/admin/questionnaires/workspace/version-archive-button', () => ({
+  VersionArchiveButton: (props: { versionId: string; archived: boolean }) => (
+    <button data-testid={`version-archive-${props.versionId}`}>
+      {props.archived ? 'Restore' : 'Archive'}
+    </button>
+  ),
+}));
+
 // ─── Factories ────────────────────────────────────────────────────────────────
 
 function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): QuestionnaireVersionSummary {
@@ -73,6 +83,7 @@ function makeVersion(over: Partial<QuestionnaireVersionSummary> = {}): Questionn
     id: 'ver-1',
     versionNumber: 1,
     status: 'launched',
+    archivedAt: null,
     goal: 'Understand the prospect',
     audience: null,
     sectionCount: 2,

@@ -15,6 +15,8 @@
  * same draft until it's ready to launch.
  */
 
+import { useState } from 'react';
+
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 
 import {
@@ -27,6 +29,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { FieldHelp } from '@/components/ui/field-help';
 import { cn } from '@/lib/utils';
 
 /** A version row for the "existing versions" list — the subset the dialog needs. */
@@ -43,8 +47,12 @@ export interface LaunchedEditConfirmDialogProps {
   nextVersionNumber: number;
   /** Every existing version, newest-first, for the "which versions exist" list. */
   versions: ConfirmDialogVersion[];
-  /** Confirm → the save proceeds (the fork happens server-side). */
-  onConfirm: () => void;
+  /**
+   * Confirm → the save proceeds (the fork happens server-side). `archiveSource` carries the
+   * admin's "archive the previous version" choice; when true the server soft-archives the
+   * version this draft branched from once the fork commits.
+   */
+  onConfirm: (archiveSource: boolean) => void;
   /** Cancel (button, Esc, or overlay) → nothing is saved. */
   onCancel: () => void;
 }
@@ -63,6 +71,11 @@ export function LaunchedEditConfirmDialog({
   onConfirm,
   onCancel,
 }: LaunchedEditConfirmDialogProps) {
+  // Opt-in: archive the version this draft branches from once the fork commits. Default off — the
+  // superseded version usually stays live until the new draft is launched. Local state resets each
+  // time the dialog is re-shown (the provider mounts a fresh instance per prompt).
+  const [archiveSource, setArchiveSource] = useState(false);
+
   return (
     <AlertDialog open={open} onOpenChange={(next) => !next && onCancel()}>
       <AlertDialogContent>
@@ -115,9 +128,37 @@ export function LaunchedEditConfirmDialog({
           </ul>
         </div>
 
+        {/* Opt-in tidy-up: archive the version being superseded so it drops out of the version list. */}
+        <div className="flex items-start gap-2.5 rounded-md border px-3 py-2.5 text-sm">
+          <Checkbox
+            id="fork-archive-source"
+            className="mt-0.5"
+            checked={archiveSource}
+            onCheckedChange={setArchiveSource}
+          />
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-1">
+              <label htmlFor="fork-archive-source" className="cursor-pointer font-medium">
+                Archive the previous version (v{currentVersionNumber})
+              </label>
+              <FieldHelp title="Archive the previous version">
+                Retires v{currentVersionNumber}: respondents can no longer start or continue it —
+                they see a &ldquo;this questionnaire has been archived&rdquo; notice — and it drops
+                out of the version list. It&rsquo;s reversible: Restore it any time from the version
+                history. Note the new draft (v{nextVersionNumber}) isn&rsquo;t launched yet, so if
+                no other version is launched the questionnaire will be unavailable until you launch
+                it. Default: off.
+              </FieldHelp>
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Retires v{currentVersionNumber} from respondents (reversible via Restore).
+            </p>
+          </div>
+        </div>
+
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>
+          <AlertDialogAction onClick={() => onConfirm(archiveSource)}>
             Create draft v{nextVersionNumber} &amp; save
           </AlertDialogAction>
         </AlertDialogFooter>

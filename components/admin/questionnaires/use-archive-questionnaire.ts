@@ -49,7 +49,7 @@ export function useArchiveQuestionnaire(): UseArchiveQuestionnaire {
   const archive = (questionnaireId: string): Promise<boolean> =>
     run(
       () => apiClient.delete(API.APP.QUESTIONNAIRES.byId(questionnaireId)),
-      'Could not archive the questionnaire.'
+      'Could not delete the questionnaire.'
     );
 
   const restore = (questionnaireId: string): Promise<boolean> =>

@@ -235,11 +235,11 @@ describe('QuestionnairesTable archive / restore', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
 
     // A confirm dialog appears — archive() is NOT called yet.
     expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
-    expect(screen.getByText(/archive this questionnaire\?/i)).toBeInTheDocument();
+    expect(screen.getByText(/delete this questionnaire\?/i)).toBeInTheDocument();
     expect(mockArchive).not.toHaveBeenCalled();
   });
 
@@ -253,25 +253,25 @@ describe('QuestionnairesTable archive / restore', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
     // The dialog's confirm button (not the menu item) commits the archive.
     const dialog = await screen.findByRole('alertdialog');
-    await user.click(within(dialog).getByRole('button', { name: /^archive$/i }));
+    await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
 
     expect(mockArchive).toHaveBeenCalledExactlyOnceWith('qn-42');
   });
 
-  it('shows Active / Archived view toggles with Active pressed by default', () => {
+  it('shows Active / Deleted view toggles with Active pressed by default', () => {
     render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
 
     expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Archived' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Deleted' })).toHaveAttribute(
       'aria-pressed',
       'false'
     );
   });
 
-  it('switching to the Archived view fetches archived rows and offers Restore, not Archive', async () => {
+  it('switching to the Deleted view fetches the deleted slice and offers Restore, not Delete', async () => {
     const user = userEvent.setup();
     // When the Archived toggle fires its fetch, return one archived row.
     mockParseApiResponse.mockResolvedValue({
@@ -287,13 +287,13 @@ describe('QuestionnairesTable archive / restore', () => {
     });
 
     render(<QuestionnairesTable initialItems={[]} initialMeta={META} />);
-    await user.click(screen.getByRole('button', { name: 'Archived' }));
+    await user.click(screen.getByRole('button', { name: 'Deleted' }));
 
     // The archived row surfaces, and its only action is Restore.
     const trigger = await screen.findByRole('button', { name: /actions for old survey/i });
     await user.click(trigger);
     expect(await screen.findByRole('menuitem', { name: /restore/i })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /archive/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /duplicate/i })).not.toBeInTheDocument();
 
     // The fetch carried the archived=true slice selector (first arg is the URL string).
@@ -311,24 +311,24 @@ describe('QuestionnairesTable archive / restore', () => {
     });
 
     render(<QuestionnairesTable initialItems={[]} initialMeta={META} />);
-    await user.click(screen.getByRole('button', { name: 'Archived' }));
+    await user.click(screen.getByRole('button', { name: 'Deleted' }));
     await user.click(await screen.findByRole('button', { name: /actions for old survey/i }));
     await user.click(await screen.findByRole('menuitem', { name: /restore/i }));
 
     expect(mockRestore).toHaveBeenCalledExactlyOnceWith('qn-arch');
   });
 
-  it('surfaces an archive error from the hook', () => {
+  it('surfaces a delete error from the hook', () => {
     mockUseArchive.mockReturnValue({
       archive: mockArchive,
       restore: mockRestore,
       isPending: false,
-      error: 'Could not archive the questionnaire.',
+      error: 'Could not delete the questionnaire.',
       clearError: vi.fn(),
     });
     render(<QuestionnairesTable initialItems={[item()]} initialMeta={{ ...META, total: 1 }} />);
 
-    expect(screen.getByText(/could not archive the questionnaire/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not delete the questionnaire/i)).toBeInTheDocument();
   });
 
   it('cancelling the confirm dialog closes it without calling archive()', async () => {
@@ -341,7 +341,7 @@ describe('QuestionnairesTable archive / restore', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
     const dialog = await screen.findByRole('alertdialog');
     await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
 
@@ -360,9 +360,9 @@ describe('QuestionnairesTable archive / restore', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /actions for onboarding survey/i }));
-    await user.click(await screen.findByRole('menuitem', { name: /archive/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
     const dialog = await screen.findByRole('alertdialog');
-    await user.click(within(dialog).getByRole('button', { name: /^archive$/i }));
+    await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
 
     expect(mockArchive).toHaveBeenCalledExactlyOnceWith('qn-42');
     // refreshAfterMutation() drives the only post-hydration fetch — a failed archive skips it.

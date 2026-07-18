@@ -135,6 +135,15 @@ describe('createSessionFromInvitation', () => {
     expect(result).toMatchObject({ ok: false, status: 409, code: 'INVITATION_NOT_STARTABLE' });
   });
 
+  it('410s a VERSION_ARCHIVED version (retired from respondents, still launched)', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
+      invitation({ version: { status: 'launched', archivedAt: new Date(), config: null } })
+    );
+    const result = await createSessionFromInvitation('tok', USER);
+    expect(result).toMatchObject({ ok: false, status: 410, code: 'VERSION_ARCHIVED' });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
   it('409s when the version is no longer launched', async () => {
     (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
       invitation({ version: { status: 'archived' } })
@@ -193,6 +202,15 @@ describe('createSessionForVersion (authed anonymous-direct)', () => {
     );
     const result = await createSessionForVersion('v1', USER);
     expect(result).toMatchObject({ ok: false, status: 404, code: 'NOT_FOUND' });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
+  it('410s a VERSION_ARCHIVED version (archived beats the launched check)', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ archivedAt: new Date() })
+    );
+    const result = await createSessionForVersion('v1', USER);
+    expect(result).toMatchObject({ ok: false, status: 410, code: 'VERSION_ARCHIVED' });
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
   });
 
@@ -261,6 +279,15 @@ describe('createAnonymousSession (no-login)', () => {
     expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
   });
 
+  it('410s a VERSION_ARCHIVED version (retired from the public surface)', async () => {
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ archivedAt: new Date() })
+    );
+    const result = await createAnonymousSession('v1');
+    expect(result).toMatchObject({ ok: false, status: 410, code: 'VERSION_ARCHIVED' });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
+  });
+
   it('403s a non-anonymous questionnaire (requires an invitation)', async () => {
     (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
       version({ config: { accessMode: 'invitation_only' } })
@@ -293,6 +320,16 @@ describe('createPreviewSession (admin preview)', () => {
       tx: mocks.tx,
       reason: 'admin_preview',
     });
+  });
+
+  it('still previews a soft-archived (archivedAt) launched version — admin rehearsal is exempt', async () => {
+    // The respondent archive gate keys on `archivedAt`; admin preview deliberately does NOT, so an
+    // admin can still inspect a version they just archived. Only the terminal `status:'archived'` blocks.
+    (mocks.prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue(
+      version({ archivedAt: new Date() })
+    );
+    const result = await createPreviewSession('v1');
+    expect(result).toMatchObject({ ok: true, session: NEW_SESSION });
   });
 
   it('replaces any prior preview for the version (one-preview-per-version index) before creating', async () => {
@@ -413,6 +450,15 @@ describe('createSessionFromInviteToken (frictionless, no-login)', () => {
     );
     const result = await createSessionFromInviteToken('tok');
     expect(result).toMatchObject({ ok: false, status: 409, code: 'VERSION_NOT_LAUNCHED' });
+  });
+
+  it('410s a VERSION_ARCHIVED version (frictionless link → archived notice)', async () => {
+    (mocks.prisma.appQuestionnaireInvitation.findUnique as Mock).mockResolvedValue(
+      invite({ version: { status: 'launched', archivedAt: new Date() } })
+    );
+    const result = await createSessionFromInviteToken('tok');
+    expect(result).toMatchObject({ ok: false, status: 410, code: 'VERSION_ARCHIVED' });
+    expect(mocks.tx.appQuestionnaireSession.create).not.toHaveBeenCalled();
   });
 
   it('creates a no-login session bound to the invitation + advances it to started', async () => {

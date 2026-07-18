@@ -9,6 +9,7 @@ import {
   createOrResumeAuthedSession,
   type AuthedSessionRequest,
 } from '@/lib/app/questionnaire/chat/session-bootstrap';
+import { VERSION_ARCHIVED_CODE } from '@/lib/app/questionnaire/version-archived';
 import { findAuthedResumeDetail } from '@/lib/app/questionnaire/chat/resumable-session';
 import { resolveSessionResumeEnabledForVersion } from '@/lib/app/questionnaire/chat/anonymity';
 import { AuthedResumeChooser } from '@/components/app/questionnaire/intro/authed-resume-chooser';
@@ -84,6 +85,13 @@ export default async function StartQuestionnairePage({
   const result = await createOrResumeAuthedSession(request);
   if (result.ok) {
     redirect(`/questionnaires/${result.sessionId}`);
+  }
+
+  // An archived version is retired from respondents — show a distinct, terminal notice (its own
+  // heading, no "we couldn't start … try" framing that reads as transient). Mirrors the no-login
+  // boot's dedicated archived state; the create seam returns VERSION_ARCHIVED for it.
+  if (result.code === VERSION_ARCHIVED_CODE) {
+    return <StartError title="This questionnaire has been archived" message={result.message} />;
   }
 
   return <StartError title="We couldn’t start your questionnaire" message={result.message} />;

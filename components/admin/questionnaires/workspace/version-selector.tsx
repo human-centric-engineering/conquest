@@ -23,6 +23,8 @@ export interface VersionOption {
   id: string;
   versionNumber: number;
   status: string;
+  /** Per-version soft-archive marker (ISO) or null. Archived versions are hidden from the picker. */
+  archivedAt: string | null;
 }
 
 interface VersionSelectorProps {
@@ -45,8 +47,12 @@ export function VersionSelector({ questionnaireId, versionId, versions }: Versio
     router.push(topSegment ? `${nextBase}/${topSegment}` : nextBase);
   };
 
-  if (versions.length <= 1) {
-    const only = versions[0];
+  // Hide archived versions from the picker to keep it tidy — but always keep the one currently being
+  // viewed, so landing on an archived version directly (e.g. via history/Restore) never blanks it out.
+  const shown = versions.filter((ver) => ver.archivedAt === null || ver.id === versionId);
+
+  if (shown.length <= 1) {
+    const only = shown[0];
     if (!only) return null;
     return (
       <span className="text-muted-foreground text-sm">
@@ -61,7 +67,7 @@ export function VersionSelector({ questionnaireId, versionId, versions }: Versio
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {versions.map((ver) => (
+        {shown.map((ver) => (
           <SelectItem key={ver.id} value={ver.id}>
             v{ver.versionNumber} · {ver.status}
           </SelectItem>

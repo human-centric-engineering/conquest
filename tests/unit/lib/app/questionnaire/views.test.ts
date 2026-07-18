@@ -91,6 +91,7 @@ function makeQuestionnaireVersionSummary(
     sectionCount: 2,
     questionCount: 8,
     dataSlotCount: 3,
+    archivedAt: null,
     changeCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-06-01T00:00:00.000Z',

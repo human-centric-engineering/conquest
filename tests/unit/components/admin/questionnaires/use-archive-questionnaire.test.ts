@@ -66,7 +66,7 @@ describe('useArchiveQuestionnaire', () => {
       expect(result.current.isPending).toBe(false);
     });
 
-    it('on a generic Error, uses the archive-specific fallback message', async () => {
+    it('on a generic Error, uses the delete-specific fallback message', async () => {
       apiDelete.mockRejectedValue(new Error('network'));
       const { result } = renderHook(() => useArchiveQuestionnaire());
 
@@ -74,7 +74,7 @@ describe('useArchiveQuestionnaire', () => {
         await result.current.archive('qn-1');
       });
 
-      expect(result.current.error).toBe('Could not archive the questionnaire.');
+      expect(result.current.error).toBe('Could not delete the questionnaire.');
     });
   });
 

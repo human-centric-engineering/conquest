@@ -13,6 +13,7 @@ import { notFound } from 'next/navigation';
 
 import { CqStatTiles, type CqStat } from '@/components/admin/cq-stat-tiles';
 import { LaunchChecklist } from '@/components/admin/questionnaires/launch-checklist';
+import { VersionArchiveButton } from '@/components/admin/questionnaires/workspace/version-archive-button';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +24,7 @@ import {
   getVersionGraphCached,
 } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
+import type { QuestionnaireVersionSummary } from '@/lib/app/questionnaire/views';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
 import {
   isLikertLabelled,
@@ -253,36 +255,84 @@ export default async function OverviewTab({ params }: PageProps) {
         </div>
       </section>
 
-      {/* Version timeline */}
+      {/* Version timeline — active versions, with archived ones tucked into a secondary group. */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Versions</h2>
         <ul className="divide-y rounded-xl border">
-          {detail.versions.map((ver) => {
-            const active = ver.id === selected.id;
-            return (
-              <li
+          {detail.versions
+            .filter((ver) => ver.archivedAt === null)
+            .map((ver) => (
+              <VersionTimelineRow
                 key={ver.id}
-                className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
-              >
-                <Link
-                  href={workspaceVersionBase(id, ver.id)}
-                  className={active ? 'font-medium' : 'hover:underline'}
-                >
-                  v{ver.versionNumber}
-                  {active && <span className="text-muted-foreground ml-2 text-xs">(viewing)</span>}
-                </Link>
-                <div className="text-muted-foreground flex items-center gap-3 text-xs">
-                  <span>
-                    {ver.sectionCount} sections · {ver.questionCount} questions ·{' '}
-                    {ver.dataSlotCount} data slot{ver.dataSlotCount === 1 ? '' : 's'}
-                  </span>
-                  <Badge variant="outline">{ver.status}</Badge>
-                </div>
-              </li>
-            );
-          })}
+                questionnaireId={id}
+                version={ver}
+                viewing={ver.id === selected.id}
+                archived={false}
+              />
+            ))}
         </ul>
+
+        {/* Archived versions — hidden from the picker; restorable here. */}
+        {detail.versions.some((ver) => ver.archivedAt !== null) && (
+          <details className="rounded-xl border">
+            <summary className="text-muted-foreground cursor-pointer px-4 py-2.5 text-xs font-medium">
+              Archived versions ({detail.versions.filter((ver) => ver.archivedAt !== null).length})
+            </summary>
+            <ul className="divide-y border-t">
+              {detail.versions
+                .filter((ver) => ver.archivedAt !== null)
+                .map((ver) => (
+                  <VersionTimelineRow
+                    key={ver.id}
+                    questionnaireId={id}
+                    version={ver}
+                    viewing={ver.id === selected.id}
+                    archived
+                  />
+                ))}
+            </ul>
+          </details>
+        )}
       </section>
     </div>
+  );
+}
+
+/** One row in the Overview version timeline — shared by the active list and the archived group. */
+function VersionTimelineRow({
+  questionnaireId,
+  version,
+  viewing,
+  archived,
+}: {
+  questionnaireId: string;
+  version: QuestionnaireVersionSummary;
+  /** True when this row is the version currently being viewed (adds the "(viewing)" marker). */
+  viewing: boolean;
+  /** True when the version is archived (renders the Restore action instead of Archive). */
+  archived: boolean;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+      <Link
+        href={workspaceVersionBase(questionnaireId, version.id)}
+        className={viewing ? 'font-medium' : 'hover:underline'}
+      >
+        v{version.versionNumber}
+        {viewing && <span className="text-muted-foreground ml-2 text-xs">(viewing)</span>}
+      </Link>
+      <div className="text-muted-foreground flex items-center gap-3 text-xs">
+        <span>
+          {version.sectionCount} sections · {version.questionCount} questions ·{' '}
+          {version.dataSlotCount} data slot{version.dataSlotCount === 1 ? '' : 's'}
+        </span>
+        <Badge variant="outline">{version.status}</Badge>
+        <VersionArchiveButton
+          questionnaireId={questionnaireId}
+          versionId={version.id}
+          archived={archived}
+        />
+      </div>
+    </li>
   );
 }

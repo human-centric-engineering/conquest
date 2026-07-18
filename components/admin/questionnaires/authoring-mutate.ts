@@ -61,13 +61,20 @@ function mutateFetch(
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body: unknown,
-  confirm: 'prompt' | 'confirmed'
+  confirm: 'prompt' | 'confirmed',
+  archiveSource = false
 ): Promise<Response> {
   return fetch(path, {
     method,
     // `x-fork-confirm` opts this request into the fork-confirmation protocol: `prompt` asks the
     // server to 409 rather than silently fork a launched version; `confirmed` is the post-dialog retry.
-    headers: { 'Content-Type': 'application/json', 'x-fork-confirm': confirm },
+    // `x-fork-archive-source` (confirmed retry only) carries the dialog's "archive the previous
+    // version" choice so the server soft-archives the branched-from version after the fork commits.
+    headers: {
+      'Content-Type': 'application/json',
+      'x-fork-confirm': confirm,
+      ...(archiveSource ? { 'x-fork-archive-source': 'true' } : {}),
+    },
     credentials: 'same-origin',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -85,9 +92,11 @@ export async function authoringMutate<T>(
   if (parsed.success === false && parsed.error.code === VERSION_FORK_CONFIRMATION_REQUIRED) {
     const details = parseForkConfirmDetails(parsed.error.details);
     if (details) {
-      const confirmed = await requestForkConfirm(details);
+      const { confirmed, archiveSource } = await requestForkConfirm(details);
       if (!confirmed) throw new ForkCancelledError();
-      parsed = await parseApiResponse<T>(await mutateFetch(method, path, body, 'confirmed'));
+      parsed = await parseApiResponse<T>(
+        await mutateFetch(method, path, body, 'confirmed', archiveSource)
+      );
     }
   }
 
