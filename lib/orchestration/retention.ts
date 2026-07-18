@@ -203,6 +203,13 @@ export async function pruneHookDeliveries(maxAgeDays?: number): Promise<PruneRes
  * Skips if no value is configured.
  */
 export async function pruneCostLogs(maxAgeDays?: number): Promise<PruneResult> {
+  // Keep `costLogRetentionDays >= executionRetentionDays`. This prune is independent of
+  // `pruneExecutions`, so a SHORTER cost window silently empties the cost drill-down of
+  // executions that are still retained: `AiWorkflowExecution.totalCostUsd` survives (it is a
+  // scalar on the execution) while the per-call `AiCostLog` rows behind it are gone, so the
+  // summary and the breakdown disagree with no indication why. Same class of coupling as the
+  // eval/execution note on `pruneEvaluationData`, and likewise not enforced in code — the
+  // settings schema validates neither.
   const days = maxAgeDays ?? (await resolveRetentionDays('costLogRetentionDays'));
   if (days === null) return { deleted: 0 };
 

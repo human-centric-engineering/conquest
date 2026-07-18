@@ -85,6 +85,7 @@ const handleEvaluateSaved = withAdminAuth<{ id: string; ordinal: string }>(
       costUsd: result.costUsd,
       model: result.model,
       evaluationId: result.evaluationId,
+      persistError: result.persistError,
     });
   }
 );

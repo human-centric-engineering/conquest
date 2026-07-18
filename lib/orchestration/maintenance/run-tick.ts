@@ -26,6 +26,7 @@ import {
   processQueuedRespondentReports,
   processQueuedReportRevisions,
 } from '@/lib/app/questionnaire/report/worker';
+import { enforceAppRetentionPolicies } from '@/lib/app/questionnaire/retention';
 
 /** Module-level guard against overlapping tick executions. */
 let tickRunning = false;
@@ -55,6 +56,7 @@ export const BACKGROUND_TASK_NAMES = [
   'evaluationRuns',
   'respondentReports',
   'respondentReportRevisions',
+  'appRetention',
 ] as const;
 
 /**
@@ -137,6 +139,9 @@ export async function runMaintenanceTick(
     processPendingEvaluationRuns(),
     processQueuedRespondentReports(),
     processQueuedReportRevisions(),
+    // App-owned prune (F14.15): turn evaluations, design-eval runs, AI run provenance. Kept in
+    // `lib/app/**` so it survives upstream syncs of the platform retention module.
+    enforceAppRetentionPolicies(),
   ])
     .then((settled) => {
       const summary = Object.fromEntries(

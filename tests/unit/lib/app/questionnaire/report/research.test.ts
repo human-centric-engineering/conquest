@@ -41,6 +41,8 @@ vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
     totalCostUsd: 0.01,
     isLocal: false,
   }),
+  // Each research turn attributes its spend through `logAppLlmCost`, which calls this.
+  logCost: vi.fn(async () => undefined),
 }));
 
 import { runReportResearch } from '@/lib/app/questionnaire/report/research';

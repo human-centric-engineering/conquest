@@ -81,10 +81,37 @@ export interface GuardedUpload {
   requiredMode: RequiredMode;
 }
 
+/**
+ * What the fidelity critic observed, threaded out of the orchestrator so the caller can persist
+ * it against the version once that version exists (F14.15).
+ *
+ * Before this, the critic's verdicts were computed, used to decide repairs, and then discarded —
+ * so a question flagged `suspect` but NOT repaired (because repair failed, or because the
+ * >`REPAIR_FLAG_CEILING` systemic-failure bail-out fired) was persisted looking exactly as clean
+ * as one the critic had confirmed. Nobody could tell the difference afterwards.
+ */
+export interface FidelityRecord {
+  /** Resolved verifier binding, for attribution after the agent's model changes. */
+  provider: string;
+  model: string;
+  /** Every verdict the critic returned. */
+  verdicts: unknown;
+  /** How many it flagged `suspect`. */
+  flaggedCount: number;
+  /** Total questions checked. */
+  totalCount: number;
+  /** What happened to the flagged ones. */
+  repairOutcome:
+    'none_flagged' | 'repaired' | 'repair_failed' | 'skipped_systemic' | 'verifier_unavailable';
+  durationMs: number;
+}
+
 /** The extractor output plus the parsed document it came from (source-doc provenance). */
 export interface ExtractedDocument {
   extraction: ExtractQuestionnaireStructureData;
   parsed: Awaited<ReturnType<typeof parseDocument>>;
+  /** Null when the verifier never ran (not seeded, or it threw). */
+  fidelity: FidelityRecord | null;
 }
 
 export type PipelineResult<T> = { ok: true; value: T } | { ok: false; response: Response };
@@ -387,5 +414,6 @@ export async function extractFromDocument(
     throw err;
   }
 
-  return { ok: true, value: { extraction, parsed } };
+  // Raw path — no fidelity critic runs here, so there is nothing to record.
+  return { ok: true, value: { extraction, parsed, fidelity: null } };
 }

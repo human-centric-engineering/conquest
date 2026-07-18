@@ -43,6 +43,8 @@ describe('listChangesQuerySchema', () => {
   });
 
   it('exposes exactly the persisted status vocabulary', () => {
-    expect([...EXTRACTION_CHANGE_STATUSES]).toEqual(['applied', 'reverted']);
+    // `superseded` (F14.15) is terminal like `reverted`: set when a whole-structure rewrite
+    // replaced the graph the row describes, so the row is kept but is no longer revertable.
+    expect([...EXTRACTION_CHANGE_STATUSES]).toEqual(['applied', 'reverted', 'superseded']);
   });
 });

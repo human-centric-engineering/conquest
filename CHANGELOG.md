@@ -18,6 +18,14 @@ release process.
 
 ### Added
 
+- **`AiEvaluationRun.agentVersionId`** — new optional column recording the `AiAgentVersion` a
+  dataset-driven evaluation run is pinned to (null = run the agent's live config). Previously
+  `AiExperimentVariant.agentVersionId` was written at create time and read nowhere, so every
+  variant's run resolved to the same live agent and a two-arm version comparison scored identical
+  configuration twice. The run worker now fails a pinned run explicitly rather than executing live
+  config under a pinned label; executing a pinned `AiAgentVersion.snapshot` needs a config-override
+  seam in the chat handler and is not yet supported. Additive — existing rows and forks are
+  unaffected.
 - **`lib/db/json.ts`** — `DB_JSON_NULL` / `DB_JSON_LITERAL_NULL`, re-exporting Prisma's `Json` null
   sentinels from `lib/`. Clearing a nullable `Json` column requires `Prisma.DbNull` (a plain `null` is
   rejected), which `lib/app/**` cannot reach: the app-extension boundary bans runtime `@prisma/client`

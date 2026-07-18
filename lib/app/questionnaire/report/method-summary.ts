@@ -31,6 +31,7 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { calculateCost } from '@/lib/orchestration/llm/cost-tracker';
 import { REPORT_METHOD_EXPLAINER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import {
   renderMethodSummaryTemplate,
   type ReportMethodRecord,
@@ -191,6 +192,7 @@ export async function summariseReportMethod(
     const agent = await prisma.aiAgent.findUnique({
       where: { slug: REPORT_METHOD_EXPLAINER_AGENT_SLUG },
       select: {
+        id: true,
         provider: true,
         model: true,
         fallbackProviders: true,
@@ -228,6 +230,17 @@ export async function summariseReportMethod(
       response.usage.inputTokens,
       response.usage.outputTokens
     ).totalCostUsd;
+
+    // Logged before `rejectSummary` — a rejected summary still spent the tokens. `versionId` is null:
+    // the explainer reads a method record, which carries no version reference.
+    logAppLlmCost({
+      agentId: agent.id,
+      provider: providerSlug,
+      model,
+      tokenUsage: { input: response.usage.inputTokens, output: response.usage.outputTokens },
+      capability: 'app_report_method_summary',
+      versionId: null,
+    });
 
     const text = typeof response.content === 'string' ? response.content.trim() : '';
     const rejection = rejectSummary(text, record);

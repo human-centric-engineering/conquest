@@ -14,7 +14,11 @@ vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
   resolveAgentProviderAndModel: vi.fn(),
 }));
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
-vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({ calculateCost: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/cost-tracker', () => ({
+  calculateCost: vi.fn(),
+  // The summariser attributes its spend through `logAppLlmCost`, which calls this.
+  logCost: vi.fn(async () => undefined),
+}));
 vi.mock('@/lib/logging', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 import { prisma } from '@/lib/db/client';

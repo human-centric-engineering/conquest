@@ -76,6 +76,10 @@ vi.mock('@/lib/app/questionnaire/report/worker', () => ({
   processQueuedReportRevisions: vi.fn(),
 }));
 
+vi.mock('@/lib/app/questionnaire/retention', () => ({
+  enforceAppRetentionPolicies: vi.fn(),
+}));
+
 // ─── Imports ────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
@@ -220,6 +224,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'evaluationRuns',
       'respondentReports',
       'respondentReportRevisions',
+      'appRetention',
     ]);
     expect(typeof body.data.durationMs).toBe('number');
     expect(body.data.durationMs).toBeGreaterThanOrEqual(0);
@@ -304,8 +309,8 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     expect(response.status).toBe(202);
     expect(body.data.schedules).toEqual({ error: 'schedules DB down' });
     // Background tasks still kick off even when schedules fail
-    // (10 tasks since the respondentReportRevisions re-run drain was added).
-    expect(body.data.backgroundTasks).toHaveLength(10);
+    // (11 tasks since the F14.15 app-layer retention prune was added).
+    expect(body.data.backgroundTasks).toHaveLength(11);
   });
 
   it('still kicks off background tasks when schedules reject', async () => {

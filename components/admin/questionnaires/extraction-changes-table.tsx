@@ -142,7 +142,7 @@ interface Props {
   questionnaireId: string;
   versionId: string;
   changes: ExtractionChangeView[];
-  counts: { applied: number; reverted: number };
+  counts: { applied: number; reverted: number; superseded: number };
 }
 
 function JsonBlock({ label, value }: { label: string; value: unknown }) {
@@ -231,6 +231,7 @@ export function ExtractionChangesTable({ questionnaireId, versionId, changes, co
           />
           <p className="text-muted-foreground ml-auto text-xs">
             {counts.applied} applied · {counts.reverted} reverted
+            {counts.superseded > 0 ? ` · ${counts.superseded} superseded` : ''}
           </p>
         </div>
 
@@ -281,7 +282,7 @@ export function ExtractionChangesTable({ questionnaireId, versionId, changes, co
                   {rows.map((change) => (
                     <li
                       key={change.id}
-                      className={`group bg-card rounded-lg border p-3 transition-shadow hover:border-[var(--cq-accent-ring)] hover:shadow-sm ${change.status === 'reverted' ? 'opacity-60' : ''}`}
+                      className={`group bg-card rounded-lg border p-3 transition-shadow hover:border-[var(--cq-accent-ring)] hover:shadow-sm ${change.status !== 'applied' ? 'opacity-60' : ''}`}
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="text-xs">
@@ -299,6 +300,15 @@ export function ExtractionChangesTable({ questionnaireId, versionId, changes, co
                         {change.status === 'reverted' && (
                           <Badge variant="outline" className="text-xs">
                             reverted
+                          </Badge>
+                        )}
+                        {change.status === 'superseded' && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs"
+                            title="A full-structure rewrite replaced the graph this change describes. It is kept for the record but can no longer be reverted."
+                          >
+                            superseded
                           </Badge>
                         )}
                         <div className="ml-auto">

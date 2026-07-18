@@ -16,6 +16,7 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 import {
   RESPONDENT_REPORT_BACKGROUND_MAX_LENGTH,
   RESPONDENT_REPORT_INSTRUCTIONS_MAX_LENGTH,
@@ -130,6 +131,7 @@ export async function craftReportConfig(opts: {
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG },
     select: {
+      id: true,
       provider: true,
       model: true,
       fallbackProviders: true,
@@ -160,6 +162,18 @@ export async function craftReportConfig(opts: {
     retryUserMessage:
       'Respond with ONLY the JSON object {"reply": string, "suggestions": {…}} — no prose, no code fence.',
     onFinalFailure: () => new Error('Config assistant response was not valid JSON after retry'),
+  });
+
+  // `versionId` is null — the assistant turn carries the draft config values, not the version they
+  // belong to.
+  logAppLlmCost({
+    agentId: agent.id,
+    provider: providerSlug,
+    model,
+    tokenUsage: result.tokenUsage,
+    capability: 'app_report_craft_config',
+    versionId: null,
+    extra: { turns: opts.messages.length },
   });
 
   return { ...result.value, costUsd: result.costUsd };

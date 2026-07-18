@@ -34,6 +34,8 @@ export interface ClaimedRun {
   name: string;
   subjectKind: string;
   agentId: string | null;
+  /** F14.15: pinned `AiAgentVersion.id`, or null to run the agent's live config. */
+  agentVersionId: string | null;
   workflowId: string | null;
   datasetId: string;
   datasetContentHash: string;
@@ -115,6 +117,7 @@ export async function claimNextRun(workerId: string): Promise<ClaimedRun | null>
       name: true,
       subjectKind: true,
       agentId: true,
+      agentVersionId: true,
       workflowId: true,
       datasetId: true,
       datasetContentHash: true,

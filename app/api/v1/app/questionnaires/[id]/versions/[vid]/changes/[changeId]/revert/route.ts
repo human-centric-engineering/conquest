@@ -52,9 +52,16 @@ const handleRevert = withAdminAuth<Params>(async (request, session, { params }) 
     return errorResponse('Extraction change not found', { code: 'NOT_FOUND', status: 404 });
   }
 
-  // Only an applied change is revertible; a re-revert is a 409 (idempotency guard).
+  // Only an applied change is revertible; both terminal statuses are a 409. The
+  // message distinguishes them — a superseded change was never reverted, its graph
+  // was rewritten wholesale, and telling the admin otherwise sends them hunting for
+  // a revert that never happened.
   if (change.status !== 'applied') {
-    throw new ConflictError('This change has already been reverted');
+    throw new ConflictError(
+      change.status === 'superseded'
+        ? 'This change was superseded by a full-structure rewrite and can no longer be reverted'
+        : 'This change has already been reverted'
+    );
   }
 
   const revertable = toRevertableChange(change);

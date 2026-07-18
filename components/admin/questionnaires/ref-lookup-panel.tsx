@@ -32,6 +32,8 @@ type TurnEvalState =
       status: 'done';
       score: number;
       evaluationId: string | null;
+      /** Set when the verdict was produced but not saved (F14.15). */
+      persistError: string | null;
       verdict: TurnEvaluation;
       model: string;
     }
@@ -95,6 +97,7 @@ export function RefLookupPanel({ initialRef, embedded = false }: RefLookupPanelP
         verdict: TurnEvaluation;
         model: string;
         evaluationId: string | null;
+        persistError: string | null;
       }>(API.APP.QUESTIONNAIRE_SESSIONS.evaluateSavedTurn(result.session.id, ordinal));
       setEvalState((s) => ({
         ...s,
@@ -102,6 +105,7 @@ export function RefLookupPanel({ initialRef, embedded = false }: RefLookupPanelP
           status: 'done',
           score: data.verdict.overallScore,
           evaluationId: data.evaluationId,
+          persistError: data.persistError ?? null,
           verdict: data.verdict,
           model: data.model,
         },
@@ -303,6 +307,14 @@ export function RefLookupPanel({ initialRef, embedded = false }: RefLookupPanelP
                           model={state.model}
                           turnIndex={turn.ordinal - 1}
                         />
+                        {state.persistError && (
+                          <p
+                            role="status"
+                            className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-200"
+                          >
+                            {state.persistError}
+                          </p>
+                        )}
                         {state.evaluationId && (
                           <TurnEvaluationReview
                             sessionId={result.session.id}

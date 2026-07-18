@@ -453,6 +453,67 @@ describe('subject resolution', () => {
 });
 
 // ---------------------------------------------------------------------------
+// F14.15 — version-pinned run refusal
+// ---------------------------------------------------------------------------
+
+describe('agent version pinning (F14.15)', () => {
+  it('marks a version-pinned run failed with agent_version_pinning_unsupported and executes no cases', async () => {
+    // The chat handler resolves an agent by slug to its LIVE config — it
+    // cannot yet execute a pinned AiAgentVersion.snapshot (UG-12). Silently
+    // running live config while reporting the pinned version would score
+    // the wrong thing, so the worker must fail loudly instead.
+    mockedClaim.mockResolvedValueOnce(makeRun({ agentVersionId: 'agent-version-7' }));
+    findManyCases.mockResolvedValueOnce([makeCase(1), makeCase(2)]);
+    findAgent.mockResolvedValueOnce({ slug: 'agent-slug' });
+    mockedGetGrader.mockReturnValue(passingGrader());
+
+    const result = await processPendingEvaluationRuns();
+
+    expect(result).toEqual({ claimed: 1, completed: 0, released: 0, failed: 1, cancelled: 0 });
+    expect(mockedMarkTerminal).toHaveBeenCalledWith(
+      'run-1',
+      'failed',
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          note: 'agent_version_pinning_unsupported',
+          agentVersionId: 'agent-version-7',
+        }),
+      })
+    );
+    // The pinning guard must short-circuit BEFORE any case executes.
+    expect(mockedRunAgent).not.toHaveBeenCalled();
+    expect(createResult).not.toHaveBeenCalled();
+  });
+
+  it('runs normally when agentVersionId is null (live config, the unpinned default)', async () => {
+    mockedClaim.mockResolvedValueOnce(makeRun({ agentVersionId: null }));
+    findManyCases.mockResolvedValueOnce([makeCase(1)]);
+    findAgent.mockResolvedValueOnce({ slug: 'agent-slug' });
+    mockedGetGrader.mockReturnValue(passingGrader());
+    mockedRunAgent.mockResolvedValueOnce(drainOk());
+    findManyResults.mockResolvedValueOnce([
+      {
+        metricScores: { exact_match: { score: 1, passed: true } },
+        subjectMetadata: {},
+        costUsd: 0,
+      },
+    ]);
+
+    const result = await processPendingEvaluationRuns();
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(mockedRunAgent).toHaveBeenCalledTimes(1);
+    // No pinning-unsupported note anywhere in the terminal call.
+    const markCall = mockedMarkTerminal.mock.calls[0];
+    expect(markCall[1]).toBe('completed');
+    expect(markCall[2]).not.toMatchObject({
+      summary: expect.objectContaining({ note: 'agent_version_pinning_unsupported' }),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Per-case error handling
 // ---------------------------------------------------------------------------
 

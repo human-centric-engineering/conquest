@@ -55,6 +55,7 @@ export const CHANGE_SELECT = {
   confidence: true,
   status: true,
   revertedAt: true,
+  supersededAt: true,
   createdAt: true,
 } as const;
 
@@ -71,6 +72,7 @@ export interface ScopedChange {
   confidence: number | null;
   status: string;
   revertedAt: Date | null;
+  supersededAt: Date | null;
   createdAt: Date;
 }
 
@@ -226,13 +228,15 @@ function toChangeView(change: ScopedChange, snapshot: GraphSnapshot): Extraction
     confidence: change.confidence,
     status: change.status as ExtractionChangeStatus,
     revertedAt: change.revertedAt?.toISOString() ?? null,
+    supersededAt: change.supersededAt?.toISOString() ?? null,
     createdAt: change.createdAt.toISOString(),
     resolvedTargetLabel: null,
     revertable: false,
     revertBlockedReason: null,
     revertSummary: null,
   };
-  // Only an applied change is a revert candidate; a dry-run plan sets the verdict.
+  // Only an applied change is a revert candidate; `reverted` and `superseded` are
+  // both terminal. A dry-run plan sets the verdict for the rest.
   if (change.status !== 'applied') return base;
   const result = planRevert(toRevertableChange(change), snapshot);
   if (result.ok) {
@@ -272,10 +276,11 @@ export async function listVersionChanges(
     }),
   ]);
 
-  const counts = { applied: 0, reverted: 0 };
+  const counts = { applied: 0, reverted: 0, superseded: 0 };
   for (const g of statusGroups) {
     if (g.status === 'applied') counts.applied = g._count._all;
     else if (g.status === 'reverted') counts.reverted = g._count._all;
+    else if (g.status === 'superseded') counts.superseded = g._count._all;
   }
 
   return { changes: rows.map((row) => toChangeView(row, snapshot)), counts };

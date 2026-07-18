@@ -86,6 +86,10 @@ vi.mock('@/lib/app/questionnaire/report/worker', () => ({
   processQueuedReportRevisions: vi.fn(),
 }));
 
+vi.mock('@/lib/app/questionnaire/retention', () => ({
+  enforceAppRetentionPolicies: vi.fn(),
+}));
+
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
@@ -214,6 +218,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'evaluationRuns',
       'respondentReports',
       'respondentReportRevisions',
+      'appRetention',
     ]);
     expect(body.data.durationMs).toEqual(expect.any(Number));
   });

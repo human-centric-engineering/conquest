@@ -121,6 +121,19 @@ Response 200: { success: true, data: Experiment (with variants including evaluat
 Audit: experiment.run
 ```
 
+> **Dataset-driven experiments cannot complete right now (F14.15).** A variant's only
+> differentiator is `agentVersionId`, and the chat handler cannot yet execute a pinned
+> `AiAgentVersion.snapshot` — it resolves agents by slug to their **live** config. So an
+> unpinned experiment is refused at this route (400: every arm would draw from one
+> distribution and the winner would be sampling noise), and a pinned one is created but
+> its pinned arms fail on the next maintenance tick with
+> `agent_version_pinning_unsupported` rather than score the live agent under a pinned
+> label. Both refusals are deliberate: the previous behaviour returned a confident,
+> wrong winner. **Legacy session-mode experiments (no dataset bound) are unaffected and
+> run normally.** Tracked as UG-12 in
+> [`upstream-gaps.md`](../app/planning/upstream-gaps.md) — dataset-driven comparison
+> starts working when that seam lands, with no change to experiment config.
+
 ## Status lifecycle
 
 ```

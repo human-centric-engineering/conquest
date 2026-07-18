@@ -73,7 +73,7 @@ function makeChangesResponse(
 ): ExtractionChangeListResponse {
   return {
     changes: [],
-    counts: { applied: 0, reverted: 0 },
+    counts: { applied: 0, reverted: 0, superseded: 0 },
     ...over,
   };
 }
@@ -130,6 +130,7 @@ describe('ExtractionChangesTab', () => {
               confidence: null,
               status: 'applied',
               revertedAt: null,
+              supersededAt: null,
               createdAt: '2026-01-01T00:00:00.000Z',
               resolvedTargetLabel: 'q1',
               revertable: true,
@@ -147,6 +148,7 @@ describe('ExtractionChangesTab', () => {
               confidence: 0.9,
               status: 'applied',
               revertedAt: null,
+              supersededAt: null,
               createdAt: '2026-01-02T00:00:00.000Z',
               resolvedTargetLabel: 'q2',
               revertable: false,
@@ -154,7 +156,7 @@ describe('ExtractionChangesTab', () => {
               revertSummary: null,
             },
           ],
-          counts: { applied: 2, reverted: 0 },
+          counts: { applied: 2, reverted: 0, superseded: 0 },
         }),
       });
 

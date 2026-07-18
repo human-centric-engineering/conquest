@@ -53,6 +53,29 @@ the execution trace it points at is gone. Set the evaluation window at or below
 the execution window. This is guidance, not a code constraint; the Settings-form
 field help repeats it.
 
+## Keep `costLogRetentionDays ≥ executionRetentionDays`
+
+The same shape of coupling, in the other direction. `pruneCostLogs` runs
+**independently** of `pruneExecutions`, so a _shorter_ cost window silently empties
+the cost drill-down of executions that are still retained:
+`AiWorkflowExecution.totalCostUsd` survives (it is a scalar on the execution) while
+the per-call `AiCostLog` rows behind it are gone. The summary and the breakdown then
+disagree with no indication why. Guidance, not a code constraint — the settings
+schema validates neither this nor the evaluation/execution pairing above.
+
+## App-layer prunes live outside this module
+
+`lib/orchestration/retention.ts` prunes platform models only. ConQuest's own
+evaluation and provenance tables — `AppQuestionnaireTurnEvaluation`,
+`AppQuestionnaireEvaluationRun`, `AppAiRun` — are pruned by
+`lib/app/questionnaire/retention.ts`, registered as the `appRetention` background
+task in the maintenance tick. They deliberately reuse `evaluationRetentionDays`
+rather than adding a fourth operator knob to keep coherent. See
+[`ai-run-provenance.md`](../app/questionnaire/ai-run-provenance.md#retention).
+
+This split is the app/platform model from `CUSTOMIZATION.md`: this file merges from
+upstream on every sync, so app-owned prunes belong in app-owned files.
+
 ## MCP audit logs are always pruned
 
 Unlike every other window, `McpServerConfig.auditRetentionDays` is **non-nullable

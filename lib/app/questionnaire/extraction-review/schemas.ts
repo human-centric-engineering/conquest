@@ -13,11 +13,15 @@ import { CHANGE_TYPES, TARGET_ENTITY_TYPES } from '@/lib/app/questionnaire/inges
 
 /**
  * The persisted lifecycle of one change row. `applied` is the ingest default;
- * F2.3 flips it to `reverted`. A `const` tuple so the filter schema, the read
- * view, and the UI badges share one source (same discipline as the status/type
- * tuples in the domain types module).
+ * F2.3 flips it to `reverted`; F14.15 flips it to `superseded` when a
+ * whole-structure rewrite replaced the graph the row describes. A `const` tuple
+ * so the filter schema, the read view, and the UI badges share one source (same
+ * discipline as the status/type tuples in the domain types module).
+ *
+ * Only `applied` rows are revert candidates — both `reverted` and `superseded`
+ * are terminal.
  */
-export const EXTRACTION_CHANGE_STATUSES = ['applied', 'reverted'] as const;
+export const EXTRACTION_CHANGE_STATUSES = ['applied', 'reverted', 'superseded'] as const;
 export type ExtractionChangeStatus = (typeof EXTRACTION_CHANGE_STATUSES)[number];
 
 /** Optional filters for `GET …/versions/:vid/changes`. Absent = no filter. */

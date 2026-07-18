@@ -191,6 +191,24 @@ async function driveRun(run: ClaimedRun): Promise<RunOutcome> {
       });
       return 'failed';
     }
+    // F14.15: a pinned run must execute that exact snapshot. `drainStreamChat`
+    // resolves an agent by slug to its LIVE config, so honouring the pin needs a
+    // config-override seam in the chat handler (UG-12). Until that lands, fail
+    // loudly — silently running live config would report a version comparison
+    // that never happened.
+    if (run.agentVersionId) {
+      await markTerminal(run.id, 'failed', {
+        summary: {
+          note: 'agent_version_pinning_unsupported',
+          agentVersionId: run.agentVersionId,
+          detail:
+            'This run is pinned to a specific agent version, but the chat handler can only ' +
+            'execute an agent’s live configuration. Running it anyway would score the live ' +
+            'agent while reporting the pinned version.',
+        },
+      });
+      return 'failed';
+    }
     agentSlug = agent.slug;
   }
 

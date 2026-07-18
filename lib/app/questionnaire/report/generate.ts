@@ -52,6 +52,7 @@ import {
   type ReportMethodRecord,
 } from '@/lib/app/questionnaire/report/method-record';
 import { summariseReportMethod } from '@/lib/app/questionnaire/report/method-summary';
+import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 
 /** Result of one generation run. */
 export interface GeneratedReport {
@@ -560,6 +561,7 @@ export async function generateReportFromInputs(
   const agent = await prisma.aiAgent.findUnique({
     where: { slug: RESPONDENT_REPORT_AGENT_SLUG },
     select: {
+      id: true,
       provider: true,
       model: true,
       fallbackProviders: true,
@@ -647,6 +649,19 @@ export async function generateReportFromInputs(
     retryUserMessage:
       'Respond with ONLY the JSON object {"summary","sections":[{"heading","body"}],"actions":[]} — no prose, no code fence.',
     onFinalFailure: () => new Error('Respondent report response was not valid JSON after retry'),
+  });
+
+  // `usedSlug`, not `providerSlug` — the cost row must name the provider that actually served the
+  // call, same reason the method record does. `versionId` is null: the generation core takes
+  // pre-assembled inputs (session + client attribution only), so the version isn't reachable here.
+  logAppLlmCost({
+    agentId: agent.id,
+    provider: usedSlug,
+    model,
+    tokenUsage: result.tokenUsage,
+    capability: 'app_report_generate',
+    versionId: null,
+    extra: { sessionId, preview },
   });
 
   // The report writer is asked for `{summary, sections, actions}` only. Strip any `research` or

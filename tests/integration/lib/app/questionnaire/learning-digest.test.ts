@@ -15,6 +15,9 @@ const prismaMock = vi.hoisted(() => ({
   appDataSlotFill: { findMany: vi.fn() },
   appAnswerSlot: { findMany: vi.fn() },
   appRoundLearningDigest: { deleteMany: vi.fn(), createMany: vi.fn(), findMany: vi.fn() },
+  // `recordAiRun` swallows its own failures by design, so omitting this model would not fail a
+  // test — it would silently turn every provenance assertion below into a no-op.
+  appAiRun: { create: vi.fn().mockResolvedValue({ id: 'run-1' }) },
   aiAgent: { findUnique: vi.fn() },
   $transaction: vi.fn(async (ops: unknown[]) => ops),
 }));
@@ -134,6 +137,47 @@ describe('refreshRoundLearningDigest — build', () => {
       divergence: 0.7,
       sessionsCovered: 4,
     });
+  });
+
+  it('records the build as an AI run so the wholesale replace stays explainable', async () => {
+    // F14.15: the transaction above erases the previous digest, so the run log is the ONLY record
+    // of how the current rows were produced. recordAiRun fail-softs, so this must be asserted
+    // directly — a dropped call would otherwise leave every other assertion in this file green.
+    await refreshRoundLearningDigest('r1', 'v1');
+
+    expect(prismaMock.appAiRun.create).toHaveBeenCalledTimes(1);
+    const data = prismaMock.appAiRun.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      subjectKind: 'version',
+      subjectId: 'v1',
+      versionId: 'v1',
+      kind: 'learning_digest',
+      status: 'succeeded',
+      provider: 'openai',
+      model: 'gpt',
+    });
+    // The snapshot must carry the themes actually written, not a placeholder.
+    expect(data.outputSnapshot).toEqual([
+      expect.objectContaining({
+        slotKind: 'data_slot',
+        slotKey: 'workload',
+        insight: 'Several mentioned heavy workload.',
+        divergence: 0.7,
+      }),
+    ]);
+    expect(data.detail).toMatchObject({ roundId: 'r1', slotCount: 1, sessionsCovered: 4 });
+  });
+
+  it('does not record an AI run when no themes survive filtering', async () => {
+    // Pairs with the test above: provenance tracks BUILDS, not attempts. A run row for a cleared
+    // digest would claim rows exist that the transaction never wrote.
+    (runStructuredCompletion as Mock).mockResolvedValue({
+      value: { themes: [{ key: 'HALLUCINATED', insight: 'made up', divergence: 0.5 }] },
+      tokenUsage: { input: 1, output: 1 },
+    });
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+    expect(res.reason).toBe('no_themes');
+    expect(prismaMock.appAiRun.create).not.toHaveBeenCalled();
   });
 
   it('drops a slot below the per-slot respondent threshold', async () => {

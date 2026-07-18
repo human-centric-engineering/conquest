@@ -25,6 +25,8 @@ export interface ExtractionChangeView {
   status: ExtractionChangeStatus;
   /** ISO timestamp of the revert, or null while applied. */
   revertedAt: string | null;
+  /** ISO timestamp of the supersede (whole-structure rewrite), or null otherwise. */
+  supersededAt: string | null;
   createdAt: string;
   /** Resolved target label (section title / question key) when reconciled, else null. */
   resolvedTargetLabel: string | null;
@@ -39,7 +41,7 @@ export interface ExtractionChangeView {
 /** The list payload: the version's changes (newest-first) plus status tallies. */
 export interface ExtractionChangeListResponse {
   changes: ExtractionChangeView[];
-  counts: { applied: number; reverted: number };
+  counts: { applied: number; reverted: number; superseded: number };
 }
 
 /** The revert response payload — the flipped row id + the applied plan summary. */
