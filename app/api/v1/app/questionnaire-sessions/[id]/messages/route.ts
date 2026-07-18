@@ -78,6 +78,10 @@ import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_
 import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing';
 import { buildPriorAnswersDigest } from '@/app/api/v1/app/questionnaire-sessions/_lib/prior-answers';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
+import {
+  VERSION_ARCHIVED_CODE,
+  VERSION_ARCHIVED_MESSAGE,
+} from '@/lib/app/questionnaire/version-archived';
 import { assertRoundAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-access';
 import { findTurnByIdempotencyKey } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 
@@ -139,6 +143,16 @@ async function handleMessage(
       return errorResponse(`Session is ${loaded.session.status}, not active`, {
         code: 'SESSION_NOT_ACTIVE',
         status: 409,
+      });
+    }
+
+    // Respondent-facing archive gate: a version archived mid-session stops serving turns, so an
+    // in-flight respondent is refused with a distinct code the surface turns into the "archived"
+    // notice. Preview sessions are exempt — an admin may still rehearse an archived version.
+    if (loaded.versionArchivedAt && !loaded.session.isPreview) {
+      return errorResponse(VERSION_ARCHIVED_MESSAGE, {
+        code: VERSION_ARCHIVED_CODE,
+        status: 410,
       });
     }
 

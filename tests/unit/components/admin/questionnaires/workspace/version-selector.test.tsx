@@ -63,6 +63,7 @@ function makeVersion(over: Partial<VersionOption> & Pick<VersionOption, 'id'>): 
   return {
     versionNumber: 1,
     status: 'draft',
+    archivedAt: null,
     ...over,
   };
 }
@@ -125,6 +126,45 @@ describe('VersionSelector', () => {
 
       // Assert: component returns null — nothing was mounted
       expect(container.firstChild).toBeNull();
+    });
+  });
+
+  describe('archived-version filtering', () => {
+    it('collapses to a plain span (no switcher) when every other version is archived', () => {
+      // Two versions but one archived → only the viewed one remains, so no picker is offered.
+      mockUsePathname.mockReturnValue(workspaceVersionBase(QID, VID_1));
+      render(
+        <VersionSelector
+          questionnaireId={QID}
+          versionId={VID_1}
+          versions={[
+            makeVersion({ id: VID_1, versionNumber: 2, status: 'draft' }),
+            makeVersion({ id: VID_2, versionNumber: 1, status: 'launched', archivedAt: 'x' }),
+          ]}
+        />
+      );
+
+      expect(screen.getByText('v2 · draft')).toBeInTheDocument();
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    });
+
+    it('keeps the currently-viewed version in the picker even when it is archived', () => {
+      // Landing on an archived version directly must never blank it out of its own switcher.
+      mockUsePathname.mockReturnValue(workspaceVersionBase(QID, VID_2));
+      render(
+        <VersionSelector
+          questionnaireId={QID}
+          versionId={VID_2}
+          versions={[
+            makeVersion({ id: VID_1, versionNumber: 2, status: 'draft' }),
+            makeVersion({ id: VID_2, versionNumber: 1, status: 'launched', archivedAt: 'x' }),
+          ]}
+        />
+      );
+
+      // Both remain (active draft + the viewed-but-archived one) → the Select is shown.
+      const trigger = screen.getByRole('combobox', { name: /select version/i });
+      expect(trigger).toHaveTextContent('v1 · launched');
     });
   });
 

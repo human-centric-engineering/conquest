@@ -263,6 +263,9 @@ beforeEach(() => {
   // implementation, so a per-test rejection (e.g. the abuse-gate write-failure block) would otherwise
   // bleed into later tests that call persistAbuseStrikes.
   sessionsMock.persistAbuseStrikes.mockResolvedValue(undefined);
+  // Same clearAllMocks() gotcha for the sensitivity-persist path: a per-test rejection (the
+  // sensitivity write-failure block) must not bleed into a later test that flags a disclosure.
+  sessionsMock.persistSensitivity.mockResolvedValue(undefined);
   // Reasoning trace: default to empty so the standard turn tests are unaffected.
   reasoningMock.buildReasoningTrace.mockReturnValue([]);
   // Retry dedup: default to "no prior turn under this key" so a standard send runs fresh.
@@ -313,6 +316,36 @@ describe('gate order', () => {
       })
     );
     expect((await POST(req({ message: 'hi' }), ctx)).status).toBe(409);
+  });
+
+  it('410s (VERSION_ARCHIVED) when the running version has been archived mid-session', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        session: { id: 'sess-1', status: 'active', versionId: 'v1', respondentUserId: USER },
+        versionArchivedAt: new Date(),
+      })
+    );
+    const res = await POST(req({ message: 'hi' }), ctx);
+    expect(res.status).toBe(410);
+    expect((await res.json()).error.code).toBe('VERSION_ARCHIVED');
+  });
+
+  it('still serves a preview session on an archived version (admin rehearsal is exempt)', async () => {
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        // Authenticated owner keeps turn-access simple; `isPreview` is the branch under test.
+        session: {
+          id: 'sess-1',
+          status: 'active',
+          versionId: 'v1',
+          respondentUserId: USER,
+          isPreview: true,
+        },
+        versionArchivedAt: new Date(),
+      })
+    );
+    // Not the 410 gate — a preview turn proceeds (streamed SSE 200), proving the exemption.
+    expect((await POST(req({ message: 'hi' }), ctx)).status).toBe(200);
   });
 
   it('429s when the per-turn sub-cap is exceeded', async () => {

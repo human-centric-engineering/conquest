@@ -129,7 +129,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(tileValue('Questionnaires')).toBe('4');
     expect(tileValue('Launched')).toBe('1');
     expect(tileValue('Drafts')).toBe('3');
-    expect(tileValue('Archived')).toBe('0');
+    expect(tileValue('Deleted')).toBe('0');
     // Sanity: the table received the same rows.
     expect(screen.getByTestId('questionnaires-table')).toHaveAttribute('data-row-count', '4');
   });
@@ -304,7 +304,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(screen.getByTestId('new-questionnaire-menu')).toBeInTheDocument();
   });
 
-  it('counts archived (soft-deleted) questionnaires in the Archived tile from the archived sweep', async () => {
+  it('counts archived (soft-deleted) questionnaires in the Deleted tile from the archived sweep', async () => {
     // Archived is a separate slice the default list excludes — the tile reads the
     // `?archived=true` sweep's meta.total, NOT a status tally of the active rows.
     vi.mocked(parseApiResponse).mockImplementation(async (res: unknown) => {
@@ -330,7 +330,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     render(await QuestionnairesListPage());
 
     // Archived tile = archived sweep total (2); Questionnaires tile = active total (4).
-    expect(tileValue('Archived')).toBe('2');
+    expect(tileValue('Deleted')).toBe('2');
     expect(tileValue('Questionnaires')).toBe('4');
   });
 
@@ -426,7 +426,7 @@ describe('QuestionnairesListPage stat tiles', () => {
 
     expect(tileValue('Drafts')).toBe('2');
     expect(tileValue('Launched')).toBe('0');
-    expect(tileValue('Archived')).toBe('0');
+    expect(tileValue('Deleted')).toBe('0');
   });
 
   it('shows the data-slot embedding explainer (with live status)', async () => {

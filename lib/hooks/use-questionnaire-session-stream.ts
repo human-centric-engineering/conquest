@@ -22,6 +22,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { API } from '@/lib/api/endpoints';
+import {
+  VERSION_ARCHIVED_CODE,
+  VERSION_ARCHIVED_MESSAGE,
+} from '@/lib/app/questionnaire/version-archived';
 import { useTypingAnimation } from '@/lib/hooks/use-typing-animation';
 import { parseSessionEvent } from '@/lib/app/questionnaire/chat/parse-session-event';
 import {
@@ -172,6 +176,18 @@ function classifyHttpFailure(
         code: code ?? 'SESSION_UNAUTHORIZED',
         title: 'Your session has ended',
         message: 'Please sign in again to continue your questionnaire.',
+      },
+    };
+  }
+  // The version was archived mid-session (retired from respondents). Terminal, not transient — a
+  // retry would 410 again — so lock the composer (`not_active`) and show the archived notice.
+  if (httpStatus === 410 || code === VERSION_ARCHIVED_CODE) {
+    return {
+      status: 'not_active',
+      error: {
+        code: code ?? VERSION_ARCHIVED_CODE,
+        title: 'This questionnaire has been archived',
+        message: message ?? VERSION_ARCHIVED_MESSAGE,
       },
     };
   }

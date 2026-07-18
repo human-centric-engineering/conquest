@@ -264,6 +264,27 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.canSend).toBe(false);
   });
 
+  it('maps a 410 VERSION_ARCHIVED to a terminal archived notice (composer locked, no retry)', async () => {
+    fetchMock.mockResolvedValue(errorResponse(410, 'VERSION_ARCHIVED'));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.status).toBe('not_active');
+    expect(result.current.error!.code).toBe('VERSION_ARCHIVED');
+    expect(result.current.error!.title).toBe('This questionnaire has been archived');
+    expect(result.current.canSend).toBe(false);
+
+    // "No retry" is real, not just cosmetic: retry() re-enters the blocking-status guard (not_active)
+    // and resends nothing — so the archived session can't be poked back to life.
+    await act(async () => {
+      await result.current.retry();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('maps a 429 to a transient error that still allows retry', async () => {
     fetchMock.mockResolvedValue(errorResponse(429, 'RATE_LIMITED'));
 

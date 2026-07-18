@@ -102,6 +102,27 @@ describe('buildTurnContext', () => {
     expect(await buildTurnContext('nope')).toBeNull();
   });
 
+  it('maps versionArchivedAt off the version row — null when the version is active', async () => {
+    // This is the SOLE seam reading `archivedAt` from the DB onto `versionArchivedAt`; the
+    // messages-route 410 archive gate depends on it (the route test mocks buildTurnContext wholesale).
+    const graph = sessionGraph();
+    (graph as unknown as { version: { archivedAt: Date | null } }).version.archivedAt = null;
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph);
+
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.versionArchivedAt).toBeNull();
+  });
+
+  it('maps versionArchivedAt off the version row — the archive marker when the version is archived', async () => {
+    const archivedAt = new Date('2026-07-18T00:00:00.000Z');
+    const graph = sessionGraph();
+    (graph as unknown as { version: { archivedAt: Date | null } }).version.archivedAt = archivedAt;
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(graph);
+
+    const loaded = await buildTurnContext('sess-1');
+    expect(loaded!.versionArchivedAt).toEqual(archivedAt);
+  });
+
   it('maps questions, slots, and the active question (the prior turn target)', async () => {
     (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionGraph());
     const loaded = await buildTurnContext('sess-1');

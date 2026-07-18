@@ -34,7 +34,9 @@ import {
   hasLaunchBlockers,
 } from '@/app/api/v1/app/questionnaires/_lib/launch-blockers';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { logger } from '@/lib/logging';
 import { copyVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/copy-version-graph';
+import { setVersionArchived } from '@/app/api/v1/app/questionnaires/_lib/version-archive';
 import {
   jsonInput,
   type ScopedVersion,
@@ -84,6 +86,21 @@ async function readForkConfirmState(): Promise<'confirmed' | 'prompt' | 'legacy'
   } catch {
     // No request scope (seeds/scripts/tests) — never block a non-interactive caller.
     return 'legacy';
+  }
+}
+
+/**
+ * Opt-in signal from the `x-fork-archive-source` header: the admin ticked "archive the
+ * previous version" in the fork-confirm dialog, so once the new draft is created we also
+ * soft-archive the version it branched from. Absent for every non-interactive caller
+ * (seeds/scripts/tests) and for an unticked confirm — so the fork behaviour is otherwise
+ * unchanged. Orthogonal to `status`, so archiving the source never strands its live work.
+ */
+async function readArchiveSourceOnFork(): Promise<boolean> {
+  try {
+    return (await headers()).get('x-fork-archive-source') === 'true';
+  } catch {
+    return false;
   }
 }
 
@@ -216,6 +233,23 @@ export async function forkVersionIfLaunched(
     metadata: { questionnaireId, sourceVersionId: versionId, versionNumber: created.versionNumber },
     clientIp: audit?.clientIp ?? null,
   });
+
+  // Opt-in (dialog checkbox → `x-fork-archive-source`): tuck the superseded source version away.
+  // A soft-archive only — its `status` and any in-flight sessions are untouched; it just drops out
+  // of the default admin version list. Done after the fork commits so a failed copy never archives.
+  // Best-effort: the fork (and the edit that follows in the route) is the real work, so a blip on
+  // this tidy-up marker must not 500 the edit or orphan the new draft — log and carry on.
+  if (await readArchiveSourceOnFork()) {
+    try {
+      await setVersionArchived(versionId, true, audit);
+    } catch (err) {
+      logger.warn('Archive-on-fork failed; the fork succeeded but the source stays visible', {
+        sourceVersionId: versionId,
+        forkedVersionId: created.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   return {
     versionId: created.id,

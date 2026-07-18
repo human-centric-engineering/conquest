@@ -21,6 +21,10 @@
 import { prisma } from '@/lib/db/client';
 import type { Prisma } from '@prisma/client';
 import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
+import {
+  VERSION_ARCHIVED_CODE,
+  VERSION_ARCHIVED_MESSAGE,
+} from '@/lib/app/questionnaire/version-archived';
 import { hashInvitationToken } from '@/lib/app/questionnaire/invitations/token';
 import { isInvitationTransitionAllowed } from '@/lib/app/questionnaire/invitations/status';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
@@ -153,6 +157,7 @@ export async function createSessionFromInvitation(
       version: {
         select: {
           status: true,
+          archivedAt: true,
           config: { select: { anonymousMode: true, profileFields: true } },
         },
       },
@@ -186,6 +191,17 @@ export async function createSessionFromInvitation(
       status: 409,
       code: 'INVITATION_NOT_STARTABLE',
       message: `An invitation in "${invitation.status}" cannot start a session`,
+      ...attribution,
+    };
+  }
+  // An archived version is retired from respondents even while still `launched` — refuse with a
+  // distinct code so the surface shows the "archived" notice rather than a generic "not open".
+  if (invitation.version.archivedAt) {
+    return {
+      ok: false,
+      status: 410,
+      code: VERSION_ARCHIVED_CODE,
+      message: VERSION_ARCHIVED_MESSAGE,
       ...attribution,
     };
   }
@@ -280,10 +296,20 @@ export async function createSessionForVersion(
 ): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, status: true, config: { select: { accessMode: true } } },
+    select: { id: true, status: true, archivedAt: true, config: { select: { accessMode: true } } },
   });
 
-  // A non-existent or unlaunched version is a 404 — don't reveal draft/archived versions.
+  // An archived version was public but is now retired — show the "archived" notice, not a 404
+  // (unlike a draft, its prior existence is not a secret worth hiding).
+  if (version?.archivedAt) {
+    return {
+      ok: false,
+      status: 410,
+      code: VERSION_ARCHIVED_CODE,
+      message: VERSION_ARCHIVED_MESSAGE,
+    };
+  }
+  // A non-existent or unlaunched version is a 404 — don't reveal draft versions.
   if (!version || version.status !== 'launched') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
@@ -397,9 +423,18 @@ export async function createPreviewSession(versionId: string): Promise<CreateSes
 export async function createAnonymousSession(versionId: string): Promise<CreateSessionResult> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
-    select: { id: true, status: true, config: { select: { accessMode: true } } },
+    select: { id: true, status: true, archivedAt: true, config: { select: { accessMode: true } } },
   });
 
+  // An archived version is retired from the public surface — the boot shows the archived notice.
+  if (version?.archivedAt) {
+    return {
+      ok: false,
+      status: 410,
+      code: VERSION_ARCHIVED_CODE,
+      message: VERSION_ARCHIVED_MESSAGE,
+    };
+  }
   if (!version || version.status !== 'launched') {
     return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
   }
@@ -455,7 +490,7 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
       // Cohorts & Rounds: the server-trusted round context this frictionless link carries.
       roundId: true,
       cohortMemberId: true,
-      version: { select: { status: true } },
+      version: { select: { status: true, archivedAt: true } },
     },
   });
 
@@ -481,6 +516,15 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
       status: 410,
       code: 'INVITATION_EXPIRED',
       message: 'This invitation link has expired',
+    };
+  }
+  // An archived version is retired from respondents — the frictionless link shows the archived notice.
+  if (invitation.version.archivedAt) {
+    return {
+      ok: false,
+      status: 410,
+      code: VERSION_ARCHIVED_CODE,
+      message: VERSION_ARCHIVED_MESSAGE,
     };
   }
   if (invitation.version.status !== 'launched') {

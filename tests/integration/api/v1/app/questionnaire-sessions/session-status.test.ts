@@ -88,6 +88,7 @@ function ctx(
       roundId: null,
       cohortMemberId: null,
     },
+    versionArchivedAt: null,
     base: {
       sessionId: 'sess-1',
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...over.config },

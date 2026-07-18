@@ -46,7 +46,16 @@ export function parseForkConfirmDetails(raw: unknown): ForkConfirmDetails | null
   return result.success ? result.data : null;
 }
 
-type Handler = (details: ForkConfirmDetails) => Promise<boolean>;
+/**
+ * The admin's answer to the fork-confirm dialog. `confirmed` gates the retry; `archiveSource` is the
+ * "archive the previous version" checkbox — honoured only when `confirmed` (a cancel archives nothing).
+ */
+export interface ForkConfirmChoice {
+  confirmed: boolean;
+  archiveSource: boolean;
+}
+
+type Handler = (details: ForkConfirmDetails) => Promise<ForkConfirmChoice>;
 
 let activeHandler: Handler | null = null;
 
@@ -59,11 +68,11 @@ export function registerForkConfirmHandler(handler: Handler): () => void {
 }
 
 /**
- * Ask the mounted provider to confirm a fork. Resolves `true` (proceed) / `false` (cancel). With no
- * provider mounted we can't prompt, so we resolve `false` — nothing forks silently, which is the
- * entire point of the confirmation.
+ * Ask the mounted provider to confirm a fork. Resolves the admin's {@link ForkConfirmChoice}. With no
+ * provider mounted we can't prompt, so we resolve `confirmed: false` — nothing forks silently, which
+ * is the entire point of the confirmation.
  */
-export async function requestForkConfirm(details: ForkConfirmDetails): Promise<boolean> {
-  if (!activeHandler) return false;
+export async function requestForkConfirm(details: ForkConfirmDetails): Promise<ForkConfirmChoice> {
+  if (!activeHandler) return { confirmed: false, archiveSource: false };
   return activeHandler(details);
 }

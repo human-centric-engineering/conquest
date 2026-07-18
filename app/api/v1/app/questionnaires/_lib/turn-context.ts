@@ -166,6 +166,12 @@ export interface LoadedTurnContext {
     /** Selectable interviewer persona: the respondent's chosen persona key (null ⇒ default applies). */
     selectedPersonaKey: string | null;
   };
+  /**
+   * Respondent-facing archive marker on the running version (ISO `Date` or null). Non-null = the
+   * version has been archived and must stop serving respondents; the turn route refuses with
+   * `VERSION_ARCHIVED` (preview sessions are exempt — admins may still rehearse).
+   */
+  versionArchivedAt: Date | null;
   base: TurnContextBase;
   /** Richer slot views for the capability args (the orchestrator only needs QuestionView). */
   slots: CapabilitySlotView[];
@@ -234,6 +240,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
           // Version framing for the conversational question phraser (F6 interviewer).
           goal: true,
           audience: true,
+          // Respondent-facing archive gate: an archived version stops serving turns (the route
+          // refuses with VERSION_ARCHIVED) even while its status is still `launched`.
+          archivedAt: true,
           config: { select: CONFIG_SELECT },
           // Data Slots feature: the version's data slots (the abstraction-layer targets). The
           // `questions` mapping (AppDataSlotQuestion) rides along so the extractor can ALSO answer
@@ -483,6 +492,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       cohortMemberId: session.cohortMemberId,
       selectedPersonaKey: session.selectedPersonaKey,
     },
+    versionArchivedAt: session.version.archivedAt,
     base: {
       sessionId: session.id,
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...config },

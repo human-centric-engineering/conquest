@@ -51,6 +51,10 @@ import {
   PROFILE_FIELD_VALIDATION_MODES,
 } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
+import {
+  VERSION_ARCHIVED_CODE,
+  VERSION_ARCHIVED_MESSAGE,
+} from '@/lib/app/questionnaire/version-archived';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
@@ -152,6 +156,8 @@ type BootState =
       refRaw: string | null;
       answeredCount: number;
     }
+  /** The version has been archived — a terminal notice, not a retryable error (no "Try again"). */
+  | { phase: 'archived'; message: string }
   | { phase: 'error'; message: string };
 
 /** The transcript-read response shape — validated at the fetch boundary (no `as` on the wire). */
@@ -464,6 +470,11 @@ export function AnonymousSessionBoot({
       const parsedBody = anonCreateResponseSchema.safeParse(await res.json());
       const body = parsedBody.success ? parsedBody.data : null;
       if (!res.ok || !body || !body.success || !body.data) {
+        // An archived version is a permanent state — show the "archived" notice, not a retryable error.
+        if (body?.error?.code === VERSION_ARCHIVED_CODE) {
+          setState({ phase: 'archived', message: body.error.message ?? VERSION_ARCHIVED_MESSAGE });
+          return null;
+        }
         setState({
           phase: 'error',
           message: body?.error?.message ?? 'This questionnaire is not available right now.',
@@ -591,6 +602,17 @@ export function AnonymousSessionBoot({
         onStartNew={() => void handleStartNew(state.stored)}
         busy={gateBusy}
       />
+    );
+  }
+
+  if (state.phase === 'archived') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-foreground text-base font-semibold">
+          This questionnaire has been archived
+        </p>
+        <p className="text-muted-foreground max-w-sm text-sm">{state.message}</p>
+      </div>
     );
   }
 

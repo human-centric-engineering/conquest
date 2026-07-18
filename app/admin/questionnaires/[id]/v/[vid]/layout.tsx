@@ -120,6 +120,7 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
                   id: ver.id,
                   versionNumber: ver.versionNumber,
                   status: ver.status,
+                  archivedAt: ver.archivedAt,
                 }))}
               />
             </div>

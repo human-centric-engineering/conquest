@@ -17,7 +17,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Archive,
   ArchiveRestore,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +24,7 @@ import {
   Loader2,
   MoreHorizontal,
   Search,
+  Trash2,
 } from 'lucide-react';
 
 import { UploadQuestionnaireDialog } from '@/components/admin/questionnaires/upload-questionnaire-dialog';
@@ -244,7 +244,7 @@ export function QuestionnairesTable({
         <div
           className="inline-flex rounded-md border p-0.5"
           role="group"
-          aria-label="Active or archived"
+          aria-label="Active or deleted"
         >
           <Button
             type="button"
@@ -264,7 +264,7 @@ export function QuestionnairesTable({
             aria-pressed={view === 'archived'}
             onClick={() => handleViewChange('archived')}
           >
-            Archived
+            Deleted
           </Button>
         </div>
         {isLoading && <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />}
@@ -299,7 +299,7 @@ export function QuestionnairesTable({
                 <TableCell colSpan={showDataSlots ? 9 : 8} className="py-10 text-center">
                   {view === 'archived' ? (
                     <p className="text-muted-foreground">
-                      No archived questionnaires. Archived questionnaires are hidden from the active
+                      No deleted questionnaires. Deleted questionnaires are hidden from the active
                       list and can be restored here.
                     </p>
                   ) : (
@@ -384,8 +384,8 @@ export function QuestionnairesTable({
                                 }
                                 disabled={isArchivePending}
                               >
-                                <Archive className="mr-2 h-4 w-4" />
-                                Archive
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
                               </DropdownMenuItem>
                             </>
                           )}
@@ -428,8 +428,8 @@ export function QuestionnairesTable({
         </div>
       </div>
 
-      {/* Archive confirmation — soft-delete is reversible, but it disappears from the
-          active list, so a confirm avoids accidental clicks. */}
+      {/* Delete confirmation — this soft-delete is reversible, but it disappears from
+          the active list, so a confirm avoids accidental clicks. */}
       <AlertDialog
         open={pendingArchive !== null}
         onOpenChange={(open) => {
@@ -438,10 +438,10 @@ export function QuestionnairesTable({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Archive this questionnaire?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this questionnaire?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingArchive
-                ? `“${pendingArchive.title}” will be hidden from the active list. Nothing is deleted — you can restore it any time from the Archived view.`
+                ? `“${pendingArchive.title}” will be removed from the active list. This is reversible — nothing is destroyed, and you can restore it any time from the Deleted view.`
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -456,7 +456,7 @@ export function QuestionnairesTable({
               }}
               disabled={isArchivePending}
             >
-              {isArchivePending ? 'Archiving…' : 'Archive'}
+              {isArchivePending ? 'Deleting…' : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

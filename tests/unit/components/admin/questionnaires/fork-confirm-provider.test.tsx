@@ -41,7 +41,7 @@ describe('ForkConfirmProvider', () => {
     expect(screen.queryByText('Create a new draft version?')).not.toBeInTheDocument();
   });
 
-  it('opens the dialog with the server lineage and resolves true on confirm', async () => {
+  it('opens the dialog with the server lineage and resolves confirmed on confirm', async () => {
     const pending = requestForkConfirm(DETAILS);
 
     expect(await screen.findByText('Create a new draft version?')).toBeInTheDocument();
@@ -50,30 +50,41 @@ describe('ForkConfirmProvider', () => {
     expect(screen.getByText(/branching from this/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create draft v3 & save' }));
-    await expect(pending).resolves.toBe(true);
+    // Archive checkbox left unticked → archiveSource false.
+    await expect(pending).resolves.toEqual({ confirmed: true, archiveSource: false });
     // Dialog closes after settling.
     await waitFor(() =>
       expect(screen.queryByText('Create a new draft version?')).not.toBeInTheDocument()
     );
   });
 
-  it('resolves false on cancel', async () => {
+  it('carries the archive-previous-version choice when the checkbox is ticked', async () => {
+    const pending = requestForkConfirm(DETAILS);
+    await screen.findByText('Create a new draft version?');
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft v3 & save' }));
+
+    await expect(pending).resolves.toEqual({ confirmed: true, archiveSource: true });
+  });
+
+  it('resolves declined on cancel', async () => {
     const pending = requestForkConfirm(DETAILS);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
-    await expect(pending).resolves.toBe(false);
+    await expect(pending).resolves.toEqual({ confirmed: false, archiveSource: false });
   });
 
   it('declines a second concurrent request instead of orphaning the first', async () => {
     // Two forking edits land near-simultaneously; only one dialog can show. The second must
-    // resolve false immediately (not overwrite the first's resolver, which would hang it).
+    // resolve declined immediately (not overwrite the first's resolver, which would hang it).
     const first = requestForkConfirm(DETAILS);
     await screen.findByText('Create a new draft version?');
     const second = requestForkConfirm(DETAILS);
-    await expect(second).resolves.toBe(false);
+    await expect(second).resolves.toEqual({ confirmed: false, archiveSource: false });
 
     // The first is still live and resolves normally on confirm.
     fireEvent.click(screen.getByRole('button', { name: 'Create draft v3 & save' }));
-    await expect(first).resolves.toBe(true);
+    await expect(first).resolves.toEqual({ confirmed: true, archiveSource: false });
   });
 
   it('settles a pending confirmation as cancelled when the provider unmounts', async () => {
@@ -86,6 +97,6 @@ describe('ForkConfirmProvider', () => {
     await screen.findByText('Create a new draft version?');
 
     unmount(); // e.g. navigating away with the dialog still open
-    await expect(pending).resolves.toBe(false);
+    await expect(pending).resolves.toEqual({ confirmed: false, archiveSource: false });
   });
 });

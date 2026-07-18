@@ -74,22 +74,38 @@ describe('authoringMutate', () => {
       .mockResolvedValueOnce(
         jsonResponse({ success: true, data: { ok: 1 }, meta: { forked: true, versionId: 'v3' } })
       );
-    bridge.requestForkConfirm.mockResolvedValue(true);
+    bridge.requestForkConfirm.mockResolvedValue({ confirmed: true, archiveSource: false });
 
     const result = await authoringMutate('PATCH', '/cfg', { a: 1 });
 
     // The dialog was fed the server's lineage details.
     expect(bridge.requestForkConfirm).toHaveBeenCalledWith(FORK_409.error.details);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect((fetchMock.mock.calls[1][1].headers as Record<string, string>)['x-fork-confirm']).toBe(
-      'confirmed'
-    );
+    const retryHeaders = fetchMock.mock.calls[1][1].headers as Record<string, string>;
+    expect(retryHeaders['x-fork-confirm']).toBe('confirmed');
+    // Checkbox unticked → no archive header sent.
+    expect(retryHeaders['x-fork-archive-source']).toBeUndefined();
     expect(result.meta?.forked).toBe(true);
+  });
+
+  it('sends x-fork-archive-source on the retry when the admin opts to archive the previous version', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(FORK_409))
+      .mockResolvedValueOnce(
+        jsonResponse({ success: true, data: { ok: 1 }, meta: { forked: true } })
+      );
+    bridge.requestForkConfirm.mockResolvedValue({ confirmed: true, archiveSource: true });
+
+    await authoringMutate('PATCH', '/cfg', { a: 1 });
+
+    const retryHeaders = fetchMock.mock.calls[1][1].headers as Record<string, string>;
+    expect(retryHeaders['x-fork-confirm']).toBe('confirmed');
+    expect(retryHeaders['x-fork-archive-source']).toBe('true');
   });
 
   it('throws ForkCancelledError and does NOT retry when the fork is declined', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(FORK_409));
-    bridge.requestForkConfirm.mockResolvedValue(false);
+    bridge.requestForkConfirm.mockResolvedValue({ confirmed: false, archiveSource: false });
 
     await expect(authoringMutate('PATCH', '/cfg', {})).rejects.toBeInstanceOf(ForkCancelledError);
     expect(fetchMock).toHaveBeenCalledTimes(1); // no retry

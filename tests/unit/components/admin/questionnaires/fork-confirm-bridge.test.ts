@@ -23,36 +23,40 @@ const DETAILS: ForkConfirmDetails = {
   versions: [{ versionNumber: 1, status: 'launched' }],
 };
 
+const DECLINED = { confirmed: false, archiveSource: false };
+const CONFIRMED = { confirmed: true, archiveSource: false };
+const CONFIRMED_ARCHIVE = { confirmed: true, archiveSource: true };
+
 // Leave the module-level handler slot clean between tests.
 afterEach(() => {
-  registerForkConfirmHandler(() => Promise.resolve(false))();
+  registerForkConfirmHandler(() => Promise.resolve(DECLINED))();
 });
 
 describe('fork-confirm-bridge', () => {
-  it('resolves false when no handler is registered (never forks silently)', async () => {
+  it('resolves declined when no handler is registered (never forks silently)', async () => {
     // Ensure the slot is empty: register then immediately unregister.
-    registerForkConfirmHandler(() => Promise.resolve(true))();
-    await expect(requestForkConfirm(DETAILS)).resolves.toBe(false);
+    registerForkConfirmHandler(() => Promise.resolve(CONFIRMED))();
+    await expect(requestForkConfirm(DETAILS)).resolves.toEqual(DECLINED);
   });
 
-  it('forwards the details to the registered handler and returns its result', async () => {
-    const handler = vi.fn(() => Promise.resolve(true));
+  it('forwards the details to the registered handler and returns its choice', async () => {
+    const handler = vi.fn(() => Promise.resolve(CONFIRMED_ARCHIVE));
     registerForkConfirmHandler(handler);
 
-    await expect(requestForkConfirm(DETAILS)).resolves.toBe(true);
+    await expect(requestForkConfirm(DETAILS)).resolves.toEqual(CONFIRMED_ARCHIVE);
     expect(handler).toHaveBeenCalledWith(DETAILS);
   });
 
   it('unregister only clears the handler it was issued for', async () => {
-    const first = vi.fn(() => Promise.resolve(true));
+    const first = vi.fn(() => Promise.resolve(CONFIRMED));
     const unregisterFirst = registerForkConfirmHandler(first);
     // A newer handler replaces the slot; the first's unregister must NOT clear it.
-    const second = vi.fn(() => Promise.resolve(false));
+    const second = vi.fn(() => Promise.resolve(DECLINED));
     registerForkConfirmHandler(second);
 
     unregisterFirst();
 
-    await expect(requestForkConfirm(DETAILS)).resolves.toBe(false);
+    await expect(requestForkConfirm(DETAILS)).resolves.toEqual(DECLINED);
     expect(second).toHaveBeenCalledWith(DETAILS);
     expect(first).not.toHaveBeenCalled();
   });
