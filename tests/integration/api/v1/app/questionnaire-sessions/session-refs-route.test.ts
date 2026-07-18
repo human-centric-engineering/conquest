@@ -91,11 +91,18 @@ describe('GET …/questionnaire-sessions/refs', () => {
       limit: 10,
       q: '7F3K',
       status: 'active',
+      sort: 'createdAt',
+      order: 'desc',
     });
   });
 
   it('defaults pagination when no params are supplied', async () => {
     await GET(req(), {});
-    expect(listAdminSessionRefs).toHaveBeenCalledWith({ page: 1, limit: 25 });
+    expect(listAdminSessionRefs).toHaveBeenCalledWith({
+      page: 1,
+      limit: 25,
+      sort: 'createdAt',
+      order: 'desc',
+    });
   });
 });

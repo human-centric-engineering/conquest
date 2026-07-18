@@ -1,11 +1,15 @@
 /**
- * Alpha session-ref browser (admin).
+ * Alpha session browser (admin).
  *
- * A cross-questionnaire list of session support references + dates + statuses. Each ref opens the
- * session viewer (inspect the conversation + regenerate its report via the re-run panel); a sibling
- * link opens the version analytics. Deliberately ALPHA-ONLY — the surface exposes respondent-shaped
- * data that is protected once alpha ends, so it `notFound()`s unless the product is in the alpha
- * release stage AND the live-sessions flag is on (mirrors the API gate).
+ * A cross-questionnaire console over respondent sessions: a KPI + charts overview, a URL-driven filter
+ * bar (status, type, questionnaire, client, cohort, round, date window), and a sortable, paginated
+ * table. Each row opens a slide-over with the conversation transcript + generated report (and a
+ * regenerate action) WITHOUT navigating away, so the list never loses position. Deliberately ALPHA-ONLY
+ * — the surface exposes respondent-shaped data that is protected once alpha ends, so it `notFound()`s
+ * unless the product is in the alpha stage AND the live-sessions flag is on (mirrors the API gate).
+ *
+ * All list/stats state lives in the URL: this server page reads `searchParams`, seeds the already-
+ * filtered first page + stats + filter options, and the client re-fetches on any URL change.
  */
 
 import type { Metadata } from 'next';
@@ -17,56 +21,122 @@ import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { logger } from '@/lib/logging';
 import { IS_ALPHA } from '@/lib/app/release-stage';
-import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
+import {
+  loadAdminSessionFilterOptions,
+  type AdminSessionRefItem,
+  type AdminSessionFilterOptions,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
+import type { AdminSessionStats } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-stats';
 import type { PaginationMeta } from '@/types/api';
 
 export const metadata: Metadata = {
-  title: 'Session refs · Alpha',
-  description: 'Browse session support references, open a session, and regenerate its report.',
+  title: 'Sessions · Alpha',
+  description:
+    'Browse respondent sessions, filter and chart them, and open a conversation + report.',
 };
 
 const EMPTY_META: PaginationMeta = { page: 1, limit: 25, total: 0, totalPages: 1 };
+const EMPTY_STATS: AdminSessionStats = {
+  total: 0,
+  completed: 0,
+  active: 0,
+  avgCompletion: 0,
+  byStatus: [],
+  overTime: [],
+  completionBuckets: [],
+  byClient: [],
+  byQuestionnaire: [],
+};
 
-/**
- * Pre-render page 1. Fetch failures never throw — the table renders an empty state and re-fetches
- * client-side on the first filter change.
- */
-async function getSessions(): Promise<{ items: AdminSessionRefItem[]; meta: PaginationMeta }> {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+/** Forward the page's search params verbatim to the list/stats endpoints (they validate + ignore unknowns). */
+function toQueryString(sp: SearchParams): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (typeof v === 'string') params.set(k, v);
+    else if (Array.isArray(v) && typeof v[0] === 'string') params.set(k, v[0]);
+  }
+  return params.toString();
+}
+
+/** Pre-render the first (filtered) page + stats. Fetch failures never throw — the client re-fetches. */
+async function seed(
+  qs: string
+): Promise<{ items: AdminSessionRefItem[]; meta: PaginationMeta; stats: AdminSessionStats }> {
+  const suffix = qs ? `?${qs}` : '';
   try {
-    const res = await serverFetch(`${API.APP.QUESTIONNAIRE_SESSIONS.REFS}?page=1&limit=25`);
-    if (!res.ok) return { items: [], meta: EMPTY_META };
-    const body = await parseApiResponse<AdminSessionRefItem[]>(res);
-    if (!body.success) return { items: [], meta: EMPTY_META };
-    return { items: body.data, meta: parsePaginationMeta(body.meta) ?? EMPTY_META };
+    const [listRes, statsRes] = await Promise.all([
+      serverFetch(`${API.APP.QUESTIONNAIRE_SESSIONS.REFS}${suffix}`),
+      serverFetch(`${API.APP.QUESTIONNAIRE_SESSIONS.REFS_STATS}${suffix}`),
+    ]);
+    const listBody = listRes.ok
+      ? await parseApiResponse<AdminSessionRefItem[]>(listRes)
+      : { success: false as const };
+    const statsBody = statsRes.ok
+      ? await parseApiResponse<AdminSessionStats>(statsRes)
+      : { success: false as const };
+    return {
+      items: listBody.success ? listBody.data : [],
+      meta: listBody.success ? (parsePaginationMeta(listBody.meta) ?? EMPTY_META) : EMPTY_META,
+      stats: statsBody.success ? statsBody.data : EMPTY_STATS,
+    };
   } catch (err) {
-    logger.error('alpha session-ref page: initial fetch failed', err);
-    return { items: [], meta: EMPTY_META };
+    logger.error('alpha sessions page: initial seed failed', err);
+    return { items: [], meta: EMPTY_META, stats: EMPTY_STATS };
   }
 }
 
-export default async function AlphaSessionRefsPage() {
+export default async function AlphaSessionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   // Alpha-only surface: hidden entirely unless the product is in the alpha stage.
   if (!IS_ALPHA) notFound();
 
-  const { items, meta } = await getSessions();
+  const sp = await searchParams;
+  const qs = toQueryString(sp);
+
+  let options: AdminSessionFilterOptions;
+  try {
+    options = await loadAdminSessionFilterOptions();
+  } catch (err) {
+    logger.error('alpha sessions page: filter options failed', err);
+    options = {
+      clients: [],
+      questionnaires: [],
+      cohorts: [],
+      rounds: [],
+      hasOpenEnded: false,
+      hasUnassignedClient: false,
+    };
+  }
+
+  const { items, meta, stats } = await seed(qs);
 
   return (
     <div className="space-y-6">
       <header className="space-y-1">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold">Session references</h1>
+          <h1 className="text-2xl font-semibold">Sessions</h1>
           <span className="rounded border border-amber-300/70 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:border-amber-400/30 dark:bg-amber-950/40 dark:text-amber-200">
             Alpha
           </span>
         </div>
         <p className="text-muted-foreground max-w-2xl text-sm">
-          Every respondent session by its support reference. Click a reference to open the session —
-          view the conversation and regenerate its report — or jump to that questionnaire&rsquo;s
-          analytics. This browser is available during alpha only and is protected afterwards.
+          Every respondent session across all questionnaires — filter, chart, and open one to read
+          its conversation and report (and regenerate it). This browser is available during alpha
+          only and is protected afterwards.
         </p>
       </header>
 
-      <SessionRefBrowser initialItems={items} initialMeta={meta} />
+      <SessionRefBrowser
+        initialItems={items}
+        initialMeta={meta}
+        initialStats={stats}
+        options={options}
+      />
     </div>
   );
 }

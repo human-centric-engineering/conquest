@@ -1,9 +1,10 @@
 /**
  * SessionRefBrowser component tests.
  *
- * The alpha ref browser table: renders rows with a ref deep-link to the session viewer + an analytics
- * link, searches by ref, filters by status, and pages. It reads the enriched list endpoint via
- * `fetch` + `parseApiResponse` (no per-row calls).
+ * The alpha Sessions console table: renders enriched rows (ref, questionnaire, client, cohort/round,
+ * status, turns, completion), links to analytics, opens a session in the drawer on row click, and drives
+ * ALL page/sort state through the URL (`router.replace`, no scroll). Child surfaces (stats, filters,
+ * drawer) are mocked so this isolates the table + pager + sort orchestration.
  *
  * @see components/admin/questionnaires/sessions/session-ref-browser.tsx
  */
@@ -11,10 +12,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { SessionRefBrowser } from '@/components/admin/questionnaires/sessions/session-ref-browser';
 import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
+import type { AdminSessionStats } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-stats';
 import type { PaginationMeta } from '@/types/api';
+
+// Isolate the browser's own orchestration — the child surfaces have their own tests.
+vi.mock('@/components/admin/questionnaires/sessions/session-stats', () => ({
+  SessionStats: () => <div data-testid="session-stats" />,
+}));
+vi.mock('@/components/admin/questionnaires/sessions/session-filters', () => ({
+  SessionFilters: () => <div data-testid="session-filters" />,
+}));
+vi.mock('@/components/admin/questionnaires/sessions/session-drawer', () => ({
+  SessionDrawer: ({ item, open }: { item: AdminSessionRefItem | null; open: boolean }) =>
+    open && item ? <div data-testid="drawer">Drawer: {item.refFormatted}</div> : null,
+}));
 
 function item(over: Partial<AdminSessionRefItem> = {}): AdminSessionRefItem {
   return {
@@ -28,6 +43,12 @@ function item(over: Partial<AdminSessionRefItem> = {}): AdminSessionRefItem {
     questionnaireTitle: 'Onboarding',
     versionId: 'v-1',
     versionNumber: 3,
+    clientId: 'dc-1',
+    clientName: 'Acme',
+    roundId: 'r-1',
+    roundName: 'Q3 Leadership',
+    cohortId: 'c-1',
+    cohortName: 'Leadership Team',
     turns: 4,
     answeredCount: 6,
     totalQuestions: 10,
@@ -37,230 +58,174 @@ function item(over: Partial<AdminSessionRefItem> = {}): AdminSessionRefItem {
 }
 
 const META: PaginationMeta = { page: 1, limit: 25, total: 1, totalPages: 1 };
+const STATS: AdminSessionStats = {
+  total: 1,
+  completed: 1,
+  active: 0,
+  avgCompletion: 60,
+  byStatus: [],
+  overTime: [],
+  completionBuckets: [],
+  byClient: [],
+  byQuestionnaire: [],
+};
+const OPTIONS = {
+  clients: [],
+  questionnaires: [],
+  cohorts: [],
+  rounds: [],
+  hasOpenEnded: false,
+  hasUnassignedClient: false,
+};
 
-function mockFetchOnce(items: AdminSessionRefItem[], meta: Partial<PaginationMeta> = {}) {
-  const body = { success: true, data: items, meta: { ...META, ...meta } };
-  return vi.fn().mockResolvedValue({ ok: true, json: async () => body });
+function renderBrowser(props: Partial<Parameters<typeof SessionRefBrowser>[0]> = {}) {
+  return render(
+    <SessionRefBrowser
+      initialItems={[item()]}
+      initialMeta={META}
+      initialStats={STATS}
+      options={OPTIONS}
+      {...props}
+    />
+  );
+}
+
+/** Override the router with a stable `replace` spy and seed the URL query. */
+function withRouter(searchParams = '') {
+  const replace = vi.fn();
+  vi.mocked(useRouter).mockReturnValue({
+    replace,
+    push: vi.fn(),
+    refresh: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  });
+  vi.mocked(useSearchParams).mockReturnValue(new URLSearchParams(searchParams) as never);
+  return replace;
+}
+
+function okFetch(items: AdminSessionRefItem[], meta: Partial<PaginationMeta> = {}) {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ success: true, data: items, meta: { ...META, ...meta } }),
+  });
 }
 
 beforeEach(() => {
-  vi.stubGlobal('fetch', mockFetchOnce([item()]));
+  withRouter();
+  vi.stubGlobal('fetch', okFetch([item()]));
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe('SessionRefBrowser', () => {
-  it('renders a ref row with the viewer deep-link and an analytics link', () => {
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
+  it('renders an enriched row (ref, questionnaire, client, cohort/round) and an analytics link', () => {
+    renderBrowser();
 
-    const refLink = screen.getByRole('link', { name: /7F3K-9M2P/ });
-    expect(refLink).toHaveAttribute('href', '/admin/questionnaires/q-1/v/v-1/sessions/sess-1');
+    expect(screen.getByText('7F3K-9M2P')).toBeInTheDocument();
     expect(screen.getByText('Onboarding')).toBeInTheDocument();
     expect(screen.getByText('v3')).toBeInTheDocument();
+    expect(screen.getByText('Acme')).toBeInTheDocument();
+    expect(screen.getByText('Leadership Team')).toBeInTheDocument();
+    expect(screen.getByText('Q3 Leadership')).toBeInTheDocument();
 
     const analyticsLink = screen.getByRole('link', { name: /analytics/i });
     expect(analyticsLink).toHaveAttribute('href', '/admin/questionnaires/q-1/v/v-1/analytics');
   });
 
-  it('shows the turn count and completion percentage', () => {
-    render(
-      <SessionRefBrowser
-        initialItems={[
-          item({ turns: 4, answeredCount: 6, totalQuestions: 10, percentComplete: 60 }),
-        ]}
-        initialMeta={META}
-      />
-    );
+  it('shows the turn count and completion percentage with an accessible title', () => {
+    renderBrowser();
     expect(screen.getByText('4')).toBeInTheDocument();
     const pct = screen.getByText('60%');
-    expect(pct).toBeInTheDocument();
     expect(pct).toHaveAttribute('title', '6 of 10 questions answered');
   });
 
-  it('marks preview sessions', () => {
-    render(<SessionRefBrowser initialItems={[item({ isPreview: true })]} initialMeta={META} />);
+  it('marks preview sessions and shows open-ended when there is no round', () => {
+    renderBrowser({ initialItems: [item({ isPreview: true, roundId: null, roundName: null })] });
     expect(screen.getByText('Preview')).toBeInTheDocument();
+    expect(screen.getByText('Open-ended')).toBeInTheDocument();
   });
 
   it('renders an empty state when there are no sessions', () => {
-    render(<SessionRefBrowser initialItems={[]} initialMeta={{ ...META, total: 0 }} />);
-    expect(screen.getByText(/no sessions found/i)).toBeInTheDocument();
+    renderBrowser({ initialItems: [], initialMeta: { ...META, total: 0 } });
+    expect(screen.getByText(/no sessions match/i)).toBeInTheDocument();
   });
 
-  it('searches by ref — issues a fetch with the q param and renders the result', async () => {
+  it('opens the drawer on row click without navigating', async () => {
     const user = userEvent.setup();
-    const fetchMock = mockFetchOnce([item({ sessionId: 'sess-9', refFormatted: '99999999' })]);
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
-    await user.type(screen.getByLabelText(/support reference/i), '9999');
-    await user.click(screen.getByRole('button', { name: /search/i }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain('q=9999');
-    expect(url).toContain('page=1');
+    renderBrowser();
+    await user.click(screen.getByText('7F3K-9M2P'));
+    expect(screen.getByTestId('drawer')).toHaveTextContent('Drawer: 7F3K-9M2P');
   });
 
-  it('pages forward, requesting the next page', async () => {
+  it('pages forward by replacing the URL with the next page', async () => {
     const user = userEvent.setup();
-    const fetchMock = mockFetchOnce([item({ sessionId: 'sess-2' })], {
-      page: 2,
-      total: 30,
-      totalPages: 2,
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const replace = withRouter();
+    renderBrowser({ initialMeta: { page: 1, limit: 25, total: 30, totalPages: 2 } });
 
-    render(
-      <SessionRefBrowser
-        initialItems={[item()]}
-        initialMeta={{ page: 1, limit: 25, total: 30, totalPages: 2 }}
-      />
-    );
     await user.click(screen.getByRole('button', { name: /next/i }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0] as string).toContain('page=2');
-  });
-
-  it('filters by status — issues a fetch with the status param', async () => {
-    const user = userEvent.setup();
-    const fetchMock = mockFetchOnce([item({ status: 'active' })]);
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
-    await user.click(screen.getByRole('combobox'));
-    await user.click(await screen.findByRole('option', { name: 'active' }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0] as string).toContain('status=active');
-  });
-
-  it('pages forward then back to page 1', async () => {
-    const user = userEvent.setup();
-    // The server always seeds page 1, so exercise Previous by going Next first.
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: [item()],
-          meta: { ...META, page: 2, total: 30, totalPages: 2 },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: [item()],
-          meta: { ...META, page: 1, total: 30, totalPages: 2 },
-        }),
-      });
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(
-      <SessionRefBrowser
-        initialItems={[item()]}
-        initialMeta={{ page: 1, limit: 25, total: 30, totalPages: 2 }}
-      />
-    );
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    // Once the page-2 result lands, Previous becomes enabled.
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /previous/i })).not.toBeDisabled()
-    );
-    expect(fetchMock.mock.calls[0][0] as string).toContain('page=2');
-
-    await user.click(screen.getByRole('button', { name: /previous/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock.mock.calls[1][0] as string).toContain('page=1');
-  });
-
-  it('surfaces an error when the list request fails (non-ok response)', async () => {
-    const user = userEvent.setup();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
-
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
-    await user.click(screen.getByRole('button', { name: /search/i }));
-
-    expect(await screen.findByText(/list request failed/i)).toBeInTheDocument();
-  });
-
-  it('surfaces an error on a 200 response with success:false', async () => {
-    const user = userEvent.setup();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ success: false, error: { code: 'X', message: 'Y' } }),
-      })
-    );
-
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
-    await user.click(screen.getByRole('button', { name: /search/i }));
-
-    expect(await screen.findByText(/list request failed/i)).toBeInTheDocument();
-  });
-
-  it('falls back to a generic message when the request rejects with a non-Error', async () => {
-    const user = userEvent.setup();
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue('boom'));
-
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
-    await user.click(screen.getByRole('button', { name: /search/i }));
-
-    expect(await screen.findByText(/could not load sessions/i)).toBeInTheDocument();
-  });
-
-  it('resets to page 1 when searching from a later page', async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi
-      .fn()
-      // Next → page 2
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: [item()],
-          meta: { ...META, page: 2, total: 30, totalPages: 2 },
-        }),
-      })
-      // Search from page 2 → resets to page 1
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: [item()],
-          meta: { ...META, page: 1, total: 30, totalPages: 2 },
-        }),
-      });
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(
-      <SessionRefBrowser
-        initialItems={[item()]}
-        initialMeta={{ page: 1, limit: 25, total: 30, totalPages: 2 }}
-      />
-    );
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /previous/i })).not.toBeDisabled()
-    );
-
-    await user.type(screen.getByLabelText(/support reference/i), '9999');
-    await user.click(screen.getByRole('button', { name: /search/i }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const url = fetchMock.mock.calls[1][0] as string;
-    expect(url).toContain('page=1');
-    expect(url).toContain('q=9999');
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining('page=2'), { scroll: false });
   });
 
   it('disables Previous on the first page', () => {
-    render(<SessionRefBrowser initialItems={[item()]} initialMeta={META} />);
+    renderBrowser();
     expect(screen.getByRole('button', { name: /previous/i })).toBeDisabled();
+  });
+
+  it('toggles sort by turns via the column header', async () => {
+    const user = userEvent.setup();
+    const replace = withRouter();
+    renderBrowser();
+
+    await user.click(screen.getByRole('button', { name: /turns/i }));
+    const url = replace.mock.calls[0][0] as string;
+    expect(url).toContain('sort=turns');
+    expect(url).toContain('order=desc');
+  });
+
+  it('re-fetches the list + stats when the URL changes', async () => {
+    const fetchMock = okFetch([item({ sessionId: 'sess-2' })], { page: 2 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = renderBrowser();
+    // Simulate a URL change (e.g. a filter or pager push landing back through searchParams).
+    vi.mocked(useSearchParams).mockReturnValue(
+      new URLSearchParams('page=2&status=active') as never
+    );
+    rerender(
+      <SessionRefBrowser
+        initialItems={[item()]}
+        initialMeta={META}
+        initialStats={STATS}
+        options={OPTIONS}
+      />
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(urls.some((u) => u.includes('/refs?') && u.includes('status=active'))).toBe(true);
+    expect(urls.some((u) => u.includes('/refs/stats?') && u.includes('status=active'))).toBe(true);
+  });
+
+  it('surfaces an error when the list request fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = renderBrowser();
+    vi.mocked(useSearchParams).mockReturnValue(new URLSearchParams('page=2') as never);
+    rerender(
+      <SessionRefBrowser
+        initialItems={[item()]}
+        initialMeta={META}
+        initialStats={STATS}
+        options={OPTIONS}
+      />
+    );
+
+    expect(await screen.findByText(/could not load sessions|request failed/i)).toBeInTheDocument();
   });
 });

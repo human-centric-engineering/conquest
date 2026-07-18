@@ -1,36 +1,47 @@
 'use client';
 
 /**
- * SessionRefBrowser — the alpha-only admin surface for browsing session support references.
+ * SessionRefBrowser — the alpha admin console for browsing respondent sessions.
  *
- * A paginated, cross-questionnaire table of every session ref with its date + status. Each ref
- * deep-links to the session viewer (where the admin inspects the conversation and, via the re-run
- * panel, regenerates its report); a sibling link opens the version's analytics. Ref-substring search
- * and status filter drive a single enriched list endpoint — no per-row fetches.
+ * A paginated, cross-questionnaire table of every session ref, above a filter bar and a KPI + charts
+ * strip. ALL filter/sort/page state lives in the URL (via `router.replace(..., { scroll: false })`), so
+ * the state is shareable, back-button-safe, and — the original pain point — survives opening a session:
+ * a row opens the {@link SessionDrawer} slide-over (transcript + report) IN PLACE rather than navigating
+ * away, so the list never loses its position. The list + stats re-fetch from a single enriched endpoint
+ * each on URL change; there are no per-row fetches.
  *
  * Alpha-gated: the page and the API both 404 unless the product is in the alpha release stage.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { BarChart3, Search } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { ArrowDown, ArrowUp, BarChart3, ChevronsUpDown } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { parsePaginationMeta } from '@/lib/validations/common';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
+import { SessionFilters } from '@/components/admin/questionnaires/sessions/session-filters';
+import { SessionStats } from '@/components/admin/questionnaires/sessions/session-stats';
+import { SessionDrawer } from '@/components/admin/questionnaires/sessions/session-drawer';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
-import { SESSION_STATUSES, type SessionStatus } from '@/lib/app/questionnaire/types';
-import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
+import { type SessionStatus } from '@/lib/app/questionnaire/types';
+import type {
+  AdminSessionRefItem,
+  AdminSessionFilterOptions,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
+import type { AdminSessionStats } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-stats';
 import type { PaginationMeta } from '@/types/api';
 
 const STATUS_BADGE: Record<SessionStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
@@ -41,193 +52,216 @@ const STATUS_BADGE: Record<SessionStatus, 'default' | 'secondary' | 'outline' | 
   aborted: 'destructive',
 };
 
-/** Sentinel for "no status filter" — Radix Select can't hold an empty-string value. */
-const ANY_STATUS = 'all';
-
 export interface SessionRefBrowserProps {
   initialItems: AdminSessionRefItem[];
   initialMeta: PaginationMeta;
+  initialStats: AdminSessionStats;
+  options: AdminSessionFilterOptions;
 }
 
-export function SessionRefBrowser({ initialItems, initialMeta }: SessionRefBrowserProps) {
+export function SessionRefBrowser({
+  initialItems,
+  initialMeta,
+  initialStats,
+  options,
+}: SessionRefBrowserProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const key = searchParams.toString();
+
   const [items, setItems] = useState(initialItems);
   const [meta, setMeta] = useState(initialMeta);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<SessionStatus | typeof ANY_STATUS>(ANY_STATUS);
-  const [page, setPage] = useState(1);
+  const [stats, setStats] = useState(initialStats);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPage = useCallback(
-    async (q: string, s: SessionStatus | typeof ANY_STATUS, p: number) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams({ page: String(p), limit: String(meta.limit) });
-        if (q.trim()) params.set('q', q.trim());
-        if (s !== ANY_STATUS) params.set('status', s);
+  const [selected, setSelected] = useState<AdminSessionRefItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-        const res = await fetch(`${API.APP.QUESTIONNAIRE_SESSIONS.REFS}?${params.toString()}`, {
+  const sort = searchParams.get('sort') ?? 'createdAt';
+  const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc';
+
+  const refetch = useCallback(async (qs: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const suffix = qs ? `?${qs}` : '';
+      const [listRes, statsRes] = await Promise.all([
+        fetch(`${API.APP.QUESTIONNAIRE_SESSIONS.REFS}${suffix}`, { credentials: 'same-origin' }),
+        fetch(`${API.APP.QUESTIONNAIRE_SESSIONS.REFS_STATS}${suffix}`, {
           credentials: 'same-origin',
-        });
-        if (!res.ok) throw new Error('List request failed');
-        const body = await parseApiResponse<AdminSessionRefItem[]>(res);
-        if (!body.success) throw new Error('List request failed');
-        setItems(body.data);
-        setMeta((prev) => parsePaginationMeta(body.meta) ?? prev);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not load sessions');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [meta.limit]
-  );
+        }),
+      ]);
+      if (!listRes.ok || !statsRes.ok) throw new Error('Request failed');
+      const listBody = await parseApiResponse<AdminSessionRefItem[]>(listRes);
+      const statsBody = await parseApiResponse<AdminSessionStats>(statsRes);
+      if (!listBody.success || !statsBody.success) throw new Error('Request failed');
+      setItems(listBody.data);
+      setMeta((prev) => parsePaginationMeta(listBody.meta) ?? prev);
+      setStats(statsBody.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load sessions');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  // Re-fetch on filter/page change (skip the first render — the server seeded page 1).
-  const [mounted, setMounted] = useState(false);
+  // Re-fetch on any URL change — but skip the first render, whose data the server already seeded.
+  const mounted = useRef(false);
   useEffect(() => {
-    if (!mounted) {
-      setMounted(true);
+    if (!mounted.current) {
+      mounted.current = true;
       return;
     }
-    void fetchPage(search, status, page);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, page]);
+    void refetch(key);
+  }, [key, refetch]);
 
-  const onSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (page !== 1) setPage(1);
-    else void fetchPage(search, status, 1);
+  /** Clone params, mutate, and push to the URL without scrolling (list state lives here). */
+  const push = (mutate: (params: URLSearchParams) => void) => {
+    const params = new URLSearchParams(searchParams.toString());
+    mutate(params);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const goToPage = (page: number) =>
+    push((params) => {
+      if (page <= 1) params.delete('page');
+      else params.set('page', String(page));
+    });
+
+  const toggleSort = (col: 'createdAt' | 'turns') =>
+    push((params) => {
+      const curSort = params.get('sort') ?? 'createdAt';
+      const curOrder = params.get('order') ?? 'desc';
+      if (curSort === col) params.set('order', curOrder === 'asc' ? 'desc' : 'asc');
+      else {
+        params.set('sort', col);
+        params.set('order', 'desc');
+      }
+      params.delete('page');
+    });
+
+  const openSession = (item: AdminSessionRefItem) => {
+    setSelected(item);
+    setDrawerOpen(true);
   };
 
   const totalPages = Math.max(1, meta.totalPages);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <form onSubmit={onSearchSubmit} className="flex items-end gap-2">
-          <div className="space-y-1">
-            <label htmlFor="ref-search" className="text-muted-foreground text-xs font-medium">
-              Support reference
-            </label>
-            <Input
-              id="ref-search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="e.g. 7F3K9M2P"
-              className="w-48 font-mono"
-            />
-          </div>
-          <Button type="submit" variant="outline" size="sm" disabled={loading}>
-            <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            Search
-          </Button>
-        </form>
-        <div className="space-y-1">
-          <label htmlFor="status-filter" className="text-muted-foreground text-xs font-medium">
-            Status
-          </label>
-          <Select
-            value={status}
-            onValueChange={(v) => {
-              setStatus(v as SessionStatus | typeof ANY_STATUS);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger id="status-filter" className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ANY_STATUS}>Any status</SelectItem>
-              {SESSION_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <SessionStats stats={stats} loading={loading} />
+
+      <SessionFilters options={options} />
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-muted-foreground text-left text-xs">
-            <tr>
-              <th className="px-3 py-2 font-medium">Reference</th>
-              <th className="px-3 py-2 font-medium">Questionnaire</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Turns</th>
-              <th className="px-3 py-2 font-medium">Complete</th>
-              <th className="px-3 py-2 font-medium">Created</th>
-              <th className="px-3 py-2 font-medium">Analytics</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
+      <div
+        className={cn(
+          'overflow-x-auto rounded-xl border transition-opacity',
+          loading && 'opacity-60'
+        )}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableHead>Reference</TableHead>
+              <TableHead>Questionnaire</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Cohort / round</TableHead>
+              <TableHead>Status</TableHead>
+              <SortHeader
+                label="Turns"
+                col="turns"
+                activeSort={sort}
+                order={order}
+                onClick={toggleSort}
+                className="text-right"
+              />
+              <TableHead className="text-right">Complete</TableHead>
+              <SortHeader
+                label="Created"
+                col="createdAt"
+                activeSort={sort}
+                order={order}
+                onClick={toggleSort}
+              />
+              <TableHead className="text-right">Analytics</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {items.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="text-muted-foreground px-3 py-8 text-center">
-                  {loading ? 'Loading…' : 'No sessions found.'}
-                </td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={9} className="text-muted-foreground py-12 text-center">
+                  {loading ? 'Loading…' : 'No sessions match these filters.'}
+                </TableCell>
+              </TableRow>
             ) : (
-              items.map((item) => {
-                const base = workspaceVersionBase(item.questionnaireId, item.versionId);
-                return (
-                  <tr key={item.sessionId} className="hover:bg-muted/30">
-                    <td className="px-3 py-2">
-                      <Link
-                        href={`${base}/sessions/${item.sessionId}`}
-                        className="text-primary font-mono font-semibold hover:underline"
-                        title="Open the session — view it and regenerate its report"
-                      >
-                        {item.refFormatted}
-                      </Link>
-                      {item.isPreview && (
-                        <Badge variant="secondary" className="ml-2">
-                          Preview
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="font-medium">{item.questionnaireTitle}</span>
-                      <span className="text-muted-foreground ml-1.5 text-xs">
-                        v{item.versionNumber}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge variant={STATUS_BADGE[item.status]}>{item.status}</Badge>
-                    </td>
-                    <td className="px-3 py-2 tabular-nums">{item.turns}</td>
-                    <td className="px-3 py-2 tabular-nums">
-                      <span
-                        title={`${item.answeredCount} of ${item.totalQuestions} question${
-                          item.totalQuestions === 1 ? '' : 's'
-                        } answered`}
-                      >
-                        {item.percentComplete}%
-                      </span>
-                    </td>
-                    <td className="text-muted-foreground px-3 py-2 tabular-nums">
-                      {new Date(item.createdAt).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Link
-                        href={`${base}/analytics`}
-                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
-                      >
-                        <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
-                        Analytics
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })
+              items.map((item) => (
+                <TableRow
+                  key={item.sessionId}
+                  onClick={() => openSession(item)}
+                  className="hover:bg-muted/40 cursor-pointer"
+                >
+                  <TableCell>
+                    <span className="text-primary font-mono font-semibold">
+                      {item.refFormatted}
+                    </span>
+                    {item.isPreview && (
+                      <Badge variant="secondary" className="ml-2">
+                        Preview
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-medium">{item.questionnaireTitle}</span>
+                    <span className="text-muted-foreground ml-1.5 text-xs">
+                      v{item.versionNumber}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {item.clientName ?? <span className="italic">Unassigned</span>}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {item.cohortName ? (
+                      <span className="text-foreground">{item.cohortName}</span>
+                    ) : (
+                      <span className="italic">No cohort</span>
+                    )}
+                    <span className="block">{item.roundName ?? 'Open-ended'}</span>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_BADGE[item.status]}>{item.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{item.turns}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <span
+                      title={`${item.answeredCount} of ${item.totalQuestions} question${
+                        item.totalQuestions === 1 ? '' : 's'
+                      } answered`}
+                    >
+                      {item.percentComplete}%
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground tabular-nums">
+                    {new Date(item.createdAt).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Link
+                      href={`${workspaceVersionBase(item.questionnaireId, item.versionId)}/analytics`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
+                    >
+                      <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Analytics
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       <div className="flex items-center justify-between">
@@ -240,7 +274,7 @@ export function SessionRefBrowser({ initialItems, initialMeta }: SessionRefBrows
             variant="outline"
             size="sm"
             disabled={loading || meta.page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => goToPage(meta.page - 1)}
           >
             Previous
           </Button>
@@ -249,12 +283,50 @@ export function SessionRefBrowser({ initialItems, initialMeta }: SessionRefBrows
             variant="outline"
             size="sm"
             disabled={loading || meta.page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
+            onClick={() => goToPage(meta.page + 1)}
           >
             Next
           </Button>
         </div>
       </div>
+
+      <SessionDrawer item={selected} open={drawerOpen} onOpenChange={setDrawerOpen} />
     </div>
+  );
+}
+
+/** A clickable, sort-toggling column header with a direction indicator. */
+function SortHeader({
+  label,
+  col,
+  activeSort,
+  order,
+  onClick,
+  className,
+}: {
+  label: string;
+  col: 'createdAt' | 'turns';
+  activeSort: string;
+  order: 'asc' | 'desc';
+  onClick: (col: 'createdAt' | 'turns') => void;
+  className?: string;
+}) {
+  const active = activeSort === col;
+  const Icon = active ? (order === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => onClick(col)}
+        className={cn(
+          'hover:text-foreground -mx-1 inline-flex items-center gap-1 rounded px-1 transition-colors',
+          className?.includes('text-right') && 'flex-row-reverse',
+          active ? 'text-foreground' : 'text-muted-foreground'
+        )}
+      >
+        {label}
+        <Icon className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </TableHead>
   );
 }
