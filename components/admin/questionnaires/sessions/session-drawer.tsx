@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
+  ChevronDown,
   ChevronRight,
   ExternalLink,
   FileText,
@@ -38,6 +39,7 @@ import { SessionWorkspace } from '@/components/app/questionnaire/session-workspa
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { SessionDownloads } from '@/components/admin/questionnaires/sessions/session-downloads';
 import { ReportBody } from '@/components/app/questionnaire/report/report-body';
+import { ReportMethodPanel } from '@/components/app/questionnaire/report/report-method';
 import { TurnEvaluationVerdict } from '@/components/app/questionnaire/turn-evaluation/turn-evaluation-verdict';
 import {
   TurnEvaluationReview,
@@ -47,6 +49,7 @@ import { RefLookupPanel } from '@/components/admin/questionnaires/ref-lookup-pan
 import { validateTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
+import type { ReportMethodClientView } from '@/lib/app/questionnaire/report/method-view';
 import type { TurnEvaluationDetail } from '@/lib/app/questionnaire/views';
 import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
@@ -75,6 +78,13 @@ interface AdminViewData {
     initialView: RespondentReportRevisionsView;
   };
   report: RespondentReportClientView | null;
+  /**
+   * The admin projection of the report's method record — how this report was actually produced.
+   * Null when the report predates method capture. NOT gated on the respondent-facing
+   * `delivery.explainMethod` setting: an operator always sees the method, whether or not the
+   * respondent was shown it.
+   */
+  method: ReportMethodClientView | null;
   availability: AdminReportAvailability;
   evaluations: SessionEvaluationItem[];
 }
@@ -254,6 +264,7 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
                     <ReportTab
                       sessionId={item.sessionId}
                       report={data.report}
+                      method={data.method}
                       panel={data.reportPanel}
                       availability={data.availability}
                       onGenerated={() => void silentReload()}
@@ -303,12 +314,14 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
 function ReportTab({
   sessionId,
   report,
+  method,
   panel,
   availability,
   onGenerated,
 }: {
   sessionId: string;
   report: RespondentReportClientView | null;
+  method: ReportMethodClientView | null;
   panel: AdminViewData['reportPanel'];
   availability: AdminReportAvailability;
   onGenerated: () => void;
@@ -367,6 +380,23 @@ function ReportTab({
         <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
           A re-run is ready in the history — open “Re-run report” to view or promote it.
         </p>
+      )}
+
+      {/* How the delivered report was actually produced. Shown whenever a record exists, regardless
+          of whether the respondent was offered the same panel. */}
+      {method && (
+        <details className="bg-card group rounded-lg border">
+          <summary className="text-foreground flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium">
+            How this report was created
+            <ChevronDown
+              className="text-muted-foreground h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+              aria-hidden="true"
+            />
+          </summary>
+          <div className="border-t px-4 py-4">
+            <ReportMethodPanel view={method} variant="admin" />
+          </div>
+        </details>
       )}
     </div>
   );

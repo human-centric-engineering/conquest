@@ -102,7 +102,7 @@ describe('runReportResearch', () => {
   it('returns an empty result (no provider work) when the agent is not seeded', async () => {
     findUnique.mockResolvedValue(null);
     const res = await runReportResearch({ ...baseOpts, rounds: 2 });
-    expect(res).toEqual({ findings: [], costUsd: 0 });
+    expect(res).toEqual({ findings: [], costUsd: 0, searches: [] });
     expect(resolveAgentProviderAndModel).not.toHaveBeenCalled();
   });
 
@@ -210,7 +210,7 @@ describe('runReportResearch', () => {
   it('coerces a non-Error rejection via String() instead of crashing on .message', async () => {
     findUnique.mockRejectedValue('boom'); // reject with a plain string, not an Error instance
     const res = await runReportResearch({ ...baseOpts, rounds: 2 });
-    expect(res).toEqual({ findings: [], costUsd: 0 });
+    expect(res).toEqual({ findings: [], costUsd: 0, searches: [] });
     expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
       'report research: failed; continuing without research',
       expect.objectContaining({ error: 'boom' })

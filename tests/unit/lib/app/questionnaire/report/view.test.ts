@@ -9,12 +9,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionnaireSession: { findUnique: vi.fn() },
+    appRespondentReport: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
   },
 }));
 
 import { prisma } from '@/lib/db/client';
-import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
+import {
+  buildAdminReportMethodView,
+  buildRespondentReportClientView,
+} from '@/lib/app/questionnaire/report/view';
+import {
+  MethodRecorder,
+  REPORT_METHOD_SCHEMA_VERSION,
+} from '@/lib/app/questionnaire/report/method-record';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -340,5 +348,120 @@ describe('buildRespondentReportClientView', () => {
     expect(view?.header?.respondentLabel).toBe('Anonymous respondent');
     // Anonymous mode must not touch the identity table.
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+/* ── Method record ("How this report was created") ───────────────────────── */
+
+/** A stored record, JSON round-tripped exactly as the Json column would return it. */
+function storedMethodRecord() {
+  const rec = new MethodRecorder('narrative', false, () => 0);
+  rec.recordAnswers({
+    answered: 3,
+    total: 4,
+    completionPct: 75,
+    unansweredListed: 1,
+    confidenceWeighted: true,
+    usedDataSlots: false,
+  });
+  rec.recordPass('coverageFence', true);
+  rec.recordModel({ provider: 'openai', model: 'gpt-5.4', tier: 'reasoning' });
+  return JSON.parse(JSON.stringify(rec.build()));
+}
+
+const AI_REPORT = { status: 'ready', content: null, formatted: false, completionPct: 75 };
+
+describe('buildRespondentReportClientView — method panel', () => {
+  it('offers the panel when the version opted in and the run recorded a record', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'narrative', delivery: { explainMethod: true } },
+        { ...AI_REPORT, methodRecord: storedMethodRecord() }
+      )
+    );
+    const view = await buildRespondentReportClientView('s1');
+
+    expect(view?.method).not.toBeNull();
+    expect(view?.method?.facts.find((f) => f.key === 'answers')?.value).toBe('3 of 4');
+    // Respondent projection — operational detail is absent, not merely hidden.
+    expect(view?.method?.admin).toBeUndefined();
+  });
+
+  it('withholds the panel when the version did not opt in, even with a record present', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'narrative', delivery: { explainMethod: false } },
+        { ...AI_REPORT, methodRecord: storedMethodRecord() }
+      )
+    );
+    expect((await buildRespondentReportClientView('s1'))?.method).toBeNull();
+  });
+
+  it('withholds the panel for a report generated before method capture existed', async () => {
+    // No backfill: rather than reconstructing a run nobody observed, the link is simply not offered.
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'narrative', delivery: { explainMethod: true } },
+        { ...AI_REPORT, methodRecord: null }
+      )
+    );
+    expect((await buildRespondentReportClientView('s1'))?.method).toBeNull();
+  });
+
+  it('withholds the panel when the stored record is from a different schema version', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session(
+        { enabled: true, mode: 'narrative', delivery: { explainMethod: true } },
+        {
+          ...AI_REPORT,
+          methodRecord: {
+            ...storedMethodRecord(),
+            schemaVersion: REPORT_METHOD_SCHEMA_VERSION + 1,
+          },
+        }
+      )
+    );
+    expect((await buildRespondentReportClientView('s1'))?.method).toBeNull();
+  });
+
+  it('carries a null method for a disabled or raw-mode report', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      session({ enabled: true, mode: 'raw', delivery: { explainMethod: true } })
+    );
+    expect((await buildRespondentReportClientView('s1'))?.method).toBeNull();
+  });
+});
+
+describe('buildAdminReportMethodView', () => {
+  it('returns the admin projection, including operational detail', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
+      methodRecord: storedMethodRecord(),
+    });
+    const view = await buildAdminReportMethodView('s1');
+
+    expect(view?.admin?.model).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.4',
+      tier: 'reasoning',
+    });
+    expect(view?.admin?.summarySource).toBe('template');
+  });
+
+  it('is NOT gated on the respondent-facing explainMethod setting', async () => {
+    // The loader never reads the config: an operator sees how a report was made whether or not the
+    // respondent was shown the same panel — indeed it matters most when they were not.
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
+      methodRecord: storedMethodRecord(),
+    });
+    expect(await buildAdminReportMethodView('s1')).not.toBeNull();
+    expect(prisma.appQuestionnaireSession.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the report or its record is absent', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue(null);
+    expect(await buildAdminReportMethodView('s1')).toBeNull();
+
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({ methodRecord: null });
+    expect(await buildAdminReportMethodView('s1')).toBeNull();
   });
 });

@@ -824,6 +824,35 @@ export function RespondentReportEditor({
               </FieldHelp>
             </Label>
           </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={value.delivery.explainMethod}
+              onCheckedChange={(v) => patch({ delivery: { ...value.delivery, explainMethod: v } })}
+              disabled={isSaving}
+              id="rr-explain-method"
+            />
+            <Label htmlFor="rr-explain-method" className="flex items-center gap-1">
+              Explain how the report was created
+              <FieldHelp title="How this report was created">
+                Adds a link on the completion screen opening a plain-English summary of how the
+                respondent&rsquo;s report was produced — how many of their answers were read, which
+                questions they skipped, whether their organisation&rsquo;s documents or web sources
+                were used, and which checks were applied. Web sources are listed so they can be
+                followed — unless the Research tab&rsquo;s sources section is set to
+                &ldquo;Don&rsquo;t show&rdquo;, in which case respondents see the number of sources
+                but not the links.
+                <br />
+                <br />
+                The summary is written from a factual record of what the generation actually did,
+                and every figure in it is checked against that record before it is shown, so it
+                cannot describe a step that did not run. Adds one small generation cost per report.
+                <br />
+                <br />
+                Independent of what admins see: the same detail (plus model, timings, cost, and the
+                exact searches) always appears in the Sessions view whether or not this is on.
+              </FieldHelp>
+            </Label>
+          </div>
           <p className="text-muted-foreground text-xs">
             Email delivery is planned for a later release.
           </p>

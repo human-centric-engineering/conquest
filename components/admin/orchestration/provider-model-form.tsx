@@ -7,7 +7,7 @@
  * following the same pattern as provider-form.tsx and agent-form.tsx.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
@@ -197,6 +197,15 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
 
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(false);
+  /**
+   * Handle for the "Saved" auto-dismiss timer, so unmounting cancels it.
+   *
+   * Without this the 2s timer outlives the component: a user who saves and navigates away inside the
+   * window leaves a pending `setSaved` on a torn-down tree, and under test it fires after the jsdom
+   * environment is disposed and throws `ReferenceError: window is not defined` — an intermittent
+   * failure that lands in whichever suite happens to be running when the timer expires.
+   */
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slugEdited, setSlugEdited] = useState(false);
 
@@ -277,6 +286,13 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
     });
   }
 
+  // Cancel the "Saved" auto-dismiss on unmount (see `savedTimerRef`).
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
+
   // Auto-fill slug from providerSlug + name in create mode
   useEffect(() => {
     if (isEdit || slugEdited) return;
@@ -342,7 +358,11 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
           body: payload,
         });
         setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
+        if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = setTimeout(() => {
+          savedTimerRef.current = null;
+          setSaved(false);
+        }, 2000);
       } else {
         const created = await apiClient.post<{ id: string }>(
           API.ADMIN.ORCHESTRATION.PROVIDER_MODELS,

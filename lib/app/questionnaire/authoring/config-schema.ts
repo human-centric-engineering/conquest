@@ -212,6 +212,12 @@ const respondentReportSettingsSchema = z
       .object({
         onScreen: z.boolean(),
         download: z.boolean(),
+        // Optional for backward-compat, for the same reason as the `generation` knobs above:
+        // definition-import replays `respondentReport` blocks exported before this shipped, whose
+        // `delivery` object has no `explainMethod`. The read path
+        // (`narrowRespondentReportSettings`) defaults it to false; the editor always sends the whole
+        // block, so this only widens what import/PATCH will accept.
+        explainMethod: z.boolean().optional(),
       })
       .strict(),
     research: z

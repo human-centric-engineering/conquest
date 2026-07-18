@@ -84,7 +84,13 @@ describe('buildIntroCopy — what you’ll get', () => {
     [false, true, /download as a PDF/i],
   ])('reflects delivery onScreen=%s download=%s', (onScreen, download, match) => {
     const copy = buildIntroCopy(
-      input({ report: report({ enabled: true, mode: 'raw', delivery: { onScreen, download } }) })
+      input({
+        report: report({
+          enabled: true,
+          mode: 'raw',
+          delivery: { onScreen, download, explainMethod: false },
+        }),
+      })
     );
     expect(copy.whatYouGet!.body).toMatch(match);
   });
@@ -95,7 +101,7 @@ describe('buildIntroCopy — what you’ll get', () => {
         report: report({
           enabled: true,
           mode: 'raw',
-          delivery: { onScreen: false, download: false },
+          delivery: { onScreen: false, download: false, explainMethod: false },
         }),
       })
     );

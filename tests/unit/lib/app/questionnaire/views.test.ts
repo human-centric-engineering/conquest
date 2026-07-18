@@ -222,7 +222,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
         dataSlotInfluence: 50,
         discountLowConfidence: true,
       },
-      delivery: { onScreen: true, download: true },
+      delivery: { onScreen: true, download: true, explainMethod: false },
       research: {
         enabled: false,
         timing: 'before',

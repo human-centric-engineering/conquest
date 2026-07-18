@@ -28,6 +28,7 @@ import type { ExportDataSlotGroup } from '@/lib/app/questionnaire/export/types';
 import {
   buildAnswerTranscript,
   buildDataSlotContextBlock,
+  buildUnansweredQuestionsBlock,
 } from '@/lib/app/questionnaire/report/content';
 
 /** One question the sample answerer should respond to. */
@@ -65,6 +66,8 @@ export interface PreviewStructure {
 export interface SampleReportInputs {
   transcript: string;
   dataSlotContext: string;
+  /** Answer coverage for the writer's negative-space block (see `buildUnansweredQuestionsBlock`). */
+  coverage: { answered: number; total: number; unansweredBlock: string };
   costUsd: number;
 }
 
@@ -259,5 +262,17 @@ export async function synthesiseSampleReportInputs(
     includeConfidence: opts.includeConfidence,
   });
 
-  return { transcript, dataSlotContext, costUsd: result.costUsd };
+  return {
+    transcript,
+    dataSlotContext,
+    // Parity with the live path: a synthesised sample normally answers every question (so this is ''
+    // and no coverage block is emitted), but if the sample generator skipped some, the preview shows
+    // the writer the same negative space a real partial session would.
+    coverage: {
+      answered: panel.answeredCount,
+      total: panel.totalCount,
+      unansweredBlock: buildUnansweredQuestionsBlock(panel.sections),
+    },
+    costUsd: result.costUsd,
+  };
 }

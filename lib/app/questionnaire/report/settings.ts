@@ -123,6 +123,7 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
     delivery: {
       onScreen: asBool(delivery.onScreen, d.delivery.onScreen),
       download: asBool(delivery.download, d.delivery.download),
+      explainMethod: asBool(delivery.explainMethod, d.delivery.explainMethod),
     },
     research: {
       enabled: asBool(research.enabled, d.research.enabled),

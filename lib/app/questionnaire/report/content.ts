@@ -240,8 +240,13 @@ function trimTo(value: unknown, max: number): string | null {
  * A finding's URL must be a syntactically-valid `http`/`https` link — findings are rendered as
  * clickable links, so a non-web scheme (`javascript:`, `data:`, `mailto:`) or garbage is dropped
  * rather than surfaced. Length-capped defensively.
+ *
+ * Exported so the method record's read path (`method-record.ts`) applies the SAME guard to the
+ * sources it renders. Both are stored JSON re-read from a Json column and rendered into an `href`;
+ * validating one on read and not the other is the asymmetry that lets a future write path (a second
+ * search backend, an import) reach an unguarded sink.
  */
-function validHttpUrl(value: unknown): string | null {
+export function validHttpUrl(value: unknown): string | null {
   const raw = trimTo(value, REPORT_RESEARCH_URL_MAX);
   if (!raw) return null;
   try {
@@ -402,6 +407,55 @@ export function buildAnswerTranscript(
   }
 
   return lines.join('\n').trim();
+}
+
+/**
+ * Cap on how many unanswered question prompts are listed in the coverage block. A respondent who
+ * abandoned a 200-question questionnaire would otherwise push a wall of unanswered prompts into the
+ * prompt, crowding out the answers that actually matter. Beyond the cap the block states how many
+ * more were skipped rather than listing them.
+ */
+export const COVERAGE_MAX_LISTED_QUESTIONS = 60;
+
+/**
+ * The negative-space block for the report writer: which questions the respondent did NOT answer.
+ *
+ * The counterpart to {@link buildAnswerTranscript}, which is deliberately answered-only. Without this
+ * the writer cannot tell a 3-question questionnaire from a 12-question one the respondent abandoned
+ * after three, which makes the grounding rule "where their answers are thin, say less rather than
+ * inferring" unactionable — thin topics are invisible.
+ *
+ * The prompts are listed for CONTEXT, never as material to write about: the framing that accompanies
+ * this block in `generate.ts` forbids answering, guessing at, or implying the content of anything
+ * listed. Listing the question text (rather than a bare count) is what lets the writer recommend a
+ * specific missing topic as a next step instead of hedging vaguely — but it is also the one place
+ * unanswered questions enter the prompt at all, so the framing there is load-bearing.
+ *
+ * Returns '' when every slot was answered (there is no gap to describe), so the caller skips both the
+ * block and its framing.
+ */
+export function buildUnansweredQuestionsBlock(sections: SessionExportModel['sections']): string {
+  const blocks: string[] = [];
+  let listed = 0;
+  let omitted = 0;
+  for (const section of sections) {
+    const unanswered = section.slots.filter((s) => !s.answered);
+    if (unanswered.length === 0) continue;
+    const rows: string[] = [];
+    for (const slot of unanswered) {
+      if (listed >= COVERAGE_MAX_LISTED_QUESTIONS) {
+        omitted += 1;
+        continue;
+      }
+      rows.push(`- ${slot.prompt}`);
+      listed += 1;
+    }
+    if (rows.length > 0) blocks.push(`## ${section.title}\n${rows.join('\n')}`);
+  }
+  if (blocks.length === 0) return '';
+  if (omitted > 0)
+    blocks.push(`(and ${omitted} further unanswered question${omitted === 1 ? '' : 's'})`);
+  return blocks.join('\n\n').trim();
 }
 
 /**

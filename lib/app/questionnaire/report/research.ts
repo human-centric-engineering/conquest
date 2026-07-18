@@ -56,10 +56,24 @@ export interface RunReportResearchOptions {
   sessionId: string;
 }
 
+/** One search the agent actually issued, recorded for the report's method record. */
+export interface ReportResearchSearch {
+  /** The query as dispatched (empty when the model supplied a non-string query). */
+  query: string;
+  /** Results the backend returned for this query, before cross-round dedupe. 0 on a failed search. */
+  resultCount: number;
+}
+
 export interface ReportResearchResult {
   findings: RespondentReportResearchFinding[];
   note?: string;
   costUsd: number;
+  /**
+   * The searches this phase performed, in order. Previously the loop tracked `searchesUsed` purely as
+   * a budget counter and discarded the queries themselves, which left no record of what was actually
+   * looked up — see `report/method-record.ts` for why that record is now load-bearing.
+   */
+  searches: ReportResearchSearch[];
 }
 
 /** Generation tuning — snappy per-turn ceiling so the whole loop stays well under the worker lease. */
@@ -104,8 +118,11 @@ function phasePurpose(phase: ReportResearchPhase): string {
 export async function runReportResearch(
   opts: RunReportResearchOptions
 ): Promise<ReportResearchResult> {
-  const empty: ReportResearchResult = { findings: [], costUsd: 0 };
+  const empty: ReportResearchResult = { findings: [], costUsd: 0, searches: [] };
   let costUsd = 0;
+  // Declared outside the try so a mid-phase throw still reports the searches that did run — a failed
+  // phase that already searched twice must not be recorded as having searched zero times.
+  const searches: ReportResearchSearch[] = [];
 
   try {
     const agent = await prisma.aiAgent.findUnique({
@@ -204,6 +221,10 @@ export async function runReportResearch(
         }
         searchesUsed += 1;
         const dispatchResult = await dispatchSearch(agent.id, call.arguments, opts.maxResults);
+        searches.push({
+          query: typeof call.arguments.query === 'string' ? call.arguments.query : '',
+          resultCount: dispatchResult.results?.length ?? 0,
+        });
         if (dispatchResult.success && dispatchResult.results) {
           collected.push(...dispatchResult.results);
           messages.push({
@@ -243,14 +264,14 @@ export async function runReportResearch(
     }
     note = note.slice(0, REPORT_RESEARCH_NOTE_MAX).trim();
 
-    return { findings, ...(note ? { note } : {}), costUsd };
+    return { findings, ...(note ? { note } : {}), costUsd, searches };
   } catch (err) {
     logger.warn('report research: failed; continuing without research', {
       sessionId: opts.sessionId,
       phase: opts.phase,
       error: errorMessage(err),
     });
-    return { findings: [], costUsd };
+    return { findings: [], costUsd, searches };
   }
 }
 

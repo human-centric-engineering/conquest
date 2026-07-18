@@ -269,7 +269,7 @@ describe('upsert + response', () => {
         dataSlotInfluence: 60,
         discountLowConfidence: false,
       },
-      delivery: { onScreen: true, download: true },
+      delivery: { onScreen: true, download: true, explainMethod: true },
       research: {
         enabled: true,
         timing: 'before' as const,

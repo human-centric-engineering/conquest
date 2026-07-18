@@ -24,7 +24,10 @@ import { prisma } from '@/lib/db/client';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { loadAdminReportRerunPanel } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-report-rerun-view';
 import { withAlphaSessionToolsEnabled } from '@/app/api/v1/app/questionnaire-sessions/_lib/alpha-gate';
-import { buildRespondentReportClientView } from '@/lib/app/questionnaire/report/view';
+import {
+  buildAdminReportMethodView,
+  buildRespondentReportClientView,
+} from '@/lib/app/questionnaire/report/view';
 import { resolveAdminReportAvailability } from '@/lib/app/questionnaire/report/availability';
 import { SESSION_STATUSES, narrowToEnum } from '@/lib/app/questionnaire/types';
 
@@ -43,10 +46,13 @@ const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, 
   });
   if (!session) return errorResponse('Session not found', { code: 'NOT_FOUND', status: 404 });
 
-  const [turns, reportPanel, report, evaluationRows] = await Promise.all([
+  const [turns, reportPanel, report, method, evaluationRows] = await Promise.all([
     loadTranscript(sessionId),
     loadAdminReportRerunPanel(session.versionId, sessionId),
     buildRespondentReportClientView(sessionId),
+    // The admin projection of the method record — richer than the respondent's, and deliberately not
+    // gated on `delivery.explainMethod` (see `buildAdminReportMethodView`).
+    buildAdminReportMethodView(sessionId),
     // This session's persisted turn evaluations (lightweight) for the drawer's Evaluations tab.
     prisma.appQuestionnaireTurnEvaluation.findMany({
       where: { sessionId },
@@ -90,7 +96,7 @@ const handleAdminView = withAdminAuth<{ id: string }>(async (request, _session, 
 
   log.info('Alpha session admin-view loaded', { sessionId, turnCount: turns.length });
 
-  return successResponse({ turns, reportPanel, report, availability, evaluations });
+  return successResponse({ turns, reportPanel, report, method, availability, evaluations });
 });
 
 export const GET = withAlphaSessionToolsEnabled(handleAdminView);

@@ -141,7 +141,9 @@ attributed" notice instead of a link.
 GDPR erasure). Status `queued → processing → ready | failed`, the generated `content`, `formatted` (whether the
 Report Formatter second pass laid out the stored prose — see below), `completionPct` (questionnaire
 completion % at generation — drives the partial-report caveat), `costUsd`,
-`notifyEmail` (respondent opt-in for a report-ready email; cleared once sent), and worker lease
+`notifyEmail` (respondent opt-in for a report-ready email; cleared once sent), `methodRecord` (the
+observed account of how the run was produced — see [Method record](#method-record-how-this-report-was-created)),
+and worker lease
 columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the evaluations
 batch worker). Raw-only mode never creates a row. `deliveredRevisionId` points at the admin re-run
 revision last **promoted** into this delivered row (null = the original submit-time generation) — see
@@ -150,7 +152,9 @@ revision last **promoted** into this delivered row (null = the original submit-t
 `AppRespondentReportRevision` — an append-only log of **admin re-runs** for a session (FK to
 `AppRespondentReport`, `onDelete: Cascade`). Each row carries its own `settingsSnapshot` (the exact
 instructions/config that re-run used), `instructions` (a short admin note), `status` + lease columns
-(its own async generation, mirroring the header), `content`/`formatted`/`completionPct`/`costUsd`, and
+(its own async generation, mirroring the header), `content`/`formatted`/`completionPct`/`costUsd`,
+`methodRecord` (per-revision: a re-run with different settings takes different steps, and promoting
+carries its record onto the delivered row so the explanation stays true to the content), and
 `authoredBy` (`admin`). `@@unique([reportId, revisionNumber])` — monotonic per report. This is decoupled
 from the delivered report: a re-run never changes what the respondent sees until an admin promotes it.
 
@@ -195,7 +199,30 @@ from the delivered report: a re-run never changes what the respondent sees until
    `estimatedDurationMinutes`, `locale`, `sensitivity`, `notes`), each rendered as its own labelled
    line by `describeAudience` (`report/content.ts`), not a one-line summary.
 
-   The DB load (steps + transcript + data-slot block + completion %) is split from the generation core:
+   **Answer coverage (the negative-space block).** The transcript is answered-only by construction —
+   `buildAnswerTranscript` filters on `slot.answered` and skips sections with no answers, and
+   `buildDataSlotContextBlock` skips unfilled slots. That guarantees no unanswered question can ever be
+   presented to the writer as if it had an answer, but on its own it also makes a 25 %-complete session
+   read exactly like a complete one: the writer cannot see what it is _not_ seeing, which leaves the
+   grounding rule "where their answers are thin, say less rather than inferring" unactionable.
+
+   So the system prompt carries a separate **coverage block** (`coverageRules` in
+   `report/generate.ts`, listing built by `buildUnansweredQuestionsBlock` in `report/content.ts`):
+   the answered/total counts and the prompts of the questions the respondent skipped, grouped by
+   section and capped at `COVERAGE_MAX_LISTED_QUESTIONS` (60, with an "(and N further…)" tail).
+
+   The framing around that listing is load-bearing, not decorative — a bare list of questions in a
+   prompt is an invitation to answer them. The block states that the writer knows **nothing** about the
+   respondent's position on anything listed, must not answer/guess/imply what they might have said or
+   treat the topic as covered, and may only reference a gap _as_ a gap (e.g. recommending the topic as
+   a next step). Never edit the listing without preserving that fencing.
+
+   The block is emitted only when something was actually skipped: a fully-answered session produces
+   `''` from the builder and the prompt is byte-identical to what it was before this existed. Note this
+   is distinct from `completionPct`, which drives the deterministic
+   [partial-report caveat](#storage-ai-modes) and is still never given to the model.
+
+   The DB load (steps + transcript + data-slot block + completion % + coverage) is split from the generation core:
    `generateRespondentReport(sessionId)` builds the inputs, then delegates to the exported
    `generateReportFromInputs(inputs)` (KB → agent → research rounds → completion → formatter → appendix).
    The [config preview](#config-preview-ai-synthesised) reuses that core with synthesised sample answers,
@@ -320,6 +347,9 @@ a revision**.
 
 ## Respondent delivery
 
+- **Method panel** — when the version sets `delivery.explainMethod` and the run recorded a method
+  record, the view carries `method` and the completion screen offers a "How this was created" dialog.
+  See [Method record](#method-record-how-this-report-was-created).
 - **Status endpoint** — `GET /api/v1/app/questionnaire-sessions/:id/report` (`report` in
   `lib/api/endpoints.ts`) serves both respondent kinds via `resolveTurnAccess` (auth cookie or
   `X-Session-Token`). It returns the `RespondentReportClientView` built by
@@ -383,3 +413,107 @@ a revision**.
     URL loses the server's `Content-Disposition`; and both run pages
     (`(protected)/questionnaires/[sessionId]`, `(public)/q/[versionId]`) set their tab title via
     `generateMetadata` from the resolved header.
+
+## Method record ("How this report was created")
+
+An optional transparency panel that explains, in plain English, how a respondent's report was
+produced: how many of their answers were read, which questions they skipped, whether their
+organisation's documents or web sources were used, and which checks were applied.
+
+Opt in per version with **`delivery.explainMethod`** (Delivery tab, default **off**). The toggle
+governs the _respondent-facing_ panel only — the admin Sessions drawer always shows the detail.
+
+### Why it is built the way it is
+
+The panel is a claim about our own diligence, which makes it the single most dangerous thing to let
+an agent write freely: "we cross-checked 12 clinical sources" is fluent, reassuring, and — if
+unearned — worse than showing nothing. So the prose is never the source of truth.
+
+1. **Observe.** A `MethodRecorder` (`report/method-record.ts`) is threaded through the generation
+   core; each stage reports what it did as it did it. Every field is observed, never inferred.
+2. **Narrate.** The **Report Method Explainer** agent (`app-report-method-explainer`, chat tier,
+   seeded by `072-report-method-explainer-agent.ts`) receives _only_ a counts-and-flags digest of the
+   record — never the report, the answers, the source URLs, or the search queries — and writes 2–4
+   plain sentences.
+3. **Check.** `rejectSummary` (`report/method-summary.ts`) refuses the output if it contains a number
+   absent from the record, a URL or `[n]` citation marker, or runs over length. Invented rigour almost
+   always surfaces as an invented tally, so the numeric check is the load-bearing one. It admits
+   _observed_ values only — it will not accept arithmetic derived from them.
+4. **Fall back.** Any rejection, provider error, or unseeded agent falls back to
+   `renderMethodSummaryTemplate` — the deterministic rendering of the same record. The respondent
+   always gets a truthful explanation; the agent only changes how warmly it reads. Generation never
+   fails because its explanation did.
+
+The panel additionally renders the counts and the source links deterministically _beneath_ the prose,
+so the narrative is independently checkable rather than merely trusted.
+
+### What the record captures
+
+`ReportMethodRecord` (`report/method-record.ts`, `schemaVersion` 1) holds answer coverage (answered /
+total / gaps listed / confidence weighting), knowledge grounding (documents in scope vs. documents
+that actually contributed a passage, with names), research (every query issued, per phase, with result
+counts, plus the deduped sources kept), the passes applied, per-stage `ran` / `skipReason`, the model,
+cost, and duration.
+
+Two distinctions the record makes deliberately:
+
+- **`skipReason` separates `disabled` from `failed`.** "We didn't look" and "we looked and it broke"
+  are different claims about our diligence; collapsing them would let the panel imply a capability was
+  deliberately unused when it actually degraded.
+- **Sources are recorded even when `research.display` is `hidden`**, but the respondent panel then
+  shows the source _count_ without the links (`sourcesHiddenFromRespondent`, frozen on the record at
+  generation time). Hiding the sources section is a choice the admin made about what respondents see,
+  so re-surfacing the links on a second respondent-facing surface would quietly override it — while
+  dropping the count entirely would make the panel under-report what shaped the report. Admins always
+  see the full list.
+
+This required instrumenting the pipeline, which previously discarded most of it: `generate.ts` flattened
+retrieved KB chunks to prose and dropped their document ids, and `runReportResearch` tracked
+`searchesUsed` purely as a budget counter and never returned the queries. `ReportResearchResult` now
+carries `searches[]`.
+
+### Capture vs. narration
+
+The record is captured on **every** run — it is free bookkeeping. Only the agent-written summary is
+gated on `delivery.explainMethod`, because it is the only part that costs anything. A record stored
+with a null summary still renders: `buildReportMethodView` falls back to the deterministic template at
+read time. So an admin who enables the panel later gets a truthful explanation for reports generated
+while it was off, with **no backfill and no regeneration**.
+
+### Audiences
+
+`buildReportMethodView(record, audience)` (`report/method-view.ts`) projects one record two ways. The
+`admin` block (model, cost, duration, search queries, document names, every stage including skipped
+ones) is _absent_ — not merely hidden — from a respondent view, so a respondent surface cannot render
+it by accident.
+
+- **Respondent** — `RespondentReportClientView.method`, non-null only when the version opted in **and**
+  the run recorded a record. `SessionComplete` shows a "How this was created" control in the report
+  toolbar opening `ReportMethodDialog`.
+- **Admin** — `buildAdminReportMethodView(sessionId)`, surfaced on the `/admin-view` payload as
+  `method` and rendered as a collapsible section in the Sessions drawer's Report tab. Deliberately
+  **not** gated on `delivery.explainMethod`: an operator should always see how a report was made, and
+  the view is most useful precisely when the respondent wasn't shown one.
+
+Both render the same `ReportMethodPanel` (`components/app/questionnaire/report/report-method.tsx`) —
+the same one-renderer discipline as `report-body.tsx`.
+
+### Reports generated before this shipped
+
+`methodRecord` is nullable with **no backfill**. `narrowMethodRecord` returns `null` for anything
+absent, malformed, or written by a different `schemaVersion`, and a null record means the panel is not
+offered at all. Reconstructing a plausible-looking account of a run nobody observed is precisely the
+failure this feature exists to prevent — so those reports simply show no link.
+
+### Preview runs
+
+The admin config preview synthesises a sample respondent and forces KB grounding and web search off.
+It passes `preview: true`, which the record carries.
+
+**A preview record never reaches the explainer agent** — `summariseReportMethod` short-circuits to the
+deterministic template. This is not a cost optimisation. Live testing showed the agent reading a
+preview record (whose digest flags `isSampleNotRealRespondent`) and writing _"based on all of your
+answers to the 12 questions you completed"_ — describing a made-up sample as the reader's own answers,
+the most misleading thing this panel could possibly say. Instruction-following is not a guarantee; the
+template leads with the disclaimer by construction. Covered by a regression test in
+`method-summary.test.ts`.
