@@ -180,8 +180,7 @@ const personaSelectionSchema = z
 /**
  * Respondent Report (report kind `respondent`) — the full {@link RespondentReportSettings} block.
  * Sent whole (not partial) by the editor; every sub-object present so a save can clear a toggle.
- * `strict()` at every level rejects unknown keys. Gated additionally by the platform flag
- * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`.
+ * `strict()` at every level rejects unknown keys.
  */
 const respondentReportSettingsSchema = z
   .object({
@@ -252,8 +251,7 @@ const respondentReportSettingsSchema = z
 /**
  * Cohort Report (report kind `cohort`) — the full {@link CohortReportSettings} block. Sent whole
  * (not partial) by the editor; every sub-object present so a save can clear a toggle. `strict()` at
- * every level rejects unknown keys. Gated additionally by the platform flags
- * `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` + `APP_QUESTIONNAIRES_COHORTS_ENABLED`.
+ * every level rejects unknown keys.
  */
 const cohortReportSettingsSchema = z
   .object({
@@ -278,7 +276,6 @@ const cohortReportSettingsSchema = z
 /**
  * Respondent intro / splash screen — the full {@link IntroSettings} block. Sent whole (not partial)
  * by the editor; every key present so a save can clear the toggle. `strict()` rejects unknown keys.
- * Gated additionally by the platform flag `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED`.
  */
 const introSettingsSchema = z
   .object({
@@ -302,7 +299,7 @@ export const updateConfigSchema = z
     coverageThreshold: z.number().min(0).max(1).optional(),
     answerConfidenceFloor: z.number().min(0).max(1).optional(),
     // Respondent-controlled early finish (escape hatch — bypasses the required gate). The two
-    // minimums are OR'd; 0 = not a criterion on that axis. Config-only, no platform flag.
+    // minimums are OR'd; 0 = not a criterion on that axis. Config-only.
     allowEarlyFinish: z.boolean().optional(),
     earlyFinishMinCoverage: z.number().min(0).max(1).optional(),
     earlyFinishMinQuestions: z.number().int().nonnegative().optional(),
@@ -346,14 +343,12 @@ export const updateConfigSchema = z
     // form), or both (toggle between them). Defaults to chat for existing versions.
     presentationMode: z.enum(PRESENTATION_MODES).optional(),
     // Inline answer correction (Variant B): let respondents fix a just-captured answer inline
-    // (in the chat + on the answer panel) instead of sending a fresh turn. On by default;
-    // respondent-facing UX, no platform flag.
+    // (in the chat + on the answer panel) instead of sending a fresh turn. On by default.
     inlineCorrectionEnabled: z.boolean().optional(),
     // Session resume: remember an in-progress session on the device + the Continue/Start-new chooser
-    // + the cross-device resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag.
+    // + the cross-device resume-by-ref endpoint. On by default.
     sessionResumeEnabled: z.boolean().optional(),
-    // Live "watch it think" reasoning trace (demo feature). Gated additionally by the platform
-    // flag APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED. placement = overlay | inline.
+    // Live "watch it think" reasoning trace (demo feature). placement = overlay | inline.
     reasoningStreamEnabled: z.boolean().optional(),
     reasoningStreamPlacement: z.enum(REASONING_PLACEMENTS).optional(),
     // "Animated" placement timing: base dwell (ms) the summary stays open for up to two steps, plus
@@ -365,22 +360,18 @@ export const updateConfigSchema = z
     // a per-turn console of the agent calls, raw prompts/responses, model, latency, and cost. Only
     // ever surfaced in a preview session (server-enforced); never reaches a real respondent.
     previewInspectorEnabled: z.boolean().optional(),
-    // Interviewer tone & persona (F-tone). Sent whole when present; gated additionally by the
-    // platform flag APP_QUESTIONNAIRES_TONE_ENABLED.
+    // Interviewer tone & persona (F-tone). Sent whole when present.
     tone: toneSettingsSchema.optional(),
     // Respondent persona-selection toggle + default key (F-persona). The persona library is fixed
     // (BUILT_IN_PERSONAS) and never sent by the editor; only the on/off toggle and the default key
-    // are stored. Gated additionally by APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED.
+    // are stored.
     personaSelection: personaSelectionSchema.optional(),
     interviewerStrategy: interviewerStrategySchema.optional(),
-    // Respondent Report. Sent whole when present; gated additionally by the platform flag
-    // APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED.
+    // Respondent Report. Sent whole when present.
     respondentReport: respondentReportSettingsSchema.optional(),
-    // Cohort Report. Sent whole when present; gated additionally by the platform flags
-    // APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED + APP_QUESTIONNAIRES_COHORTS_ENABLED.
+    // Cohort Report. Sent whole when present.
     cohortReport: cohortReportSettingsSchema.optional(),
-    // Respondent intro / splash screen. Sent whole when present; gated additionally by the platform
-    // flag APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED.
+    // Respondent intro / splash screen. Sent whole when present.
     intro: introSettingsSchema.optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), {

@@ -4,9 +4,8 @@
  * questionnaire. This is the first of two report kinds; the later cross-respondent **Cohort
  * Report** (`cohort`) will get its own tab + config.
  *
- * Lives under the version segment for the shared workspace chrome (header + tabs). Gated behind
- * APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED on top of the master flag — `notFound()`s when
- * either is off, mirroring the tab's visibility in `workspace-nav.ts`. Reads the resolved config
+ * Lives under the version segment for the shared workspace chrome (header + tabs). Tab visibility
+ * is driven by `workspace-nav.ts`. Reads the resolved config
  * from the cached version graph (no second fetch) and hands the `respondentReport` slice to the
  * client editor.
  */

@@ -287,9 +287,8 @@ export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
  * a brief dwell so the respondent glimpses the reasoning before it tucks away; `inline` renders a
  * quiet collapsible disclosure that stays closed until the respondent opens it. Both show the same
  * collapsed "Reasoning · N" chip on settled / historical turns. An admin chooses per version on the
- * Settings tab; both are gated by the platform flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED`.
- * The enum value `overlay` is retained for config compatibility even though the UI now labels it
- * "Animated". See `lib/app/questionnaire/reasoning` and [[feature-flags-are-db-rows]].
+ * Settings tab. The enum value `overlay` is retained for config compatibility even though the UI
+ * now labels it "Animated". See `lib/app/questionnaire/reasoning`.
  */
 export const REASONING_PLACEMENTS = ['overlay', 'inline'] as const;
 export type ReasoningPlacement = (typeof REASONING_PLACEMENTS)[number];
@@ -441,8 +440,7 @@ export type ProfileFieldConfig = {
  * conversational interviewer responds — fed into its system prompt at turn time by
  * `buildToneInstructions` (`lib/app/questionnaire/chat/tone.ts`). Each dimension is an
  * independent enable-toggle + a 1–5 slider; everything is off by default so existing
- * questionnaires keep today's voice. Gated additionally by the platform flag
- * `APP_QUESTIONNAIRES_TONE_ENABLED`. Stored as a single `tone` Json column.
+ * questionnaires keep today's voice. Stored as a single `tone` Json column.
  *
  * The nine dimensions split into two kinds (see {@link TONE_DIMENSION_KEYS}):
  *   - **bipolar** (`empathy`, `formality`, `verbosity`, `readingComplexity`, `humour`):
@@ -735,8 +733,7 @@ export const REPORT_RESEARCH_INSTRUCTIONS_MAX_LENGTH = 4000;
  * `mode` selects raw / raw+insights / narrative; `rawIncludes` chooses what the raw section shows
  * (ignored by `narrative`, which has no separate raw section); `generation` carries the AI knobs
  * (consulted by both AI modes — `raw_plus_insights` and `narrative`); `delivery` chooses how the
- * respondent receives it (email deferred to v2). Also gated by the platform flag
- * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED`.
+ * respondent receives it (email deferred to v2).
  */
 export type RespondentReportSettings = {
   enabled: boolean;
@@ -789,10 +786,9 @@ export type RespondentReportSettings = {
     explainMethod: boolean;
   };
   /**
-   * Optional web-search rounds that bring live external context into the report. Additionally gated
-   * by the platform flag `APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED` and by the search backend
-   * being configured (Brave key + allowlisted host) — inert and skipped otherwise, never failing a
-   * report. Consulted only by the AI modes (`raw_plus_insights`, `narrative`).
+   * Optional web-search rounds that bring live external context into the report. Gated by the
+   * search backend being configured (Brave key + allowlisted host) — inert and skipped otherwise,
+   * never failing a report. Consulted only by the AI modes (`raw_plus_insights`, `narrative`).
    */
   research: {
     /** Master toggle for this version's report web-search rounds. */
@@ -918,9 +914,7 @@ export const COHORT_REPORT_BACKGROUND_MAX_LENGTH = 8000;
  * The resolved cohort-report config block (per version). `enabled` master-gates the feature for this
  * version; `generation` carries the AI knobs both the thematic-analysis and narrative agents consult.
  * `structure` is the admin-authored outline the agent fills (empty = auto-structure). The `use*`
- * toggles decide what context the agents may draw on. Also gated by the platform flag
- * `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` and (because cohort reports are round-scoped) by
- * `APP_QUESTIONNAIRES_COHORTS_ENABLED`. Narrowed by `narrowCohortReportSettings`
+ * toggles decide what context the agents may draw on. Narrowed by `narrowCohortReportSettings`
  * (lib/app/questionnaire/cohort-report/settings.ts).
  */
 export type CohortReportSettings = {
@@ -980,8 +974,7 @@ export const INTRO_VIDEO_URL_MAX_LENGTH = 500;
  * (company, team, purpose, how results are used) — optionally REPLACED per cohort by
  * `AppCohort.introBackground`; `buttonLabel` is the proceed button's text (`''` = a per-mode default).
  * The rest of the splash copy (how it works, what you'll get) is DERIVED from `presentationMode` +
- * `respondentReport` at runtime, never stored. Also gated by the platform flag
- * `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED`. See `lib/app/questionnaire/intro`.
+ * `respondentReport` at runtime, never stored. See `lib/app/questionnaire/intro`.
  */
 export type IntroSettings = {
   enabled: boolean;
@@ -1018,7 +1011,7 @@ export type QuestionnaireConfigShape = {
    * Respondent-controlled early finish: when on, the respondent may voluntarily end the session
    * and get their report before the agent's own completion thresholds are met. A deliberate escape
    * hatch — it BYPASSES the required-question gate (unlike the agent's `offer`). Off by default;
-   * config-only (no platform flag), like {@link inlineCorrectionEnabled}.
+   * config-only, like {@link inlineCorrectionEnabled}.
    */
   allowEarlyFinish: boolean;
   /**
@@ -1037,9 +1030,8 @@ export type QuestionnaireConfigShape = {
   voiceEnabled: boolean;
   /**
    * Let respondents attach files (images, documents) to their answers — surfaces a paperclip
-   * button in the composer. Off by default; only takes effect when the platform flag
-   * `APP_QUESTIONNAIRES_ATTACHMENT_INPUT_ENABLED` is on. The respondent surfaces AND the live
-   * `/messages` turn gate both honour it, so attachments sent while off are ignored.
+   * button in the composer. Off by default. The respondent surfaces AND the live `/messages`
+   * turn gate both honour it, so attachments sent while off are ignored.
    */
   attachmentsEnabled: boolean;
   contradictionMode: ContradictionMode;
@@ -1070,8 +1062,7 @@ export type QuestionnaireConfigShape = {
   /**
    * Seriousness / abuse gate: how many non-genuine (preposterous / abusive / off-topic)
    * answers a session tolerates before it is abandoned. `0` = off for this questionnaire.
-   * Escalating warnings precede the abandon strike. Only takes effect when the platform
-   * flag `APP_QUESTIONNAIRES_SERIOUSNESS_GATE_ENABLED` is on.
+   * Escalating warnings precede the abandon strike.
    */
   abuseThreshold: number;
   /**
@@ -1084,8 +1075,7 @@ export type QuestionnaireConfigShape = {
   /**
    * Sensitivity awareness / safeguarding: when on, the agent detects a sensitive or contentious
    * disclosure (abuse, distress, safeguarding) each turn, remembers it at session level, and asks
-   * every later question more gently. Off by default; only takes effect when the platform flag
-   * `APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED` is on. See [[feature-flags-are-db-rows]].
+   * every later question more gently. Off by default.
    */
   sensitivityAwareness: boolean;
   /**
@@ -1115,22 +1105,22 @@ export type QuestionnaireConfigShape = {
    * turn captured through a small inline editor — beneath the most-recent turn in the chat and on
    * the answer-panel row — instead of sending a fresh chat turn. Corrections route through the
    * form-edit path (`PUT …/answers`), so they bypass the turn pipeline and never trigger a
-   * same-slot contradiction re-check. Off by default; respondent-facing UX with no platform flag.
+   * same-slot contradiction re-check. Off by default.
    */
   inlineCorrectionEnabled: boolean;
   /**
    * Session resume: let a respondent return to an in-progress session instead of always starting
    * fresh. Governs the whole capability — the no-login surface remembering its session on the device
    * (localStorage) + the "Continue where you left off / Start new" chooser + the cross-device
-   * resume-by-ref endpoint. On by default; respondent-facing UX, no platform flag.
+   * resume-by-ref endpoint. On by default.
    * Off ⇒ today's behaviour (anonymous returns mint a fresh session; by-ref resume 404s).
    */
   sessionResumeEnabled: boolean;
   /**
    * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
    * answers captured (with provenance + confidence), contradictions spotted, why the next question
-   * was chosen — as a live feed beside the chat. On by default; only takes effect when the platform
-   * flag `APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED` is on. See `lib/app/questionnaire/reasoning`.
+   * was chosen — as a live feed beside the chat. On by default.
+   * See `lib/app/questionnaire/reasoning`.
    */
   reasoningStreamEnabled: boolean;
   /** Where the reasoning trace renders ({@link REASONING_PLACEMENTS}); default `overlay`. */
@@ -1163,15 +1153,15 @@ export type QuestionnaireConfigShape = {
   previewInspectorEnabled: boolean;
   /**
    * Interviewer tone & persona — how the conversational interviewer responds to answers. See
-   * {@link ToneSettings}. Off by default per dimension; only takes effect when the platform flag
-   * `APP_QUESTIONNAIRES_TONE_ENABLED` is on. Threaded to the phraser via `buildToneInstructions`.
+   * {@link ToneSettings}. Off by default per dimension. Threaded to the phraser via
+   * `buildToneInstructions`.
    */
   tone: ToneSettings;
   /**
    * Selectable interviewer persona library — the menu of named voices a respondent may choose from.
    * See {@link PersonaOption}. Fixed: the read path always fills this with the built-in library
-   * ({@link narrowPersonas}); the legacy `personas` column is ignored. Only surfaced when the platform
-   * flag `APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED` and `personaSelection.enabled` are both on.
+   * ({@link narrowPersonas}); the legacy `personas` column is ignored. Only surfaced when
+   * `personaSelection.enabled` is on.
    */
   personas: PersonaOption[];
   /**
@@ -1183,21 +1173,17 @@ export type QuestionnaireConfigShape = {
   interviewerStrategy: InterviewerStrategySettings;
   /**
    * Respondent Report — the per-respondent report delivered after completion. See
-   * {@link RespondentReportSettings}. Off by default; only takes effect when the platform flag
-   * `APP_QUESTIONNAIRES_RESPONDENT_REPORT_ENABLED` is on.
+   * {@link RespondentReportSettings}. Off by default.
    */
   respondentReport: RespondentReportSettings;
   /**
    * Cohort Report — the cross-respondent analysis/charting/narrative generated over a round's
-   * submissions. See {@link CohortReportSettings}. Off by default; only takes effect when the
-   * platform flags `APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED` + `APP_QUESTIONNAIRES_COHORTS_ENABLED`
-   * are on.
+   * submissions. See {@link CohortReportSettings}. Off by default.
    */
   cohortReport: CohortReportSettings;
   /**
    * Respondent intro / splash screen shown before the questionnaire starts. See
-   * {@link IntroSettings}. Off by default; only takes effect when the platform flag
-   * `APP_QUESTIONNAIRES_INTRO_SCREEN_ENABLED` is on.
+   * {@link IntroSettings}. Off by default.
    */
   intro: IntroSettings;
 };

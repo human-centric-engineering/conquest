@@ -28,9 +28,8 @@ import { registerNavSection } from '@/lib/admin-nav/registry';
 import { IS_ALPHA } from '@/lib/app/release-stage';
 
 export function initAppNav(): void {
-  // ConQuest questionnaires (P2 / F2.1). The whole surface is flag-gated server
-  // side (`APP_QUESTIONNAIRES_ENABLED`); this nav entry is always present in the
-  // sidebar, but every page/route under it 404s when the flag is off.
+  // ConQuest questionnaires (P2 / F2.1). Routes under this surface are admin-only
+  // (`withAdminAuth`); this nav entry is only rendered for admins by the sidebar.
   registerNavSection({
     title: 'Questionnaires',
     // Replace the plain uppercase label with the ConQuest brand lockup so the

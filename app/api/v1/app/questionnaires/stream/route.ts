@@ -11,8 +11,8 @@
  *   opens, failures surface as a terminal `error` event and success as a `done`
  *   event carrying the new draft's ids. Mirrors `compose/stream`'s `drive()`.
  *
- * Auth: admin only. Flag: 404 when `APP_QUESTIONNAIRES_ENABLED` is off. Rate limit:
- * the same per-admin ingest sub-cap as the non-streaming route.
+ * Auth: admin only. Rate limit: the same per-admin ingest sub-cap as the
+ * non-streaming route.
  */
 
 import type { NextRequest } from 'next/server';

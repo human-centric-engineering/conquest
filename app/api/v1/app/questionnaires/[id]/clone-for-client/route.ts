@@ -10,11 +10,11 @@
  *   provenance via the shared `copyVersionGraph`; does NOT copy sessions, invitations,
  *   evaluation runs, or extraction-change records (a clone starts fresh).
  *
- * Pipeline: flag-gate → withAdminAuth → Zod body → source 404 → target-client 404 →
+ * Pipeline: withAdminAuth → Zod body → source 404 → target-client 404 →
  * transactional create+copy → admin audit → 200 `{ questionnaireId, versionId }`.
  *
- * Auth: admin only. Flag: 404 when `APP_QUESTIONNAIRES_ENABLED` is off. No sub-cap —
- * the 100/min section cap suffices (bounded, no LLM call). A fork strips this file.
+ * Auth: admin only. No sub-cap — the 100/min section cap suffices (bounded, no LLM
+ * call). A fork strips this file.
  */
 
 import { z } from 'zod';

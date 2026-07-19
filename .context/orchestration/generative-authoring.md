@@ -58,9 +58,7 @@ just-composed draft, so it never forks there.)
 | `POST /api/v1/app/questionnaires/compose/stream`                   | SSE — the watch-it-build surface; persists at the terminal, `done` carries the new ids. |
 | `POST /api/v1/app/questionnaires/:id/versions/:vid/compose/refine` | One refine turn → rewrites the draft graph → updated structure + summary.               |
 
-Gate: `withGenerativeAuthoringEnabled` (master `APP_QUESTIONNAIRES_ENABLED` **and**
-sub-flag `APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED`) — 404 when off, so a dark
-sub-feature looks like a missing route.
+Auth: admin only (`withAdminAuth`).
 
 ### Requiredness (`requiredAll`)
 
@@ -70,16 +68,9 @@ no requiredness, so there's no "from source" mode — it's a pure toggle:
 omitted/`true` ⇒ `persistIngestion({ requiredness: 'all' })` (every question required);
 `false` ⇒ `'optional'`. See [ingestion.md → Requiredness policy](../app/questionnaire/ingestion.md#requiredness-policy).
 
-## Feature flag
-
-`APP_QUESTIONNAIRES_GENERATIVE_AUTHORING_ENABLED` is a **DB `feature_flag` row**
-(seed `035`, disabled by default), not an env var. Toggle it in the admin
-feature-flags UI. With it off: the routes 404 and the "Describe your goal" entry
-point is hidden — the page is otherwise unchanged.
-
 ## Admin UI
 
-- **Entry point** — the list page's single upload button becomes `NewQuestionnaireMenu` (`components/admin/questionnaires/new-questionnaire-menu.tsx`): a "New questionnaire" dropdown with **Upload document** (the existing dialog, driven controlled) + **Describe your goal** (→ `/admin/questionnaires/compose`). The "Describe your goal" item only shows when the sub-flag is on.
+- **Entry point** — the list page's single upload button becomes `NewQuestionnaireMenu` (`components/admin/questionnaires/new-questionnaire-menu.tsx`): a "New questionnaire" dropdown with **Upload document** (the existing dialog, driven controlled) + **Describe your goal** (→ `/admin/questionnaires/compose`).
 - **Compose Studio** — `app/admin/questionnaires/compose/page.tsx` + `components/admin/questionnaires/compose/compose-studio.tsx`: left = brief + refine chat, right = live `StructurePreview`. SSE consumed via `fetch` → reader → `parseSseBlock` (same as `data-slots-review.tsx`). "Open in editor" → the Structure editor.
 
 ## Anti-patterns / gotchas

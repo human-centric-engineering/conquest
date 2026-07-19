@@ -3,7 +3,7 @@
 Version-scoped admin page at `/admin/questionnaires/[id]/analytics?v=[versionId]` — the read-side
 view of a version's completed-session data. Three surfaces in tabs: per-question **distributions**,
 the completion **funnel**, and **cost** actuals. Reached from the `Analytics` button on the
-questionnaire detail page. Read-only, admin-only, master-flag-gated (`APP_QUESTIONNAIRES_ENABLED`).
+questionnaire detail page. Read-only and admin-only (`withAdminAuth`).
 
 > **Source of truth:** aggregators in `lib/app/questionnaire/analytics/`, routes under
 > `app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/`, UI in
