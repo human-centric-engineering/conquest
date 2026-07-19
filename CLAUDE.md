@@ -371,6 +371,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Contextual Help          | `.context/ui/contextual-help.md`                          | `<FieldHelp>` directive for form fields                                                                                                         |
 | UI Hooks                 | `.context/ui/hooks.md`                                    | `useLocalStorage`, `useWizard`                                                                                                                  |
 | Per-Surface Theming      | `.context/ui/surface-theming.md`                          | `data-surface` seam: proxy classification, `<SurfaceSync>`, fork-owned `brand-theme.css`, the six design constraints                            |
+| Link QR Codes            | `.context/ui/qr-codes.md`                                 | `CopyLinkField showQr` / `LinkQrCode`; CQ mark at centre, download + copy-image, the scannability constraints                                   |
 
 ## Troubleshooting
 

@@ -11,10 +11,11 @@
  */
 
 import { useState } from 'react';
-import { Loader2, Mail, Copy, Check } from 'lucide-react';
+import { Loader2, Mail, Copy, Check, QrCode } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { LinkQrCode } from '@/components/app/qr/link-qr-code';
 import { Button } from '@/components/ui/button';
 import { FieldHelp } from '@/components/ui/field-help';
 
@@ -45,6 +46,7 @@ export function RoundInvitesPanel({ roundId, questionnaireCount }: RoundInvitesP
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [qrFor, setQrFor] = useState<string | null>(null);
 
   const generate = async () => {
     setIsGenerating(true);
@@ -116,30 +118,51 @@ export function RoundInvitesPanel({ roundId, questionnaireCount }: RoundInvitesP
           </p>
           {result.links.length > 0 && (
             <ul className="divide-y rounded-md border">
-              {result.links.map((link) => (
-                <li
-                  key={`${link.memberId}-${link.versionId}`}
-                  className="flex items-center gap-3 px-3 py-2"
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    <span className="font-medium">{link.name}</span>{' '}
-                    <span className="text-muted-foreground">{link.email}</span>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => void copy(link.url)}
-                  >
-                    {copied === link.url ? (
-                      <Check className="mr-2 h-4 w-4" />
-                    ) : (
-                      <Copy className="mr-2 h-4 w-4" />
+              {result.links.map((link) => {
+                const key = `${link.memberId}-${link.versionId}`;
+                return (
+                  <li key={key} className="px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        <span className="font-medium">{link.name}</span>{' '}
+                        <span className="text-muted-foreground">{link.email}</span>
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => void copy(link.url)}
+                      >
+                        {copied === link.url ? (
+                          <Check className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Copy className="mr-2 h-4 w-4" />
+                        )}
+                        {copied === link.url ? 'Copied' : 'Copy link'}
+                      </Button>
+                      {/* One QR open at a time — these lists run to a full cohort, and rendering
+                          a code per row would bury the names the admin is scanning for. */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0"
+                        aria-expanded={qrFor === key}
+                        onClick={() => setQrFor((current) => (current === key ? null : key))}
+                      >
+                        <QrCode className="mr-2 h-4 w-4" />
+                        {qrFor === key ? 'Hide QR' : 'QR'}
+                      </Button>
+                    </div>
+                    {qrFor === key && (
+                      <LinkQrCode
+                        url={link.url}
+                        label={`invite-${link.name}`}
+                        className="pt-3 pb-1"
+                      />
                     )}
-                    {copied === link.url ? 'Copied' : 'Copy link'}
-                  </Button>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

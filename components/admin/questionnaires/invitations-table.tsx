@@ -357,7 +357,7 @@ export function InvitationsTable({ questionnaireId, invitations }: InvitationsTa
           </DialogHeader>
           {revealed && (
             <div className="space-y-3">
-              <CopyLinkField url={revealed.url} />
+              <CopyLinkField url={revealed.url} showQr qrLabel="No-login link" />
               <p className="text-muted-foreground text-xs">
                 Expires {formatDate(revealed.expiresAt)}. This created a fresh link and invalidated
                 any previous link for this person.

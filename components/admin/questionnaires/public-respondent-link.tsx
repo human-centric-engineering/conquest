@@ -43,5 +43,7 @@ export function PublicRespondentLink({
     ? 'Anyone with this link can answer — no sign-in needed.'
     : 'Activates once this version is launched.';
 
-  return <CopyLinkField url={url} label={label} note={note} />;
+  // QR is offered here above all: this is the link that goes on a poster, a slide, or a
+  // handout, where a scannable code is the whole point.
+  return <CopyLinkField url={url} label={label} note={note} showQr />;
 }
