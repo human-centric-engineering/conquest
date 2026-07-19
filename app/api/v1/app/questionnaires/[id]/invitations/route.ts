@@ -38,7 +38,7 @@ import {
   parseInviteeFields,
   validateInviteeProfile,
 } from '@/lib/app/questionnaire/invitations/invitee-fields';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { listInvitations } from '@/app/api/v1/app/questionnaires/[id]/invitations/_lib/read';
 import {
   findLiveInvitation,

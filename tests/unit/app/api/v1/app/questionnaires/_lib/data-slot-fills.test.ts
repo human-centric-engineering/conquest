@@ -20,15 +20,17 @@ const prismaMock = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
-// jsonInput is re-exported from authoring-routes; mock it to identity so we can
-// assert the transformed DB write without pulling Prisma.JsonNull semantics in.
-vi.mock('@/app/api/v1/app/questionnaires/_lib/authoring-routes', () => ({
+// Mock jsonInput to identity so we can assert the transformed DB write without pulling
+// Prisma.JsonNull semantics in. `jsonArray` keeps its real behaviour — the history append path
+// under test depends on it returning a live, pushable array.
+vi.mock('@/app/api/v1/app/_lib/prisma-json', () => ({
   jsonInput: vi.fn((v: unknown) => v),
+  jsonArray: <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []),
 }));
 
 import { upsertDataSlotFill } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
 import type { DataSlotFillInput } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 type Mock = ReturnType<typeof vi.fn>;
 

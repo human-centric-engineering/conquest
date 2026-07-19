@@ -37,6 +37,7 @@ import {
   clearDataSlotFill,
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-fills';
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
+import { jsonArray, jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 /**
  * Question types whose answer reads meaningfully on its own — free-text prose and the labels of a
@@ -68,17 +69,6 @@ export interface FormSlot {
   key: string;
   type: QuestionType;
   typeConfig: unknown;
-}
-
-/** Convert an arbitrary JSON value into a Prisma `Json` input (null → DB-null). */
-function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (value === null || value === undefined) return Prisma.JsonNull;
-  return value;
-}
-
-/** Parse a stored `refinementHistory` Json column into the typed array (ours to read). */
-function asHistory(value: Prisma.JsonValue): RefinementHistoryEntry[] {
-  return Array.isArray(value) ? (value as unknown as RefinementHistoryEntry[]) : [];
 }
 
 /**
@@ -189,7 +179,7 @@ export async function recordManualAnswer(
     source: 'manual',
     createdAt: new Date().toISOString(),
   };
-  const history = [...asHistory(existing.refinementHistory), entry];
+  const history = [...jsonArray<RefinementHistoryEntry>(existing.refinementHistory), entry];
 
   await client.appAnswerSlot.update({
     where: { id: existing.id },

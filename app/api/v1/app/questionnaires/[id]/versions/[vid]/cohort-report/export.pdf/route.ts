@@ -25,21 +25,18 @@ import {
 } from '@/lib/app/questionnaire/cohort-report';
 import { loadVersionReportScope } from '@/app/api/v1/app/questionnaires/_lib/version-report';
 import { renderCohortReportPdf } from '@/app/api/v1/app/rounds/[id]/cohort-report/_lib/render-cohort-report-pdf';
+import {
+  resolveRevisionSelector,
+  revisionParamSchema,
+} from '@/app/api/v1/app/rounds/[id]/cohort-report/_lib/revision-param';
 
 export const runtime = 'nodejs';
 
 type Params = { id: string; vid: string };
 
 const querySchema = z.object({
-  revision: z.string().max(20).optional(),
+  revision: revisionParamSchema,
 });
-
-function resolveWhich(raw: string | undefined): number | 'head' | 'published' {
-  if (!raw || raw === 'head') return 'head';
-  if (raw === 'published') return 'published';
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : 'head';
-}
 
 const handleExportPdf = withAdminAuth<Params>(
   async (request: NextRequest, _session, { params }) => {
@@ -54,7 +51,10 @@ const handleExportPdf = withAdminAuth<Params>(
       const { revision } = validateQueryParams(searchParams, querySchema);
 
       const scope = resolved.scope;
-      const revisionData = await getCohortReportRevisionContent(scope, resolveWhich(revision));
+      const revisionData = await getCohortReportRevisionContent(
+        scope,
+        resolveRevisionSelector(revision)
+      );
       if (!revisionData) {
         return errorResponse('No version report to export', { code: 'NO_REPORT', status: 404 });
       }

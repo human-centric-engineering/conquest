@@ -23,7 +23,7 @@ import { Prisma } from '@prisma/client';
 import { executeTransaction } from '@/lib/db/utils';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import {
   mergeGoalAudience,
   type MergeProvenance,

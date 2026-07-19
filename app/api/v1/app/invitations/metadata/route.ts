@@ -7,10 +7,11 @@
  *   status — and marks the invitation `opened` on first valid view. Unknown token →
  *   404; expired / revoked → 410.
  *
- * Flag-gate first (404 when off). Read-throughput is bounded by the `/api/v1/app`
- * section rate limit (100/min, keyed on IP for anonymous callers) — no sub-cap.
+ * Read-throughput is bounded by the `/api/v1/app` section rate limit (100/min, keyed
+ * on IP for anonymous callers) — no sub-cap.
  */
 
+import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 
 import { errorResponse, successResponse } from '@/lib/api/responses';
@@ -28,15 +29,23 @@ import {
   resolutionErrorResponse,
 } from '@/app/api/v1/app/invitations/_lib/resolve';
 
+/**
+ * Bounds the only input this unauthenticated route accepts. Issued tokens are exactly 64 hex
+ * chars, but the cap is deliberately loose rather than an exact-format regex: a strict match
+ * would answer 400-vs-404 differently for malformed and unknown tokens, handing a guesser a
+ * format oracle. The cap's job is simply to stop unbounded input reaching the hash + DB lookup.
+ */
+const tokenSchema = z.string().min(1).max(256);
+
 export async function GET(request: NextRequest): Promise<Response> {
   const log = await getRouteLogger(request);
-  const token = new URL(request.url).searchParams.get('token');
-  if (!token) {
+  const parsed = tokenSchema.safeParse(new URL(request.url).searchParams.get('token'));
+  if (!parsed.success) {
     return errorResponse('A token is required', { code: 'VALIDATION_ERROR', status: 400 });
   }
 
   try {
-    return await readMetadata(token, log);
+    return await readMetadata(parsed.data, log);
   } catch (error) {
     return handleAPIError(error);
   }

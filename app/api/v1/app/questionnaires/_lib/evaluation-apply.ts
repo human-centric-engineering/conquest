@@ -44,9 +44,9 @@ import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork
 import {
   audienceProvenanceForEdit,
   goalProvenanceForEdit,
-  jsonInput,
   type ScopedVersion,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { deriveFindingState } from '@/app/api/v1/app/questionnaires/_lib/evaluation-staleness';
 
 /** The finding fields the apply engine needs (a row subset). */

@@ -11,6 +11,7 @@
  * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`. Mutations are audited.
  */
 
+import { z } from 'zod';
 import type { NextRequest } from 'next/server';
 
 import { errorResponse, successResponse } from '@/lib/api/responses';
@@ -24,18 +25,28 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { createRoundSchema, defaultRoundName } from '@/lib/app/questionnaire/rounds';
 import { getRoundDetail, listRounds } from '@/app/api/v1/app/rounds/_lib/read';
 
+/** Bounds the list filters. `q` reaches a Prisma `contains`, so it must not be unbounded. */
+const listQuerySchema = z.object({
+  demoClientId: z.string().min(1).max(64).optional(),
+  cohortId: z.string().min(1).max(64).optional(),
+  q: z.string().max(200).optional(),
+});
+
 const handleList = withAdminAuth(async (request: NextRequest) => {
   const log = await getRouteLogger(request);
   const { searchParams } = new URL(request.url);
-  const demoClientId = searchParams.get('demoClientId') ?? undefined;
-  const cohortId = searchParams.get('cohortId') ?? undefined;
-  if (!demoClientId && !cohortId) {
+  const parsed = listQuerySchema.safeParse({
+    demoClientId: searchParams.get('demoClientId') ?? undefined,
+    cohortId: searchParams.get('cohortId') ?? undefined,
+    q: searchParams.get('q') ?? undefined,
+  });
+  if (!parsed.success || (!parsed.data.demoClientId && !parsed.data.cohortId)) {
     return errorResponse('demoClientId or cohortId is required', {
       code: 'VALIDATION_ERROR',
       status: 400,
     });
   }
-  const q = searchParams.get('q') ?? undefined;
+  const { demoClientId, cohortId, q } = parsed.data;
   const rounds = await listRounds({ demoClientId, cohortId, q });
   log.info('Rounds listed', { demoClientId, cohortId, count: rounds.length });
   return successResponse(rounds);

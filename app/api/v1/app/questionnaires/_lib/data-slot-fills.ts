@@ -9,7 +9,7 @@ import type { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonArray, jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { narrowToEnum, QUESTION_TYPES, type AnswerProvenance } from '@/lib/app/questionnaire/types';
 import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answer';
 import type { DataSlotFillHistoryEntry } from '@/lib/app/questionnaire/panel/types';
@@ -34,11 +34,6 @@ export interface DataSlotFillInput {
    * it (promotion). Shown in the panel as "provisional · may revisit".
    */
   provisional?: boolean;
-}
-
-/** Narrow a stored `refinementHistory` Json column back to the data-slot history entries. */
-function asHistory(value: unknown): DataSlotFillHistoryEntry[] {
-  return Array.isArray(value) ? (value as DataSlotFillHistoryEntry[]) : [];
 }
 
 /**
@@ -138,7 +133,7 @@ export async function upsertDataSlotFill(
 
   // Append a history entry only when the captured value actually changed — a reworded paraphrase of
   // the same value (or a bare provisional flip) shouldn't pollute the "how this answer evolved" trail.
-  const history = asHistory(existing.refinementHistory);
+  const history = jsonArray<DataSlotFillHistoryEntry>(existing.refinementHistory);
   if (valueChanged) {
     history.push({
       previousValue: existing.value,

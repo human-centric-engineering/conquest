@@ -28,11 +28,8 @@ import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-
 import { updateConfigSchema } from '@/lib/app/questionnaire/authoring';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
-import {
-  forkMeta,
-  jsonInput,
-  loadScopedVersion,
-} from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {

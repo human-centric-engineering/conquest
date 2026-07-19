@@ -20,6 +20,7 @@ import { executeTransaction } from '@/lib/db/utils';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 import type { ExtractQuestionnaireStructureData } from '@/lib/app/questionnaire/capabilities';
 import { normalizeSuggestedTypeConfig } from '@/lib/app/questionnaire/ingestion/normalize-type-config';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import {
   mergeGoalAudience,
   type MergeProvenance,
@@ -103,17 +104,6 @@ export class IncoherentExtractionError extends Error {
     );
     this.name = 'IncoherentExtractionError';
   }
-}
-
-/**
- * Convert an arbitrary (LLM-originated) JSON value into a Prisma `Json` input.
- * `null`/`undefined` map to the DB-null sentinel; any other value is stored as
- * opaque JSON. The shape is intentionally untrusted — this is a storage-boundary
- * cast, the same discipline the capability seed uses for its function definition.
- */
-function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (value === null || value === undefined) return Prisma.JsonNull;
-  return value;
 }
 
 /**

@@ -58,12 +58,6 @@ export function shownInviteeFields(fields: InviteeFieldConfig[]): InviteeFieldCo
   return fields.filter((f) => f.shown);
 }
 
-/** Cast a stored `AppQuestionnaireInvitation.profile` JSON column back to {@link InviteeProfile}. */
-export function asInviteeProfile(value: unknown): InviteeProfile | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  return value;
-}
-
 /** Per-field value schema — email is validated as an address; the rest are short free text. */
 function fieldValueSchema(key: InviteeFieldKey): z.ZodTypeAny {
   return key === 'email'

@@ -29,7 +29,7 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import { reviewFindingSchema } from '@/lib/app/questionnaire/evaluation';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import {
   buildScopedFindingView,
   loadScopedFinding,

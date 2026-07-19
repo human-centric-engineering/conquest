@@ -41,9 +41,9 @@ import {
   audienceProvenanceForEdit,
   forkMeta,
   goalProvenanceForEdit,
-  jsonInput,
   loadScopedVersion,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 const handleVersionGraph = withAdminAuth<{ id: string; vid: string }>(
   async (request, _session, { params }) => {

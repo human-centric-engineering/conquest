@@ -31,11 +31,8 @@ import {
 } from '@/lib/app/questionnaire/scoring';
 import { EMPTY_SCORING_SCHEMA } from '@/lib/app/questionnaire/scoring/types';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
-import {
-  forkMeta,
-  jsonInput,
-  loadScopedVersion,
-} from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 type Params = { id: string; vid: string };
 

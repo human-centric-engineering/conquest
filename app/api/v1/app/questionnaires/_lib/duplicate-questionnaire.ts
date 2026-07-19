@@ -22,7 +22,7 @@
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { copyVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/copy-version-graph';
 import { MAX_QUESTIONNAIRE_TITLE_LENGTH } from '@/lib/app/questionnaire/title';
 

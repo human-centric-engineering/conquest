@@ -28,10 +28,10 @@ import {
   asKeyConflict,
   assertKeyAvailable,
   forkMeta,
-  jsonInput,
   loadScopedVersion,
   resolveForkedId,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 type Params = { id: string; vid: string; questionId: string };
 

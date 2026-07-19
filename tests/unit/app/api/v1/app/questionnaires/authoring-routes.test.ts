@@ -2,21 +2,20 @@
  * Unit tests for the authoring route glue helpers (F2.1 / PR2).
  *
  * The pure pieces of `_lib/authoring-routes.ts` — the reorder permutation guard,
- * fork id retargeting, admin-supplied provenance stamping, and the JSON-null
- * boundary — exercised without a DB. The Prisma-touching helpers
+ * fork id retargeting, and admin-supplied provenance stamping — exercised without
+ * a DB. (The JSON-null boundary moved to `app/api/v1/app/_lib/prisma-json.ts`;
+ * see its own test.) The Prisma-touching helpers
  * (`loadScopedVersion`, `resolveQuestionKey`) are covered via the route
  * integration tests.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { Prisma } from '@prisma/client';
 
 import {
   applyReorder,
   audienceProvenanceForEdit,
   forkMeta,
   goalProvenanceForEdit,
-  jsonInput,
   resolveForkedId,
 } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import type { ForkResult } from '@/app/api/v1/app/questionnaires/_lib/fork';
@@ -123,13 +122,5 @@ describe('forkMeta', () => {
       versionId: 'v2',
       versionNumber: 2,
     });
-  });
-});
-
-describe('jsonInput', () => {
-  it('maps null/undefined to the SQL-NULL sentinel and passes JSON through', () => {
-    expect(jsonInput(null)).toBe(Prisma.JsonNull);
-    expect(jsonInput(undefined)).toBe(Prisma.JsonNull);
-    expect(jsonInput({ a: 1 })).toEqual({ a: 1 });
   });
 });
