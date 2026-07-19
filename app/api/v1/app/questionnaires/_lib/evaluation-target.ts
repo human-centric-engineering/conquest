@@ -52,6 +52,7 @@ export function resolveFindingTarget(
       sectionTitle: null,
       position: null,
       sectionPosition: null,
+      questionType: null,
       removed: false,
     };
   }
@@ -63,6 +64,7 @@ export function resolveFindingTarget(
       sectionTitle: null,
       position: null,
       sectionPosition: null,
+      questionType: null,
       removed: false,
     };
   }
@@ -84,6 +86,7 @@ export function resolveFindingTarget(
       sectionTitle: null,
       position: null,
       sectionPosition: idx !== -1 ? idx + 1 : null,
+      questionType: null,
       removed: current !== null && liveIdx === -1,
     };
   }
@@ -100,6 +103,7 @@ export function resolveFindingTarget(
       sectionTitle: null,
       position: null,
       sectionPosition: null,
+      questionType: null,
       removed: false,
     };
   }
@@ -111,6 +115,7 @@ export function resolveFindingTarget(
     // 1-based for display — the stored indices are 0-based.
     position: located.indexInSection + 1,
     sectionPosition: located.sectionIndex + 1,
+    questionType: located.question.type,
     removed: live === null,
   };
 }

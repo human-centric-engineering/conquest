@@ -27,6 +27,7 @@ function target(over: Partial<FindingTargetView> = {}): FindingTargetView {
     sectionTitle: 'Section A',
     position: 1,
     sectionPosition: 1,
+    questionType: 'likert',
     removed: false,
     ...over,
   };
@@ -262,7 +263,9 @@ describe('groupContextLabel', () => {
     sectionTitle: 'Background',
     sectionPosition: 1,
     position: 3,
+    questionType: 'likert',
     removed: false,
+    gap: false,
     findings: [],
     counts: { major: 0, minor: 0, info: 0, total: 0 },
     dimensions: [],
@@ -288,5 +291,110 @@ describe('groupContextLabel', () => {
 
   it('has nothing positional to say about an unknown target', () => {
     expect(groupContextLabel(group({ kind: 'unknown' }))).toBeNull();
+  });
+
+  it('never labels a gap group "Goal", even though it carries kind goal', () => {
+    // The Coverage judge addresses gaps at `goal` because a missing question has no key to target.
+    // Labelling that "Goal" says the finding edits the goal statement, which it never does.
+    const counts = { major: 0, minor: 0, info: 0, total: 2 };
+    expect(groupContextLabel(group({ kind: 'goal', gap: true, counts }))).toBe('Coverage gaps');
+  });
+
+  it('says "gap" in the singular for a lone drafted question', () => {
+    const counts = { major: 0, minor: 0, info: 0, total: 1 };
+    expect(groupContextLabel(group({ kind: 'goal', gap: true, counts }))).toBe('Coverage gap');
+  });
+});
+
+describe('coverage gaps split out from the goal', () => {
+  /** A drafted new question, as the Coverage judge emits it: addressed at `goal`. */
+  function gapFinding(prompt: string, over: Partial<EvaluationFindingView> = {}) {
+    return finding({
+      dimension: 'coverage',
+      targetKey: 'goal',
+      target: target({ kind: 'goal', key: 'goal', label: 'Questionnaire goal' }),
+      proposedEdit: { op: 'add_question', prompt, type: 'free_text' },
+      applicable: 'deep-link',
+      ...over,
+    });
+  }
+
+  it('groups drafted questions away from the goal, under their own label', () => {
+    const groups = groupFindingsByTarget([gapFinding('How big is your team?')]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].gap).toBe(true);
+    expect(groups[0].label).toBe('Questions not yet asked');
+    // The whole point: nothing on this group says "Questionnaire goal".
+    expect(groups[0].label).not.toContain('goal');
+  });
+
+  it('keeps a real goal edit under the goal, separate from the gaps', () => {
+    const groups = groupFindingsByTarget([
+      gapFinding('How big is your team?'),
+      finding({
+        dimension: 'goal_match',
+        targetKey: 'goal',
+        target: target({ kind: 'goal', key: 'goal', label: 'Questionnaire goal' }),
+        proposedEdit: { op: 'edit_goal', goal: 'A better goal' },
+      }),
+    ]);
+    expect(groups).toHaveLength(2);
+    const goalGroup = groups.find((g) => !g.gap);
+    expect(goalGroup?.label).toBe('Questionnaire goal');
+    expect(goalGroup?.findings).toHaveLength(1);
+  });
+
+  it('collects every drafted question into one group, whatever it was addressed to', () => {
+    // A draft is about the questionnaire's missing coverage, not about the target it was hung on.
+    const groups = groupFindingsByTarget([
+      gapFinding('How big is your team?'),
+      gapFinding('What is your budget?', {
+        targetKey: 'section:Background',
+        target: target({ kind: 'section', key: 'section:Background', label: 'Background' }),
+      }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].findings).toHaveLength(2);
+  });
+
+  it("follows the admin's edit when it turns a draft into an in-place op", () => {
+    // `editedOverride` is what actually applies, so it decides the group too.
+    const groups = groupFindingsByTarget([
+      gapFinding('How big is your team?', {
+        targetKey: 'q1',
+        target: target({ key: 'q1', label: 'A question' }),
+        editedOverride: { op: 'replace_prompt', prompt: 'Reworded' },
+      }),
+    ]);
+    expect(groups[0].gap).toBe(false);
+    expect(groups[0].label).toBe('A question');
+  });
+
+  it('sorts gaps after the goal but before the questions', () => {
+    const groups = groupFindingsByTarget([
+      ...questionWith('q1', 1, 1, ['minor']),
+      gapFinding('How big is your team?'),
+      finding({
+        targetKey: 'goal',
+        target: target({ kind: 'goal', key: 'goal', label: 'Questionnaire goal' }),
+        proposedEdit: { op: 'edit_goal', goal: 'A better goal' },
+      }),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual([
+      'Questionnaire goal',
+      'Questions not yet asked',
+      'Q q1',
+    ]);
+  });
+
+  it('carries no answer type on a gap group, since each draft names its own', () => {
+    const groups = groupFindingsByTarget([
+      gapFinding('How big is your team?'),
+      gapFinding('Rate your morale', {
+        proposedEdit: { op: 'add_question', prompt: 'Rate your morale', type: 'likert' },
+      }),
+    ]);
+    expect(groups[0].questionType).toBeNull();
+    expect(groups[0].removed).toBe(false);
   });
 });

@@ -42,6 +42,7 @@ describe('resolveFindingTarget — questions', () => {
       sectionTitle: 'Background',
       position: 2,
       sectionPosition: 1,
+      questionType: 'single_choice',
       removed: false,
     });
   });

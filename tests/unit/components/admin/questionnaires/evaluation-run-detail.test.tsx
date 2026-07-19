@@ -150,12 +150,119 @@ describe('EvaluationRunDetail review queue', () => {
           sectionTitle: 'Background',
           position: 2,
           sectionPosition: 1,
+          questionType: 'likert',
           removed: false,
         },
       }),
     ]);
     expect(screen.getByText('“What is your role?”')).toBeInTheDocument();
     expect(screen.getByText('Question 2 · Background')).toBeInTheDocument();
+  });
+
+  it('names every block of prose, so advice is never mistaken for the questionnaire', async () => {
+    // Three near-identical paragraphs otherwise: the question, the suggestion, the reasoning.
+    await renderQueue([
+      finding({
+        sourceQuote: 'Guidelines: skip if the respondent is a contractor.',
+        target: {
+          kind: 'question',
+          key: 'q_dupe',
+          label: 'What is your role?',
+          sectionTitle: 'Background',
+          position: 2,
+          sectionPosition: 1,
+          questionType: 'likert',
+          removed: false,
+        },
+      }),
+    ]);
+    expect(screen.getByText('Question 2 · Background')).toBeInTheDocument();
+    expect(screen.getByText('Suggestion')).toBeInTheDocument();
+    expect(screen.getByText('Rationale')).toBeInTheDocument();
+    expect(screen.getByText('Evidence')).toBeInTheDocument();
+    expect(screen.getByText('Edit')).toBeInTheDocument();
+  });
+
+  it('labels a section target as a section rather than a question', async () => {
+    await renderQueue([
+      finding({
+        targetKey: 'section:Background',
+        target: {
+          kind: 'section',
+          key: 'section:Background',
+          label: 'Background',
+          sectionTitle: 'Background',
+          position: null,
+          sectionPosition: 1,
+          questionType: null,
+          removed: false,
+        },
+      }),
+    ]);
+    expect(screen.getByText('Section')).toBeInTheDocument();
+    // Not quoted — a section title is not something a respondent is asked.
+    expect(screen.getByText('Background')).toBeInTheDocument();
+  });
+
+  it('names the answer type, so the reader can judge a suggestion without opening the editor', async () => {
+    await renderQueue([
+      finding({
+        target: {
+          kind: 'question',
+          key: 'q_dupe',
+          label: 'What is your role?',
+          sectionTitle: 'Background',
+          position: 2,
+          sectionPosition: 1,
+          questionType: 'single_choice',
+          removed: false,
+        },
+      }),
+    ]);
+    expect(screen.getByText('· Multi-Choice (One Answer)')).toBeInTheDocument();
+  });
+
+  it('drops a source quote that only restates the question already shown above it', async () => {
+    // Judges routinely quote the prompt verbatim as their evidence. Rendering it again, indented,
+    // reads as a further detail when it is the same sentence — so it is suppressed, not shown.
+    await renderQueue([
+      finding({
+        sourceQuote: 'What is your role?',
+        target: {
+          kind: 'question',
+          key: 'q_dupe',
+          label: 'What is your role?',
+          sectionTitle: 'Background',
+          position: 2,
+          sectionPosition: 1,
+          questionType: 'free_text',
+          removed: false,
+        },
+      }),
+    ]);
+    // The prompt is named once — as the target line, not a second time as a quote.
+    expect(screen.getAllByText(/What is your role\?/)).toHaveLength(1);
+  });
+
+  it('keeps a source quote that points outside the question prompt', async () => {
+    await renderQueue([
+      finding({
+        sourceQuote: 'Guidelines: skip if the respondent is a contractor.',
+        target: {
+          kind: 'question',
+          key: 'q_dupe',
+          label: 'What is your role?',
+          sectionTitle: 'Background',
+          position: 2,
+          sectionPosition: 1,
+          questionType: 'free_text',
+          removed: false,
+        },
+      }),
+    ]);
+    expect(
+      screen.getByText('Guidelines: skip if the respondent is a contractor.')
+    ).toBeInTheDocument();
   });
 
   it('marks a target that was removed from the structure since the run', async () => {
@@ -168,6 +275,7 @@ describe('EvaluationRunDetail review queue', () => {
           sectionTitle: 'Background',
           position: 1,
           sectionPosition: 1,
+          questionType: 'likert',
           removed: true,
         },
       }),
@@ -192,12 +300,15 @@ describe('EvaluationRunDetail review queue', () => {
           sectionTitle: null,
           position: null,
           sectionPosition: null,
+          questionType: null,
           removed: false,
         },
       }),
     ]);
-    expect(screen.getByText('Questionnaire goal')).toBeInTheDocument();
+    // The context chip names it. The header's named-target block is suppressed for goal/audience:
+    // their label only restates the kind, so rendering it would print "goal" three ways over.
     expect(screen.getByText('Goal')).toBeInTheDocument();
+    expect(screen.queryByText('“Questionnaire goal”')).not.toBeInTheDocument();
   });
 
   it('accept calls the PATCH review endpoint with { action: "accept" } and updates the card', async () => {
@@ -287,6 +398,20 @@ describe('EvaluationRunDetail review queue', () => {
     expect(screen.getByRole('button', { name: 'Add to questionnaire' })).toBeInTheDocument();
   });
 
+  it('captions the drafted prompt so it cannot be read as an existing question', async () => {
+    // The draft renders in the same weight as `proposedChange` right above it; without the caption
+    // a question that does not exist yet looks like one that does.
+    await renderQueue([addQuestionFinding()]);
+    expect(screen.getByText(/Suggested new question · Free text/)).toBeInTheDocument();
+    expect(screen.getByText('How big is your team?')).toBeInTheDocument();
+  });
+
+  it('names the new question as the subject of the data-slot checkbox', async () => {
+    // Under a coverage-gap heading, a bare "add to a data slot" reads as slotting the *heading*.
+    await renderQueue([addQuestionFinding()], true, true);
+    expect(screen.getByLabelText(/Also add the new question to a data slot/i)).toBeInTheDocument();
+  });
+
   it('disables "Add to questionnaire" when the add_question finding is stale', async () => {
     await renderQueue([
       finding({
@@ -300,10 +425,10 @@ describe('EvaluationRunDetail review queue', () => {
 
   it('shows the data-slot checkbox for an add_question only when the version has data slots', async () => {
     const { unmount } = await renderQueue([addQuestionFinding()], true, false);
-    expect(screen.queryByLabelText(/add to a data slot/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/to a data slot/i)).not.toBeInTheDocument();
     unmount();
     await renderQueue([addQuestionFinding()], true, true);
-    expect(screen.getByLabelText(/add to a data slot/i)).toBeChecked();
+    expect(screen.getByLabelText(/to a data slot/i)).toBeChecked();
   });
 
   it('assigns the new question to a data slot after a one-click add when the checkbox is on', async () => {
@@ -327,7 +452,7 @@ describe('EvaluationRunDetail review queue', () => {
 
   it('does not assign after a one-click add when the data-slot checkbox is unticked', async () => {
     await renderQueue([addQuestionFinding()], true, true);
-    await userEvent.click(screen.getByLabelText(/add to a data slot/i)); // untick
+    await userEvent.click(screen.getByLabelText(/to a data slot/i)); // untick
     mockFetchOnce({ finding: addQuestionFinding({ status: 'applied', appliedToVersionId: 'v1' }) });
 
     await userEvent.click(screen.getByRole('button', { name: 'Add to questionnaire' }));
@@ -356,7 +481,7 @@ describe('EvaluationRunDetail review queue', () => {
     await renderQueue([finding()]);
     // "Apply" and "Accept" read as near-synonyms on their own; the label is what says the second
     // group only records a decision.
-    expect(screen.getByText('Record a decision')).toBeInTheDocument();
+    expect(screen.getByText('Record a decision:')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 
@@ -570,6 +695,7 @@ function crossJudgeRun(): EvaluationRunDetailView {
         sectionTitle: 'Background',
         position: 1,
         sectionPosition: 1,
+        questionType: 'likert',
         removed: false,
       },
     }),
@@ -586,6 +712,7 @@ function crossJudgeRun(): EvaluationRunDetailView {
         sectionTitle: 'Background',
         position: 1,
         sectionPosition: 1,
+        questionType: 'likert',
         removed: false,
       },
     }),
@@ -634,6 +761,7 @@ function npsTarget() {
     sectionTitle: 'Outcomes',
     position: 1,
     sectionPosition: 2,
+    questionType: 'likert',
     removed: false,
   };
 }
@@ -672,6 +800,29 @@ describe('EvaluationRunDetail by-question view', () => {
     // ...but no finding body is rendered until one is opened.
     expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
     expect(screen.queryByText('Ask why, not just whether.')).not.toBeInTheDocument();
+  });
+
+  it('shows each question’s answer type on the collapsed index', async () => {
+    renderCrossJudge();
+    expect(screen.getAllByText('Likert').length).toBeGreaterThan(0);
+  });
+
+  it('heads drafted questions as coverage gaps, never as the questionnaire goal', async () => {
+    // A gap is addressed at `goal` because a missing question has no key — but grouped under a
+    // "Questionnaire goal" heading it reads as an edit to the goal, which it never is.
+    render(
+      <EvaluationRunDetail
+        run={run([addQuestionFinding({ dimension: 'coverage', targetKey: 'goal' })])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        dataSlotsAvailable={false}
+      />
+    );
+    expect(screen.getByText('Questions not yet asked')).toBeInTheDocument();
+    expect(screen.getByText('Coverage gap')).toBeInTheDocument();
+    expect(screen.queryByText('Questionnaire goal')).not.toBeInTheDocument();
+    expect(screen.getByText(/Nothing here changes an existing question/)).toBeInTheDocument();
   });
 
   it('gathers every judge’s findings about one question under a single card', async () => {
@@ -801,6 +952,19 @@ describe('EvaluationRunDetail by-question view', () => {
     renderCrossJudge();
     // Clarity raised one major (q_role) and one info (q_nps).
     expect(screen.getByLabelText('Severity split: 1 major, 1 info')).toBeInTheDocument();
+  });
+
+  it('fills each severity segment from a distinct ramp step', () => {
+    // The regression this guards: major and minor once used `destructive` and `--cq-accent`, which
+    // measure ~10 ΔE apart, so a stacked bar read as one undifferentiated red band. The exact
+    // hexes live in globals.css (documented with their measurements) — what must hold here is that
+    // no two severities share a step, and that the segments are separated rather than butted.
+    renderCrossJudge();
+    const bar = screen.getByLabelText('Severity split: 1 major, 1 info');
+    const fills = [...bar.children].map((c) => c.className);
+    expect(fills).toHaveLength(2);
+    expect(new Set(fills).size).toBe(2);
+    expect(bar.className).toContain('gap-[2px]');
   });
 
   it('still lists a fully-decided question, and it reopens like any other', async () => {

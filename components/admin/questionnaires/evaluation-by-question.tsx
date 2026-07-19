@@ -22,12 +22,14 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation';
+import { questionTypeLabel } from '@/lib/app/questionnaire/types';
 import type { EvaluationFindingView } from '@/lib/app/questionnaire/views';
 import { FindingReviewCard } from '@/components/admin/questionnaires/evaluation-finding-review';
 import {
   groupContextLabel,
   type FindingGroup,
 } from '@/components/admin/questionnaires/evaluation-grouping';
+import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
 
 interface ApplyMeta {
   forked: boolean;
@@ -103,10 +105,13 @@ function GroupCard({
         className="hover:bg-accent/40 flex w-full flex-col gap-2 rounded-xl p-4 text-left transition-colors"
       >
         <div className="flex w-full flex-wrap items-center gap-2">
-          {context && (
-            <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              {context}
-            </span>
+          {context && <FieldLabel>{context}</FieldLabel>}
+          {/* How the question is answered — a suggestion reads differently against free text than
+              against a Likert scale, and without this the reviewer has to open the editor to know. */}
+          {group.questionType && (
+            <Badge variant="outline" className="text-xs font-normal">
+              {questionTypeLabel(group.questionType)}
+            </Badge>
           )}
           {group.removed && (
             <Badge variant="outline" className="text-xs">
@@ -132,10 +137,19 @@ function GroupCard({
           {group.kind === 'question' ? `“${group.label}”` : group.label}
         </h3>
 
+        {/* A gap group holds proposed *additions*, not judgements about something that exists. Said
+            outright, because every other card on this page is about existing structure. */}
+        {group.gap && (
+          <p className="text-muted-foreground text-xs">
+            Topics the goal calls for that no question covers. Nothing here changes an existing
+            question.
+          </p>
+        )}
+
         {/* Cross-judge consensus: the signal this view exists to surface. */}
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-muted-foreground text-xs">
-            Flagged by {group.dimensions.length} of 7 judges:
+            {group.gap ? 'Raised by' : 'Flagged by'} {group.dimensions.length} of 7 judges:
           </span>
           {group.dimensions.map((d) => (
             <span

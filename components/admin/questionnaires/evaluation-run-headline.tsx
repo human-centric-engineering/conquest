@@ -35,14 +35,20 @@ import {
 } from '@/components/admin/questionnaires/evaluation-grouping';
 
 /**
- * Severity → bar fill. An ordinal 3-step ramp (alarm → accent → quiet) built from existing
- * theme tokens so it tracks light/dark without a second palette. Never the sole signal: every
- * bar is paired with a text tally.
+ * Severity → bar fill, from the `--cq-sev-*` ramp in `globals.css` (which documents how the steps
+ * were chosen and measured). Ordinal by chroma — hot red → warm amber → neutral grey — so severity
+ * reads as intensity.
+ *
+ * This used to be `destructive` / `--cq-accent` / muted, which failed twice over: the burnt amber
+ * accent measures ~10 ΔE from the destructive red, so the two stacked segments read as one red
+ * band, and the accent being the *darker* of the pair made minor look more severe than major.
+ *
+ * Never the sole signal: every bar is paired with the text tally below it and an `aria-label`.
  */
 const SEVERITY_FILL: Record<keyof Omit<SeverityCounts, 'total'>, string> = {
-  major: 'bg-destructive',
-  minor: 'bg-[color:var(--cq-accent)]',
-  info: 'bg-muted-foreground/40',
+  major: 'bg-[color:var(--cq-sev-major)]',
+  minor: 'bg-[color:var(--cq-sev-minor)]',
+  info: 'bg-[color:var(--cq-sev-info)]',
 };
 
 const SEVERITY_ORDER = ['major', 'minor', 'info'] as const;
@@ -55,7 +61,9 @@ function SeverityBar({ counts }: { counts: SeverityCounts }) {
     .join(', ');
   return (
     <div
-      className="bg-muted mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full"
+      // gap-[2px]: adjacent fills must not touch, or two segments read as one band. Segments
+      // shrink to absorb the gaps, so the widths still sum to the full track.
+      className="bg-muted mt-1.5 flex h-1.5 w-full gap-[2px] overflow-hidden rounded-full"
       role="img"
       aria-label={`Severity split: ${label}`}
     >
@@ -63,7 +71,7 @@ function SeverityBar({ counts }: { counts: SeverityCounts }) {
         counts[s] > 0 ? (
           <div
             key={s}
-            className={SEVERITY_FILL[s]}
+            className={`${SEVERITY_FILL[s]} min-w-0 shrink rounded-full`}
             style={{ width: `${(counts[s] / counts.total) * 100}%` }}
           />
         ) : null
