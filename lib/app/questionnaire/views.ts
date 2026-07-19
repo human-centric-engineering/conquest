@@ -198,6 +198,22 @@ export interface FindingTargetView {
   sectionTitle: string | null;
   /** 1-based position within its section when `kind === 'question'`; `null` otherwise. */
   position: number | null;
+  /**
+   * 1-based index of the containing section (`kind === 'question'`), or of the section itself
+   * (`kind === 'section'`); `null` otherwise. Paired with {@link position} this is what lets a
+   * reader sort findings into questionnaire order — `position` alone is only meaningful within
+   * one section. Derived at read time like the rest of this view, never stored.
+   */
+  sectionPosition: number | null;
+  /**
+   * The configured answer type (`free_text`, `likert`, `single_choice`, …) when
+   * `kind === 'question'`; `null` otherwise. A reviewer judges a suggestion very differently
+   * depending on how the question is answered — "add a scale anchor" is meaningless on free text —
+   * so the type travels with the target rather than forcing a trip to the structure editor. Kept
+   * as `string` (not `QuestionType`) because it comes from a stored structure that may carry a
+   * type this build no longer knows; the UI falls back to showing the raw value.
+   */
+  questionType: string | null;
   /** The target exists only in the run's snapshot — it was removed from the live structure since. */
   removed: boolean;
 }

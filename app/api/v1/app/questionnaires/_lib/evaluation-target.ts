@@ -51,6 +51,8 @@ export function resolveFindingTarget(
       label: GOAL_LABEL,
       sectionTitle: null,
       position: null,
+      sectionPosition: null,
+      questionType: null,
       removed: false,
     };
   }
@@ -61,6 +63,8 @@ export function resolveFindingTarget(
       label: AUDIENCE_LABEL,
       sectionTitle: null,
       position: null,
+      sectionPosition: null,
+      questionType: null,
       removed: false,
     };
   }
@@ -70,14 +74,20 @@ export function resolveFindingTarget(
     // A section is addressed by title, which is neither unique nor stable — "removed" here means
     // no live section carries that title any more (the staleness deriver treats ambiguity too,
     // but for *naming* the target a single match isn't required).
-    const live = current?.sections.some((s) => s.title === title) ?? false;
+    const liveIdx = current?.sections.findIndex((s) => s.title === title) ?? -1;
+    // Fall back to the snapshot for *ordering* a since-removed section, the same way a removed
+    // question is still named from the snapshot below.
+    const idx =
+      liveIdx !== -1 ? liveIdx : (snapshot?.sections.findIndex((s) => s.title === title) ?? -1);
     return {
       kind: 'section',
       key: targetKey,
       label: title,
       sectionTitle: null,
       position: null,
-      removed: current !== null && !live,
+      sectionPosition: idx !== -1 ? idx + 1 : null,
+      questionType: null,
+      removed: current !== null && liveIdx === -1,
     };
   }
 
@@ -92,6 +102,8 @@ export function resolveFindingTarget(
       label: targetKey,
       sectionTitle: null,
       position: null,
+      sectionPosition: null,
+      questionType: null,
       removed: false,
     };
   }
@@ -100,8 +112,10 @@ export function resolveFindingTarget(
     key: targetKey,
     label: located.question.prompt,
     sectionTitle: located.sectionTitle,
-    // 1-based for display — the stored `indexInSection` is 0-based.
+    // 1-based for display — the stored indices are 0-based.
     position: located.indexInSection + 1,
+    sectionPosition: located.sectionIndex + 1,
+    questionType: located.question.type,
     removed: live === null,
   };
 }

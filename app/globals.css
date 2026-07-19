@@ -84,6 +84,35 @@
     --cq-accent-muted: color-mix(in oklab, var(--cq-accent) 16%, transparent);
     --cq-accent-ring: color-mix(in oklab, var(--cq-accent) 45%, transparent);
   }
+
+  /* Severity ramp — major / minor / info, for the evaluation severity bars.
+     Deliberately NOT built from --cq-accent: the burnt amber sits ~10 ΔE from the
+     destructive red (validated, below the 15 normal-vision floor), so a stacked
+     bar read as one undifferentiated red band — and because the accent is the
+     *darker* of the two, minor read as more severe than major. Red → amber →
+     grey is hot/warm/neutral, so severity drops as chroma drops. Measured with
+     the dataviz validator: major↔minor ΔE 24.1 normal, 19.2 deutan, 18.2 tritan.
+     Never the sole signal — every bar carries a text tally beside it.
+
+     KEEP THIS IN ITS OWN RULE, not merged into the .cq-surface block above.
+     Tailwind emits an @supports fallback for each color-mix() declaration, which
+     splits the containing rule into fragments — and plain declarations trailing
+     the last color-mix() are dropped from the built CSS. Declared here they
+     survive; declared after --cq-accent-ring they silently vanish and every bar
+     renders transparent. */
+  .cq-surface {
+    --cq-sev-major: #dc2626;
+    --cq-sev-minor: #f59e0b;
+    --cq-sev-info: #94a3b8;
+  }
+  /* Selected for the dark surface, not flipped from light: both steps lift so
+     they clear #1a1a19, and the pair separates further here — ΔE 27.4 normal,
+     20.4 deutan, 24.5 tritan. */
+  .dark .cq-surface {
+    --cq-sev-major: #ef4444;
+    --cq-sev-minor: #fbbf24;
+    --cq-sev-info: #64748b;
+  }
 }
 
 @layer utilities {

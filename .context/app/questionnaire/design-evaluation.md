@@ -264,8 +264,13 @@ structure mutates under the findings.
 against) but a useless _label_: a card reading "`q_role` · Rewrite the question prompt" forces the
 reviewer into the structure editor to find out what is being judged. So the read seam resolves the
 key to its subject — `_lib/evaluation-target.ts` (`resolveFindingTarget`) projects a `target`
-onto each finding view: `{ kind, key, label, sectionTitle, position, removed }`, where `label` is
-the question's prompt (or the section title, or "Questionnaire goal" / "Target audience").
+onto each finding view: `{ kind, key, label, sectionTitle, position, sectionPosition, questionType,
+removed }`, where `label` is the question's prompt (or the section title, or "Questionnaire goal" /
+"Target audience") and `questionType` is the configured answer type (`null` for non-question
+targets). The type travels with the target because a suggestion reads differently depending on it —
+"add a scale anchor" is meaningless on free text — and the alternative is a trip to the structure
+editor. It stays a `string`, not a `QuestionType`: it comes from a stored structure that may name a
+type this build no longer knows, and the UI (`questionTypeLabel`) falls back to the raw value.
 
 Same posture as staleness — **derived at read time, never stored** (a persisted prompt would rot
 the moment the question was reworded) — with two differences worth knowing:
@@ -294,7 +299,7 @@ as its label — the card renders, the raw-key chip still identifies it, fail-cl
   lineage.
 - The run-detail admin component is the interactive queue. Each card names its subject first —
   a context chip ("Question 2 · Background", "Goal") and the question prompt quoted beneath the
-  badges, from the resolved `target` — then leads with the **primary
+  badges with its answer type, from the resolved `target` — then leads with the **primary
   work-action** sized by the effective op — **"Add to questionnaire"** for an `add_question`
   (one-click apply) plus a secondary **"Open in editor"** (the seeded refine deep-link); **"Apply"**
   (with an inline edit-override mini-form for text ops + type + ordinal) for other structured ops;
@@ -303,3 +308,115 @@ as its label — the card renders, the raw-key chip still identifies it, fail-cl
   the new draft when an apply forks a launched version.
 - `EvaluationSeedComposer` (`components/admin/questionnaires/`) renders the pre-filled new-question
   form for the "Open in editor" deep-link; the structure page resolves the seed and forces edit mode.
+
+## Reading a run — two views over the same findings
+
+The API returns findings ordered by `(dimension, ordinal)`: the order they were **produced**. That
+is the right shape for "how did the Clarity judge do?" and the wrong shape for the job the admin is
+on the page to do — fix the questionnaire. A question flagged by three judges is the strongest
+signal a run carries, and in dimension order those three findings sit screens apart. So the
+run-detail page offers two groupings over one set of findings and one set of review actions:
+
+| View            | Grouping                    | Answers                                                    |
+| --------------- | --------------------------- | ---------------------------------------------------------- |
+| **By question** | one card per `target.key`   | "what's wrong with Q4, and do the judges agree?" (default) |
+| By judge        | one section per `dimension` | "which dimension is unhappy, and what did it score?"       |
+
+By-question sorts three ways — `natural` (questionnaire order), `major` (worst-first), `findings`
+(busiest-first) — via the pure `groupFindingsByTarget` in
+`components/admin/questionnaires/evaluation-grouping.ts`. Both count sorts fall back to natural
+order, so equally-severe targets stay in a stable, meaningful sequence. Each card leads with the
+question prompt (the subject under review), names the judges that flagged it, and tallies severity;
+`FindingReviewCard` takes a `lead` prop that swaps its leading chip from the target to the judge,
+since under a question heading the missing fact is _which judge said this_.
+
+**Every group starts collapsed.** The page opens as a scannable index — which questions have
+problems, how many judges agree, and how severe — and the reviewer drills into the ones they choose
+to work on. That is why the card header has to carry its weight on its own: context chip, the
+prompt, its answer type, the judge-consensus row, and the severity tally are all visible closed. Groups open
+independently and stay open across a re-sort (the card is keyed on the target, not its sorted
+slot), so re-ordering never folds away work in progress.
+
+**Every block of prose is labelled, and the questionnaire is separated from the advice.** A finding
+card stacks three or four paragraphs — the question under review, the judge's suggestion, its
+rationale, sometimes a quote — and with only font weight between them a reader landing mid-card
+cannot tell whether a sentence is _the questionnaire_ or _the AI's opinion of it_, which is the one
+distinction the page exists to communicate. So the card is two bands: a tinted, ruled-off **header**
+carrying the badges and (under a judge heading) the question itself, and a **body** in which every
+block is introduced by a small uppercase eyebrow — `Suggestion`, `Rationale`, `Evidence`, `Edit`,
+`Suggested new question · <type>`. Below the rule, everything is the judge talking.
+
+The eyebrow is `FieldLabel` / `LabelledField` from
+`components/admin/questionnaires/evaluation-field.tsx`, shared rather than re-declared per file: the
+value is in the labels being visibly the same kind of thing everywhere, and the moment two surfaces
+drift in size or weight the eyebrow stops reading as structure and starts reading as decoration. The
+by-question group header uses the same `FieldLabel` for its context chip.
+
+The header's named-target block renders **only for `question` and `section` targets**, whose label is
+real content. `goal` / `audience` / `unknown` labels merely restate the kind, which the badge-row
+context chip already carries — a block would print the same word twice under an eyebrow saying it a
+third time. When the block does render, its eyebrow carries the _full_ context ("Question 4 ·
+Business Execution") and the badge-row chip is dropped, so the target is named once, not twice.
+
+**A quote that only restates the prompt is dropped.** Judges routinely cite the question's own
+wording as their `sourceQuote`, which is useful in the raw payload and noise on screen: the prompt
+is already the card's heading (by question) or its target line (by judge), so re-rendering the same
+sentence indented beneath the rationale reads as a further detail that isn't one.
+`quoteRestatesTarget` suppresses a quote that matches the target label after normalisation, in
+either containment direction. A quote reaching outside the prompt — guidelines, a neighbouring
+question, an answer option — survives, because that is evidence found nowhere else on the card.
+
+**Only flagged targets appear.** The payload carries findings, not the version's question list, so
+a clean question is absent by construction — the headline says "across N flagged items" rather than
+implying full coverage. Non-question targets (`section`, `goal`, `audience`, `unknown`) get their
+own groups; nothing is filtered out, and `goal`/`audience` pin above the structure.
+
+**Coverage gaps group by op, not by target — the one exception to keying on `target.key`.** A gap is
+a question that does not exist yet, so it has no key to be addressed at; the Coverage judge is told
+to hang it on the literal `goal` (see the ops table above). Grouped by target that files drafted
+questions under a heading reading "Questionnaire goal", which states the opposite of what they are —
+not an edit to the goal statement, but coverage the goal implies and no question supplies. So any
+finding whose **effective op** (`editedOverride ?? proposedEdit`) is `add_question` is routed to a
+single synthetic group, `gap:new-questions`, titled _"Questions not yet asked"_ and captioned as
+proposed additions. It sorts after `goal`/`audience` and before the structure, carries no answer type
+(each draft names its own), and leaves genuine `edit_goal` findings under the goal where they belong.
+Editing a draft into an in-place op moves it back out of the gap group, since the effective op is
+what actually applies.
+
+Two labels on the finding card follow from the same confusion. The drafted prompt is captioned
+**"Suggested new question · &lt;type&gt;"** — it renders in the same weight as `proposedChange`
+directly above it, so unlabelled a question that doesn't exist reads as one that does. And the
+data-slot checkbox names its subject (_"Also add the new question to a data slot"_): its bare form
+read as slotting the group heading rather than the question being drafted.
+
+### Headline band
+
+`EvaluationRunHeadline` puts the two questions an admin opens the page with above the fold: severity
+totals + review progress (`CqStatTiles`), and a per-judge strip carrying each dimension's score and
+its severity split. **Judge cells are filter buttons** — the summary is a way into the work, not
+decoration. When judges failed, the band says the totals are an undercount rather than quietly
+omitting them; a stale count is surfaced the same way.
+
+**The severity bar's ramp is measured, not chosen by eye.** Fills come from `--cq-sev-major` /
+`-minor` / `-info` in `globals.css` — hot red → warm amber → neutral grey, so severity reads as
+falling chroma. The first cut used `bg-destructive` and `--cq-accent`, which failed twice: the burnt
+amber accent measures **ΔE 10.0** from the destructive red (below the 15 normal-vision floor), so
+the two stacked segments read as one red band — and because the accent is the _darker_ of the pair,
+minor looked more severe than major, inverting the ordinal signal. The replacement measures ΔE 24.1
+normal / 19.2 deutan / 18.2 tritan on light, 27.4 / 20.4 / 24.5 on dark, whose steps are selected
+against the dark surface rather than flipped from light. Segments carry a 2px gap so adjacent fills
+never touch. Colour is never the sole signal — each bar pairs with a text tally and an `aria-label`.
+Re-measure with the `dataviz` skill's `validate_palette.js` before touching these values.
+
+Three filters compose across both views (status ∧ severity ∧ judge). **Severity filtering is new**:
+`severity` was previously display-only, which made "show me what blocks launch" — the entire point
+of the `major` level — impossible to ask.
+
+### `sectionPosition` — the one read-seam addition
+
+`position` is 1-based _within a section_, so it cannot order questions across sections. The by-question
+natural sort needs a section ordinal, so `FindingTargetView` gained **`sectionPosition`**, populated
+by `resolveFindingTarget` from a `sectionIndex` now returned by `locateSlot`. Same posture as the
+rest of the view: **derived at read time, never stored**, no migration. It is `null` for
+`goal`/`audience`/`unknown`, and falls back to the run snapshot for a since-removed section so
+history still orders sensibly.

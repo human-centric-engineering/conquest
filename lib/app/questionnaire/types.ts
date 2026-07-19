@@ -119,6 +119,18 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
 };
 
 /**
+ * Label a type that arrived as a plain `string` — from a stored structure, an evaluation snapshot,
+ * or any other surface where the value predates (or postdates) this build's {@link QUESTION_TYPES}.
+ * Unknown values render as themselves rather than `undefined`, so a legacy row degrades to a raw
+ * key instead of a blank badge. Callers holding a real {@link QuestionType} should index
+ * {@link QUESTION_TYPE_LABELS} directly — the exhaustive record is the stronger guarantee.
+ */
+export function questionTypeLabel(type: string): string {
+  const labels: Record<string, string> = QUESTION_TYPE_LABELS;
+  return labels[type] ?? type;
+}
+
+/**
  * How a `free_text` comment field's living paraphrase is built (stored in the slot's
  * `typeConfig.commentAggregation`; classified by the extractor/composer, admin-overridable):
  *  - `isolated`  → paraphrase only this question's own answer + tangential chat mentions of it.
