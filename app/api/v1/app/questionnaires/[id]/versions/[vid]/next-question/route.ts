@@ -19,10 +19,7 @@
  *
  *   The three deterministic strategies run as pure functions (no sub-cap; they
  *   inherit the section 100/min). `adaptive` runs its real embedding + LLM pick
- *   only when the `APP_QUESTIONNAIRES_ADAPTIVE_STRATEGY_ENABLED` sub-flag is on;
- *   that path takes a tighter per-admin sub-cap. When the sub-flag is off, an
- *   `adaptive` selection degrades to `weighted` (no deps wired → the strategy's
- *   own fallback). 404 when the master flag is off or the version is absent.
+ *   and takes a tighter per-admin sub-cap. 404 when the version is absent.
  */
 
 import { z } from 'zod';

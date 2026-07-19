@@ -16,9 +16,9 @@
  *   unknown session/version is a 404. A self-edge (already in the target status) is an
  *   idempotent no-op that writes no event.
  *
- *   Gated by the master questionnaires flag only (F4.6 is deterministic — no LLM, no
- *   sub-flag). A single-transaction transition is cheap, so it takes no per-flow
- *   sub-cap: the platform's automatic 100/min section cap (proxy.ts) suffices.
+ *   F4.6 is deterministic — no LLM — and a single-transaction transition is cheap, so it
+ *   takes no per-flow sub-cap: the platform's automatic 100/min section cap (proxy.ts)
+ *   suffices.
  */
 
 import { z } from 'zod';

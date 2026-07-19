@@ -8,15 +8,13 @@
  *   F5.1 dispatch seam — one structured LLM call per dimension, fail-soft per judge),
  *   then PERSISTS the run + one finding row per judge finding and returns the completed
  *   run detail. Synchronous: the run is terminal the moment this returns (no worker, no
- *   polling — the 2026-06-05 decision). Gated by the master flag AND the design-evaluation
- *   sub-flag (the whole POST is paid LLM work — 404 when either is off, mirroring the
- *   preview route), and takes the per-admin LLM sub-cap.
+ *   polling — the 2026-06-05 decision). The whole POST is paid LLM work, so it takes the
+ *   per-admin LLM sub-cap (mirroring the preview route).
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/evaluations
- *   Admin-only. Lists this version's persisted runs newest-first (paginated). Read-only —
- *   master-flag-gated and version-scoped via `loadScopedVersion`, with no sub-flag 404
- *   (persisted history stays readable even if the sub-feature is later switched off, the
- *   same posture as the read-only `changes` list).
+ *   Admin-only. Lists this version's persisted runs newest-first (paginated). Read-only and
+ *   version-scoped via `loadScopedVersion` (persisted history stays readable, the same
+ *   posture as the read-only `changes` list).
  */
 
 import { z } from 'zod';
@@ -127,8 +125,8 @@ const handleListRuns = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const { id, vid } = await params;
 
-    // Read-only: master-flag-gated (the wrapper) and version-scoped. No sub-flag 404 —
-    // persisted history stays readable, the `changes` list posture.
+    // Read-only and version-scoped — persisted history stays readable, the `changes`
+    // list posture.
     const scoped = await loadScopedVersion(id, vid);
     if (!scoped) {
       throw new NotFoundError('Questionnaire version not found');

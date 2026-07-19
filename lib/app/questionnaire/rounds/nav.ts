@@ -2,7 +2,7 @@
  * Cohorts & Rounds — admin URL helpers, nested under the demo-client detail surface.
  *
  * The two feature tabs (Cohorts, Rounds) are appended to the demo-client sub-nav by
- * `demo-clients/nav.ts` (flag-gated there). These helpers build the drill-down hrefs the
+ * `demo-clients/nav.ts` (opt-in there via `cohortsEnabled`). These helpers build the drill-down hrefs the
  * tables link to. Plain data inside the framework-agnostic `lib/app/**` boundary — SSR-safe.
  */
 

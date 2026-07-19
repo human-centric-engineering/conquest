@@ -15,10 +15,10 @@
  *
  *   Expensive — one batch of embedding-API calls — so it takes the same tight per-admin sub-cap as
  *   the question-slot embedder (`embedSlotsLimiter`) on top of the section 100/min. 404 when the
- *   master flag is off or the version doesn't resolve under the questionnaire.
+ *   version doesn't resolve under the questionnaire.
  *
- *   Gated on the master app flag only (not the adaptive data-slot sub-flag): an admin may
- *   pre-generate embeddings before turning the feature on. See `_lib/data-slot-embeddings.ts`.
+ *   Independent of adaptive data-slot selection: an admin may pre-generate embeddings before
+ *   turning the feature on. See `_lib/data-slot-embeddings.ts`.
  */
 
 import { z } from 'zod';

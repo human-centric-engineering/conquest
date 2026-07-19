@@ -5,10 +5,9 @@
  *   Admin-only. Returns the cohort-report read view for the round + bundled version: the report
  *   header (status, publish state, cost, revision count), the working-head revision's content, and
  *   the dataset the charts render against. `exists: false` when nothing has been generated yet (the
- *   UI shows "Generate" over a live data preview). Read-only — no paid work; gated by the
- *   cohort-report flag.
+ *   UI shows "Generate" over a live data preview). Read-only — no paid work.
  *
- * Pipeline: cohort-report flag-gate (404) → withAdminAuth → 404 unknown round → 422 version not
+ * Pipeline: withAdminAuth → 404 unknown round → 422 version not
  *   bundled → build view.
  */
 

@@ -7,8 +7,8 @@
  *   session, and regenerate its report. Query params: page, limit, q (ref substring), status. Each row
  *   carries the questionnaire + version ids to deep-link the session viewer and analytics.
  *
- *   Gate order: master flag → live-sessions flag → alpha release stage (404 before auth) →
- *   withAdminAuth → read. This surface is deliberately protected once alpha ends (gated on
+ *   Gate order: alpha release stage (404 before auth) → withAdminAuth → read. This surface is
+ *   deliberately protected once alpha ends (gated on
  *   `IS_ALPHA` / `NEXT_PUBLIC_RELEASE_STAGE`). Inherits the 100/min `api` section cap; no sub-cap (a read).
  */
 

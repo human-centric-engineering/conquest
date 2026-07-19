@@ -4,8 +4,8 @@
  * Exercises the POST handler with the DB seam (`prisma`), the capability dispatcher,
  * and the answer-slot persistence seam (`_lib/answer-slots`) mocked — but the pure
  * `applyRefinement` REAL, so the persist payload is the genuine merge. Covers: gate
- * order (404 master-flag-off before auth; 404 sub-flag-off after auth), 401/403,
- * scope-404, no-resolvable-answers 400, body validation, the rate-limit 429, the
+ * order (401 unauthenticated; 403 non-admin), scope-404, no-resolvable-answers 400,
+ * body validation, the rate-limit 429, the
  * persist-then-refine wiring (seed → dispatch → apply → write), and the fail-soft
  * empty path. The refiner capability itself is tested separately.
  */

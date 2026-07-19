@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/app/questionnaires/workflows/:slug
  *
- * Admin-only, flag-gated. Returns one pipeline diagram (the raw platform
+ * Admin-only. Returns one pipeline diagram (the raw platform
  * `WorkflowDefinition` — the client runs the pure mapper itself) enriched with
  * live per-node detail: the agent binding + best-effort resolved model, the
  * exact prompt messages from the catalog, and each capability's name. When a

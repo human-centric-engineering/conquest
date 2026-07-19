@@ -2,8 +2,8 @@
  * Seriousness / abuse gate — the pure escalation + strike logic.
  *
  * Two pure exports, no Prisma / Next:
- *  - {@link seriousnessGateActive} — whether the gate runs at all (platform flag + a positive
- *    per-questionnaire threshold).
+ *  - {@link seriousnessGateActive} — whether the gate runs at all (a positive per-questionnaire
+ *    threshold).
  *  - {@link evaluateAbuseStrike} — fold one non-serious answer into the session's strike count
  *    and decide: escalating warning, or abandon at the threshold. Pure: count in → decision out,
  *    so it's zero-mock unit-testable and the orchestrator stays deterministic.
@@ -43,11 +43,15 @@ export function abuseAbortMessage(count: number): string {
 }
 
 /**
- * Whether the gate is live for a turn: the platform sub-feature flag must be on AND the
- * questionnaire must tolerate fewer than `Infinity` strikes (`threshold > 0`; `0` = off).
+ * Whether the gate is live for a turn: the questionnaire must tolerate fewer than `Infinity`
+ * strikes (`threshold > 0`; `0` = off for this questionnaire).
+ *
+ * This previously also AND-ed a platform feature flag, which no longer exists. The orchestrator
+ * checks `config.abuseThreshold > 0` inline rather than calling this, so the helper is kept only
+ * as the named statement of the rule — if you wire it up, that is the whole rule.
  */
-export function seriousnessGateActive(flagEnabled: boolean, threshold: number): boolean {
-  return flagEnabled && threshold > 0;
+export function seriousnessGateActive(threshold: number): boolean {
+  return threshold > 0;
 }
 
 /**

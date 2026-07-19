@@ -11,9 +11,8 @@
  *   purpose is to let admins tune the panel and sanity-check a structure before launch,
  *   and to give F5.2 a proven dispatch seam to build persistence on.
  *
- *   Gated by the master flag AND the design-evaluation sub-flag (the whole route is
- *   paid LLM work — there is no free deterministic result to fall back to): 404 when
- *   either is off, or when the version is absent. The run takes a per-admin LLM sub-cap.
+ *   404 when the version is absent. The whole route is paid LLM work — there is no free
+ *   deterministic result to fall back to — so the run takes a per-admin LLM sub-cap.
  *   Per-judge failure is fail-soft — a dimension that errors returns a `diagnostic`
  *   instead of a verdict, and the other six still return — so one flaky judge never
  *   5xxs the whole panel.

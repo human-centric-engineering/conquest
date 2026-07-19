@@ -9,7 +9,7 @@
  * the single enriched list endpoint (no per-row fetches); the detail is fetched once per open.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 
 import { apiClient } from '@/lib/api/client';
@@ -49,12 +49,15 @@ const EMPTY_FILTERS: Filters = {
   sortOrder: 'desc',
 };
 
+/** The filter/page state the server-rendered first page corresponds to. */
+const SEED_QUERY_KEY = JSON.stringify([EMPTY_FILTERS, 1]);
+
 const FLAG_BADGE: Record<string, string> = {
-  none: 'bg-zinc-100 text-zinc-600',
-  flagged: 'bg-amber-100 text-amber-700',
-  reviewed: 'bg-blue-100 text-blue-700',
-  actioned: 'bg-emerald-100 text-emerald-700',
-  dismissed: 'bg-zinc-200 text-zinc-500',
+  none: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
+  flagged: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400',
+  reviewed: 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400',
+  actioned: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400',
+  dismissed: 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500',
 };
 
 export function TurnEvaluationsTable({
@@ -72,7 +75,13 @@ export function TurnEvaluationsTable({
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
+  // Monotonic id for the in-flight list request. Typing in a filter fires several overlapping
+  // fetches; without this, a slow earlier response can land last and repopulate the table with
+  // results for filters the admin has already moved past. Only the latest request may commit.
+  const fetchSeq = useRef(0);
+
   const fetchPage = useCallback(async (f: Filters, p: number) => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -91,25 +100,33 @@ export function TurnEvaluationsTable({
       if (!res.ok) throw new Error('List request failed');
       const body = await parseApiResponse<TurnEvaluationListItem[]>(res);
       if (!body.success) throw new Error('List request failed');
+      if (seq !== fetchSeq.current) return;
       setItems(body.data);
       setMeta((prev) => parsePaginationMeta(body.meta) ?? prev);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load evaluations');
+      if (seq === fetchSeq.current) {
+        setError(err instanceof Error ? err.message : 'Could not load evaluations');
+      }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) setLoading(false);
     }
   }, []);
 
-  // Re-fetch on filter/page change (skip the very first render — the server seeded page 1).
-  const [mounted, setMounted] = useState(false);
+  // Re-fetch on filter/page change; the server already seeded page 1 with EMPTY_FILTERS, so skip
+  // while the controls still match that seed.
+  //
+  // The skip is keyed on the seed VALUE rather than a one-shot "have I mounted" flag. A bare
+  // `ref = true` flag would be flipped by the first of StrictMode's double-invoked mount effects
+  // and then let the second one through, firing a redundant fetch on mount in development. (The
+  // older `useState` flag avoided that only because both invocations closed over the same stale
+  // `false` — at the cost of an extra render and an exhaustive-deps suppression.) Comparing values
+  // is idempotent, so it holds under any number of invocations.
+  const hasFetched = useRef(false);
   useEffect(() => {
-    if (!mounted) {
-      setMounted(true);
-      return;
-    }
+    if (!hasFetched.current && JSON.stringify([filters, page]) === SEED_QUERY_KEY) return;
+    hasFetched.current = true;
     void fetchPage(filters, page);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, page]);
+  }, [filters, page, fetchPage]);
 
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setPage(1);
@@ -215,7 +232,7 @@ export function TurnEvaluationsTable({
       </div>
 
       {error && (
-        <p className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400">
           {error}
         </p>
       )}

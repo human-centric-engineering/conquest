@@ -4,8 +4,8 @@
  * Exercises the POST handler with the DB seam (`prisma`), the answer-slot persistence
  * seam (`_lib/answer-slots`), and the capability dispatcher mocked: gate order, the
  * accept/hold resolution, the completion-sweep wiring (run only on an eligible accept,
- * gated by the F4.3 sub-flag, fail-soft), and the active→completed transition (only on
- * a clean submit). The pure resolution logic is unit-tested separately
+ * gated by the per-questionnaire contradiction mode, fail-soft), and the active→completed
+ * transition (only on a clean submit). The pure resolution logic is unit-tested separately
  * (completion-logic.test.ts) and the seam in answer-slot-persistence.test.ts; this
  * pins the route's orchestration.
  */
@@ -311,7 +311,7 @@ describe('accept → hold for review (sweep found contradictions)', () => {
   });
 });
 
-describe('accept → fail-soft + sub-flag', () => {
+describe('accept → fail-soft', () => {
   it('treats a failed sweep as clean and still submits (with a diagnostic)', async () => {
     dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue({
       success: false,

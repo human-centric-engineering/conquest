@@ -1,7 +1,6 @@
 /**
  * Evaluations tab — run / review design-time judge evaluations for the selected
- * version. Lifted into the workspace; reads `vid` from the path. History reads
- * under the master flag; the run button is gated by the design-evaluation sub-flag.
+ * version. Lifted into the workspace; reads `vid` from the path.
  */
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';

@@ -8,7 +8,7 @@
  *   the slots build instead of staring at a spinner. The final set is persisted as the version's
  *   pending DRAFT (AppDataSlotDraft) before the terminal `done` event, exactly like the
  *   single-shot route — runtime + the launch gate still read only the saved set until the admin
- *   reviews + saves. Gated by the master flag AND the data-slots sub-flag; per-admin sub-cap.
+ *   reviews + saves. Per-admin sub-cap.
  *
  * The non-streaming sibling (`../generate`) stays for API consumers; the admin UI uses this one.
  */

@@ -6,8 +6,7 @@
  * DELETE /api/v1/app/rounds/:id/phases/:phaseId  — remove the phase; the subgroup's members fall back
  *        to the round's own window.
  *
- * Both: round-phases flag-gate first (404 when off), then `withAdminAuth`, then 404 on an unknown
- * phase (scoped to the round in the path). Audited.
+ * Both: `withAdminAuth`, then 404 on an unknown phase (scoped to the round in the path). Audited.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

@@ -4,9 +4,8 @@
  * defines band cutoffs — Big-Five style — either in the visual builder or by extracting a draft from
  * an uploaded document. Scores feed the cohort report's scored aggregation.
  *
- * Gated behind APP_QUESTIONNAIRES_COHORT_REPORT_ENABLED (+ cohorts + master) — `notFound()`s when
- * off, mirroring the tab's visibility in `workspace-nav.ts`. Reads the schema + available keys from
- * the scoring-schema GET endpoint.
+ * Tab visibility is driven by `workspace-nav.ts`. Reads the schema + available keys from the
+ * scoring-schema GET endpoint.
  */
 import type { Metadata } from 'next';
 

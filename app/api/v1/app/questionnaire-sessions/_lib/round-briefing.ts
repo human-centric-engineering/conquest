@@ -5,7 +5,7 @@
  * Route-local seam (the `lib/app/**` boundary is Prisma-free); the pure selection/formatting lives in
  * `lib/app/questionnaire/rounds/briefing.ts`. Returns `null` when the round is gone or its per-round
  * `contextEnabled` toggle is off — so the caller treats "no briefing" and "briefing disabled"
- * identically (no injection). The platform flag is checked separately by the caller (the route).
+ * identically (no injection).
  */
 
 import { prisma } from '@/lib/db/client';

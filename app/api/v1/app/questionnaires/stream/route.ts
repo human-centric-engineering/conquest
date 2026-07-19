@@ -11,8 +11,8 @@
  *   opens, failures surface as a terminal `error` event and success as a `done`
  *   event carrying the new draft's ids. Mirrors `compose/stream`'s `drive()`.
  *
- * Auth: admin only. Flag: 404 when `APP_QUESTIONNAIRES_ENABLED` is off. Rate limit:
- * the same per-admin ingest sub-cap as the non-streaming route.
+ * Auth: admin only. Rate limit: the same per-admin ingest sub-cap as the
+ * non-streaming route.
  */
 
 import type { NextRequest } from 'next/server';
@@ -103,7 +103,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
   }
 
   async function* drive(): AsyncGenerator<ExtractionStreamEvent> {
-    // The orchestrator runs extract → (verify → repair, when the sub-flag is on) → coherence,
+    // The orchestrator runs extract → verify → repair → coherence,
     // yielding real phase events (extracting / verifying / repairing) as it goes. Drain it,
     // re-yielding each event over the stream, then take its returned PipelineResult.
     const orchestrator = orchestrateExtraction(upload, { adminId, log });

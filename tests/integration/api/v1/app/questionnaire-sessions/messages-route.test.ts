@@ -3,7 +3,7 @@
  *
  * The turn-context loader, invoker builder, offer renderer, and persistence are mocked, but
  * the REAL pure orchestrator runs — so this pins the route's wiring: gate order
- * (flag → auth → ownership → status → sub-cap → validation), the SSE framing
+ * (auth → ownership → status → sub-cap → validation), the SSE framing
  * (start → content → done), and that the turn is persisted with the orchestrator's outputs.
  */
 
@@ -72,7 +72,7 @@ const dataSlotEmbedMock = vi.hoisted(() => ({
 vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings', () => dataSlotEmbedMock);
 
 // Extraction pre-filter — mocked so the wiring (which lists the extractor sees) is asserted without
-// running the real ranker. Default: a full-set passthrough (`applied:false`), so the flag being on
+// running the real ranker. Default: a full-set passthrough (`applied:false`), so the pre-filter
 // changes nothing unless a test overrides it.
 const prefilterMock = vi.hoisted(() => ({
   narrowExtractionCandidates: vi.fn(() =>
@@ -247,7 +247,7 @@ beforeEach(() => {
     yield { type: 'content', delta: 'Ready to submit?' };
     return { message: 'Ready to submit?', costUsd: 0.001 };
   });
-  // Phrasing on by default in these tests (all sub-flags true): echo the verbatim prompt so
+  // Phrasing on by default in these tests: echo the verbatim prompt so
   // existing content assertions hold; the real fail-soft/streaming is covered in question-stream.test.ts.
   questionMock.streamQuestionMessage.mockImplementation(async function* (opts: {
     input: { prompt: string };
@@ -1050,7 +1050,7 @@ describe('sensitivity awareness / safeguarding', () => {
 });
 
 describe('reasoning stream (F9.9)', () => {
-  /** A context with reasoning stream on (both platform flag and per-version toggle). */
+  /** A context with reasoning stream on (per-version config toggle). */
   function reasoningContext(persist = false) {
     const base = loadedContext();
     return loadedContext({
@@ -1927,7 +1927,7 @@ describe('adaptive embedding lazy-ensure', () => {
 
     await drainSse(await POST(req({ message: 'hi' }), ctx));
 
-    // When adaptive flag is on AND selectionStrategy is 'adaptive', embeddings are ensured.
+    // When selectionStrategy is 'adaptive', embeddings are ensured.
     expect(slotEmbedMock.ensureVersionSlotsEmbedded).toHaveBeenCalledWith('v1');
   });
 
@@ -1970,7 +1970,7 @@ describe('adaptive embedding lazy-ensure', () => {
   });
 
   it('calls ensureVersionDataSlotsEmbedded when data-slot adaptive mode is active', async () => {
-    // Arrange: data-slot mode + adaptive data-slot sub-flag both on.
+    // Arrange: data-slot mode with the adaptive data-slot path active.
     const base = loadedContext();
     ctxMock.buildTurnContext.mockResolvedValue(
       loadedContext({

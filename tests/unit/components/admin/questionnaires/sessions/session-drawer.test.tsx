@@ -15,6 +15,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { SessionDrawer } from '@/components/admin/questionnaires/sessions/session-drawer';
+import { REPORT_POLL_MS } from '@/components/admin/questionnaires/sessions/constants';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import type { AdminSessionRefItem } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-list';
 
@@ -578,19 +579,19 @@ describe('SessionDrawer — generating poll', () => {
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(4000);
+      await vi.advanceTimersByTimeAsync(REPORT_POLL_MS);
     });
     expect(mockGet).toHaveBeenCalledTimes(2);
 
     // Report lands ready — the interval must be torn down.
     mockGet.mockResolvedValue(adminView());
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(4000);
+      await vi.advanceTimersByTimeAsync(REPORT_POLL_MS);
     });
     const afterReady = mockGet.mock.calls.length;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(12000);
+      await vi.advanceTimersByTimeAsync(REPORT_POLL_MS * 3);
     });
     expect(mockGet).toHaveBeenCalledTimes(afterReady);
   });
@@ -601,7 +602,7 @@ describe('SessionDrawer — generating poll', () => {
 
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(12000);
+      await vi.advanceTimersByTimeAsync(REPORT_POLL_MS * 3);
     });
     expect(mockGet).toHaveBeenCalledTimes(1);
   });
@@ -616,7 +617,7 @@ describe('SessionDrawer — generating poll', () => {
 
     mockGet.mockRejectedValue(new Error('transient'));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(4000);
+      await vi.advanceTimersByTimeAsync(REPORT_POLL_MS);
     });
 
     // No error screen — a failed poll must not blow away the drawer.

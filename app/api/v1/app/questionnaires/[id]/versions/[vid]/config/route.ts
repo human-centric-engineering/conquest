@@ -13,7 +13,7 @@
  *
  *   Forks a new draft first if the target is launched (the editable id comes back
  *   in `meta`); the fork preamble copies any existing config into the draft, and
- *   this upsert then writes to the draft's row. 404 when the feature flag is off.
+ *   this upsert then writes to the draft's row.
  */
 
 import { successResponse } from '@/lib/api/responses';
@@ -28,11 +28,8 @@ import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-
 import { updateConfigSchema } from '@/lib/app/questionnaire/authoring';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
-import {
-  forkMeta,
-  jsonInput,
-  loadScopedVersion,
-} from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {

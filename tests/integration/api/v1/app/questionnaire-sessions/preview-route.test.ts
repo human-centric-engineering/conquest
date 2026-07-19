@@ -2,7 +2,7 @@
  * Integration test: admin "Preview as respondent" session-create route.
  *
  * The create seam, rate limiter, and token minter are mocked, plus better-auth. Pins the
- * admin-only preview surface: the live-sessions flag gate (before auth), the admin-auth gate
+ * admin-only preview surface: the admin-auth gate
  * (401/403), the per-admin sub-cap, dispatch to createPreviewSession, the typed-failure → HTTP
  * mapping, and that a success returns the minted access token. The anonymous-mode bypass lives
  * in createPreviewSession (unit-tested in create-session.test.ts); here we pin that the route

@@ -8,7 +8,7 @@
  * DELETE /api/v1/app/rounds/:id   — delete (cascades round items; sessions keep their
  *        plain-String roundId, treated as no-longer-gating on continue).
  *
- * All: cohorts flag-gate first (404 when off), then `withAdminAuth`, then 404 on unknown id.
+ * All: `withAdminAuth`, then 404 on unknown id.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

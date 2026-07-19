@@ -199,7 +199,14 @@ async function generaliseThemes(slots: SlotSamples[]): Promise<GeneralisedThemes
       inputTokens: completion.tokenUsage.input,
       outputTokens: completion.tokenUsage.output,
       metadata: { capability: 'app_learning_digest', slots: slots.length },
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+      // Cost tracking is best-effort and must never fail the digest — but a silent swallow hides
+      // systematic cost-logging outages, so log it like every other logCost call site does.
+      logger.error('learning digest: logCost rejected', {
+        agentId: agent.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     const valid = new Set(slots.map((s) => s.key));
     return {

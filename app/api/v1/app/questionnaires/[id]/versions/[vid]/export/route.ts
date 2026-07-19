@@ -5,7 +5,7 @@
  *   Admin-only. Downloads a version's **completed** session results in CSV (one row per
  *   session × question) or JSON (the full session graph: answers + provenance + turns).
  *   Reuses the F8.1 analytics filter (`from`/`to`/`tagIds`), so an export mirrors exactly
- *   what the admin is viewing. Master-flag-gated and version-scoped.
+ *   what the admin is viewing. Version-scoped.
  *
  *   Anonymous mode (`AppQuestionnaireConfig.anonymousMode`) is honoured in the loader:
  *   respondent identity is nulled and the `turns` array is dropped from the payload.

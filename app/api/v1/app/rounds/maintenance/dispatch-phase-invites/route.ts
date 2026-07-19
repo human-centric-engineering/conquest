@@ -8,8 +8,7 @@
  *   scheduled workflow (an `AiWorkflowSchedule` cron calling this URL) or an external cron at it, or
  *   call it manually. Returns the run summary.
  *
- * Round-phases flag-gate first (404 when off), then `withAdminAuth` — the scheduled caller presents
- * admin credentials. Audited.
+ * `withAdminAuth` — the scheduled caller presents admin credentials. Audited.
  */
 
 import { successResponse } from '@/lib/api/responses';

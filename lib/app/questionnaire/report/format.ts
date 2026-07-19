@@ -1,6 +1,7 @@
 /**
- * Report formatting — the optional second pass over a generated report (feature-flagged by
- * `APP_REPORT_FORMATTER_ENABLED`).
+ * Report formatting — a best-effort second pass over a generated report. `report/generate.ts`
+ * always invokes it; "optional" means it degrades, not that it is gated: on any failure it
+ * returns the original content with `formatted: false`.
  *
  * The report WRITER agent (`report/generate.ts`) is responsible for grounded substance; this pass is
  * responsible for FORM only. It re-paragraphs the prose at natural boundaries, converts inline

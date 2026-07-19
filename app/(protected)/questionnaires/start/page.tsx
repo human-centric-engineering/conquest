@@ -24,8 +24,7 @@ export const metadata: Metadata = {
  *
  * Resolves `?invitationToken=` or `?versionId=` into a created/resumed session and redirects
  * to the chat surface. Centralises the invitation-vs-version branching and maps create
- * failures to a friendly screen. The flag gate runs first so a dark-launched surface looks
- * like a missing route.
+ * failures to a friendly screen.
  */
 export default async function StartQuestionnairePage({
   searchParams,

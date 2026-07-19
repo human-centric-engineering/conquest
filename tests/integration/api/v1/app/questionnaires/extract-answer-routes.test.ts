@@ -2,9 +2,9 @@
  * Integration test: questionnaire answer-extraction preview route (F4.2).
  *
  * Exercises the POST handler with the DB seam (`prisma`) and the capability
- * dispatcher mocked: gate order (404 master-flag-off before auth; 404 sub-flag-off
- * after auth), 401/403, scope-404, unknown-active-key 400, body validation, the
- * rate-limit 429, the capability wiring (active + side-effect intents), and the
+ * dispatcher mocked: gate order (401 unauthenticated; 403 non-admin), scope-404,
+ * unknown-active-key 400, body validation, the rate-limit 429, the capability wiring
+ * (active + side-effect intents), and the
  * fail-soft empty-intents path. The extractor capability itself is tested
  * separately (answer-capability.test.ts); this pins the route → context-builder →
  * dispatch wiring.

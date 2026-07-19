@@ -6,7 +6,7 @@
  * POST /api/v1/app/cohorts/:id/subgroups  — create one subgroup (409 when the name is already
  *      taken on this cohort — `@@unique([cohortId, name])`).
  *
- * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`. Creates are audited.
+ * Both: `withAdminAuth`. Creates are audited.
  */
 
 import { Prisma } from '@prisma/client';

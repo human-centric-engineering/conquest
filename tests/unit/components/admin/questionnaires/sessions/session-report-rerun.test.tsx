@@ -51,6 +51,7 @@ vi.mock('@/components/app/questionnaire/report/report-body', () => ({
 
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { API } from '@/lib/api/endpoints';
+import { REPORT_POLL_MS } from '@/components/admin/questionnaires/sessions/constants';
 import { APIClientError } from '@/lib/api/client';
 import { DEFAULT_RESPONDENT_REPORT_SETTINGS } from '@/lib/app/questionnaire/types';
 import type {
@@ -326,9 +327,10 @@ describe('SessionReportRerun', () => {
       // opening a Radix dialog. The Radix open-state flip renders the content synchronously.
       fireEvent.click(screen.getByRole('button', { name: /re-run report/i }));
 
-      // Poll interval is 3s; advance past it and the refresh GET fires (then the view settles ready).
+      // Advance past one poll interval and the refresh GET fires (then the view settles ready).
+      // Derived from the shared constant so retuning the interval doesn't silently break this test.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(3200);
+        await vi.advanceTimersByTimeAsync(REPORT_POLL_MS + 200);
       });
       expect(mockApiGet).toHaveBeenCalledWith(
         API.APP.QUESTIONNAIRE_SESSIONS.reportRevisions('sess-1')
@@ -337,7 +339,7 @@ describe('SessionReportRerun', () => {
       // After the view settles to ready, no further polls fire.
       const callsAfterSettle = mockApiGet.mock.calls.length;
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(6000);
+        await vi.advanceTimersByTimeAsync(REPORT_POLL_MS * 2);
       });
       expect(mockApiGet.mock.calls.length).toBe(callsAfterSettle);
     } finally {

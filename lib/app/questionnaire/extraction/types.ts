@@ -122,7 +122,7 @@ export interface ExtractionContext {
    * Sensitivity awareness / safeguarding: when true, the prompt asks the extractor to ALSO emit a
    * `sensitivity` assessment for a genuine sensitive/contentious disclosure. Off (the default) adds
    * no prompt text and no behaviour, so the feature is zero-cost when disabled. The route sets this
-   * from the platform flag AND the per-questionnaire config toggle.
+   * from the per-questionnaire config toggle.
    */
   sensitivityAware?: boolean;
   /**

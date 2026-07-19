@@ -40,7 +40,7 @@ import {
   type SectionUpdateFields,
 } from '@/lib/app/questionnaire/extraction-review';
 import type { ChangeType, TargetEntityType } from '@/lib/app/questionnaire/ingestion/types';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 /** The change-row fields the review surface reads / reverts. */
 export const CHANGE_SELECT = {

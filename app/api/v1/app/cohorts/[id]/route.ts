@@ -5,7 +5,7 @@
  * PATCH  /api/v1/app/cohorts/:id   — edit name/description (audited).
  * DELETE /api/v1/app/cohorts/:id   — delete (cascades members, rounds, round items).
  *
- * All: cohorts flag-gate first (404 when off), then `withAdminAuth`, then 404 on unknown id.
+ * All: `withAdminAuth`, then 404 on unknown id.
  */
 
 import { successResponse } from '@/lib/api/responses';

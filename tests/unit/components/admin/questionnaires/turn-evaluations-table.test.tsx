@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { StrictMode } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -368,6 +369,48 @@ describe('TurnEvaluationsTable', () => {
         ...unknown[],
       ];
       expect(lastUrl).toContain('minScore=50');
+    });
+
+    it('does not re-fetch on mount — the server already seeded page 1', async () => {
+      stubListFetch([]);
+      setup([makeItem()]);
+
+      // Deliberately give any mount effect a chance to fire before asserting.
+      await new Promise((r) => setTimeout(r, 0));
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('does not re-fetch on mount even when the mount effect runs twice (StrictMode)', async () => {
+      // reactStrictMode is on, so React double-invokes the mount effect in development. A one-shot
+      // "have I mounted" ref would be consumed by the first invocation and let the second through,
+      // firing a redundant list request on every page load. StrictMode double-invokes effects, so
+      // rendering inside <StrictMode> reproduces exactly that.
+      stubListFetch([]);
+      render(
+        <StrictMode>
+          <TurnEvaluationsTable initialItems={[makeItem()]} initialMeta={BASE_META} />
+        </StrictMode>
+      );
+
+      await new Promise((r) => setTimeout(r, 0));
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('fetches with maxScore param when Max score is set', async () => {
+      // Mirrors the Min score case — the two bounds are set independently, so an onChange wired
+      // to the wrong state field would leave this one silently inert.
+      stubListFetch([]);
+      const { user } = setup([]);
+
+      await user.type(screen.getByRole('spinbutton', { name: /max score/i }), '90');
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      const [lastUrl] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [
+        string,
+        ...unknown[],
+      ];
+      expect(lastUrl).toContain('maxScore=90');
+      expect(lastUrl).not.toContain('minScore=');
     });
 
     it('resets to page=1 in the fetch URL when a filter changes', async () => {

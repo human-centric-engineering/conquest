@@ -14,11 +14,10 @@ import {
 } from '@/lib/app/questionnaire/seriousness';
 
 describe('seriousnessGateActive', () => {
-  it('requires both the flag and a positive threshold', () => {
-    expect(seriousnessGateActive(true, 4)).toBe(true);
-    expect(seriousnessGateActive(false, 4)).toBe(false);
-    expect(seriousnessGateActive(true, 0)).toBe(false);
-    expect(seriousnessGateActive(false, 0)).toBe(false);
+  it('is active only for a positive threshold — 0 means off for this questionnaire', () => {
+    expect(seriousnessGateActive(4)).toBe(true);
+    expect(seriousnessGateActive(1)).toBe(true);
+    expect(seriousnessGateActive(0)).toBe(false);
   });
 });
 

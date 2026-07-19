@@ -4,8 +4,7 @@
  * GET /api/v1/app/questionnaires/:id
  *   Admin-only read of one questionnaire plus a newest-first summary of each of
  *   its versions (status, goal/audience, section/question/change counts). 404 when
- *   the id is unknown — and, like every `/api/v1/app/**` route, 404 when the
- *   feature flag is off. Read model: `_lib/detail.ts`. Edit affordances arrive in
+ *   the id is unknown. Read model: `_lib/detail.ts`. Edit affordances arrive in
  *   F2.1b (PR2).
  *
  * PATCH /api/v1/app/questionnaires/:id

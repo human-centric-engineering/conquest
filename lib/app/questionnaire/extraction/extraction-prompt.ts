@@ -261,8 +261,8 @@ slot's fill — a directly answered mapped question can NEVER leave its parent d
 the question came up on a tangent or was not the one you asked about.`;
 
 /**
- * Appended to the system rules ONLY when sensitivity awareness is on (gated by the platform flag +
- * per-questionnaire toggle, threaded as `ctx.sensitivityAware`). Asks the extractor to flag a
+ * Appended to the system rules ONLY when sensitivity awareness is on (the per-questionnaire
+ * toggle, threaded as `ctx.sensitivityAware`). Asks the extractor to flag a
  * genuine sensitive/contentious disclosure so the conversation can tread carefully. Kept off the
  * default prompt so the feature adds zero tokens/behaviour when disabled.
  */

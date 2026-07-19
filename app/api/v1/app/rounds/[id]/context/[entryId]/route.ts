@@ -4,8 +4,8 @@
  * PATCH  /api/v1/app/rounds/:id/context/:entryId  — re-attribute / retitle / rewrite / reorder.
  * DELETE /api/v1/app/rounds/:id/context/:entryId  — remove a briefing entry.
  *
- * All: round-context flag-gate first (404 when off), then `withAdminAuth`, then 404 when the entry
- * isn't found within the round. A re-attribution (`questionSlotId`) must point at a question in the
+ * All: `withAdminAuth`, then 404 when the entry isn't found within the round. A re-attribution
+ * (`questionSlotId`) must point at a question in the
  * entry's version (else 400). Audited.
  */
 

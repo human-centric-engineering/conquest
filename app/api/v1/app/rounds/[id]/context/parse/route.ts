@@ -7,7 +7,7 @@
  *   trimmed and capped — it does NOT persist; the admin reviews, edits, and saves it via create. No
  *   LLM call: a pure parse, reusing the intro-background upload guard + the knowledge-base parser.
  *
- * Pipeline: round-context flag-gate → withAdminAuth → per-admin sub-cap → file guard → parseDocument.
+ * Pipeline: withAdminAuth → per-admin sub-cap → file guard → parseDocument.
  */
 
 import type { NextRequest } from 'next/server';

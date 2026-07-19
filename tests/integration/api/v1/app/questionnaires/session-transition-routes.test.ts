@@ -2,7 +2,7 @@
  * Integration test: session lifecycle transition route (F4.6).
  *
  * Exercises the POST handler with the DB (`prisma`) and the session seam
- * (`_lib/sessions`) mocked: gate order (master flag → auth → validation → scope), the
+ * (`_lib/sessions`) mocked: gate order (auth → validation → scope), the
  * action dispatch (pause/resume/abandon → the right seam call), the resume payload, and
  * the 409 mapping of an illegal transition. The pure transition rules are unit-tested
  * (session-logic.test.ts) and the seam's writes in session-state-machine.test.ts; this

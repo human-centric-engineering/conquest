@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/app/questionnaires/prompts
  *
- * Admin-only, flag-gated. Returns every questionnaire agent paired with the exact
+ * Admin-only. Returns every questionnaire agent paired with the exact
  * prompt(s) it sends (rendered from representative sample contexts by the catalog)
  * AND its seeded DB binding — so an operator can read the real, load-bearing prompts
  * that the editable `systemInstructions` field does not drive. Read-only: builds the

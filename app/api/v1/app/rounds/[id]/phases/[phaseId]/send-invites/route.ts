@@ -6,7 +6,7 @@
  *   an admin can release one group (e.g. the leadership team) ahead of the rest. Idempotent: members
  *   already invited are skipped; only freshly-minted links are emailed. Returns the generation result.
  *
- * Round-phases flag-gate first (404 when off), then `withAdminAuth`. Audited.
+ * `withAdminAuth`. Audited.
  */
 
 import { successResponse } from '@/lib/api/responses';

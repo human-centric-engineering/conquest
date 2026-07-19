@@ -8,9 +8,9 @@
  * `started | completed | revoked`). Destructive; returns `deletedCounts`; audited as
  * `app_demo_client.reset_sessions` (the audit row is never deleted).
  *
- * Gate order: flag-gate first (404 when off), then `withAdminAuth` (401/403), then 404
- * on unknown id, then the 409 anonymousMode refusal (a structural block — wins over a
- * correct slug), then the 400 typed-confirmation (`confirmSlug` must equal the slug).
+ * Gate order: `withAdminAuth` (401/403), then 404 on unknown id, then the 409
+ * anonymousMode refusal (a structural block — wins over a correct slug), then the 400
+ * typed-confirmation (`confirmSlug` must equal the slug).
  *
  * "403 on ownership" is the admin-role guard: `AppDemoClient` has no per-user owner — it
  * is a global admin fixture, so `withAdminAuth` is the whole ownership story.

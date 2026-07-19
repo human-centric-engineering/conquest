@@ -189,8 +189,8 @@ const argsSchema = z
     sessionId: z.string().optional(),
     /**
      * Sensitivity awareness / safeguarding: when true, the prompt asks the extractor to ALSO flag
-     * a genuine sensitive/contentious disclosure. The route sets this from the platform flag AND
-     * the per-questionnaire toggle; off (default) adds no prompt text or behaviour.
+     * a genuine sensitive/contentious disclosure. The route sets this from the per-questionnaire
+     * toggle; off (default) adds no prompt text or behaviour.
      */
     sensitivityAware: z.boolean().optional(),
     /**

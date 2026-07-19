@@ -4,10 +4,9 @@
  * Tests the no-login respondent chat surface (F7.1) Server Component.
  *
  * Test Coverage:
- * - Feature flag off → notFound()
- * - Flag on → renders AnonymousSessionBoot with versionId, voiceInputEnabled, welcomeCopy from theme
- * - voiceInputEnabled=true propagated when flag is on
- * - voiceInputEnabled=false propagated when flag is off
+ * - Renders AnonymousSessionBoot with versionId, voiceInputEnabled, welcomeCopy from theme
+ * - voiceInputEnabled=true propagated when the version enables voice
+ * - voiceInputEnabled=false propagated when the version opted out
  * - welcomeCopy is taken from the resolved theme (page does not hard-code it)
  * - Page metadata title
  *
@@ -156,9 +155,8 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveReasoningDwellForVersion).mockResolvedValue({ dwellMs: 2000, perItemMs: 330 });
     vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
     vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(true);
-    // Per-questionnaire opt-ins default ON, so these tests isolate the platform flag as the
-    // deciding factor. The page ANDs platform flag AND config opt-in; dedicated tests below
-    // exercise the config-off path.
+    // Per-questionnaire opt-ins default ON here; the page reads the config opt-in for each
+    // affordance, and dedicated tests below exercise the config-off path.
     vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveAdminPreviewMeta).mockResolvedValue({
@@ -318,7 +316,7 @@ describe('PublicQuestionnairePage', () => {
       });
       render(Component);
 
-      // Assert: the flag is resolved for this version and forwarded to the boot.
+      // Assert: anonymous mode is resolved for this version and forwarded to the boot.
       expect(resolveAnonymousForVersion).toHaveBeenCalledWith(VERSION_ID);
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
         'data-anonymous',

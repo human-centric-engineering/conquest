@@ -73,7 +73,7 @@ export interface QuestionnaireChatProps {
    * "Watch it think" reasoning placement (demo feature) — `overlay` ("Animated") mounts the newest
    * turn's collapsed trace open then animates it closed after a beat; `inline` shows the quiet
    * collapsed trace beneath each turn (opens on click only). `undefined`/null = the feature is off
-   * (no trace rendered), which is what the page passes when the platform flag or version toggle is off.
+   * (no trace rendered), which is what the page passes when the version toggle is off.
    */
   reasoningPlacement?: ReasoningPlacement | null;
   /**

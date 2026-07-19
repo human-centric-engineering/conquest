@@ -73,8 +73,7 @@ async function getQuestionnaireStats(): Promise<QuestionnaireStats> {
 /**
  * Admin — Questionnaires list page (P2 / F2.1a).
  *
- * Thin server component: gates on the feature flag (404 when off — the surface is
- * dark), pre-renders the first page via `serverFetch`, and hands off to the
+ * Thin server component: pre-renders the first page via `serverFetch`, and hands off to the
  * client `<QuestionnairesTable>` for search / filter / pagination. Fetch failures
  * never throw — the table renders an empty-state and an inline banner.
  */

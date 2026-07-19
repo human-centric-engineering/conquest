@@ -13,10 +13,11 @@
  * inspector and admin drawer both establish a `.dark` context), light on a light admin page.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Check, Copy, Download, Gauge } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard';
 import { MarkdownContent } from '@/components/admin/orchestration/markdown-or-raw-view';
 import { serializeTurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/serialize';
 import type { TurnEvaluation } from '@/lib/app/questionnaire/turn-evaluation/schema';
@@ -36,20 +37,11 @@ function downloadMarkdown(filename: string, text: string): void {
 
 /** Small copy-to-clipboard button matching the inspector's console styling. */
 function CopyButton({ getText, label }: { getText: () => string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(getText());
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard unavailable — no-op.
-    }
-  }
+  const { copied, copy } = useCopyToClipboard();
   return (
     <button
       type="button"
-      onClick={() => void copy()}
+      onClick={() => void copy(getText())}
       className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide uppercase transition-colors"
       aria-label={label}
     >

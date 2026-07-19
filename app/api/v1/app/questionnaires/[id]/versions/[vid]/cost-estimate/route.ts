@@ -16,7 +16,7 @@
  *   (token volume estimated, USD withheld) rather than a misleading $0.
  *
  *   No mutation, no audit, no LLM call (pure math) → no rate-limit sub-cap; the
- *   route inherits the section 100/min. 404 when the feature flag is off.
+ *   route inherits the section 100/min.
  *
  *   See `lib/app/questionnaire/cost-estimation/` for the methodology and
  *   `.context/app/questionnaire/cost-estimation.md` for the full guide.

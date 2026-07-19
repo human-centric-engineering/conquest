@@ -36,10 +36,16 @@ export interface CohortReportEditorProps {
   onCancel: () => void;
 }
 
-type EditSection = CohortReportSection & { format: 'html' };
+/**
+ * A section in the working set. `id` is a stable client-side key so that reordering (move up/down)
+ * and duplicate/remove don't remount the row — with an array-index key React reuses the DOM across a
+ * swap, landing focus and in-progress editor state on the wrong section. Not persisted; stripped on
+ * save. Mirrors the `DraftSlot.id` approach in `data-slots-review.tsx`.
+ */
+type EditSection = CohortReportSection & { format: 'html'; id: string };
 
-function toHtmlSection(s: CohortReportSection): EditSection {
-  return { ...s, format: 'html' };
+function toHtmlSection(s: CohortReportSection, i: number): EditSection {
+  return { ...s, format: 'html', id: `section-${i}` };
 }
 
 export function CohortReportEditor({
@@ -54,6 +60,9 @@ export function CohortReportEditor({
   const [sections, setSections] = React.useState<EditSection[]>(
     content.sections.map(toHtmlSection)
   );
+  // Mints ids for sections added AFTER mount, starting past the seed length so it can't collide
+  // with a seed id. A ref (not state) — bumping it must never itself trigger a render.
+  const idSeq = React.useRef(content.sections.length);
   const [recommendations, setRecommendations] = React.useState(content.recommendations.join('\n'));
   const [actions, setActions] = React.useState(content.actions.join('\n'));
   const [saving, setSaving] = React.useState(false);
@@ -78,14 +87,20 @@ export function CohortReportEditor({
   function duplicate(i: number) {
     setSections((prev) => {
       const next = [...prev];
-      next.splice(i + 1, 0, { ...prev[i] });
+      next.splice(i + 1, 0, { ...prev[i], id: `section-${idSeq.current++}` });
       return next;
     });
   }
   function addSection() {
     setSections((prev) => [
       ...prev,
-      { heading: 'New section', body: '', format: 'html', chartIds: [] },
+      {
+        heading: 'New section',
+        body: '',
+        format: 'html',
+        chartIds: [],
+        id: `section-${idSeq.current++}`,
+      },
     ]);
   }
 
@@ -165,7 +180,7 @@ export function CohortReportEditor({
           </Button>
         </div>
         {sections.map((section, i) => (
-          <div key={i} className="space-y-2 rounded-lg border p-3">
+          <div key={section.id} className="space-y-2 rounded-lg border p-3">
             <div className="flex items-center gap-2">
               <Input
                 value={section.heading}
@@ -241,6 +256,7 @@ export function CohortReportEditor({
           onChange={(e) => setRecommendations(e.target.value)}
           rows={4}
           placeholder="One per line"
+          aria-label="Recommendations, one per line"
         />
       </section>
 
@@ -251,6 +267,7 @@ export function CohortReportEditor({
           onChange={(e) => setActions(e.target.value)}
           rows={4}
           placeholder="One per line"
+          aria-label="Actions, one per line"
         />
       </section>
     </div>

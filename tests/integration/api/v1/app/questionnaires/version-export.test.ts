@@ -1,11 +1,11 @@
 /**
  * Integration test: result-export route (F8.2).
  *
- * Pins the route shell — flag-gate → rate-limit → auth → version-scope → query-validation
+ * Pins the route shell — rate-limit → auth → version-scope → query-validation
  * → loader → format serialisation — for GET .../versions/:vid/export. The DB loader is
  * stubbed (unit-tested separately) but the REAL serialisers run, so the CSV/JSON bodies
  * and the download headers are exercised end to end:
- *   - 404 flag off (before auth); 401 unauth; 403 non-admin; 404 unknown version
+ *   - 401 unauth; 403 non-admin; 404 unknown version
  *   - 400 on a bad date query
  *   - default format = JSON; `?format=csv` → text/csv + attachment .csv
  *   - the resolved scope (version + parsed tags) reaches the loader

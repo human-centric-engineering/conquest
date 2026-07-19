@@ -344,8 +344,8 @@ async function handleSubmit(
         });
       }
       // Learning Mode: rebuild this round's peer-theme digest so the NEXT respondent sees the
-      // just-completed session folded in. Gated by the platform flag + the round having a roundId;
-      // the builder itself re-checks the per-round toggle + k-anonymity. Runs via `after()` so it
+      // just-completed session folded in. Gated on the round having a roundId; the builder itself
+      // re-checks the per-round toggle + k-anonymity. Runs via `after()` so it
       // never blocks THIS respondent's submit confirmation behind an LLM call that only benefits
       // the next respondent, yet still completes on serverless (a bare `void` would be frozen).
       // A missed rebuild self-heals on the next completion (or a manual admin Rebuild). Fail-soft.

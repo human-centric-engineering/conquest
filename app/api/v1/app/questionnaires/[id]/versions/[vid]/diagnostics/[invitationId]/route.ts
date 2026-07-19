@@ -4,8 +4,8 @@
  * GET /api/v1/app/questionnaires/:id/versions/:vid/diagnostics/:invitationId
  *   Admin-only. One invitation's lifecycle, every session it produced with the full per-turn
  *   telemetry timeline (including the raw inspector calls for the deep-dive), and its captured
- *   errors. 404s when the invitation doesn't belong to the scoped version. Read-only — master-flag-
- *   gated; version-scoped.
+ *   errors. 404s when the invitation doesn't belong to the scoped version. Read-only and
+ *   version-scoped.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

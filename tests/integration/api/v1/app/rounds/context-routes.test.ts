@@ -1,7 +1,6 @@
 /**
- * Integration: round Additional Context ("briefing") routes — list / create / update / delete,
- * the round-context flag gate, and the version/question membership validations. DB seam + read
- * model mocked.
+ * Integration: round Additional Context ("briefing") routes — list / create / update / delete
+ * and the version/question membership validations. DB seam + read model mocked.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

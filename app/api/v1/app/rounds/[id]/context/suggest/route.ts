@@ -7,7 +7,7 @@
  *   `{ entries: [{ questionSlotId, title, content }] }`; it does NOT persist — the admin reviews,
  *   edits, and saves each via the normal create endpoint. Reuses the seeded composer agent.
  *
- * Pipeline: round-context flag-gate → withAdminAuth → per-admin sub-cap → JSON body → version
+ * Pipeline: withAdminAuth → per-admin sub-cap → JSON body → version
  *   membership check → questions load → composer-agent load → capability dispatch → map → 200.
  */
 

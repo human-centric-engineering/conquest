@@ -37,8 +37,8 @@ interface Props {
   versionId: string;
   versionNumber: number;
   runs: EvaluationRunListItem[];
-  /** Whether the design-evaluation sub-flag is on — the POST 404s otherwise, so the
-   *  "Run evaluation" button is hidden when off (history stays readable under the master flag). */
+  /** When false, the "Run evaluation" button is hidden and existing runs stay readable.
+   *  Callers pass `true` today. */
   canRun: boolean;
 }
 

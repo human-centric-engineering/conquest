@@ -21,6 +21,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
+import { jsonArray, jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import {
   ANSWER_PROVENANCES,
   narrowToEnum,
@@ -53,21 +54,6 @@ export interface SeedAnswerInput {
    * explicitly clear it; a string overwrites it (the extractor re-emits the accumulated paraphrase).
    */
   paraphrase?: string | null;
-}
-
-/**
- * Convert an arbitrary JSON value into a Prisma `Json` input — mirrors the
- * ingestion persist helper. `null`/`undefined` map to the DB-null sentinel.
- */
-function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (value === null || value === undefined) return Prisma.JsonNull;
-  return value;
-}
-
-/** Parse a stored `refinementHistory` JSON column into the typed array (our own
- *  data; defensively default a non-array to empty). */
-function asHistory(value: Prisma.JsonValue): RefinementHistoryEntry[] {
-  return Array.isArray(value) ? (value as unknown as RefinementHistoryEntry[]) : [];
 }
 
 /**
@@ -190,7 +176,7 @@ export async function loadAnswerSlot(
       value: row.value,
       provenance: narrowToEnum(row.provenanceLabel, ANSWER_PROVENANCES, 'direct'),
       confidence: row.confidence,
-      refinementHistory: asHistory(row.refinementHistory),
+      refinementHistory: jsonArray<RefinementHistoryEntry>(row.refinementHistory),
       ...(row.rationale != null ? { rationale: row.rationale } : {}),
     },
   };

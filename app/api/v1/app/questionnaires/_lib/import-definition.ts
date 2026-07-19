@@ -24,7 +24,7 @@ import { slugifyKey, nextAvailableKey } from '@/lib/app/questionnaire/authoring/
 import { normalizeTagLabel } from '@/lib/app/questionnaire/tagging';
 import { AUDIENCE_FIELDS } from '@/lib/app/questionnaire/types';
 import type { DefinitionImport } from '@/lib/app/questionnaire/authoring';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 export interface ImportDefinitionInput {
   envelope: DefinitionImport;

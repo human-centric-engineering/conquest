@@ -18,6 +18,7 @@ import { ArrowLeft, Columns2, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { REPORT_POLL_MS } from '@/components/admin/questionnaires/sessions/constants';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -147,7 +148,7 @@ export function SessionReportRerun({
   // (memoised on sessionId), so listing it as a dep never re-arms the interval spuriously.
   useEffect(() => {
     if (!open || !inFlight) return;
-    const timer = setInterval(() => void refresh(), 3000);
+    const timer = setInterval(() => void refresh(), REPORT_POLL_MS);
     return () => clearInterval(timer);
   }, [open, inFlight, refresh]);
 

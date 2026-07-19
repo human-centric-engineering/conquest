@@ -18,9 +18,8 @@
  *   detection (and compare `flag` vs `probe`) before launch, and give the engine
  *   (P6) a proven detection seam to call.
  *
- *   Gated by the master flag AND the contradiction-detection sub-flag (it spends an
- *   LLM call per pass): 404 when either is off, or when the version is absent. The
- *   call takes a per-admin LLM sub-cap. Detection failure is fail-soft — an empty
+ *   404 when the version is absent. The call spends an LLM call per pass, so it
+ *   takes a per-admin LLM sub-cap. Detection failure is fail-soft — an empty
  *   findings list with a `diagnostic`, never a 5xx — so the engine can keep the
  *   conversation going rather than crash a turn.
  */

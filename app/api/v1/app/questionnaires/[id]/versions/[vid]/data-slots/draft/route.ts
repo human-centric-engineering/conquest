@@ -3,9 +3,8 @@
  *
  * DELETE /api/v1/app/questionnaires/:id/versions/:vid/data-slots/draft
  *   Admin-only: discard the version's pending generated data-slot proposal (the draft the
- *   admin generated but never saved). The saved/live set (AppDataSlot) is untouched. Gated by
- *   the master flag AND the data-slots sub-flag. Idempotent — discarding when there is no
- *   draft is a no-op success.
+ *   admin generated but never saved). The saved/live set (AppDataSlot) is untouched.
+ *   Idempotent — discarding when there is no draft is a no-op success.
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

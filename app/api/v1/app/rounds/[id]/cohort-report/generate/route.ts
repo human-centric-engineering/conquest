@@ -4,10 +4,10 @@
  * POST /api/v1/app/rounds/:id/cohort-report/generate   body: { versionId }
  *   Admin-only. Builds the round's dataset, runs the seeded cohort-report agent over it, and appends
  *   a new AI revision (the working head) — then returns the refreshed read view. Paid LLM work, so it
- *   carries a per-admin generate sub-cap on top of the section limiter. Gated by the cohort-report
- *   flag AND the per-version `config.cohortReport.enabled` toggle.
+ *   carries a per-admin generate sub-cap on top of the section limiter. Gated by the per-version
+ *   `config.cohortReport.enabled` toggle.
  *
- * Pipeline: cohort-report flag-gate (404) → withAdminAuth → 404 unknown round → 422 version not
+ * Pipeline: withAdminAuth → 404 unknown round → 422 version not
  *   bundled → 403 when the version's cohort-report config is disabled → rate-limit → generate +
  *   persist revision → audit → return view (failed report row + 502 on generation error).
  */
@@ -60,7 +60,7 @@ const handleGenerate = withAdminAuth<Params>(async (request, session, { params }
     });
   }
 
-  // Per-version opt-in gate (the second gate the cohort-report flag ANDs).
+  // Per-version opt-in gate.
   const config = await prisma.appQuestionnaireConfig.findUnique({
     where: { versionId },
     select: { cohortReport: true },

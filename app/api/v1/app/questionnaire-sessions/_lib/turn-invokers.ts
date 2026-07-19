@@ -6,7 +6,7 @@
  * `capabilityDispatcher` (the preview-route path), and maps the result back fail-soft — a
  * capability failure becomes an empty outcome + a `diagnostic`, never a throw, so a single
  * failing step doesn't crash the turn. Selection runs the pure F4.1 strategy directly
- * (degrading adaptive → weighted when its sub-flag is off). The completion-offer prose is
+ * (degrading adaptive → weighted for non-`adaptive` versions). The completion-offer prose is
  * NOT an invoker — the route renders it (PR4 via the capability, PR5 streamed).
  */
 
@@ -175,8 +175,8 @@ export async function buildTurnInvokers(opts: {
   }>;
   /**
    * Sensitivity awareness / safeguarding: when true, the extractor is asked to ALSO flag a genuine
-   * sensitive disclosure. Resolved by the route from the platform flag AND the per-questionnaire
-   * toggle; off (default) keeps the prompt and behaviour unchanged.
+   * sensitive disclosure. Resolved by the route from the per-questionnaire toggle; off (default)
+   * keeps the prompt and behaviour unchanged.
    */
   sensitivityAware?: boolean;
   /**
@@ -512,7 +512,7 @@ export async function buildTurnInvokers(opts: {
       return { decision, latencyMs: Date.now() - started };
     },
 
-    // Adaptive data-slot selection — only does work when its sub-flag is on (else returns null and
+    // Adaptive data-slot selection — only does work when `dataSlotAdaptiveEnabled` (else null and
     // the data-slot orchestrator keeps its deterministic topic-local pick). Fail-soft inside.
     async selectDataSlot(state, unfilled, context): Promise<DataSlotSelectOutcome | null> {
       if (!dataSlotAdaptiveEnabled) {

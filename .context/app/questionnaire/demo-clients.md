@@ -108,8 +108,7 @@ The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
 
 ## API
 
-All routes are flag-gated (`404` when `APP_QUESTIONNAIRES_ENABLED` is off, before
-auth), `withAdminAuth` (401/403), and audited. Registry: `API.APP.DEMO_CLIENTS`.
+All routes are `withAdminAuth` (401/403) and audited. Registry: `API.APP.DEMO_CLIENTS`.
 
 | Method + path                                      | Purpose                                                                            | Notable codes                                               |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------- |

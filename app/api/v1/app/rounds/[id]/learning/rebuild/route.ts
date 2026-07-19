@@ -7,7 +7,7 @@
  *   a per-version build summary. The build itself re-checks the per-round toggle + k-anonymity and is
  *   fully fail-soft.
  *
- * Pipeline: learning-mode flag-gate (404 when off) → withAdminAuth → 404 on unknown round →
+ * Pipeline: withAdminAuth → 404 on unknown round →
  *   resolve bundled versions → refresh each → summary.
  */
 

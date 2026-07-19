@@ -16,9 +16,8 @@
  *   yet (F4.6/P6). Its purpose is twofold — let admins sanity-check extraction
  *   before launch, and give the engine (P6) a proven extraction seam to call.
  *
- *   Gated by the master flag AND the answer-extraction sub-flag (it spends an LLM
- *   call per turn): 404 when either is off, or when the version is absent. The
- *   call takes a per-admin LLM sub-cap. Extraction failure is fail-soft — an empty
+ *   404 when the version is absent. It spends an LLM call per turn, so the call
+ *   takes a per-admin LLM sub-cap. Extraction failure is fail-soft — an empty
  *   intent list with a `diagnostic`, never a 5xx — so the engine can keep the
  *   conversation going rather than crash a turn.
  */

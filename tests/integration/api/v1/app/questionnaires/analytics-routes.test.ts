@@ -1,11 +1,10 @@
 /**
  * Integration test: questionnaire analytics read routes (F8.1).
  *
- * Pins the route → flag-gate → auth → version-scope → query-validation → aggregator
+ * Pins the route → auth → version-scope → query-validation → aggregator
  * wiring for the three GET endpoints (distributions / funnel / cost). The aggregators
  * themselves are unit-tested separately (lib/app/questionnaire/analytics/*.test.ts);
  * here they're stubbed so the test exercises only the route shell:
- *   - 404 when the master flag is off (before auth — the app looks absent)
  *   - 401 unauthenticated / 403 non-admin
  *   - 404 when the version doesn't resolve under the questionnaire
  *   - 400 on an invalid query (bad date)

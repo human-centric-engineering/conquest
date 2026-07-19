@@ -8,7 +8,7 @@
  *   questionnaire 200s without a write or a duplicate audit. Audited
  *   `questionnaire.restore`. See .context/app/questionnaire/archiving.md.
  *
- * Pipeline: flag-gate → withAdminAuth → load → (no-op if active) → clear marker →
+ * Pipeline: withAdminAuth → load → (no-op if active) → clear marker →
  * admin audit → 200 `{ id }`. Auth: admin only. No sub-cap — the 100/min section
  * cap suffices (a single bounded UPDATE, no LLM call).
  */

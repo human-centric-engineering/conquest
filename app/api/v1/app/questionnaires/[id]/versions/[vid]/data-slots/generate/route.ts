@@ -6,9 +6,9 @@
  *   the proposed slots (short names + descriptions + question mappings). The proposal is
  *   persisted as the version's pending DRAFT (AppDataSlotDraft) so it survives navigation, but
  *   it is NOT live — runtime and the launch gate read only the saved set (AppDataSlot) until
- *   the admin reviews + saves via PUT. Gated by the master flag AND the data-slots sub-flag
- *   (paid LLM work). Per-admin sub-cap. Fail-soft: a generator failure returns an empty set +
- *   a diagnostic (and persists nothing) rather than a 5xx.
+ *   the admin reviews + saves via PUT. Per-admin sub-cap (paid LLM work). Fail-soft: a
+ *   generator failure returns an empty set + a diagnostic (and persists nothing) rather
+ *   than a 5xx.
  */
 
 import { successResponse } from '@/lib/api/responses';

@@ -9,8 +9,8 @@
  *   Create a demo client. Slug is derive-with-override: supplied → validated
  *   kebab-case; absent → derived from the name. A slug collision surfaces as 409.
  *
- * Both: flag-gate first (404 when off — the app is dark), then `withAdminAuth`.
- * Mutations are audited. A real client engagement strips this surface — see
+ * Both: `withAdminAuth`. Mutations are audited.
+ * A real client engagement strips this surface — see
  * .context/app/questionnaire/forking.md § "Replacing demo tenancy".
  */
 

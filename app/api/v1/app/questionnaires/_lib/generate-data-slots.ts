@@ -54,8 +54,7 @@ export interface GenerateAndSaveResult {
 /**
  * Run the data-slot generator over `versionId`'s questions and replace its live slot set with
  * the result. `questionnaireId` scopes the version lookup (a mismatched pair is treated as
- * "no questions"). Does not check the data-slots feature flag — the flag gates the runtime/UI,
- * not whether slots may exist; callers that care should check it themselves.
+ * "no questions").
  */
 export async function generateAndSaveDataSlots(
   questionnaireId: string,

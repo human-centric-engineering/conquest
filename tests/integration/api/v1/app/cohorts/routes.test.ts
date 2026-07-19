@@ -1,8 +1,8 @@
 /**
  * Integration: cohort CRUD routes.
  *
- * Exercises the HTTP orchestration with the DB seam mocked — the cohorts flag gate (404 before
- * auth), the required-demoClientId list guard, create (incl. the unknown-demo-client 404), the
+ * Exercises the HTTP orchestration with the DB seam mocked — the required-demoClientId list
+ * guard, create (incl. the unknown-demo-client 404), the
  * member roster add + duplicate-email 409, and audit emission. Read-model projections are
  * mocked here; they're unit-tested elsewhere.
  */
@@ -98,7 +98,13 @@ describe('POST /api/v1/app/cohorts', () => {
       jsonReq({ demoClientId: 'dc-1', name: 'Leadership' }, COHORTS_URL)
     );
     expect(res.status).toBe(201);
-    expect(prismaMock.appCohort.create).toHaveBeenCalled();
+    // Assert the payload actually handed to Prisma, not just that create fired — otherwise a
+    // mis-mapped demoClientId/name/createdBy still goes green.
+    expect(prismaMock.appCohort.create.mock.calls[0][0].data).toMatchObject({
+      demoClientId: 'dc-1',
+      name: 'Leadership',
+      createdBy: 'cmjbv4i3x00003wsloputgwul',
+    });
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'app_cohort.create', entityId: 'co-9' })
     );
@@ -131,6 +137,13 @@ describe('POST /api/v1/app/cohorts/:id/members', () => {
 
     const res = await addMemberPOST(jsonReq({ email: 'jo@acme.com', name: 'Jo' }, url), ctx);
     expect(res.status).toBe(201);
+    // The roster fields come straight from user input — pin that they reach Prisma unmangled and
+    // scoped to the cohort from the URL, not just that create was called.
+    expect(prismaMock.appCohortMember.create.mock.calls[0][0].data).toMatchObject({
+      cohortId: 'co-1',
+      email: 'jo@acme.com',
+      name: 'Jo',
+    });
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'app_cohort_member.add' })
     );

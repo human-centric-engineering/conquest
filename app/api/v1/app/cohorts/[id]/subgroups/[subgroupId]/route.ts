@@ -7,7 +7,7 @@
  *        automatically (AppCohortMember.subgroupId → SetNull) and any round phases that targeted
  *        it cascade away; the roster + session history are untouched.
  *
- * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`, then 404 on an unknown
+ * Both: `withAdminAuth`, then 404 on an unknown
  * subgroup (scoped to the cohort in the path). Audited.
  */
 

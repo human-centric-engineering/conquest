@@ -2,7 +2,7 @@
  * Persisted turn-evaluation detail.
  *
  * GET /api/v1/app/turn-evaluations/:evalId
- *   Admin-only, turn-evaluation-flag-gated. Returns one evaluation in full: the verdict, the
+ *   Admin-only. Returns one evaluation in full: the verdict, the
  *   snapshotted input that was judged, the complete review/provenance state, and the
  *   questionnaire title + version number. 404 when the row doesn't exist. Read-only; the read
  *   model lives in `_lib/turn-evaluation-list.ts`.

@@ -2,14 +2,14 @@
  * Integration test: POST /api/v1/app/questionnaires/stream (SSE streaming ingest twin).
  *
  * The streaming route shares the exact pre-stream pipeline with the non-streaming
- * `POST /questionnaires` route (see `route.test.ts` in the parent folder): flag gate,
+ * `POST /questionnaires` route (see `route.test.ts` in the parent folder):
  * admin auth, per-admin rate cap, multipart guard, demo-client existence check. Those
  * gates all still return a normal JSON error envelope BEFORE the stream opens. Once the
  * stream opens (`sseResponse` returns 200), extraction/persist failures surface as a
  * terminal `event: error` frame instead of an HTTP error status, and success surfaces as
  * a terminal `event: done` frame carrying the persisted draft's ids + counts.
  *
- * Covers: 404 flag-off · 401 unauth · 403 non-admin · 429 rate-limit · 400 missing-file ·
+ * Covers: 401 unauth · 403 non-admin · 429 rate-limit · 400 missing-file ·
  * 400 unsupported-format · 413 oversize · 404 demo-client-not-found (all pre-stream JSON) ·
  * happy-path SSE done frame + persistence wiring · extractor-failure error frame ·
  * persist-failure error frame (both still HTTP 200, stream already opened).

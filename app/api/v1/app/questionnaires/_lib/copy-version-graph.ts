@@ -26,7 +26,7 @@
 
 import { executeTransaction } from '@/lib/db/utils';
 import { CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { copySlotEmbeddings } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { copyDataSlotEmbeddings } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
 

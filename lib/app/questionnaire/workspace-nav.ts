@@ -89,7 +89,7 @@ export interface WorkspaceGroup {
  * Lifecycle grouping of the 13 workspace tabs into the four life-stages of a
  * questionnaire — Overview · Build · Distribute · Results — plus a standalone
  * Settings. The flat `QUESTIONNAIRE_WORKSPACE_TABS` stays the source of truth
- * (hrefs, flags, intra-group order); this layer only adds the two-tier shape the
+ * (hrefs, intra-group order); this layer only adds the two-tier shape the
  * sub-nav renders. **Every workspace tab id appears in exactly one group** — the
  * unit test asserts the partition so a new tab can't silently fall out of the nav.
  */
@@ -116,7 +116,7 @@ export const QUESTIONNAIRE_WORKSPACE_GROUPS: readonly WorkspaceGroup[] = [
   { id: 'settings', label: 'Settings', tabIds: ['settings'] },
 ];
 
-/** A group projected to its currently-visible (flag-filtered) tabs. */
+/** A group projected to its currently-visible tabs. */
 export interface ResolvedWorkspaceGroup {
   id: string;
   label: string;

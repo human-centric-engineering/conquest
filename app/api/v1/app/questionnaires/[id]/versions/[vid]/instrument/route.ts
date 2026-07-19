@@ -8,7 +8,7 @@
  *   distribution. Distinct from the results export (`…/export`), which is respondent answers.
  *
  * Node runtime — `@react-pdf/renderer` needs Node. Bulk read: a dedicated `exportLimiter` sub-cap on
- * top of the section tier. Master-flag-gated and version-scoped.
+ * top of the section tier. Version-scoped.
  */
 
 import { z } from 'zod';

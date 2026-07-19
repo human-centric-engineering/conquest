@@ -41,6 +41,7 @@ import {
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard';
 import {
   formatInspectorCall,
   formatInspectorTurn,
@@ -651,22 +652,12 @@ function CopyButton({
   idleText?: string;
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(getText());
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard unavailable — no-op.
-    }
-  }
+  const { copied, copy } = useCopyToClipboard();
 
   return (
     <button
       type="button"
-      onClick={() => void copy()}
+      onClick={() => void copy(getText())}
       className={cn(
         'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-mono text-[0.6rem] font-semibold tracking-wide text-zinc-400 uppercase transition-colors hover:bg-zinc-800 hover:text-zinc-100',
         className

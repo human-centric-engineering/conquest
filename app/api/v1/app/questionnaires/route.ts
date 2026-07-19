@@ -18,14 +18,13 @@
  *   builds the review/edit surface that consumes the change log).
  *
  * Pipeline (the order is load-bearing):
- *   flag-gate → withAdminAuth → per-admin sub-cap → content-length guard →
- *   multipart parse → extension allowlist → admin-metadata parse → demo-client
- *   existence check → SHA-256 dedup → document parse → scanned/empty detection →
- *   capability dispatch → coherence check → transactional persist → admin audit → 201.
+ *   withAdminAuth → per-admin sub-cap → content-length guard → multipart parse →
+ *   extension allowlist → admin-metadata parse → demo-client existence check →
+ *   SHA-256 dedup → document parse → scanned/empty detection → capability dispatch →
+ *   coherence check → transactional persist → admin audit → 201.
  *
- * Auth: admin only. Flag: 404 when `APP_QUESTIONNAIRES_ENABLED` is off (the app
- * is dark). Rate limit: inherits the 100/min `api` section cap automatically; adds
- * a tighter per-admin sub-cap here because each ingest is ≥1 reasoning LLM call.
+ * Auth: admin only. Rate limit: inherits the 100/min `api` section cap automatically;
+ * adds a tighter per-admin sub-cap here because each ingest is ≥1 reasoning LLM call.
  */
 
 import type { NextRequest } from 'next/server';

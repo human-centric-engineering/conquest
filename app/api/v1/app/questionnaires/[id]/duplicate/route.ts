@@ -13,7 +13,7 @@
  * caller-supplied suffix). It shares the same create+copy core, so the two can
  * never drift, and it survives a fork that strips the demo clone route.
  *
- * Pipeline: flag-gate → withAdminAuth → Zod body → service → source/version 404 →
+ * Pipeline: withAdminAuth → Zod body → service → source/version 404 →
  * admin audit → 201 `{ questionnaireId, versionId }`. Auth: admin only. No sub-cap —
  * the 100/min section cap suffices (bounded, no LLM call).
  */

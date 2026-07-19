@@ -18,7 +18,7 @@
  *        unanswered question directly.
  *
  * Contradiction detection (F4.3) + refinement (F4.4) run here too, in parity with {@link runTurn}
- * (steps 2.6/2.7): gated by the questionnaire's `contradictionMode` + cadence and the platform flag,
+ * (steps 2.6/2.7): gated by the questionnaire's `contradictionMode` + cadence,
  * they compare the background question answers — and the respondent's latest message — so a same-slot
  * reversal across turns surfaces a `contradiction` warning (and, under `probe` mode, a reconciliation
  * question). The conflicting question answer is refined; the data-slot fill reconciles as the

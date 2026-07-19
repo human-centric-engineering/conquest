@@ -10,13 +10,12 @@
  *   API-first surface; the admin UI uses the streaming sibling
  *   (`/compose/stream`) for the watch-it-build experience.
  *
- * Pipeline: flag-gate → withAdminAuth → per-admin sub-cap → JSON body parse →
+ * Pipeline: withAdminAuth → per-admin sub-cap → JSON body parse →
  *   demo-client existence check → composer-agent load → capability dispatch →
  *   coherence check → transactional persist → admin audit → 201.
  *
- * Auth: admin only. Flag: 404 when the master OR generative-authoring sub-flag is
- * off. Rate limit: inherits the 100/min `api` section cap; adds a tighter per-admin
- * sub-cap because each compose is a 1+ reasoning LLM call.
+ * Auth: admin only. Rate limit: inherits the 100/min `api` section cap; adds a
+ * tighter per-admin sub-cap because each compose is a 1+ reasoning LLM call.
  */
 
 import type { NextRequest } from 'next/server';

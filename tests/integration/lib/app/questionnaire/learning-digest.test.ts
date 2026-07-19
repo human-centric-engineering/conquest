@@ -46,6 +46,8 @@ import {
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
+import { logCost } from '@/lib/orchestration/llm/cost-tracker';
+import { logger } from '@/lib/logging';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -272,6 +274,24 @@ describe('refreshRoundLearningDigest — build', () => {
     prismaMock.appQuestionnaireRound.findUnique.mockResolvedValue(null);
     const res = await refreshRoundLearningDigest('r1', 'v1');
     expect(res).toEqual({ built: false, reason: 'learning_disabled' });
+  });
+
+  it('still builds the digest when cost logging rejects, and logs the rejection', async () => {
+    // Cost tracking is fire-and-forget: a logCost outage must not fail the digest (the whole
+    // point of the `.catch`), but it must not be swallowed silently either — that would hide a
+    // systematic cost-logging failure. Pins both halves of that contract.
+    (logCost as Mock).mockRejectedValueOnce(new Error('cost sink unavailable'));
+
+    const res = await refreshRoundLearningDigest('r1', 'v1');
+
+    expect(res.built).toBe(true);
+    expect(res.slotCount).toBe(1);
+    await vi.waitFor(() => {
+      expect(logger.error).toHaveBeenCalledWith(
+        'learning digest: logCost rejected',
+        expect.objectContaining({ error: 'cost sink unavailable' })
+      );
+    });
   });
 });
 

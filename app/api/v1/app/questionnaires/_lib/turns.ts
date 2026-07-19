@@ -23,18 +23,9 @@ import type { ToolCallRecord } from '@/lib/app/questionnaire/orchestrator';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 export type { ToolCallRecord };
-
-/**
- * Convert an arbitrary JSON value into a Prisma `Json` input — mirrors the answer-slot
- * seam's helper. Lets a typed array with optional fields (e.g. {@link ToolCallRecord}[])
- * satisfy `InputJsonValue`; `null`/`undefined` map to the DB-null sentinel.
- */
-function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (value === null || value === undefined) return Prisma.JsonNull;
-  return value;
-}
 
 /** Everything {@link recordTurn} persists for one turn. */
 export interface TurnWriteInput {

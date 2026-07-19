@@ -3,8 +3,8 @@
  *
  * The Overview tab is the default workspace landing. It shows stat tiles, launch
  * readiness (LaunchChecklist for drafts, a "launched" panel otherwise), and quick
- * actions including "Preview as respondent" (gated on liveSessions flag + version
- * status === 'launched') and a version timeline.
+ * actions including "Preview as respondent" (offered for a launched version or a
+ * launch-ready draft) and a version timeline.
  *
  * Fetchers are mocked at the `workspace-data` boundary. Heavy children (CqStatTiles,
  * LaunchChecklist) are stubbed to identifiable markers so we assert the page's own

@@ -37,10 +37,8 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { logger } from '@/lib/logging';
 import { copyVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/copy-version-graph';
 import { setVersionArchived } from '@/app/api/v1/app/questionnaires/_lib/version-archive';
-import {
-  jsonInput,
-  type ScopedVersion,
-} from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { type ScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 /** Error code the client detects to raise the "create a new draft?" confirmation dialog. */
 export const VERSION_FORK_CONFIRMATION_REQUIRED = 'VERSION_FORK_CONFIRMATION_REQUIRED';

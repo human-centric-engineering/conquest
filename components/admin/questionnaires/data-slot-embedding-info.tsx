@@ -19,7 +19,9 @@ function StatusPill({ on }: { on: boolean }) {
     <span
       className={cn(
         'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-        on ? 'bg-emerald-100 text-emerald-800' : 'bg-muted text-muted-foreground'
+        on
+          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400'
+          : 'bg-muted text-muted-foreground'
       )}
     >
       {on ? 'On' : 'Off'}

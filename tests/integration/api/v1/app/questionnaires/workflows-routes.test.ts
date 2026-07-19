@@ -1,11 +1,10 @@
 /**
  * Integration test: Behind-the-Scenes workflow read routes.
  *
- * Pins the route → flag-gate → auth → (optional lens) → enrichment wiring for the
+ * Pins the route → auth → (optional lens) → enrichment wiring for the
  * two GET endpoints. The enrichment + applicability builders are DB-touching and
  * unit-tested separately, so here they're stubbed and the test exercises only the
  * route shell:
- *   - 404 when the master flag is off (before auth — the app looks absent)
  *   - 401 unauthenticated / 403 non-admin
  *   - list returns the real registry summaries; a ?versionId= lens annotates them
  *   - detail 200s with the enriched workflow, 404s on an unknown slug

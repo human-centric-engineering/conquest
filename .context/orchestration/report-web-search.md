@@ -8,16 +8,14 @@ Shipped for the **Respondent Report** (report kind `respondent`); the module is 
 
 To take this feature live in an environment (the feature is inert until all four are done):
 
-1. **Seed** — `npm run db:seed` applies the 3 new seed units: the feature flag (`069`), the Report Research agent (`070`), and the `web_search` capability + agent binding (`071`).
+1. **Seed** — `npm run db:seed` applies the Report Research agent (`070`) and the `web_search` capability + agent binding (`071`).
 2. **Search backend** — set `BRAVE_SEARCH_API_KEY` and add `api.search.brave.com` to `ORCHESTRATION_ALLOWED_HOSTS` (both in `.env.local`). Until both are set, research is skipped and reports generate normally.
-3. **Feature flag** — enable the `APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED` feature flag (a `feature_flag` DB row, disabled by default).
-4. **Configure & verify** — on a questionnaire version's **Respondent Report → Research** tab, enable rounds and set instructions; complete a session; confirm the "Research & sources" block renders on the completion screen and in the exported PDF.
+3. **Configure & verify** — on a questionnaire version's **Respondent Report → Research** tab, enable rounds and set instructions; complete a session; confirm the "Research & sources" block renders on the completion screen and in the exported PDF.
 
 ## Feature gate & configuration
 
-- **Platform flag:** `APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_ENABLED` (`APP_QUESTIONNAIRES_REPORT_WEB_SEARCH_FLAG`), a `feature_flag` DB row, **disabled by default**, seeded by `069-report-web-search-flag.ts`. Opt-in on top of `APP_QUESTIONNAIRES_ENABLED` and the report-kind flag.
 - **Search backend (required to actually run):** `BRAVE_SEARCH_API_KEY` env var + `api.search.brave.com` in `ORCHESTRATION_ALLOWED_HOSTS`. Until both are set the feature is **inert** — research is skipped and the report generates normally. Same graceful-degradation contract as the provider-model-audit workflow.
-- **Per-version config:** the `research` block inside the `respondentReport` JSON column (no migration — it nests in the existing column). Edited from the **Research tab** on the Respondent Report editor (hidden unless the platform flag is on).
+- **Per-version config:** the `research` block inside the `respondentReport` JSON column (no migration — it nests in the existing column). Edited from the **Research tab** on the Respondent Report editor.
 
 The `research` config (`RespondentReportSettings.research`, `lib/app/questionnaire/types.ts`):
 
@@ -90,6 +88,6 @@ The **narrative** use has no separate render surface — it lands inside the rep
 - Capability: `lib/app/questionnaire/capabilities/web-search.ts` (+ `constants.ts`, `lib/app/capabilities.ts`)
 - Research module: `lib/app/questionnaire/report/research.ts`; appendix synthesis: `report/appendix.ts`
 - Generation: `lib/app/questionnaire/report/generate.ts`; content: `report/content.ts`
-- UI: `components/admin/questionnaires/report/respondent-report-editor.tsx` (Research tab), `workspace-data.ts` (`reportWebSearch` flag)
+- UI: `components/admin/questionnaires/report/respondent-report-editor.tsx` (Research tab)
 - Rendering: `session-complete.tsx`, `session-pdf-document.tsx`
-- Seeds: `prisma/seeds/app-questionnaire/069-report-web-search-flag.ts`, `070-report-researcher-agent.ts`, `071-web-search-capability.ts`
+- Seeds: `prisma/seeds/app-questionnaire/070-report-researcher-agent.ts`, `071-web-search-capability.ts`

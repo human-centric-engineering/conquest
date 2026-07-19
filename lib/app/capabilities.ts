@@ -33,89 +33,66 @@ import {
   AppWebSearchCapability,
 } from '@/lib/app/questionnaire/capabilities';
 
+/**
+ * Register every ConQuest capability with the app capability dispatcher.
+ *
+ * Registration is wiring only: it makes a capability *dispatchable*, it does not run anything.
+ * Each capability executes solely when its owning route or orchestrator dispatches it by slug,
+ * so registering the full set unconditionally here is safe — an unused capability simply sits
+ * in the table. Access control lives on the routes (`withAdminAuth`), not here.
+ */
 export function initAppCapabilities(): void {
-  // F1.1 — questionnaire ingestion. The capability is inert until the
-  // APP_QUESTIONNAIRES_ENABLED flag is on (only the flag-gated ingestion route
-  // dispatches it), so registering it unconditionally here is safe.
+  // F1.1 — questionnaire ingestion. Dispatched by the ingestion route.
   registerAppCapability(new AppExtractQuestionnaireStructureCapability());
 
-  // F4.2 — answer extraction. Inert until the APP_QUESTIONNAIRES_ENABLED master
-  // flag and the APP_QUESTIONNAIRES_ANSWER_EXTRACTION sub-flag are both on (only
-  // the flag-gated preview route dispatches it), so unconditional registration
-  // here is safe.
+  // F4.2 — answer extraction. Dispatched by the preview route.
   registerAppCapability(new AppExtractAnswerSlotsCapability());
 
-  // F4.3 — contradiction detection. Inert until the APP_QUESTIONNAIRES_ENABLED
-  // master flag and the APP_QUESTIONNAIRES_CONTRADICTION_DETECTION sub-flag are
-  // both on (only the flag-gated preview route dispatches it), so unconditional
-  // registration here is safe.
+  // F4.3 — contradiction detection. Dispatched by the preview route.
   registerAppCapability(new AppDetectContradictionsCapability());
 
-  // F4.4 — answer refinement. Inert until the APP_QUESTIONNAIRES_ENABLED master
-  // flag and the APP_QUESTIONNAIRES_ANSWER_REFINEMENT sub-flag are both on (only
-  // the flag-gated refine-answer route dispatches it), so unconditional
-  // registration here is safe.
+  // F4.4 — answer refinement. Dispatched by the refine-answer route.
   registerAppCapability(new AppRefineAnswerCapability());
 
-  // F4.5 — completion-offer composition. Inert until the APP_QUESTIONNAIRES_ENABLED
-  // master flag and the APP_QUESTIONNAIRES_COMPLETION sub-flag are both on (only the
-  // flag-gated completion-status route dispatches it), so unconditional registration
-  // here is safe.
+  // F4.5 — completion-offer composition. Dispatched by the completion-status route.
   registerAppCapability(new AppComposeCompletionOfferCapability());
 
-  // F5.1 — design-time structure evaluation. Inert until the APP_QUESTIONNAIRES_ENABLED
-  // master flag and the APP_QUESTIONNAIRES_DESIGN_EVALUATION sub-flag are both on (only
-  // the flag-gated evaluate-preview route dispatches it), so unconditional registration
-  // here is safe.
+  // F5.1 — design-time structure evaluation. Dispatched by the evaluate-preview route.
   registerAppCapability(new AppEvaluateStructureCapability());
 
   // Ingest verify + repair — the extraction critic + scales/matrix repair specialist that run
-  // between extract and persist on the streaming ingest surface. Inert until the
-  // APP_QUESTIONNAIRES_ENABLED master flag and the APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR sub-flag
-  // are both on (only the flag-gated orchestrator dispatches them), so unconditional registration
-  // here is safe.
+  // between extract and persist on the streaming ingest surface. Dispatched by the orchestrator.
   registerAppCapability(new AppVerifyExtractionStructureCapability());
   registerAppCapability(new AppRepairQuestionsCapability());
 
-  // Data Slots — the data-slot generator. Inert until the APP_QUESTIONNAIRES_ENABLED master
-  // flag and the APP_QUESTIONNAIRES_DATA_SLOTS sub-flag are both on (only the flag-gated
-  // generate-data-slots route dispatches it), so unconditional registration here is safe.
+  // Data Slots — the data-slot generator. Dispatched by the generate-data-slots route.
   registerAppCapability(new AppGenerateDataSlotsCapability());
 
-  // Data Slots — single-slot refinement. Reuses the generator agent; inert until the same flags
-  // are on (only the flag-gated refine route dispatches it), so unconditional registration is safe.
+  // Data Slots — single-slot refinement. Reuses the generator agent; dispatched by the refine route.
   registerAppCapability(new AppRefineDataSlotCapability());
 
   // Data Slots — assign newly-added (orphaned) questions to existing slots or new ones. Reuses the
-  // generator agent; inert until the same flags are on (only the flag-gated assign route dispatches
-  // it), so unconditional registration here is safe.
+  // generator agent; dispatched by the assign route.
   registerAppCapability(new AppAssignDataSlotsCapability());
 
-  // Generative authoring — compose a questionnaire from a plain-English brief. Inert until the
-  // APP_QUESTIONNAIRES_ENABLED master flag and the APP_QUESTIONNAIRES_GENERATIVE_AUTHORING sub-flag
-  // are both on (only the flag-gated compose routes dispatch it), so unconditional registration is safe.
+  // Generative authoring — compose a questionnaire from a plain-English brief. Dispatched by the
+  // compose routes.
   registerAppCapability(new AppComposeQuestionnaireCapability());
 
   // Generative authoring — conversational refinement of a composed structure. Reuses the composer
-  // agent; inert until the same flags are on (only the flag-gated refine route dispatches it), so
-  // unconditional registration here is safe.
+  // agent; dispatched by the refine route.
   registerAppCapability(new AppRefineQuestionnaireStructureCapability());
 
   // Respondent intro — generate / refine the "about this questionnaire" background markdown. Reuses
-  // the composer agent; inert until the APP_QUESTIONNAIRES_ENABLED + intro-screen flags are on (only
-  // the flag-gated intro-background author route dispatches it), so unconditional registration is safe.
+  // the composer agent; dispatched by the intro-background author route.
   registerAppCapability(new AppAuthorIntroBackgroundCapability());
 
   // Round Additional Context — propose interviewer "briefing" notes from a questionnaire (+ optional
-  // source material). Reuses the composer agent; inert until the APP_QUESTIONNAIRES_ENABLED + cohorts
-  // + round-context flags are on (only the flag-gated suggest route dispatches it), so unconditional
-  // registration here is safe.
+  // source material). Reuses the composer agent; dispatched by the suggest route.
   registerAppCapability(new AppSuggestRoundBriefingCapability());
 
   // Report web search — the query-only search tool the Report Research agent calls in its tool loop.
-  // Inert until the APP_QUESTIONNAIRES_ENABLED master flag, a report-kind flag, and the
-  // APP_QUESTIONNAIRES_REPORT_WEB_SEARCH sub-flag are all on AND the search backend is configured
-  // (Brave key + allowlisted host) — only the report research loop dispatches it, and it returns a
-  // structured error (never throws) when unconfigured, so unconditional registration here is safe.
+  // Dispatched by the report research loop, and inert unless the search backend is configured
+  // (Brave key + allowlisted host); it returns a structured error rather than throwing when not.
   registerAppCapability(new AppWebSearchCapability());
 }

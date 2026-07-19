@@ -214,12 +214,14 @@ export function ScoringBuilder({
           <div key={i} className="flex flex-wrap items-center gap-2">
             <Input
               placeholder="Name (e.g. Openness)"
+              aria-label={`Scale ${i + 1} name`}
               value={scale.name}
               onChange={(e) => updateScale(i, { name: e.target.value })}
               className="w-48"
             />
             <Input
               placeholder="key"
+              aria-label={`Scale ${i + 1} key`}
               value={scale.key}
               onChange={(e) => updateScale(i, { key: e.target.value })}
               className="w-32 font-mono text-xs"
@@ -248,6 +250,7 @@ export function ScoringBuilder({
           <div key={i} className="flex flex-wrap items-center gap-2">
             <select
               value={`${item.source}:${item.ref}`}
+              aria-label={`Item ${i + 1} source`}
               onChange={(e) => {
                 const [source, ref] = e.target.value.split(':');
                 updateItem(i, { source: source as 'question' | 'dataSlot', ref });
@@ -263,6 +266,7 @@ export function ScoringBuilder({
             <span className="text-muted-foreground text-xs">→</span>
             <select
               value={item.scaleKey}
+              aria-label={`Item ${i + 1} scale`}
               onChange={(e) => updateItem(i, { scaleKey: e.target.value })}
               className="border-input bg-background rounded-md border px-2 py-1 text-sm"
             >
@@ -340,6 +344,7 @@ export function ScoringBuilder({
             />
             <Input
               placeholder="Label (e.g. High)"
+              aria-label={`Band ${i + 1} label`}
               value={band.label}
               onChange={(e) => updateBand(i, { label: e.target.value })}
               className="w-40"

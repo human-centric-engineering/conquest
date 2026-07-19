@@ -17,8 +17,8 @@ export const metadata: Metadata = {
  * Read-only transparency surface: every questionnaire agent paired with the real
  * prompt(s) it sends, rendered from representative sample contexts. Exists because
  * the prompts are assembled in code (not the agent's editable `systemInstructions`),
- * so they are otherwise invisible to an operator. Thin server component: gates on the
- * master flag (404 when off), pre-fetches the catalog, hands to the client view.
+ * so they are otherwise invisible to an operator. Thin server component: pre-fetches
+ * the catalog, hands to the client view.
  */
 export default async function PromptLibraryPage() {
   let agents: PromptAgentApiView[] = [];

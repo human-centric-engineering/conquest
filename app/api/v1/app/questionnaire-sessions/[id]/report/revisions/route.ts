@@ -12,8 +12,7 @@
  *   ASYNC: this only appends a `queued` revision that the maintenance worker then drives. Only the AI
  *   report modes (`raw_plus_insights`, `narrative`) generate a report; a `raw` config is rejected.
  *
- *   Gate order: master flag → respondent-report flag (404 before auth) → withAdminAuth → per-admin
- *   re-run sub-cap → validate → resolve settings → enqueue.
+ *   Gate order: withAdminAuth → per-admin re-run sub-cap → validate → resolve settings → enqueue.
  */
 
 import { z } from 'zod';

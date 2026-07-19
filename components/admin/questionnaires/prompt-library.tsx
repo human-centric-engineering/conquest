@@ -30,6 +30,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard';
 import type {
   CatalogMessage,
   PromptAgentApiView,
@@ -603,7 +604,7 @@ function roleMeta(role: string): { term: string; blurb: string } {
 // ---------------------------------------------------------------------------
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   return (
     <Button
       type="button"
@@ -611,17 +612,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
       size="sm"
       className="h-6 gap-1 px-1.5 text-[0.65rem]"
       title={copied ? 'Copied!' : 'Copy'}
-      onClick={() => {
-        void (async () => {
-          try {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1600);
-          } catch {
-            // Clipboard unavailable — no-op.
-          }
-        })();
-      }}
+      onClick={() => void copy(text)}
     >
       {copied ? (
         <Check className="h-3 w-3" aria-hidden />

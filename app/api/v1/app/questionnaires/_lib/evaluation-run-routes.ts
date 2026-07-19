@@ -30,7 +30,7 @@ import {
 } from '@/lib/app/questionnaire/evaluation';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import type { EvaluationPanelResult } from '@/lib/app/questionnaire/evaluation/run-panel';
-import { jsonInput } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import {
   deriveApplicability,

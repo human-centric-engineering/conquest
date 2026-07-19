@@ -2,7 +2,7 @@
  * Integration test: public respondent invitation routes (F3.2 PR2).
  *
  * Exercises `GET /api/v1/app/invitations/metadata` and `POST …/accept` with the DB
- * seam (`prisma`) and better-auth mocked: flag gate, token resolution (404/410),
+ * seam (`prisma`) and better-auth mocked: token resolution (404/410),
  * the sent→opened transition on first view, the already-used guard, the
  * account-exists guard, and the happy-path register → bind → cookie-forward.
  */
@@ -96,6 +96,22 @@ describe('GET metadata', () => {
   it('404s for an unknown token', async () => {
     prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(null);
     expect((await metadataGET(metaReq('nope'))).status).toBe(404);
+  });
+
+  it('400s an over-long token without hashing it or hitting the DB', async () => {
+    // This route is unauthenticated, so the token is the one input an anonymous caller controls.
+    // It is bounded before it reaches the SHA-256 + lookup rather than after.
+    const res = await metadataGET(metaReq('a'.repeat(257)));
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionnaireInvitation.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('still accepts a real 64-hex token at the bound', async () => {
+    // Guards against the cap being tightened below the issued token length.
+    prismaMock.appQuestionnaireInvitation.findUnique.mockResolvedValue(null);
+    const res = await metadataGET(metaReq('a'.repeat(64)));
+    expect(res.status).toBe(404);
+    expect(prismaMock.appQuestionnaireInvitation.findUnique).toHaveBeenCalled();
   });
 
   it('410s for an expired invitation', async () => {

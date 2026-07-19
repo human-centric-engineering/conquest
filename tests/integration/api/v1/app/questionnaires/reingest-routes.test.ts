@@ -2,13 +2,13 @@
  * Integration test: POST /api/v1/app/questionnaires/:id/versions/:vid/reingest (F2.4).
  *
  * Exercises the re-ingest route's HTTP orchestration with the boundaries mocked:
- * flag gate, admin auth, per-admin sub-cap, scope-404, the draft-only 409, the
+ * admin auth, per-admin sub-cap, scope-404, the draft-only 409, the
  * shared upload→extract pipeline (parse, dispatch, coherence), the version-scoped
  * SHA-256 dedup short-circuit, the replace-in-place writer, and the admin audit.
  * The pure writer (`reingestVersion`) is unit-/integration-tested via the writer
  * itself; here we prove the wiring, the gate order, and the F2.4-specific seams.
  *
- * Covers: 404 flag-off · 401 · 403 · 404 unknown/cross-id version · 409 non-draft
+ * Covers: 401 · 403 · 404 unknown/cross-id version · 409 non-draft
  * (launched + archived) · 200 happy (replace) · 200 dedup short-circuit (no
  * writes, no dispatch) · 413/400/400 input · 422 scanned/empty/parse/incoherent ·
  * dispatch-error mapping · 503 extractor-missing · 429 sub-cap · audit content.

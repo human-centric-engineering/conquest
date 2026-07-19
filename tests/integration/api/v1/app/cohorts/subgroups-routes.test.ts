@@ -1,5 +1,5 @@
 /**
- * Integration: cohort subgroup routes — list / create / update / delete, the round-phases flag gate,
+ * Integration: cohort subgroup routes — list / create / update / delete,
  * the cohort-membership 404s, and the unique-name 409. DB seam + read model mocked.
  */
 

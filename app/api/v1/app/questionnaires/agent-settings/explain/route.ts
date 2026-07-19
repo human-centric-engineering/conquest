@@ -1,7 +1,7 @@
 /**
  * POST /api/v1/app/questionnaires/agent-settings/explain
  *
- * Admin-only, flag-gated. The hybrid "Explain with AI" layer of the Agent
+ * Admin-only. The hybrid "Explain with AI" layer of the Agent
  * Settings Evaluation surface: given an agent slug, runs one reasoning-model
  * structured completion and returns a plain-language explanation plus an optional
  * applyable suggestion. Per-admin rate-limited (LLM sub-flow).

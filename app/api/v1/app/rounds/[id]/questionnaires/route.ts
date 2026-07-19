@@ -6,7 +6,7 @@
  *   DISTINCT questionnaires — re-attaching the same one is a 409
  *   (`@@unique([roundId, questionnaireId])`).
  *
- * Cohorts flag-gate first (404 when off), then `withAdminAuth`. Audited.
+ * `withAdminAuth`. Audited.
  */
 
 import { Prisma } from '@prisma/client';

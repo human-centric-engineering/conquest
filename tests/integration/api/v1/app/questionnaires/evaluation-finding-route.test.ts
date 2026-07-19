@@ -4,10 +4,10 @@
  *   PATCH /api/v1/app/questionnaires/:id/versions/:vid/evaluations/:runId/findings/:findingId
  *     accept | decline | edit | mark_applied
  *
- * Gate order: master flag + design-eval sub-flag off → 404; non-admin → 403; unauthenticated → 401;
- * finding not found → 404; already-applied → 409. The four actions write the right `data`; mark_applied
- * validates the target version belongs to the questionnaire. The DB seam (`loadScopedFinding` /
- * `buildScopedFindingView`) and prisma writes are mocked; the Zod body validation stays real.
+ * Gate order: non-admin → 403; unauthenticated → 401; finding not found → 404; already-applied →
+ * 409. The four actions write the right `data`; mark_applied validates the target version belongs
+ * to the questionnaire. The DB seam (`loadScopedFinding` / `buildScopedFindingView`) and prisma writes are
+ * mocked; the Zod body validation stays real.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

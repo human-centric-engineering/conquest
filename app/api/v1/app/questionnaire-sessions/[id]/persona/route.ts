@@ -4,12 +4,12 @@
  * GET /api/v1/app/questionnaire-sessions/:id/persona
  *   → { success: true, data: { persona: ResolvedSessionPersonas | null } }
  *   The no-login anonymous surface boots client-side, so (like the intro route) it fetches the
- *   resolved persona menu here on boot. Returns `persona: null` when the platform flag is off — the
- *   per-version `personaSelection.enabled` (inside the payload) is the second gate the client honours.
+ *   resolved persona menu here on boot. The per-version `personaSelection.enabled` (inside the
+ *   payload) is the gate the client honours.
  *
  * PATCH /api/v1/app/questionnaire-sessions/:id/persona   body: { personaKey: string | null }
  *   → { success: true, data: { selectedPersonaKey: string | null } }
- *   Persists the respondent's chosen interviewer on the session. 404 when the platform flag is off;
+ *   Persists the respondent's chosen interviewer on the session.
  *   422 when respondent switching isn't enabled for the version (no picker ⇒ a crafted request can't
  *   override the pinned persona) or when the key isn't one of the version's personas. `null` clears
  *   the choice (⇒ default applies), but only while switching is enabled.

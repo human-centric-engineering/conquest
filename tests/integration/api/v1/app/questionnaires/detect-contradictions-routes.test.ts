@@ -2,8 +2,8 @@
  * Integration test: questionnaire contradiction-detection preview route (F4.3).
  *
  * Exercises the POST handler with the DB seam (`prisma`) and the capability
- * dispatcher mocked: gate order (404 master-flag-off before auth; 404 sub-flag-off
- * after auth), 401/403, scope-404, insufficient-answers 400, body validation, the
+ * dispatcher mocked: gate order (401 unauthenticated; 403 non-admin), scope-404,
+ * insufficient-answers 400, body validation, the
  * rate-limit 429, the capability wiring (mode/windowN defaulted from config), and
  * the fail-soft empty-findings path. The detector capability itself is tested
  * separately (contradiction-capability.test.ts); this pins the route →

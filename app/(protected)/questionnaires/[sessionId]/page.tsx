@@ -102,8 +102,8 @@ export default async function QuestionnaireSessionPage({
     'both'
   );
   const wantsForm = presentationMode === 'form' || presentationMode === 'both';
-  // Voice and attachments each need BOTH the platform flag (capability dark-launch) AND the
-  // version's per-questionnaire opt-in, so the affordance shows only when the author turned it on.
+  // Voice and attachments each need the version's per-questionnaire opt-in, so the affordance
+  // shows only when the author turned it on.
   const voiceConfigured = row.config?.voiceEnabled ?? false;
   const attachmentsConfigured = row.config?.attachmentsEnabled ?? false;
   const reasoningConfigured = row.config?.reasoningStreamEnabled ?? false;
@@ -146,7 +146,7 @@ export default async function QuestionnaireSessionPage({
   // Respondent profile capture (F-capture). Resolves the blocking form gate (its `formFields` subset)
   // for non-anonymous versions; `null` for anonymous (PII-free) and `satisfied` on a resume with an
   // existing snapshot or when there is no form subset (all-conversational / hybrid's conversational
-  // half is gathered in-chat). No platform flag — purely per-version config (like profileFields).
+  // half is gathered in-chat). Purely per-version config (like profileFields).
   const capture = await resolveSessionCapture(sessionId);
 
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
@@ -183,7 +183,7 @@ export default async function QuestionnaireSessionPage({
           reasoningPlacement={reasoningPlacement}
           reasoningDwellMs={row.config?.reasoningStreamDwellMs}
           reasoningPerItemMs={row.config?.reasoningStreamPerItemMs}
-          // Inline answer correction (Variant B): respondent-facing UX, default off; no platform flag.
+          // Inline answer correction (Variant B): respondent-facing UX, default off.
           inlineCorrectionEnabled={row.config?.inlineCorrectionEnabled ?? false}
         />
       </BrandThemeProvider>

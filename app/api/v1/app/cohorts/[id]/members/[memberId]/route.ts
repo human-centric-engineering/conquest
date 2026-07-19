@@ -7,7 +7,7 @@
  *   SOFT remove — sets `status: removed` + stamps `removedAt`. The row is kept so any session
  *   that points back to it survives; the access guard denies a removed member mid-round.
  *
- * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`, then 404 on unknown
+ * Both: `withAdminAuth`, then 404 on unknown
  * member (scoped to the cohort in the path). Audited.
  */
 

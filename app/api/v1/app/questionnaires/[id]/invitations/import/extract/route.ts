@@ -6,8 +6,8 @@
  *   vision model. Returns `{ people: ParsedInvitee[], warnings: string[] }` for the verify grid —
  *   nothing is persisted here.
  *
- * Gates: flag (404) → admin → invite-import sub-flag (404, paid + PII) → `inviteLimiter`. The
- * extraction itself logs cost and may fail soft (an unconfigured/over-budget provider → 502).
+ * Gates: admin → `inviteLimiter` (paid + PII). The extraction itself logs cost and may fail soft
+ * (an unconfigured/over-budget provider → 502).
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

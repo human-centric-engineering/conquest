@@ -7,8 +7,7 @@
  *   — no respondent data, no embedding vectors. The counterpart of the settings-only export on the
  *   Settings tab; importable through `POST …/questionnaires/import` to clone the questionnaire.
  *
- * Bulk read — a dedicated `exportLimiter` sub-cap sits on top of the section tier. Master-flag-gated
- * and version-scoped.
+ * Bulk read — a dedicated `exportLimiter` sub-cap sits on top of the section tier. Version-scoped.
  */
 
 import { errorResponse } from '@/lib/api/responses';

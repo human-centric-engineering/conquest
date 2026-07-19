@@ -4,8 +4,7 @@
  * GET  /api/v1/app/rounds/:id/context        — list briefing entries (optional ?versionId= filter).
  * POST /api/v1/app/rounds/:id/context        — create a briefing entry (general or question-attributed).
  *
- * All: round-context flag-gate first (404 when off — master AND cohorts AND round-context), then
- * `withAdminAuth`, then 404 on unknown round. The version must be one the round bundles, and an
+ * All: `withAdminAuth`, then 404 on unknown round. The version must be one the round bundles, and an
  * attributed `questionSlotId` must belong to that version (else 400). Audited.
  */
 

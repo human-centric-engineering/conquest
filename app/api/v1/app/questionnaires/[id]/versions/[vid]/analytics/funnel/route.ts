@@ -5,7 +5,7 @@
  *   Admin-only. Computes the invited → opened → started → completed funnel for a
  *   version, with per-stage drop-off and a separate count of anonymous (un-invited)
  *   sessions. Query params: `from`/`to` (YYYY-MM-DD, default last 30 days).
- *   Read-only — master-flag-gated and version-scoped; no sub-flag.
+ *   Read-only — version-scoped.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

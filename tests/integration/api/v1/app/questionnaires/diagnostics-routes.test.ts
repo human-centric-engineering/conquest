@@ -1,11 +1,10 @@
 /**
  * Integration test: questionnaire diagnostics read routes (F8.5).
  *
- * Pins the route → flag-gate → auth → version-scope → aggregator wiring for the two GET
+ * Pins the route → auth → version-scope → aggregator wiring for the two GET
  * endpoints (version rollup + per-invitation drill-down). The aggregators themselves are
  * unit-tested separately (lib/app/questionnaire/analytics/diagnostics.test.ts); here they're
  * stubbed so the test exercises only the route shell:
- *   - 404 when the master flag is off (before auth — the app looks absent)
  *   - 401 unauthenticated / 403 non-admin
  *   - 404 when the version doesn't resolve under the questionnaire
  *   - 404 when the drill-down aggregator returns null (invitation not on this version)

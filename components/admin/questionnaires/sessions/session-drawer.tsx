@@ -13,7 +13,7 @@
  * in from the right as a sheet.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
@@ -29,6 +29,7 @@ import {
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { REPORT_POLL_MS } from '@/components/admin/questionnaires/sessions/constants';
 import { cn } from '@/lib/utils';
 import { formatCompactDuration } from '@/lib/utils/format-duration';
 import { formatCompactDateTime } from '@/lib/utils/format-datetime';
@@ -103,19 +104,27 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
 
   const sessionId = item?.sessionId ?? null;
 
+  // Monotonic id for the in-flight load. Switching sessions quickly (or hitting Retry mid-flight)
+  // starts a second request while the first is still open; without this, a slow earlier response
+  // can land last and overwrite the newer session's view. Only the latest request may commit.
+  const loadSeq = useRef(0);
+
   const load = useCallback(async (id: string) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     setData(null);
     try {
       const view = await apiClient.get<AdminViewData>(API.APP.QUESTIONNAIRE_SESSIONS.adminView(id));
-      setData(view);
+      if (seq === loadSeq.current) setData(view);
     } catch (err) {
-      setError(
-        err instanceof APIClientError ? err.message : 'Could not load this session. Please retry.'
-      );
+      if (seq === loadSeq.current) {
+        setError(
+          err instanceof APIClientError ? err.message : 'Could not load this session. Please retry.'
+        );
+      }
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 
@@ -123,11 +132,13 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
   // Report tab updates in place rather than flashing the whole drawer).
   const silentReload = useCallback(async () => {
     if (!sessionId) return;
+    // Don't bump the sequence — a poll must never win against a newer explicit load, only defer.
+    const seq = loadSeq.current;
     try {
       const view = await apiClient.get<AdminViewData>(
         API.APP.QUESTIONNAIRE_SESSIONS.adminView(sessionId)
       );
-      setData(view);
+      if (seq === loadSeq.current) setData(view);
     } catch {
       // Transient — keep the last good view.
     }
@@ -148,7 +159,7 @@ export function SessionDrawer({ item, open, onOpenChange }: SessionDrawerProps) 
   const reportGenerating = reportStatus === 'queued' || reportStatus === 'processing';
   useEffect(() => {
     if (!open || !reportGenerating) return;
-    const timer = setInterval(() => void silentReload(), 4000);
+    const timer = setInterval(() => void silentReload(), REPORT_POLL_MS);
     return () => clearInterval(timer);
   }, [open, reportGenerating, silentReload]);
 

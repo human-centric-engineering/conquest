@@ -288,8 +288,7 @@ const EXTRACTION_VERIFIER: PromptAgentCatalogEntry = {
   stage: 'authoring',
   summary:
     'Critic that reads the extracted questions + the source and flags any whose answer type/config is unfaithful (a mis-typed scale, a likert missing anchors, a flattened or row-lost rating grid). Flags only — it never rewrites.',
-  dispatch:
-    'Between extract and persist on the streaming ingest route, when the ingest verify+repair sub-flag is on.',
+  dispatch: 'Between extract and persist on the streaming ingest route.',
   builderModule: 'lib/app/questionnaire/ingestion/verify-prompt.ts',
   instructionsAreLoadBearing: false,
   specimens: [

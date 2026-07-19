@@ -3,9 +3,9 @@
  *
  * The non-streaming ingest and re-ingest routes keep calling {@link extractFromDocument} directly
  * (a single synchronous extractor pass). The *streaming* route drives THIS generator instead: it
- * runs the same extract, then — when the verify+repair sub-flag is on — a critic pass that flags
- * mis-typed / mis-scaled questions and a scales-&-matrix specialist that re-extracts only the
- * flagged ones, before the existing coherence gate and persist.
+ * runs the same extract, then a critic pass that flags mis-typed / mis-scaled questions and a
+ * scales-&-matrix specialist that re-extracts only the flagged ones, before the existing
+ * coherence gate and persist.
  *
  * It yields real {@link ExtractionPhaseEvent}s as it goes (the route re-yields them over SSE) and
  * returns the same {@link PipelineResult} `extractFromDocument` does, so the route's persist block
@@ -80,8 +80,8 @@ function errorMessage(err: unknown): string {
 
 /**
  * The streaming ingest pipeline. Yields phase events; returns the extractor output (verified +
- * repaired when the sub-flag is on) or a ready-made error `Response` — exactly what the route's
- * persist block already expects.
+ * repaired) or a ready-made error `Response` — exactly what the route's persist block already
+ * expects.
  */
 export async function* orchestrateExtraction(
   upload: GuardedUpload,

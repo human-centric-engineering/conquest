@@ -17,8 +17,8 @@ export const metadata: Metadata = {
  *
  * Cost/performance control surface for the questionnaire agents: current vs
  * advisory model / temperature / maxTokens / reasoning effort, cost trade-offs,
- * and one-click apply. Thin server component — gates on the master flag (404 when
- * off), pre-fetches the deterministic evaluation, hands to the client panel.
+ * and one-click apply. Thin server component — pre-fetches the deterministic
+ * evaluation, hands to the client panel.
  */
 export default async function AgentSettingsPage() {
   let evaluation: AgentSettingsEvaluation | null = null;

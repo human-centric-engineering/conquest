@@ -9,7 +9,7 @@
  *   assignments on the draft — the UI confirms before calling.
  *
  * Pipeline (order is load-bearing):
- *   flag-gate → withAdminAuth → per-admin sub-cap → scope-404 → draft-only 409 →
+ *   withAdminAuth → per-admin sub-cap → scope-404 → draft-only 409 →
  *   guard upload → version-scoped SHA-256 dedup short-circuit → parse + extract →
  *   transactional replace → admin audit → 200.
  *
@@ -19,9 +19,9 @@
  * a questionnaire. Everything in between is the shared `_lib/extract-pipeline.ts`.
  *
  * Re-ingest of a `launched`/`archived` version is refused (`REINGEST_NOT_DRAFT`,
- * 409) — it is a draft editorial operation, not a fork. Auth: admin only. Flag:
- * 404 when `APP_QUESTIONNAIRES_ENABLED` is off. Rate limit: shares the per-admin
- * `ingestLimiter` sub-cap with new ingest (each re-ingest is ≥1 reasoning LLM call).
+ * 409) — it is a draft editorial operation, not a fork. Auth: admin only.
+ * Rate limit: shares the per-admin `ingestLimiter` sub-cap with new ingest (each
+ * re-ingest is ≥1 reasoning LLM call).
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

@@ -2,7 +2,7 @@
 
 > Replacing a **draft** version's source document and re-extracting its structure.
 > Built by **F2.4** ([`../planning/features/f2.4.md`](../planning/features/f2.4.md))
-> — the last feature of P2. Gated by `APP_QUESTIONNAIRES_ENABLED` (seeded off).
+> — the last feature of P2.
 > Builds on the F1.1 ingest pipeline ([`ingestion.md`](./ingestion.md)) and the
 > F2.1 scoped-version helpers.
 
@@ -27,35 +27,34 @@ free-text extractor steering — both inherited for free through the shared
 
 ### Pipeline (order is load-bearing)
 
-1. **Flag gate** — `404` when `APP_QUESTIONNAIRES_ENABLED` is off (runs first).
-2. **`withAdminAuth`** — `401` / `403`.
-3. **Per-admin sub-cap** — the shared `ingestLimiter` (10/min, keyed on admin id);
+1. **`withAdminAuth`** — `401` / `403` (runs first).
+2. **Per-admin sub-cap** — the shared `ingestLimiter` (10/min, keyed on admin id);
    each re-ingest is ≥1 reasoning LLM call. `429` when exceeded.
-4. **Scope-404** — `loadScopedVersion(id, vid)`; `404 NOT_FOUND` when the version
+3. **Scope-404** — `loadScopedVersion(id, vid)`; `404 NOT_FOUND` when the version
    doesn't resolve under the questionnaire (no cross-questionnaire leak).
-5. **Draft-only** — `409 REINGEST_NOT_DRAFT` for a `launched`/`archived` version.
+4. **Draft-only** — `409 REINGEST_NOT_DRAFT` for a `launched`/`archived` version.
    Re-ingest is a draft editorial operation, **not** a fork (see _Decisions_). This
    is the outer check; the writer **re-asserts draft-ness inside its transaction**
    too, so a concurrent launch during extraction can't slip a launched version
    through (a TOCTOU the outer check alone would leave open).
-6. **Guard the upload** — body-size, extension allowlist, admin-metadata, SHA-256.
+5. **Guard the upload** — body-size, extension allowlist, admin-metadata, SHA-256.
    Same codes as ingest (`413 FILE_TOO_LARGE`, `400 UNSUPPORTED_FORMAT`, `400` on a
    bad audience field, `400` missing file).
-7. **Version-scoped dedup short-circuit** — if the upload is byte-identical to the
+6. **Version-scoped dedup short-circuit** — if the upload is byte-identical to the
    version's **current (most recent) source document** _and_ no admin goal/audience
    override was supplied → `200` `{ deduped: true }`, applied-change counts returned
    unchanged, **no re-extraction, no writes, no audit**. Two scopings matter: it
    matches only the _active_ source doc (a superseded doc's hash still re-extracts,
    so its structure can be restored), and an override is never silently dropped (it
    forces the full re-extract + merge path even for identical bytes).
-8. **Parse → extract** — `parseDocument` → scanned/empty detection (`422
+7. **Parse → extract** — `parseDocument` → scanned/empty detection (`422
 SCANNED_DOCUMENT` / `422 EMPTY_DOCUMENT` / `422 PARSE_FAILED`) → extractor
    dispatch (mapped `429` / `502` / `503`) → coherence pre-check (`422
 EXTRACTION_INCOHERENT`). Identical to ingest — it is the **shared**
    `_lib/extract-pipeline.ts`.
-9. **Transactional replace** — `reingestVersion` (see below).
-10. **Audit** — `questionnaire.reingest` (`entityType: questionnaire_version`).
-11. **`200`** with the new counts, resolved goal/audience, provenance, and
+8. **Transactional replace** — `reingestVersion` (see below).
+9. **Audit** — `questionnaire.reingest` (`entityType: questionnaire_version`).
+10. **`200`** with the new counts, resolved goal/audience, provenance, and
     `deduped: false`.
 
 ### Success — `200`

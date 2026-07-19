@@ -21,16 +21,6 @@ import {
 import { nextAvailableKey, slugifyKey } from '@/lib/app/questionnaire/authoring/key';
 import type { ForkResult } from '@/app/api/v1/app/questionnaires/_lib/fork';
 
-/**
- * Storage-boundary cast for a JSON column: null/undefined → SQL-NULL sentinel,
- * else opaque JSON. The input is already Zod-validated, so the cast is at the
- * Prisma boundary only (the same discipline as `_lib/persist.ts`).
- */
-export function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (value === null || value === undefined) return Prisma.JsonNull;
-  return value;
-}
-
 /** The minimal version facts a mutation route needs before it forks/writes. */
 export interface ScopedVersion {
   id: string;

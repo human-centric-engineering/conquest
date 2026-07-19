@@ -46,7 +46,7 @@ interface Props {
   questionnaireId: string;
   /** Resolved invitee-field config (email forced shown+required) — drives the grid columns. */
   inviteeFields: InviteeFieldConfig[];
-  /** Whether the AI import methods (PDF/image) are available (the import sub-flag). */
+  /** Whether the AI import methods (PDF/image) are offered. Callers pass `true` today. */
   importEnabled: boolean;
   /** No launched version → the whole flow is disabled. */
   disabled: boolean;

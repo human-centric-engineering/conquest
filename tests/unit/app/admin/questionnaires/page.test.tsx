@@ -436,7 +436,7 @@ describe('QuestionnairesListPage stat tiles', () => {
     expect(screen.getByText('About data-slot embedding')).toBeInTheDocument();
     expect(screen.getByText('Adaptive question selection')).toBeInTheDocument();
     expect(screen.getByText('Extraction pre-filter (large surveys)')).toBeInTheDocument();
-    // Adaptive selection (a platform flag) shows a live On pill; the pre-filter is now a
+    // Adaptive selection is always available, so it shows an On pill; the pre-filter is a
     // per-questionnaire Settings toggle, so it has no global pill.
     const pills = screen.getAllByText(/^(On|Off)$/).map((el) => el.textContent);
     expect(pills).toEqual(['On']);

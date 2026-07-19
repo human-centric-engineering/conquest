@@ -1,6 +1,6 @@
 /**
- * Integration: round routes — create (default name derivation), the manual close action
- * (incl. the already-closed 409), and the cohorts flag gate. DB seam + read model mocked.
+ * Integration: round routes — create (default name derivation) and the manual close action
+ * (incl. the already-closed 409). DB seam + read model mocked.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -67,6 +67,26 @@ describe('GET /api/v1/app/rounds', () => {
 
   it('400s when neither demoClientId nor cohortId is supplied', async () => {
     const res = await listGET(getReq(ROUNDS_URL));
+    expect(res.status).toBe(400);
+    expect(listRounds).not.toHaveBeenCalled();
+  });
+
+  it('treats a present-but-empty scope param as absent rather than 400ing the request', async () => {
+    // `?demoClientId=&cohortId=co-1` — an empty param must not invalidate the valid one. The
+    // schema bounds each scope with `.min(1)`, so a raw '' would fail the whole parse and 400 a
+    // request that carries a perfectly good cohortId.
+    (listRounds as unknown as Mock).mockResolvedValue([]);
+    const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=&cohortId=co-1`));
+    expect(res.status).toBe(200);
+    expect(listRounds).toHaveBeenCalledWith({
+      demoClientId: undefined,
+      cohortId: 'co-1',
+      q: undefined,
+    });
+  });
+
+  it('400s when both scope params are present but blank', async () => {
+    const res = await listGET(getReq(`${ROUNDS_URL}?demoClientId=&cohortId=`));
     expect(res.status).toBe(400);
     expect(listRounds).not.toHaveBeenCalled();
   });
