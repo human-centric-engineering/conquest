@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { API } from '@/lib/api/endpoints';
+import { COPIED_FEEDBACK_MS } from '@/components/admin/questionnaires/sessions/constants';
 
 export interface SessionDownloadsProps {
   questionnaireId: string;
@@ -48,7 +49,6 @@ export interface SessionDownloadsProps {
 /** Which action is in flight — drives the per-control busy state. */
 type DownloadKind = 'report' | 'transcript-pdf' | 'transcript-txt' | 'transcript-copy';
 /** How long the "Copied" confirmation stays before reverting to the idle label. */
-const COPIED_FEEDBACK_MS = 2_000;
 
 /** Extract a `filename="…"` from a `Content-Disposition` header, or null when absent. */
 function filenameFromDisposition(disposition: string | null): string | null {

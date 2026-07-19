@@ -9,10 +9,10 @@
  * lifecycle strip during the session and on the completion screen.
  */
 
-import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 
 export interface SessionRefChipProps {
@@ -24,23 +24,14 @@ export interface SessionRefChipProps {
 const TOOLTIP = 'Quote this reference if you need to report a problem with this conversation.';
 
 export function SessionRefChip({ refRaw, className }: SessionRefChipProps) {
-  const [copied, setCopied] = useState(false);
+  // Clipboard unavailable is fine — the code stays visible to read aloud.
+  const { copied, copy } = useCopyToClipboard();
   const display = formatSessionRef(refRaw);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(display);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard unavailable — the code is still visible to read aloud.
-    }
-  }
 
   return (
     <button
       type="button"
-      onClick={() => void copy()}
+      onClick={() => void copy(display)}
       title={TOOLTIP}
       aria-label={`Support reference ${display}. ${TOOLTIP} Click to copy.`}
       className={cn(

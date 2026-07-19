@@ -9,12 +9,12 @@
  * or mints anything.
  */
 
-import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard';
 
 export interface CopyLinkFieldProps {
   /** Absolute URL to display and copy. */
@@ -26,18 +26,9 @@ export interface CopyLinkFieldProps {
 }
 
 export function CopyLinkField({ url, label, note }: CopyLinkFieldProps) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      // Clipboard can be denied (permissions / insecure context); the input is selectable
-      // as a manual fallback, so swallow rather than surface a transient error.
-    }
-  }
+  // Clipboard can be denied (permissions / insecure context); the hook swallows that and the
+  // input is selectable as a manual fallback, so a failed copy needs no error surface.
+  const { copied, copy } = useCopyToClipboard();
 
   return (
     <div className="space-y-1.5">
@@ -54,7 +45,7 @@ export function CopyLinkField({ url, label, note }: CopyLinkFieldProps) {
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => void copy()}
+          onClick={() => void copy(url)}
           className="shrink-0"
         >
           {copied ? (

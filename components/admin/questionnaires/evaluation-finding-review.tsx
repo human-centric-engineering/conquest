@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
+import { parseApiResponse } from '@/lib/api/parse-response';
 import { QUESTION_TYPES, QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
 import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
 import type { EvaluationFindingView } from '@/lib/app/questionnaire/views';
@@ -99,16 +100,19 @@ async function sendJson(
       headers: { 'Content-Type': 'application/json' },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
-    const json = (await res.json()) as
-      | { success: true; data: unknown; meta?: unknown }
-      | { success: false; error: { message: string; details?: { reason?: string } } };
+    const json = await parseApiResponse<unknown>(res);
     if (!res.ok || !json.success) {
       const reason = !json.success ? json.error.details?.reason : undefined;
       const message = !json.success ? json.error.message : 'Request failed';
-      return { ok: false, message: reason ? `${message} (${reason})` : message };
+      return {
+        ok: false,
+        message: typeof reason === 'string' ? `${message} (${reason})` : message,
+      };
     }
     return { ok: true, data: json.data, meta: json.meta };
   } catch {
+    // Network failure or a body that isn't a valid API envelope — `parseApiResponse` throws on
+    // the latter, so a malformed response surfaces here rather than being cast into shape.
     return { ok: false, message: 'Network error' };
   }
 }
