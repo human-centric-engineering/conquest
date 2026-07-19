@@ -2,10 +2,10 @@
  * Integration test: questionnaire completion-status preview route (F4.5).
  *
  * Exercises the POST handler with the DB seam (`prisma`) and the capability
- * dispatcher mocked: gate order (404 master-flag-off before auth; 401/403; scope-404),
+ * dispatcher mocked: gate order (401/403; scope-404),
  * the deterministic assessment (offer / not_ready / blocked_on_required), and the
- * offer-composition wiring — composed only when the assessment is `offer` AND the
- * completion sub-flag is on, fail-soft, and NOT 404 when the sub-flag is off. The
+ * offer-composition wiring — composed only when the assessment is `offer`, and
+ * fail-soft when the composer errors. The
  * composer capability itself is tested separately (completion-capability.test.ts);
  * this pins the route → context → assessment → dispatch wiring and the no-persistence
  * contract.
@@ -182,7 +182,7 @@ describe('gate order + auth', () => {
 });
 
 describe('assessment', () => {
-  it('returns offer with a composed offer when complete and the sub-flag is on', async () => {
+  it('returns offer with a composed offer when the session is complete', async () => {
     const res = await POST(req(COMPLETE_BODY), ctx(PARAMS));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -221,7 +221,7 @@ describe('assessment', () => {
   });
 });
 
-describe('sub-flag + fail-soft', () => {
+describe('fail-soft', () => {
   it('is fail-soft: a composer error yields the assessment + a diagnostic, no offer', async () => {
     dispatchMock.capabilityDispatcher.dispatch.mockResolvedValue({
       success: false,

@@ -3,12 +3,12 @@
  *
  * The general-purpose "make a copy" action — a plain, unattributed duplicate of the
  * current version. Exercises the route's HTTP orchestration with the boundaries
- * mocked: flag gate, admin auth, Zod body, source 404, current-version resolution
+ * mocked: admin auth, Zod body, source 404, current-version resolution
  * (launched-else-latest), the transactional create + `copyVersionGraph` call (via the
  * shared `duplicateQuestionnaire` service), and the admin audit. The deep copy itself
  * is single-sourced via `copyVersionGraph` (covered by the fork tests) and stubbed.
  *
- * Covers: 404 flag-off · 401 · 403 · 404 unknown questionnaire · 404 no-version ·
+ * Covers: 401 · 403 · 404 unknown questionnaire · 404 no-version ·
  * 201 happy (default "Copy") · 201 with custom suffix · no demo attribution ·
  * launched-preferred-over-latest · audit content.
  */

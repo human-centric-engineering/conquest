@@ -1,8 +1,7 @@
 /**
  * Integration test: frictionless invite session-create route (invitations Phase B).
  *
- * The create seam, rate limiter, and token minter are mocked. Pins the public surface: the
- * live-sessions flag gate (outer wrapper) AND the frictionless-invites sub-flag (inner 404),
+ * The create seam, rate limiter, and token minter are mocked. Pins the public surface:
  * the IP-keyed sub-cap, dispatch to createSessionFromInviteToken, the typed-failure → HTTP
  * mapping, and that a success returns the minted access token.
  */

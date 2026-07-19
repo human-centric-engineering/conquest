@@ -1,9 +1,9 @@
 /**
  * Integration test: Respondent Report re-run route (admin history + enqueue).
  *
- * Exercises gate order (master flag → report flag → auth → rate-limit → validation → mode guard →
- * enqueue), the 202 enqueue envelope, the raw-mode rejection, the version-config fallback when no
- * `config` is sent, and the GET history read. The enqueue/view core is unit-tested separately + mocked.
+ * Exercises gate order (auth → rate-limit → validation → mode guard → enqueue), the 202 enqueue
+ * envelope, the raw-mode rejection, the version-config fallback when no `config` is sent, and the
+ * GET history read. The enqueue/view core is unit-tested separately + mocked.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

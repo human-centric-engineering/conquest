@@ -2,13 +2,13 @@
  * Integration test: POST /api/v1/app/questionnaires (F1.1 / PR4, T1.4.6).
  *
  * Exercises the route's HTTP orchestration end-to-end with the boundaries mocked:
- * the flag gate, admin auth, multipart guards, SHA-256 dedup, document parse,
+ * admin auth, multipart guards, SHA-256 dedup, document parse,
  * capability dispatch, persistence, and admin audit. The pure persistence/merge
  * logic is unit-tested separately (persist.test.ts, merge.test.ts); here we prove
  * the wiring, the gate order, the failure-mode envelopes, and that admin-supplied
  * metadata flows to both the extractor (suppression) and the writer (merge).
  *
- * Covers: 404 flag-off · 401 unauth · 403 non-admin · 201 happy · oversize 413 ·
+ * Covers: 401 unauth · 403 non-admin · 201 happy · oversize 413 ·
  * unsupported 400 · missing-file 400 · invalid-audience 400 · scanned PDF 422 ·
  * empty 422 · parse-fail 422 · incoherent 422 · dedup 409 · extractor-missing 503 ·
  * dispatch-error status mapping · per-admin rate-limit 429 · audit content.

@@ -2,7 +2,7 @@
  * Integration test: questionnaire next-question preview route (F4.1 / PR2).
  *
  * Exercises the POST handler with the DB seam (`prisma`) mocked: gate order
- * (404 flag-off before auth), 401/403, scope-404, body validation, and the
+ * (401 unauthenticated; 403 non-admin), scope-404, body validation, and the
  * selection wiring for each deterministic strategy — sequential (the saved
  * default), answered-state filtering, a `weighted` override, `random`
  * determinism, the `adaptive`-degrades-to-weighted PR2 behaviour, and the
@@ -235,7 +235,7 @@ describe('selection wiring', () => {
   });
 });
 
-describe('adaptive path (sub-flag on)', () => {
+describe('adaptive path', () => {
   beforeEach(() => {
     // A controllable fake of the real embedder/LLM deps.
     (buildAdaptiveDeps as unknown as Mock).mockReturnValue({

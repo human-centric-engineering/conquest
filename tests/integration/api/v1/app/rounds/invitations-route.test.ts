@@ -1,5 +1,5 @@
 /**
- * Integration: the round invitations (grant) route — flag gate, 404 on unknown round, and that
+ * Integration: the round invitations (grant) route — 404 on unknown round, and that
  * it delegates to the generator + audits. The generator itself is unit-tested in invites.test.ts.
  */
 

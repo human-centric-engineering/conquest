@@ -2,13 +2,13 @@
  * Integration test: POST /api/v1/app/questionnaires/:id/clone-for-client (DEMO-ONLY,
  * deferred-gaps Item 4).
  *
- * Exercises the route's HTTP orchestration with the boundaries mocked: flag gate,
+ * Exercises the route's HTTP orchestration with the boundaries mocked:
  * admin auth, Zod body, source 404, current-version resolution (launched-else-latest),
  * target-client 404, the transactional create + `copyVersionGraph` call, source-doc
  * copy, and the admin audit. The deep copy itself is single-sourced via
  * `copyVersionGraph` (covered by the fork tests) and stubbed here.
  *
- * Covers: 404 flag-off · 401 · 403 · 400 bad body · 404 unknown questionnaire · 404
+ * Covers: 401 · 403 · 400 bad body · 404 unknown questionnaire · 404
  * no-version · 404 unknown target client · 201 happy (attributed) · 201 generic (None)
  * · launched-preferred-over-latest · audit content.
  */

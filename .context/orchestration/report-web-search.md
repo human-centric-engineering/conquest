@@ -86,6 +86,6 @@ The **narrative** use has no separate render surface — it lands inside the rep
 - Capability: `lib/app/questionnaire/capabilities/web-search.ts` (+ `constants.ts`, `lib/app/capabilities.ts`)
 - Research module: `lib/app/questionnaire/report/research.ts`; appendix synthesis: `report/appendix.ts`
 - Generation: `lib/app/questionnaire/report/generate.ts`; content: `report/content.ts`
-- UI: `components/admin/questionnaires/report/respondent-report-editor.tsx` (Research tab), `workspace-data.ts` (`reportWebSearch` flag)
+- UI: `components/admin/questionnaires/report/respondent-report-editor.tsx` (Research tab)
 - Rendering: `session-complete.tsx`, `session-pdf-document.tsx`
-- Seeds: `prisma/seeds/app-questionnaire/069-report-web-search-flag.ts`, `070-report-researcher-agent.ts`, `071-web-search-capability.ts`
+- Seeds: `prisma/seeds/app-questionnaire/070-report-researcher-agent.ts`, `071-web-search-capability.ts`

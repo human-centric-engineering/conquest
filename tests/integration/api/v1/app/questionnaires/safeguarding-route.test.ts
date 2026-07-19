@@ -3,13 +3,12 @@
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/analytics/safeguarding
  *
- * Exercises the full route shell: master-flag gate → admin auth guard →
+ * Exercises the full route shell: admin auth guard →
  * version-scope check → query-param validation → getSafeguardingSummary
  * aggregator invocation → response envelope. The aggregator itself is
  * unit-tested in lib/app/questionnaire/analytics/safeguarding.test.ts; here
  * it's stubbed so the test only exercises the route shell:
  *
- *   - 404 when the master flag is off, before auth (app looks absent)
  *   - 401 unauthenticated / 403 non-admin
  *   - 404 with NOT_FOUND error envelope when the version doesn't resolve
  *   - 400 with error envelope on an invalid date query

@@ -93,4 +93,24 @@ describe('validateInviteeProfile', () => {
     });
     expect(rejected.ok).toBe(false);
   });
+
+  it('rejects a non-object payload rather than throwing', () => {
+    // `raw` arrives straight off a JSON body, so a caller can hand us anything. The guard must
+    // return the failure envelope — a throw here would surface as a 500 instead of a 400.
+    for (const raw of [null, undefined, 'a string', 42, true, ['array']]) {
+      const result = validateInviteeProfile(fields, raw);
+      expect(result).toEqual({ ok: false, message: 'Invitee details must be an object' });
+    }
+  });
+
+  it('drops explicit null/undefined optional values instead of failing validation', () => {
+    // A JSON payload legitimately carries `null` for "not supplied" — that must behave like an
+    // omitted key, not like a present-but-invalid one.
+    const result = validateInviteeProfile(fields, {
+      firstName: 'Ada',
+      email: 'a@b.com',
+      jobTitle: null,
+    });
+    expect(result).toEqual({ ok: true, values: { firstName: 'Ada', email: 'a@b.com' } });
+  });
 });

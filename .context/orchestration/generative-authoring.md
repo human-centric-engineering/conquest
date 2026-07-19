@@ -85,5 +85,5 @@ omitted/`true` ⇒ `persistIngestion({ requiredness: 'all' })` (every question r
 - Capabilities: `lib/app/questionnaire/capabilities/{compose-questionnaire,refine-questionnaire-structure}.ts`
 - Orchestrator + prompts + schemas + events: `lib/app/questionnaire/ingestion/{stream-compose,compose-prompt,compose-schema,compose-events}.ts`
 - Route helpers: `app/api/v1/app/questionnaires/_lib/{compose-pipeline,compose-input}.ts`; persist helpers `briefSource` / `replaceVersionStructure` in `_lib/persist.ts`
-- Seeds: `prisma/seeds/app-questionnaire/035-generative-authoring-flag.ts`, `036-composer-agent.ts`, `037-compose-capability.ts`, `038-refine-structure-capability.ts`
-- Constants/flag: `lib/app/questionnaire/constants.ts`, `feature-flag.ts` (`isGenerativeAuthoringEnabled` / `ensureGenerativeAuthoringEnabled` / `withGenerativeAuthoringEnabled`)
+- Seeds: `prisma/seeds/app-questionnaire/036-composer-agent.ts`, `037-compose-capability.ts`, `038-refine-structure-capability.ts`
+- Constants: `lib/app/questionnaire/constants.ts`

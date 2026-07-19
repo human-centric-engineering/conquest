@@ -2,8 +2,8 @@
  * Integration test: design-time evaluation preview route (F5.1).
  *
  * Exercises the POST handler with the DB seam (`prisma`) and the capability dispatcher
- * mocked: gate order (404 master-flag-off before auth; 404 sub-flag-off after auth),
- * 401/403, scope-404, not-configured-404 (no judges seeded), the rate-limit 429, the
+ * mocked: gate order (401 unauthenticated; 403 non-admin), scope-404,
+ * not-configured-404 (no judges seeded), the rate-limit 429, the
  * panel fan-out (one dispatch per dimension), the dimension subset, and the fail-soft
  * per-judge path (one judge errors, the rest still return). The capability itself is
  * tested separately (evaluate-structure-capability.test.ts); this pins the route →

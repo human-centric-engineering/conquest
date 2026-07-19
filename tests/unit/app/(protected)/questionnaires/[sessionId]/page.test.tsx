@@ -4,7 +4,6 @@
  * Tests the authenticated respondent chat surface (F7.1) Server Component.
  *
  * Test Coverage:
- * - Feature flag off → notFound()
  * - No session → clearInvalidSession called with correct return URL
  * - DB row not found → notFound()
  * - Row belongs to a different user → notFound() (ownership 404 — key authz test)
@@ -12,7 +11,7 @@
  * - Valid owned active session, answers exist → resumed welcome copy
  * - Completed session → initialStatus='completed' (terminal-positive, F7.3)
  * - Abandoned session → initialStatus='not_active'
- * - voiceInputEnabled flag propagated to QuestionnaireChat
+ * - voiceInputEnabled (per-questionnaire config opt-in) propagated to QuestionnaireChat
  * - Page metadata title
  *
  * @see app/(protected)/questionnaires/[sessionId]/page.tsx
@@ -226,8 +225,8 @@ function makeRow(
     version: {
       config: {
         anonymousMode: overrides.anonymous ?? false,
-        // Per-questionnaire opt-ins default ON so the flag tests isolate the platform flag; the
-        // page ANDs platform flag AND config opt-in, exercised by dedicated tests below.
+        // Per-questionnaire opt-ins default ON here; the page reads the config opt-in for each
+        // affordance, with the opt-out paths exercised by dedicated tests below.
         voiceEnabled: overrides.voiceEnabled ?? true,
         attachmentsEnabled: overrides.attachmentsEnabled ?? true,
       },
@@ -577,7 +576,7 @@ describe('QuestionnaireSessionPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Voice input flag propagation
+  // Voice input propagation
   // -------------------------------------------------------------------------
 
   describe('voiceInputEnabled (per-version opt-in)', () => {

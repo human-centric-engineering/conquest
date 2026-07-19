@@ -1,6 +1,6 @@
 /**
  * Integration: round phase routes — list / create / update / delete, the per-phase send-invites
- * action, and the maintenance dispatch hook. Covers the round-phases flag gate, the cohort-membership
+ * action, and the maintenance dispatch hook. Covers the cohort-membership
  * + window-nesting 422s, the unique-phase 409, and the staggered-send wiring. DB seam, read model, and
  * invite generator mocked.
  */

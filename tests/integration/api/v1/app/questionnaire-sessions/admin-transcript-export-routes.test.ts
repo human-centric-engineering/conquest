@@ -2,7 +2,7 @@
  * Integration test: admin chat-transcript export routes (P8 admin session views).
  *
  * The admin-side twins of the F7.6 respondent transcript exports. Pins the authorization that
- * makes them safe: the app-flag gate (404 before auth), admin-only access (401/403), and
+ * makes them safe: admin-only access (401/403), and
  * questionnaire ownership (cross-questionnaire → 404, with NO render). On success they emit the
  * same envelopes as the respondent routes — `application/pdf` for `transcript.pdf` and
  * `text/plain` for `transcript.txt`, each an `attachment` with the `transcript-<slug>-v<N>.<ext>`

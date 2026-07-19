@@ -32,13 +32,23 @@ const listQuerySchema = z.object({
   q: z.string().max(200).optional(),
 });
 
+/**
+ * `searchParams.get()` returns `''` for a present-but-empty param (`?cohortId=`), and `??` only
+ * catches null — so an empty scope param would reach `.min(1)` and fail the WHOLE parse, 400ing a
+ * request whose other scope param was perfectly valid. Treat blank as absent, which is what the
+ * "one of the two is required" check below already assumes.
+ */
+function param(searchParams: URLSearchParams, key: string): string | undefined {
+  return searchParams.get(key)?.trim() || undefined;
+}
+
 const handleList = withAdminAuth(async (request: NextRequest) => {
   const log = await getRouteLogger(request);
   const { searchParams } = new URL(request.url);
   const parsed = listQuerySchema.safeParse({
-    demoClientId: searchParams.get('demoClientId') ?? undefined,
-    cohortId: searchParams.get('cohortId') ?? undefined,
-    q: searchParams.get('q') ?? undefined,
+    demoClientId: param(searchParams, 'demoClientId'),
+    cohortId: param(searchParams, 'cohortId'),
+    q: param(searchParams, 'q'),
   });
   if (!parsed.success || (!parsed.data.demoClientId && !parsed.data.cohortId)) {
     return errorResponse('demoClientId or cohortId is required', {

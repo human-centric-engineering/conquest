@@ -49,6 +49,9 @@ const EMPTY_FILTERS: Filters = {
   sortOrder: 'desc',
 };
 
+/** The filter/page state the server-rendered first page corresponds to. */
+const SEED_QUERY_KEY = JSON.stringify([EMPTY_FILTERS, 1]);
+
 const FLAG_BADGE: Record<string, string> = {
   none: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
   flagged: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400',
@@ -109,14 +112,19 @@ export function TurnEvaluationsTable({
     }
   }, []);
 
-  // Re-fetch on filter/page change (skip the very first render — the server seeded page 1).
-  // A ref, not state: the skip flag must not itself cause a render.
-  const seeded = useRef(false);
+  // Re-fetch on filter/page change; the server already seeded page 1 with EMPTY_FILTERS, so skip
+  // while the controls still match that seed.
+  //
+  // The skip is keyed on the seed VALUE rather than a one-shot "have I mounted" flag. A bare
+  // `ref = true` flag would be flipped by the first of StrictMode's double-invoked mount effects
+  // and then let the second one through, firing a redundant fetch on mount in development. (The
+  // older `useState` flag avoided that only because both invocations closed over the same stale
+  // `false` — at the cost of an extra render and an exhaustive-deps suppression.) Comparing values
+  // is idempotent, so it holds under any number of invocations.
+  const hasFetched = useRef(false);
   useEffect(() => {
-    if (!seeded.current) {
-      seeded.current = true;
-      return;
-    }
+    if (!hasFetched.current && JSON.stringify([filters, page]) === SEED_QUERY_KEY) return;
+    hasFetched.current = true;
     void fetchPage(filters, page);
   }, [filters, page, fetchPage]);
 

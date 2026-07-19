@@ -256,6 +256,7 @@ export function CohortReportEditor({
           onChange={(e) => setRecommendations(e.target.value)}
           rows={4}
           placeholder="One per line"
+          aria-label="Recommendations, one per line"
         />
       </section>
 
@@ -266,6 +267,7 @@ export function CohortReportEditor({
           onChange={(e) => setActions(e.target.value)}
           rows={4}
           placeholder="One per line"
+          aria-label="Actions, one per line"
         />
       </section>
     </div>

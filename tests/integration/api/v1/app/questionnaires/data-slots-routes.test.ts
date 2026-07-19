@@ -6,10 +6,10 @@
  *   PUT  /api/v1/app/questionnaires/:id/versions/:vid/data-slots  → replace slots (fork if launched)
  *   POST /api/v1/app/questionnaires/:id/versions/:vid/data-slots/generate → LLM-backed generation
  *
- * Gate order for all handlers: master flag + data-slots sub-flag off → 404 before auth;
- * non-admin → 403; unauthenticated → 401; missing/cross-id version → 404.
+ * Gate order for all handlers: non-admin → 403; unauthenticated → 401;
+ * missing/cross-id version → 404.
  *
- * Covers: 404 flag-off · 401 · 403 · 404 scope · GET returns slots+draft · PUT validates
+ * Covers: 401 · 403 · 404 scope · GET returns slots+draft · PUT validates
  * body (400/422) · PUT forks launched version + retires source draft · audit row written ·
  * POST generate happy path + fail-soft · dispatch error codes → HTTP statuses · rate-limit 429.
  */
