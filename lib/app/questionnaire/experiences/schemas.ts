@@ -35,6 +35,12 @@ import {
   SYNTHESIS_EVERY_N_MAX,
   SYNTHESIS_EVERY_N_MIN,
 } from '@/lib/app/questionnaire/experiences/types';
+import {
+  DATA_SLOT_KEY_MAX_LENGTH,
+  ROUTING_RULE_OPERATORS,
+  ROUTING_RULE_VALUE_MAX_LENGTH,
+  VALUELESS_OPERATORS,
+} from '@/lib/app/questionnaire/experiences/routing/types';
 
 /** A cuid-ish id. Loose on purpose — the FK/lookup is the real check, this only rejects junk. */
 const idSchema = z.string().min(1).max(64);
@@ -173,6 +179,77 @@ export const reorderExperienceStepsSchema = z.object({
 });
 
 export type ReorderExperienceStepsInput = z.infer<typeof reorderExperienceStepsSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Routing rules (P15.2)                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Create a routing rule.
+ *
+ * `value` is required for every operator except the valueless ones — a `contains` rule with no
+ * operand would match nothing (the evaluator rejects an empty needle rather than matching
+ * everything), so accepting it silently would create a rule that never fires.
+ */
+export const createRoutingRuleSchema = z
+  .object({
+    dataSlotKey: z.string().min(1).max(DATA_SLOT_KEY_MAX_LENGTH),
+    operator: z.enum(ROUTING_RULE_OPERATORS),
+    value: z.string().max(ROUTING_RULE_VALUE_MAX_LENGTH).nullish(),
+    targetStepKey: z.string().min(1).max(EXPERIENCE_STEP_KEY_MAX_LENGTH),
+  })
+  .superRefine((rule, ctx) => {
+    const needsValue = !VALUELESS_OPERATORS.includes(rule.operator);
+    if (
+      needsValue &&
+      (rule.value === null || rule.value === undefined || rule.value.trim() === '')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['value'],
+        message: `The "${rule.operator}" comparison needs a value to compare against`,
+      });
+    }
+    if ((rule.operator === 'gt' || rule.operator === 'lt') && rule.value != null) {
+      if (!Number.isFinite(Number(rule.value))) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value'],
+          message: 'A greater/less-than comparison needs a number',
+        });
+      }
+    }
+  });
+
+export type CreateRoutingRuleInput = z.infer<typeof createRoutingRuleSchema>;
+
+/**
+ * Update a routing rule — the full rule, not a patch.
+ *
+ * Deliberately not `.partial()`: the operator and value are interdependent (changing `exists` to
+ * `gt` requires a numeric value to arrive with it), and a partial update would have to re-read the
+ * row to re-validate the pair. Sending the whole rule keeps the cross-field check honest.
+ */
+export const updateRoutingRuleSchema = createRoutingRuleSchema;
+
+export type UpdateRoutingRuleInput = z.infer<typeof updateRoutingRuleSchema>;
+
+/** Reorder rules — the complete ordered id list, same contract as step reorder. */
+export const reorderRoutingRulesSchema = z.object({
+  ruleIds: z.array(idSchema).min(1),
+});
+
+/**
+ * Dry-run the selector against a real completed session, without side effects.
+ *
+ * Lets an author see what their criteria and instructions actually produce before a respondent
+ * meets them.
+ */
+export const previewRoutingSchema = z.object({
+  sessionId: idSchema,
+});
+
+export type PreviewRoutingInput = z.infer<typeof previewRoutingSchema>;
 
 /** Query filters for the experience list. */
 export const listExperiencesQuerySchema = z.object({

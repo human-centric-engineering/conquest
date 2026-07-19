@@ -99,8 +99,10 @@ model AppExperience {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  demoClient AppDemoClient         @relation(fields: [demoClientId], references: [id], onDelete: Cascade)
-  steps      AppExperienceStep[]
+  demoClient   AppDemoClient              @relation(fields: [demoClientId], references: [id], onDelete: Cascade)
+  steps        AppExperienceStep[]
+  runs         AppExperienceRun[]
+  routingRules AppExperienceRoutingRule[]
 
   @@index([demoClientId])
   @@index([status])
@@ -156,4 +158,141 @@ model AppExperienceStep {
   @@unique([experienceId, key])
   @@index([experienceId])
   @@map("app_experience_step")
+}
+
+/// One respondent's journey through an experience (P15.2) — the run.
+///
+/// A run owns the sequence; each leg is an ordinary `AppQuestionnaireSession`, so the entire turn
+/// orchestrator, answer-slot pipeline, respondent report and analytics apply per leg with no
+/// changes. What the run adds is: which step is current, what context was carried at the handoff,
+/// what the selector decided and why, and the cumulative spend the run-level budget grades against.
+///
+/// `respondentUserId` and `cohortMemberId` are plain Strings with no @relation (UG-1) — identity
+/// pointers, never graph edges.
+model AppExperienceRun {
+  id           String @id @default(cuid())
+  experienceId String
+
+  /// Short human-quotable ref, minted by generateSessionRef(). Doubles as the respondent-facing
+  /// URL segment (`/x/<publicRef>`) so a stitched journey keeps one address across its legs.
+  publicRef String? @unique
+
+  /// EXPERIENCE_RUN_STATUSES (experiences/run/types.ts):
+  /// active | awaiting_handoff | completed | abandoned | aborted.
+  /// Mirrors SESSION_STATUSES' vocabulary deliberately — an admin reading both surfaces should
+  /// not have to learn two words for the same idea. `awaiting_handoff` is the one addition: a leg
+  /// has completed and the selector has not yet resolved.
+  status String @default("active")
+
+  /// Identity pointers. Plain Strings, no @relation (UG-1).
+  respondentUserId String?
+  cohortMemberId   String?
+
+  /// The step the run is currently on. Plain String pointer into AppExperienceStep — deliberately
+  /// not a relation, so deleting a step from a draft experience cannot cascade a run away.
+  currentStepId String?
+
+  /// The FROZEN carry-over payload handed to the current leg (CarryOverContext). Written once at
+  /// handoff and never recomputed: an earlier leg may later be re-scored, and a finished report
+  /// must not shift underneath it.
+  carryOver Json?
+
+  /// The selector's decision at the most recent fork (RoutingDecision) — decision, chosen step,
+  /// confidence, rationale, and which of rule / llm / fallback / budget produced it.
+  routingDecision Json?
+
+  /// Cumulative AI spend across every leg plus the selector, handoff and report calls.
+  /// Denormalised so the handoff gate can grade the run without a multi-table sum on every fork.
+  spentUsd Float @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  experience AppExperience         @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  legs       AppExperienceRunLeg[]
+
+  @@index([experienceId])
+  @@index([status])
+  @@index([respondentUserId])
+  @@map("app_experience_run")
+}
+
+/// One leg of a run — the pairing of a step with the session that fulfilled it.
+///
+/// `sessionId` is a plain String with NO @relation and `@unique`. This is the load-bearing FK
+/// decision of the whole feature: it is an identity↔answer pointer, exactly like
+/// `AppQuestionnaireSession.roundId`. A real relation would make respondent answers reachable by
+/// walking experience config and would let config deletion cascade into respondent data.
+///
+/// `@@unique([runId, ordinal])` is what makes the handoff idempotent. `after()`, a
+/// double-tapped submit and a cron retry can all race `advanceExperienceRun`; rather than a
+/// read-then-write check (which loses the race), the constraint arbitrates and the caller treats
+/// P2002 as "someone else already created this leg" — i.e. success.
+model AppExperienceRunLeg {
+  id    String @id @default(cuid())
+  runId String
+
+  /// The step this leg fulfils. Plain String pointer (UG-1), as on the run.
+  stepId String
+
+  /// The session that ran it. Plain String, no @relation (UG-1). Unique: a session belongs to at
+  /// most one leg, which is also how the submit hook looks up "is this session part of a run?".
+  sessionId String @unique
+
+  /// Position in the journey, 0-based. Paired with runId in the idempotency constraint.
+  ordinal Int
+
+  /// EXPERIENCE_LEG_STATUSES (experiences/run/types.ts): active | completed | abandoned.
+  status String @default("active")
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  run AppExperienceRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, ordinal])
+  @@index([runId])
+  @@index([stepId])
+  @@map("app_experience_run_leg")
+}
+
+/// A deterministic routing rule — evaluated BEFORE the LLM selector, first match wins.
+///
+/// Rules exist because owners will want hard-pinned routing ("if headcount > 500, always the
+/// enterprise questionnaire") and retro-fitting that after the LLM path ships means fighting it.
+/// They also keep the common cases off the critical path: the respondent is waiting at the fork,
+/// and a rule resolves in microseconds where the selector takes seconds.
+///
+/// `dataSlotKey` names a data slot in the CARRY-OVER payload, not a question key — the data-slot
+/// layer is the semantic answer vocabulary and is stable across question rewording.
+model AppExperienceRoutingRule {
+  id           String @id @default(cuid())
+  experienceId String
+
+  /// The carry-over data-slot key this rule tests.
+  dataSlotKey String
+  /// ROUTING_RULE_OPERATORS (experiences/routing/types.ts): equals | contains | gt | lt | exists
+  operator    String
+  /// Comparison operand. Null for `exists`, which tests only for a filled slot.
+  value       String?
+
+  /// The `key` of the step to route to when this rule matches. A plain String rather than a step
+  /// id so a rule survives an author deleting and re-creating a step under the same key; an
+  /// unresolvable key is treated as a non-match and logged, never a crash.
+  targetStepKey String
+
+  /// Evaluation order. First match wins, so ordinal is the rule's precedence.
+  ordinal Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  experience AppExperience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+
+  @@index([experienceId])
+  @@map("app_experience_routing_rule")
 }

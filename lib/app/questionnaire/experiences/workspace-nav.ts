@@ -31,6 +31,10 @@ export interface ExperienceWorkspaceTab extends WorkspaceTab {
 export const EXPERIENCE_WORKSPACE_TABS: readonly ExperienceWorkspaceTab[] = [
   { id: 'overview', label: 'Overview', segment: '', exact: true },
   { id: 'steps', label: 'Steps', segment: 'steps' },
+  // Routing is switcher-only: a facilitated meeting has no fork to configure, so showing an empty
+  // rules editor there would imply a decision that surface never makes.
+  { id: 'routing', label: 'Routing', segment: 'routing', kinds: ['agentic_switcher'] },
+  { id: 'runs', label: 'Runs', segment: 'runs' },
   { id: 'settings', label: 'Settings', segment: 'settings' },
 ];
 

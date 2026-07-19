@@ -711,6 +711,22 @@ export const API = {
       step: (id: string, stepId: string): string => `/api/v1/app/experiences/${id}/steps/${stepId}`,
       /** Reorder steps — full ordered id list (PATCH). */
       reorderSteps: (id: string): string => `/api/v1/app/experiences/${id}/steps/reorder`,
+      /** Deterministic routing rules: list (GET) + create (POST). */
+      routingRules: (id: string): string => `/api/v1/app/experiences/${id}/routing-rules`,
+      /** Replace (PATCH — whole rule) / delete (DELETE) one rule. */
+      routingRule: (id: string, ruleId: string): string =>
+        `/api/v1/app/experiences/${id}/routing-rules/${ruleId}`,
+      /** Dry-run the selector against a completed session, no side effects (POST). */
+      previewRouting: (id: string): string => `/api/v1/app/experiences/${id}/preview-routing`,
+      /** Runs: admin list (GET) + START a run (POST — respondent-facing, not admin-gated). */
+      runs: (id: string): string => `/api/v1/app/experiences/${id}/runs`,
+      /** One run with its legs + routing rationale (GET — admin). */
+      run: (runId: string): string => `/api/v1/app/experiences/runs/${runId}`,
+      /** THE POLL ENDPOINT — the respondent's client asks "what next?" after a submit (GET). */
+      runStatus: (runId: string, sessionId?: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/status${sessionId ? `?sessionId=${sessionId}` : ''}`,
+      /** Manually push a stuck run forward (POST — admin only; has real side effects). */
+      advanceRun: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/advance`,
     },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {
