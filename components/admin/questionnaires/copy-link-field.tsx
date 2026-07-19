@@ -7,10 +7,17 @@
  *
  * Read-only by design: it displays a URL the caller already holds — it never fetches
  * or mints anything.
+ *
+ * With `showQr`, it also offers a scannable QR for the same URL behind a toggle. The
+ * QR is collapsed by default because most admins are pasting the link into an email,
+ * not holding a phone up to the screen — and an always-on 176px block would push the
+ * surrounding form around for the majority who don't need it.
  */
 
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, QrCode } from 'lucide-react';
+import { useState } from 'react';
 
+import { LinkQrCode } from '@/components/app/qr/link-qr-code';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,12 +30,21 @@ export interface CopyLinkFieldProps {
   label?: string;
   /** Optional muted helper line rendered below the input. */
   note?: string;
+  /** Offer a "Show QR code" toggle revealing a scannable, downloadable code for `url`. */
+  showQr?: boolean;
+  /**
+   * Names the downloaded QR file and its accessible label. Defaults to `label` — pass this
+   * when the surrounding UI (a dialog title, say) already names the link and rendering a
+   * visible `label` would just repeat it.
+   */
+  qrLabel?: string;
 }
 
-export function CopyLinkField({ url, label, note }: CopyLinkFieldProps) {
+export function CopyLinkField({ url, label, note, showQr = false, qrLabel }: CopyLinkFieldProps) {
   // Clipboard can be denied (permissions / insecure context); the hook swallows that and the
   // input is selectable as a manual fallback, so a failed copy needs no error surface.
   const { copied, copy } = useCopyToClipboard();
+  const [qrOpen, setQrOpen] = useState(false);
 
   return (
     <div className="space-y-1.5">
@@ -55,8 +71,22 @@ export function CopyLinkField({ url, label, note }: CopyLinkFieldProps) {
           )}
           {copied ? 'Copied' : 'Copy'}
         </Button>
+        {showQr && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setQrOpen((open) => !open)}
+            aria-expanded={qrOpen}
+            className="shrink-0"
+          >
+            <QrCode className="mr-1.5 h-3 w-3" />
+            {qrOpen ? 'Hide QR' : 'QR code'}
+          </Button>
+        )}
       </div>
       {note && <p className="text-muted-foreground text-xs">{note}</p>}
+      {showQr && qrOpen && <LinkQrCode url={url} label={qrLabel ?? label} className="pt-2" />}
     </div>
   );
 }
