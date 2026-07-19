@@ -36,9 +36,8 @@ export interface LaunchReadinessOptions {
 
 /**
  * Resolve a version's launch readiness — the same criteria the launch gate enforces (goal,
- * audience, ≥1 section, ≥1 question, a saved config, generated data slots when that feature is on,
- * and — for an `adaptive` version with the sub-flag on — embedded question slots). `ready` is true
- * when every check passes.
+ * audience, ≥1 section, ≥1 question, a saved config, generated data slots, and — for an `adaptive`
+ * version — embedded question slots). `ready` is true when every check passes.
  */
 export async function loadLaunchReadiness(
   versionId: string,

@@ -4,14 +4,12 @@
  * GET /api/v1/app/questionnaires/:id/versions/:vid/cohort-report
  *   Admin-only. Returns the version-wide report read view: the report header (status, publish state,
  *   cost, revision count), the working-head revision's content, and the dataset the charts render
- *   against. `exists: false` when nothing has been generated yet. Read-only — no paid work; gated by
- *   the cohort-report flag.
+ *   against. `exists: false` when nothing has been generated yet. Read-only — no paid work.
  *
  * PATCH /api/v1/app/questionnaires/:id/versions/:vid/cohort-report   body: { content }
- *   Admin-only. Appends the edited content as a new `admin` revision (the working head). Gated by the
- *   cohort-report flag.
+ *   Admin-only. Appends the edited content as a new `admin` revision (the working head).
  *
- * Pipeline: cohort-report flag-gate (404) → withAdminAuth → 404 unknown version → build view / edit.
+ * Pipeline: withAdminAuth → 404 unknown version → build view / edit.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

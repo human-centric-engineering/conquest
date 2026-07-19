@@ -8,7 +8,7 @@
  * POST /api/v1/app/rounds
  *   Create a round for a cohort. `name` defaults to the cohort name + window when omitted.
  *
- * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`. Mutations are audited.
+ * Both: `withAdminAuth`. Mutations are audited.
  */
 
 import { z } from 'zod';

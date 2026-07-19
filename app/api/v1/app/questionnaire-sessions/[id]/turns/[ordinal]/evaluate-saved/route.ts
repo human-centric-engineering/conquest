@@ -2,7 +2,7 @@
  * Re-evaluate a SAVED turn from its persisted inspector traces.
  *
  * POST /api/v1/app/questionnaire-sessions/:id/turns/:ordinal/evaluate-saved
- *   Admin-only, turn-evaluation-flag-gated, per-admin rate-limited (the same paid reasoning call as
+ *   Admin-only, per-admin rate-limited (the same paid reasoning call as
  *   the live evaluator). Reads the turn's saved inspector dump and runs the evaluator over it, then
  *   persists the verdict (returned with its `evaluationId`). Unlike the live `evaluate-turn` route
  *   this is NOT preview-gated — it's how a real chat, found by its `publicRef`, gets judged.

@@ -8,8 +8,8 @@
  *   OFF for the preview (fast, cheap, deterministic) — the returned report is a sample, never a real
  *   respondent's. Persists nothing.
  *
- *   Gate order: master flag (404 before auth) → withAdminAuth → per-admin preview sub-cap (two LLM
- *   calls per preview) → validate → load version structure → synthesise → generate. Only the AI modes
+ *   Gate order: withAdminAuth → per-admin preview sub-cap (two LLM calls per preview) → validate →
+ *   load version structure → synthesise → generate. Only the AI modes
  *   (`raw_plus_insights`, `narrative`) generate a report; a `raw` config is rejected (its output is just
  *   the respondent's answers, previewed via the respondent walkthrough).
  */

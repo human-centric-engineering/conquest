@@ -19,10 +19,9 @@
  *   validated here (external data → Zod, never `as`). The questionnaire objectives (goal, audience,
  *   strategy, tone) are loaded SERVER-SIDE from the session's version so they can't be spoofed.
  *
- *   Gated by the master flag AND the turn-evaluation sub-flag (the whole route is paid LLM work):
- *   404 when either is off. It additionally requires the session to be a *preview* — the same gate
- *   the inspector that produces the dump enforces — so it can only run where the inspector runs.
- *   Takes a per-admin LLM sub-cap. A failed evaluation returns a clean error envelope, never a 500
+ *   Requires the session to be a *preview* — the same gate the inspector that produces the dump
+ *   enforces — so it can only run where the inspector runs. Takes a per-admin LLM sub-cap (the
+ *   whole route is paid LLM work). A failed evaluation returns a clean error envelope, never a 500
  *   that breaks the drawer.
  */
 

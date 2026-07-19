@@ -8,8 +8,8 @@
  *   Nothing is persisted — the advisor is ephemeral and re-runnable. ADMIN-TRIGGERED ONLY: there is
  *   no GET and no auto-run; the client POSTs this when the admin presses "Run advisor".
  *
- * Auth: admin only. Flag: 404 when the master OR advisor sub-flag is off. Rate limit: per-admin
- * advisor sub-cap (two reasoning calls per run). Mirrors the compose `stream` route's `drive()`.
+ * Auth: admin only. Rate limit: per-admin advisor sub-cap (two reasoning calls per run).
+ * Mirrors the compose `stream` route's `drive()`.
  */
 
 import type { NextRequest } from 'next/server';

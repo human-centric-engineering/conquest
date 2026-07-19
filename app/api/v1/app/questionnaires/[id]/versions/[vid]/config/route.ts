@@ -13,7 +13,7 @@
  *
  *   Forks a new draft first if the target is launched (the editable id comes back
  *   in `meta`); the fork preamble copies any existing config into the draft, and
- *   this upsert then writes to the draft's row. 404 when the feature flag is off.
+ *   this upsert then writes to the draft's row.
  */
 
 import { successResponse } from '@/lib/api/responses';

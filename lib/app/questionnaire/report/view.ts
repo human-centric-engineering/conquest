@@ -1,8 +1,8 @@
 /**
  * Respondent Report — the respondent-facing view (completion screen + report endpoint).
  *
- * Resolves what a respondent should see after completing: whether a report is enabled (config AND
- * platform flag), its mode + delivery, and — for the AI modes (`raw_plus_insights`, `narrative`) — the
+ * Resolves what a respondent should see after completing: whether a report is enabled (per-version
+ * config), its mode + delivery, and — for the AI modes (`raw_plus_insights`, `narrative`) — the
  * generation status and content (from `AppRespondentReport`). Raw mode and disabled reports carry
  * `insights: null`. Pure data assembly behind a mockable seam; the endpoint adds access control.
  */
@@ -132,8 +132,8 @@ function asAudience(value: unknown): AudienceShape | null {
 
 /**
  * Build the respondent-facing report view for a session. Returns `null` when the session doesn't
- * exist. `enabled` reflects both the per-version config AND the platform flag, so a respondent never
- * waits on a report the platform has turned off.
+ * exist. `enabled` reflects the per-version config, so a respondent never waits on a report the
+ * questionnaire has turned off.
  */
 export async function buildRespondentReportClientView(
   sessionId: string

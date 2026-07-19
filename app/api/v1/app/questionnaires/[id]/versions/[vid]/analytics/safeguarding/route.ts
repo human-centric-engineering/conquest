@@ -5,8 +5,8 @@
  *   Admin-only. Counts non-preview sessions in the window that flagged a sensitive disclosure
  *   (and how many were serious). Counts only — no summaries, no session identities — and k-anon
  *   suppressed below the threshold. Query params: `from`/`to` (YYYY-MM-DD, default last 30 days).
- *   Read-only — master-flag-gated and version-scoped; no sub-flag (the count is safe to show even
- *   when sensitivity awareness is off — it's simply zero).
+ *   Read-only — version-scoped (the count is safe to show even when sensitivity awareness is
+ *   off — it's simply zero).
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

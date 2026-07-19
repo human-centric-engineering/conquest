@@ -11,11 +11,9 @@
  * completion-offer prose is composed via the F4.5 capability and emitted as chunked
  * `content` here; PR5 upgrades it to true token streaming.
  *
- * Gate order: live-sessions flag (404 before auth) → load session → access (authenticated
- * owner OR a valid anonymous session token) → status must be `active` → per-turn sub-cap →
- * body validation. Per-step sub-flag gating: a disabled sub-feature is skipped gracefully
- * (the turn still runs). Capability failures are fail-soft (a `warning` frame, never a 5xx
- * once streaming).
+ * Gate order: load session → access (authenticated owner OR a valid anonymous session token)
+ * → status must be `active` → per-turn sub-cap → body validation. Capability failures are
+ * fail-soft (a `warning` frame, never a 5xx once streaming).
  */
 
 import { z } from 'zod';
@@ -204,7 +202,7 @@ async function handleMessage(
     // auto-pauses the session (the `paused` event + a `cost_cap_reached` marker); the status
     // gate above then rejects every later turn. Soft (≥90%) lets the turn run but flags
     // `costPressure` so the core offers completion early + the offer prose nudges a wrap-up,
-    // and writes the soft marker once. Gated by its own sub-flag and a configured budget.
+    // and writes the soft marker once. Runs only when a budget is configured.
     const capUsd = loaded.base.config.costBudgetUsd;
     let costPressure: 'soft' | undefined;
     if (capUsd !== null) {
@@ -334,8 +332,8 @@ async function handleMessage(
       }
     }
 
-    // Adaptive data-slot selection (50+-slot scale): when its sub-flag is on AND we're in data-slot
-    // mode, the orchestrator ranks unfilled slots by embedding similarity + an LLM pick. Like the
+    // Adaptive data-slot selection (50+-slot scale): when we're in data-slot mode, the
+    // orchestrator ranks unfilled slots by embedding similarity + an LLM pick. Like the
     // question-slot path, ensure the data slots are embedded the first time such a session runs — a
     // cheap no-op once embedded. Fail-soft: a missing embedder degrades to the deterministic
     // topic-local pick, so a failure here must never break a turn.
@@ -360,7 +358,7 @@ async function handleMessage(
     // when extraction actually runs (a kickoff forces it off). The pre-filter needs BOTH question and
     // data-slot embeddings regardless of selection strategy — ensure them here (cheap no-op once
     // embedded; fail-soft, since the pre-filter degrades to the full set without embeddings).
-    // Per-questionnaire Settings toggle (not a platform flag) — recommended for large surveys.
+    // Per-questionnaire Settings toggle — recommended for large surveys.
     const prefilterActive = loaded.base.config.extractionPrefilter && !body.kickoff;
     const activeDataSlotKey = loaded.base.activeDataSlotKey ?? null;
     const activeTheme = activeDataSlotKey
@@ -384,9 +382,9 @@ async function handleMessage(
       }
     }
 
-    // Live "watch it think" reasoning stream (demo feature): the platform flag AND the per-version
-    // config toggle. `persist` additionally requires the version opt-in — when off the trace streams
-    // live but isn't saved, so resumed turns show nothing. Both inert when the flag is off.
+    // Live "watch it think" reasoning stream (demo feature): the per-version config toggle.
+    // `persist` additionally requires the version opt-in — when off the trace streams live but
+    // isn't saved, so resumed turns show nothing.
     const reasoningStreamOn = loaded.base.config.reasoningStreamEnabled;
     const reasoningPersist = reasoningStreamOn && loaded.base.config.reasoningStreamPersist;
 
@@ -420,8 +418,8 @@ async function handleMessage(
       toneConfig.persona.enabled || TONE_DIMENSION_KEYS.some((key) => toneConfig[key].enabled);
     const tonePhraserInput = toneActive ? { tone: toneConfig } : {};
 
-    // Interviewer strategy (questioning approach): per-questionnaire, gated only on its own `enabled`
-    // (no platform flag — off by default). When on, the phraser receives the settings plus the live
+    // Interviewer strategy (questioning approach): per-questionnaire, gated only on its own
+    // `enabled` (off by default). When on, the phraser receives the settings plus the live
     // progress signals the funnel arc reads (coverage so far + whether the respondent's been terse).
     const strategyConfig = loaded.base.config.interviewerStrategy;
     const strategyActive = strategyConfig.enabled;

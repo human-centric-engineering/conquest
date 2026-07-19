@@ -14,8 +14,8 @@
  *   then writes the refined graph to the fork. The success `meta` carries the fork
  *   outcome so the editor can notice + redirect.
  *
- * Auth: admin only. Flag: 404 when the master OR generative-authoring sub-flag is
- * off. Rate limit: per-admin compose sub-cap (shared with the compose routes).
+ * Auth: admin only. Rate limit: per-admin compose sub-cap (shared with the compose
+ * routes).
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

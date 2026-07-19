@@ -7,8 +7,8 @@
  * (`lib/app/questionnaire/intro/resolve.ts`): server-only (reads Prisma); the `persona/settings.ts`
  * narrowers are pure and shared with the read/write paths.
  *
- * `enabled` here means "show the picker": it does NOT consult the platform flag — the caller (route /
- * page) enables the picker only when built-in persona mode is on, exactly as the intro surface does. It requires
+ * `enabled` here means "show the picker": the caller (route / page) enables it only when built-in
+ * persona mode is on, exactly as the intro surface does. It requires
  * built-in persona mode on AND respondent switching allowed AND at least two personas — when
  * switching is off the pinned persona still governs the interviewer, there's just no picker.
  */

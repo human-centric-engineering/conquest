@@ -90,7 +90,7 @@ interface AnonymousSessionBootProps {
   presentationMode?: PresentationMode;
   /**
    * Live "watch it think" reasoning placement (demo feature) — `overlay` | `inline`, or
-   * `undefined`/null when off. Resolved server-side (platform flag AND version toggle) and
+   * `undefined`/null when off. Resolved server-side from the version toggle and
    * forwarded to the workspace.
    */
   reasoningPlacement?: ReasoningPlacement | null;
@@ -248,7 +248,7 @@ const introResponseSchema = z.object({
 /**
  * Fetch the session's resolved intro (token-authed). Fails soft to `null` on any error — a splash
  * read must never block the surface from opening; the worst case is no intro screen, exactly the
- * pre-feature behaviour. Only called for a fresh session when the platform flag is on.
+ * pre-feature behaviour. Only called for a fresh session.
  */
 async function fetchIntro(
   sessionId: string,

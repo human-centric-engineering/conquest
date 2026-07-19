@@ -7,7 +7,7 @@
  *   `{ background }`; it does NOT persist — the admin reviews and saves it via the config / cohort
  *   PATCH. Reuses the seeded composer agent (the shared authoring binding).
  *
- * Pipeline: intro flag-gate → withAdminAuth → per-admin sub-cap → JSON body → composer-agent load →
+ * Pipeline: withAdminAuth → per-admin sub-cap → JSON body → composer-agent load →
  *   capability dispatch → map errors → 200.
  */
 

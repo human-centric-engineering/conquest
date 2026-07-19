@@ -3,9 +3,9 @@
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/evaluations/:runId
  *   Admin-only. Returns one run with its findings (ordered by dimension, then ordinal),
- *   scoped to the version — a run from another version 404s. Read-only: master-flag-gated
- *   and version-scoped via `loadScopedVersion`, no sub-flag 404 (persisted history stays
- *   readable, the same posture as the runs list and the `changes` review).
+ *   scoped to the version — a run from another version 404s. Read-only and version-scoped
+ *   via `loadScopedVersion` (persisted history stays readable, the same posture as the
+ *   runs list and the `changes` review).
  */
 
 import { successResponse } from '@/lib/api/responses';

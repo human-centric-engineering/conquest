@@ -859,7 +859,7 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
  * `respondent` = the per-respondent summary delivered after one session (P10, shipped); `cohort` =
  * the cross-respondent analysis/charting/narrative an admin generates over a whole round's
  * submissions (P14). Scope (one session vs many) is the axis where confusion happens, so the words
- * carry it. Namespaces config rows, routes (`…/cohort-report`), and feature flags by kind.
+ * carry it. Namespaces config rows and routes (`…/cohort-report`) by kind.
  */
 export const REPORT_KINDS = ['respondent', 'cohort'] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];

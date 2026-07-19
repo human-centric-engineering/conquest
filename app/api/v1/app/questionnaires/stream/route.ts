@@ -102,7 +102,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
   }
 
   async function* drive(): AsyncGenerator<ExtractionStreamEvent> {
-    // The orchestrator runs extract → (verify → repair, when the sub-flag is on) → coherence,
+    // The orchestrator runs extract → verify → repair → coherence,
     // yielding real phase events (extracting / verifying / repairing) as it goes. Drain it,
     // re-yielding each event over the stream, then take its returned PipelineResult.
     const orchestrator = orchestrateExtraction(upload, { adminId, log });

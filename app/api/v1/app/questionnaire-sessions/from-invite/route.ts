@@ -7,10 +7,8 @@
  * A per-invitee token boots a NO-LOGIN session bound to the invitation (the token IS the
  * credential). Mirrors the anonymous route: null `respondentUserId`, a signed `accessToken` the
  * caller presents on each turn (`X-Session-Token`), so the existing anonymous turn path drives it
- * unchanged. Deliberately unauthenticated; rate-limited on client IP and gated by the live-sessions
- * flag AND the frictionless-invites sub-flag (404 when off → the link falls back to the
- * account-registration accept flow). (Security review: an unauthenticated mutation surface keyed on
- * a 32-byte token.)
+ * unchanged. Deliberately unauthenticated; rate-limited on client IP. (Security review: an
+ * unauthenticated mutation surface keyed on a 32-byte token.)
  */
 
 import { z } from 'zod';

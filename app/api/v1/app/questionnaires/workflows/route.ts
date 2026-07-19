@@ -1,11 +1,11 @@
 /**
  * GET /api/v1/app/questionnaires/workflows
  *
- * Admin-only, flag-gated. Returns the read-only "Behind the Scenes" workflow
+ * Admin-only. Returns the read-only "Behind the Scenes" workflow
  * diagrams as lightweight summaries for the picker. When a `?versionId=` lens is
  * supplied, each summary is annotated with its applicability to that version
  * (applies / inactive / unavailable). Read-only: computes from the in-code
- * registry + resolved flags/config; persists nothing.
+ * registry + resolved config; persists nothing.
  */
 
 import type { NextRequest } from 'next/server';

@@ -2,7 +2,7 @@
  * Look a chat up by its support reference.
  *
  * GET /api/v1/app/turn-evaluations/by-ref/:ref
- *   Admin-only, turn-evaluation-flag-gated. Resolves a respondent-quoted reference (forgivingly
+ *   Admin-only. Resolves a respondent-quoted reference (forgivingly
  *   normalised) to its session and that session's turns — each annotated with whether a saved
  *   inspector dump is present (so it can be re-evaluated) and how many verdicts it already has.
  *   404 when no session matches the reference. Read-only; the read model lives in

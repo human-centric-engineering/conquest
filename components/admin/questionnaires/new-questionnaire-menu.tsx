@@ -13,8 +13,8 @@
  *
  * The "Describe your goal" item only renders when generative authoring is enabled
  * (the parent passes `generativeAuthoringEnabled`); with it off, the menu still
- * works as an upload-only entry point so the page is unchanged for forks that
- * leave the sub-flag dark.
+ * works as an upload-only entry point, so a fork can suppress the surface without
+ * touching this component.
  */
 
 import { useState } from 'react';
@@ -35,7 +35,7 @@ import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients'
 
 export interface NewQuestionnaireMenuProps {
   demoClientOptions?: AttributedDemoClient[];
-  /** When false, the "Describe your goal" item is hidden (sub-flag off). */
+  /** When false, the "Describe your goal" item is hidden. Callers pass `true` today. */
   generativeAuthoringEnabled?: boolean;
 }
 

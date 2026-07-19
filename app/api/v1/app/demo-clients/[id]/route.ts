@@ -6,7 +6,7 @@
  * DELETE /api/v1/app/demo-clients/:id   — delete, REFUSED with 409 while any
  *        questionnaire is still attributed (the admin must detach/reassign first).
  *
- * All: flag-gate first (404 when off), then `withAdminAuth`, then 404 on unknown id.
+ * All: `withAdminAuth`, then 404 on unknown id.
  * A real client engagement strips this surface — see forking.md § "Replacing demo tenancy".
  */
 

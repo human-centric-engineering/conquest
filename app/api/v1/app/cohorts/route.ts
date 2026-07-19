@@ -9,7 +9,7 @@
  * POST /api/v1/app/cohorts
  *   Create a cohort under a demo client.
  *
- * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`. Mutations are audited.
+ * Both: `withAdminAuth`. Mutations are audited.
  */
 
 import { z } from 'zod';

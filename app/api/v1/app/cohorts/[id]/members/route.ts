@@ -5,7 +5,7 @@
  * POST /api/v1/app/cohorts/:id/members   — add one person (409 when their email is already on
  *      this cohort's roster — `@@unique([cohortId, email])`).
  *
- * Both: cohorts flag-gate first (404 when off), then `withAdminAuth`. Adds are audited.
+ * Both: `withAdminAuth`. Adds are audited.
  */
 
 import { Prisma } from '@prisma/client';

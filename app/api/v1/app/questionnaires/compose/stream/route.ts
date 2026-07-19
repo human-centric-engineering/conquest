@@ -11,8 +11,8 @@
  *   pattern, except the questionnaire is created at the terminal (there is no
  *   pre-existing version, unlike data-slot generation).
  *
- * Auth: admin only. Flag: 404 when the master OR generative-authoring sub-flag is
- * off. Rate limit: per-admin compose sub-cap (shared with the non-streaming route).
+ * Auth: admin only. Rate limit: per-admin compose sub-cap (shared with the
+ * non-streaming route).
  */
 
 import type { NextRequest } from 'next/server';

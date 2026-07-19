@@ -11,8 +11,7 @@
  *   (the suggestion was authored by hand in the editor — stamp the finding's terminal state +
  *   the version it landed in). This is the review-queue write; it never mutates the questionnaire
  *   structure (that's the explicit `…/apply` POST — `mark_applied` only records that the editor
- *   already did the authoring). Sub-flag gated — a decision is part of the paid design-evaluation
- *   sub-feature, so it 404s when the sub-flag is off (the reads stay master-flag only).
+ *   already did the authoring).
  *
  *   A finding already `applied` is terminal → 409.
  */

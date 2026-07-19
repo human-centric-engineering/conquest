@@ -6,7 +6,7 @@
  *   the respondent's on-screen report + downloadable PDF now render this re-run. A no-op 409 when the
  *   revision isn't `ready` (nothing to promote). Cheap (a DB copy) — inherits the section rate cap.
  *
- *   Gate order: master flag → respondent-report flag (404 before auth) → withAdminAuth → promote.
+ *   Gate order: withAdminAuth → promote.
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

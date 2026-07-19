@@ -45,7 +45,7 @@ export interface RoundAccessSubject {
    * has no subgroup phase on this round — then the round window applies as before. When present, the
    * member's effective window is {@link resolveEffectiveWindow}(round, phase): the phase open always
    * applies, and the phase close applies only under `hard` end mode (`relaxed` defers to the round
-   * close). Round phasing is feature-flagged — callers pass `null` when the flag is off.
+   * close).
    */
   phase?: PhaseWindow | null;
   /** Whether the session's questionnaire is actually bundled in this round. */

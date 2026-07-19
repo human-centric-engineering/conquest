@@ -7,7 +7,7 @@
  *   counterpart of `GET …/versions/:vid/definition`. After commit it regenerates question +
  *   data-slot embeddings (best-effort; they also self-heal lazily at runtime).
  *
- * Per-admin `ingestLimiter` sub-cap — each import writes a whole graph. Master-flag-gated.
+ * Per-admin `ingestLimiter` sub-cap — each import writes a whole graph.
  */
 
 import type { NextRequest } from 'next/server';

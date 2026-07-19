@@ -22,8 +22,7 @@
  *   provenance, and appended `refinementHistory` back through `_lib/answer-slots.ts`.
  *   This exercises the real write path before the streaming engine (F4.6) exists.
  *
- *   Gated by the master flag AND the answer-refinement sub-flag (it spends an LLM
- *   call per pass): 404 when either is off, or when the version is absent. The call
+ *   404 when the version is absent. It spends an LLM call per pass, so the call
  *   takes a per-admin LLM sub-cap. Refinement failure is fail-soft — empty decisions
  *   with a `diagnostic`, never a 5xx (the seeded answers may already be persisted;
  *   the upsert is idempotent).

@@ -6,8 +6,7 @@
  *
  *   Admin-only. Executes the finding's structured edit (`editedOverride ?? proposedEdit`) on the
  *   draft version through the fork-if-launched authoring seam, then marks the finding `applied`.
- *   Sub-flag gated (a structural mutation in the paid sub-feature) and takes the apply sub-cap
- *   (apply may fork a launched version — a multi-row deep copy).
+ *   Takes the apply sub-cap (apply may fork a launched version — a multi-row deep copy).
  *
  *   An edit that can't be applied returns **409** with a reason the UI acts on:
  *   `stale` (structure drifted — re-run), `target_gone` (the target was deleted),

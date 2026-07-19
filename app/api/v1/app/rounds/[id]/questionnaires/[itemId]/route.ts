@@ -4,7 +4,7 @@
  * DELETE /api/v1/app/rounds/:id/questionnaires/:itemId
  *   Removes the round-item (scoped to the round in the path → 404 otherwise). Audited.
  *
- * Cohorts flag-gate first (404 when off), then `withAdminAuth`.
+ * `withAdminAuth`.
  */
 
 import { successResponse } from '@/lib/api/responses';

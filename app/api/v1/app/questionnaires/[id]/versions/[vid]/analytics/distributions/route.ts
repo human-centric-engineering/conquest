@@ -5,8 +5,7 @@
  *   Admin-only. Aggregates the answers captured across a version's non-preview
  *   sessions into a per-question, type-appropriate distribution. Query params:
  *   `from`/`to` (YYYY-MM-DD, default last 30 days), `tagIds` (comma-separated,
- *   restricts to tagged questions). Read-only — master-flag-gated and
- *   version-scoped; no sub-flag (no paid work).
+ *   restricts to tagged questions). Read-only — version-scoped (no paid work).
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

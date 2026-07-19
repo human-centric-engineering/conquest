@@ -13,7 +13,7 @@
  *   send failure keeps the row at `pending` (resend later) — it does not fail the
  *   request. Returns a per-recipient result array.
  *
- * Both: flag-gate first (404 when off), then `withAdminAuth`. The POST adds the
+ * Both: `withAdminAuth`. The POST adds the
  * `inviteLimiter` sub-cap (email-bombing guard) on top of the section limiter.
  */
 

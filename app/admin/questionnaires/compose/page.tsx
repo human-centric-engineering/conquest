@@ -13,10 +13,8 @@ export const metadata: Metadata = {
 /**
  * Admin — Compose Studio (generative authoring).
  *
- * Thin server shell: gates on BOTH the master questionnaire flag and the
- * generative-authoring sub-flag (404 when either is off — the surface is dark and
- * the API would 404 too), then hands off to the client `<ComposeStudio>`, which
- * owns the brief → stream → refine flow.
+ * Thin server shell: hands off to the client `<ComposeStudio>`, which owns the
+ * brief → stream → refine flow.
  */
 export default function ComposeQuestionnairePage() {
   return (

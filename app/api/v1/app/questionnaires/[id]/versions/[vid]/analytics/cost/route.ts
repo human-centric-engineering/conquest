@@ -5,7 +5,7 @@
  *   Admin-only. Aggregates the version's `AiCostLog` spend over the window: total,
  *   runtime vs design-time split, per-capability breakdown, daily trend, and top
  *   sessions by spend. Query params: `from`/`to` (YYYY-MM-DD, default last 30 days).
- *   Read-only — master-flag-gated and version-scoped; no sub-flag.
+ *   Read-only — version-scoped.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

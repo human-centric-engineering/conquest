@@ -94,8 +94,8 @@ export async function resolvePresentationModeForVersion(
 
 /**
  * Resolve `inlineCorrectionEnabled` (Variant B) for a launched version (no-login / preview
- * respondent surface). Config is 1:1 and lazy — an absent row defaults to ON (respondent-facing UX,
- * no platform flag). The authenticated surface reads it off its session-ownership query instead.
+ * respondent surface). Config is 1:1 and lazy — an absent row defaults to ON. The authenticated
+ * surface reads it off its session-ownership query instead.
  */
 export async function resolveInlineCorrectionForVersion(versionId: string): Promise<boolean> {
   const version = await prisma.appQuestionnaireVersion.findUnique({

@@ -25,9 +25,8 @@
  *   `accept` while the gate is not an offer (e.g. a required question is open) does
  *   NOT submit. `hold` always continues.
  *
- *   Gated by the master flag only. The sweep takes a per-admin sub-cap and is
- *   fail-soft (a failed sweep is treated as clean so a wrap-up never 5xxs). The sweep
- *   runs only when the F4.3 contradiction sub-flag is also on.
+ *   The sweep takes a per-admin sub-cap and is fail-soft (a failed sweep is treated
+ *   as clean so a wrap-up never 5xxs).
  */
 
 import { z } from 'zod';
@@ -128,7 +127,7 @@ const handleComplete = withAdminAuth<{ id: string; vid: string }>(
     }
 
     // Run the completion-sweep only on an eligible accept. The decision to run is pure
-    // (shouldRunDetection); execution is gated by the F4.3 sub-flag and is fail-soft.
+    // (shouldRunDetection) and execution is fail-soft.
     let sweep: CompletionSweepResult = { run: false, contradictionCount: 0 };
     let diagnostic: string | undefined;
     let findings: DetectContradictionsData['findings'] = [];

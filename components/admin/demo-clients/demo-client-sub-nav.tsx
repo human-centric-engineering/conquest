@@ -15,7 +15,7 @@ import { demoClientTabHref, demoClientTabs } from '@/lib/app/questionnaire/demo-
 
 interface DemoClientSubNavProps {
   clientId: string;
-  /** Whether the Cohorts & Rounds tabs are shown (the `APP_QUESTIONNAIRES_COHORTS` flag). */
+  /** Whether the Cohorts & Rounds tabs are shown. Callers pass `true` today. */
   cohortsEnabled?: boolean;
 }
 

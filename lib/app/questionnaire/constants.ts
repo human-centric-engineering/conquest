@@ -604,8 +604,7 @@ export const EVALUATE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinitio
 // ---------------------------------------------------------------------------
 // Ingest verify + repair — the extraction critic + scales/matrix repair specialist
 // that run between extract and persist on the streaming ingest surface. Both are
-// dispatched by the orchestrator (`_lib/orchestrate-extraction.ts`) behind the
-// APP_QUESTIONNAIRES_INGEST_VERIFY_REPAIR sub-flag; both persist nothing.
+// dispatched by the orchestrator (`_lib/orchestrate-extraction.ts`); both persist nothing.
 // ---------------------------------------------------------------------------
 
 /** Slug of the extraction-verifier capability — the critic that flags mis-typed / mis-scaled questions. */

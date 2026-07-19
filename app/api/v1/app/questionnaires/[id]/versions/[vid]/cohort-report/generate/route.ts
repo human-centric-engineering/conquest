@@ -5,10 +5,9 @@
  *   Admin-only. Builds the version-wide dataset (every round + open-ended session for the version),
  *   runs the seeded cohort-report agent over it, and appends a new AI revision (the working head) —
  *   then returns the refreshed read view. Paid LLM work, so it carries a per-admin generate sub-cap on
- *   top of the section limiter. Gated by the cohort-report flag AND the per-version
- *   `config.cohortReport.enabled` toggle.
+ *   top of the section limiter. Gated by the per-version `config.cohortReport.enabled` toggle.
  *
- * Pipeline: cohort-report flag-gate (404) → withAdminAuth → 404 unknown version → 403 when the
+ * Pipeline: withAdminAuth → 404 unknown version → 403 when the
  *   version's cohort-report config is disabled → rate-limit → generate + persist revision → audit →
  *   return view (failed report row + 502 on generation error).
  */
@@ -47,7 +46,7 @@ const handleGenerate = withAdminAuth<Params>(async (request, session, { params }
   const resolved = await loadVersionReportScope(id, vid);
   if (!resolved) throw new NotFoundError('Questionnaire version not found');
 
-  // Per-version opt-in gate (the second gate the cohort-report flag ANDs).
+  // Per-version opt-in gate.
   if (!(await isVersionReportEnabledForVersion(vid))) {
     return errorResponse('Version-wide report is not enabled for this questionnaire version', {
       code: 'COHORT_REPORT_DISABLED',

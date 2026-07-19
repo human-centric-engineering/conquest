@@ -11,7 +11,7 @@
  *
  * Fail-soft, always: no last message, <2 candidates, un-embedded slots, an LLM/budget error, or an
  * off-pool pick all return `null`, and the orchestrator falls back to the deterministic pick. The
- * sub-flag gate is enforced upstream (the route only wires this invoker when the feature is on).
+ * gate is enforced upstream (the route only wires this invoker when the feature is active).
  */
 
 import { embedText } from '@/lib/orchestration/knowledge/embedder';

@@ -7,8 +7,8 @@
  *   (full field text the admin applies wholesale). Stateless — the client holds the transcript; this
  *   route persists nothing (the admin saves config through the normal config PATCH).
  *
- *   Gate order: master flag (404 before auth) → withAdminAuth → per-admin assist sub-cap → validate →
- *   craft. The `vid` is accepted for symmetry/routing but the turn is stateless, so it isn't loaded.
+ *   Gate order: withAdminAuth → per-admin assist sub-cap → validate → craft.
+ *   The `vid` is accepted for symmetry/routing but the turn is stateless, so it isn't loaded.
  */
 
 import { z } from 'zod';

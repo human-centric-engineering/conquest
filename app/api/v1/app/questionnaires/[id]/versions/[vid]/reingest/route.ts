@@ -9,7 +9,7 @@
  *   assignments on the draft — the UI confirms before calling.
  *
  * Pipeline (order is load-bearing):
- *   flag-gate → withAdminAuth → per-admin sub-cap → scope-404 → draft-only 409 →
+ *   withAdminAuth → per-admin sub-cap → scope-404 → draft-only 409 →
  *   guard upload → version-scoped SHA-256 dedup short-circuit → parse + extract →
  *   transactional replace → admin audit → 200.
  *

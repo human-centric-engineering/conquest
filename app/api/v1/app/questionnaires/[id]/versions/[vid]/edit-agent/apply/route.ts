@@ -16,7 +16,7 @@
  *   The precise ops re-resolve against the fork (key/ordinal-addressed, and the fork preserves both).
  *   The success `meta` carries the fork outcome so the editor can notice + redirect.
  *
- * Auth: admin only. Flag: 404 when the master OR edit-agent sub-flag is off.
+ * Auth: admin only.
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

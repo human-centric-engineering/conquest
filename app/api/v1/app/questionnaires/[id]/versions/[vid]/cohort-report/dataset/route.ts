@@ -5,10 +5,9 @@
  *   Admin-only. Builds the cross-respondent dataset over ALL of the version's non-preview sessions
  *   (every round AND open-ended sessions): overall per-question distributions plus per-demographic-
  *   segment distributions. Reuses the F8.1/F8.3 distribution + k-anonymity machinery, so every segment
- *   below the floor is suppressed. Read-only — no paid LLM work; gated by the cohort-report flag.
+ *   below the floor is suppressed. Read-only — no paid LLM work.
  *
- * Pipeline: cohort-report flag-gate (404 when off) → withAdminAuth → 404 unknown version → build
- *   dataset.
+ * Pipeline: withAdminAuth → 404 unknown version → build dataset.
  */
 
 import { successResponse } from '@/lib/api/responses';

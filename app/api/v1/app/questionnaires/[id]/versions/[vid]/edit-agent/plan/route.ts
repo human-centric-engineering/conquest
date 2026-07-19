@@ -11,8 +11,8 @@
  *   Preview is read-only, so it never blocks on version status or sessions; the apply route owns the
  *   fork-a-new-draft decision for launched / session-pinned versions.
  *
- * Auth: admin only. Flag: 404 when the master OR edit-agent sub-flag is off. Rate limit: per-admin
- * compose sub-cap (shared with the compose/refine routes — same class of paid reasoning work).
+ * Auth: admin only. Rate limit: per-admin compose sub-cap (shared with the compose/refine routes —
+ * same class of paid reasoning work).
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

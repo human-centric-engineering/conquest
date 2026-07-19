@@ -132,8 +132,7 @@ function estPerCall(costPerMillionUsd: number | null, maxTokens: number): number
 
 /**
  * Evaluate every covered questionnaire agent's settings against the advisory
- * recommendations. Agents whose rows don't exist (feature flag off / not seeded)
- * are omitted.
+ * recommendations. Agents whose rows don't exist (not seeded) are omitted.
  *
  * @param now - injectable clock for the actuals window (defaults to wall clock).
  */

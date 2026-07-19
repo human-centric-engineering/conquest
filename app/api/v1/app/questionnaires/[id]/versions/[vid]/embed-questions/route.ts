@@ -16,12 +16,12 @@
  *   embedding); `force: true` re-embeds all (e.g. after editing prompts).
  *
  *   Expensive — one batch of embedding-API calls — so it takes a tight per-admin
- *   sub-cap on top of the section 100/min. 404 when the master flag is off or the
- *   version doesn't resolve under the questionnaire.
+ *   sub-cap on top of the section 100/min. 404 when the version doesn't resolve
+ *   under the questionnaire.
  *
- *   Gated on the master app flag only (not the adaptive sub-flag): an admin may
- *   pre-generate embeddings before turning adaptive on. See
- *   `_lib/slot-embeddings.ts` for the pgvector seam.
+ *   Independent of the adaptive strategy: an admin may pre-generate embeddings
+ *   before turning adaptive on. See `_lib/slot-embeddings.ts` for the pgvector
+ *   seam.
  */
 
 import { z } from 'zod';

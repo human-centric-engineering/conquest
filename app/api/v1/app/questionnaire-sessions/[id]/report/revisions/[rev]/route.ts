@@ -6,7 +6,7 @@
  *   "View" dialog can render it with the same paper renderer respondents see. 404 when the revision
  *   doesn't exist.
  *
- *   Gate order: master flag → respondent-report flag (404 before auth) → withAdminAuth → load.
+ *   Gate order: withAdminAuth → load.
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

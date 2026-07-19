@@ -6,8 +6,7 @@
  *   each with their ordered questions — plus goal/audience and their stored
  *   per-field provenance (`goalProvenance`/`audienceProvenance`). The version is
  *   scoped to its parent questionnaire, so a mismatched id/vid pair 404s rather
- *   than leaking a version from another questionnaire. 404 when the feature flag
- *   is off. Read model: `_lib/detail.ts`.
+ *   than leaking a version from another questionnaire. Read model: `_lib/detail.ts`.
  *
  * PATCH /api/v1/app/questionnaires/:id/versions/:vid  (F2.1 / PR2)
  *   Edit the version's goal and/or audience. Forks a new draft first if the target

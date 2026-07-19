@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/app/questionnaires/agent-settings
  *
- * Admin-only, flag-gated. Returns the deterministic Agent Settings Evaluation:
+ * Admin-only. Returns the deterministic Agent Settings Evaluation:
  * each questionnaire agent's current model / temperature / maxTokens / reasoning
  * effort versus the curated advisory recommendation, with cost trade-offs and
  * real 30-day spend, plus the task-tier and infra default evaluations.

@@ -7,7 +7,7 @@
  *   path auto-pauses an in-flight session). Idempotent guard: closing an already-closed round
  *   is a 409. Reopening is a `PATCH … { status: 'open' }`.
  *
- * Cohorts flag-gate first (404 when off), then `withAdminAuth`. Audited.
+ * `withAdminAuth`. Audited.
  */
 
 import { errorResponse, successResponse } from '@/lib/api/responses';

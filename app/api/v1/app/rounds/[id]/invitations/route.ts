@@ -12,7 +12,7 @@
  *   URL) and flips it to `sent`; omitted/false mints copy/paste links without sending. For
  *   STAGGERED per-subgroup sending see `…/phases/:phaseId/send-invites`.
  *
- * Cohorts flag-gate first (404 when off), then `withAdminAuth`. Audited.
+ * `withAdminAuth`. Audited.
  */
 
 import { successResponse } from '@/lib/api/responses';

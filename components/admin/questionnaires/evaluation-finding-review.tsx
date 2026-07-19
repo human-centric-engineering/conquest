@@ -17,7 +17,7 @@
  *
  * Accept/Dismiss/Edit hit the PATCH review route; Apply / Add hit the apply route (which may fork
  * the version — the parent shows the fork banner from the returned meta). All mutations are
- * sub-flag gated server-side; this card only renders the affordances.
+ * enforced server-side; this card only renders the affordances.
  */
 
 import { useState } from 'react';

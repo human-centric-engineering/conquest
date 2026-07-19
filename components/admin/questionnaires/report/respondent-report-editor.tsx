@@ -113,7 +113,8 @@ export interface RespondentReportEditorProps {
   dataSlotsEnabled: boolean;
   /** The questionnaire's attributed demo client (whose KB grounds reports), or null when generic. */
   client: { id: string; name: string } | null;
-  /** Whether the report web-search platform flag is on (gates the Research tab). */
+  /** When false, the Research tab is hidden. Callers pass `true` today; the search backend
+   *  itself still has to be configured (Brave key + allowlisted host) for research to run. */
   webSearchEnabled: boolean;
 }
 
@@ -241,8 +242,7 @@ export function RespondentReportEditor({
             <Label htmlFor="rr-enabled" className="flex items-center gap-1">
               Enable the respondent report
               <FieldHelp title="Respondent report">
-                When on, respondents receive a report after completing this questionnaire. Also
-                requires the platform feature flag to be enabled.
+                When on, respondents receive a report after completing this questionnaire.
               </FieldHelp>
             </Label>
           </div>

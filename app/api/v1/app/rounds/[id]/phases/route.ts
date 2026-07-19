@@ -6,7 +6,7 @@
  *      has a phase on this round (`@@unique([roundId, subgroupId])`); 422 when the subgroup is not in
  *      the round's cohort or the window does not nest inside the round window.
  *
- * Both: round-phases flag-gate first (404 when off), then `withAdminAuth`. Creates are audited.
+ * Both: `withAdminAuth`. Creates are audited.
  */
 
 import { Prisma } from '@prisma/client';

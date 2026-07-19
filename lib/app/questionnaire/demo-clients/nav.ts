@@ -6,10 +6,9 @@
  * hrefs from these and applies active-state detection; the shared layout renders
  * them under the sticky header.
  *
- * Unlike the questionnaire workspace, demo-client tabs don't vary by feature
- * flag — the master questionnaires flag is already enforced by the layout before
- * any tab renders, and every tab applies to every demo client. Kept as plain data
- * inside the framework-agnostic `lib/app/**` boundary so it stays SSR-safe.
+ * Every tab applies to every demo client, so the list is near-static — only the
+ * Cohorts & Rounds pair is conditional (see {@link DEMO_CLIENT_COHORT_TABS}). Kept
+ * as plain data inside the framework-agnostic `lib/app/**` boundary so it stays SSR-safe.
  *
  * Every tab is nested under `/admin/demo-clients/[id]/<segment>`.
  */
@@ -33,10 +32,9 @@ export const DEMO_CLIENT_TABS: readonly DemoClientTab[] = [
 ];
 
 /**
- * The Cohorts & Rounds tabs — appended to the sub-nav only when the
- * `APP_QUESTIONNAIRES_COHORTS` flag is on (resolved server-side in the layout and threaded
- * down to the client sub-nav). Inserted before Management so the destructive demo-ops tab
- * stays last.
+ * The Cohorts & Rounds tabs — appended to the sub-nav only when `cohortsEnabled` is set
+ * (decided server-side in the layout and threaded down to the client sub-nav). Inserted
+ * before Management so the destructive demo-ops tab stays last.
  */
 export const DEMO_CLIENT_COHORT_TABS: readonly DemoClientTab[] = [
   { id: 'cohorts', label: 'Cohorts', segment: 'cohorts' },
@@ -44,8 +42,8 @@ export const DEMO_CLIENT_COHORT_TABS: readonly DemoClientTab[] = [
 ];
 
 /**
- * Resolve the visible tab list. The cohorts/rounds tabs are flag-gated; everything else is
- * always shown, with Management kept last. Pure — the caller resolves the flag.
+ * Resolve the visible tab list. The cohorts/rounds tabs are opt-in via `cohortsEnabled`;
+ * everything else is always shown, with Management kept last. Pure — the caller decides.
  */
 export function demoClientTabs(opts: { cohortsEnabled: boolean }): readonly DemoClientTab[] {
   if (!opts.cohortsEnabled) return DEMO_CLIENT_TABS;

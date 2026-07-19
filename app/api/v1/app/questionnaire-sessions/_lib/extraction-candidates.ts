@@ -11,8 +11,8 @@
  * answer still lands and a later message can enrich an already-filled slot from another theme. The
  * narrowing keeps those guarantees via hard safety rails (below) and is **fail-soft** — no last
  * message, an embed error, or an un-embedded version all return the FULL set rather than a partial
- * narrowing that could silently drop a slot. The sub-flag gate is enforced upstream (the route only
- * narrows when the feature is on).
+ * narrowing that could silently drop a slot. The gate is enforced upstream (the route only narrows
+ * when the per-questionnaire pre-filter setting is on).
  *
  * Mirrors `data-slot-selection.ts`: direct imports of the embedder + rankers (mocked in tests), one
  * `embedText` call reused for both rankings, pure assembly.

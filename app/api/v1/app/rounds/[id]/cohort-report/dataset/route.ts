@@ -6,10 +6,10 @@
  *   given bundled version: overall per-question distributions plus per-demographic-segment
  *   distributions (by `profileFields` of type select/number, and by cohort subgroup). Reuses the
  *   F8.1/F8.3 distribution + k-anonymity machinery, so every segment below the floor is suppressed.
- *   Read-only — no paid LLM work; gated by the cohort-report flag (which ANDs the master + cohorts
- *   flags). `versionId` is required and validated to be one the round actually bundles.
+ *   Read-only — no paid LLM work. `versionId` is required and validated to be one the round
+ *   actually bundles.
  *
- * Pipeline: cohort-report flag-gate (404 when off) → withAdminAuth → 404 on unknown round →
+ * Pipeline: withAdminAuth → 404 on unknown round →
  *   422 when the version isn't bundled by the round → build dataset.
  */
 

@@ -7,8 +7,7 @@
  *
  * PUT /api/v1/app/questionnaires/:id/versions/:vid/data-slots
  *   Admin-only: replace the version's data slots with the reviewed/accepted set. Forks a new
- *   draft first if the target is launched (editable id returned in `meta`). Gated by the
- *   master flag AND the data-slots sub-flag.
+ *   draft first if the target is launched (editable id returned in `meta`).
  */
 
 import { successResponse, errorResponse } from '@/lib/api/responses';

@@ -8,8 +8,8 @@
  * unlike the authenticated page (which resolves the intro server-side) it fetches the resolved splash
  * here, on boot, before it decides whether to show the intro screen. Same two respondent kinds as the
  * turn/transcript routes, so it reuses `resolveTurnAccess` (an authenticated owner OR a valid
- * anonymous/preview `X-Session-Token`). Read-only. Returns `intro: null` when the platform flag is
- * off — the per-version `intro.enabled` (inside the payload) is the second gate the client honours.
+ * anonymous/preview `X-Session-Token`). Read-only. The per-version `intro.enabled` (inside the
+ * payload) is the gate the client honours.
  */
 
 import type { NextRequest } from 'next/server';

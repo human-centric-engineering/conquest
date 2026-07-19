@@ -6,7 +6,7 @@
  *   the version's full question set (so the model may also re-suggest which questions the slot
  *   covers). Returns the single refined slot. Persists NOTHING: the admin's working set is the
  *   source of truth and is committed via PUT — a refine is just an LLM-assisted edit to one card.
- *   Gated by the master flag AND the data-slots sub-flag (paid LLM work). Per-admin sub-cap.
+ *   Per-admin sub-cap (paid LLM work).
  *   Fail-soft: a refiner failure returns `slot: null` + a diagnostic rather than a 5xx.
  */
 

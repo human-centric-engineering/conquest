@@ -10,7 +10,7 @@
  *   like every authoring edit). Existing slots are preserved verbatim — they only gain question
  *   keys; the deterministic merge does the writing, the model only decides placement.
  *
- *   Gated by the master flag AND the data-slots sub-flag (paid LLM work). Per-admin sub-cap.
+ *   Per-admin sub-cap (paid LLM work).
  *   Fail-soft: an agent failure returns the unchanged slots + a diagnostic rather than a 5xx —
  *   the question is already created; failing to slot it must not surface as an error.
  */

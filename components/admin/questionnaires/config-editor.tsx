@@ -458,8 +458,7 @@ function SettingsGroup({
 /**
  * The either/or mode selector for the "Interviewer tone & persona" group — a two-option segmented
  * radio. "Custom voice" hand-tunes the tone dials + persona prose (`personaSelection.enabled` off);
- * "Built-in persona" hands the interviewer to a library persona (`enabled` on). Only rendered when
- * the persona-selection sub-flag is on — when off there is no choice, just the custom tone editor.
+ * "Built-in persona" hands the interviewer to a library persona (`enabled` on).
  */
 function VoiceModeToggle({
   mode,
@@ -885,9 +884,9 @@ export function ConfigEditor({
         supportResourceUrl: supportResourceUrl.trim(),
         answerSlotPanelScope,
         presentationMode,
-        // Inline answer correction (Variant B): respondent-facing UX, no platform flag.
+        // Inline answer correction (Variant B): respondent-facing UX.
         inlineCorrectionEnabled,
-        // Session resume: device-remember + Continue/Start-new chooser + by-ref resume. No platform flag.
+        // Session resume: device-remember + Continue/Start-new chooser + by-ref resume.
         sessionResumeEnabled,
         // Live "watch it think" reasoning stream (demo feature). Requires the platform
         // reasoning-stream flag to take effect.
@@ -1975,7 +1974,7 @@ export function ConfigEditor({
             accent="bg-rose-500/10 text-rose-600 dark:text-rose-400"
             id="safeguarding"
             title="Answer quality & safeguarding"
-            description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions. Each also requires its platform flag."
+            description="Protective and data-integrity features: handling sensitive disclosures, ending abusive sessions, and catching contradictions."
             conflicts={conflictsFor('safeguarding')}
           >
             <div className="space-y-3">

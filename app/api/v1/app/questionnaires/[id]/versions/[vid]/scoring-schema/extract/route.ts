@@ -4,10 +4,9 @@
  * POST /api/v1/app/questionnaires/:id/versions/:vid/scoring-schema/extract  (multipart: `file`)
  *   Admin-only. Parses an uploaded scoring document and runs the cohort-report agent to PROPOSE a
  *   scoring schema scoped to the version's available keys. Returns the proposal (does NOT persist —
- *   the admin reviews it in the builder and saves via PUT). Paid LLM work → per-admin sub-cap. Gated
- *   by the cohort-report flag.
+ *   the admin reviews it in the builder and saves via PUT). Paid LLM work → per-admin sub-cap.
  *
- * Pipeline: cohort-report flag-gate (404) → withAdminAuth → version scope → sub-cap → file guard →
+ * Pipeline: withAdminAuth → version scope → sub-cap → file guard →
  *   parseDocument → extract → return proposal.
  */
 

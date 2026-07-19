@@ -11,8 +11,7 @@
  *   platform's global documents list (which would show every client's docs); upload + per-document
  *   detail still use the platform endpoints, only the scoped LIST lives here.
  *
- *   Gate order mirrors the other demo-client routes: flag-gate first (404 when off), then
- *   `withAdminAuth`, then 404 on an unknown id.
+ *   Gate order mirrors the other demo-client routes: `withAdminAuth`, then 404 on an unknown id.
  */
 
 import { NotFoundError } from '@/lib/api/errors';

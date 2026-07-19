@@ -116,8 +116,8 @@ export interface SessionWorkspaceProps {
   initialFormView?: AnswerPanelView;
   /**
    * Live "watch it think" reasoning placement (demo feature) — `overlay` | `inline`, or
-   * `undefined`/null when the feature is off (platform flag or version toggle off). The page
-   * resolves the gate server-side and passes the effective placement; the chat renders nothing
+   * `undefined`/null when the version toggle is off. The page resolves the gate server-side
+   * and passes the effective placement; the chat renders nothing
    * when it's absent.
    */
   reasoningPlacement?: ReasoningPlacement | null;

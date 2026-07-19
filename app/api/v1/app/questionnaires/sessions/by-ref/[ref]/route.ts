@@ -11,9 +11,9 @@
  * session's own questionnaire/version so the UI sends the admin to wherever it actually lives.
  *
  * A static sibling of the `[id]` segment (like `…/questionnaires/prompts` and `…/compose`); Next
- * resolves the static `sessions` path ahead of the dynamic `[id]`. Admin-authenticated, flag-gated
- * first so a disabled app looks like a missing route. Lightweight — no turns or eval counts (unlike
- * the turn-evaluation `by-ref`); it only needs to point the admin at the viewer.
+ * resolves the static `sessions` path ahead of the dynamic `[id]`. Admin-authenticated. Lightweight
+ * — no turns or eval counts (unlike the turn-evaluation `by-ref`); it only needs to point the admin
+ * at the viewer.
  */
 
 import { withAdminAuth } from '@/lib/auth/guards';

@@ -7,7 +7,7 @@
  *   extracted text (trimmed, capped to the intro length) — it does NOT persist; the admin reviews,
  *   edits, and saves it via the config / cohort PATCH. No LLM call: a pure parse.
  *
- * Pipeline: intro flag-gate → withAdminAuth → per-admin sub-cap → file guard → parseDocument → cap.
+ * Pipeline: withAdminAuth → per-admin sub-cap → file guard → parseDocument → cap.
  */
 
 import type { NextRequest } from 'next/server';

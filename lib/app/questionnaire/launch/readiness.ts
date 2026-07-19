@@ -25,8 +25,8 @@ export interface LaunchReadinessInput {
   /** True when the version has ≥1 saved data slot (only checked when required). */
   dataSlotsReady: boolean;
   /**
-   * When the version uses the `adaptive` strategy (and the adaptive sub-flag is on), launch
-   * requires the question slots to be embedded — adaptive ranks candidates by vector similarity,
+   * When the version uses the `adaptive` strategy, launch requires the question slots to be
+   * embedded — adaptive ranks candidates by vector similarity,
    * so an un-embedded version would silently fall back to `weighted`. Optional/defaults off: only
    * the *launch* gate sets this. The preview gate leaves it off so a draft can still be rehearsed
    * (the live turn loop embeds lazily as a backstop). See [[adaptive selection]].
