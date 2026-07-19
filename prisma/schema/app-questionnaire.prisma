@@ -568,6 +568,10 @@ model AppDemoClient {
   // Cohorts (groups of people) belonging to this demo client. Cascade on delete: a
   // cohort is meaningless without its client. Members + rounds cascade in turn.
   cohorts        AppCohort[]
+  // Experiences (P15) — journeys composed from this client's questionnaires. Cascade on delete,
+  // same reasoning as cohorts: an experience is meaningless without its client. Steps cascade in
+  // turn. Defined in schema/app-experience.prisma.
+  experiences    AppExperience[]
 
   @@map("app_demo_client")
 }
@@ -1683,7 +1687,7 @@ model AppAiRun {
   id String @id @default(cuid())
 
   /// What this run acted on. APP_AI_RUN_SUBJECTS (ai-run/types.ts):
-  /// version | session | respondent_report | cohort_report.
+  /// version | session | respondent_report | cohort_report | experience_run.
   subjectKind String
   /// The subject row's id. Plain String, no FK (UG-1) — polymorphic, and the run must
   /// outlive a deleted subject long enough to explain what happened to it.

@@ -696,6 +696,22 @@ export const API = {
       /** Accept an invitation: register + bind the account (POST). */
       ACCEPT: '/api/v1/app/invitations/accept',
     },
+    /**
+     * Experiences (P15) — journeys composed from existing questionnaires. An Experience
+     * sequences questionnaires, routes between them, and synthesises across the whole run.
+     */
+    EXPERIENCES: {
+      /** List (GET `?status=` `?kind=` `?demoClientId=`) + create (POST). */
+      ROOT: '/api/v1/app/experiences',
+      /** Detail with ordered steps (GET), edit (PATCH), delete (DELETE — draft only). */
+      byId: (id: string): string => `/api/v1/app/experiences/${id}`,
+      /** Steps: list (GET) + append (POST). */
+      steps: (id: string): string => `/api/v1/app/experiences/${id}/steps`,
+      /** Edit (PATCH) / remove (DELETE) one step. */
+      step: (id: string, stepId: string): string => `/api/v1/app/experiences/${id}/steps/${stepId}`,
+      /** Reorder steps — full ordered id list (PATCH). */
+      reorderSteps: (id: string): string => `/api/v1/app/experiences/${id}/steps/reorder`,
+    },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {
       /** List (GET) + create (POST). */
