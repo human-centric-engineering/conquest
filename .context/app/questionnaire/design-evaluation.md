@@ -303,3 +303,57 @@ as its label — the card renders, the raw-key chip still identifies it, fail-cl
   the new draft when an apply forks a launched version.
 - `EvaluationSeedComposer` (`components/admin/questionnaires/`) renders the pre-filled new-question
   form for the "Open in editor" deep-link; the structure page resolves the seed and forces edit mode.
+
+## Reading a run — two views over the same findings
+
+The API returns findings ordered by `(dimension, ordinal)`: the order they were **produced**. That
+is the right shape for "how did the Clarity judge do?" and the wrong shape for the job the admin is
+on the page to do — fix the questionnaire. A question flagged by three judges is the strongest
+signal a run carries, and in dimension order those three findings sit screens apart. So the
+run-detail page offers two groupings over one set of findings and one set of review actions:
+
+| View            | Grouping                    | Answers                                                    |
+| --------------- | --------------------------- | ---------------------------------------------------------- |
+| **By question** | one card per `target.key`   | "what's wrong with Q4, and do the judges agree?" (default) |
+| By judge        | one section per `dimension` | "which dimension is unhappy, and what did it score?"       |
+
+By-question sorts three ways — `natural` (questionnaire order), `major` (worst-first), `findings`
+(busiest-first) — via the pure `groupFindingsByTarget` in
+`components/admin/questionnaires/evaluation-grouping.ts`. Both count sorts fall back to natural
+order, so equally-severe targets stay in a stable, meaningful sequence. Each card leads with the
+question prompt (the subject under review), names the judges that flagged it, and tallies severity;
+`FindingReviewCard` takes a `lead` prop that swaps its leading chip from the target to the judge,
+since under a question heading the missing fact is _which judge said this_.
+
+**Every group starts collapsed.** The page opens as a scannable index — which questions have
+problems, how many judges agree, and how severe — and the reviewer drills into the ones they choose
+to work on. That is why the card header has to carry its weight on its own: context chip, the
+prompt, the judge-consensus row, and the severity tally are all visible closed. Groups open
+independently and stay open across a re-sort (the card is keyed on the target, not its sorted
+slot), so re-ordering never folds away work in progress.
+
+**Only flagged targets appear.** The payload carries findings, not the version's question list, so
+a clean question is absent by construction — the headline says "across N flagged items" rather than
+implying full coverage. Non-question targets (`section`, `goal`, `audience`, `unknown`) get their
+own groups; nothing is filtered out, and `goal`/`audience` pin above the structure.
+
+### Headline band
+
+`EvaluationRunHeadline` puts the two questions an admin opens the page with above the fold: severity
+totals + review progress (`CqStatTiles`), and a per-judge strip carrying each dimension's score and
+its severity split. **Judge cells are filter buttons** — the summary is a way into the work, not
+decoration. When judges failed, the band says the totals are an undercount rather than quietly
+omitting them; a stale count is surfaced the same way.
+
+Three filters compose across both views (status ∧ severity ∧ judge). **Severity filtering is new**:
+`severity` was previously display-only, which made "show me what blocks launch" — the entire point
+of the `major` level — impossible to ask.
+
+### `sectionPosition` — the one read-seam addition
+
+`position` is 1-based _within a section_, so it cannot order questions across sections. The by-question
+natural sort needs a section ordinal, so `FindingTargetView` gained **`sectionPosition`**, populated
+by `resolveFindingTarget` from a `sectionIndex` now returned by `locateSlot`. Same posture as the
+rest of the view: **derived at read time, never stored**, no migration. It is `null` for
+`goal`/`audience`/`unknown`, and falls back to the run snapshot for a since-removed section so
+history still orders sensibly.

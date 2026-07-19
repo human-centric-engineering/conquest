@@ -83,7 +83,7 @@ must render the version selector and highlight the active version against `[vid]
             …/v/[vid]/data-slots
             …/v/[vid]/invitations           → questionnaire-scoped; vid ignored, targets newest launched
             …/v/[vid]/analytics
-            …/v/[vid]/evaluations[/[runId]]
+            …/v/[vid]/evaluations[/[runId]]  → run detail: headline band + by-question / by-judge views
             …/v/[vid]/extraction-changes
             …/v/[vid]/settings              → questionnaire Name (rename) + run-time Configuration (F3.1, version-scoped, fork-on-launch) + demo-client attribution + clone (DEMO-ONLY)
 ```

@@ -198,6 +198,13 @@ export interface FindingTargetView {
   sectionTitle: string | null;
   /** 1-based position within its section when `kind === 'question'`; `null` otherwise. */
   position: number | null;
+  /**
+   * 1-based index of the containing section (`kind === 'question'`), or of the section itself
+   * (`kind === 'section'`); `null` otherwise. Paired with {@link position} this is what lets a
+   * reader sort findings into questionnaire order — `position` alone is only meaningful within
+   * one section. Derived at read time like the rest of this view, never stored.
+   */
+  sectionPosition: number | null;
   /** The target exists only in the run's snapshot — it was removed from the live structure since. */
   removed: boolean;
 }

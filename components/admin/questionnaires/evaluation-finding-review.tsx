@@ -18,6 +18,16 @@
  * Accept/Dismiss/Edit hit the PATCH review route; Apply / Add hit the apply route (which may fork
  * the version — the parent shows the fork banner from the returned meta). All mutations are
  * enforced server-side; this card only renders the affordances.
+ *
+ * **Apply vs Accept.** These are the two easiest actions to confuse — the words are near-synonyms
+ * in English but do very different things, and a divider alone did not carry that. So the second
+ * group is introduced by a "Record a decision" label, and every action carries a `Tip` naming its
+ * exact effect (Apply's is generated from `describeOp`, so it states the actual edit):
+ *
+ *  - **Apply** writes to the questionnaire now, forking a launched version into a draft first.
+ *  - **Accept** changes nothing — it records agreement so an admin can triage a whole run first
+ *    and then apply the survivors, landing every edit in one draft (the fork-lineage rule).
+ *  - **Dismiss** rejects the suggestion; nothing changes.
  */
 
 import { useState } from 'react';
@@ -25,6 +35,7 @@ import Link from 'next/link';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tip } from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -39,6 +50,7 @@ import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { QUESTION_TYPES, QUESTION_TYPE_LABELS } from '@/lib/app/questionnaire/types';
+import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation';
 import type { ProposedEdit } from '@/lib/app/questionnaire/evaluation';
 import type { EvaluationFindingView } from '@/lib/app/questionnaire/views';
 import {
@@ -60,6 +72,13 @@ interface Props {
   canApply: boolean;
   /** Whether the version has data slots — drives the "slot the new question" checkbox on add_question. */
   dataSlotsAvailable?: boolean;
+  /**
+   * Which fact the card leads with — the one its surrounding heading does *not* already supply.
+   * Under a judge heading (`'target'`, the default) that's which question is meant; under a
+   * question heading (`'dimension'`) the question is already named, so the missing fact is which
+   * judge said this.
+   */
+  lead?: 'target' | 'dimension';
   /** Called with the server's updated view; `meta` is present after a successful apply. */
   onUpdate: (next: EvaluationFindingView, meta?: ApplyMeta) => void;
 }
@@ -151,6 +170,7 @@ export function FindingReviewCard({
   runId,
   canApply,
   dataSlotsAvailable = false,
+  lead = 'target',
   onUpdate,
 }: Props) {
   const [busy, setBusy] = useState<null | 'accept' | 'decline' | 'edit' | 'apply'>(null);
@@ -240,7 +260,11 @@ export function FindingReviewCard({
         <Badge variant={sev.variant} className="text-xs">
           {sev.label}
         </Badge>
-        <span className="text-muted-foreground text-xs">{targetContext(finding)}</span>
+        <span className="text-muted-foreground text-xs">
+          {lead === 'dimension'
+            ? EVALUATION_DIMENSION_SPECS[finding.dimension].label
+            : targetContext(finding)}
+        </span>
         <code className="bg-muted rounded px-1.5 py-0.5 text-xs">{finding.targetKey}</code>
         <Badge variant={statusBadge.variant} className="text-xs">
           {statusBadge.label}
@@ -254,7 +278,7 @@ export function FindingReviewCard({
 
       {/* What this judgement is *about*, quoted — without it the card names only the slot key,
           and the reviewer has to open the structure editor to know which question is meant. */}
-      {finding.target && finding.target.kind !== 'unknown' && (
+      {lead === 'target' && finding.target && finding.target.kind !== 'unknown' && (
         <p className="mt-2 text-sm">
           <span className="italic">
             {finding.target.kind === 'question'
@@ -335,38 +359,48 @@ export function FindingReviewCard({
               {/* Primary work-action, sized by the effective op. */}
               {addOp ? (
                 <>
-                  <Button
-                    size="sm"
-                    disabled={busy !== null || finding.stale || !canApply}
-                    title={applyDisabledTitle}
-                    onClick={() => void apply()}
-                  >
-                    {busy === 'apply' ? 'Adding…' : 'Add to questionnaire'}
-                  </Button>
-                  <Button asChild size="sm" variant="secondary">
-                    <Link href={seedHref}>Open in editor</Link>
-                  </Button>
+                  <Tip label="Adds this question to the questionnaire now, as drafted. A launched version is forked to a new draft first.">
+                    <Button
+                      size="sm"
+                      disabled={busy !== null || finding.stale || !canApply}
+                      title={applyDisabledTitle}
+                      onClick={() => void apply()}
+                    >
+                      {busy === 'apply' ? 'Adding…' : 'Add to questionnaire'}
+                    </Button>
+                  </Tip>
+                  <Tip label="Opens the structure editor with this question pre-filled, so you can reword it before saving.">
+                    <Button asChild size="sm" variant="secondary">
+                      <Link href={seedHref}>Open in editor</Link>
+                    </Button>
+                  </Tip>
                 </>
               ) : finding.applicable === 'apply' && op ? (
                 <>
                   {isEditableOp(op) && (
+                    <Tip label="Adjust the suggested change before applying it.">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy !== null}
+                        onClick={() => setEditing(true)}
+                      >
+                        Edit
+                      </Button>
+                    </Tip>
+                  )}
+                  <Tip
+                    label={`Changes the questionnaire now — ${describeOp(op).toLowerCase()}. A launched version is forked to a new draft first.`}
+                  >
                     <Button
                       size="sm"
-                      variant="ghost"
-                      disabled={busy !== null}
-                      onClick={() => setEditing(true)}
+                      disabled={busy !== null || finding.stale || !canApply}
+                      title={applyDisabledTitle}
+                      onClick={() => void apply()}
                     >
-                      Edit
+                      {busy === 'apply' ? 'Applying…' : 'Apply'}
                     </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    disabled={busy !== null || finding.stale || !canApply}
-                    title={applyDisabledTitle}
-                    onClick={() => void apply()}
-                  >
-                    {busy === 'apply' ? 'Applying…' : 'Apply'}
-                  </Button>
+                  </Tip>
                 </>
               ) : (
                 <Button asChild size="sm" variant="secondary">
@@ -374,30 +408,41 @@ export function FindingReviewCard({
                 </Button>
               )}
 
-              {/* Quiet secondary triage. Dismiss always; Accept (agree-but-not-yet-applied) only
-                  where it's distinct from the work-action — for add_question, "Add to
-                  questionnaire"/"Open in editor" already imply acceptance, so Accept is omitted. */}
+              {/* Quiet secondary triage — these only record a decision, they never touch the
+                  questionnaire. "Apply" and a bare "Accept" read as near-synonyms, so the group is
+                  named for what it does — records a decision — which is the whole contrast with
+                  Apply. (The verbs stay verbs rather than becoming "Accepted"/"Dismissed": those
+                  are the status-badge strings, and the same word as both a button and a state
+                  reads as ambiguous.) Accept is omitted for add_question, where the work-actions
+                  ("Add to questionnaire" / "Open in editor") already imply acceptance. */}
               <span className="bg-border mx-1 h-5 w-px" aria-hidden />
+              <Tip label="These only record what you decided — neither one edits the questionnaire.">
+                <span className="text-muted-foreground cursor-help text-xs">Record a decision</span>
+              </Tip>
               {!addOp && (
+                <Tip label="Records that you agree, without changing the questionnaire. Triage a whole run this way, then apply the ones you kept — every applied edit then lands in one draft.">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    disabled={busy !== null}
+                    onClick={() => void decide('accept')}
+                  >
+                    {busy === 'accept' ? 'Accepting…' : 'Accept'}
+                  </Button>
+                </Tip>
+              )}
+              <Tip label="Rejects this suggestion. Nothing in the questionnaire changes.">
                 <Button
                   size="sm"
                   variant="ghost"
                   className="text-muted-foreground"
                   disabled={busy !== null}
-                  onClick={() => void decide('accept')}
+                  onClick={() => void decide('decline')}
                 >
-                  {busy === 'accept' ? 'Accepting…' : 'Accept'}
+                  {busy === 'decline' ? 'Dismissing…' : 'Dismiss'}
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                disabled={busy !== null}
-                onClick={() => void decide('decline')}
-              >
-                {busy === 'decline' ? 'Dismissing…' : 'Dismiss'}
-              </Button>
+              </Tip>
             </div>
           </>
         )

@@ -46,14 +46,25 @@ export interface LocatedSlot {
   question: StructureQuestion;
   sectionTitle: string;
   indexInSection: number;
+  /**
+   * 0-based index of the containing section. Not used by staleness (a `reorder` compares
+   * `sectionTitle`), but it is the only way a reader can reconstruct *questionnaire* order:
+   * `indexInSection` alone cannot order questions across sections.
+   */
+  sectionIndex: number;
 }
 
 /** Find a slot by its stable `key` anywhere in the structure, with its position. */
 export function locateSlot(structure: VersionStructureInput, key: string): LocatedSlot | null {
-  for (const section of structure.sections) {
+  for (const [sectionIndex, section] of structure.sections.entries()) {
     const idx = section.questions.findIndex((q) => q.key === key);
     if (idx !== -1) {
-      return { question: section.questions[idx], sectionTitle: section.title, indexInSection: idx };
+      return {
+        question: section.questions[idx],
+        sectionTitle: section.title,
+        indexInSection: idx,
+        sectionIndex,
+      };
     }
   }
   return null;

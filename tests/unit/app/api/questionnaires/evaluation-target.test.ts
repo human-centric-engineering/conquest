@@ -41,8 +41,17 @@ describe('resolveFindingTarget — questions', () => {
       label: 'Which team?',
       sectionTitle: 'Background',
       position: 2,
+      sectionPosition: 1,
       removed: false,
     });
+  });
+
+  it('reports the containing section’s 1-based index, so questions order across sections', () => {
+    // `position` alone cannot order these two: both are the 1st/2nd of their own section.
+    const first = resolveFindingTarget('q_role', structure(), structure());
+    const later = resolveFindingTarget('q_ramp', structure(), structure());
+    expect(first).toMatchObject({ sectionPosition: 1, position: 1 });
+    expect(later).toMatchObject({ sectionPosition: 2, position: 1 });
   });
 
   it('resolves against the live structure, not the run snapshot, when the prompt was reworded', () => {
@@ -97,7 +106,18 @@ describe('resolveFindingTarget — non-question targets', () => {
     expect(resolveFindingTarget('section:Background', structure(), null)).toMatchObject({
       kind: 'section',
       label: 'Background',
+      sectionPosition: 1,
       removed: false,
+    });
+    expect(resolveFindingTarget('section:Experience', structure(), null)).toMatchObject({
+      sectionPosition: 2,
+    });
+  });
+
+  it('leaves the version-level targets unpositioned', () => {
+    expect(resolveFindingTarget('goal', structure(), null)).toMatchObject({
+      sectionPosition: null,
+      position: null,
     });
   });
 
