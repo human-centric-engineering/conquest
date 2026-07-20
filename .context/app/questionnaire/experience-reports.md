@@ -152,3 +152,4 @@ retain-vs-delete decision inside it.
 - `.context/app/planning/features/f15.4b.md` — the run report, what shipped and why
 - `.context/app/questionnaire/experiences.md` — the model
 - `.context/app/questionnaire/experience-continuity.md` — the respondent journey
+- `.context/app/planning/features/f15-followups.md` — everything still open across P15

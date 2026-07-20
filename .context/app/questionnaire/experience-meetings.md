@@ -69,6 +69,36 @@ the same people.
   anything, because the floor check guarantees some slot reached `minSupport` and
   `respondedCount <= participantCount`. The gate is the only thing that suppresses.
 
+### What the floor counts: `supportBasis`
+
+The floor is always the same; the **unit** it counts is not. `SynthesisMaterial.supportBasis` says
+which, and defaults to `per-session` when absent so an omission never widens the gate.
+
+| Basis            | Used by                      | The floor is applied to                   |
+| ---------------- | ---------------------------- | ----------------------------------------- |
+| `per-session`    | `individual` rooms, no rooms | distinct sessions that answered some slot |
+| `room-occupancy` | `scribe` rooms               | the room's occupancy                      |
+
+A scribe room has **exactly one session by design**, so counting sessions reported a room of six as
+a room of one and put every scribe room permanently below the floor — no scribe room could ever be
+synthesised. Occupancy is the honest count there: those people chose the room and had the
+conversation the pen wrote down. It is a different unit, **never a lower bar** — a scribe room of
+one still does not synthesise, `meetsSupportThreshold` still refuses anything under 2, and the
+room-size clamp caps every finding at occupancy, so a one-person room could not carry a finding past
+the floor even if the check were bypassed.
+
+Occupancy has **one definition** (`roomOccupancy` in `meeting-service.ts`, grouping runs by
+`currentRoomId`), shared by the picker, the console and the support basis — a room cannot report one
+number to the facilitator and another to the k-anonymity floor.
+
+The basis also changes the **prompt**: a scribe room's material holds one written record, and a
+model left to read that as one person returns `supportCount: 1` and the gate suppresses everything
+anyway. It is told the record belongs to all N in the room — and told to count _down_ for dissent
+the record itself notes, so the number stays honest.
+
+None of this reaches the **read** path. `loadMeetingInsights` gates on the stored `supportCount` and
+knows nothing of rooms or bases.
+
 ## What the synthesiser reads
 
 **Data slots, rationales, movement, and questionnaire background — never raw chat.** The data-slot
@@ -100,6 +130,9 @@ Optional. A separate table, so the roomless common case stays untouched and noth
 Scribe mode exists because a room that talks an answer through together has one answer, not six —
 and six near-identical copies would make the support counts meaningless. **The pen is first-come**;
 a room deciding who types is friction a timed breakout cannot afford.
+
+The flip side is that a scribe room's support cannot be counted in sessions — see `supportBasis`
+above. One session is the whole point of the mode, not a small room.
 
 `currentRoomId` sits on the RUN as well as `roomId` on the leg, because a participant watching a
 scribe has no leg and the facilitator still needs to see them placed.
@@ -138,3 +171,4 @@ during the introduction) and a session only once a breakout runs.
 
 - `.context/app/planning/features/f15.5a.md`, `f15.5b.md`
 - `.context/app/questionnaire/experiences.md` — the model
+- `.context/app/planning/features/f15-followups.md` — everything still open across P15

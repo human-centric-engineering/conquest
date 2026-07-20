@@ -173,3 +173,4 @@ Converging both surfaces on `/x/` is a deliberate follow-up, not part of F15.3.
 - `.context/app/planning/features/f15.3.md` — what shipped and why
 - `.context/app/questionnaire/experiences.md` — the model and continuity modes
 - `.context/app/questionnaire/experience-routing.md` — how the fork is decided
+- `.context/app/planning/features/f15-followups.md` — everything still open across P15

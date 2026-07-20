@@ -160,3 +160,4 @@ defending as an LLM one.
 - `.context/app/questionnaire/cohorts.md` — the roster an experience may reuse
 - `.context/app/questionnaire/round-context-and-learning.md` — the k-anonymity precedent
 - `.context/app/questionnaire/ai-run-provenance.md` — the run-capture contract
+- `.context/app/planning/features/f15-followups.md` — everything still open across P15
