@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ExperienceEmptyState, StepKindBadge } from '@/components/admin/experiences/experience-ui';
 import { ExperienceStepForm } from '@/components/admin/experiences/experience-step-form';
+import { BreakoutRoomsEditor } from '@/components/admin/experiences/breakout-rooms-editor';
 import type { ExperienceStepView } from '@/lib/app/questionnaire/experiences/views';
 import type { ExperienceKind } from '@/lib/app/questionnaire/experiences/types';
 
@@ -263,6 +264,18 @@ export function ExperienceStepsPanel({
               onSuccess={() => setEditing(null)}
               onCancel={() => setEditing(null)}
             />
+          )}
+          {/* Rooms are edited beside the step rather than inside the form: they are their own
+              rows with their own endpoints, and folding them into the step's single submit would
+              mean an author loses a half-typed room by cancelling the step edit. */}
+          {editing?.kind === 'breakout' && (
+            <div className="border-t pt-4">
+              <BreakoutRoomsEditor
+                experienceId={experienceId}
+                stepId={editing.id}
+                rooms={editing.rooms ?? []}
+              />
+            </div>
           )}
         </DialogContent>
       </Dialog>

@@ -69,6 +69,7 @@ export interface ExperienceStepRow {
   durationSeconds?: number | null;
   briefing?: string | null;
   synthesisFocus?: string | null;
+  rooms?: Array<{ id: string; name: string; mode: string; ordinal: number }>;
   ordinal: number;
   createdAt: Date;
   updatedAt: Date;
@@ -126,6 +127,8 @@ export interface ExperienceStepView {
   durationSeconds: number | null;
   briefing: string | null;
   synthesisFocus: string | null;
+  /** Authored rooms (P15.5b). Empty for every non-breakout step and for most breakouts. */
+  rooms: Array<{ id: string; name: string; mode: string; ordinal: number }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -197,6 +200,7 @@ export function toExperienceStepView(
     durationSeconds: row.durationSeconds ?? null,
     briefing: row.briefing ?? null,
     synthesisFocus: row.synthesisFocus ?? null,
+    rooms: row.rooms ?? [],
     ordinal: row.ordinal,
     questionnaireId: row.questionnaireId,
     questionnaireTitle: resolved.questionnaireTitle ?? null,

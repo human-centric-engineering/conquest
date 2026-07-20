@@ -69,11 +69,16 @@ export function useRespondentReport(
   }, [accessToken]);
 
   const retry = useCallback(() => {
-    // A run report has no re-queue endpoint yet, so "Check again" opens a fresh poll window rather
-    // than re-triggering generation. That is still honest progress — the worker may simply have
-    // been slower than the poll window — and it is strictly better than a dead button.
+    // A run report re-queues through its own endpoint (the per-session retry route is
+    // session-scoped and would 404). Best-effort, then a fresh poll window either way.
     if (runId) {
-      setRetryNonce((n) => n + 1);
+      void fetch(API.APP.EXPERIENCES.runReportRetry(runId), {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+      })
+        .catch(() => {})
+        .finally(() => setRetryNonce((n) => n + 1));
       return;
     }
     // Best-effort re-trigger: re-queue a failed/orphaned report and kick the worker, then restart

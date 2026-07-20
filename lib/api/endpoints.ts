@@ -725,6 +725,12 @@ export const API = {
       /** Replace (PATCH — whole rule) / delete (DELETE) one rule. */
       routingRule: (id: string, ruleId: string): string =>
         `/api/v1/app/experiences/${id}/routing-rules/${ruleId}`,
+      /** Reorder routing rules — the COMPLETE ordered id list (PATCH). Order is behaviour. */
+      reorderRoutingRules: (id: string): string =>
+        `/api/v1/app/experiences/${id}/routing-rules/reorder`,
+      /** Re-queue a failed run-level report (POST — respondent-facing). */
+      runReportRetry: (runId: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/report/retry`,
       /** Dry-run the selector against a completed session, no side effects (POST). */
       previewRouting: (id: string): string => `/api/v1/app/experiences/${id}/preview-routing`,
       /** Runs: admin list (GET) + START a run (POST — respondent-facing, not admin-gated). */
@@ -761,6 +767,12 @@ export const API = {
       /** Join a live meeting (POST — respondent-facing, not admin-gated). */
       meetingJoin: (meetingId: string): string =>
         `/api/v1/app/experiences/meetings/${meetingId}/join`,
+      /** Authoring a breakout's rooms: list (GET) + add (POST). Admin. */
+      stepRooms: (id: string, stepId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/rooms`,
+      /** Edit (PATCH) / remove (DELETE) one authored room. Admin. */
+      stepRoom: (id: string, stepId: string, roomId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/rooms/${roomId}`,
       /** Breakout rooms in the current breakout: list (GET) + choose one (POST). */
       meetingRooms: (meetingId: string): string =>
         `/api/v1/app/experiences/meetings/${meetingId}/rooms`,
