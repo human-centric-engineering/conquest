@@ -94,12 +94,11 @@ export function useRespondentReport(
 
   const notify = useCallback(
     async (email: string): Promise<boolean> => {
-      // No run-scoped notify endpoint yet. Returning false makes the UI report that the opt-in did
-      // not take, rather than POSTing the entry leg's session route and quietly promising an email
-      // about a report that leg is not generating.
-      if (runId) return false;
       try {
-        const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.reportNotify(sessionId), {
+        const notifyUrl = runId
+          ? API.APP.EXPERIENCES.runReportNotify(runId)
+          : API.APP.QUESTIONNAIRE_SESSIONS.reportNotify(sessionId);
+        const res = await fetch(notifyUrl, {
           method: 'POST',
           credentials: 'include',
           headers: { ...authHeaders(), 'Content-Type': 'application/json' },

@@ -25,6 +25,8 @@ import {
   type RespondentReportClientView,
 } from '@/lib/app/questionnaire/report/view';
 import { validateRespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import { narrowMethodRecord } from '@/lib/app/questionnaire/report/method-record';
+import { buildReportMethodView } from '@/lib/app/questionnaire/report/method-view';
 
 /**
  * Build the respondent-facing view for a run's report. `null` when the run doesn't exist or has no
@@ -43,6 +45,7 @@ export async function buildRunReportClientView(
           content: true,
           formatted: true,
           completionPct: true,
+          methodRecord: true,
           generatedAt: true,
           error: true,
           notifyEmail: true,
@@ -75,9 +78,15 @@ export async function buildRunReportClientView(
       error: report?.error ?? null,
       notifyRequested: Boolean(report?.notifyEmail),
     },
-    // The method panel is per-report and the base view resolved the ENTRY LEG's — which, now that
-    // legs no longer generate their own reports, does not exist. Suppress it rather than describe
-    // the wrong run. Surfacing the run's own method record is a follow-up.
-    method: null,
+    // The RUN's own method record, not the entry leg's — the base view resolved that leg's, which
+    // no longer exists now that legs do not generate reports. Gated on the same `explainMethod`
+    // delivery setting the base view already applied: `base.method === null` means the author did
+    // not opt in, and a run report must not become a way around that.
+    method:
+      base.method === null
+        ? null
+        : ((record) => (record ? buildReportMethodView(record, 'respondent') : null))(
+            narrowMethodRecord(report?.methodRecord)
+          ),
   };
 }

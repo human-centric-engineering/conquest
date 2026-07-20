@@ -731,6 +731,9 @@ export const API = {
       /** Re-queue a failed run-level report (POST — respondent-facing). */
       runReportRetry: (runId: string): string =>
         `/api/v1/app/experiences/runs/${runId}/report/retry`,
+      /** Opt in to an email when the run report is ready (POST — respondent-facing). */
+      runReportNotify: (runId: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/report/notify`,
       /** Dry-run the selector against a completed session, no side effects (POST). */
       previewRouting: (id: string): string => `/api/v1/app/experiences/${id}/preview-routing`,
       /** Runs: admin list (GET) + START a run (POST — respondent-facing, not admin-gated). */
