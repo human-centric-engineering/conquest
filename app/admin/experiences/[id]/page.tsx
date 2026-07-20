@@ -16,6 +16,7 @@ import {
   EXPERIENCE_ROUTING_FALLBACK_LABELS,
 } from '@/lib/app/questionnaire/experiences/types';
 import { experienceWorkspaceBase } from '@/lib/app/questionnaire/experiences/workspace-nav';
+import { ExperienceRespondentLink } from '@/components/admin/experiences/experience-respondent-link';
 
 export const metadata: Metadata = {
   title: 'Experience overview',
@@ -67,6 +68,19 @@ export default async function ExperienceOverviewPage({
       <CqStatTiles stats={tiles} />
 
       <ExperienceBlockers blockers={blockers} />
+
+      {/* The shareable link. Placed directly under the readiness blockers because those two answer
+          the same question in sequence — "is this ready?" then "how do people reach it?" */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-medium">Share</h2>
+        <div className="bg-card rounded-xl border p-4">
+          <ExperienceRespondentLink
+            experienceId={id}
+            status={experience.status}
+            accessMode={experience.accessMode}
+          />
+        </div>
+      </section>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">

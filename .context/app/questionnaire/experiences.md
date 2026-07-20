@@ -83,6 +83,10 @@ EXPERIENCE_CONTINUITY_MODES = ['linked', 'stitched', 'merged'];
 `merged` is the only mode that genuinely changes persistence, which is why it is last and may never
 ship: `stitched` delivers most of the perceived value at a fraction of the cost.
 
+**How the respondent actually travels a run** — the handoff wiring, the `/x/<publicRef>` stable
+address, the httpOnly run credential and the seam marker — is
+[`experience-continuity.md`](./experience-continuity.md).
+
 ## Settings
 
 `AppExperience.settings` is a lazily-defaulted Json blob (`{}` resolves to
@@ -149,6 +153,7 @@ defending as an LLM one.
 
 ## Related
 
+- `.context/app/questionnaire/experience-continuity.md` — the respondent journey, addressing, credential
 - `.context/app/planning/features/f15.1.md` — foundation decisions and what shipped
 - `.context/app/questionnaire/cohorts.md` — the roster an experience may reuse
 - `.context/app/questionnaire/round-context-and-learning.md` — the k-anonymity precedent

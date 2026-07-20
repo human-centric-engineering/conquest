@@ -24,53 +24,12 @@ import type { NextRequest } from 'next/server';
 
 import { getRouteLogger } from '@/lib/api/context';
 import { errorResponse, successResponse } from '@/lib/api/responses';
-import { prisma } from '@/lib/db/client';
-import { getServerSession } from '@/lib/auth/utils';
 import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
+import { canReadRun } from '@/app/api/v1/app/experiences/_lib/run-access';
 import { buildRunPollState } from '@/app/api/v1/app/experiences/_lib/run-read';
 import { runPollLimiter } from '@/app/api/v1/app/experiences/_lib/rate-limit';
-import { verifySessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
-
-/**
- * Whether this caller may read this run.
- *
- * Ownership is proven against the run's LEGS, not the run row: the no-login surface holds a token
- * for a session, and the authenticated surface owns sessions — neither knows anything about a run
- * id directly. An admin bypasses.
- */
-async function canReadRun(
-  request: NextRequest,
-  runId: string
-): Promise<{ allowed: boolean; knownSessionId?: string }> {
-  const legs = await prisma.appExperienceRunLeg.findMany({
-    where: { runId },
-    select: { sessionId: true },
-  });
-  if (legs.length === 0) return { allowed: false };
-  const legSessionIds = new Set(legs.map((l) => l.sessionId));
-
-  // No-login surface: a signed token for any session in this run.
-  const token = request.headers.get('x-session-token');
-  if (token) {
-    const verified = verifySessionToken(token, new Date());
-    if (verified.ok && legSessionIds.has(verified.sessionId)) {
-      return { allowed: true, knownSessionId: verified.sessionId };
-    }
-  }
-
-  const session = await getServerSession();
-  if (!session?.user) return { allowed: false };
-  if (session.user.role === 'admin') return { allowed: true };
-
-  // Authenticated respondent: they must own at least one of the run's sessions.
-  const owned = await prisma.appQuestionnaireSession.findFirst({
-    where: { id: { in: [...legSessionIds] }, respondentUserId: session.user.id },
-    select: { id: true },
-  });
-  return owned ? { allowed: true, knownSessionId: owned.id } : { allowed: false };
-}
 
 export async function GET(
   request: NextRequest,
@@ -94,7 +53,15 @@ export async function GET(
   const knownSessionId =
     new URL(request.url).searchParams.get('sessionId') ?? access.knownSessionId;
 
-  const state = await buildRunPollState(runId, knownSessionId ?? undefined);
+  // Only a token-authenticated caller gets a minted token for a newly-revealed leg. An admin
+  // reading someone else's run, and a cookie-authenticated respondent, both explicitly do not:
+  // the admin has no business holding a respondent credential, and the respondent's cookie
+  // already opens the leg.
+  const state = await buildRunPollState(
+    runId,
+    knownSessionId ?? undefined,
+    access.viaToken === true || access.viaRunCookie === true
+  );
   if (!state) {
     return errorResponse('Run not found', { code: 'NOT_FOUND', status: 404 });
   }

@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { narrowCarryOver } from '@/lib/app/questionnaire/experiences/carryover/narrow';
 import {
@@ -20,8 +21,14 @@ import {
   type ExperienceLegStatus,
   type ExperienceRunStatus,
   type RunPollState,
+  type SessionExperienceContext,
+  type StitchedHistory,
+  type StitchedSegment,
 } from '@/lib/app/questionnaire/experiences/run/types';
+import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
+import { narrowExperienceSettings } from '@/lib/app/questionnaire/experiences/settings';
 import {
+  EXPERIENCE_CONTINUITY_MODES,
   ROUTING_DECISIONS,
   ROUTING_SOURCES,
   type RoutingDecisionKind,
@@ -49,7 +56,14 @@ const DEFAULT_CONTINUE_MESSAGE = "Thanks — there's one more area I'd like to e
 export async function buildRunPollState(
   runId: string,
   /** The leg the client already knows about — so a newly-created later leg is recognised. */
-  knownSessionId?: string
+  knownSessionId?: string,
+  /**
+   * Mint an access token for a newly-revealed leg. Set ONLY when the caller proved ownership with
+   * a valid session token (the no-login surface), never for a cookie-authenticated respondent —
+   * they do not need one, and issuing a bearer credential nobody asked for widens the surface for
+   * no gain.
+   */
+  mintTokenForNewLeg = false
 ): Promise<RunPollState | null> {
   const run = await prisma.appExperienceRun.findUnique({
     where: { id: runId },
@@ -98,10 +112,112 @@ export async function buildRunPollState(
       sessionId: newest.sessionId,
       stepTitle: step?.title ?? 'Next questions',
       message: message ?? DEFAULT_CONTINUE_MESSAGE,
+      ...(mintTokenForNewLeg ? { sessionToken: mintSessionToken(newest.sessionId).token } : {}),
     };
   }
 
   return { state: 'pending' };
+}
+
+/**
+ * Whether this session is a leg of an experience run, and how its seam should be presented.
+ *
+ * Called on every session-status read, including the vast majority that are standalone sessions —
+ * so the miss path must be one indexed lookup and nothing more. It is: `sessionId` is `@unique` on
+ * the leg table, and a null result short-circuits before the second query.
+ *
+ * The continuity mode is read LIVE from the experience rather than frozen onto the run. That is
+ * deliberate and follows from the invariant that `linked` and `stitched` share a persistence
+ * shape: an author who switches modes mid-flight changes what in-flight respondents see, which is
+ * the point of the two modes being presentation-only.
+ */
+export async function experienceContextForSession(
+  sessionId: string
+): Promise<SessionExperienceContext | null> {
+  const leg = await prisma.appExperienceRunLeg.findUnique({
+    where: { sessionId },
+    select: {
+      runId: true,
+      ordinal: true,
+      stepId: true,
+      run: {
+        select: {
+          publicRef: true,
+          experience: { select: { continuityMode: true, settings: true } },
+        },
+      },
+    },
+  });
+  if (!leg) return null;
+
+  // The step pointer is unmodelled (UG-1), so a step deleted after the run took it resolves to
+  // null and the divider falls back to generic copy. Never throw on a dangling pointer.
+  const step = await prisma.appExperienceStep.findUnique({
+    where: { id: leg.stepId },
+    select: { title: true },
+  });
+
+  const settings = narrowExperienceSettings(leg.run.experience.settings);
+  return {
+    runId: leg.runId,
+    publicRef: leg.run.publicRef,
+    ordinal: leg.ordinal,
+    continuityMode: narrowToEnum(
+      leg.run.experience.continuityMode,
+      EXPERIENCE_CONTINUITY_MODES,
+      'linked'
+    ),
+    seamMarker: settings.stitchedSeamMarker,
+    stepTitle: step?.title ?? null,
+  };
+}
+
+/**
+ * Replay every leg of a run that came BEFORE the given session, oldest first (P15.3).
+ *
+ * What makes one continuous chat out of two sessions. Strictly a READ — no rows are written,
+ * merged or rewritten, which is the whole reason `stitched` and `linked` can share a persistence
+ * shape and an experience can be switched between them mid-flight.
+ *
+ * Returns empty for the entry leg (nothing precedes it) and for a session that is not part of a
+ * run at all. Step titles resolve in one batched query; a dangling step pointer renders as a
+ * generic divider rather than throwing.
+ */
+export async function loadStitchedHistory(
+  runId: string,
+  currentSessionId: string
+): Promise<StitchedHistory> {
+  const legs = await prisma.appExperienceRunLeg.findMany({
+    where: { runId },
+    orderBy: { ordinal: 'asc' },
+    select: { ordinal: true, stepId: true, sessionId: true },
+  });
+
+  const current = legs.find((l) => l.sessionId === currentSessionId);
+  // A session that is not a leg of this run gets no history. Callers gate on ownership before
+  // reaching here, but returning empty rather than everything keeps the failure mode closed.
+  if (!current) return { segments: [] };
+
+  const prior = legs.filter((l) => l.ordinal < current.ordinal);
+  if (prior.length === 0) return { segments: [] };
+
+  const steps = await prisma.appExperienceStep.findMany({
+    where: { id: { in: prior.map((l) => l.stepId) } },
+    select: { id: true, title: true },
+  });
+  const titleById = new Map(steps.map((s) => [s.id, s.title]));
+
+  // Sequential rather than Promise.all: a run has a handful of legs, and each `loadTranscript` is
+  // itself a query returning every turn of a conversation. Fanning them out buys nothing and
+  // makes the worst case (a long journey being replayed) spikier on the connection pool.
+  const segments: StitchedSegment[] = [];
+  for (const leg of prior) {
+    segments.push({
+      stepTitle: titleById.get(leg.stepId) ?? null,
+      turns: await loadTranscript(leg.sessionId),
+    });
+  }
+  return { segments };
 }
 
 /** One leg, as the admin runs console renders it. */

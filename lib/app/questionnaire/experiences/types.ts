@@ -70,6 +70,27 @@ export const EXPERIENCE_CONTINUITY_MODE_LABELS: Record<ExperienceContinuityMode,
 };
 
 /**
+ * How visible the seam between legs is under `stitched` (P15.3).
+ *
+ * `divider` renders a labelled rule carrying the next step's title; `none` reveals the bridging
+ * turn with no marker at all. Both auto-continue — the choice is about honesty, not friction.
+ *
+ * There is a real argument on each side, which is why this is the author's call and not ours.
+ * A marker tells the respondent the subject changed and that a different questionnaire is now
+ * asking, which matters when the second leg is materially more probing than the first. No marker
+ * reads as one interviewer following a thread, which is the smoother experience and the whole
+ * point of choosing `stitched`. Ignored entirely under `linked` and `merged`.
+ */
+export const EXPERIENCE_SEAM_MARKERS = ['divider', 'none'] as const;
+export type ExperienceSeamMarker = (typeof EXPERIENCE_SEAM_MARKERS)[number];
+
+/** Human labels for the seam-marker selector. */
+export const EXPERIENCE_SEAM_MARKER_LABELS: Record<ExperienceSeamMarker, string> = {
+  divider: 'Subtle divider with the step title',
+  none: 'Seamless — no marker',
+};
+
+/**
  * What to do when the routing selector cannot be trusted — it errored, named a step that does not
  * exist, or reported confidence below the experience's threshold.
  *
@@ -158,6 +179,14 @@ export interface ExperienceSettingsShape {
    */
   showRoutingRationale: boolean;
   /**
+   * `stitched` only: how visible the seam between legs is. See {@link ExperienceSeamMarker}.
+   *
+   * Read unconditionally but applied only under `stitched` — a `linked` journey shows a full
+   * handoff card and a `merged` one has no seam to mark. Keeping the key mode-independent means
+   * switching an experience between modes never loses the author's choice.
+   */
+  stitchedSeamMarker: ExperienceSeamMarker;
+  /**
    * Facilitated meetings: re-synthesise a breakout after this many further completions. Lower is
    * more live and more expensive. Ignored by the switcher kind.
    */
@@ -195,6 +224,10 @@ export const DEFAULT_EXPERIENCE_SETTINGS: ExperienceSettingsShape = {
   summariseCarryOver: true,
   carryProfile: true,
   showRoutingRationale: true,
+  // `divider` rather than `none`: a respondent moving from a broad opener into a materially more
+  // probing follow-up should be able to see that the subject changed. An author who wants the
+  // smoother read can opt out; the reverse default would hide the seam by accident.
+  stitchedSeamMarker: 'divider',
   synthesisEveryNCompletions: 3,
   insightMinSupport: 3,
   surfaceInsightsToRespondents: false,

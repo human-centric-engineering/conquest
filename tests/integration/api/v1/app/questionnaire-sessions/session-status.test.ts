@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   buildTurnContext: vi.fn(),
   sumSessionTurnCost: vi.fn(),
+  experienceContextForSession: vi.fn(),
 }));
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turn-context', () => ({
@@ -26,6 +27,13 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/turn-context', () => ({
 }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({
   sumSessionTurnCost: mocks.sumSessionTurnCost,
+}));
+// The experience-membership lookup (P15.3) is a real Prisma read. Mocked like the other DB seams
+// so this test stays deterministic — without it the call escapes to a live client and only the
+// seam's fail-soft catch keeps the test green, which would mask a genuine regression behind
+// `prisma:error` noise rather than failing.
+vi.mock('@/app/api/v1/app/experiences/_lib/run-read', () => ({
+  experienceContextForSession: mocks.experienceContextForSession,
 }));
 
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
@@ -112,6 +120,8 @@ function ctx(
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.sumSessionTurnCost.mockResolvedValue(0);
+  // The overwhelming majority of sessions are standalone, not a leg of an experience run.
+  mocks.experienceContextForSession.mockResolvedValue(null);
 });
 
 describe('loadSessionStatus', () => {
@@ -286,5 +296,57 @@ describe('loadSessionStatus', () => {
 
     // total=0 → allAnswered = (0 > 0 && ...) = false → kind must be 'not_ready'.
     expect(loaded?.view.completion.kind).toBe('not_ready');
+  });
+});
+
+/**
+ * Experience membership (P15.3). This rides the status view rather than the submit response
+ * because the submit response is seen exactly once — a respondent who reloads a completed leg
+ * would otherwise land on the terminal completion screen and never learn the journey continues.
+ */
+describe('loadSessionStatus — experience membership', () => {
+  it('reports null for an ordinary standalone session', async () => {
+    mocks.buildTurnContext.mockResolvedValue(ctx());
+
+    const loaded = await loadSessionStatus('sess-1');
+
+    expect(loaded?.view.experience).toBeNull();
+    expect(mocks.experienceContextForSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('passes the run context through when the session is a leg', async () => {
+    mocks.buildTurnContext.mockResolvedValue(ctx());
+    mocks.experienceContextForSession.mockResolvedValue({
+      runId: 'run_1',
+      publicRef: '7F3K9M2P',
+      ordinal: 1,
+      continuityMode: 'stitched',
+      seamMarker: 'divider',
+      stepTitle: 'Team depth',
+    });
+
+    const loaded = await loadSessionStatus('sess-1');
+
+    expect(loaded?.view.experience).toEqual({
+      runId: 'run_1',
+      publicRef: '7F3K9M2P',
+      ordinal: 1,
+      continuityMode: 'stitched',
+      seamMarker: 'divider',
+      stepTitle: 'Team depth',
+    });
+  });
+
+  it('degrades to null rather than failing the whole status read', async () => {
+    // Lifecycle status drives the entire respondent UI. An experience lookup that errors must
+    // never take it down — the worst acceptable outcome is a leg that does not offer its handoff.
+    mocks.buildTurnContext.mockResolvedValue(ctx());
+    mocks.experienceContextForSession.mockRejectedValue(new Error('db unavailable'));
+
+    const loaded = await loadSessionStatus('sess-1');
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.view.experience).toBeNull();
+    expect(loaded?.view.status).toBe('active');
   });
 });

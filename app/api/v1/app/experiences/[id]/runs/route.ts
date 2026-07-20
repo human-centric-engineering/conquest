@@ -25,6 +25,7 @@ import { createExperienceRun } from '@/app/api/v1/app/experiences/_lib/run-creat
 import { listRunsForExperience } from '@/app/api/v1/app/experiences/_lib/run-read';
 import { experienceStartLimiter } from '@/app/api/v1/app/experiences/_lib/rate-limit';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
+import { mintRunToken, runCookieHeader } from '@/app/api/v1/app/experiences/_lib/run-access-token';
 
 const startSchema = z.object({
   /** Optional cohort-member binding, when the caller arrived through a roster link. */
@@ -83,7 +84,7 @@ export async function POST(
     sessionId: result.session.id,
   });
 
-  return successResponse(
+  const response = successResponse(
     {
       runId: result.run.id,
       publicRef: result.run.publicRef,
@@ -95,6 +96,21 @@ export async function POST(
     undefined,
     { status: 201 }
   );
+
+  // The run credential (P15.3): an httpOnly cookie covering EVERY leg this run will ever have,
+  // including ones that do not exist yet. It is what lets `/x/<publicRef>` open leg B on the
+  // no-login surface without putting a credential in the URL — see `run-access-token.ts` for why
+  // that distinction matters for this data in particular.
+  //
+  // Set for the no-login surface only. An authenticated respondent's own session cookie already
+  // proves who they are, and issuing a second credential nobody needs widens the surface for
+  // nothing. Skipped when the run has no publicRef (a pre-column row) — the cookie is keyed on it.
+  if (!respondentUserId && result.run.publicRef) {
+    const { token: runToken } = mintRunToken(result.run.id);
+    response.headers.append('Set-Cookie', runCookieHeader(result.run.publicRef, runToken));
+  }
+
+  return response;
 }
 
 export const GET = handleList;

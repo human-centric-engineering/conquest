@@ -41,6 +41,7 @@ function input(over: Partial<SessionStatusInput> = {}): SessionStatusInput {
     capped: false,
     anonymous: false,
     ref: null,
+    experience: null,
     ...over,
   };
 }

@@ -25,6 +25,7 @@ import {
   type CostCapTier,
   type SessionStatusView,
 } from '@/lib/app/questionnaire/session';
+import { experienceContextForSession } from '@/app/api/v1/app/experiences/_lib/run-read';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
 
@@ -81,6 +82,12 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     costTier = classifyCostCap(spentUsd, capUsd);
   }
 
+  // Experiences (P15.3): is this session a leg of a run, and how should its seam be presented?
+  // One indexed lookup on the leg table's `@unique` sessionId, null for a standalone session —
+  // which is the overwhelming majority, so the miss path stays cheap. Fail-soft: an experience
+  // read that errors must not take down the lifecycle status the whole respondent UI depends on.
+  const experience = await experienceContextForSession(sessionId).catch(() => null);
+
   const view = buildSessionStatusView({
     status,
     assessment,
@@ -89,6 +96,7 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     anonymous,
     // The support reference comes from the same turn-context load (null for pre-column rows).
     ref: loaded.session.publicRef ?? null,
+    experience,
   });
 
   return {

@@ -7,6 +7,11 @@
  */
 
 import type { SensitivitySeverity } from '@/lib/app/questionnaire/types';
+import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
+import type {
+  ExperienceContinuityMode,
+  ExperienceSeamMarker,
+} from '@/lib/app/questionnaire/experiences/types';
 
 /**
  * A run's lifecycle status.
@@ -174,6 +179,75 @@ export const ADVANCE_BLOCKED_CODES = [
 export type AdvanceBlockedCode = (typeof ADVANCE_BLOCKED_CODES)[number];
 
 /* -------------------------------------------------------------------------- */
+/* Session ↔ run membership                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a respondent surface needs to know about the run its session belongs to (P15.3).
+ *
+ * Carried on the session STATUS VIEW rather than handed back by the submit response, and that
+ * choice is load-bearing: the submit response is seen exactly once, so a respondent who reloads
+ * a completed leg — or returns to the tab an hour later — would otherwise land on the terminal
+ * completion screen with no idea the journey continues. The status view is re-read on every
+ * mount, so run membership survives a refresh.
+ *
+ * `null` for an ordinary standalone session, which is the overwhelming majority — the lookup is a
+ * single indexed hit on the `@unique` `sessionId`.
+ */
+export interface SessionExperienceContext {
+  runId: string;
+  /**
+   * The run's stable public ref — the `/x/<publicRef>` address, when it has one.
+   *
+   * Null only for a pre-column run. Its presence is what tells the respondent surface it is on the
+   * stable address, where continuing means REFRESHING in place rather than navigating: pushing the
+   * URL you are already on is a no-op, so a stitched handoff there would silently do nothing.
+   */
+  publicRef: string | null;
+  /** This leg's 0-based position. `> 0` means earlier legs exist to stitch above this one. */
+  ordinal: number;
+  /**
+   * How the seam is presented. Read live from the experience rather than frozen onto the run, so
+   * an author switching modes changes what in-flight respondents see — which is exactly the
+   * promise that `linked` and `stitched` share a persistence shape.
+   */
+  continuityMode: ExperienceContinuityMode;
+  /** Only applied under `stitched`; see {@link ExperienceSeamMarker}. */
+  seamMarker: ExperienceSeamMarker;
+  /** This leg's step title — the divider label. Null when the step pointer no longer resolves. */
+  stepTitle: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Stitched history                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One earlier leg's conversation, as the stitched surface replays it above the live one (P15.3).
+ *
+ * Deliberately NOT folded into the live `turns` array, and deliberately not expressed by widening
+ * {@link QuestionnaireTurn} with a `seam` role. The turn array is consumed by the reveal cursor,
+ * the inspector drawer, and `report/craft.ts` — which maps `turn.role` directly onto an
+ * `LlmMessage`. A synthetic role would have travelled into a real LLM call as a role the provider
+ * does not accept. Keeping history a separate, read-only prop means none of those paths change.
+ */
+export interface StitchedSegment {
+  /** The step this leg fulfilled — the divider label. Null when the step pointer no longer resolves. */
+  stepTitle: string | null;
+  /** The leg's replayed conversation, oldest first. */
+  turns: QuestionnaireTurn[];
+}
+
+/**
+ * Every leg BEFORE the one currently being answered, oldest first.
+ *
+ * Empty for the entry leg, which is the common case and renders exactly as a standalone session.
+ */
+export interface StitchedHistory {
+  segments: StitchedSegment[];
+}
+
+/* -------------------------------------------------------------------------- */
 /* Poll status                                                                */
 /* -------------------------------------------------------------------------- */
 
@@ -185,6 +259,23 @@ export type AdvanceBlockedCode = (typeof ADVANCE_BLOCKED_CODES)[number];
  */
 export type RunPollState =
   | { state: 'pending' }
-  | { state: 'leg'; sessionId: string; stepTitle: string; message: string }
+  | {
+      state: 'leg';
+      sessionId: string;
+      stepTitle: string;
+      message: string;
+      /**
+       * A freshly-minted access token for the NEW leg — present only on the no-login surface.
+       *
+       * Without it the anonymous respondent cannot open leg B at all: they hold a signed token
+       * scoped to leg A's session id, and leg B is a different session. The authenticated surface
+       * needs nothing here, because a cookie already proves who they are.
+       *
+       * Minted only when the caller proved ownership by presenting a valid token for a sibling leg
+       * of THIS run. It is a lateral move within a journey the caller is already inside, never a
+       * way to obtain a credential for a session they could not otherwise reach.
+       */
+      sessionToken?: string;
+    }
   | { state: 'conclude'; reason: ConcludeReason; message: string }
   | { state: 'failed'; message: string };

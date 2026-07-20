@@ -9,8 +9,10 @@
  * `narrowRespondentReportSettings` (`lib/app/questionnaire/report/settings.ts`).
  */
 
+import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import {
   DEFAULT_EXPERIENCE_SETTINGS,
+  EXPERIENCE_SEAM_MARKERS,
   EXPERIENCE_SYNTHESIS_INSTRUCTIONS_MAX_LENGTH,
   INSIGHT_MIN_SUPPORT_CEILING,
   INSIGHT_MIN_SUPPORT_FLOOR,
@@ -51,6 +53,11 @@ export function narrowExperienceSettings(value: unknown): ExperienceSettingsShap
     summariseCarryOver: asBool(obj.summariseCarryOver, d.summariseCarryOver),
     carryProfile: asBool(obj.carryProfile, d.carryProfile),
     showRoutingRationale: asBool(obj.showRoutingRationale, d.showRoutingRationale),
+    stitchedSeamMarker: narrowToEnum(
+      typeof obj.stitchedSeamMarker === 'string' ? obj.stitchedSeamMarker : '',
+      EXPERIENCE_SEAM_MARKERS,
+      d.stitchedSeamMarker
+    ),
     synthesisEveryNCompletions: asInt(
       obj.synthesisEveryNCompletions,
       SYNTHESIS_EVERY_N_MIN,

@@ -21,6 +21,7 @@ import {
   EXPERIENCE_ROUTING_FALLBACKS,
   EXPERIENCE_ROUTING_INSTRUCTIONS_MAX_LENGTH,
   EXPERIENCE_STATUSES,
+  EXPERIENCE_SEAM_MARKERS,
   EXPERIENCE_STEP_KEY_MAX_LENGTH,
   EXPERIENCE_STEP_KINDS,
   EXPERIENCE_STEP_PURPOSE_MAX_LENGTH,
@@ -65,6 +66,7 @@ export const experienceSettingsPatchSchema = z
     summariseCarryOver: z.boolean(),
     carryProfile: z.boolean(),
     showRoutingRationale: z.boolean(),
+    stitchedSeamMarker: z.enum(EXPERIENCE_SEAM_MARKERS),
     synthesisEveryNCompletions: z
       .number()
       .int()

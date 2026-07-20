@@ -118,6 +118,35 @@ describe('narrowExperienceSettings', () => {
     expect(narrowExperienceSettings(once)).toEqual(once);
   });
 
+  describe('stitchedSeamMarker (P15.3)', () => {
+    it('accepts both markers', () => {
+      expect(narrowExperienceSettings({ stitchedSeamMarker: 'none' }).stitchedSeamMarker).toBe(
+        'none'
+      );
+      expect(narrowExperienceSettings({ stitchedSeamMarker: 'divider' }).stitchedSeamMarker).toBe(
+        'divider'
+      );
+    });
+
+    it.each([
+      ['an unknown string', 'subtle'],
+      ['a boolean', true],
+      ['null', null],
+      ['a number', 1],
+    ])('falls back to the default for %s', (_label, value) => {
+      expect(narrowExperienceSettings({ stitchedSeamMarker: value }).stitchedSeamMarker).toBe(
+        DEFAULT_EXPERIENCE_SETTINGS.stitchedSeamMarker
+      );
+    });
+
+    it('defaults to showing the divider', () => {
+      // A respondent moving from a broad opener into a materially more probing follow-up should be
+      // able to SEE the subject changed. Hiding the seam must stay an explicit author choice — the
+      // opposite default would conceal it by accident.
+      expect(DEFAULT_EXPERIENCE_SETTINGS.stitchedSeamMarker).toBe('divider');
+    });
+  });
+
   it('defaults the k-anonymity floor to at least three supporters', () => {
     // Two people can usually identify each other from "a tension between two of you"; three is the
     // smallest group where that stops being true. Guard the default so it is not lowered casually.

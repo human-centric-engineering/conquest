@@ -725,6 +725,12 @@ export const API = {
       /** THE POLL ENDPOINT — the respondent's client asks "what next?" after a submit (GET). */
       runStatus: (runId: string, sessionId?: string): string =>
         `/api/v1/app/experiences/runs/${runId}/status${sessionId ? `?sessionId=${sessionId}` : ''}`,
+      /**
+       * The earlier legs of a run, for the stitched surface to replay above the live one (GET).
+       * Respondent-only — the admin bypass does not apply.
+       */
+      runTranscript: (runId: string, sessionId: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/transcript?sessionId=${sessionId}`,
       /** Manually push a stuck run forward (POST — admin only; has real side effects). */
       advanceRun: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/advance`,
     },

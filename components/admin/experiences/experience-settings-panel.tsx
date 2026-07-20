@@ -43,6 +43,8 @@ import {
   EXPERIENCE_ROUTING_FALLBACK_LABELS,
   EXPERIENCE_ROUTING_FALLBACKS,
   EXPERIENCE_ROUTING_INSTRUCTIONS_MAX_LENGTH,
+  EXPERIENCE_SEAM_MARKER_LABELS,
+  EXPERIENCE_SEAM_MARKERS,
   EXPERIENCE_STATUSES,
   EXPERIENCE_SYNTHESIS_INSTRUCTIONS_MAX_LENGTH,
   EXPERIENCE_TITLE_MAX_LENGTH,
@@ -74,6 +76,7 @@ const formSchema = z.object({
   summariseCarryOver: z.boolean(),
   carryProfile: z.boolean(),
   showRoutingRationale: z.boolean(),
+  stitchedSeamMarker: z.enum(EXPERIENCE_SEAM_MARKERS),
   synthesisEveryNCompletions: z
     .number({ message: 'Enter a whole number' })
     .int()
@@ -95,6 +98,7 @@ const SETTINGS_KEYS = [
   'summariseCarryOver',
   'carryProfile',
   'showRoutingRationale',
+  'stitchedSeamMarker',
   'synthesisEveryNCompletions',
   'insightMinSupport',
   'surfaceInsightsToRespondents',
@@ -318,6 +322,52 @@ export function ExperienceSettingsPanel({ experience }: { experience: Experience
             </Select>
             <FormError message={errors.continuityMode?.message} />
           </div>
+
+          {/* Only meaningful under `stitched` — a `linked` journey shows a full handoff card, so
+              there is no seam to mark. The value is preserved when the mode is switched away and
+              back; it is simply not shown while it cannot apply. */}
+          {watch('continuityMode') === 'stitched' && (
+            <div className="space-y-2">
+              <Label htmlFor="settings-seam" className="flex items-center gap-1">
+                Mark where the questionnaire changes
+                <FieldHelp title="Seam marker">
+                  <p>
+                    <strong>Subtle divider</strong> — a thin labelled rule carrying the next step
+                    &apos;s title appears where the follow-up begins.
+                  </p>
+                  <p className="mt-2">
+                    <strong>Seamless</strong> — the follow-up simply continues, with no marker.
+                  </p>
+                  <p className="text-muted-foreground mt-2">
+                    A divider is worth keeping when the follow-up is noticeably more probing than
+                    the opener — it tells the respondent the subject has changed rather than letting
+                    them discover it mid-answer.
+                  </p>
+                </FieldHelp>
+              </Label>
+              <Select
+                value={watch('stitchedSeamMarker')}
+                onValueChange={(v) =>
+                  setValue('stitchedSeamMarker', v as FormValues['stitchedSeamMarker'], {
+                    shouldDirty: true,
+                  })
+                }
+                disabled={isLoading}
+              >
+                <SelectTrigger id="settings-seam">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXPERIENCE_SEAM_MARKERS.map((marker) => (
+                    <SelectItem key={marker} value={marker}>
+                      {EXPERIENCE_SEAM_MARKER_LABELS[marker]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormError message={errors.stitchedSeamMarker?.message} />
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="settings-instructions" className="flex items-center gap-1">

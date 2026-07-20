@@ -57,6 +57,8 @@ import {
   computeReasoningDwellMs,
 } from '@/components/app/questionnaire/chat/reasoning-trace';
 import { TurnInspectorDrawer } from '@/components/app/questionnaire/chat/turn-inspector-drawer';
+import { SeamDivider } from '@/components/app/questionnaire/experiences/seam-divider';
+import type { StitchedHistory } from '@/lib/app/questionnaire/experiences/run/types';
 
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
@@ -102,6 +104,17 @@ export interface QuestionnaireChatProps {
   correctionTargets?: CorrectionTarget[];
   /** Refetch the panel/lifecycle after a successful inline correction. */
   onCorrected?: (view: AnswerPanelView) => void;
+  /**
+   * Experiences, `stitched` continuity (P15.3): the earlier legs of this run, replayed above the
+   * live conversation. Read-only and settled — never animated, never part of the reveal queue.
+   * Omitted/null for a standalone session and for `linked`, which is the overwhelming majority.
+   */
+  stitchedHistory?: StitchedHistory | null;
+  /**
+   * The divider label introducing the LIVE leg, when history precedes it. `null` suppresses every
+   * seam divider (the author chose the seamless marker); `undefined` means not stitched at all.
+   */
+  stitchedSeamLabel?: string | null;
   /**
    * Read-only replay: render the transcript with no composer (no input, mic, or attachment row), for
    * the admin session viewer reading a respondent's conversation. The respondent surface never sets
@@ -402,6 +415,8 @@ export function QuestionnaireChat({
   animateOpening = false,
   correctionTargets = [],
   onCorrected,
+  stitchedHistory,
+  stitchedSeamLabel,
   readOnly = false,
   className,
 }: QuestionnaireChatProps) {
@@ -541,6 +556,35 @@ export function QuestionnaireChat({
       {/* Transcript */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-6">
+          {/* Experiences, `stitched` continuity (P15.3): the earlier legs of this run, replayed
+              above the live conversation so the journey reads as one. Rendered as its own block
+              rather than concatenated into `turns` — the reveal cursor, the typewriter and the
+              inspector all index that array, and history must settle instantly and animate
+              nothing. `stitchedSeamLabel` is null when the author chose the seamless marker. */}
+          {stitchedHistory?.segments.map((segment, s) => (
+            <div key={`seg-${s}`} className="flex flex-col gap-6">
+              {stitchedSeamLabel !== null && s > 0 && <SeamDivider label={segment.stepTitle} />}
+              {segment.turns.map((turn, t) =>
+                turn.role === 'user' ? (
+                  <UserBubble key={`seg-${s}-t-${t}`} content={turn.content} />
+                ) : (
+                  <AssistantTurn key={`seg-${s}-t-${t}`}>
+                    <TurnReasoning steps={turn.reasoning} placement={reasoningPlacement} />
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <Markdown>{turn.content}</Markdown>
+                    </div>
+                    <TurnNotices warnings={turn.warnings} />
+                  </AssistantTurn>
+                )
+              )}
+            </div>
+          ))}
+          {/* The divider introducing the LIVE leg — shown only when history precedes it. */}
+          {stitchedSeamLabel !== null &&
+            stitchedSeamLabel !== undefined &&
+            (stitchedHistory?.segments.length ?? 0) > 0 && (
+              <SeamDivider label={stitchedSeamLabel} />
+            )}
           {turns.map((turn, i) => {
             if (turn.role === 'user') return <UserBubble key={i} content={turn.content} />;
 
