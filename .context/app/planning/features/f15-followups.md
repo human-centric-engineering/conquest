@@ -101,7 +101,12 @@ precisely so this change is possible without touching them.
 
 ---
 
-## 5. Experience-wide report synthesis · **a phase**
+## 5. Experience-wide report synthesis · **SHIPPED — F15.8 (2026-07-20)**
+
+> Built as [`f15.8.md`](./f15.8.md). Reads finished step reports (switcher) or k-anonymity-gated
+> breakout insights (meeting); its own `AppExperienceSynthesis` table rather than a fourth
+> `ReportScope` kind. The constraint below is why, and a static import guard in `synthesis.test.ts`
+> now enforces it. Retained for the reasoning.
 
 A view across a whole journey, synthesised over **ready per-step reports**.
 

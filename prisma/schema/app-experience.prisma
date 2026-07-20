@@ -66,9 +66,9 @@ model AppExperience {
   /// `minRoutingConfidence`. Defaults to `conclude` — when the selector cannot decide, finishing
   /// with what was gathered is honest; routing a respondent into a long questionnaire on a
   /// coin-flip is not.
-  routingFallback String @default("conclude")
+  routingFallback      String  @default("conclude")
   /// Below this confidence the selector's answer is discarded and `routingFallback` applies.
-  minRoutingConfidence Float @default(0.6)
+  minRoutingConfidence Float   @default(0.6)
   /// Admin-authored guidance appended to the selector prompt ("prefer depth over breadth when the
   /// respondent has already shown domain fluency"). Null = the base prompt only.
   routingInstructions  String?
@@ -81,7 +81,7 @@ model AppExperience {
 
   /// ACCESS_MODES (types.ts — reused, not re-declared): invitation_only | public | both.
   /// Governs who may START a run. Individual legs still honour their own version's config.
-  accessMode String @default("invitation_only")
+  accessMode String  @default("invitation_only")
   /// Short human-quotable code for the public experience link (`/x/<publicRef>`), minted by
   /// generateSessionRef(). Null until the experience is launched with public access.
   publicRef  String? @unique
@@ -104,6 +104,7 @@ model AppExperience {
   runs         AppExperienceRun[]
   meetings     AppExperienceMeeting[]
   routingRules AppExperienceRoutingRule[]
+  syntheses    AppExperienceSynthesis[]
 
   @@index([demoClientId])
   @@index([status])
@@ -142,8 +143,8 @@ model AppExperienceStep {
   /// Optional round whose access window this step honours. Plain String, no @relation (UG-1).
   roundId         String?
 
-  title            String // display name in the journey editor
-  purpose          String? // what this step is for; shown to the selector as candidate context
+  title             String // display name in the journey editor
+  purpose           String? // what this step is for; shown to the selector as candidate context
   /// When the selector should choose THIS step, in the admin's own words. The highest-signal
   /// input to the routing decision; null means the selector falls back to `purpose` + title.
   selectionCriteria String?
@@ -179,7 +180,7 @@ model AppExperienceStep {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  experience AppExperience             @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  experience AppExperience               @relation(fields: [experienceId], references: [id], onDelete: Cascade)
   rooms      AppExperienceBreakoutRoom[]
 
   @@unique([experienceId, key])
@@ -412,7 +413,7 @@ model AppExperienceMeeting {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  experience AppExperience             @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  experience AppExperience          @relation(fields: [experienceId], references: [id], onDelete: Cascade)
   runs       AppExperienceRun[]
   insights   AppExperienceInsight[]
 
@@ -484,7 +485,6 @@ model AppExperienceInsight {
   @@map("app_experience_insight")
 }
 
-
 /// A ROOM within a breakout (P15.5b) — the optional refinement on "everyone answers individually".
 ///
 /// A breakout is a period of TIME. Usually the whole group answers the same questionnaire on their
@@ -526,4 +526,61 @@ model AppExperienceBreakoutRoom {
   @@unique([stepId, name])
   @@index([stepId])
   @@map("app_experience_breakout_room")
+}
+
+/// The experience-wide synthesis — one view across a whole journey (P15.8).
+///
+/// ## Why this is its own table rather than a fourth `AppCohortReport` scope
+///
+/// `AppCohortReport.versionId` is NOT NULL on every row, because every one of its three scopes
+/// (round, version, experience_step) analyses exactly ONE questionnaire version. An experience
+/// spans versions by definition, so there is no honest value to put there. `scopeOwnerCreate` /
+/// `scopeOwnerWhere` are also deliberately exhaustive switches over the three kinds. Forcing a
+/// fourth kind in would mean relaxing a NOT NULL that currently documents a real invariant.
+///
+/// ## What it reads — and the trap it exists to avoid
+///
+/// A synthesis reads FINISHED per-step outputs: ready cohort reports for a switcher, already
+/// k-anonymity-gated insights for a facilitated meeting. It must NEVER re-aggregate sessions
+/// across steps. `buildCohortDataset` resolves everything by a single `versionId` and joins fills
+/// by `dataSlotId` — the row id, not the key — so fills from another version find no bucket and
+/// are SILENTLY DROPPED. A naive cross-step dataset would emit a confident, well-formatted report
+/// over a fraction of the data, with no error and no warning. Prose in, prose out.
+///
+/// One row per experience: `experienceId` is unique. Regenerating appends nothing — it replaces
+/// `content`, mirroring the breakout synthesis rather than the cohort report's revision history.
+/// An experience-wide view is a read of a moving target (step reports get regenerated), so a
+/// revision chain would imply a stability it does not have.
+model AppExperienceSynthesis {
+  id           String @id @default(cuid())
+  experienceId String @unique
+
+  /// EXPERIENCE_SYNTHESIS_STATUSES: queued | processing | ready | failed.
+  status String @default("queued")
+
+  /// `ExperienceSynthesisContent` — narrative, findings (each citing the steps that support it),
+  /// divergences, coverage, caveats. Null until ready.
+  content Json?
+
+  /// How many of the eligible steps actually contributed, recorded at generation time. Stored
+  /// rather than derived because coverage is a statement about the moment the synthesis was
+  /// written; a step report generated afterwards must not silently make an old synthesis look
+  /// more complete than it was.
+  coveredSteps  Int @default(0)
+  eligibleSteps Int @default(0)
+
+  costUsd     Float?
+  error       String?
+  generatedAt DateTime?
+
+  /// Admin `User.id`, no FK (UG-1) — attribution, not ownership.
+  createdBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  experience AppExperience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("app_experience_synthesis")
 }

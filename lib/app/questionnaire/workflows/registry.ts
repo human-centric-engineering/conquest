@@ -21,6 +21,7 @@ import { designEvaluationWorkflow } from '@/lib/app/questionnaire/workflows/defi
 import { experienceMeetingWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-meeting';
 import { experienceRunLifecycleWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-run-lifecycle';
 import { experienceSwitcherWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-switcher';
+import { experienceSynthesisWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-synthesis';
 import { dataSlotGenerationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-generation';
 import { dataSlotTurnWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-turn';
 import { generativeAuthoringWorkflow } from '@/lib/app/questionnaire/workflows/definitions/generative-authoring';
@@ -51,6 +52,7 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   experienceSwitcherWorkflow,
   experienceMeetingWorkflow,
   experienceRunLifecycleWorkflow,
+  experienceSynthesisWorkflow,
 ] as const;
 
 /** Look up one diagram by slug. */

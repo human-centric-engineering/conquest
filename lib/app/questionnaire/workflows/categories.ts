@@ -80,7 +80,12 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
     id: 'experiences',
     label: 'Experiences',
     description: 'Journeys that compose several questionnaires into one respondent path.',
-    slugs: ['experience-switcher', 'experience-meeting', 'experience-run-lifecycle'],
+    slugs: [
+      'experience-switcher',
+      'experience-meeting',
+      'experience-run-lifecycle',
+      'experience-synthesis',
+    ],
   },
 ] as const;
 

@@ -68,3 +68,20 @@ export const SYNTHESIS_TIMEOUT_MS = 60_000;
 
 /** Cap on how many findings one breakout synthesis may produce. */
 export const SYNTHESIS_MAX_INSIGHTS = 12;
+
+/**
+ * The experience-wide synthesiser (P15.8) — writes one view across a whole journey from the
+ * FINISHED per-step outputs.
+ *
+ * Reasoning-tier: its whole job is to hold several step reports side by side and notice where they
+ * agree, where they diverge, and what only shows up across the set. Like the breakout synthesiser
+ * and unlike the routing selector, nobody is watching a spinner mid-conversation — an admin asked
+ * for this deliberately — so it gets a generous timeout and correctness matters more than latency.
+ */
+export const EXPERIENCE_SYNTHESIS_AGENT_SLUG = 'app-experience-synthesiser';
+
+/** Token ceiling for one experience-wide synthesis. Generous: several step reports go in. */
+export const EXPERIENCE_SYNTHESIS_MAX_TOKENS = 6_000;
+
+/** Timeout for one experience-wide synthesis. Long, for the same reason as the breakout one. */
+export const EXPERIENCE_SYNTHESIS_TIMEOUT_MS = 90_000;

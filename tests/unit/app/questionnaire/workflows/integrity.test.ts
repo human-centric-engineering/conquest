@@ -108,13 +108,14 @@ describe('workflow diagram integrity', () => {
     constants.RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG,
     // The Agent Settings Advisor builds its prompt in code and is not in the Prompt Library.
     AGENT_SETTINGS_ADVISOR_SLUG,
-    // The three Experience agents build their prompts in code from run-time material (the
-    // carry-over digest, the candidate criteria, a breakout's collected slots) rather than from a
-    // catalogued template, so there is no specimen the Prompt Library could render. Their nodes
-    // correctly show no Prompt tab.
+    // The Experience agents build their prompts in code from run-time material (the carry-over
+    // digest, the candidate criteria, a breakout's collected slots, a set of finished step
+    // reports) rather than from a catalogued template, so there is no specimen the Prompt Library
+    // could render. Their nodes correctly show no Prompt tab.
     experienceConstants.EXPERIENCE_ROUTER_AGENT_SLUG,
     experienceConstants.EXPERIENCE_HANDOFF_AGENT_SLUG,
     experienceConstants.MEETING_SYNTHESIS_AGENT_SLUG,
+    experienceConstants.EXPERIENCE_SYNTHESIS_AGENT_SLUG,
   ]);
 
   it('every agent-backed step exposes a catalogued prompt (or is a known exception)', () => {
