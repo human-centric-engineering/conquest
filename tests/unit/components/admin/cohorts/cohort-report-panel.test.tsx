@@ -40,6 +40,7 @@ function view(overrides: Partial<CohortReportView> = {}): CohortReportView {
   return {
     scopeKind: 'round',
     roundId: 'r1',
+    stepId: null,
     versionId: 'v1',
     exists: true,
     title: 'Q1 — cohort report',

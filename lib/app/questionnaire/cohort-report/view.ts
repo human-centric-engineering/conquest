@@ -28,15 +28,21 @@ import type { CohortDataset } from '@/lib/app/questionnaire/cohort-report/types'
 import {
   scopeOwnerWhere,
   scopeRoundId,
+  scopeStepId,
   type ReportScope,
 } from '@/lib/app/questionnaire/cohort-report/scope';
 
 /** The client-safe cohort-report read shape. */
 export interface CohortReportView {
-  /** 'round' (one round's submissions) or 'version' (version-wide cross-round synthesis). */
-  scopeKind: 'round' | 'version';
-  /** Owning round id, or null for a version-wide report. */
+  /**
+   * 'round' (one round's submissions), 'version' (version-wide cross-round synthesis), or
+   * 'experience_step' (the legs of one step of one journey — F15.4).
+   */
+  scopeKind: 'round' | 'version' | 'experience_step';
+  /** Owning round id, or null for any other scope. */
   roundId: string | null;
+  /** Owning experience step id, or null for any other scope. */
+  stepId: string | null;
   versionId: string;
   /** False when no report has been generated for this round yet (UI shows "Generate"). */
   exists: boolean;
@@ -95,6 +101,7 @@ export async function buildCohortReportView(params: {
     return {
       scopeKind: scope.kind,
       roundId: scopeRoundId(scope),
+      stepId: scopeStepId(scope),
       versionId,
       exists: false,
       title: null,
@@ -116,6 +123,7 @@ export async function buildCohortReportView(params: {
   return {
     scopeKind: scope.kind,
     roundId: scopeRoundId(scope),
+    stepId: scopeStepId(scope),
     versionId,
     exists: true,
     title: report.title,

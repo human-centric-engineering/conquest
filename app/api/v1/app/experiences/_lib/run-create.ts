@@ -146,6 +146,7 @@ export async function createExperienceRun(
     respondentUserId: params.respondentUserId,
     cohortMemberId: params.cohortMemberId,
     roundId: entry.roundId,
+    stepId: entry.id,
     fromSessionId: null,
   });
 

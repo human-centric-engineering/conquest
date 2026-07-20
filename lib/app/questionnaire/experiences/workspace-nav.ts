@@ -35,6 +35,10 @@ export const EXPERIENCE_WORKSPACE_TABS: readonly ExperienceWorkspaceTab[] = [
   // rules editor there would imply a decision that surface never makes.
   { id: 'routing', label: 'Routing', segment: 'routing', kinds: ['agentic_switcher'] },
   { id: 'runs', label: 'Runs', segment: 'runs' },
+  // Reports are scoped PER STEP (F15.4), which is why they get their own tab rather than sitting
+  // under Runs: a run is one respondent's journey, a report is every respondent who answered one
+  // step of it. Two different questions about the same data.
+  { id: 'reports', label: 'Reports', segment: 'reports' },
   { id: 'settings', label: 'Settings', segment: 'settings' },
 ];
 

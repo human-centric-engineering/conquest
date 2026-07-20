@@ -139,6 +139,100 @@ describe('experience datamodel (Prisma.dmmf)', () => {
   });
 });
 
+describe('experience pointers on other models (F15.4)', () => {
+  it('keeps AppQuestionnaireSession.experienceStepId a plain scalar String', () => {
+    const session = getModel('AppQuestionnaireSession');
+    const field = getField(session, 'experienceStepId');
+
+    // Same UG-1 posture as roundId / cohortMemberId / cohortSubgroupId beside it: an
+    // identity↔answer pointer read for report SCOPING and stats, never a graph edge.
+    expect(field.kind).toBe('scalar');
+    expect(field.type).toBe('String');
+  });
+
+  it('declares NO relation from a session to an experience step', () => {
+    // The load-bearing assertion. A real relation would let editing a journey's steps cascade
+    // into respondent answers, and would make answers reachable by walking experience config.
+    const session = getModel('AppQuestionnaireSession');
+    const stepRelations = session.fields.filter(
+      (f) => f.kind === 'object' && f.type === 'AppExperienceStep'
+    );
+    expect(stepRelations).toEqual([]);
+  });
+
+  it('keeps AppCohortReport.experienceStepOwnerId a plain scalar String with no relation', () => {
+    // No FK: a step is experience CONFIG, and a cascade would delete a generated report about
+    // respondents who already ran it.
+    const report = getModel('AppCohortReport');
+    const field = getField(report, 'experienceStepOwnerId');
+    expect(field.kind).toBe('scalar');
+    expect(field.type).toBe('String');
+
+    const stepRelations = report.fields.filter(
+      (f) => f.kind === 'object' && f.type === 'AppExperienceStep'
+    );
+    expect(stepRelations).toEqual([]);
+  });
+});
+
+describe('F15.4 migration SQL', () => {
+  /** Read one migration by folder suffix. */
+  function readMigration(suffix: string): string {
+    const migrationsDir = join(process.cwd(), 'prisma', 'migrations');
+    const folder = readdirSync(migrationsDir).find((d) => d.endsWith(suffix));
+    if (!folder) throw new Error(`${suffix} migration folder not found`);
+    return readFileSync(join(migrationsDir, folder, 'migration.sql'), 'utf8');
+  }
+
+  const sessionSql = readMigration('_add_session_experience_step_id');
+  const reportSql = readMigration('_add_cohort_report_experience_step_scope');
+
+  it('adds experienceStepId NULLABLE — every pre-existing session correctly has none', () => {
+    const line = executableLines(sessionSql).match(/ADD COLUMN\s+"experienceStepId"[^;]*/)?.[0];
+    expect(line).toBeTruthy();
+    expect(line).toContain('TEXT');
+    // A NOT NULL would have required a backfill for every session ever taken.
+    expect(line).not.toContain('NOT NULL');
+  });
+
+  it('indexes experienceStepId — it is the per-step report scope filter', () => {
+    expect(executableLines(sessionSql)).toMatch(
+      /CREATE INDEX .*app_questionnaire_session.*"experienceStepId"/
+    );
+  });
+
+  it('adds experienceStepOwnerId nullable and UNIQUE — one report per step', () => {
+    const exec = executableLines(reportSql);
+    const line = exec.match(/ADD COLUMN\s+"experienceStepOwnerId"[^;]*/)?.[0];
+    expect(line).toBeTruthy();
+    // Nullable is what lets the round- and version-scoped rows coexist in the same table:
+    // Postgres permits multiple NULLs in a unique index.
+    expect(line).not.toContain('NOT NULL');
+    expect(exec).toMatch(/CREATE UNIQUE INDEX .*"experienceStepOwnerId"/);
+  });
+
+  it('declares no foreign key for either new pointer', () => {
+    expect(executableLines(sessionSql)).not.toMatch(/FOREIGN KEY/i);
+    expect(executableLines(reportSql)).not.toMatch(/FOREIGN KEY/i);
+  });
+
+  it('does not drop the raw-SQL pgvector / tsvector indexes', () => {
+    // Both migrations were hand-stripped; Prisma's diff proposes these drops every time because
+    // it cannot see raw-SQL indexes. A regression here silently destroys vector search.
+    for (const sql of [sessionSql, reportSql]) {
+      const exec = executableLines(sql);
+      expect(exec).not.toMatch(/DROP INDEX/i);
+      // The GENERATED ALWAYS searchVector column draws a phantom DROP DEFAULT for the same reason.
+      expect(exec).not.toMatch(/DROP DEFAULT/i);
+    }
+  });
+
+  it('touches only its own table', () => {
+    expect(executableLines(sessionSql)).not.toMatch(/ALTER TABLE "ai_knowledge_chunk"/);
+    expect(executableLines(reportSql)).not.toMatch(/ALTER TABLE "ai_knowledge_chunk"/);
+  });
+});
+
 describe('experience migration SQL', () => {
   const sql = readExperienceMigrationSql();
 

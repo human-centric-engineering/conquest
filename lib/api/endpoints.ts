@@ -709,6 +709,15 @@ export const API = {
       steps: (id: string): string => `/api/v1/app/experiences/${id}/steps`,
       /** Edit (PATCH) / remove (DELETE) one step. */
       step: (id: string, stepId: string): string => `/api/v1/app/experiences/${id}/steps/${stepId}`,
+      /**
+       * The step's cohort report — read view (GET) / edit content (PATCH). Scoped to the legs of
+       * this step only; see `cohort-report/scope.ts` for why per-step and never per-experience.
+       */
+      stepReport: (id: string, stepId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/cohort-report`,
+      /** Generate the step's cohort report (POST — paid LLM work). */
+      generateStepReport: (id: string, stepId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/cohort-report/generate`,
       /** Reorder steps — full ordered id list (PATCH). */
       reorderSteps: (id: string): string => `/api/v1/app/experiences/${id}/steps/reorder`,
       /** Deterministic routing rules: list (GET) + create (POST). */

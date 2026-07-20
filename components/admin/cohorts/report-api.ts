@@ -52,6 +52,27 @@ export function roundReportApi(roundId: string, versionId: string): ReportApi {
   };
 }
 
+/**
+ * Experience-step-scoped report endpoints (F15.4) — the legs of one step of one journey.
+ *
+ * Like the version owner, the subject is fully identified by the path, so bodies and queries carry
+ * no id. No `refineUrl`: per-section AI assist exists only on the round owner today, and the panel
+ * hides the affordance when it is absent.
+ */
+export function stepReportApi(experienceId: string, stepId: string): ReportApi {
+  const base = API.APP.EXPERIENCES.stepReport(experienceId, stepId);
+  return {
+    viewUrl: base,
+    datasetUrl: `${base}/dataset`,
+    generateStreamUrl: `${base}/generate/stream`,
+    revisionsUrl: `${base}/revisions`,
+    publishUrl: `${base}/publish`,
+    pdfUrl: `${base}/export.pdf`,
+    patchUrl: base,
+    body: {},
+  };
+}
+
 /** Version-scoped report endpoints. The version is in the path, so bodies/queries carry no id. */
 export function versionReportApi(id: string, versionId: string): ReportApi {
   return {

@@ -619,6 +619,12 @@ export async function createSessionForExperienceLeg(params: {
   cohortMemberId: string | null;
   roundId: string | null;
   /**
+   * The experience step this leg fulfils — denormalised onto the session so per-step cohort
+   * reports can be a plain `where` clause. Required, not optional: every leg has a step, and
+   * making it optional would let a caller silently mint a leg that no step report can ever see.
+   */
+  stepId: string;
+  /**
    * The session the run just completed — the source of persona + safeguarding continuity.
    * Null for the ENTRY leg, which has no predecessor to carry anything from.
    */
@@ -672,6 +678,12 @@ export async function createSessionForExperienceLeg(params: {
         status: 'active',
         ...(params.roundId ? { roundId: params.roundId } : {}),
         ...(params.cohortMemberId ? { cohortMemberId: params.cohortMemberId } : {}),
+        // Experiences (F15.4): the step this leg fulfils, denormalised onto the session so a
+        // per-step cohort report is a plain `where` clause. Written HERE — at the one place a leg
+        // session is minted — rather than patched on afterwards, so it can never be missing for a
+        // session that is genuinely part of a run. See the schema comment for why the leg table's
+        // pointer alone is not enough.
+        experienceStepId: params.stepId,
         // Persona continuity: a respondent who chose an interviewer voice should not be handed a
         // different one mid-journey.
         ...(previous?.selectedPersonaKey

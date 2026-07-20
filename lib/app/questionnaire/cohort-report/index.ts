@@ -12,7 +12,9 @@ export { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-repor
 export {
   roundScope,
   versionScope,
+  experienceStepScope,
   scopeRoundId,
+  scopeStepId,
   scopeVersionId,
   scopeLabel,
   scopeSessionWhere,

@@ -3,6 +3,8 @@
  *
  * Pure functions — no DB, no mocks. Asserts the structural output of each helper for both kinds
  * so the dataset/persist/view layers can rely on a single source of truth without re-testing it.
+ *
+ * Covers all three owners: round, version, and experience_step (F15.4).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -10,7 +12,9 @@ import { describe, it, expect } from 'vitest';
 import {
   roundScope,
   versionScope,
+  experienceStepScope,
   scopeRoundId,
+  scopeStepId,
   scopeVersionId,
   scopeLabel,
   scopeSessionWhere,
@@ -20,6 +24,7 @@ import {
 
 const ROUND_ID = 'round-abc';
 const VERSION_ID = 'version-xyz';
+const STEP_ID = 'step-def';
 const LABEL = 'Q1 Pulse';
 
 describe('roundScope', () => {
@@ -110,23 +115,114 @@ describe('scopeOwnerWhere', () => {
 });
 
 describe('scopeOwnerCreate', () => {
-  it('writes the four-field round shape: scopeKind=round, roundId set, versionOwnerId null', () => {
+  it('writes the round shape: scopeKind=round, roundId set, other owner keys null', () => {
     const create = scopeOwnerCreate(roundScope(ROUND_ID, VERSION_ID, LABEL));
     expect(create).toEqual({
       scopeKind: 'round',
       roundId: ROUND_ID,
       versionOwnerId: null,
+      experienceStepOwnerId: null,
       versionId: VERSION_ID,
     });
   });
 
-  it('writes the four-field version shape: scopeKind=version, roundId null, versionOwnerId set', () => {
+  it('writes the version shape: scopeKind=version, versionOwnerId set, other owner keys null', () => {
     const create = scopeOwnerCreate(versionScope(VERSION_ID, LABEL));
     expect(create).toEqual({
       scopeKind: 'version',
       roundId: null,
       versionOwnerId: VERSION_ID,
+      experienceStepOwnerId: null,
       versionId: VERSION_ID,
     });
+  });
+
+  it('writes the step shape: scopeKind=experience_step, only experienceStepOwnerId set', () => {
+    const create = scopeOwnerCreate(experienceStepScope(STEP_ID, VERSION_ID, LABEL));
+    expect(create).toEqual({
+      scopeKind: 'experience_step',
+      roundId: null,
+      versionOwnerId: null,
+      experienceStepOwnerId: STEP_ID,
+      versionId: VERSION_ID,
+    });
+  });
+
+  it('sets EXACTLY ONE owner key for every scope kind', () => {
+    // The three nullable-unique columns coexist only because at most one is ever non-null. A row
+    // with two set would satisfy two owners at once; a row with none would collide with the next
+    // such row on every unique index.
+    const scopes = [
+      roundScope(ROUND_ID, VERSION_ID, LABEL),
+      versionScope(VERSION_ID, LABEL),
+      experienceStepScope(STEP_ID, VERSION_ID, LABEL),
+    ];
+    for (const scope of scopes) {
+      const { roundId, versionOwnerId, experienceStepOwnerId } = scopeOwnerCreate(scope);
+      const set = [roundId, versionOwnerId, experienceStepOwnerId].filter((v) => v !== null);
+      expect(set).toHaveLength(1);
+    }
+  });
+
+  it('always sets versionId, whatever the owner', () => {
+    // buildCohortDataset resolves questions, data slots, profile fields and the scoring schema by
+    // this one versionId. A row without it would have no analysable subject.
+    expect(scopeOwnerCreate(roundScope(ROUND_ID, VERSION_ID, LABEL)).versionId).toBe(VERSION_ID);
+    expect(scopeOwnerCreate(versionScope(VERSION_ID, LABEL)).versionId).toBe(VERSION_ID);
+    expect(scopeOwnerCreate(experienceStepScope(STEP_ID, VERSION_ID, LABEL)).versionId).toBe(
+      VERSION_ID
+    );
+  });
+});
+
+describe('experience-step scope (F15.4)', () => {
+  it('keys the owner on experienceStepOwnerId alone', () => {
+    const where = scopeOwnerWhere(experienceStepScope(STEP_ID, VERSION_ID, LABEL));
+    expect(where).toEqual({ experienceStepOwnerId: STEP_ID });
+    expect(where).not.toHaveProperty('roundId');
+    expect(where).not.toHaveProperty('versionOwnerId');
+  });
+
+  it('filters sessions by the denormalised experienceStepId', () => {
+    // Not by joining AppExperienceRunLeg — that pointer is unmodelled (UG-1), so there is no
+    // relation to join through.
+    const where = scopeSessionWhere(experienceStepScope(STEP_ID, VERSION_ID, LABEL));
+    expect(where).toEqual({
+      versionId: VERSION_ID,
+      isPreview: false,
+      experienceStepId: STEP_ID,
+    });
+  });
+
+  it('does NOT scope by versionId alone', () => {
+    // The load-bearing assertion. Filtering on versionId alone would sweep in every ordinary round
+    // and walk-up session on the same questionnaire and report them as part of the journey.
+    const where = scopeSessionWhere(experienceStepScope(STEP_ID, VERSION_ID, LABEL));
+    expect(where.experienceStepId).toBe(STEP_ID);
+  });
+
+  it('excludes preview sessions like every other scope', () => {
+    expect(scopeSessionWhere(experienceStepScope(STEP_ID, VERSION_ID, LABEL)).isPreview).toBe(
+      false
+    );
+  });
+
+  it('carries a single versionId — the step pins exactly one questionnaire version', () => {
+    // This is what lets buildCohortDataset and chart-series.ts keep their single-data-slot-
+    // vocabulary assumption and need zero changes. An experience-WIDE scope would span versions
+    // whose AppDataSlot ids differ, and fills from another version would be silently dropped.
+    const scope = experienceStepScope(STEP_ID, VERSION_ID, LABEL);
+    expect(scopeVersionId(scope)).toBe(VERSION_ID);
+  });
+
+  it('reports its step id and no round id', () => {
+    const scope = experienceStepScope(STEP_ID, VERSION_ID, LABEL);
+    expect(scopeStepId(scope)).toBe(STEP_ID);
+    expect(scopeRoundId(scope)).toBeNull();
+  });
+
+  it('reports null stepId for the other two scopes', () => {
+    expect(scopeStepId(roundScope(ROUND_ID, VERSION_ID, LABEL))).toBeNull();
+    expect(scopeStepId(versionScope(VERSION_ID, LABEL))).toBeNull();
   });
 });

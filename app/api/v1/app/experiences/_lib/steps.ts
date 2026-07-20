@@ -10,6 +10,32 @@ import { prisma } from '@/lib/db/client';
 import { slugifyStepKey } from '@/lib/app/questionnaire/experiences/types';
 
 /**
+ * Resolve the version a step should run: its pin, or the questionnaire's newest launched one.
+ *
+ * Shared by the run advance path (which version does the NEXT leg run?) and the step-report scope
+ * (which version did these legs run?). Those two must never disagree — a report scoped to a
+ * different version than the legs actually ran would resolve its data slots against the wrong
+ * vocabulary and silently analyse nothing. Hence one definition, not two.
+ *
+ * Null when the step has no questionnaire, or its questionnaire has no launched, unarchived
+ * version. Both are ordinary states for a half-authored journey, not errors.
+ */
+export async function resolveStepVersionId(step: {
+  questionnaireId: string | null;
+  versionId: string | null;
+}): Promise<string | null> {
+  if (step.versionId) return step.versionId;
+  if (!step.questionnaireId) return null;
+
+  const newest = await prisma.appQuestionnaireVersion.findFirst({
+    where: { questionnaireId: step.questionnaireId, status: 'launched', archivedAt: null },
+    orderBy: { versionNumber: 'desc' },
+    select: { id: true },
+  });
+  return newest?.id ?? null;
+}
+
+/**
  * Derive a step key that is unique within its experience.
  *
  * Slugifies the title, then appends `-2`, `-3`, … until free. Suffixing rather than rejecting

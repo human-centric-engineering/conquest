@@ -154,6 +154,7 @@ defending as an LLM one.
 ## Related
 
 - `.context/app/questionnaire/experience-continuity.md` — the respondent journey, addressing, credential
+- `.context/app/questionnaire/experience-reports.md` — per-step reports and why scoping is per step
 - `.context/app/planning/features/f15.1.md` — foundation decisions and what shipped
 - `.context/app/questionnaire/cohorts.md` — the roster an experience may reuse
 - `.context/app/questionnaire/round-context-and-learning.md` — the k-anonymity precedent

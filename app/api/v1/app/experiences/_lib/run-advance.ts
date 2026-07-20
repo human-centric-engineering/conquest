@@ -67,22 +67,8 @@ import {
 import type { CandidateStep } from '@/lib/app/questionnaire/experiences/routing/types';
 import { serialiseCarryOver } from '@/lib/app/questionnaire/experiences/carryover/narrow';
 import { createSessionForExperienceLeg } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
-
-/** Resolve the version a step should run: its pin, or the questionnaire's newest launched one. */
-async function resolveStepVersionId(step: {
-  questionnaireId: string | null;
-  versionId: string | null;
-}): Promise<string | null> {
-  if (step.versionId) return step.versionId;
-  if (!step.questionnaireId) return null;
-
-  const newest = await prisma.appQuestionnaireVersion.findFirst({
-    where: { questionnaireId: step.questionnaireId, status: 'launched', archivedAt: null },
-    orderBy: { versionNumber: 'desc' },
-    select: { id: true },
-  });
-  return newest?.id ?? null;
-}
+// Shared with the step-report scope: a report must analyse the same version the legs ran.
+import { resolveStepVersionId } from '@/app/api/v1/app/experiences/_lib/steps';
 
 /** Mark a run concluded. Idempotent — a second call is a no-op update. */
 async function concludeRun(
@@ -363,6 +349,7 @@ export async function advanceExperienceRun(
       respondentUserId: run.respondentUserId,
       cohortMemberId: run.cohortMemberId,
       roundId: nextStep.roundId,
+      stepId: nextStep.id,
       fromSessionId: completedSessionId,
     });
     if (!created.ok) {
