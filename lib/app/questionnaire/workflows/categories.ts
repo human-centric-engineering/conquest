@@ -19,7 +19,8 @@
  */
 
 /** The part of ConQuest a workflow belongs to. */
-export type WorkflowCategory = 'creation' | 'config' | 'conversation' | 'reporting' | 'evaluation';
+export type WorkflowCategory =
+  'creation' | 'config' | 'conversation' | 'reporting' | 'evaluation' | 'experiences';
 
 export interface WorkflowCategoryMeta {
   id: WorkflowCategory;
@@ -71,6 +72,20 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
     label: 'Evaluation & QA',
     description: 'Inspecting and scoring a single preview turn.',
     slugs: ['turn-inspector', 'turn-evaluation'],
+  },
+  // Last because an experience spans every stage above it: it composes questionnaires that were
+  // created, configured, conversed through and reported on by the pipelines listed earlier. Reading
+  // the picker top to bottom now goes single questionnaire → journey of several.
+  {
+    id: 'experiences',
+    label: 'Experiences',
+    description: 'Journeys that compose several questionnaires into one respondent path.',
+    slugs: [
+      'experience-switcher',
+      'experience-meeting',
+      'experience-run-lifecycle',
+      'experience-synthesis',
+    ],
   },
 ] as const;
 

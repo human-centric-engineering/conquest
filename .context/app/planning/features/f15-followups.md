@@ -101,7 +101,12 @@ precisely so this change is possible without touching them.
 
 ---
 
-## 5. Experience-wide report synthesis · **a phase**
+## 5. Experience-wide report synthesis · **SHIPPED — F15.8 (2026-07-20)**
+
+> Built as [`f15.8.md`](./f15.8.md). Reads finished step reports (switcher) or k-anonymity-gated
+> breakout insights (meeting); its own `AppExperienceSynthesis` table rather than a fourth
+> `ReportScope` kind. The constraint below is why, and a static import guard in `synthesis.test.ts`
+> now enforces it. Retained for the reasoning.
 
 A view across a whole journey, synthesised over **ready per-step reports**.
 
@@ -144,6 +149,25 @@ probably what a follow-up should do.
 `BreakoutRoomsEditor` supports add, remove and mode. The API supports `ordinal` and per-room
 `questionnaireId` / `versionId`, but the editor exposes neither, so a room running its own
 questionnaire must be configured through the API.
+
+---
+
+## 9. `report` step kind is selectable but inert · **needs a product decision**
+
+Found while drawing the journey for F15.7 — a flat list hid it, a diagram did not.
+
+`report` is in `EXPERIENCE_STEP_KINDS`, has a label in `EXPERIENCE_STEP_KIND_LABELS`, and is offered
+by `kindsFor()` in the step form for **both** experience kinds. But no runtime module reads it: the
+run report is enqueued from `concludeRun` (F15.4b), `routableSteps()` selects only `branch`, and
+`experienceBlockers()` never checks it. A grep for a consumer returns nothing.
+
+So an author can add a "Report" step, save it, and it does nothing at all. The live diagram
+currently labels such a node "Authored marker only — the run report is produced when the run
+concludes, not by this step", which is honest but is not a fix.
+
+**Either** give it a runtime role (an explicit terminal step that pins which version's report
+settings apply, say), **or** drop it from `kindsFor()` and the enum. Selectable-but-inert is the
+worst of the three states — it invites an author to build something that silently has no effect.
 
 ---
 

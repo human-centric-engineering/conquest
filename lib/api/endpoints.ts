@@ -718,6 +718,14 @@ export const API = {
       /** Generate the step's cohort report (POST — paid LLM work). */
       generateStepReport: (id: string, stepId: string): string =>
         `/api/v1/app/experiences/${id}/steps/${stepId}/cohort-report/generate`,
+      /**
+       * The experience-wide synthesis — read view (GET). Written over FINISHED per-step outputs,
+       * never a re-aggregation of sessions across steps (which would silently drop cross-version
+       * data); see `experiences/synthesis/material.ts`.
+       */
+      synthesis: (id: string): string => `/api/v1/app/experiences/${id}/synthesis`,
+      /** Generate the experience-wide synthesis (POST — paid LLM work). */
+      generateSynthesis: (id: string): string => `/api/v1/app/experiences/${id}/synthesis/generate`,
       /** Reorder steps — full ordered id list (PATCH). */
       reorderSteps: (id: string): string => `/api/v1/app/experiences/${id}/steps/reorder`,
       /** Deterministic routing rules: list (GET) + create (POST). */

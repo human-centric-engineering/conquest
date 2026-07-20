@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ExperienceExamplesCompact } from '@/components/admin/experiences/experience-examples';
 import { FieldHelp } from '@/components/ui/field-help';
 import { FormError } from '@/components/forms/form-error';
 import type { AttributedDemoClient } from '@/lib/app/questionnaire/demo-clients';
@@ -201,6 +202,7 @@ export function ExperienceForm({ demoClientOptions, onSuccess, onCancel }: Exper
           </SelectContent>
         </Select>
         <p className="text-muted-foreground text-sm">{EXPERIENCE_KIND_DESCRIPTIONS[kind]}</p>
+        <ExperienceExamplesCompact kind={kind} />
         <FormError message={errors.kind?.message} />
       </div>
 

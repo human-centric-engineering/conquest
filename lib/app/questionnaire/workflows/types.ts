@@ -57,9 +57,22 @@ export interface NodeVectorPlugPoint {
 }
 
 /**
- * A questionnaire Settings-tab option that changes this step's behaviour. `key`
- * is a dotted path into {@link QuestionnaireConfigShape} (validated by the
- * integrity test), so an operator can find it on the Settings tab.
+ * Which settings blob a {@link StepSetting} key is a path into.
+ *
+ * Defaults to `questionnaire` so every pre-existing diagram is unaffected. `experience` exists
+ * because the Experience diagrams document steps governed by `ExperienceSettingsShape` on
+ * `AppExperience` — a different blob on a different Settings tab. Without the distinction the
+ * integrity test would resolve an experience key against `DEFAULT_QUESTIONNAIRE_CONFIG`, find
+ * nothing, and fail; papering over that by dropping the setting would cost the operator the
+ * "where do I change this?" answer, which is the whole point of the field.
+ */
+export type StepSettingScope = 'questionnaire' | 'experience';
+
+/**
+ * A Settings-tab option that changes this step's behaviour. `key` is a dotted path into
+ * {@link QuestionnaireConfigShape} — or, when `scope` is `experience`, into
+ * `ExperienceSettingsShape`. Validated against the matching defaults by the integrity test, so an
+ * operator can always find the setting on the Settings tab it names.
  */
 export interface StepSetting {
   /** Dotted config path, e.g. `contradictionMode` or `personaSelection.enabled`. */
@@ -68,6 +81,8 @@ export interface StepSetting {
   label: string;
   /** One line: how changing this setting changes the step's behaviour. */
   effect: string;
+  /** Which settings blob `key` indexes into. Omitted means `questionnaire`. */
+  scope?: StepSettingScope;
 }
 
 /**

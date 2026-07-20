@@ -153,3 +153,66 @@ retain-vs-delete decision inside it.
 - `.context/app/questionnaire/experiences.md` — the model
 - `.context/app/questionnaire/experience-continuity.md` — the respondent journey
 - `.context/app/planning/features/f15-followups.md` — everything still open across P15
+
+## The experience-wide synthesis (F15.8)
+
+`/admin/experiences/[id]/reports` renders it above the per-step tabs. Code:
+`lib/app/questionnaire/experiences/synthesis/**`. Schema: `AppExperienceSynthesis`.
+
+**It reads finished outputs, never sessions.** This is the whole design constraint, and the reason
+the earlier note in this doc said an experience-wide view "must be a synthesis over ready step
+reports, not a re-aggregation". `buildCohortDataset` resolves everything by a single `versionId`
+and `buildDataSlots` joins fills by `dataSlotId` — the row id, not the key — so a fill from another
+version finds no bucket and is dropped with **no error and no warning**. An experience spans
+versions by definition, so the obvious implementation would emit a confident, well-formatted report
+over a fraction of the data. `synthesis.test.ts` asserts the module never imports the dataset
+builder and never touches `appAnswerSlot` / `appDataSlotFill` / `appQuestionnaireSession`.
+
+**The two kinds read different things**, because they produce different things:
+
+| kind                  | input                                                                    |
+| --------------------- | ------------------------------------------------------------------------ |
+| `agentic_switcher`    | ready per-step cohort reports, plus the routing distribution             |
+| `facilitated_meeting` | `AppExperienceInsight` rows, re-gated at the current `insightMinSupport` |
+
+The meeting gate is re-applied **on read** rather than trusted from write time, so raising
+`insightMinSupport` after a meeting immediately narrows what any later synthesis can see. Anything
+below the floor never enters the material, so the writer cannot surface it, paraphrase it, or fold
+it into a finding — anonymity carries through by construction rather than by instruction.
+
+**Two fields the model does not write.** `coverage` is server-computed from the material: a model
+asked to describe its own inputs produces a tidy answer, and coverage is exactly the field a reader
+leans on to judge how far to trust the rest. Citations (`sourceStepKeys`) are verified against the
+steps that actually contributed and unknown keys are dropped — the same evidence-not-conclusion
+discipline `verifiedSupportCount` applies to breakout support counts. A hallucinated citation is
+worse than none: it sends a reader to check a source that never said it, and makes an unsupported
+claim look sourced. The prompt does not mention the check; a prompt is not where this is enforced.
+
+**Partial by design.** Missing or unfinished step reports are recorded in coverage and skipped
+rather than blocking generation — one never-generated step would otherwise hold the whole feature
+hostage. Generating with nothing ready returns 409 `NOTHING_TO_SYNTHESISE` with the coverage
+attached, so the panel can name the missing steps instead of saying "something went wrong".
+
+**A shape-valid answer is not a usable one.** The response schema puts no floor on `narrative` or
+the claim arrays, so `{"narrative":"","findings":[],"divergences":[]}` parses cleanly. The parse
+callback therefore also requires `isUsableSynthesisContent`, which is what earns the retry and then
+the hard failure — without it a degenerate answer is stored `ready` and the admin pays for a call
+that renders as a coverage list with nothing above it and no error. Note the asymmetry it encodes:
+a narrative with no findings is legitimate (every step agreeing is a real result), a wholly empty
+one is not.
+
+**Spend is logged through `logAppLlmCost`**, like every other app-tier LLM call. The `costUsd` on
+the row is display-only and is overwritten on every regeneration, so it is not an aggregate — the
+`AiCostLog` row is what makes the synthesiser agent's `monthlyBudgetUsd` ceiling able to fire at
+all, since `checkBudget` aggregates by `agentId`. `versionId` is null: an experience spans versions
+by definition.
+
+**No revision chain**, unlike `AppCohortReport`. A synthesis reads a moving target — its inputs are
+themselves regenerated and edited — so a history would imply a stability it does not have. One row
+per experience, replaced on regeneration. A failed regeneration preserves the previous content:
+retrying should never be worse than not trying.
+
+**Its own table, not a fourth `ReportScope` kind.** `AppCohortReport.versionId` is NOT NULL on every
+row because each of its scopes analyses exactly one version, and `scopeOwnerCreate` /
+`scopeOwnerWhere` are deliberately exhaustive switches. An experience has no single version to put
+there.

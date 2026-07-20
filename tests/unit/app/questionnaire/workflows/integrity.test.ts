@@ -23,6 +23,8 @@ import * as constants from '@/lib/app/questionnaire/constants';
 import { AGENT_SETTINGS_ADVISOR_SLUG } from '@/lib/app/questionnaire/agent-advisory/explain-schema';
 import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import * as experienceConstants from '@/lib/app/questionnaire/experiences/constants';
+import { DEFAULT_EXPERIENCE_SETTINGS } from '@/lib/app/questionnaire/experiences/types';
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
 import { WORKFLOW_CATEGORIES, categoryForSlug } from '@/lib/app/questionnaire/workflows/categories';
 import { getNodeMeta } from '@/lib/app/questionnaire/workflows/types';
@@ -37,6 +39,13 @@ const KNOWN_AGENT_SLUGS = new Set<string>([
   // The Agent Settings Advisor's slug lives in agent-advisory/explain-schema.ts (named
   // `*_SLUG`, not a constants.ts `*_AGENT_SLUG`), so add it explicitly.
   AGENT_SETTINGS_ADVISOR_SLUG,
+  // The Experience agents (router, handoff, meeting synthesiser) live in
+  // `experiences/constants.ts` rather than the shared questionnaire constants — deliberately, so
+  // the whole feature stays removable in one directory. Same `*_AGENT_SLUG` convention, so the
+  // same filter applies to that module.
+  ...Object.entries(experienceConstants)
+    .filter(([name, value]) => name.endsWith('_AGENT_SLUG') && typeof value === 'string')
+    .map(([, value]) => value as string),
 ]);
 
 const catalog = buildPromptCatalog();
@@ -99,6 +108,14 @@ describe('workflow diagram integrity', () => {
     constants.RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG,
     // The Agent Settings Advisor builds its prompt in code and is not in the Prompt Library.
     AGENT_SETTINGS_ADVISOR_SLUG,
+    // The Experience agents build their prompts in code from run-time material (the carry-over
+    // digest, the candidate criteria, a breakout's collected slots, a set of finished step
+    // reports) rather than from a catalogued template, so there is no specimen the Prompt Library
+    // could render. Their nodes correctly show no Prompt tab.
+    experienceConstants.EXPERIENCE_ROUTER_AGENT_SLUG,
+    experienceConstants.EXPERIENCE_HANDOFF_AGENT_SLUG,
+    experienceConstants.MEETING_SYNTHESIS_AGENT_SLUG,
+    experienceConstants.EXPERIENCE_SYNTHESIS_AGENT_SLUG,
   ]);
 
   it('every agent-backed step exposes a catalogued prompt (or is a known exception)', () => {
@@ -121,17 +138,28 @@ describe('workflow diagram integrity', () => {
   });
 
   it('every step-setting key resolves to a real config field', () => {
-    const resolve = (path: string): unknown =>
+    const resolve = (path: string, root: unknown): unknown =>
       path.split('.').reduce<unknown>((acc, key) => {
         if (acc && typeof acc === 'object' && key in (acc as Record<string, unknown>)) {
           return (acc as Record<string, unknown>)[key];
         }
         return undefined;
-      }, DEFAULT_QUESTIONNAIRE_CONFIG);
+      }, root);
 
+    // A setting names the Settings tab an operator should go to. Experience-scoped keys index into
+    // `ExperienceSettingsShape` on `AppExperience`, not the per-questionnaire config, so they are
+    // resolved against their own defaults — pinning each key to the blob it actually belongs to
+    // rather than letting one of the two go unchecked.
     for (const { slug, stepId, meta } of allMetas) {
       for (const setting of meta.settings ?? []) {
-        expect(resolve(setting.key), `${slug}/${stepId} → ${setting.key}`).not.toBeUndefined();
+        const root =
+          setting.scope === 'experience'
+            ? DEFAULT_EXPERIENCE_SETTINGS
+            : DEFAULT_QUESTIONNAIRE_CONFIG;
+        expect(
+          resolve(setting.key, root),
+          `${slug}/${stepId} → ${setting.key} (scope: ${setting.scope ?? 'questionnaire'})`
+        ).not.toBeUndefined();
       }
     }
   });

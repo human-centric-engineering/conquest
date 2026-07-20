@@ -98,6 +98,10 @@ export default async function ExperiencesListPage() {
                 The same short questionnaire run by many people at once, synthesised per breakout so
                 a facilitator sees where a team agrees and where it does not.
               </p>
+              <p className="text-muted-foreground mt-2">
+                Open any experience and its <strong>How it works</strong> tab draws the journey as a
+                diagram, explains the kind, and shows worked examples.
+              </p>
             </FieldHelp>
           </h1>
           <p className="text-muted-foreground text-sm">

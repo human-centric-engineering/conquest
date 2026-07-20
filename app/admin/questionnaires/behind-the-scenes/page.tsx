@@ -20,7 +20,12 @@ export const metadata: Metadata = {
  * flag (404 when off), pre-fetches the workflow summaries, hands to the client
  * explorer (which fetches per-workflow detail on demand).
  */
-export default async function BehindTheScenesPage() {
+export default async function BehindTheScenesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ workflow?: string }>;
+}) {
+  const { workflow } = await searchParams;
   let workflows: WorkflowSummary[] = [];
   try {
     const res = await serverFetch(API.APP.QUESTIONNAIRES.workflows);
@@ -32,5 +37,5 @@ export default async function BehindTheScenesPage() {
     logger.error('behind-the-scenes page: workflow list fetch failed', err);
   }
 
-  return <BehindTheScenesExplorer initialWorkflows={workflows} />;
+  return <BehindTheScenesExplorer initialWorkflows={workflows} initialSlug={workflow} />;
 }

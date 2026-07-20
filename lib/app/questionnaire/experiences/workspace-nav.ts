@@ -30,6 +30,10 @@ export interface ExperienceWorkspaceTab extends WorkspaceTab {
 
 export const EXPERIENCE_WORKSPACE_TABS: readonly ExperienceWorkspaceTab[] = [
   { id: 'overview', label: 'Overview', segment: '', exact: true },
+  // Sits second, next to Overview, because it answers "what am I building?" rather than "what have
+  // I built?" — and because the Steps tab immediately after it renders the journey as a flat list,
+  // which cannot show a switcher's branching shape. No `kinds` filter: both kinds need explaining.
+  { id: 'how-it-works', label: 'How it works', segment: 'how-it-works' },
   { id: 'steps', label: 'Steps', segment: 'steps' },
   // Routing is switcher-only: a facilitated meeting has no fork to configure, so showing an empty
   // rules editor there would imply a decision that surface never makes.
