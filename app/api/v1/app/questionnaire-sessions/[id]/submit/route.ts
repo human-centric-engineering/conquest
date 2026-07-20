@@ -63,8 +63,9 @@ import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-l
 import { runCompletionSweep } from '@/app/api/v1/app/questionnaire-sessions/_lib/completion-sweep-run';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
+import { advanceExperienceRun, legForSession } from '@/app/api/v1/app/experiences/_lib/run-advance';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
-import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
+import { enqueueRespondentReport, isExperienceLeg } from '@/lib/app/questionnaire/report/enqueue';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
@@ -316,15 +317,30 @@ async function handleSubmit(
         reason: early ? 'respondent_early_finish' : 'respondent_submit',
       });
       log.info('Respondent session submitted', { sessionId, status, early });
-      // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
-      // or narrative). Best-effort — a queue failure must never fail the submission just made.
-      const enqueued = await enqueueRespondentReport(sessionId).catch((err) => {
-        log.error('Failed to enqueue respondent report', {
+      // Experiences (F15.4b): a leg of a run gets NO per-session report — the run-level report,
+      // enqueued when the journey concludes, covers every leg including this one. Generating both
+      // would bill the journey twice and hand the respondent n+1 reports where they were promised
+      // one summary. Fail-soft to `false` (i.e. behave as a standalone session): if this lookup
+      // errors, a redundant per-leg report is a far better outcome than none at all.
+      const partOfRun = await isExperienceLeg(sessionId).catch((err) => {
+        log.error('Failed to check experience leg for report enqueue', {
           sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
         return false;
       });
+
+      // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
+      // or narrative). Best-effort — a queue failure must never fail the submission just made.
+      const enqueued = partOfRun
+        ? false
+        : await enqueueRespondentReport(sessionId).catch((err) => {
+            log.error('Failed to enqueue respondent report', {
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return false;
+          });
       // Instant start: kick the report worker AFTER the response so generation begins within
       // seconds rather than waiting for the next maintenance-cron minute. `after()` (next/server)
       // survives serverless (runs within the function's maxDuration) and on a persistent process
@@ -361,7 +377,43 @@ async function handleSubmit(
           })
         );
       }
-      return successResponse({ sessionId, status });
+      // Experiences (P15.2): when this session is a leg of a run, resolve the fork — route into
+      // the next questionnaire or conclude the journey. Runs via `after()` for the same reason as
+      // the learning digest: the decision involves an LLM call, and THIS respondent's submit
+      // confirmation must not wait on it. The client polls
+      // `GET /api/v1/app/experiences/runs/[runId]/status` for the outcome.
+      //
+      // Fail-soft and idempotent: `advanceExperienceRun` never throws, and the leg table's
+      // `@@unique([runId, ordinal])` makes a concurrent double-fire a no-op rather than a second
+      // session. A standalone (non-experience) session finds no leg and skips entirely.
+      const experienceLeg = await legForSession(sessionId).catch((err: unknown) => {
+        log.error('Failed to look up experience leg', {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
+      if (experienceLeg) {
+        const runId = experienceLeg.runId;
+        after(async () => {
+          const result = await advanceExperienceRun(runId, sessionId);
+          if (result.kind === 'blocked') {
+            log.error('Experience run advance blocked', {
+              sessionId,
+              runId,
+              code: result.code,
+              message: result.message,
+            });
+          } else {
+            log.info('Experience run advanced', { sessionId, runId, outcome: result.kind });
+          }
+        });
+      }
+      return successResponse({
+        sessionId,
+        status,
+        ...(experienceLeg ? { runId: experienceLeg.runId } : {}),
+      });
     } catch (err) {
       if (err instanceof SessionTransitionError) {
         throw new ConflictError(err.message, { from: err.from, to: err.to });

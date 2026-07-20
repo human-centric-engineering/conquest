@@ -259,6 +259,7 @@ function makeStatus(
       cost,
       anonymous: false,
       ref: null,
+      experience: null,
     },
   };
 }

@@ -1,0 +1,529 @@
+/// ConQuest **Experiences** (P15) — journeys composed from existing questionnaires.
+///
+/// An Experience sequences questionnaires into a single respondent journey. The questionnaire
+/// stays the first-class citizen: nothing here changes authoring, the turn orchestrator, answer
+/// slots, or respondent reports. Experiences add ordering, an AI routing decision between legs,
+/// context carried from one leg to the next, and synthesis across the whole run.
+///
+/// Two kinds, both general-purpose:
+///  - `agentic_switcher`   — an opening questionnaire, then a routing decision: conclude with a
+///                           report, or continue into a further questionnaire chosen from a
+///                           candidate set based on what was learnt. The mechanism carries no
+///                           assumption about domain (triage, diagnostics, depth-escalation and
+///                           lead qualification are all just applications of it).
+///  - `facilitated_meeting` — many participants run the same short questionnaire simultaneously;
+///                           per-breakout synthesis surfaces tensions to a live facilitator (P15.5).
+///
+/// ## Where this sits relative to Rounds
+///
+/// Experience sits ABOVE AppQuestionnaireRound and does not replace it. A round remains the
+/// time-boxed delivery of ONE questionnaire to a cohort; an Experience may reuse a round's access
+/// window per step (`AppExperienceStep.roundId`) and reuse a cohort as its roster
+/// (`AppExperience.cohortId`). No existing round/cohort model changes.
+///
+/// ## FK posture (UG-1)
+///
+/// House style, as in app-questionnaire.prisma: app-internal CONFIG edges are real `@relation`s
+/// (an Experience owns its steps); identity↔answer pointers are plain `String`s with no relation,
+/// so respondent data can never be reached by walking config, and archiving a questionnaire can
+/// never cascade away an experience's history. `questionnaireId`, `versionId`, `roundId`,
+/// `cohortId` and `createdBy` are therefore deliberately unmodelled pointers.
+
+/// An EXPERIENCE — the authored journey. Identity, routing policy, and run-time settings; the
+/// sequence itself lives in AppExperienceStep.
+///
+/// `demoClientId` is a real @relation (onDelete: Cascade), matching AppCohort: app-internal config
+/// scoped to a client, not an identity↔answer edge.
+///
+/// `settings` is a lazily-defaulted Json blob (the AppQuestionnaireRound.learningConfig pattern),
+/// read through `narrowExperienceSettings`. Deliberately a blob rather than columns: the
+/// facilitated-meeting kind is expected to grow many per-experience variants (facilitator
+/// visibility, insight cadence, synthesis instructions, respondent exposure), and each of those is
+/// a settings key rather than a migration.
+model AppExperience {
+  id           String  @id @default(cuid())
+  demoClientId String
+  title        String // display name ("Leadership diagnostic journey")
+  description  String? // internal admin note
+
+  /// EXPERIENCE_KINDS (experiences/types.ts): agentic_switcher | facilitated_meeting
+  kind   String
+  /// EXPERIENCE_STATUSES (experiences/types.ts): draft | launched | archived.
+  /// Mirrors AppQuestionnaire.status so the admin surfaces read the same way.
+  status String @default("draft")
+
+  /// EXPERIENCE_CONTINUITY_MODES (experiences/types.ts): linked | stitched | merged.
+  ///
+  /// `linked` and `stitched` share an IDENTICAL persistence shape — one AppQuestionnaireSession
+  /// per leg either way. `stitched` differs only in presentation (prior transcript rendered
+  /// inline, intro/capture/persona gates suppressed on later legs, one URL throughout), so a run
+  /// can be switched between them at any time without touching a row. `merged` (P15.6, may never
+  /// ship) is the only mode that genuinely changes persistence.
+  continuityMode String @default("linked")
+
+  /// EXPERIENCE_ROUTING_FALLBACKS (experiences/types.ts): conclude | first_candidate | default_step.
+  /// What happens when the selector errors, names an unknown step, or reports confidence below
+  /// `minRoutingConfidence`. Defaults to `conclude` — when the selector cannot decide, finishing
+  /// with what was gathered is honest; routing a respondent into a long questionnaire on a
+  /// coin-flip is not.
+  routingFallback String @default("conclude")
+  /// Below this confidence the selector's answer is discarded and `routingFallback` applies.
+  minRoutingConfidence Float @default(0.6)
+  /// Admin-authored guidance appended to the selector prompt ("prefer depth over breadth when the
+  /// respondent has already shown domain fluency"). Null = the base prompt only.
+  routingInstructions  String?
+
+  /// RUN-level cost ceiling in USD, across every leg. Distinct from
+  /// AppQuestionnaireConfig.costBudgetUsd, which is PER SESSION and would therefore silently
+  /// multiply across a multi-leg run. Null = uncapped. Enforced at the handoff gate (a run at hard
+  /// cap is forced to conclude) and fed into the per-turn grade as remaining run budget.
+  costBudgetUsd Float?
+
+  /// ACCESS_MODES (types.ts — reused, not re-declared): invitation_only | public | both.
+  /// Governs who may START a run. Individual legs still honour their own version's config.
+  accessMode String @default("invitation_only")
+  /// Short human-quotable code for the public experience link (`/x/<publicRef>`), minted by
+  /// generateSessionRef(). Null until the experience is launched with public access.
+  publicRef  String? @unique
+
+  /// Optional roster: an AppCohort whose members may run this experience. Plain String, no
+  /// @relation (UG-1) — a roster pointer, not a config edge.
+  cohortId  String?
+  /// Admin User.id; plain String, no FK (UG-1).
+  createdBy String?
+
+  /// ExperienceSettingsShape (experiences/types.ts), read via narrowExperienceSettings.
+  /// Lazily defaulted: `{}` resolves to DEFAULT_EXPERIENCE_SETTINGS.
+  settings Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  demoClient   AppDemoClient              @relation(fields: [demoClientId], references: [id], onDelete: Cascade)
+  steps        AppExperienceStep[]
+  runs         AppExperienceRun[]
+  meetings     AppExperienceMeeting[]
+  routingRules AppExperienceRoutingRule[]
+
+  @@index([demoClientId])
+  @@index([status])
+  @@map("app_experience")
+}
+
+/// One STEP in an experience — a node in the journey.
+///
+/// `kind` distinguishes what the step does:
+///  - `entry`    — where a run begins. Exactly one per experience (enforced at the app layer, not
+///                 the schema, so an author can reorder freely mid-edit without hitting a constraint).
+///  - `branch`   — a candidate the selector may route into. `selectionCriteria` is the
+///                 admin's plain-English account of when this step is the right one; it is the
+///                 primary signal the selector reasons over.
+///  - `breakout` — a facilitated-meeting breakout (P15.5).
+///  - `report`   — a terminal synthesis step (P15.4).
+///
+/// `questionnaireId` / `versionId` are plain Strings with NO @relation, deliberately. A real FK
+/// would let deleting or cascading a questionnaire destroy an experience's authored structure and,
+/// worse, the run history that points at it. `versionId` null means "resolve the newest launched
+/// version at run time"; set means the step is pinned to an exact version.
+model AppExperienceStep {
+  id           String @id @default(cuid())
+  experienceId String
+  /// Stable author-facing slug, unique within the experience. The selector names steps by this
+  /// key rather than by id, so routing decisions stay legible in AppAiRun snapshots.
+  key          String
+
+  /// EXPERIENCE_STEP_KINDS (experiences/types.ts): entry | branch | breakout | report
+  kind String
+
+  /// Target questionnaire. Plain String, no @relation (see model docblock).
+  questionnaireId String?
+  /// Pinned version, or null to resolve the newest launched version at run time.
+  versionId       String?
+  /// Optional round whose access window this step honours. Plain String, no @relation (UG-1).
+  roundId         String?
+
+  title            String // display name in the journey editor
+  purpose          String? // what this step is for; shown to the selector as candidate context
+  /// When the selector should choose THIS step, in the admin's own words. The highest-signal
+  /// input to the routing decision; null means the selector falls back to `purpose` + title.
+  selectionCriteria String?
+
+  /// Author-controlled order. Doubles as candidate priority for the `first_candidate` fallback,
+  /// and for a facilitated meeting it IS the agenda: breakouts run in this order.
+  ordinal Int @default(0)
+
+  /// ---- Facilitated-meeting breakout meta (P15.5) ----
+  ///
+  /// A breakout is a PERIOD OF TIME in a meeting, not a place: participants go and have their own
+  /// chats against this step's questionnaire, then the answers are aggregated and synthesised for
+  /// the facilitator to walk the room through.
+
+  /// The DEFAULT length of this breakout, in seconds. Null means untimed.
+  ///
+  /// Authored intent only — the facilitator picks the actual length when starting the breakout
+  /// (`AppExperienceMeeting.breakoutDurationSeconds`), because the room in front of them is the
+  /// thing that decides whether twelve minutes is right today. This is what the console offers
+  /// them pre-filled, not a rule.
+  durationSeconds Int?
+
+  /// What the facilitator says to the room before sending them off — the framing that makes a
+  /// breakout land. Separate from `purpose` (which is written for the ROUTING SELECTOR to read):
+  /// the audiences are different, so one field serving both would be written for neither.
+  briefing String?
+
+  /// What the synthesis should look for in THIS breakout, in the author's words. Appended to the
+  /// experience-level `synthesisInstructions`. Per-step because a meeting's breakouts usually ask
+  /// for different things — "where do we disagree" then "what should we commit to".
+  synthesisFocus String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  experience AppExperience             @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  rooms      AppExperienceBreakoutRoom[]
+
+  @@unique([experienceId, key])
+  @@index([experienceId])
+  @@map("app_experience_step")
+}
+
+/// One respondent's journey through an experience (P15.2) — the run.
+///
+/// A run owns the sequence; each leg is an ordinary `AppQuestionnaireSession`, so the entire turn
+/// orchestrator, answer-slot pipeline, respondent report and analytics apply per leg with no
+/// changes. What the run adds is: which step is current, what context was carried at the handoff,
+/// what the selector decided and why, and the cumulative spend the run-level budget grades against.
+///
+/// `respondentUserId` and `cohortMemberId` are plain Strings with no @relation (UG-1) — identity
+/// pointers, never graph edges.
+model AppExperienceRun {
+  id           String @id @default(cuid())
+  experienceId String
+
+  /// Short human-quotable ref, minted by generateSessionRef(). Doubles as the respondent-facing
+  /// URL segment (`/x/<publicRef>`) so a stitched journey keeps one address across its legs.
+  publicRef String? @unique
+
+  /// EXPERIENCE_RUN_STATUSES (experiences/run/types.ts):
+  /// active | awaiting_handoff | completed | abandoned | aborted.
+  /// Mirrors SESSION_STATUSES' vocabulary deliberately — an admin reading both surfaces should
+  /// not have to learn two words for the same idea. `awaiting_handoff` is the one addition: a leg
+  /// has completed and the selector has not yet resolved.
+  status String @default("active")
+
+  /// Identity pointers. Plain Strings, no @relation (UG-1).
+  respondentUserId String?
+  cohortMemberId   String?
+
+  /// The step the run is currently on. Plain String pointer into AppExperienceStep — deliberately
+  /// not a relation, so deleting a step from a draft experience cannot cascade a run away.
+  currentStepId String?
+
+  /// The FROZEN carry-over payload handed to the current leg (CarryOverContext). Written once at
+  /// handoff and never recomputed: an earlier leg may later be re-scored, and a finished report
+  /// must not shift underneath it.
+  carryOver Json?
+
+  /// The selector's decision at the most recent fork (RoutingDecision) — decision, chosen step,
+  /// confidence, rationale, and which of rule / llm / fallback / budget produced it.
+  routingDecision Json?
+
+  /// Cumulative AI spend across every leg plus the selector, handoff and report calls.
+  /// Denormalised so the handoff gate can grade the run without a multi-table sum on every fork.
+  spentUsd Float @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  /// The meeting this run belongs to, for a facilitated experience (P15.5). Null for a switcher
+  /// run, which is one person travelling alone. A REAL relation with Cascade: a run has no meaning
+  /// without the occurrence it was part of, and both are respondent data (UG-1 governs
+  /// CONFIG→answer edges, which this is not).
+  meetingId String?
+
+  /// The breakout room this participant is in for the CURRENT breakout (P15.5b). Plain String
+  /// pointer (UG-1). Held on the run rather than only on the leg because a participant in a
+  /// `scribe` room has no leg of their own — they are in the room, watching someone else write —
+  /// and the facilitator still needs to see them placed.
+  currentRoomId String?
+
+  experience AppExperience         @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  meeting    AppExperienceMeeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  legs       AppExperienceRunLeg[]
+  /// The run-level respondent report (F15.4b), when one has been generated. Cascades from here:
+  /// the report is about this run and has no meaning without it.
+  report     AppRespondentReport?
+
+  @@index([experienceId])
+  @@index([status])
+  @@index([respondentUserId])
+  @@index([meetingId])
+  @@map("app_experience_run")
+}
+
+/// One leg of a run — the pairing of a step with the session that fulfilled it.
+///
+/// `sessionId` is a plain String with NO @relation and `@unique`. This is the load-bearing FK
+/// decision of the whole feature: it is an identity↔answer pointer, exactly like
+/// `AppQuestionnaireSession.roundId`. A real relation would make respondent answers reachable by
+/// walking experience config and would let config deletion cascade into respondent data.
+///
+/// `@@unique([runId, ordinal])` is what makes the handoff idempotent. `after()`, a
+/// double-tapped submit and a cron retry can all race `advanceExperienceRun`; rather than a
+/// read-then-write check (which loses the race), the constraint arbitrates and the caller treats
+/// P2002 as "someone else already created this leg" — i.e. success.
+model AppExperienceRunLeg {
+  id    String @id @default(cuid())
+  runId String
+
+  /// The step this leg fulfils. Plain String pointer (UG-1), as on the run.
+  stepId String
+
+  /// The session that ran it. Plain String, no @relation (UG-1). Unique: a session belongs to at
+  /// most one leg, which is also how the submit hook looks up "is this session part of a run?".
+  sessionId String @unique
+
+  /// The breakout ROOM this leg was answered in (P15.5b), when the breakout had rooms. Plain
+  /// String pointer (UG-1) like every other target pointer: deleting a room from a draft agenda
+  /// must not cascade away the answers given in it. Null for an ordinary roomless breakout.
+  roomId String?
+
+  /// Position in the journey, 0-based. Paired with runId in the idempotency constraint.
+  ordinal Int
+
+  /// EXPERIENCE_LEG_STATUSES (experiences/run/types.ts): active | completed | abandoned.
+  status String @default("active")
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  run AppExperienceRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, ordinal])
+  @@index([runId])
+  @@index([stepId])
+  @@index([roomId])
+  @@map("app_experience_run_leg")
+}
+
+/// A deterministic routing rule — evaluated BEFORE the LLM selector, first match wins.
+///
+/// Rules exist because owners will want hard-pinned routing ("if headcount > 500, always the
+/// enterprise questionnaire") and retro-fitting that after the LLM path ships means fighting it.
+/// They also keep the common cases off the critical path: the respondent is waiting at the fork,
+/// and a rule resolves in microseconds where the selector takes seconds.
+///
+/// `dataSlotKey` names a data slot in the CARRY-OVER payload, not a question key — the data-slot
+/// layer is the semantic answer vocabulary and is stable across question rewording.
+model AppExperienceRoutingRule {
+  id           String @id @default(cuid())
+  experienceId String
+
+  /// The carry-over data-slot key this rule tests.
+  dataSlotKey String
+  /// ROUTING_RULE_OPERATORS (experiences/routing/types.ts): equals | contains | gt | lt | exists
+  operator    String
+  /// Comparison operand. Null for `exists`, which tests only for a filled slot.
+  value       String?
+
+  /// The `key` of the step to route to when this rule matches. A plain String rather than a step
+  /// id so a rule survives an author deleting and re-creating a step under the same key; an
+  /// unresolvable key is treated as a non-match and logged, never a crash.
+  targetStepKey String
+
+  /// Evaluation order. First match wins, so ordinal is the rule's precedence.
+  ordinal Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  experience AppExperience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+
+  @@index([experienceId])
+  @@map("app_experience_routing_rule")
+}
+
+/// A MEETING — one live occurrence of a facilitated experience (P15.5).
+///
+/// The entity an `AppExperienceRun` cannot be. A run is ONE respondent's journey; a meeting is the
+/// shared, live fact that a group of people are doing this together right now. It owns the things
+/// that belong to the occurrence rather than to any participant: which breakout is running, when
+/// its clock started, and when the whole thing ended.
+///
+/// The same experience is run many times — a quarterly offsite, the same agenda, a different room
+/// each time — which is exactly why the timer lives here and the DURATION lives on the step. The
+/// step says "this breakout is meant to take 12 minutes"; the meeting says "it started at 14:03".
+///
+/// Participants may be from one cohort, several, or none at all (a public one-off). No roster is
+/// required: `joinRef` is the address, and the experience's `accessMode` decides whether a login is
+/// needed — the same gate a walk-up questionnaire uses.
+model AppExperienceMeeting {
+  id           String @id @default(cuid())
+  experienceId String
+
+  /// Short human-quotable join code, minted by generateSessionRef(). This is what goes on the
+  /// slide: `/m/<joinRef>`. Addresses the meeting; it does NOT authorise anything on its own —
+  /// access is decided by the experience's accessMode, exactly as for a walk-up questionnaire.
+  joinRef String @unique
+
+  /// Display name for this occurrence ("Q3 Planning — 14 Aug"). Null falls back to the
+  /// experience title; a facilitator running the same agenda monthly needs to tell them apart.
+  title String?
+
+  /// EXPERIENCE_MEETING_STATUSES (experiences/meeting/types.ts):
+  /// scheduled | live | ended | abandoned.
+  status String @default("scheduled")
+
+  /// The breakout currently running, or null between breakouts / before the meeting starts.
+  /// Plain String pointer into AppExperienceStep (UG-1), like `AppExperienceRun.currentStepId`:
+  /// deleting a step from a draft experience must not cascade away a meeting that ran it.
+  currentStepId String?
+
+  /// The live clock for the current breakout. `breakoutEndsAt` is stored, NOT derived on read —
+  /// neither an author editing the step's default nor a settings change may retroactively move a
+  /// clock the room is already watching. Both null when no breakout is running.
+  ///
+  /// The facilitator can also END early, which sets `breakoutEndsAt` to now — the grace window
+  /// then runs from there, so "wrap up, thirty seconds" is one action rather than a cut-off.
+  breakoutStartedAt DateTime?
+  breakoutEndsAt    DateTime?
+
+  /// What the facilitator actually chose for this breakout, in seconds — which may differ from the
+  /// step's authored default. Recorded so a later read can tell "they gave the room 20 minutes"
+  /// from "the step says 12"; null for an untimed breakout.
+  breakoutDurationSeconds Int?
+
+  /// The grace window after `breakoutEndsAt`, in seconds, frozen at the moment the breakout
+  /// started. Participants may still finish and submit during it; nothing new is started.
+  ///
+  /// Frozen rather than read live from settings for the same reason as `breakoutEndsAt`: a room
+  /// mid-sentence must not lose its remaining seconds because someone edited a setting.
+  breakoutGraceSeconds Int @default(30)
+
+  /// Who is running it. Plain String admin User.id, no FK (UG-1) — attribution, not ownership.
+  facilitatorUserId String?
+
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  experience AppExperience             @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  runs       AppExperienceRun[]
+  insights   AppExperienceInsight[]
+
+  @@index([experienceId])
+  @@index([status])
+  @@map("app_experience_meeting")
+}
+
+/// One synthesised finding from a breakout (P15.5) — what the facilitator walks the room through.
+///
+/// Generated by aggregating the breakout's completed sessions. Regenerated as more people finish
+/// (`synthesisEveryNCompletions`) and once more when the breakout ends, so the facilitator sees it
+/// building rather than waiting on a cold start when they are ready to talk.
+///
+/// ## k-anonymity is structural, not cosmetic
+///
+/// `supportCount` is how many respondents a finding rests on, and `insightMinSupport` (default 3,
+/// floor 2) suppresses anything below it. Two people can usually identify each other from "a
+/// tension between two of you"; three is the smallest group where that stops being true. The count
+/// is stored so the gate can be re-applied on read if the setting is raised AFTER generation —
+/// re-running the synthesis is not required to make an existing meeting safer.
+model AppExperienceInsight {
+  id        String @id @default(cuid())
+  meetingId String
+
+  /// The breakout this finding came from. Plain String pointer (UG-1), as on the meeting.
+  stepId String
+
+  /// The ROOM it came from (P15.5b), when the breakout had rooms. Rooms are synthesised
+  /// SEPARATELY — they may have answered different questionnaires, so combining them would be the
+  /// same cross-vocabulary mistake per-step report scoping exists to avoid. Null for a roomless
+  /// breakout, whose single synthesis covers everyone.
+  roomId String?
+
+  /// EXPERIENCE_INSIGHT_KINDS (experiences/meeting/types.ts):
+  /// agreement | tension | outlier | theme | question.
+  kind String
+
+  /// The finding itself, in the facilitator's reading voice — a sentence they can say out loud.
+  statement String
+
+  /// The supporting detail: what was said, paraphrased. Never raw quotes attributable to one
+  /// person — a synthesis read aloud to the room must not out anybody.
+  detail String?
+
+  /// How many respondents this rests on. The k-anonymity gate reads this; see the model docblock.
+  supportCount Int @default(0)
+
+  /// Author-controlled walkthrough order within the breakout, and the synthesiser's own sense of
+  /// significance. The facilitator walks them in this order.
+  ordinal Int @default(0)
+
+  /// Whether the facilitator has already covered this in the room. Drives the walkthrough UI's
+  /// progress; a meeting that overruns should show what is still unsaid.
+  covered Boolean @default(false)
+
+  /// Whether respondents may see it, when `surfaceInsightsToRespondents` is on. Per-insight so a
+  /// facilitator can hold one back without turning the whole feature off mid-meeting.
+  visibleToRespondents Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  meeting AppExperienceMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId, stepId, ordinal])
+  @@index([meetingId, stepId, roomId])
+  @@index([meetingId, stepId, supportCount])
+  @@map("app_experience_insight")
+}
+
+
+/// A ROOM within a breakout (P15.5b) — the optional refinement on "everyone answers individually".
+///
+/// A breakout is a period of TIME. Usually the whole group answers the same questionnaire on their
+/// own devices and there are no rooms at all. Sometimes the group splits: each room takes its own
+/// dedicated questionnaire, and works either individually or through one person writing for
+/// everybody.
+///
+/// Rooms are OPTIONAL. A breakout with no rooms behaves exactly as F15.5a — which is why they are a
+/// separate table rather than a nullable pair of columns on the step: the common case stays
+/// untouched, and nothing has to interpret "roomId is null" as a mode.
+model AppExperienceBreakoutRoom {
+  id     String @id @default(cuid())
+  stepId String
+
+  /// What the facilitator calls it out loud — "Table 3", "Engineering", "The window side".
+  name    String
+  ordinal Int    @default(0)
+
+  /// This room's own questionnaire. Null inherits the breakout step's, which is the common case
+  /// even when rooms exist: splitting a group does not always mean asking different questions.
+  /// Plain Strings, no @relation (UG-1), exactly as on the step.
+  questionnaireId String?
+  versionId       String?
+
+  /// BREAKOUT_ROOM_MODES (experiences/meeting/types.ts): individual | scribe.
+  ///
+  /// `individual` — everyone in the room answers their own copy, and the room is just a grouping
+  /// for the synthesis.
+  /// `scribe` — ONE session represents the whole room, driven by whoever claims the pen. The
+  /// others are present and watching, and deliberately have no session of their own: a room
+  /// talking through an answer together has one answer, not six.
+  mode String @default("individual")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  step AppExperienceStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, name])
+  @@index([stepId])
+  @@map("app_experience_breakout_room")
+}

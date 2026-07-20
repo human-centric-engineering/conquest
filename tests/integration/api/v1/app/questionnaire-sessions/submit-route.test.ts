@@ -34,10 +34,12 @@ vi.mock('next/server', async (importOriginal) => {
 
 const reportMock = vi.hoisted(() => ({
   enqueueRespondentReport: vi.fn(),
+  isExperienceLeg: vi.fn(),
   processQueuedRespondentReports: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/report/enqueue', () => ({
   enqueueRespondentReport: reportMock.enqueueRespondentReport,
+  isExperienceLeg: reportMock.isExperienceLeg,
 }));
 vi.mock('@/lib/app/questionnaire/report/worker', () => ({
   processQueuedRespondentReports: reportMock.processQueuedRespondentReports,
@@ -151,6 +153,8 @@ beforeEach(() => {
   sessionsMock.markSessionCompleted.mockResolvedValue('completed');
   // Default: no report enqueued → the instant-start kick is not scheduled (individual tests opt in).
   reportMock.enqueueRespondentReport.mockResolvedValue(false);
+  // The overwhelming majority of sessions are standalone, not a leg of an experience run.
+  reportMock.isExperienceLeg.mockResolvedValue(false);
   reportMock.processQueuedRespondentReports.mockResolvedValue({
     claimed: 0,
     succeeded: 0,
@@ -320,6 +324,30 @@ describe('respondent report instant-start kick', () => {
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
     expect(afterMock.after).not.toHaveBeenCalled();
+  });
+
+  it('SKIPS the per-session report when the session is a leg of an experience run', async () => {
+    // F15.4b: the run-level report covers every leg. Enqueuing here too would bill the journey
+    // twice and hand the respondent n+1 reports where they were promised one summary.
+    reportMock.isExperienceLeg.mockResolvedValue(true);
+    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+
+    const res = await POST(req(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(reportMock.enqueueRespondentReport).not.toHaveBeenCalled();
+  });
+
+  it('falls back to enqueuing when the leg lookup fails', async () => {
+    // Fail-soft direction matters: a redundant per-leg report is a far better outcome than a
+    // respondent who receives nothing because one lookup errored.
+    reportMock.isExperienceLeg.mockRejectedValue(new Error('db down'));
+    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+
+    const res = await POST(req(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(reportMock.enqueueRespondentReport).toHaveBeenCalledWith('sess-1');
   });
 
   it('completes the submit even if enqueue throws', async () => {

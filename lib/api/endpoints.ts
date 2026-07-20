@@ -696,6 +696,93 @@ export const API = {
       /** Accept an invitation: register + bind the account (POST). */
       ACCEPT: '/api/v1/app/invitations/accept',
     },
+    /**
+     * Experiences (P15) — journeys composed from existing questionnaires. An Experience
+     * sequences questionnaires, routes between them, and synthesises across the whole run.
+     */
+    EXPERIENCES: {
+      /** List (GET `?status=` `?kind=` `?demoClientId=`) + create (POST). */
+      ROOT: '/api/v1/app/experiences',
+      /** Detail with ordered steps (GET), edit (PATCH), delete (DELETE — draft only). */
+      byId: (id: string): string => `/api/v1/app/experiences/${id}`,
+      /** Steps: list (GET) + append (POST). */
+      steps: (id: string): string => `/api/v1/app/experiences/${id}/steps`,
+      /** Edit (PATCH) / remove (DELETE) one step. */
+      step: (id: string, stepId: string): string => `/api/v1/app/experiences/${id}/steps/${stepId}`,
+      /**
+       * The step's cohort report — read view (GET) / edit content (PATCH). Scoped to the legs of
+       * this step only; see `cohort-report/scope.ts` for why per-step and never per-experience.
+       */
+      stepReport: (id: string, stepId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/cohort-report`,
+      /** Generate the step's cohort report (POST — paid LLM work). */
+      generateStepReport: (id: string, stepId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/cohort-report/generate`,
+      /** Reorder steps — full ordered id list (PATCH). */
+      reorderSteps: (id: string): string => `/api/v1/app/experiences/${id}/steps/reorder`,
+      /** Deterministic routing rules: list (GET) + create (POST). */
+      routingRules: (id: string): string => `/api/v1/app/experiences/${id}/routing-rules`,
+      /** Replace (PATCH — whole rule) / delete (DELETE) one rule. */
+      routingRule: (id: string, ruleId: string): string =>
+        `/api/v1/app/experiences/${id}/routing-rules/${ruleId}`,
+      /** Reorder routing rules — the COMPLETE ordered id list (PATCH). Order is behaviour. */
+      reorderRoutingRules: (id: string): string =>
+        `/api/v1/app/experiences/${id}/routing-rules/reorder`,
+      /** Re-queue a failed run-level report (POST — respondent-facing). */
+      runReportRetry: (runId: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/report/retry`,
+      /** Opt in to an email when the run report is ready (POST — respondent-facing). */
+      runReportNotify: (runId: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/report/notify`,
+      /** Dry-run the selector against a completed session, no side effects (POST). */
+      previewRouting: (id: string): string => `/api/v1/app/experiences/${id}/preview-routing`,
+      /** Runs: admin list (GET) + START a run (POST — respondent-facing, not admin-gated). */
+      runs: (id: string): string => `/api/v1/app/experiences/${id}/runs`,
+      /** One run with its legs + routing rationale (GET — admin). */
+      run: (runId: string): string => `/api/v1/app/experiences/runs/${runId}`,
+      /** THE POLL ENDPOINT — the respondent's client asks "what next?" after a submit (GET). */
+      runStatus: (runId: string, sessionId?: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/status${sessionId ? `?sessionId=${sessionId}` : ''}`,
+      /**
+       * The earlier legs of a run, for the stitched surface to replay above the live one (GET).
+       * Respondent-only — the admin bypass does not apply.
+       */
+      runTranscript: (runId: string, sessionId: string): string =>
+        `/api/v1/app/experiences/runs/${runId}/transcript?sessionId=${sessionId}`,
+      /**
+       * The run-level respondent report — the journey's summary (GET). Respondent-only; the admin
+       * bypass does not apply. Polled by the completion screen until the status is terminal.
+       */
+      runReport: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/report`,
+      /** Manually push a stuck run forward (POST — admin only; has real side effects). */
+      advanceRun: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/advance`,
+      /** Facilitated meetings (P15.5): list (GET) + create one occurrence (POST). */
+      meetings: (id: string): string => `/api/v1/app/experiences/${id}/meetings`,
+      /** Facilitator actions on a live meeting — start, run a breakout, end, synthesise (POST). */
+      meetingActions: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/actions`,
+      /** THE MEETING POLL — live state + audience-filtered insights (GET). */
+      meetingLive: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/live`,
+      /** Mark an insight covered / publish it to respondents (PATCH — admin). */
+      meetingInsight: (meetingId: string, insightId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/insights/${insightId}`,
+      /** Join a live meeting (POST — respondent-facing, not admin-gated). */
+      meetingJoin: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/join`,
+      /** Authoring a breakout's rooms: list (GET) + add (POST). Admin. */
+      stepRooms: (id: string, stepId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/rooms`,
+      /** Edit (PATCH) / remove (DELETE) one authored room. Admin. */
+      stepRoom: (id: string, stepId: string, roomId: string): string =>
+        `/api/v1/app/experiences/${id}/steps/${stepId}/rooms/${roomId}`,
+      /** Breakout rooms in the current breakout: list (GET) + choose one (POST). */
+      meetingRooms: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/rooms`,
+      /** The participant's own live state — which session, and may they answer (GET). */
+      meetingParticipant: (meetingId: string, runId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/participant?runId=${runId}`,
+    },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {
       /** List (GET) + create (POST). */

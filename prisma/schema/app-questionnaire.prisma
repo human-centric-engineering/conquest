@@ -568,6 +568,10 @@ model AppDemoClient {
   // Cohorts (groups of people) belonging to this demo client. Cascade on delete: a
   // cohort is meaningless without its client. Members + rounds cascade in turn.
   cohorts        AppCohort[]
+  // Experiences (P15) — journeys composed from this client's questionnaires. Cascade on delete,
+  // same reasoning as cohorts: an experience is meaningless without its client. Steps cascade in
+  // turn. Defined in schema/app-experience.prisma.
+  experiences    AppExperience[]
 
   @@map("app_demo_client")
 }
@@ -877,6 +881,21 @@ model AppQuestionnaireSession {
   // per-phase completion STATS group without a member join and survive later roster edits. Null for
   // non-round sessions, or members with no subgroup. Read for stats only, never to attribute answers.
   cohortSubgroupId     String?
+  // Experiences (F15.4): the experience STEP this session fulfilled, when it is a leg of a run.
+  // Plain String, no @relation — the SAME UG-1 posture as `roundId`/`cohortMemberId`, and read for
+  // exactly the same reason: per-step report SCOPING and stats, never to attribute answers.
+  //
+  // Denormalised from `AppExperienceRunLeg.stepId` deliberately. Per-step cohort reports must be
+  // expressible as a plain session `where` clause, because `ReportScope`/`scopeSessionWhere` are
+  // pure and the dataset + chart-series modules assume one data-slot vocabulary per scope. Without
+  // this column a step scope would have to pre-resolve every leg's sessionId and pass an
+  // `id: { in: [...] }` list — which goes stale, breaks the module's purity contract, and scales
+  // badly on a large cohort. Filtering on the step's `versionId` alone is NOT equivalent: it would
+  // sweep in ordinary round and walk-up sessions on the same questionnaire and report them as part
+  // of the journey.
+  //
+  // Written once by `createSessionForExperienceLeg`; null for every non-experience session.
+  experienceStepId     String?
   // Selectable interviewer persona (F-persona): the persona key the respondent chose (or was
   // pre-selected) for this session, keyed into the version's persona library. Null = use the version's
   // default persona / its own tone. Read at turn time by resolveEffectiveTone so the chosen voice
@@ -923,6 +942,7 @@ model AppQuestionnaireSession {
   @@index([roundId])
   @@index([cohortMemberId])
   @@index([cohortSubgroupId])
+  @@index([experienceStepId])
   // DRIFT WARNING: a raw-SQL PARTIAL UNIQUE INDEX
   // (idx_app_questionnaire_session_preview_per_version, migration
   // 20260605141500) enforces at most one preview session per version
@@ -968,8 +988,9 @@ model AppRespondentProfileSnapshot {
   @@map("app_respondent_profile_snapshot")
 }
 
-/// The generated Respondent Report (report kind `respondent`) for one completed session — 1:1 with
-/// the session. Created `queued` at submit ONLY when the version's `respondentReport` config is
+/// The generated Respondent Report (report kind `respondent`) — for ONE completed session, or (F15.4b)
+/// for ONE experience RUN spanning several legs. Created `queued` at submit ONLY when the version's
+/// `respondentReport` config is
 /// enabled in mode `raw_plus_insights`; the deterministic raw-only mode renders on demand and needs
 /// no row. The maintenance-tick worker leases a queued row, runs the report agent (optionally
 /// grounded in the attributed client's knowledge base), and writes `ready` + `content` (or `failed`
@@ -980,7 +1001,14 @@ model AppRespondentProfileSnapshot {
 /// (lib/orchestration/evaluations/run-worker.ts) for crash-safe recovery of stale claims.
 model AppRespondentReport {
   id                  String    @id @default(cuid())
-  sessionId           String    @unique
+  /// RESPONDENT_REPORT_SUBJECTS (types.ts): 'session' | 'experience_run'.
+  /// Polymorphic owner, mirroring the pattern AppCohortReport already uses: exactly one of the two
+  /// nullable-unique owner keys is set per row, and Postgres permits multiple NULLs in a unique
+  /// index so both constraints coexist. A run report is NOT expressible as a session report — its
+  /// inputs span several sessions, which `sessionId @unique` forbids by construction.
+  subjectKind         String    @default("session")
+  /// Session-scope owner key. NULL for run-scope rows.
+  sessionId           String?   @unique
   mode                String // RESPONDENT_REPORT_MODES (types.ts); the AI modes `raw_plus_insights` + `narrative` persist a row
   status              String    @default("queued") // RESPONDENT_REPORT_STATUSES: queued | processing | ready | failed
   content             Json? // RespondentReportContent (insights payload); null until ready
@@ -1006,7 +1034,13 @@ model AppRespondentReport {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  session   AppQuestionnaireSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  /// Run-scope owner key (F15.4b). NULL for session-scope rows. A REAL relation with
+  /// `onDelete: Cascade`, matching how AppExperienceRunLeg attaches to its run: a run is respondent
+  /// data, not config, so deleting one must take its report with it. This is not a UG-1 violation —
+  /// UG-1 forbids CONFIG→answer edges, and the run is the answer side.
+  runId               String?   @unique
+  session   AppQuestionnaireSession?      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  run       AppExperienceRun?             @relation(fields: [runId], references: [id], onDelete: Cascade)
   revisions AppRespondentReportRevision[]
 
   @@index([status, lockedAt])
@@ -1075,9 +1109,19 @@ model AppCohortReport {
   // one report per round while leaving room for version-scope rows (roundId NULL) and keeps the
   // round FK/cascade relation intact; `versionOwnerId @unique` does the same for one report per
   // version. `versionId` (the analysed/pinned version) is set on EVERY row.
-  scopeKind               String    @default("round") // 'round' | 'version'
+  scopeKind               String    @default("round") // 'round' | 'version' | 'experience_step'
   roundId                 String?   @unique // round-scope owner key + FK; NULL for version-scope rows
   versionOwnerId          String?   @unique // version-scope owner key (= versionId); NULL for round-scope rows (UG-1, no FK)
+  /// Experience-step-scope owner key (F15.4): the `AppExperienceStep.id` whose legs this report
+  /// analyses. Plain String, no FK (UG-1) — a step is experience CONFIG, and a real relation would
+  /// let editing a journey cascade away a generated report about respondents who already ran it.
+  ///
+  /// Scoped PER STEP rather than per experience deliberately. One step pins one questionnaire
+  /// version, so `versionId` stays set on every row and `buildCohortDataset` / `chart-series.ts`
+  /// keep their single-data-slot-vocabulary assumption — they need ZERO changes. An
+  /// experience-wide view is a synthesis over ready step reports, never a re-aggregation across
+  /// versions whose slot keys do not reconcile.
+  experienceStepOwnerId   String?   @unique
   versionId               String // the version analysed; for round scope the round's pinned version; plain String (UG-1)
   title                   String
   status                  String    @default("queued") // COHORT_REPORT_STATUSES (types.ts): queued | processing | ready | failed
@@ -1683,7 +1727,7 @@ model AppAiRun {
   id String @id @default(cuid())
 
   /// What this run acted on. APP_AI_RUN_SUBJECTS (ai-run/types.ts):
-  /// version | session | respondent_report | cohort_report.
+  /// version | session | respondent_report | cohort_report | experience_run.
   subjectKind String
   /// The subject row's id. Plain String, no FK (UG-1) — polymorphic, and the run must
   /// outlive a deleted subject long enough to explain what happened to it.

@@ -18,6 +18,7 @@ import {
   Building2,
   ClipboardList,
   MessageSquareText,
+  Route,
   SlidersHorizontal,
   TicketCheck,
   Workflow,
@@ -52,6 +53,15 @@ export function initAppNav(): void {
         // Exact match: sibling pages live under `/admin/questionnaires/*` (e.g. the
         // prompt library), so a prefix match would light this item up on those too.
         exact: true,
+      },
+      // Experiences (P15): journeys composed from questionnaires. Sits directly beneath
+      // Questionnaires because it consumes them — an experience sequences questionnaires you have
+      // already authored, it never replaces authoring them.
+      {
+        href: '/admin/experiences',
+        label: 'Experiences',
+        icon: Route,
+        description: 'Compose journeys from your questionnaires',
       },
       {
         href: '/admin/questionnaires/prompts',

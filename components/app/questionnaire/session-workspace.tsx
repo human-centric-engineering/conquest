@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { BookOpen, ClipboardList, Drama, ListChecks, MessageSquare } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -69,6 +70,10 @@ import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
 import { ProfileCaptureGate } from '@/components/app/questionnaire/profile/profile-capture-gate';
+import { HandoffCard } from '@/components/app/questionnaire/experiences/handoff-card';
+import { StitchedContinuation } from '@/components/app/questionnaire/experiences/stitched-continuation';
+import { useStitchedHistory } from '@/lib/hooks/use-stitched-history';
+import type { RunPollState } from '@/lib/app/questionnaire/experiences/run/types';
 import { API } from '@/lib/api/endpoints';
 
 /**
@@ -599,6 +604,70 @@ export function SessionWorkspace({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [views.length, goRelative]);
 
+  /* ---------------------------------------------------------------------- */
+  /* Experiences (P15.2 wiring, P15.3 stitched)                              */
+  /* ---------------------------------------------------------------------- */
+
+  // Run membership rides on the LIFECYCLE STATUS VIEW, not on the submit response. The submit
+  // response is seen once; a respondent who reloads a completed leg — or comes back to the tab an
+  // hour later — would otherwise land on the terminal completion screen and never learn the
+  // journey continues. `null` for an ordinary standalone session, which is almost all of them.
+  const router = useRouter();
+  const experience = lifecycle.view?.experience ?? null;
+  const stitched = experience?.continuityMode === 'stitched';
+
+  // Earlier legs, replayed above the live conversation. Only fetched when there is something to
+  // fetch: stitched, and not the entry leg. Never in the read-only admin viewer, which has no
+  // respondent credential and whose own surface already shows one session at a time.
+  const stitchedHistory = useStitchedHistory({
+    runId: experience?.runId ?? null,
+    sessionId,
+    sessionToken: accessToken,
+    enabled: Boolean(stitched && !readOnly && (experience?.ordinal ?? 0) > 0),
+  });
+
+  // A stitched handoff that ended the journey rather than continuing it. Held here so the
+  // component can fall through to the ordinary completion screen once the poll settles.
+  const [stitchedOutcome, setStitchedOutcome] = useState<RunPollState | null>(null);
+
+  // How this surface moves into the next leg. Derived here rather than passed in: the page
+  // rendering this workspace is a SERVER component, so it cannot hand down a function at all.
+  //
+  // The two surfaces differ in a way that is easy to get silently wrong. The authenticated one
+  // addresses each session by id, so continuing NAVIGATES. The no-login surface sits on
+  // `/x/<publicRef>` — one stable address for the whole journey — where the URL for leg B is the
+  // URL already in the address bar. `router.push` there is a no-op, so continuing must REFRESH,
+  // which re-runs the server component and resolves the run to its new current leg.
+  const onContinue = useCallback(
+    (nextSessionId: string) => {
+      if (experience?.publicRef && accessToken) {
+        router.refresh();
+        return;
+      }
+      router.push(`/questionnaires/${nextSessionId}`);
+    },
+    [router, experience?.publicRef, accessToken]
+  );
+
+  const onConclude = useCallback(() => {
+    // The run-level report is F15.4; until it exists the last leg's own respondent report is the
+    // closest honest thing, and it lives on the completion screen this falls through to.
+    setStitchedOutcome({ state: 'conclude', reason: 'selector', message: '' });
+  }, []);
+
+  // Whether this surface can host a handoff at all. The no-login path needs the stable address;
+  // without a publicRef (a pre-column run) there is nowhere to send the respondent, and showing a
+  // Continue button that goes nowhere is worse than falling through to the completion screen.
+  const canHandOff = accessToken ? Boolean(experience?.publicRef) : true;
+
+  // The label the live leg's divider carries — null when the author chose the seamless marker,
+  // undefined when this is not a stitched leg at all (no dividers anywhere).
+  const stitchedSeamLabel = stitched
+    ? experience?.seamMarker === 'none'
+      ? null
+      : (experience?.stepTitle ?? null)
+    : undefined;
+
   // Read-only viewer (admin): just the transcript, no chrome. Rendered after all hooks so the
   // panel/lifecycle/form hooks (inert via `enabled: false`) still obey the rules of hooks. A
   // completed session is shown as its conversation here, not the respondent's completion screen.
@@ -625,12 +694,49 @@ export function SessionWorkspace({
   // into the chat and, on any further send, hit the "session no longer active" panel; instead it
   // stays on the calm completion screen where the report download lives.
   if (stream.status === 'completed' || lifecycle.view?.status === 'completed') {
+    // A leg of an experience is NOT the end of anything yet — the selector may still route the
+    // respondent onward. Before P15.3 this arm was unconditional, so a completed leg dead-ended on
+    // the completion screen and the whole run machinery behind it was unreachable.
+    //
+    // `stitchedOutcome` is how the stitched branch falls through: once the fork resolves to an
+    // ending (or the handoff fails) there is nothing left to continue into, and the ordinary
+    // completion screen — with its report and download — is the right destination.
+    if (experience && canHandOff && !stitchedOutcome) {
+      if (stitched) {
+        return (
+          <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6">
+            <StitchedContinuation
+              runId={experience.runId}
+              sessionId={sessionId}
+              sessionToken={accessToken}
+              onContinue={onContinue}
+              onSettled={setStitchedOutcome}
+            />
+          </div>
+        );
+      }
+      return (
+        <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6">
+          <HandoffCard
+            runId={experience.runId}
+            sessionId={sessionId}
+            sessionToken={accessToken}
+            onContinue={onContinue}
+            onConclude={onConclude}
+          />
+        </div>
+      );
+    }
+
     return (
       <SessionComplete
         sessionId={sessionId}
         accessToken={accessToken}
         answeredCount={lifecycle.view?.completion.answeredCount ?? null}
         refRaw={lifecycle.view?.ref ?? null}
+        // Experiences (F15.4b): a leg shows the RUN's report — the journey's summary — because the
+        // leg itself no longer generates one. Null for a standalone session.
+        runId={experience?.runId ?? null}
         // The last-settled answer panel feeds the "while your report is being prepared" cycler — the
         // respondent sees their own captured positions echoed back instead of a bare spinner.
         captured={panel.view ?? null}
@@ -759,6 +865,8 @@ export function SessionWorkspace({
           animateOpening={autoStart}
           correctionTargets={correctionTargets}
           onCorrected={onTurnSettled}
+          stitchedHistory={stitchedHistory}
+          stitchedSeamLabel={stitchedSeamLabel}
           className="min-h-0 flex-1"
         />
       </div>

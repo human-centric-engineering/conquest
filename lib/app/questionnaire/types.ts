@@ -693,6 +693,19 @@ export function isAiRespondentReportMode(mode: RespondentReportMode): boolean {
   return mode === 'raw_plus_insights' || mode === 'narrative';
 }
 
+/**
+ * What a respondent report is ABOUT (F15.4b).
+ *
+ * `session` — one completed questionnaire, the original 1:1 shape.
+ * `experience_run` — one respondent's whole journey across every leg of a run.
+ *
+ * A run report is not expressible as a session report: its inputs span several sessions, which the
+ * `sessionId @unique` constraint forbids by construction. Hence the polymorphic owner, mirroring
+ * the pattern `AppCohortReport` already uses.
+ */
+export const RESPONDENT_REPORT_SUBJECTS = ['session', 'experience_run'] as const;
+export type RespondentReportSubject = (typeof RESPONDENT_REPORT_SUBJECTS)[number];
+
 /** Lifecycle of a stored mode-2 report (the async tick-worker pipeline). */
 export const RESPONDENT_REPORT_STATUSES = ['queued', 'processing', 'ready', 'failed'] as const;
 export type RespondentReportStatus = (typeof RESPONDENT_REPORT_STATUSES)[number];

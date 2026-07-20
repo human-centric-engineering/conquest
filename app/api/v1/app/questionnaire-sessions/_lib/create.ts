@@ -590,3 +590,119 @@ export async function createSessionFromInviteToken(token: string): Promise<Creat
 
   return { ok: true, session, resumed: false };
 }
+
+/**
+ * Create the session for the NEXT LEG of an experience run (P15.2).
+ *
+ * The sixth creator, and the only server-initiated one: every other path here begins with a
+ * respondent action, whereas this fires from the handoff after the previous leg completed. That
+ * difference drives three deliberate departures:
+ *
+ *  - **No access-mode gate.** Access was decided when the run started; a step's questionnaire may
+ *    legitimately be `invitation_only` (it is never reachable except through this experience), and
+ *    re-applying the walk-up gate here would make such a step permanently unroutable.
+ *  - **No `sessionStartLimiter`.** A server-initiated handoff is not a respondent-initiated start.
+ *    Counting it would let a legitimate two-leg respondent burn two of their start allowance.
+ *  - **No resume lookup.** The run's `@@unique([runId, ordinal])` is the idempotency guard; a
+ *    resumable-session check here would wrongly rejoin an unrelated earlier session the respondent
+ *    happens to have against the same questionnaire.
+ *
+ * Carries `selectedPersonaKey` and the safeguarding state forward from the source leg, so the next
+ * interviewer neither resets its voice nor re-opens a disclosure the respondent already made.
+ *
+ * The caller (`run-advance.ts`) is responsible for having resolved a launched version; this seam
+ * still refuses an archived or unlaunched one rather than trusting that.
+ */
+export async function createSessionForExperienceLeg(params: {
+  versionId: string;
+  respondentUserId: string | null;
+  cohortMemberId: string | null;
+  roundId: string | null;
+  /**
+   * The experience step this leg fulfils — denormalised onto the session so per-step cohort
+   * reports can be a plain `where` clause. Required, not optional: every leg has a step, and
+   * making it optional would let a caller silently mint a leg that no step report can ever see.
+   */
+  stepId: string;
+  /**
+   * The session the run just completed — the source of persona + safeguarding continuity.
+   * Null for the ENTRY leg, which has no predecessor to carry anything from.
+   */
+  fromSessionId: string | null;
+}): Promise<CreateSessionResult> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: params.versionId },
+    select: { id: true, status: true, archivedAt: true },
+  });
+
+  if (version?.archivedAt) {
+    return {
+      ok: false,
+      status: 410,
+      code: VERSION_ARCHIVED_CODE,
+      message: VERSION_ARCHIVED_MESSAGE,
+    };
+  }
+  if (!version || version.status !== 'launched') {
+    return { ok: false, status: 404, code: 'NOT_FOUND', message: 'Questionnaire not found' };
+  }
+
+  // Round gating still applies when the step pins one: a step delivered inside a round window must
+  // honour that window even though the run reached it programmatically.
+  if (params.roundId) {
+    const gate = await assertRoundAccess({
+      roundId: params.roundId,
+      cohortMemberId: params.cohortMemberId,
+      versionId: params.versionId,
+      // Create-time: a step naming a round that no longer exists is a bad reference, not an
+      // ungated step — deny rather than silently running the leg unwindowed.
+      onMissingRound: 'deny',
+    });
+    if (!gate.ok) return gate;
+  }
+
+  const previous = params.fromSessionId
+    ? await prisma.appQuestionnaireSession.findUnique({
+        where: { id: params.fromSessionId },
+        select: { selectedPersonaKey: true, sensitivityLevel: true, sensitivityNotes: true },
+      })
+    : null;
+
+  const session = await prisma.$transaction(async (tx) => {
+    const created = await tx.appQuestionnaireSession.create({
+      data: {
+        versionId: params.versionId,
+        respondentUserId: params.respondentUserId,
+        publicRef: generateSessionRef(),
+        isPreview: false,
+        status: 'active',
+        ...(params.roundId ? { roundId: params.roundId } : {}),
+        ...(params.cohortMemberId ? { cohortMemberId: params.cohortMemberId } : {}),
+        // Experiences (F15.4): the step this leg fulfils, denormalised onto the session so a
+        // per-step cohort report is a plain `where` clause. Written HERE — at the one place a leg
+        // session is minted — rather than patched on afterwards, so it can never be missing for a
+        // session that is genuinely part of a run. See the schema comment for why the leg table's
+        // pointer alone is not enough.
+        experienceStepId: params.stepId,
+        // Persona continuity: a respondent who chose an interviewer voice should not be handed a
+        // different one mid-journey.
+        ...(previous?.selectedPersonaKey
+          ? { selectedPersonaKey: previous.selectedPersonaKey }
+          : {}),
+        // Safeguarding continuity. Carried unconditionally — no setting gates it. Forgetting a
+        // disclosure between legs would make this interviewer re-open it.
+        ...(previous?.sensitivityLevel ? { sensitivityLevel: previous.sensitivityLevel } : {}),
+        // The column is non-nullable with a `[]` default, so a null read (impossible in practice,
+        // but the Json type admits it) must fall through to that default rather than be written.
+        ...(previous?.sensitivityNotes !== undefined && previous.sensitivityNotes !== null
+          ? { sensitivityNotes: previous.sensitivityNotes }
+          : {}),
+      },
+      select: { id: true, status: true, versionId: true },
+    });
+    await recordSessionCreated(created.id, { tx, reason: 'experience_handoff' });
+    return created;
+  });
+
+  return { ok: true, session, resumed: false };
+}

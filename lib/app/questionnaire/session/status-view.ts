@@ -20,6 +20,7 @@
  */
 
 import type { CostCapTier } from '@/lib/app/questionnaire/session/cost-cap';
+import type { SessionExperienceContext } from '@/lib/app/questionnaire/experiences/run/types';
 import type {
   CompletionAssessment,
   CompletionKind,
@@ -69,6 +70,14 @@ export interface SessionStatusView {
    * reporting a problem so an admin can look the session up.
    */
   ref: string | null;
+  /**
+   * The experience run this session is a leg of (P15.3), or `null` for a standalone session.
+   *
+   * Lives on the status view — not the submit response — so that run membership survives a page
+   * reload. Without it a respondent who refreshes a completed leg lands on the terminal completion
+   * screen and never learns the journey continues.
+   */
+  experience: SessionExperienceContext | null;
 }
 
 /** Inputs the pure builder maps — all already computed by the route seam. */
@@ -83,6 +92,8 @@ export interface SessionStatusInput {
   anonymous: boolean;
   /** The session's raw support reference, or null for a row predating the column. */
   ref: string | null;
+  /** Experience-run membership, already resolved by the route seam. Null when standalone. */
+  experience: SessionExperienceContext | null;
 }
 
 /** Map the assessment + cost tier + status into the client-safe view. */
@@ -101,6 +112,7 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
     cost: input.capped ? { tier: input.costTier } : null,
     anonymous: input.anonymous,
     ref: input.ref,
+    experience: input.experience,
   };
 }
 

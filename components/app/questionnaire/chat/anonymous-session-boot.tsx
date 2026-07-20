@@ -43,21 +43,18 @@ import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
 import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
-import {
-  ANSWER_PROVENANCES,
-  CAPTURE_MODES,
-  PERSONA_SWITCHERS,
-  PROFILE_FIELD_TYPES,
-  PROFILE_FIELD_VALIDATION_MODES,
-} from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import {
   VERSION_ARCHIVED_CODE,
   VERSION_ARCHIVED_MESSAGE,
 } from '@/lib/app/questionnaire/version-archived';
-import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
-import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
+import {
+  fetchCapture,
+  fetchIntro,
+  fetchPersonas,
+  fetchTranscript,
+} from '@/lib/app/questionnaire/session/boot-fetchers';
 
 interface AnonymousSessionBootProps {
   versionId: string;
@@ -160,193 +157,10 @@ type BootState =
   | { phase: 'archived'; message: string }
   | { phase: 'error'; message: string };
 
-/** The transcript-read response shape — validated at the fetch boundary (no `as` on the wire). */
-const transcriptResponseSchema = z.object({
-  success: z.boolean(),
-  data: z
-    .object({
-      turns: z.array(
-        z.object({
-          role: z.enum(['user', 'assistant']),
-          content: z.string(),
-          warnings: z
-            .array(
-              z.object({ code: z.string(), message: z.string(), detail: z.string().optional() })
-            )
-            .optional(),
-          reasoning: z
-            .array(
-              z.object({
-                kind: z.enum(REASONING_STEP_KINDS),
-                label: z.string(),
-                tone: z.enum(REASONING_TONES),
-                detail: z.string().optional(),
-                rationale: z.string().optional(),
-                sourceQuote: z.string().optional(),
-                confidence: z.number().optional(),
-                provenance: z.enum(ANSWER_PROVENANCES).optional(),
-              })
-            )
-            .optional(),
-        })
-      ),
-      // Preview Turn Inspector (admin-only): present only when the session is a preview with the
-      // inspector toggle on; absent for a real respondent. Validated with the same schema the live
-      // `inspector` frame parses through. `.catch([])` keeps a malformed trace from failing the whole
-      // parse — admin debug data must never wipe the respondent's replayed transcript (the same
-      // fail-soft contract the warnings/reasoning replay uses server-side).
-      inspectorTurns: z.array(inspectorTurnSchema).catch([]).optional(),
-    })
-    .optional(),
-});
-
-/**
- * Fetch the session's replayed transcript (token-authed). Fails soft to an empty transcript on any
- * error — a transcript read must never block the surface from opening; the worst case is a fresh
- * greeting + a re-asked opening question, exactly the pre-replay behaviour.
- */
-async function fetchTranscript(
-  sessionId: string,
-  accessToken: string
-): Promise<{ turns: QuestionnaireTurn[]; inspectorTurns: TurnInspectorData[] }> {
-  const empty = { turns: [], inspectorTurns: [] };
-  try {
-    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.transcript(sessionId), {
-      headers: { 'X-Session-Token': accessToken },
-    });
-    if (!res.ok) return empty;
-    const parsed = transcriptResponseSchema.safeParse(await res.json());
-    if (!parsed.success) return empty;
-    return {
-      turns: parsed.data.data?.turns ?? [],
-      inspectorTurns: parsed.data.data?.inspectorTurns ?? [],
-    };
-  } catch {
-    return empty;
-  }
-}
-
-/** Resolved-intro response shape — validated at the fetch boundary (no `as` on the wire). */
-const introSectionSchema = z.object({ heading: z.string(), body: z.string() });
-const resolvedIntroSchema = z.object({
-  enabled: z.boolean(),
-  questionnaireTitle: z.string(),
-  background: z.string(),
-  videoUrl: z.string(),
-  copy: z.object({
-    howItWorks: introSectionSchema,
-    whatYouGet: introSectionSchema.nullable(),
-    goodToKnow: z.array(z.string()),
-    buttonLabel: z.string(),
-  }),
-});
-const introResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({ intro: resolvedIntroSchema.nullable() }).optional(),
-});
-
-/**
- * Fetch the session's resolved intro (token-authed). Fails soft to `null` on any error — a splash
- * read must never block the surface from opening; the worst case is no intro screen, exactly the
- * pre-feature behaviour. Only called for a fresh session.
- */
-async function fetchIntro(
-  sessionId: string,
-  accessToken: string
-): Promise<ResolvedSessionIntro | null> {
-  try {
-    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.intro(sessionId), {
-      headers: { 'X-Session-Token': accessToken },
-    });
-    if (!res.ok) return null;
-    const parsed = introResponseSchema.safeParse(await res.json());
-    if (!parsed.success) return null;
-    return parsed.data.data?.intro ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** Persona-menu response shape — validated at the fetch boundary (no `as` on the wire). */
-const personaMenuSchema = z.object({
-  enabled: z.boolean(),
-  personas: z.array(z.object({ key: z.string(), label: z.string(), description: z.string() })),
-  selectedPersonaKey: z.string().nullable(),
-  defaultPersonaKey: z.string(),
-  // Fail-soft: an unknown/missing switcher falls back to the pre-chat page (original behaviour).
-  switcher: z.enum(PERSONA_SWITCHERS).catch('page'),
-});
-const personaResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({ persona: personaMenuSchema.nullable() }).optional(),
-});
-
-/**
- * Fetch the session's resolved persona menu (token-authed). Fails soft to `null` on any error — the
- * picker is an enhancement, never a blocker; the worst case is no persona step and the default voice.
- */
-async function fetchPersonas(
-  sessionId: string,
-  accessToken: string
-): Promise<ResolvedSessionPersonas | null> {
-  try {
-    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.persona(sessionId), {
-      headers: { 'X-Session-Token': accessToken },
-    });
-    if (!res.ok) return null;
-    const parsed = personaResponseSchema.safeParse(await res.json());
-    if (!parsed.success) return null;
-    return parsed.data.data?.persona ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** Resolved-capture response shape — validated at the fetch boundary (no `as` on the wire). */
-const profileFieldSchema = z.object({
-  key: z.string(),
-  label: z.string(),
-  type: z.enum(PROFILE_FIELD_TYPES),
-  required: z.boolean(),
-  options: z.array(z.string()).optional(),
-  validation: z.enum(PROFILE_FIELD_VALIDATION_MODES),
-  captureVia: z.enum(CAPTURE_MODES).optional(),
-});
-const resolvedCaptureSchema = z.object({
-  captureMode: z.enum(CAPTURE_MODES),
-  // Only the form-gate subset reaches the client; a hybrid version's conversational fields are gathered
-  // server-side by the interviewer and never gate the carousel.
-  formFields: z.array(profileFieldSchema),
-  satisfied: z.boolean(),
-});
-const captureResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({ capture: resolvedCaptureSchema.nullable() }).optional(),
-});
-
-/**
- * Fetch the session's resolved profile capture (token-authed). Fails soft to `null` on any error — a
- * capture read must never wedge the surface. The server PUT remains the enforcing boundary, so a
- * soft-fail here at worst skips the client gate; it can never smuggle an unvalidated profile through.
- * Called on both fresh and resumed sessions (the `satisfied` flag skips the gate on resume). Returns
- * `null` for anonymous versions (the PII-free path).
- */
-async function fetchCapture(
-  sessionId: string,
-  accessToken: string
-): Promise<ResolvedSessionCapture | null> {
-  try {
-    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.profile(sessionId), {
-      headers: { 'X-Session-Token': accessToken },
-    });
-    if (!res.ok) return null;
-    const parsed = captureResponseSchema.safeParse(await res.json());
-    if (!parsed.success) return null;
-    return parsed.data.data?.capture ?? null;
-  } catch {
-    return null;
-  }
-}
+/* The transcript / intro / persona / capture reads live in
+   `lib/app/questionnaire/session/boot-fetchers.ts` — shared with the experience run surface
+   (`/x/<publicRef>`), which opens a session it did not create and needs the identical four reads.
+   `fetchStatus` stays here: only the durable-resume gate uses it. */
 
 /** Status-read response shape — the fields the resume gate needs, validated at the fetch boundary. */
 const statusResponseSchema = z.object({

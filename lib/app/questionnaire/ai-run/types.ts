@@ -27,6 +27,8 @@ export const APP_AI_RUN_SUBJECTS = [
   'session',
   'respondent_report',
   'cohort_report',
+  /** An `AppExperienceRun` — the journey a respondent took across an Experience's legs (P15). */
+  'experience_run',
 ] as const;
 export type AppAiRunSubject = (typeof APP_AI_RUN_SUBJECTS)[number];
 
@@ -47,6 +49,17 @@ export const APP_AI_RUN_KINDS = [
   'report_preview',
   /** Learning digest — one round's digest generation, kept so digests have a history. */
   'learning_digest',
+  /**
+   * Experience routing (P15) — the selector's decision at a fork, plus the rationale behind it.
+   * Recorded for every decision including the deterministic ones: "why did this respondent get
+   * that questionnaire" is a question an admin will ask about a run months later, and a rule-based
+   * answer is as worth defending as an LLM one.
+   */
+  'experience_routing',
+  /** Experience handoff (P15) — the carry-over briefing compressed for the next leg's prompt. */
+  'experience_handoff',
+  /** Experience report (P15) — the run-level synthesis across every leg. */
+  'experience_report',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

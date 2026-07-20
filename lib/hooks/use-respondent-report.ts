@@ -46,7 +46,15 @@ export interface UseRespondentReportResult {
 
 export function useRespondentReport(
   sessionId: string,
-  accessToken?: string
+  accessToken?: string,
+  /**
+   * Experiences (F15.4b): when this session is a leg of a run, poll the RUN-level report instead
+   * of the session's own — a leg no longer generates one, because the run report covers every leg.
+   *
+   * Passed rather than derived so the hook stays a pure poller with no lookup of its own; the
+   * workspace already knows the run from the session status view.
+   */
+  runId?: string | null
 ): UseRespondentReportResult {
   const [view, setView] = useState<RespondentReportClientView | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -61,6 +69,18 @@ export function useRespondentReport(
   }, [accessToken]);
 
   const retry = useCallback(() => {
+    // A run report re-queues through its own endpoint (the per-session retry route is
+    // session-scoped and would 404). Best-effort, then a fresh poll window either way.
+    if (runId) {
+      void fetch(API.APP.EXPERIENCES.runReportRetry(runId), {
+        method: 'POST',
+        credentials: 'include',
+        headers: authHeaders(),
+      })
+        .catch(() => {})
+        .finally(() => setRetryNonce((n) => n + 1));
+      return;
+    }
     // Best-effort re-trigger: re-queue a failed/orphaned report and kick the worker, then restart
     // polling regardless of the POST's outcome (a transient failure still gets a fresh poll window).
     void fetch(API.APP.QUESTIONNAIRE_SESSIONS.reportRetry(sessionId), {
@@ -70,12 +90,15 @@ export function useRespondentReport(
     })
       .catch(() => {})
       .finally(() => setRetryNonce((n) => n + 1));
-  }, [sessionId, authHeaders]);
+  }, [sessionId, runId, authHeaders]);
 
   const notify = useCallback(
     async (email: string): Promise<boolean> => {
       try {
-        const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.reportNotify(sessionId), {
+        const notifyUrl = runId
+          ? API.APP.EXPERIENCES.runReportNotify(runId)
+          : API.APP.QUESTIONNAIRE_SESSIONS.reportNotify(sessionId);
+        const res = await fetch(notifyUrl, {
           method: 'POST',
           credentials: 'include',
           headers: { ...authHeaders(), 'Content-Type': 'application/json' },
@@ -88,7 +111,7 @@ export function useRespondentReport(
         return false;
       }
     },
-    [sessionId, authHeaders]
+    [sessionId, runId, authHeaders]
   );
 
   useEffect(() => {
@@ -105,7 +128,10 @@ export function useRespondentReport(
       try {
         const headers: Record<string, string> = {};
         if (accessToken) headers['X-Session-Token'] = accessToken;
-        const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.report(sessionId), {
+        const url = runId
+          ? API.APP.EXPERIENCES.runReport(runId)
+          : API.APP.QUESTIONNAIRE_SESSIONS.report(sessionId);
+        const res = await fetch(url, {
           method: 'GET',
           credentials: 'include',
           headers,
@@ -149,7 +175,7 @@ export function useRespondentReport(
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [sessionId, accessToken, retryNonce]);
+  }, [sessionId, accessToken, runId, retryNonce]);
 
   return { view, loaded, timedOut, retry, notify };
 }

@@ -26,6 +26,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
     cost: null,
     anonymous: false,
     ref: null,
+    experience: null,
     ...over,
   };
 }

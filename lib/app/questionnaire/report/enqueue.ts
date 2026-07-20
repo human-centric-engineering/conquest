@@ -34,6 +34,67 @@ export async function enqueueRespondentReport(sessionId: string): Promise<boolea
 }
 
 /**
+ * Enqueue the RUN-level report for a concluded experience run (F15.4b).
+ *
+ * Called from the `conclude` path — the one place a journey is known to be over. Until this
+ * existed, the handoff card's "See your summary" pointed at the last leg's own report, which
+ * described one questionnaire rather than the journey the respondent actually took.
+ *
+ * ## Which leg's settings govern
+ *
+ * The ENTRY leg's version config, not the last leg's. A run spans several versions, so something
+ * has to arbitrate, and the entry leg is the only leg every run has. Anchoring on the last leg
+ * would mean two respondents on the same experience receive differently-styled reports purely
+ * because the selector routed them differently — a difference the author never asked for and
+ * cannot easily predict.
+ *
+ * Idempotent on `runId`: `advanceExperienceRun` can be raced by `after()`, a double-tapped submit
+ * and a cron retry, exactly as the handoff itself can.
+ */
+export async function enqueueRunReport(runId: string): Promise<boolean> {
+  const entryLeg = await prisma.appExperienceRunLeg.findFirst({
+    where: { runId },
+    orderBy: { ordinal: 'asc' },
+    select: { sessionId: true },
+  });
+  if (!entryLeg) return false;
+
+  const meta = await prisma.appQuestionnaireSession.findUnique({
+    where: { id: entryLeg.sessionId },
+    select: { version: { select: { config: { select: { respondentReport: true } } } } },
+  });
+  const settings = narrowRespondentReportSettings(meta?.version?.config?.respondentReport);
+  if (!settings.enabled || !isAiRespondentReportMode(settings.mode)) return false;
+
+  await prisma.appRespondentReport.upsert({
+    where: { runId },
+    create: { runId, subjectKind: 'experience_run', mode: settings.mode, status: 'queued' },
+    // Idempotent: a concurrent advance must not reset an already-generated report.
+    update: {},
+  });
+  return true;
+}
+
+/**
+ * Whether this session is a leg of an experience run — i.e. whether its own per-session report
+ * should be SKIPPED in favour of the run-level one.
+ *
+ * Generating both would bill the respondent's journey twice over and hand them n+1 reports where
+ * they were promised one summary. The run report covers every leg, including this one.
+ *
+ * The cost of skipping is that an ABANDONED run yields no report at all. That is the same outcome
+ * as abandoning a standalone questionnaire, so it introduces no new failure mode — and a run that
+ * concludes for any reason (including budget exhaustion) does enqueue one.
+ */
+export async function isExperienceLeg(sessionId: string): Promise<boolean> {
+  const leg = await prisma.appExperienceRunLeg.findUnique({
+    where: { sessionId },
+    select: { id: true },
+  });
+  return leg !== null;
+}
+
+/**
  * Admin-triggered "Generate report" for a session that has none yet — force a `queued` delivered report
  * so the worker generates it now (used by the session drawer's Report tab before a report exists).
  * Unlike {@link enqueueRespondentReport} (idempotent submit-time enqueue), this re-queues an inert

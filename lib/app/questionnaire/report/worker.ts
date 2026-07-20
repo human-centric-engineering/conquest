@@ -17,6 +17,7 @@ import {
   generateRespondentReportWithSettings,
 } from '@/lib/app/questionnaire/report/generate';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
+import { generateRunReport } from '@/lib/app/questionnaire/report/run-report';
 import { sendRespondentReportReadyEmail } from '@/lib/app/questionnaire/report/notify-send';
 
 /**
@@ -62,10 +63,18 @@ function claimableWhere(orphanCutoff: Date) {
   };
 }
 
-/** A claimed report row — enough to generate + (optionally) email on completion. */
+/**
+ * A claimed report row — enough to generate + (optionally) email on completion.
+ *
+ * The owner is polymorphic (F15.4b): exactly one of `sessionId` / `runId` is set. `driveReport`
+ * branches on which, so a run report and a session report share one queue, one lease and one
+ * worker tick rather than growing a second parallel pipeline.
+ */
 interface ClaimedReport {
   id: string;
-  sessionId: string;
+  sessionId: string | null;
+  /** Set for a run-level report spanning every leg of an experience run. */
+  runId: string | null;
   /** Respondent opted in to a report-ready email; null when they didn't. */
   notifyEmail: string | null;
 }
@@ -89,15 +98,27 @@ async function claimNextReport(workerId: string): Promise<ClaimedReport | null> 
 
   return prisma.appRespondentReport.findUnique({
     where: { id: candidate.id },
-    select: { id: true, sessionId: true, notifyEmail: true },
+    select: { id: true, sessionId: true, runId: true, notifyEmail: true },
   });
 }
 
 /** Generate + persist one claimed report. Returns whether it succeeded. */
 async function driveReport(claimed: ClaimedReport): Promise<boolean> {
   try {
-    const { content, costUsd, formatted, completionPct, methodRecord } =
-      await generateRespondentReport(claimed.sessionId);
+    // Which generator depends on what the report is ABOUT. Both return the identical shape and
+    // both run the same downstream pipeline (KB grounding, research rounds, formatter, method
+    // record) — a run report differs only in assembling its inputs from several legs.
+    const generated = claimed.runId
+      ? await generateRunReport(claimed.runId)
+      : claimed.sessionId
+        ? await generateRespondentReport(claimed.sessionId)
+        : null;
+    if (!generated) {
+      // A row with neither owner set cannot be generated and never will be. Fail it terminally
+      // rather than letting it be re-claimed on every tick forever.
+      throw new Error('Report row has no session or run owner');
+    }
+    const { content, costUsd, formatted, completionPct, methodRecord } = generated;
     // Re-read notifyEmail: generation takes tens of seconds, during which the respondent may have
     // just opted in (the notify route matches `processing` rows). Using the claim-time value would
     // miss that late opt-in AND the ready-write below clears the column — so read the fresh value
@@ -130,13 +151,24 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
     });
     // Best-effort report-ready email — the report is already saved, so a send failure is logged,
     // never surfaced or retried.
-    if (notifyEmail) {
+    // Branch on the same polymorphic owner the generator did. A run-scope row has NO sessionId by
+    // construction, so addressing the send by session alone silently discarded every run opt-in
+    // while the ready-write cleared the address — the respondent was told an email was coming and
+    // nothing ever arrived. The null arm is unreachable (an ownerless row threw above); it keeps
+    // the branch total rather than reaching for a non-null assertion.
+    const subject = claimed.runId
+      ? { runId: claimed.runId }
+      : claimed.sessionId
+        ? { sessionId: claimed.sessionId }
+        : null;
+    if (notifyEmail && subject) {
       try {
-        await sendRespondentReportReadyEmail(claimed.sessionId, notifyEmail);
+        await sendRespondentReportReadyEmail(subject, notifyEmail);
       } catch (err) {
         logger.warn('respondent report: ready-email send failed', {
           reportId: claimed.id,
           sessionId: claimed.sessionId,
+          runId: claimed.runId,
           error: errorMessage(err),
         });
       }
@@ -206,7 +238,12 @@ export async function processQueuedRespondentReports(): Promise<ReportWorkerResu
 /** A claimed revision row — enough to generate its report with the snapshot settings. */
 interface ClaimedRevision {
   id: string;
-  sessionId: string;
+  /**
+   * Null when the parent report is RUN-scoped (F15.4b). Admin re-runs are a per-session affordance
+   * today, so such a revision cannot currently be created — this is defensive, not a live path.
+   * `driveRevision` fails it terminally rather than crashing the whole tick.
+   */
+  sessionId: string | null;
   settingsSnapshot: unknown;
 }
 
@@ -244,6 +281,11 @@ type RevisionUpdateData = Parameters<
 async function driveRevision(claimed: ClaimedRevision): Promise<boolean> {
   try {
     const settings = narrowRespondentReportSettings(claimed.settingsSnapshot);
+    if (!claimed.sessionId) {
+      // Re-running a RUN-scoped report is not supported yet. Fail terminally so the row does not
+      // sit in the queue being re-claimed on every tick forever.
+      throw new Error('Re-running a run-scoped report is not supported');
+    }
     const { content, costUsd, formatted, completionPct, methodRecord } =
       await generateRespondentReportWithSettings(claimed.sessionId, settings);
     await prisma.appRespondentReportRevision.updateMany({
