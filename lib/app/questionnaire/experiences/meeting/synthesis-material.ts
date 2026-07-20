@@ -107,11 +107,32 @@ export interface MaterialSlot {
   movements: MaterialMovement[];
 }
 
+/**
+ * What the number behind a finding counts.
+ *
+ * `per-session` — one session is one person, so support is counted from the sessions that answered
+ * a slot. True for `individual` rooms and for a roomless breakout.
+ *
+ * `room-occupancy` — a `scribe` room, where ONE session speaks for everybody in it. The other
+ * participants are present, took part in the conversation, and deliberately have no session of their
+ * own. Counting sessions there would say "one person" about a room of six and suppress the entire
+ * room, so the honest count of the people a position rests on is the room's OCCUPANCY: the
+ * participants who chose that room. This is a different counting basis, not a lower bar — see
+ * {@link hasEnoughToSynthesise}, which applies the same k-anonymity floor to it.
+ */
+export const SUPPORT_BASES = ['per-session', 'room-occupancy'] as const;
+export type SupportBasis = (typeof SUPPORT_BASES)[number];
+
 /** The complete input to a breakout synthesis. */
 export interface SynthesisMaterial {
   background: SynthesisBackground;
-  /** How many participants completed the breakout — the denominator for the whole synthesis. */
+  /**
+   * The denominator for the whole synthesis. Who COMPLETED the breakout under `per-session`; the
+   * room's occupancy under `room-occupancy`, where one session speaks for everyone present.
+   */
   participantCount: number;
+  /** Defaults to `per-session` when absent — the stricter of the two, so an omission never widens. */
+  supportBasis?: SupportBasis;
   slots: MaterialSlot[];
 }
 
@@ -170,14 +191,21 @@ function labelParticipants(rows: readonly SynthesisFillRow[]): Map<string, strin
  * COMPLETED the breakout, which is the honest denominator. Deriving it from fills would count only
  * those who answered something, quietly inflating every proportion — "everyone agreed" when in
  * truth half the room said nothing.
+ *
+ * In a `scribe` room the caller passes the room's occupancy instead, with
+ * `supportBasis: 'room-occupancy'` — there is only ever one session there and it speaks for the
+ * whole room, so sessions are simply the wrong unit to count.
  */
 export function buildSynthesisMaterial(params: {
   background: SynthesisBackground;
   definitions: readonly SynthesisSlotDefinition[];
   fills: readonly SynthesisFillRow[];
   participantCount: number;
+  /** Omit for the ordinary one-session-per-person case. */
+  supportBasis?: SupportBasis;
 }): SynthesisMaterial {
   const { background, definitions, fills, participantCount } = params;
+  const supportBasis: SupportBasis = params.supportBasis ?? 'per-session';
   const labels = labelParticipants(fills);
 
   const byKey = new Map<string, SynthesisFillRow[]>();
@@ -226,7 +254,7 @@ export function buildSynthesisMaterial(params: {
     };
   });
 
-  return { background, participantCount, slots };
+  return { background, participantCount, supportBasis, slots };
 }
 
 /**
@@ -235,8 +263,35 @@ export function buildSynthesisMaterial(params: {
  * Below the support floor the gate would suppress every finding anyway, so running the model would
  * spend money to produce nothing. The caller shows "not enough responses yet" instead — which is
  * also the honest thing to tell a facilitator watching a room of three.
+ *
+ * ## The floor is the same for both bases; only the unit being counted differs
+ *
+ * The floor — never below 2, matching {@link meetsSupportThreshold} — is applied whichever way
+ * support is counted. What changes is WHAT is counted, and it changes because in a scribe room the
+ * session count stopped measuring people:
+ *
+ *  - `per-session`: at least one slot must have been answered by `floor` distinct sessions. One
+ *    session is one person here, so this is a direct count of the people behind a finding.
+ *  - `room-occupancy`: a scribe room has exactly one session by design, so no slot can ever reach
+ *    the floor and this check would refuse every scribe room forever — a room of six with a
+ *    pen-holder is not a room of one. So the floor is applied to the room's occupancy, which is a
+ *    count of real people who chose that room and sat through the conversation the pen recorded.
+ *    A slot must still have been answered at all: an empty room has nothing to synthesise, however
+ *    many people are in it.
+ *
+ * A scribe room of one therefore does NOT synthesise, exactly as a solo respondent does not. The
+ * floor never drops below two people either way, and the room-size clamp in the synthesiser caps
+ * every finding at `participantCount`, so a one-person room could not carry a finding past
+ * `meetsSupportThreshold` even if this check were somehow bypassed.
  */
 export function hasEnoughToSynthesise(material: SynthesisMaterial, minSupport: number): boolean {
   const floor = Math.max(2, Math.floor(minSupport));
+
+  if (material.supportBasis === 'room-occupancy') {
+    return (
+      material.participantCount >= floor && material.slots.some((slot) => slot.respondedCount > 0)
+    );
+  }
+
   return material.slots.some((slot) => slot.respondedCount >= floor);
 }

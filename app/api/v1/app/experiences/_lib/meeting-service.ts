@@ -18,8 +18,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
-import { narrowToEnum } from '@/lib/app/questionnaire/types';
+import { narrowToEnum, ACCESS_MODES } from '@/lib/app/questionnaire/types';
 import { narrowExperienceSettings } from '@/lib/app/questionnaire/experiences/settings';
+import { EXPERIENCE_STATUSES } from '@/lib/app/questionnaire/experiences/types';
 import {
   BREAKOUT_ROOM_MODES,
   breakoutPhase,
@@ -316,9 +317,10 @@ async function synthesiseOne(
   const room = roomId
     ? await prisma.appExperienceBreakoutRoom.findUnique({
         where: { id: roomId },
-        select: { name: true, versionId: true, questionnaireId: true },
+        select: { name: true, mode: true, versionId: true, questionnaireId: true },
       })
     : null;
+  const roomMode = room ? narrowToEnum(room.mode, BREAKOUT_ROOM_MODES, 'individual') : null;
 
   // The sessions that ran THIS breakout — and this room, when there are rooms — in THIS meeting.
   const legs = await prisma.appExperienceRunLeg.findMany({
@@ -364,6 +366,22 @@ async function synthesiseOne(
 
   const slotKeyById = new Map(definitions.map((d) => [d.id, d.key]));
 
+  // How many people this synthesis actually rests on.
+  //
+  // In an `individual` room (and in a roomless breakout) that is the completed sessions: one
+  // session, one person. In a `scribe` room it is the room's OCCUPANCY, because the room has
+  // exactly one session by design — whoever took the pen — and everyone else was there, took part
+  // in the conversation, and deliberately has no session of their own. Counting sessions there
+  // reports a room of six as a room of one, which put every scribe room permanently below the
+  // k-anonymity floor and meant no scribe room could ever be synthesised at all.
+  //
+  // The floor itself does not move: a scribe room with fewer than two occupants still fails
+  // `hasEnoughToSynthesise`, and the room-size clamp caps every finding at this same number.
+  const roomIsScribe = roomMode === 'scribe' && roomId !== null;
+  const participantCount = roomIsScribe
+    ? ((await roomOccupancy(meetingId, [roomId])).get(roomId) ?? 0)
+    : completed.length;
+
   const material = buildSynthesisMaterial({
     background: {
       questionnaireTitle: version?.questionnaire?.title ?? 'Questionnaire',
@@ -393,7 +411,8 @@ async function synthesiseOne(
         provenanceLabel: f.provenanceLabel,
         refinementHistory: narrowRefinementHistory(f.refinementHistory),
       })),
-    participantCount: completed.length,
+    participantCount,
+    supportBasis: roomIsScribe ? 'room-occupancy' : 'per-session',
   });
 
   const result = await synthesiseBreakout({
@@ -554,6 +573,16 @@ export async function setInsightVisible(insightId: string, visible: boolean): Pr
 /** What a joining participant needs to start answering. */
 export interface JoinResult {
   runId: string;
+  /**
+   * The run's public reference — what the run credential's cookie is keyed on.
+   *
+   * Returned because the join route must set that cookie: a meeting run has no legs until the
+   * first breakout starts, so neither a session token nor session ownership can prove membership
+   * of it. The cookie is the only credential that exists at that moment.
+   *
+   * Nullable only because the column is — a run created here always has one.
+   */
+  publicRef: string | null;
   /** The session for the CURRENT breakout, or null when none is running yet. */
   sessionId: string | null;
   meetingId: string;
@@ -573,10 +602,19 @@ export interface JoinResult {
 export async function joinMeeting(params: {
   meetingId: string;
   respondentUserId: string | null;
-}): Promise<JoinResult | { error: 'NOT_LIVE' | 'NOT_FOUND' }> {
+}): Promise<
+  | JoinResult
+  | { error: 'NOT_LIVE' | 'NOT_FOUND' | 'EXPERIENCE_NOT_RUNNING' | 'INVITATION_REQUIRED' }
+> {
   const meeting = await prisma.appExperienceMeeting.findUnique({
     where: { id: params.meetingId },
-    select: { id: true, status: true, currentStepId: true, experienceId: true },
+    select: {
+      id: true,
+      status: true,
+      currentStepId: true,
+      experienceId: true,
+      experience: { select: { status: true, accessMode: true } },
+    },
   });
   if (!meeting) return { error: 'NOT_FOUND' };
 
@@ -585,13 +623,31 @@ export async function joinMeeting(params: {
   // told the meeting has not started, not silently parked in a state nobody is watching.
   if (status !== 'live') return { error: 'NOT_LIVE' };
 
+  // The experience itself must be runnable. A live meeting hanging off a draft or archived
+  // experience is an authoring slip, not an invitation — `createExperienceRun` refuses the same
+  // case, and a meeting is just another way to start a run.
+  const experienceStatus = narrowToEnum(meeting.experience.status, EXPERIENCE_STATUSES, 'draft');
+  if (experienceStatus !== 'launched') return { error: 'EXPERIENCE_NOT_RUNNING' };
+
+  // The join code is quotable by design — it goes on a slide and is read aloud — so it is NOT a
+  // secret and cannot be the only gate. Under `invitation_only` an anonymous walk-up is refused;
+  // a signed-in participant is let through, because the meeting path has no way to prove cohort
+  // membership and refusing everyone would make an invitation_only meeting unjoinable.
+  const accessMode = narrowToEnum(meeting.experience.accessMode, ACCESS_MODES, 'invitation_only');
+  if (accessMode === 'invitation_only' && !params.respondentUserId) {
+    return { error: 'INVITATION_REQUIRED' };
+  }
+
   // One run per participant per meeting. An authenticated respondent is matched on their user id;
   // an anonymous one cannot be recognised across requests and so always gets a fresh run — which
   // is correct, because from the room's point of view an unidentifiable rejoin IS a new person.
   const existing = params.respondentUserId
     ? await prisma.appExperienceRun.findFirst({
         where: { meetingId: meeting.id, respondentUserId: params.respondentUserId },
-        select: { id: true },
+        // `publicRef` too, not just `id`: a rejoin must be able to re-issue the run credential, and
+        // it is keyed on the ref. Selecting only the id here would leave a rejoining participant
+        // without the cookie their next poll is gated on.
+        select: { id: true, publicRef: true },
       })
     : null;
 
@@ -605,19 +661,20 @@ export async function joinMeeting(params: {
         publicRef: generateSessionRef(),
         status: 'active',
       },
-      select: { id: true },
+      select: { id: true, publicRef: true },
     }));
 
   if (!meeting.currentStepId) {
-    return { runId: run.id, sessionId: null, meetingId: meeting.id };
+    return { runId: run.id, publicRef: run.publicRef, sessionId: null, meetingId: meeting.id };
   }
 
   const sessionId = await ensureBreakoutSession({
     runId: run.id,
+    meetingId: meeting.id,
     stepId: meeting.currentStepId,
     respondentUserId: params.respondentUserId,
   });
-  return { runId: run.id, sessionId, meetingId: meeting.id };
+  return { runId: run.id, publicRef: run.publicRef, sessionId, meetingId: meeting.id };
 }
 
 /**
@@ -630,6 +687,12 @@ export async function joinMeeting(params: {
  */
 async function ensureBreakoutSession(params: {
   runId: string;
+  /**
+   * The meeting this session belongs to. Required because rooms are keyed on the STEP, so the same
+   * `(stepId, roomId)` pair recurs across every meeting of the same experience — a scribe-pen
+   * lookup that omits it finds an earlier meeting's leg.
+   */
+  meetingId: string;
   stepId: string;
   respondentUserId: string | null;
   /** The room this participant is in, when the breakout has rooms (F15.5b). */
@@ -660,7 +723,7 @@ async function ensureBreakoutSession(params: {
     // One session for the whole room. Whoever already claimed the pen owns it; everybody else is
     // present and watching, with no session of their own.
     const scribeLeg = await prisma.appExperienceRunLeg.findFirst({
-      where: { stepId: params.stepId, roomId: room.id },
+      where: { stepId: params.stepId, roomId: room.id, run: { meetingId: params.meetingId } },
       select: { sessionId: true, runId: true },
     });
     if (scribeLeg) return scribeLeg.runId === params.runId ? scribeLeg.sessionId : null;
@@ -758,6 +821,7 @@ export async function participantState(params: {
     meeting.currentStepId && window.canAnswer
       ? await ensureBreakoutSession({
           runId: run.id,
+          meetingId: params.meetingId,
           stepId: meeting.currentStepId,
           respondentUserId: run.respondentUserId,
         })
@@ -778,6 +842,31 @@ export async function participantState(params: {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * How many participants have CHOSEN each of these rooms, in this meeting.
+ *
+ * The single definition of occupancy. It reads `currentRoomId` on the RUN rather than counting
+ * legs, which is the only place a scribe room's watchers appear at all — they have no leg, by
+ * design. Shared by the room picker, the facilitator's console, and the scribe support basis in
+ * {@link synthesiseOne}, so a room cannot report one occupancy to the console and a different one
+ * to the k-anonymity floor.
+ *
+ * Keyed `string | null` because `groupBy` types the grouping column as nullable; the `in` filter
+ * means every key here is in fact one of the ids asked for.
+ */
+async function roomOccupancy(
+  meetingId: string,
+  roomIds: readonly string[]
+): Promise<Map<string | null, number>> {
+  if (roomIds.length === 0) return new Map();
+  const rows = await prisma.appExperienceRun.groupBy({
+    by: ['currentRoomId'],
+    where: { meetingId, currentRoomId: { in: [...roomIds] } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.currentRoomId, r._count._all]));
+}
+
+/**
  * The rooms of a breakout, with live occupancy.
  *
  * `scribeTaken` matters more than it looks: a second person claiming the pen in a scribe room
@@ -795,19 +884,23 @@ export async function loadBreakoutRooms(params: {
   });
   if (rooms.length === 0) return [];
 
-  const [occupancy, scribeLegs] = await Promise.all([
-    prisma.appExperienceRun.groupBy({
-      by: ['currentRoomId'],
-      where: { meetingId: params.meetingId, currentRoomId: { in: rooms.map((r) => r.id) } },
-      _count: { _all: true },
-    }),
+  const [counts, scribeLegs] = await Promise.all([
+    roomOccupancy(
+      params.meetingId,
+      rooms.map((r) => r.id)
+    ),
     prisma.appExperienceRunLeg.findMany({
-      where: { stepId: params.stepId, roomId: { in: rooms.map((r) => r.id) } },
+      // Scoped to THIS meeting: rooms are keyed on the step, so an earlier meeting of the same
+      // experience would otherwise report its rooms as already having a scribe.
+      where: {
+        stepId: params.stepId,
+        roomId: { in: rooms.map((r) => r.id) },
+        run: { meetingId: params.meetingId },
+      },
       select: { roomId: true },
     }),
   ]);
 
-  const counts = new Map(occupancy.map((o) => [o.currentRoomId, o._count._all]));
   const taken = new Set(scribeLegs.map((l) => l.roomId));
 
   return rooms.map((r) => ({
@@ -871,6 +964,7 @@ export async function chooseRoom(params: {
 
   const sessionId = await ensureBreakoutSession({
     runId: run.id,
+    meetingId: params.meetingId,
     stepId: meeting.currentStepId,
     respondentUserId: run.respondentUserId,
     roomId: room.id,

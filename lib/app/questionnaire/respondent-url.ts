@@ -13,5 +13,14 @@ export function respondentPublicPath(versionId: string): string {
   return `/q/${versionId}`;
 }
 
+/**
+ * Public respondent path for an experience RUN (`/x/<publicRef>`) — one stable address for a whole
+ * journey, resolving server-side to whichever leg the run is currently on. Distinct from
+ * {@link respondentPublicPath}, which addresses a single questionnaire version.
+ */
+export function experienceRunPublicPath(publicRef: string): string {
+  return `/x/${publicRef}`;
+}
+
 /** Query param carrying a frictionless invitation token on the public surface (`?i=<token>`). */
 export const FRICTIONLESS_INVITE_PARAM = 'i';

@@ -20,6 +20,9 @@ vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn:
 vi.mock('@/lib/app/questionnaire/report/generate', () => ({
   generateRespondentReport: vi.fn(),
 }));
+vi.mock('@/lib/app/questionnaire/report/run-report', () => ({
+  generateRunReport: vi.fn(),
+}));
 vi.mock('@/lib/app/questionnaire/report/notify-send', () => ({
   sendRespondentReportReadyEmail: vi.fn(),
 }));
@@ -27,6 +30,7 @@ vi.mock('@/lib/app/questionnaire/report/notify-send', () => ({
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
+import { generateRunReport } from '@/lib/app/questionnaire/report/run-report';
 import { sendRespondentReportReadyEmail } from '@/lib/app/questionnaire/report/notify-send';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 
@@ -41,6 +45,7 @@ beforeEach(() => {
   (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
     id: 'r1',
     sessionId: 'sess-1',
+    runId: null,
     notifyEmail: null,
   });
   // After the first drain iteration, no more candidates.
@@ -117,6 +122,7 @@ describe('processQueuedRespondentReports', () => {
     (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
       id: 'r1',
       sessionId: 'sess-1',
+      runId: null,
       notifyEmail: 'you@example.com',
     });
     (generateRespondentReport as Mock).mockResolvedValue({
@@ -126,7 +132,10 @@ describe('processQueuedRespondentReports', () => {
 
     await processQueuedRespondentReports();
 
-    expect(sendRespondentReportReadyEmail).toHaveBeenCalledWith('sess-1', 'you@example.com');
+    expect(sendRespondentReportReadyEmail).toHaveBeenCalledWith(
+      { sessionId: 'sess-1' },
+      'you@example.com'
+    );
     // The ready write clears notifyEmail so a later re-drain never re-sends.
     const readyWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
       (c) => c[0]?.data?.status === 'ready'
@@ -148,6 +157,7 @@ describe('processQueuedRespondentReports', () => {
     (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
       id: 'r1',
       sessionId: 'sess-1',
+      runId: null,
       notifyEmail: 'you@example.com',
     });
     (generateRespondentReport as Mock).mockResolvedValue({
@@ -198,5 +208,83 @@ describe('processQueuedRespondentReports', () => {
 
     await processQueuedRespondentReports();
     expect(prisma.appRespondentReport.count).not.toHaveBeenCalled();
+  });
+});
+
+describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
+  /**
+   * A run-scope row has NO sessionId — the schema says so ("Session-scope owner key. NULL for
+   * run-scope rows") and `enqueueRunReport` creates it that way. Every assertion here exists
+   * because addressing the send by session alone silently dropped the respondent's opt-in.
+   */
+  function claimRunRow(notifyEmail: string | null) {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
+      id: 'r1',
+      sessionId: null,
+      runId: 'run-1',
+      notifyEmail,
+    });
+  }
+
+  beforeEach(() => {
+    (generateRunReport as Mock).mockResolvedValue({
+      content: { summary: 'journey', sections: [], actions: [] },
+      costUsd: 0.02,
+      formatted: true,
+      completionPct: 80,
+    });
+  });
+
+  it('sends the report-ready email for a run report, addressed by runId', async () => {
+    claimRunRow('you@example.com');
+
+    const result = await processQueuedRespondentReports();
+
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(generateRunReport).toHaveBeenCalledWith('run-1');
+    expect(sendRespondentReportReadyEmail).toHaveBeenCalledWith(
+      { runId: 'run-1' },
+      'you@example.com'
+    );
+  });
+
+  it('clears notifyEmail on the ready write, so a re-drain never re-sends', async () => {
+    claimRunRow('you@example.com');
+
+    await processQueuedRespondentReports();
+
+    const readyWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
+      (c) => c[0]?.data?.status === 'ready'
+    );
+    expect(readyWrite?.[0].data).toMatchObject({ notifyEmail: null });
+  });
+
+  it('does not send when a run report carries no address', async () => {
+    claimRunRow(null);
+
+    await processQueuedRespondentReports();
+    expect(sendRespondentReportReadyEmail).not.toHaveBeenCalled();
+  });
+
+  it('still marks a run report ready when the send throws (best-effort)', async () => {
+    claimRunRow('you@example.com');
+    (sendRespondentReportReadyEmail as Mock).mockRejectedValue(new Error('smtp down'));
+
+    const result = await processQueuedRespondentReports();
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+  });
+
+  it('fails an ownerless row terminally rather than trying to email about it', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({
+      id: 'r1',
+      sessionId: null,
+      runId: null,
+      notifyEmail: 'you@example.com',
+    });
+
+    const result = await processQueuedRespondentReports();
+
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+    expect(sendRespondentReportReadyEmail).not.toHaveBeenCalled();
   });
 });

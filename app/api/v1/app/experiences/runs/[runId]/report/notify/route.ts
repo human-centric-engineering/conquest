@@ -15,6 +15,7 @@ import type { NextRequest } from 'next/server';
 
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
+import { handleAPIError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { createRateLimitResponse } from '@/lib/security/rate-limit';
@@ -35,39 +36,47 @@ export async function POST(
   const log = await getRouteLogger(request);
   const { runId } = await params;
 
-  const limit = runPollLimiter.check(getClientIP(request));
-  if (!limit.success) return createRateLimitResponse(limit);
+  try {
+    const limit = runPollLimiter.check(getClientIP(request));
+    if (!limit.success) return createRateLimitResponse(limit);
 
-  const access = await canReadRun(request, runId);
-  // No admin bypass: an admin has no business attaching an address to someone else's report.
-  if (!access.allowed || access.isAdmin) {
-    return errorResponse('Run not found', { code: 'NOT_FOUND', status: 404 });
-  }
+    const access = await canReadRun(request, runId);
+    // No admin bypass: an admin has no business attaching an address to someone else's report.
+    if (!access.allowed || access.isAdmin) {
+      return errorResponse('Run not found', { code: 'NOT_FOUND', status: 404 });
+    }
 
-  const body = await validateRequestBody(request, notifySchema);
+    // Throws on a malformed body or a bad address; the catch below turns that into the standard
+    // 400 envelope rather than letting it escape as an unhandled 500.
+    const body = await validateRequestBody(request, notifySchema);
 
-  const report = await prisma.appRespondentReport.findUnique({
-    where: { runId },
-    select: { id: true, status: true },
-  });
-  if (!report)
-    return errorResponse('No report to notify about', { code: 'NO_REPORT', status: 409 });
-
-  // `queued` and `processing` are the only states with a send still ahead of them. The worker
-  // re-reads notifyEmail just before writing `ready`, precisely so a late opt-in like this one is
-  // not missed.
-  if (report.status !== 'queued' && report.status !== 'processing') {
-    return errorResponse('That report is no longer being generated', {
-      code: 'NOT_IN_FLIGHT',
-      status: 409,
+    const report = await prisma.appRespondentReport.findUnique({
+      where: { runId },
+      select: { id: true, status: true },
     });
+    if (!report)
+      return errorResponse('No report to notify about', { code: 'NO_REPORT', status: 409 });
+
+    // The state gate lives IN the write, not before it: between a separate check and update the
+    // worker can finish the report — it writes `ready` and clears `notifyEmail` — and an address
+    // re-attached afterwards would never be sent and never cleared, leaving the view promising an
+    // email forever. `queued`/`processing` are the only states with a send still ahead of them,
+    // and the worker re-reads notifyEmail just before writing `ready` so a late opt-in still lands.
+    const updated = await prisma.appRespondentReport.updateMany({
+      where: { id: report.id, status: { in: ['queued', 'processing'] } },
+      data: { notifyEmail: body.email },
+    });
+
+    if (updated.count === 0) {
+      return errorResponse('That report is no longer being generated', {
+        code: 'NOT_IN_FLIGHT',
+        status: 409,
+      });
+    }
+
+    log.info('Run report notify requested', { runId });
+    return successResponse({ notifying: true });
+  } catch (err) {
+    return handleAPIError(err);
   }
-
-  await prisma.appRespondentReport.update({
-    where: { id: report.id },
-    data: { notifyEmail: body.email },
-  });
-
-  log.info('Run report notify requested', { runId });
-  return successResponse({ notifying: true });
 }

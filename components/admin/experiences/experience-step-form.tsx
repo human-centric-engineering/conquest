@@ -318,7 +318,14 @@ export function ExperienceStepForm({
               max={120}
               placeholder="12"
               disabled={isLoading}
-              {...register('durationMinutes', { valueAsNumber: true })}
+              // `setValueAs` rather than `valueAsNumber`: a cleared number input yields NaN, which
+              // the schema rejects — so removing a clock from an existing step became unsavable,
+              // contradicting the "leave blank for no clock" contract. Mapping empty to null here
+              // keeps the schema's INPUT type `number | null`, which `z.preprocess`/`z.coerce`
+              // would widen to `unknown` and break react-hook-form's generic (see schema above).
+              {...register('durationMinutes', {
+                setValueAs: (v) => (v === '' || v === null ? null : Number(v)),
+              })}
             />
             <FormError message={errors.durationMinutes?.message} />
           </div>

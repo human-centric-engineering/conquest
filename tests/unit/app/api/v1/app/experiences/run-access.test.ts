@@ -138,7 +138,7 @@ describe('canReadRun — authenticated', () => {
   });
 
   it('flags the admin bypass distinctly, so the transcript route can exclude it', async () => {
-    authMock.getServerSession.mockResolvedValue({ user: { id: 'admin_1', role: 'admin' } });
+    authMock.getServerSession.mockResolvedValue({ user: { id: 'admin_1', role: 'ADMIN' } });
 
     const access = await canReadRun(req(), RUN_ID);
     expect(access.allowed).toBe(true);
@@ -147,13 +147,44 @@ describe('canReadRun — authenticated', () => {
     expect(access.isAdmin).toBe(true);
     expect(access.knownSessionId).toBeUndefined();
   });
+
+  it('matches the admin role case-sensitively against the stored value', async () => {
+    // `User.role` is persisted uppercase ('ADMIN' — see prisma/schema/auth.prisma) and every other
+    // guard in the codebase compares it that way. A lowercase comparison here would make the bypass
+    // above dead code in production, so pin the casing: 'admin' must NOT be treated as an admin.
+    prismaMock.prisma.appQuestionnaireSession.findFirst.mockResolvedValue(null);
+    authMock.getServerSession.mockResolvedValue({ user: { id: 'admin_1', role: 'admin' } });
+
+    const access = await canReadRun(req(), RUN_ID);
+    expect(access.allowed).toBe(false);
+    expect(access.isAdmin).toBeUndefined();
+  });
 });
 
 describe('canReadRun — no legs', () => {
-  it('refuses a run with no legs even with a valid credential', async () => {
+  it('ADMITS a valid run credential even with no legs, naming no session', async () => {
+    // A legless run is a normal state on the meeting path (P15.5): a participant is present from
+    // the moment they join and gets no leg until the facilitator starts a breakout. The credential
+    // is HMAC-bound to this exact runId, so whether legs exist yet has no bearing on whether its
+    // holder belongs inside the run — there is simply no leg to name.
     prismaMock.prisma.appExperienceRunLeg.findMany.mockResolvedValue([]);
     const { token } = mintRunToken(RUN_ID);
     const access = await canReadRun(req({ cookies: { cq_run_7F3K9M2P: token } }), RUN_ID);
-    expect(access.allowed).toBe(false);
+
+    expect(access.allowed).toBe(true);
+    expect(access.viaRunCookie).toBe(true);
+    // Deliberately absent rather than undefined-from-`legs[0]`: there is no leg to point at.
+    expect(access.knownSessionId).toBeUndefined();
+  });
+
+  it('refuses every LEG-BASED proof when there are no legs', async () => {
+    // The session-token and owned-session paths both match against a leg, so a legless run cannot
+    // satisfy either — only the run credential, which is bound to the run itself.
+    prismaMock.prisma.appExperienceRunLeg.findMany.mockResolvedValue([]);
+    const { token } = mintSessionToken('sess_anything');
+    expect((await canReadRun(req({ token }), RUN_ID)).allowed).toBe(false);
+
+    authMock.getServerSession.mockResolvedValue({ user: { id: 'user_1', role: 'USER' } });
+    expect((await canReadRun(req(), RUN_ID)).allowed).toBe(false);
   });
 });

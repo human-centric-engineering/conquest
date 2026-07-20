@@ -65,6 +65,20 @@ function build(fills: SynthesisFillRow[], participantCount = 3) {
   });
 }
 
+/**
+ * A scribe room: ONE session — the pen — speaking for `occupancy` people who have no session of
+ * their own.
+ */
+function buildScribe(fills: SynthesisFillRow[], occupancy: number) {
+  return buildSynthesisMaterial({
+    background: BACKGROUND,
+    definitions: DEFS,
+    fills,
+    participantCount: occupancy,
+    supportBasis: 'room-occupancy',
+  });
+}
+
 describe('positionText', () => {
   it('prefers the paraphrase — the position in the respondent’s own words', () => {
     expect(positionText({ paraphrase: 'Stretched thin', value: 'stretched' })).toBe(
@@ -248,5 +262,55 @@ describe('hasEnoughToSynthesise', () => {
 
   it('is false for an empty breakout', () => {
     expect(hasEnoughToSynthesise(build([]), 3)).toBe(false);
+  });
+
+  it('defaults to the per-session basis when none is given — an omission never widens the gate', () => {
+    const material = build([fill({ sessionId: 's1' }), fill({ sessionId: 's2' })], 9);
+    expect(material.supportBasis).toBe('per-session');
+    // A big `participantCount` must not rescue a slot that only two sessions answered.
+    expect(hasEnoughToSynthesise(material, 3)).toBe(false);
+  });
+});
+
+describe('hasEnoughToSynthesise — scribe rooms count occupancy, not sessions', () => {
+  // A scribe room has exactly ONE session by design: whoever claimed the pen. Everyone else is
+  // present and deliberately session-less. Counting sessions made `respondedCount` permanently 1,
+  // so no scribe room could EVER clear the floor — a whole shipped room mode that silently
+  // produced "not enough responses yet" for a room of six who all took part.
+
+  it('synthesises a scribe room whose occupancy clears the floor, on one session', () => {
+    const material = buildScribe([fill({ sessionId: 'the_pen' })], 6);
+    expect(material.slots[0].respondedCount).toBe(1);
+    expect(hasEnoughToSynthesise(material, 3)).toBe(true);
+  });
+
+  it('clears a floor set exactly at the occupancy', () => {
+    expect(hasEnoughToSynthesise(buildScribe([fill({ sessionId: 'the_pen' })], 3), 3)).toBe(true);
+  });
+
+  it('REFUSES a scribe room below the floor — one pen speaking for one person is an attribution', () => {
+    expect(hasEnoughToSynthesise(buildScribe([fill({ sessionId: 'the_pen' })], 1), 3)).toBe(false);
+    expect(hasEnoughToSynthesise(buildScribe([fill({ sessionId: 'the_pen' })], 2), 3)).toBe(false);
+  });
+
+  it('honours the hard floor of two even when the setting asks for less', () => {
+    // The k-anonymity floor stays structural: occupancy as the basis is a different UNIT, never a
+    // lower bar. A room of one cannot be talked past the floor by a hand-edited setting.
+    expect(hasEnoughToSynthesise(buildScribe([fill({ sessionId: 'the_pen' })], 1), 1)).toBe(false);
+    expect(hasEnoughToSynthesise(buildScribe([fill({ sessionId: 'the_pen' })], 1), 0)).toBe(false);
+    // ...and two occupants is the least that can pass, whatever the setting.
+    expect(hasEnoughToSynthesise(buildScribe([fill({ sessionId: 'the_pen' })], 2), 1)).toBe(true);
+  });
+
+  it('refuses a full room where the pen answered nothing — occupancy is not material', () => {
+    // Six people in a room is not six people having said something.
+    expect(hasEnoughToSynthesise(buildScribe([], 6), 3)).toBe(false);
+  });
+
+  it('leaves individual rooms untouched — same inputs, the old per-session verdict', () => {
+    const fills = [fill({ sessionId: 'the_pen' })];
+    // Identical material and an ample room size: the only difference is the basis.
+    expect(hasEnoughToSynthesise(build(fills, 6), 3)).toBe(false);
+    expect(hasEnoughToSynthesise(buildScribe(fills, 6), 3)).toBe(true);
   });
 });

@@ -25,6 +25,7 @@ import {
   type RespondentReportClientView,
 } from '@/lib/app/questionnaire/report/view';
 import { validateRespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { narrowMethodRecord } from '@/lib/app/questionnaire/report/method-record';
 import { buildReportMethodView } from '@/lib/app/questionnaire/report/method-view';
 
@@ -63,7 +64,27 @@ export async function buildRunReportClientView(
   // in that case either. Pass the chrome through untouched rather than inventing an insights block.
   if (base.insights === null) return base;
 
+  // The method panel is gated on the author's `explainMethod` opt-in, read HERE from the entry
+  // leg's config rather than inferred from `base.method`. The base view derives its panel from the
+  // entry LEG's own report row — and a leg never has one (`isExperienceLeg` skips per-session
+  // enqueue in favour of the run's report), so `base.method` is unconditionally null and reading it
+  // would suppress the run's record forever. Same gate, same leg, same setting; just no longer
+  // derived from a downstream value that no longer exists. It must stay closed: if the author did
+  // not opt in, a run report must not become a way around that.
+  const entryMeta = await prisma.appQuestionnaireSession.findUnique({
+    where: { id: run.legs[0].sessionId },
+    select: { version: { select: { config: { select: { respondentReport: true } } } } },
+  });
+  const settings = narrowRespondentReportSettings(entryMeta?.version?.config?.respondentReport);
+
   const report = run.report;
+  // Both conditions must hold, exactly as in the base view: the version opted in, AND this RUN
+  // recorded how its generation went. `narrowMethodRecord` returns null for an absent, malformed or
+  // future-schema record.
+  const methodRecord = settings.delivery.explainMethod
+    ? narrowMethodRecord(report?.methodRecord)
+    : null;
+
   return {
     ...base,
     insights: {
@@ -78,15 +99,8 @@ export async function buildRunReportClientView(
       error: report?.error ?? null,
       notifyRequested: Boolean(report?.notifyEmail),
     },
-    // The RUN's own method record, not the entry leg's — the base view resolved that leg's, which
-    // no longer exists now that legs do not generate reports. Gated on the same `explainMethod`
-    // delivery setting the base view already applied: `base.method === null` means the author did
-    // not opt in, and a run report must not become a way around that.
-    method:
-      base.method === null
-        ? null
-        : ((record) => (record ? buildReportMethodView(record, 'respondent') : null))(
-            narrowMethodRecord(report?.methodRecord)
-          ),
+    // The RUN's own method record, replacing the entry leg's (which the base view resolved and
+    // which no longer exists now that legs do not generate reports).
+    method: methodRecord ? buildReportMethodView(methodRecord, 'respondent') : null,
   };
 }

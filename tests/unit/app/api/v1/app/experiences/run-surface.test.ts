@@ -121,7 +121,7 @@ describe('resolveRunSurface — authenticated respondent', () => {
       versionId: 'ver_1',
       respondentUserId: 'user_1',
     });
-    authMock.getServerSession.mockResolvedValue({ user: { id: 'admin_1', role: 'admin' } });
+    authMock.getServerSession.mockResolvedValue({ user: { id: 'admin_1', role: 'ADMIN' } });
 
     expect(await resolveRunSurface(REF, [])).toEqual({ ok: false, reason: 'no_credential' });
   });

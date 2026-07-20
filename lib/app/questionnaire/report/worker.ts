@@ -151,16 +151,24 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
     });
     // Best-effort report-ready email — the report is already saved, so a send failure is logged,
     // never surfaced or retried.
-    // Session-scoped only: the notify opt-in route is per-session, so a run report never carries
-    // an address today. Guarding on `sessionId` keeps that defensive rather than a crash if it
-    // ever does.
-    if (notifyEmail && claimed.sessionId) {
+    // Branch on the same polymorphic owner the generator did. A run-scope row has NO sessionId by
+    // construction, so addressing the send by session alone silently discarded every run opt-in
+    // while the ready-write cleared the address — the respondent was told an email was coming and
+    // nothing ever arrived. The null arm is unreachable (an ownerless row threw above); it keeps
+    // the branch total rather than reaching for a non-null assertion.
+    const subject = claimed.runId
+      ? { runId: claimed.runId }
+      : claimed.sessionId
+        ? { sessionId: claimed.sessionId }
+        : null;
+    if (notifyEmail && subject) {
       try {
-        await sendRespondentReportReadyEmail(claimed.sessionId, notifyEmail);
+        await sendRespondentReportReadyEmail(subject, notifyEmail);
       } catch (err) {
         logger.warn('respondent report: ready-email send failed', {
           reportId: claimed.id,
           sessionId: claimed.sessionId,
+          runId: claimed.runId,
           error: errorMessage(err),
         });
       }

@@ -5,7 +5,6 @@ import {
   experienceTabHref,
   experienceWorkspaceBase,
   visibleExperienceTabs,
-  type ExperienceWorkspaceTab,
 } from '@/lib/app/questionnaire/experiences/workspace-nav';
 import { EXPERIENCE_KINDS } from '@/lib/app/questionnaire/experiences/types';
 
@@ -36,8 +35,8 @@ describe('experience workspace nav', () => {
   });
 
   it('shows every unrestricted tab for both experience kinds', () => {
-    // P15.1 ships no kind-restricted tabs, so both kinds see the full list. This guards the
-    // filter itself: a `kinds` array added later must not accidentally hide the shared tabs.
+    // Unrestricted tabs are the shared spine of the nav — a `kinds` array added to a restricted
+    // tab must never accidentally hide them from either kind.
     for (const kind of EXPERIENCE_KINDS) {
       const visible = visibleExperienceTabs(kind);
       const unrestricted = EXPERIENCE_WORKSPACE_TABS.filter((t) => !t.kinds);
@@ -46,20 +45,25 @@ describe('experience workspace nav', () => {
   });
 
   it('filters a kind-restricted tab out for the other kind', () => {
-    // Exercises the `kinds` predicate itself against a synthetic tab, so the filter is covered
-    // before P15.2 adds the first genuinely kind-restricted tab (Routing, switcher-only).
-    const restricted: ExperienceWorkspaceTab = {
-      id: 'x',
-      label: 'X',
-      segment: 'x',
-      kinds: ['agentic_switcher'],
-    };
-    const tabs: readonly ExperienceWorkspaceTab[] = [...EXPERIENCE_WORKSPACE_TABS, restricted];
+    // Exercises the real `kinds` predicate through `visibleExperienceTabs` against the shipped
+    // restricted tabs: Routing is switcher-only, Meetings is facilitated-only. Asserting both
+    // directions is what catches an inverted or dropped condition in the filter.
+    const switcherIds = visibleExperienceTabs('agentic_switcher').map((t) => t.id);
+    const meetingIds = visibleExperienceTabs('facilitated_meeting').map((t) => t.id);
 
-    const forSwitcher = tabs.filter((t) => !t.kinds || t.kinds.includes('agentic_switcher'));
-    const forMeeting = tabs.filter((t) => !t.kinds || t.kinds.includes('facilitated_meeting'));
+    expect(switcherIds).toContain('routing');
+    expect(switcherIds).not.toContain('meetings');
 
-    expect(forSwitcher.map((t) => t.id)).toContain('x');
-    expect(forMeeting.map((t) => t.id)).not.toContain('x');
+    expect(meetingIds).toContain('meetings');
+    expect(meetingIds).not.toContain('routing');
+  });
+
+  it('declares each restricted tab against a real experience kind', () => {
+    // A `kinds` entry that doesn't match a known kind would silently hide the tab everywhere.
+    for (const tab of EXPERIENCE_WORKSPACE_TABS) {
+      for (const kind of tab.kinds ?? []) {
+        expect(EXPERIENCE_KINDS).toContain(kind);
+      }
+    }
   });
 });

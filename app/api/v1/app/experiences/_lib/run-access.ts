@@ -73,7 +73,6 @@ export async function canReadRun(request: NextRequest, runId: string): Promise<R
     orderBy: { ordinal: 'desc' },
     select: { sessionId: true },
   });
-  if (legs.length === 0) return { allowed: false };
   const legSessionIds = new Set(legs.map((l) => l.sessionId));
 
   // The run credential (P15.3) — an httpOnly cookie covering every leg, checked FIRST because it
@@ -81,10 +80,23 @@ export async function canReadRun(request: NextRequest, runId: string): Promise<R
   // surface carries. `knownSessionId` resolves to the NEWEST leg: a run-scoped credential says
   // nothing about which leg the holder is on, and the newest is the only defensible reading —
   // it is where the journey actually is.
+  //
+  // Checked BEFORE the "no legs" refusal below, because a legless run is a normal state on the
+  // meeting path: a participant is present from the moment they join and does not get a leg until
+  // the facilitator starts a breakout. The credential is HMAC-bound to this exact `runId`, so
+  // whether legs exist yet has no bearing on whether its holder belongs inside the run. There is
+  // simply no leg to name, hence no `knownSessionId`.
   const runCookie = readRunCookie(request, runId);
   if (runCookie) {
-    return { allowed: true, knownSessionId: legs[0].sessionId, viaRunCookie: true };
+    return {
+      allowed: true,
+      ...(legs.length > 0 ? { knownSessionId: legs[0].sessionId } : {}),
+      viaRunCookie: true,
+    };
   }
+
+  // Every remaining proof is made against a leg, so a legless run cannot satisfy any of them.
+  if (legs.length === 0) return { allowed: false };
 
   // No-login surface, legacy per-session path: a signed token for any session in this run.
   const token = request.headers.get('x-session-token');
@@ -97,7 +109,7 @@ export async function canReadRun(request: NextRequest, runId: string): Promise<R
 
   const session = await getServerSession();
   if (!session?.user) return { allowed: false };
-  if (session.user.role === 'admin') return { allowed: true, isAdmin: true };
+  if (session.user.role === 'ADMIN') return { allowed: true, isAdmin: true };
 
   // Authenticated respondent: they must own at least one of the run's sessions.
   const owned = await prisma.appQuestionnaireSession.findFirst({

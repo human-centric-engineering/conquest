@@ -86,6 +86,20 @@ describe('applySupportGate', () => {
     expect(gated.map((i) => i.id)).toEqual(['a', 'b']);
   });
 
+  it('still suppresses a stored scribe finding on READ, whatever basis generated it', () => {
+    // Scribe rooms count occupancy rather than sessions to decide whether to synthesise at all,
+    // but nothing about that reaches the read path. The gate sees a stored `supportCount` and
+    // knows nothing of rooms — so raising `insightMinSupport` after a meeting thins an existing
+    // scribe synthesis exactly as it thins any other, without regenerating it.
+    const stored = [
+      insight({ id: 'room', supportCount: 6 }),
+      insight({ id: 'thin', supportCount: 1 }),
+    ];
+    expect(applySupportGate(stored, 3).map((i) => i.id)).toEqual(['room']);
+    // Raised after the fact: the six-person finding goes too, on read, with no regeneration.
+    expect(applySupportGate(stored, 7)).toEqual([]);
+  });
+
   it('returns nothing when a small room produced only thin findings', () => {
     // The realistic failure a facilitator must not misread: three participants, every finding
     // resting on one or two of them. Better an empty synthesis than an attributable one.

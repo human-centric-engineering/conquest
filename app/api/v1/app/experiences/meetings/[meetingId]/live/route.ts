@@ -40,7 +40,7 @@ async function resolveAudience(
   meetingId: string
 ): Promise<'facilitator' | 'respondent' | null> {
   const session = await getServerSession();
-  if (session?.user?.role === 'admin') return 'facilitator';
+  if (session?.user?.role === 'ADMIN') return 'facilitator';
 
   const token = request.headers.get('x-session-token');
   if (token) {

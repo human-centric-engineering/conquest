@@ -20,6 +20,7 @@ import { prisma } from '@/lib/db/client';
 import { z } from 'zod';
 
 import { chooseRoom, loadBreakoutRooms } from '@/app/api/v1/app/experiences/_lib/meeting-service';
+import { canReadRun } from '@/app/api/v1/app/experiences/_lib/run-access';
 import { runPollLimiter } from '@/app/api/v1/app/experiences/_lib/rate-limit';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 import { getServerSession } from '@/lib/auth/utils';
@@ -60,6 +61,18 @@ export async function POST(
   if (!limit.success) return createRateLimitResponse(limit);
 
   const body = await validateRequestBody(request, chooseSchema);
+
+  // Participants pick their OWN room. `runId` in the body names whose run is being moved, and it is
+  // a plain cuid the caller may well have seen in a log or a link — so it has to be proven. Ungated,
+  // this endpoint would let anyone quoting a run id shove that participant into a different room and
+  // collect a session token for their breakout on the way out. Proof comes from the run credential
+  // set at `/join`, or a session token for one of the run's legs.
+  const access = await canReadRun(request, body.runId);
+  // 404, matching the "meeting not found" answer below: a run id you were not given must not be
+  // confirmed to exist.
+  if (!access.allowed)
+    return errorResponse('Meeting not found', { code: 'NOT_FOUND', status: 404 });
+
   const result = await chooseRoom({ meetingId, runId: body.runId, roomId: body.roomId });
 
   if (!result.ok) {
@@ -69,8 +82,9 @@ export async function POST(
     });
   }
 
-  // A newly-minted session needs a credential on the no-login surface. Null in a scribe room where
-  // somebody else holds the pen — they are in the room, watching, with nothing to drive.
+  // A newly-minted session needs a credential on the no-login surface, and only ever for a caller
+  // who passed the gate above. Null in a scribe room where somebody else holds the pen — they are
+  // in the room, watching, with nothing to drive.
   const session = await getServerSession();
   const token =
     !session?.user && result.sessionId ? mintSessionToken(result.sessionId).token : null;
