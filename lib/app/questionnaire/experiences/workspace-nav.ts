@@ -39,6 +39,9 @@ export const EXPERIENCE_WORKSPACE_TABS: readonly ExperienceWorkspaceTab[] = [
   // under Runs: a run is one respondent's journey, a report is every respondent who answered one
   // step of it. Two different questions about the same data.
   { id: 'reports', label: 'Reports', segment: 'reports' },
+  // Meetings are facilitated-only: a switcher has no room to run, so showing the tab there would
+  // imply an occurrence that surface never has.
+  { id: 'meetings', label: 'Meetings', segment: 'meetings', kinds: ['facilitated_meeting'] },
   { id: 'settings', label: 'Settings', segment: 'settings' },
 ];
 

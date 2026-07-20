@@ -747,6 +747,23 @@ export const API = {
       runReport: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/report`,
       /** Manually push a stuck run forward (POST — admin only; has real side effects). */
       advanceRun: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/advance`,
+      /** Facilitated meetings (P15.5): list (GET) + create one occurrence (POST). */
+      meetings: (id: string): string => `/api/v1/app/experiences/${id}/meetings`,
+      /** Facilitator actions on a live meeting — start, run a breakout, end, synthesise (POST). */
+      meetingActions: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/actions`,
+      /** THE MEETING POLL — live state + audience-filtered insights (GET). */
+      meetingLive: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/live`,
+      /** Mark an insight covered / publish it to respondents (PATCH — admin). */
+      meetingInsight: (meetingId: string, insightId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/insights/${insightId}`,
+      /** Join a live meeting (POST — respondent-facing, not admin-gated). */
+      meetingJoin: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/join`,
+      /** The participant's own live state — which session, and may they answer (GET). */
+      meetingParticipant: (meetingId: string, runId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/participant?runId=${runId}`,
     },
     /** DEMO-ONLY (F2.5.1): demo-client identity + attribution. A fork strips this. */
     DEMO_CLIENTS: {
