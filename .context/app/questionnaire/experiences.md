@@ -103,6 +103,46 @@ neither bound is a defensible reading of NaN.
 `insightMinSupport` defaults to **3** and floors at 2. Two people can usually identify each other
 from "a tension between two of you"; three is the smallest group where that stops being true.
 
+## Explaining it (the How it works tab)
+
+`/admin/experiences/[id]/how-it-works` answers "what am I building?" in three passes: **this
+experience** as a live diagram, **the general shape** of its kind, then **worked examples**.
+
+The live diagram exists because the Overview and Steps tabs both render a journey as a flat ordered
+`<ol>`. That is fair for a facilitated meeting, which really is a sequence — but a switcher is a
+branching decision wearing a list's clothes, and nothing in a list shows that rule order is
+significant or that the selector only sees what the rules did not settle.
+
+`buildExperienceDiagram(experience, rules)`
+(`lib/app/questionnaire/experiences/diagram/build.ts`) is pure and client-safe: it maps the authored
+rows onto a platform `WorkflowDefinition` so the Behind-the-Scenes `ReadOnlyCanvas` can draw them.
+Notes for anyone extending it:
+
+- **It must never throw.** `questionnaireId` and a rule's `targetStepKey` are unmodelled (UG-1) and
+  may dangle. A missing questionnaire renders "may have been deleted"; a rule pointing at a
+  nonexistent step key gets an explicit **Unresolved target** node, which surfaces an authoring
+  error rather than hiding it. This builder feeds a whole tab — a throw takes the page out.
+- **Three questionnaire states, not two.** No pointer set = half-authored; pointer set but
+  unresolvable = deleted. An author needs to tell those apart.
+- **No `_layout` is emitted.** BFS auto-layout places nodes, which is the right trade for a graph
+  whose shape changes on every edit. Hand-placed coordinates are worth it only for the curated
+  explainer diagrams.
+- The selector node is typed `route` (not `agent_call`) so each candidate gets its own labelled
+  output handle; its `_meta.agentSlug` is what keeps the agentic "AI" treatment.
+- A facilitated meeting is built as a plain sequence — routing machinery there would invent a fork
+  the runtime never makes.
+
+The generic diagrams and worked examples are curated: `workflows/definitions/experience-*.ts` and
+`experiences/examples.ts`. **Keep the switcher examples domain-neutral as a set** (triage,
+escalating depth, role-branching). It is general-purpose conditional routing; illustrating it with
+one commercial scenario narrows what authors imagine it can do.
+
+> **`report` is a vestigial step kind.** It is in `EXPERIENCE_STEP_KINDS`, labelled, and offered in
+> the step form for both experience kinds — but **no runtime module reads it**. The run report is
+> enqueued from `concludeRun`, and `routableSteps` only ever selects `branch`. The diagram says so
+> on the node rather than implying an effect. Either wire it up or remove it from the form; leaving
+> it selectable-but-inert is the worst of the three.
+
 ## Readiness
 
 `experienceBlockers(view)` returns author-facing sentences; empty means ready. It is **advisory** —

@@ -18,6 +18,9 @@ import { cohortReportWorkflow } from '@/lib/app/questionnaire/workflows/definiti
 import { configAdvisorWorkflow } from '@/lib/app/questionnaire/workflows/definitions/config-advisor';
 import { conversationTurnWorkflow } from '@/lib/app/questionnaire/workflows/definitions/conversation-turn';
 import { designEvaluationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/design-evaluation';
+import { experienceMeetingWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-meeting';
+import { experienceRunLifecycleWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-run-lifecycle';
+import { experienceSwitcherWorkflow } from '@/lib/app/questionnaire/workflows/definitions/experience-switcher';
 import { dataSlotGenerationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-generation';
 import { dataSlotTurnWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-turn';
 import { generativeAuthoringWorkflow } from '@/lib/app/questionnaire/workflows/definitions/generative-authoring';
@@ -45,6 +48,9 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   agentSettingsAdvisorWorkflow,
   turnInspectorWorkflow,
   turnEvaluationWorkflow,
+  experienceSwitcherWorkflow,
+  experienceMeetingWorkflow,
+  experienceRunLifecycleWorkflow,
 ] as const;
 
 /** Look up one diagram by slug. */

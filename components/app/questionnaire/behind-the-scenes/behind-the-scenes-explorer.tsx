@@ -26,6 +26,12 @@ import {
 
 interface BehindTheScenesExplorerProps {
   initialWorkflows: WorkflowSummary[];
+  /**
+   * Slug to open on mount, for deep links from elsewhere in the admin (the experience workspace
+   * links straight to its own kind's diagram). Ignored when it names no known workflow, so a stale
+   * or hand-edited link degrades to the default rather than rendering an empty canvas.
+   */
+  initialSlug?: string;
 }
 
 function LegendDot({ className, label }: { className: string; label: string }) {
@@ -44,10 +50,15 @@ const STATUS_BANNER: Record<string, string> = {
     'border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200',
 };
 
-export function BehindTheScenesExplorer({ initialWorkflows }: BehindTheScenesExplorerProps) {
+export function BehindTheScenesExplorer({
+  initialWorkflows,
+  initialSlug,
+}: BehindTheScenesExplorerProps) {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>(initialWorkflows);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(
-    initialWorkflows[0]?.slug ?? null
+    (initialSlug && initialWorkflows.some((w) => w.slug === initialSlug) ? initialSlug : null) ??
+      initialWorkflows[0]?.slug ??
+      null
   );
   const [lens, setLens] = useState<QuestionnaireOption | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
