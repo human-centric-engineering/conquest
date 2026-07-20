@@ -740,6 +740,11 @@ export const API = {
        */
       runTranscript: (runId: string, sessionId: string): string =>
         `/api/v1/app/experiences/runs/${runId}/transcript?sessionId=${sessionId}`,
+      /**
+       * The run-level respondent report — the journey's summary (GET). Respondent-only; the admin
+       * bypass does not apply. Polled by the completion screen until the status is terminal.
+       */
+      runReport: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/report`,
       /** Manually push a stuck run forward (POST — admin only; has real side effects). */
       advanceRun: (runId: string): string => `/api/v1/app/experiences/runs/${runId}/advance`,
     },

@@ -734,6 +734,9 @@ export function SessionWorkspace({
         accessToken={accessToken}
         answeredCount={lifecycle.view?.completion.answeredCount ?? null}
         refRaw={lifecycle.view?.ref ?? null}
+        // Experiences (F15.4b): a leg shows the RUN's report — the journey's summary — because the
+        // leg itself no longer generates one. Null for a standalone session.
+        runId={experience?.runId ?? null}
         // The last-settled answer panel feeds the "while your report is being prepared" cycler — the
         // respondent sees their own captured positions echoed back instead of a bare spinner.
         captured={panel.view ?? null}

@@ -212,6 +212,9 @@ model AppExperienceRun {
 
   experience AppExperience         @relation(fields: [experienceId], references: [id], onDelete: Cascade)
   legs       AppExperienceRunLeg[]
+  /// The run-level respondent report (F15.4b), when one has been generated. Cascades from here:
+  /// the report is about this run and has no meaning without it.
+  report     AppRespondentReport?
 
   @@index([experienceId])
   @@index([status])

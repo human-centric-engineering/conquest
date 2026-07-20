@@ -5,8 +5,11 @@ Reports over an experience come in two shapes, and they answer different questio
 | Report          | Subject                                     | Status                   |
 | --------------- | ------------------------------------------- | ------------------------ |
 | **Step report** | everyone who answered ONE step of a journey | shipped (F15.4a)         |
-| **Run report**  | ONE respondent across all their legs        | F15.4b                   |
+| **Run report**  | ONE respondent across all their legs        | shipped (F15.4b)         |
 | Experience-wide | a synthesis over ready step reports         | not planned as one phase |
+
+The two are orthogonal: a step report is _cross-respondent, one questionnaire_; a run report is
+_one respondent, cross-questionnaire_.
 
 ## Step reports are scoped PER STEP — never per experience
 
@@ -98,8 +101,54 @@ it wants to drop. The schema test asserts all of this for both migrations.
 mechanically from the version ones and arrived with "version scope" headers and "No version report"
 error strings. Type-checking cannot catch that — read the output.
 
+## The run report (F15.4b)
+
+One summary for a whole journey — what `conclude` has promised since F15.2.
+
+**The pipeline is reused, not forked.** `generateReportFromInputs` takes pre-assembled material, so
+`run-report.ts` only assembles inputs from N legs; KB grounding, web-search rounds, the agent, the
+formatter, the appendix pass and the method record all apply unchanged.
+
+**A leg generates no per-session report.** The run report covers every leg — generating both would
+bill the journey twice and hand the respondent n+1 reports where one was promised. The submit route
+skips the enqueue for a leg, failing soft to "not a leg" (a redundant report beats none).
+
+**Enqueued from `concludeRun`** — the single choke point where a journey is known to be over, so
+every dead end (selector, budget, no candidates, unrunnable step) still yields a report.
+
+Anchoring choices, all for the same reason — a run spans several versions, so something must
+arbitrate:
+
+| Input    | Comes from           | Why not the alternative                                          |
+| -------- | -------------------- | ---------------------------------------------------------------- |
+| settings | the **entry** leg    | the last leg varies by routing → same experience, different look |
+| KB scope | the **experience**   | a leg's questionnaire would be arbitrary                         |
+| goal     | the **entry** leg    | later legs' goals show in their own headed sections              |
+| coverage | **summed** over legs | the final leg alone overstates how much was answered             |
+
+**Per-leg `## Part N — <title>` headings are load-bearing.** Without them the writer reads a flat
+wall of Q&A and cannot see the respondent was asked about a topic twice, in two questionnaires —
+the progression a journey report exists to notice.
+
+`runId` is a **real** cascading relation (a run is respondent data, not config — UG-1 forbids
+CONFIG→answer edges, and the run is the answer side). `sessionId` relaxed to nullable-unique;
+`subjectKind` discriminates.
+
+The respondent view composes the entry leg's chrome with the run's generation state, and suppresses
+the method panel — the base view resolves the entry leg's record, which no longer exists.
+
+### Known erasure gap (pre-existing)
+
+`eraseUser()` removes the profile snapshot but retains sessions, answers, transcripts and reports —
+`respondentUserId` is a plain String with no FK and no erasure hook is registered.
+`AppRespondentProfileSnapshot` is the one app table with a modelled `User` FK. Structured answers
+are arguably de-identified by that; **free-text transcripts and report prose are not**. F15.4b
+follows the existing pattern rather than half-fixing it; closing this is its own work with a real
+retain-vs-delete decision inside it.
+
 ## Related
 
-- `.context/app/planning/features/f15.4a.md` — what shipped and why
+- `.context/app/planning/features/f15.4a.md` — per-step reports, what shipped and why
+- `.context/app/planning/features/f15.4b.md` — the run report, what shipped and why
 - `.context/app/questionnaire/experiences.md` — the model
 - `.context/app/questionnaire/experience-continuity.md` — the respondent journey

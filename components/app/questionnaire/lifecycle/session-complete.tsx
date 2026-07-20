@@ -83,6 +83,12 @@ export interface SessionCompleteProps {
    * cycler (the preparing state falls back to its plain caption).
    */
   captured?: AnswerPanelView | null;
+  /**
+   * Experiences (F15.4b): when this session is a leg of a concluded run, show the RUN-level report
+   * — the summary of the whole journey — instead of this leg's own, which is no longer generated.
+   * Omitted/null for an ordinary standalone session.
+   */
+  runId?: string | null;
   className?: string;
 }
 
@@ -92,6 +98,7 @@ export function SessionComplete({
   answeredCount,
   refRaw,
   captured,
+  runId,
   className,
 }: SessionCompleteProps) {
   const [downloading, setDownloading] = useState(false);
@@ -106,7 +113,11 @@ export function SessionComplete({
 
   // Respondent report view (polls while insights generate). When no report is configured the view
   // is `enabled: false` and the screen keeps its default responses-PDF download (F7.4 behaviour).
-  const { view, loaded, timedOut, retry, notify } = useRespondentReport(sessionId, accessToken);
+  const { view, loaded, timedOut, retry, notify } = useRespondentReport(
+    sessionId,
+    accessToken,
+    runId
+  );
   const reportEnabled = view?.enabled ?? false;
   // In an AI report mode the downloaded PDF's headline IS the generated report, so hold the button
   // until the report is actually ready — offering a "download" mid-generation would hand the

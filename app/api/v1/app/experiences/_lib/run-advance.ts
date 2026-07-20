@@ -69,8 +69,16 @@ import { serialiseCarryOver } from '@/lib/app/questionnaire/experiences/carryove
 import { createSessionForExperienceLeg } from '@/app/api/v1/app/questionnaire-sessions/_lib/create';
 // Shared with the step-report scope: a report must analyse the same version the legs ran.
 import { resolveStepVersionId } from '@/app/api/v1/app/experiences/_lib/steps';
+import { enqueueRunReport } from '@/lib/app/questionnaire/report/enqueue';
 
-/** Mark a run concluded. Idempotent — a second call is a no-op update. */
+/**
+ * Mark a run concluded. Idempotent — a second call is a no-op update.
+ *
+ * This is the single choke point where a journey is known to be over, and therefore the one place
+ * the run-level report is enqueued (F15.4b). Every dead end funnels through here — the selector
+ * choosing to conclude, an exhausted budget, no candidates, an unrunnable step — so a respondent
+ * always ends up with a report regardless of WHY their journey ended.
+ */
 async function concludeRun(
   runId: string,
   decision: RoutingDecision,
@@ -84,6 +92,18 @@ async function concludeRun(
       routingDecision: { ...decision, concludeReason: reason },
     },
   });
+
+  // Fail-soft, exactly like the per-session enqueue at submit: the run IS concluded, and failing
+  // to queue a report must not turn that into a failed advance and leave the run mid-flight.
+  // The respondent's client polls for `conclude` either way; a missing report shows as "not ready"
+  // rather than stranding them.
+  await enqueueRunReport(runId).catch((err: unknown) => {
+    logger.error('experience conclude: run report enqueue failed', {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   return { kind: 'conclude', runId, reason };
 }
 

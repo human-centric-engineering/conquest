@@ -65,7 +65,7 @@ import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-cont
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { advanceExperienceRun, legForSession } from '@/app/api/v1/app/experiences/_lib/run-advance';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
-import { enqueueRespondentReport } from '@/lib/app/questionnaire/report/enqueue';
+import { enqueueRespondentReport, isExperienceLeg } from '@/lib/app/questionnaire/report/enqueue';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
@@ -317,15 +317,30 @@ async function handleSubmit(
         reason: early ? 'respondent_early_finish' : 'respondent_submit',
       });
       log.info('Respondent session submitted', { sessionId, status, early });
-      // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
-      // or narrative). Best-effort — a queue failure must never fail the submission just made.
-      const enqueued = await enqueueRespondentReport(sessionId).catch((err) => {
-        log.error('Failed to enqueue respondent report', {
+      // Experiences (F15.4b): a leg of a run gets NO per-session report — the run-level report,
+      // enqueued when the journey concludes, covers every leg including this one. Generating both
+      // would bill the journey twice and hand the respondent n+1 reports where they were promised
+      // one summary. Fail-soft to `false` (i.e. behave as a standalone session): if this lookup
+      // errors, a redundant per-leg report is a far better outcome than none at all.
+      const partOfRun = await isExperienceLeg(sessionId).catch((err) => {
+        log.error('Failed to check experience leg for report enqueue', {
           sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
         return false;
       });
+
+      // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
+      // or narrative). Best-effort — a queue failure must never fail the submission just made.
+      const enqueued = partOfRun
+        ? false
+        : await enqueueRespondentReport(sessionId).catch((err) => {
+            log.error('Failed to enqueue respondent report', {
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return false;
+          });
       // Instant start: kick the report worker AFTER the response so generation begins within
       // seconds rather than waiting for the next maintenance-cron minute. `after()` (next/server)
       // survives serverless (runs within the function's maxDuration) and on a persistent process

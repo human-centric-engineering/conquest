@@ -988,8 +988,9 @@ model AppRespondentProfileSnapshot {
   @@map("app_respondent_profile_snapshot")
 }
 
-/// The generated Respondent Report (report kind `respondent`) for one completed session — 1:1 with
-/// the session. Created `queued` at submit ONLY when the version's `respondentReport` config is
+/// The generated Respondent Report (report kind `respondent`) — for ONE completed session, or (F15.4b)
+/// for ONE experience RUN spanning several legs. Created `queued` at submit ONLY when the version's
+/// `respondentReport` config is
 /// enabled in mode `raw_plus_insights`; the deterministic raw-only mode renders on demand and needs
 /// no row. The maintenance-tick worker leases a queued row, runs the report agent (optionally
 /// grounded in the attributed client's knowledge base), and writes `ready` + `content` (or `failed`
@@ -1000,7 +1001,14 @@ model AppRespondentProfileSnapshot {
 /// (lib/orchestration/evaluations/run-worker.ts) for crash-safe recovery of stale claims.
 model AppRespondentReport {
   id                  String    @id @default(cuid())
-  sessionId           String    @unique
+  /// RESPONDENT_REPORT_SUBJECTS (types.ts): 'session' | 'experience_run'.
+  /// Polymorphic owner, mirroring the pattern AppCohortReport already uses: exactly one of the two
+  /// nullable-unique owner keys is set per row, and Postgres permits multiple NULLs in a unique
+  /// index so both constraints coexist. A run report is NOT expressible as a session report — its
+  /// inputs span several sessions, which `sessionId @unique` forbids by construction.
+  subjectKind         String    @default("session")
+  /// Session-scope owner key. NULL for run-scope rows.
+  sessionId           String?   @unique
   mode                String // RESPONDENT_REPORT_MODES (types.ts); the AI modes `raw_plus_insights` + `narrative` persist a row
   status              String    @default("queued") // RESPONDENT_REPORT_STATUSES: queued | processing | ready | failed
   content             Json? // RespondentReportContent (insights payload); null until ready
@@ -1026,7 +1034,13 @@ model AppRespondentReport {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  session   AppQuestionnaireSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  /// Run-scope owner key (F15.4b). NULL for session-scope rows. A REAL relation with
+  /// `onDelete: Cascade`, matching how AppExperienceRunLeg attaches to its run: a run is respondent
+  /// data, not config, so deleting one must take its report with it. This is not a UG-1 violation —
+  /// UG-1 forbids CONFIG→answer edges, and the run is the answer side.
+  runId               String?   @unique
+  session   AppQuestionnaireSession?      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  run       AppExperienceRun?             @relation(fields: [runId], references: [id], onDelete: Cascade)
   revisions AppRespondentReportRevision[]
 
   @@index([status, lockedAt])

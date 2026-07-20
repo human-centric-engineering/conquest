@@ -175,6 +175,33 @@ describe('experience pointers on other models (F15.4)', () => {
   });
 });
 
+describe('run-scoped respondent report (F15.4b)', () => {
+  it('makes the report owner polymorphic — session OR run', () => {
+    const report = getModel('AppRespondentReport');
+    expect(getField(report, 'subjectKind').type).toBe('String');
+    expect(getField(report, 'sessionId').type).toBe('String');
+    expect(getField(report, 'runId').type).toBe('String');
+  });
+
+  it('relates the run report to its run so deleting a run takes the report with it', () => {
+    // A run is respondent data, not config, so a real cascading relation is correct here — this is
+    // not a UG-1 violation, which forbids CONFIG→answer edges.
+    const report = getModel('AppRespondentReport');
+    const runRelations = report.fields.filter(
+      (f) => f.kind === 'object' && f.type === 'AppExperienceRun'
+    );
+    expect(runRelations).toHaveLength(1);
+  });
+
+  it('exposes the report from the run side', () => {
+    const run = getModel('AppExperienceRun');
+    const reportRelations = run.fields.filter(
+      (f) => f.kind === 'object' && f.type === 'AppRespondentReport'
+    );
+    expect(reportRelations).toHaveLength(1);
+  });
+});
+
 describe('F15.4 migration SQL', () => {
   /** Read one migration by folder suffix. */
   function readMigration(suffix: string): string {
@@ -186,6 +213,20 @@ describe('F15.4 migration SQL', () => {
 
   const sessionSql = readMigration('_add_session_experience_step_id');
   const reportSql = readMigration('_add_cohort_report_experience_step_scope');
+  const runReportSql = readMigration('_add_run_scoped_respondent_report');
+
+  it('drops NOT NULL from sessionId so run-scoped rows can exist (F15.4b)', () => {
+    const exec = executableLines(runReportSql);
+    expect(exec).toMatch(/ALTER COLUMN "sessionId" DROP NOT NULL/);
+    // Existing rows keep their value and pick up the default, so no backfill is needed.
+    expect(exec).toMatch(/"subjectKind" TEXT NOT NULL DEFAULT 'session'/);
+  });
+
+  it('cascades the run report from its run', () => {
+    expect(executableLines(runReportSql)).toMatch(
+      /FOREIGN KEY \("runId"\) REFERENCES "app_experience_run"\("id"\) ON DELETE CASCADE/
+    );
+  });
 
   it('adds experienceStepId NULLABLE — every pre-existing session correctly has none', () => {
     const line = executableLines(sessionSql).match(/ADD COLUMN\s+"experienceStepId"[^;]*/)?.[0];
@@ -219,7 +260,7 @@ describe('F15.4 migration SQL', () => {
   it('does not drop the raw-SQL pgvector / tsvector indexes', () => {
     // Both migrations were hand-stripped; Prisma's diff proposes these drops every time because
     // it cannot see raw-SQL indexes. A regression here silently destroys vector search.
-    for (const sql of [sessionSql, reportSql]) {
+    for (const sql of [sessionSql, reportSql, runReportSql]) {
       const exec = executableLines(sql);
       expect(exec).not.toMatch(/DROP INDEX/i);
       // The GENERATED ALWAYS searchVector column draws a phantom DROP DEFAULT for the same reason.
@@ -230,6 +271,7 @@ describe('F15.4 migration SQL', () => {
   it('touches only its own table', () => {
     expect(executableLines(sessionSql)).not.toMatch(/ALTER TABLE "ai_knowledge_chunk"/);
     expect(executableLines(reportSql)).not.toMatch(/ALTER TABLE "ai_knowledge_chunk"/);
+    expect(executableLines(runReportSql)).not.toMatch(/ALTER TABLE "ai_knowledge_chunk"/);
   });
 });
 
