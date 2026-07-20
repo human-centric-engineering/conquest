@@ -45,3 +45,26 @@ export const RUN_POLL_TIMEOUT_MS = 45_000;
 
 /** Interval between run-status polls. */
 export const RUN_POLL_INTERVAL_MS = 1_500;
+
+/**
+ * The breakout synthesiser — turns a room's data-slot fills into findings a facilitator reads
+ * aloud (P15.5).
+ *
+ * Wants a reasoning-tier model: it clusters positions across participants, weighs agreement
+ * against dissent, and has to count support honestly. Unlike the router, NOBODY IS WAITING on a
+ * spinner — the facilitator is still talking to the room — so it is given a longer timeout and a
+ * larger budget than the selector, and correctness matters more than latency.
+ */
+export const MEETING_SYNTHESIS_AGENT_SLUG = 'app-meeting-synthesiser';
+
+/** Token ceiling for one synthesis. Generous: a breakout of twenty people is a lot of material. */
+export const SYNTHESIS_MAX_TOKENS = 4_000;
+
+/**
+ * Timeout for one synthesis. Long relative to the routing selector's 12s precisely because the
+ * respondent is not waiting: the facilitator triggers it, keeps talking, and reads it when ready.
+ */
+export const SYNTHESIS_TIMEOUT_MS = 60_000;
+
+/** Cap on how many findings one breakout synthesis may produce. */
+export const SYNTHESIS_MAX_INSIGHTS = 12;
