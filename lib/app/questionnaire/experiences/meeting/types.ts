@@ -117,10 +117,71 @@ export interface MeetingLiveState {
   /** The live clock (ISO), or null when no breakout is running. */
   breakoutStartedAt: string | null;
   breakoutEndsAt: string | null;
+  /**
+   * The grace window frozen at breakout start. Sent to the client so it can render the countdown
+   * itself every tick without a request, and reach the same answer the server would.
+   */
+  breakoutGraceSeconds: number;
   /** How many participants have joined this meeting at all. */
   participantCount: number;
   /** How many have COMPLETED the current breakout — the facilitator's "are they done yet". */
   completedCount: number;
+}
+
+/**
+ * Where a breakout is in its life, right now.
+ *
+ * `running` — the clock is going; people are answering.
+ * `grace`   — the clock has ended and the grace window has not. People may FINISH and submit what
+ *             they are mid-way through. Nothing new should be started.
+ * `closed`  — both have passed. No further submissions.
+ *
+ * The middle phase exists because the clock ending and the room being done are not the same
+ * moment. Cutting someone off mid-sentence loses the answer and the goodwill; thirty seconds costs
+ * the meeting nothing. An untimed breakout is always `running` until the facilitator ends it.
+ */
+export const BREAKOUT_PHASES = ['running', 'grace', 'closed'] as const;
+export type BreakoutPhase = (typeof BREAKOUT_PHASES)[number];
+
+/**
+ * Which phase a breakout is in.
+ *
+ * `endsAt` null means untimed — always `running`, because only the facilitator closes it. Both
+ * boundaries are exclusive-of-the-past: exactly AT `endsAt` is still `running`, and exactly at the
+ * grace boundary is still `grace`, so nobody loses a submission to a rounding edge.
+ */
+export function breakoutPhase(
+  endsAt: string | null,
+  graceSeconds: number,
+  now: Date
+): BreakoutPhase {
+  if (!endsAt) return 'running';
+  const end = new Date(endsAt).getTime();
+  // An unparseable clock must not silently close a live breakout — treat it as untimed.
+  if (Number.isNaN(end)) return 'running';
+
+  const t = now.getTime();
+  if (t <= end) return 'running';
+  const graceEnd = end + Math.max(0, graceSeconds) * 1000;
+  return t <= graceEnd ? 'grace' : 'closed';
+}
+
+/**
+ * Seconds left in the GRACE window, or null when not in it.
+ *
+ * Drives the respondent's "finish up — 24 seconds" line. Separate from {@link secondsRemaining},
+ * which counts the main clock: a single countdown that silently rolled from one into the other
+ * would tell someone they had 30 seconds left when what they actually had was 30 seconds to submit
+ * — a different instruction.
+ */
+export function graceSecondsRemaining(
+  endsAt: string | null,
+  graceSeconds: number,
+  now: Date
+): number | null {
+  if (breakoutPhase(endsAt, graceSeconds, now) !== 'grace' || !endsAt) return null;
+  const graceEnd = new Date(endsAt).getTime() + Math.max(0, graceSeconds) * 1000;
+  return Math.max(0, Math.round((graceEnd - now.getTime()) / 1000));
 }
 
 /**

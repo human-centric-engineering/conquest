@@ -11,7 +11,11 @@
 
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import {
+  BREAKOUT_GRACE_MAX_SECONDS,
+  BREAKOUT_GRACE_MIN_SECONDS,
   DEFAULT_EXPERIENCE_SETTINGS,
+  EXPERIENCE_CONSOLE_DISPLAYS,
+  EXPERIENCE_INSIGHT_DISPLAYS,
   EXPERIENCE_SEAM_MARKERS,
   EXPERIENCE_SYNTHESIS_INSTRUCTIONS_MAX_LENGTH,
   INSIGHT_MIN_SUPPORT_CEILING,
@@ -73,6 +77,22 @@ export function narrowExperienceSettings(value: unknown): ExperienceSettingsShap
     surfaceInsightsToRespondents: asBool(
       obj.surfaceInsightsToRespondents,
       d.surfaceInsightsToRespondents
+    ),
+    respondentInsightDisplay: narrowToEnum(
+      typeof obj.respondentInsightDisplay === 'string' ? obj.respondentInsightDisplay : '',
+      EXPERIENCE_INSIGHT_DISPLAYS,
+      d.respondentInsightDisplay
+    ),
+    consoleDisplayMode: narrowToEnum(
+      typeof obj.consoleDisplayMode === 'string' ? obj.consoleDisplayMode : '',
+      EXPERIENCE_CONSOLE_DISPLAYS,
+      d.consoleDisplayMode
+    ),
+    breakoutGraceSeconds: asInt(
+      obj.breakoutGraceSeconds,
+      BREAKOUT_GRACE_MIN_SECONDS,
+      BREAKOUT_GRACE_MAX_SECONDS,
+      d.breakoutGraceSeconds
     ),
     synthesisInstructions: asText(
       obj.synthesisInstructions,

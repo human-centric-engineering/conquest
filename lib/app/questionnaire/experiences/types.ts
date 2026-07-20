@@ -84,6 +84,43 @@ export const EXPERIENCE_CONTINUITY_MODE_LABELS: Record<ExperienceContinuityMode,
 export const EXPERIENCE_SEAM_MARKERS = ['divider', 'none'] as const;
 export type ExperienceSeamMarker = (typeof EXPERIENCE_SEAM_MARKERS)[number];
 
+/**
+ * How respondents see a meeting's synthesis in their own questionnaire window (P15.5).
+ *
+ * `none` — the shared screen only. `tab` — a quiet extra tab beside the conversation, there when
+ * they look for it. `modal` — surfaced over the conversation when the facilitator publishes it,
+ * which pulls attention but interrupts anyone still typing.
+ */
+export const EXPERIENCE_INSIGHT_DISPLAYS = ['none', 'tab', 'modal'] as const;
+export type ExperienceInsightDisplay = (typeof EXPERIENCE_INSIGHT_DISPLAYS)[number];
+
+/** Human labels for the respondent insight-display selector. */
+export const EXPERIENCE_INSIGHT_DISPLAY_LABELS: Record<ExperienceInsightDisplay, string> = {
+  none: 'Shared screen only',
+  tab: 'A tab in their questionnaire',
+  modal: 'Pop it up over their conversation',
+};
+
+/**
+ * How the facilitator console renders (P15.5).
+ *
+ * `standard` is the working surface — full controls, dense. `presentation` is for a projector, a
+ * meeting-room screen, or a Zoom share: larger type, fewer controls, readable at distance and
+ * through video compression.
+ */
+export const EXPERIENCE_CONSOLE_DISPLAYS = ['standard', 'presentation'] as const;
+export type ExperienceConsoleDisplay = (typeof EXPERIENCE_CONSOLE_DISPLAYS)[number];
+
+/** Human labels for the console display selector. */
+export const EXPERIENCE_CONSOLE_DISPLAY_LABELS: Record<ExperienceConsoleDisplay, string> = {
+  standard: 'Standard — for your own screen',
+  presentation: 'Presentation — for a shared screen or projector',
+};
+
+/** Bounds on the post-clock grace window, in seconds. */
+export const BREAKOUT_GRACE_MIN_SECONDS = 0;
+export const BREAKOUT_GRACE_MAX_SECONDS = 300;
+
 /** Human labels for the seam-marker selector. */
 export const EXPERIENCE_SEAM_MARKER_LABELS: Record<ExperienceSeamMarker, string> = {
   divider: 'Subtle divider with the step title',
@@ -202,6 +239,36 @@ export interface ExperienceSettingsShape {
    * Per-insight overrides still apply; this is the default for newly generated ones.
    */
   surfaceInsightsToRespondents: boolean;
+  /**
+   * Facilitated meetings: HOW a respondent sees the synthesis in their own questionnaire window,
+   * when `surfaceInsightsToRespondents` is on. `none` means the shared screen is the only place it
+   * appears.
+   *
+   * Separate from the boolean gate because the two questions are different: whether people may see
+   * the analysis at all, and whether it belongs on their own device. A room watching a projector
+   * together reads differently from forty people each looking down at a phone — and on a Zoom call
+   * the shared screen may be the only thing anyone can see.
+   */
+  respondentInsightDisplay: ExperienceInsightDisplay;
+  /**
+   * Facilitated meetings: how the facilitator console renders. `presentation` is the
+   * shared-screen mode — larger type, fewer controls, readable from the back of a room or through
+   * a compressed video call.
+   *
+   * A per-experience setting rather than a device guess: the same console may be on a laptop the
+   * facilitator alone sees, a projector the room reads, or a Zoom share where it is the ONLY
+   * surface anyone has. Nothing about the viewport tells us which.
+   */
+  consoleDisplayMode: ExperienceConsoleDisplay;
+  /**
+   * Facilitated meetings: seconds granted after a breakout's clock ends for people to finish the
+   * answer they are mid-way through and submit.
+   *
+   * Exists because the clock ending and the room being done are not the same moment. Cutting
+   * someone off mid-sentence loses the answer AND the goodwill; thirty seconds costs the meeting
+   * nothing.
+   */
+  breakoutGraceSeconds: number;
   /** Facilitated meetings: admin guidance appended to the breakout synthesis prompt. */
   synthesisInstructions: string;
 }
@@ -231,6 +298,12 @@ export const DEFAULT_EXPERIENCE_SETTINGS: ExperienceSettingsShape = {
   synthesisEveryNCompletions: 3,
   insightMinSupport: 3,
   surfaceInsightsToRespondents: false,
+  // Defaults to the shared screen only: a facilitated meeting is a room looking at one thing
+  // together, and putting the analysis on forty phones by default changes that without being asked.
+  respondentInsightDisplay: 'none',
+  consoleDisplayMode: 'standard',
+  // Long enough to finish a sentence and press send, short enough that the room does not drift.
+  breakoutGraceSeconds: 30,
   synthesisInstructions: '',
 };
 

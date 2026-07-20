@@ -16,6 +16,7 @@
  */
 
 import {
+  breakoutPhase,
   isTerminalMeetingStatus,
   type ExperienceMeetingStatus,
 } from '@/lib/app/questionnaire/experiences/meeting/types';
@@ -125,12 +126,54 @@ export function breakoutEndsAt(startedAt: Date, durationSeconds: number | null):
   return new Date(startedAt.getTime() + durationSeconds * 1000);
 }
 
+/** What a participant is allowed to do right now. */
+export interface ParticipantWindow {
+  /** May they send a new turn / start a new answer? */
+  canAnswer: boolean;
+  /** May they submit what they already have? True through the grace window as well. */
+  canSubmit: boolean;
+  /** True during grace — the surface says "finish up" rather than "time's up". */
+  wrappingUp: boolean;
+}
+
+const SHUT: ParticipantWindow = { canAnswer: false, canSubmit: false, wrappingUp: false };
+
 /**
- * Whether a participant may still answer in this meeting.
+ * What a participant may do in this meeting, right now.
  *
- * True only while a breakout is actually running. Between breakouts the room is listening to the
- * facilitator, not typing — and an answer arriving then would land in whichever breakout happened
- * to start next, corrupting a synthesis that is scoped per period.
+ * Answering and submitting are separated deliberately. When the clock ends, the grace window lets
+ * someone FINISH and send what they are mid-way through — but not begin something new, because a
+ * fresh answer started after the bell will not be part of the conversation the room is about to
+ * discuss. Cutting off both at once loses answers people had already written.
+ *
+ * Between breakouts the window is shut entirely: the room is listening to the facilitator, and an
+ * answer arriving then would land in whichever breakout started next, corrupting a synthesis that
+ * is scoped per period.
+ */
+export function participantWindow(
+  state: MeetingState,
+  clock: { breakoutEndsAt: string | null; breakoutGraceSeconds: number },
+  now: Date
+): ParticipantWindow {
+  if (state.status !== 'live' || state.currentStepId === null) return SHUT;
+
+  const phase = breakoutPhase(clock.breakoutEndsAt, clock.breakoutGraceSeconds, now);
+  switch (phase) {
+    case 'running':
+      return { canAnswer: true, canSubmit: true, wrappingUp: false };
+    case 'grace':
+      return { canAnswer: false, canSubmit: true, wrappingUp: true };
+    case 'closed':
+      return SHUT;
+  }
+}
+
+/**
+ * Whether a participant may answer at all — the coarse gate.
+ *
+ * Kept as a named predicate because "is this meeting open for answers" is asked in places that do
+ * not care about the grace distinction. Anything rendering a composer or accepting a submit should
+ * use {@link participantWindow} instead, which knows the difference.
  */
 export function canParticipantAnswer(state: MeetingState): boolean {
   return state.status === 'live' && state.currentStepId !== null;

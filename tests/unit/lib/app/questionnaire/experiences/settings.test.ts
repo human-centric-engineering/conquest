@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 
 import { narrowExperienceSettings } from '@/lib/app/questionnaire/experiences/settings';
 import {
+  BREAKOUT_GRACE_MAX_SECONDS,
+  BREAKOUT_GRACE_MIN_SECONDS,
   DEFAULT_EXPERIENCE_SETTINGS,
   EXPERIENCE_SYNTHESIS_INSTRUCTIONS_MAX_LENGTH,
   INSIGHT_MIN_SUPPORT_CEILING,
@@ -144,6 +146,54 @@ describe('narrowExperienceSettings', () => {
       // able to SEE the subject changed. Hiding the seam must stay an explicit author choice — the
       // opposite default would conceal it by accident.
       expect(DEFAULT_EXPERIENCE_SETTINGS.stitchedSeamMarker).toBe('divider');
+    });
+  });
+
+  describe('facilitated-meeting display + grace (P15.5)', () => {
+    it('defaults respondent insight display to the shared screen only', () => {
+      // A facilitated meeting is a room looking at one thing together; putting the analysis on
+      // forty phones by default changes that without anyone asking for it.
+      expect(DEFAULT_EXPERIENCE_SETTINGS.respondentInsightDisplay).toBe('none');
+    });
+
+    it.each(['none', 'tab', 'modal'] as const)('accepts the %s display', (mode) => {
+      expect(
+        narrowExperienceSettings({ respondentInsightDisplay: mode }).respondentInsightDisplay
+      ).toBe(mode);
+    });
+
+    it('falls back for an unknown display value', () => {
+      expect(
+        narrowExperienceSettings({ respondentInsightDisplay: 'sidebar' }).respondentInsightDisplay
+      ).toBe(DEFAULT_EXPERIENCE_SETTINGS.respondentInsightDisplay);
+    });
+
+    it.each(['standard', 'presentation'] as const)('accepts the %s console mode', (mode) => {
+      expect(narrowExperienceSettings({ consoleDisplayMode: mode }).consoleDisplayMode).toBe(mode);
+    });
+
+    it('defaults the grace window to 30 seconds', () => {
+      // Long enough to finish a sentence and press send; short enough that the room does not drift.
+      expect(DEFAULT_EXPERIENCE_SETTINGS.breakoutGraceSeconds).toBe(30);
+    });
+
+    it('clamps the grace window into range', () => {
+      expect(narrowExperienceSettings({ breakoutGraceSeconds: 99_999 }).breakoutGraceSeconds).toBe(
+        BREAKOUT_GRACE_MAX_SECONDS
+      );
+      expect(narrowExperienceSettings({ breakoutGraceSeconds: -10 }).breakoutGraceSeconds).toBe(
+        BREAKOUT_GRACE_MIN_SECONDS
+      );
+    });
+
+    it('allows zero grace — an author may want a hard stop', () => {
+      expect(narrowExperienceSettings({ breakoutGraceSeconds: 0 }).breakoutGraceSeconds).toBe(0);
+    });
+
+    it('falls back for a non-numeric grace rather than clamping it', () => {
+      expect(narrowExperienceSettings({ breakoutGraceSeconds: 'soon' }).breakoutGraceSeconds).toBe(
+        DEFAULT_EXPERIENCE_SETTINGS.breakoutGraceSeconds
+      );
     });
   });
 

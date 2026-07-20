@@ -14,9 +14,15 @@ import {
   canParticipantAnswer,
   canStartBreakout,
   canStartMeeting,
+  participantWindow,
   type MeetingState,
 } from '@/lib/app/questionnaire/experiences/meeting/lifecycle';
-import { isOverrunning, secondsRemaining } from '@/lib/app/questionnaire/experiences/meeting/types';
+import {
+  breakoutPhase,
+  graceSecondsRemaining,
+  isOverrunning,
+  secondsRemaining,
+} from '@/lib/app/questionnaire/experiences/meeting/types';
 
 function state(over: Partial<MeetingState> = {}): MeetingState {
   return { status: 'live', currentStepId: null, ...over };
@@ -160,6 +166,126 @@ describe('isOverrunning', () => {
     // The guard that keeps the clock advisory: a breakout past its time is still endable only by
     // an explicit call, and `canEndBreakout` neither knows nor cares about the clock.
     expect(canEndBreakout(state({ currentStepId: 'step_1' })).ok).toBe(true);
+  });
+});
+
+describe('breakoutPhase', () => {
+  const ENDS = '2026-08-14T14:15:00.000Z';
+  const GRACE = 30;
+
+  it('is running before the clock ends', () => {
+    expect(breakoutPhase(ENDS, GRACE, new Date('2026-08-14T14:14:59.000Z'))).toBe('running');
+  });
+
+  it('is still running EXACTLY at the clock', () => {
+    // Boundaries favour the participant — nobody loses a submission to a rounding edge.
+    expect(breakoutPhase(ENDS, GRACE, new Date(ENDS))).toBe('running');
+  });
+
+  it('is grace just after the clock', () => {
+    expect(breakoutPhase(ENDS, GRACE, new Date('2026-08-14T14:15:01.000Z'))).toBe('grace');
+  });
+
+  it('is still grace EXACTLY at the grace boundary', () => {
+    expect(breakoutPhase(ENDS, GRACE, new Date('2026-08-14T14:15:30.000Z'))).toBe('grace');
+  });
+
+  it('is closed once grace has passed', () => {
+    expect(breakoutPhase(ENDS, GRACE, new Date('2026-08-14T14:15:31.000Z'))).toBe('closed');
+  });
+
+  it('closes immediately after the clock when grace is zero', () => {
+    expect(breakoutPhase(ENDS, 0, new Date('2026-08-14T14:15:01.000Z'))).toBe('closed');
+  });
+
+  it('is always running for an untimed breakout — only the facilitator closes it', () => {
+    expect(breakoutPhase(null, GRACE, new Date('2030-01-01T00:00:00.000Z'))).toBe('running');
+  });
+
+  it('treats an unparseable clock as untimed rather than closing a live breakout', () => {
+    // Failing OPEN here is deliberate: a bad timestamp must not silently shut a room out.
+    expect(breakoutPhase('not-a-date', GRACE, new Date())).toBe('running');
+  });
+
+  it('never lets a negative grace reopen the window', () => {
+    expect(breakoutPhase(ENDS, -60, new Date('2026-08-14T14:15:01.000Z'))).toBe('closed');
+  });
+});
+
+describe('graceSecondsRemaining', () => {
+  const ENDS = '2026-08-14T14:15:00.000Z';
+
+  it('counts down within the grace window', () => {
+    expect(graceSecondsRemaining(ENDS, 30, new Date('2026-08-14T14:15:06.000Z'))).toBe(24);
+  });
+
+  it('is null while the main clock is still running', () => {
+    // A single countdown rolling from one into the other would tell someone they had 30 seconds
+    // left when what they had was 30 seconds to SUBMIT — a different instruction.
+    expect(graceSecondsRemaining(ENDS, 30, new Date('2026-08-14T14:14:00.000Z'))).toBeNull();
+  });
+
+  it('is null once closed', () => {
+    expect(graceSecondsRemaining(ENDS, 30, new Date('2026-08-14T14:16:00.000Z'))).toBeNull();
+  });
+
+  it('is null for an untimed breakout', () => {
+    expect(graceSecondsRemaining(null, 30, new Date())).toBeNull();
+  });
+});
+
+describe('participantWindow', () => {
+  const ENDS = '2026-08-14T14:15:00.000Z';
+  const clock = { breakoutEndsAt: ENDS, breakoutGraceSeconds: 30 };
+  const running = state({ currentStepId: 'step_1' });
+
+  it('allows answering and submitting while the clock runs', () => {
+    expect(participantWindow(running, clock, new Date('2026-08-14T14:10:00.000Z'))).toEqual({
+      canAnswer: true,
+      canSubmit: true,
+      wrappingUp: false,
+    });
+  });
+
+  it('during grace: SUBMIT yes, new answers no', () => {
+    // The load-bearing distinction. Someone mid-sentence keeps what they wrote; nobody starts
+    // something the room will not get to discuss.
+    expect(participantWindow(running, clock, new Date('2026-08-14T14:15:10.000Z'))).toEqual({
+      canAnswer: false,
+      canSubmit: true,
+      wrappingUp: true,
+    });
+  });
+
+  it('shuts once grace has passed', () => {
+    expect(participantWindow(running, clock, new Date('2026-08-14T14:16:00.000Z'))).toEqual({
+      canAnswer: false,
+      canSubmit: false,
+      wrappingUp: false,
+    });
+  });
+
+  it('is shut between breakouts, whatever the clock says', () => {
+    expect(
+      participantWindow(state({ currentStepId: null }), clock, new Date('2026-08-14T14:10:00.000Z'))
+    ).toEqual({ canAnswer: false, canSubmit: false, wrappingUp: false });
+  });
+
+  it('is shut before the meeting starts and after it ends', () => {
+    const early = state({ status: 'scheduled', currentStepId: 'step_1' });
+    const late = state({ status: 'ended', currentStepId: 'step_1' });
+    const at = new Date('2026-08-14T14:10:00.000Z');
+    expect(participantWindow(early, clock, at).canSubmit).toBe(false);
+    expect(participantWindow(late, clock, at).canSubmit).toBe(false);
+  });
+
+  it('stays open indefinitely for an untimed breakout', () => {
+    const untimed = { breakoutEndsAt: null, breakoutGraceSeconds: 30 };
+    expect(participantWindow(running, untimed, new Date('2030-01-01T00:00:00.000Z'))).toEqual({
+      canAnswer: true,
+      canSubmit: true,
+      wrappingUp: false,
+    });
   });
 });
 

@@ -158,9 +158,12 @@ model AppExperienceStep {
   /// chats against this step's questionnaire, then the answers are aggregated and synthesised for
   /// the facilitator to walk the room through.
 
-  /// How long the breakout is meant to run, in seconds. Null means untimed — the facilitator ends
-  /// it by hand. This is the AUTHORED intent; the live clock is on the meeting, because the same
-  /// experience can be run many times and each occurrence starts at a different moment.
+  /// The DEFAULT length of this breakout, in seconds. Null means untimed.
+  ///
+  /// Authored intent only — the facilitator picks the actual length when starting the breakout
+  /// (`AppExperienceMeeting.breakoutDurationSeconds`), because the room in front of them is the
+  /// thing that decides whether twelve minutes is right today. This is what the console offers
+  /// them pre-filled, not a rule.
   durationSeconds Int?
 
   /// What the facilitator says to the room before sending them off — the framing that makes a
@@ -367,12 +370,26 @@ model AppExperienceMeeting {
   /// deleting a step from a draft experience must not cascade away a meeting that ran it.
   currentStepId String?
 
-  /// The live clock for the current breakout. `breakoutEndsAt` is computed from the step's
-  /// `durationSeconds` at start time and stored, NOT derived on read — an author who edits the
-  /// duration mid-meeting must not retroactively move a clock the room is already watching.
-  /// Both null when no breakout is running.
+  /// The live clock for the current breakout. `breakoutEndsAt` is stored, NOT derived on read —
+  /// neither an author editing the step's default nor a settings change may retroactively move a
+  /// clock the room is already watching. Both null when no breakout is running.
+  ///
+  /// The facilitator can also END early, which sets `breakoutEndsAt` to now — the grace window
+  /// then runs from there, so "wrap up, thirty seconds" is one action rather than a cut-off.
   breakoutStartedAt DateTime?
   breakoutEndsAt    DateTime?
+
+  /// What the facilitator actually chose for this breakout, in seconds — which may differ from the
+  /// step's authored default. Recorded so a later read can tell "they gave the room 20 minutes"
+  /// from "the step says 12"; null for an untimed breakout.
+  breakoutDurationSeconds Int?
+
+  /// The grace window after `breakoutEndsAt`, in seconds, frozen at the moment the breakout
+  /// started. Participants may still finish and submit during it; nothing new is started.
+  ///
+  /// Frozen rather than read live from settings for the same reason as `breakoutEndsAt`: a room
+  /// mid-sentence must not lose its remaining seconds because someone edited a setting.
+  breakoutGraceSeconds Int @default(30)
 
   /// Who is running it. Plain String admin User.id, no FK (UG-1) — attribution, not ownership.
   facilitatorUserId String?
