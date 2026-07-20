@@ -179,7 +179,8 @@ model AppExperienceStep {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  experience AppExperience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  experience AppExperience             @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  rooms      AppExperienceBreakoutRoom[]
 
   @@unique([experienceId, key])
   @@index([experienceId])
@@ -242,6 +243,12 @@ model AppExperienceRun {
   /// CONFIG→answer edges, which this is not).
   meetingId String?
 
+  /// The breakout room this participant is in for the CURRENT breakout (P15.5b). Plain String
+  /// pointer (UG-1). Held on the run rather than only on the leg because a participant in a
+  /// `scribe` room has no leg of their own — they are in the room, watching someone else write —
+  /// and the facilitator still needs to see them placed.
+  currentRoomId String?
+
   experience AppExperience         @relation(fields: [experienceId], references: [id], onDelete: Cascade)
   meeting    AppExperienceMeeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   legs       AppExperienceRunLeg[]
@@ -278,6 +285,11 @@ model AppExperienceRunLeg {
   /// most one leg, which is also how the submit hook looks up "is this session part of a run?".
   sessionId String @unique
 
+  /// The breakout ROOM this leg was answered in (P15.5b), when the breakout had rooms. Plain
+  /// String pointer (UG-1) like every other target pointer: deleting a room from a draft agenda
+  /// must not cascade away the answers given in it. Null for an ordinary roomless breakout.
+  roomId String?
+
   /// Position in the journey, 0-based. Paired with runId in the idempotency constraint.
   ordinal Int
 
@@ -294,6 +306,7 @@ model AppExperienceRunLeg {
   @@unique([runId, ordinal])
   @@index([runId])
   @@index([stepId])
+  @@index([roomId])
   @@map("app_experience_run_leg")
 }
 
@@ -428,6 +441,12 @@ model AppExperienceInsight {
   /// The breakout this finding came from. Plain String pointer (UG-1), as on the meeting.
   stepId String
 
+  /// The ROOM it came from (P15.5b), when the breakout had rooms. Rooms are synthesised
+  /// SEPARATELY — they may have answered different questionnaires, so combining them would be the
+  /// same cross-vocabulary mistake per-step report scoping exists to avoid. Null for a roomless
+  /// breakout, whose single synthesis covers everyone.
+  roomId String?
+
   /// EXPERIENCE_INSIGHT_KINDS (experiences/meeting/types.ts):
   /// agreement | tension | outlier | theme | question.
   kind String
@@ -460,6 +479,51 @@ model AppExperienceInsight {
   meeting AppExperienceMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@index([meetingId, stepId, ordinal])
+  @@index([meetingId, stepId, roomId])
   @@index([meetingId, stepId, supportCount])
   @@map("app_experience_insight")
+}
+
+
+/// A ROOM within a breakout (P15.5b) — the optional refinement on "everyone answers individually".
+///
+/// A breakout is a period of TIME. Usually the whole group answers the same questionnaire on their
+/// own devices and there are no rooms at all. Sometimes the group splits: each room takes its own
+/// dedicated questionnaire, and works either individually or through one person writing for
+/// everybody.
+///
+/// Rooms are OPTIONAL. A breakout with no rooms behaves exactly as F15.5a — which is why they are a
+/// separate table rather than a nullable pair of columns on the step: the common case stays
+/// untouched, and nothing has to interpret "roomId is null" as a mode.
+model AppExperienceBreakoutRoom {
+  id     String @id @default(cuid())
+  stepId String
+
+  /// What the facilitator calls it out loud — "Table 3", "Engineering", "The window side".
+  name    String
+  ordinal Int    @default(0)
+
+  /// This room's own questionnaire. Null inherits the breakout step's, which is the common case
+  /// even when rooms exist: splitting a group does not always mean asking different questions.
+  /// Plain Strings, no @relation (UG-1), exactly as on the step.
+  questionnaireId String?
+  versionId       String?
+
+  /// BREAKOUT_ROOM_MODES (experiences/meeting/types.ts): individual | scribe.
+  ///
+  /// `individual` — everyone in the room answers their own copy, and the room is just a grouping
+  /// for the synthesis.
+  /// `scribe` — ONE session represents the whole room, driven by whoever claims the pen. The
+  /// others are present and watching, and deliberately have no session of their own: a room
+  /// talking through an answer together has one answer, not six.
+  mode String @default("individual")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  step AppExperienceStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, name])
+  @@index([stepId])
+  @@map("app_experience_breakout_room")
 }

@@ -210,3 +210,57 @@ export function isOverrunning(endsAt: string | null, now: Date): boolean {
   const end = new Date(endsAt).getTime();
   return !Number.isNaN(end) && now.getTime() > end;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Breakout rooms (F15.5b)                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How a room works.
+ *
+ * `individual` — everyone in the room answers their own copy. The room is a grouping for the
+ * synthesis; each person still has their own conversation.
+ * `scribe` — ONE session represents the whole room, driven by whoever claims the pen. The others
+ * are present and watching, and deliberately have no session: a room that talks an answer through
+ * together has one answer, not six, and six near-identical copies would also make the k-anonymity
+ * support counts meaningless.
+ */
+export const BREAKOUT_ROOM_MODES = ['individual', 'scribe'] as const;
+export type BreakoutRoomMode = (typeof BREAKOUT_ROOM_MODES)[number];
+
+/** Human labels for the room-mode selector. */
+export const BREAKOUT_ROOM_MODE_LABELS: Record<BreakoutRoomMode, string> = {
+  individual: 'Everyone answers their own',
+  scribe: 'One person writes for the room',
+};
+
+/** One room, as the participant's picker and the facilitator's console render it. */
+export interface BreakoutRoomView {
+  id: string;
+  name: string;
+  ordinal: number;
+  mode: BreakoutRoomMode;
+  /** How many participants have chosen this room. */
+  occupancy: number;
+  /**
+   * Whether someone already holds the pen. Scribe rooms only; a second person cannot claim it,
+   * because two people writing the same answer would overwrite each other mid-sentence.
+   */
+  scribeTaken: boolean;
+}
+
+/**
+ * What a participant may do about rooms right now.
+ *
+ * Choosing a room is only meaningful while a breakout with rooms is running — before that there is
+ * nothing to join, and afterwards the answers are already given.
+ */
+export function canChooseRoom(params: {
+  breakoutRunning: boolean;
+  phase: BreakoutPhase;
+  hasRooms: boolean;
+}): boolean {
+  // Deliberately excludes `grace`: arriving at a room with seconds left, to a questionnaire you
+  // have not started, is worse than being told you missed it.
+  return params.breakoutRunning && params.hasRooms && params.phase === 'running';
+}

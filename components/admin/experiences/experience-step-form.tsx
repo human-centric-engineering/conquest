@@ -19,6 +19,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 
+import {
+  BREAKOUT_BRIEFING_MAX_LENGTH,
+  BREAKOUT_SYNTHESIS_FOCUS_MAX_LENGTH,
+} from '@/lib/app/questionnaire/experiences/meeting/types';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
@@ -54,6 +58,17 @@ const formSchema = z.object({
   questionnaireId: z.string(),
   purpose: z.string().trim().max(EXPERIENCE_STEP_PURPOSE_MAX_LENGTH),
   selectionCriteria: z.string().trim().max(EXPERIENCE_STEP_SELECTION_CRITERIA_MAX_LENGTH),
+  // Minutes in the form, seconds on the wire: an author thinks "eight minutes", not "480".
+  // `z.number()` with valueAsNumber rather than z.coerce — coercion widens the schema's INPUT type
+  // to unknown, which no longer satisfies react-hook-form's form-values generic.
+  durationMinutes: z
+    .number({ message: 'Enter a number of minutes, or leave blank' })
+    .int()
+    .min(1)
+    .max(120)
+    .nullable(),
+  briefing: z.string().trim().max(BREAKOUT_BRIEFING_MAX_LENGTH),
+  synthesisFocus: z.string().trim().max(BREAKOUT_SYNTHESIS_FOCUS_MAX_LENGTH),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -110,6 +125,9 @@ export function ExperienceStepForm({
       questionnaireId: step?.questionnaireId ?? NONE,
       purpose: step?.purpose ?? '',
       selectionCriteria: step?.selectionCriteria ?? '',
+      durationMinutes: step?.durationSeconds ? Math.round(step.durationSeconds / 60) : null,
+      briefing: step?.briefing ?? '',
+      synthesisFocus: step?.synthesisFocus ?? '',
     },
   });
 
@@ -126,6 +144,13 @@ export function ExperienceStepForm({
         purpose: values.purpose.trim() === '' ? null : values.purpose.trim(),
         selectionCriteria:
           values.selectionCriteria.trim() === '' ? null : values.selectionCriteria.trim(),
+        // An empty box means "no clock", not "zero minutes".
+        durationSeconds:
+          values.durationMinutes === null || Number.isNaN(values.durationMinutes)
+            ? null
+            : values.durationMinutes * 60,
+        briefing: values.briefing.trim() === '' ? null : values.briefing.trim(),
+        synthesisFocus: values.synthesisFocus.trim() === '' ? null : values.synthesisFocus.trim(),
       };
 
       if (isEdit) {
@@ -267,6 +292,79 @@ export function ExperienceStepForm({
           />
           <FormError message={errors.selectionCriteria?.message} />
         </div>
+      )}
+
+      {/* Breakout meta (P15.5) — only meaningful for a facilitated meeting's timed segments. */}
+      {kind === 'breakout' && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="step-duration" className="flex items-center gap-1">
+              How long, in minutes
+              <FieldHelp title="Breakout length">
+                <p>
+                  The default you will be offered when you start this breakout — you can change it
+                  in the moment, and you can always pull the room back early.
+                </p>
+                <p className="text-muted-foreground mt-2">
+                  Leave blank for no clock at all. The timer never ends a breakout on its own; it is
+                  there so you and the room can see the time.
+                </p>
+              </FieldHelp>
+            </Label>
+            <Input
+              id="step-duration"
+              type="number"
+              min={1}
+              max={120}
+              placeholder="12"
+              disabled={isLoading}
+              {...register('durationMinutes', { valueAsNumber: true })}
+            />
+            <FormError message={errors.durationMinutes?.message} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="step-briefing" className="flex items-center gap-1">
+              What you will say to the room
+              <FieldHelp title="Briefing">
+                The framing you give before sending people off. Kept separate from Purpose because
+                that one is written for the AI to read — this one is written for you to say.
+              </FieldHelp>
+            </Label>
+            <Textarea
+              id="step-briefing"
+              placeholder="Take eight minutes on your own. Be candid — nothing here is attributed to anyone."
+              rows={3}
+              disabled={isLoading}
+              {...register('briefing')}
+            />
+            <FormError message={errors.briefing?.message} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="step-focus" className="flex items-center gap-1">
+              What the synthesis should look for
+              <FieldHelp title="Synthesis focus">
+                <p>
+                  What would make this breakout worth discussing? Disagreements, blockers, whether
+                  people changed their minds.
+                </p>
+                <p className="text-muted-foreground mt-2">
+                  Findings supported by too few people are always held back, whatever you write here
+                  — a room can identify each other from “a tension between two of you”.
+                </p>
+              </FieldHelp>
+            </Label>
+            <Textarea
+              id="step-focus"
+              placeholder="Where does the team disagree about workload, and did anyone shift?"
+              rows={3}
+              disabled={isLoading}
+              {...register('synthesisFocus')}
+            />
+            <FormError message={errors.synthesisFocus?.message} />
+          </div>
+        </>
       )}
 
       <div className="space-y-2">

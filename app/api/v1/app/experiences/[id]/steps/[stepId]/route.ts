@@ -62,6 +62,13 @@ const handleUpdate = withAdminAuth<StepParams>(async (request, session, { params
         ...(body.selectionCriteria !== undefined
           ? { selectionCriteria: body.selectionCriteria ?? null }
           : {}),
+        ...(body.durationSeconds !== undefined
+          ? { durationSeconds: body.durationSeconds ?? null }
+          : {}),
+        ...(body.briefing !== undefined ? { briefing: body.briefing ?? null } : {}),
+        ...(body.synthesisFocus !== undefined
+          ? { synthesisFocus: body.synthesisFocus ?? null }
+          : {}),
       },
       select: EXPERIENCE_STEP_SELECT,
     });

@@ -21,8 +21,11 @@ import { generateSessionRef } from '@/lib/app/questionnaire/session-ref';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
 import { narrowExperienceSettings } from '@/lib/app/questionnaire/experiences/settings';
 import {
+  BREAKOUT_ROOM_MODES,
+  breakoutPhase,
   EXPERIENCE_INSIGHT_KINDS,
   EXPERIENCE_MEETING_STATUSES,
+  type BreakoutRoomView,
   type MeetingInsightView,
   type MeetingLiveState,
 } from '@/lib/app/questionnaire/experiences/meeting/types';
@@ -261,15 +264,41 @@ export async function synthesiseAndStore(
 ): Promise<{ stored: number; withheld: number }> {
   const meeting = await prisma.appExperienceMeeting.findUnique({
     where: { id: meetingId },
-    select: {
-      id: true,
-      currentStepId: true,
-      experience: { select: { settings: true } },
-    },
+    select: { id: true, currentStepId: true },
   });
   if (!meeting?.currentStepId) return { stored: 0, withheld: 0 };
 
-  const stepId = meeting.currentStepId;
+  // Rooms are synthesised SEPARATELY (F15.5b). They may have answered different questionnaires, so
+  // combining them would resolve fills against the wrong data-slot vocabulary and silently drop
+  // most of them — the same failure per-step report scoping exists to prevent. A roomless breakout
+  // is the single-null-room case and takes the identical path.
+  const rooms = await prisma.appExperienceBreakoutRoom.findMany({
+    where: { stepId: meeting.currentStepId },
+    select: { id: true },
+  });
+  const targets: (string | null)[] = rooms.length > 0 ? rooms.map((r) => r.id) : [null];
+
+  let stored = 0;
+  let withheld = 0;
+  for (const roomId of targets) {
+    const result = await synthesiseOne(meetingId, meeting.currentStepId, roomId);
+    stored += result.stored;
+    withheld += result.withheld;
+  }
+  return { stored, withheld };
+}
+
+/** Synthesise one breakout, or one room of it. */
+async function synthesiseOne(
+  meetingId: string,
+  stepId: string,
+  roomId: string | null
+): Promise<{ stored: number; withheld: number }> {
+  const meeting = await prisma.appExperienceMeeting.findUnique({
+    where: { id: meetingId },
+    select: { experience: { select: { settings: true } } },
+  });
+  if (!meeting) return { stored: 0, withheld: 0 };
   const settings = narrowExperienceSettings(meeting.experience.settings);
 
   const step = await prisma.appExperienceStep.findUnique({
@@ -284,9 +313,16 @@ export async function synthesiseAndStore(
   });
   if (!step) return { stored: 0, withheld: 0 };
 
-  // The sessions that ran THIS breakout, in THIS meeting.
+  const room = roomId
+    ? await prisma.appExperienceBreakoutRoom.findUnique({
+        where: { id: roomId },
+        select: { name: true, versionId: true, questionnaireId: true },
+      })
+    : null;
+
+  // The sessions that ran THIS breakout — and this room, when there are rooms — in THIS meeting.
   const legs = await prisma.appExperienceRunLeg.findMany({
-    where: { stepId, run: { meetingId } },
+    where: { stepId, roomId, run: { meetingId } },
     select: { sessionId: true },
   });
   const sessionIds = legs.map((l) => l.sessionId);
@@ -298,7 +334,8 @@ export async function synthesiseAndStore(
   });
   if (completed.length === 0) return { stored: 0, withheld: 0 };
 
-  const versionId = step.versionId ?? completed[0].versionId;
+  // The room's own version when it has one; otherwise whatever these sessions actually ran.
+  const versionId = room?.versionId ?? step.versionId ?? completed[0].versionId;
 
   const [definitions, fills, version] = await Promise.all([
     prisma.appDataSlot.findMany({
@@ -331,7 +368,8 @@ export async function synthesiseAndStore(
     background: {
       questionnaireTitle: version?.questionnaire?.title ?? 'Questionnaire',
       goal: version?.goal ?? null,
-      breakoutTitle: step.title,
+      // Named for the room when there is one, so the synthesis says which group it describes.
+      breakoutTitle: room ? `${step.title} — ${room.name}` : step.title,
       briefing: step.briefing,
       synthesisFocus: step.synthesisFocus,
     },
@@ -371,11 +409,12 @@ export async function synthesiseAndStore(
 
   // Replace atomically so the console never renders a half-written synthesis.
   await prisma.$transaction([
-    prisma.appExperienceInsight.deleteMany({ where: { meetingId, stepId } }),
+    prisma.appExperienceInsight.deleteMany({ where: { meetingId, stepId, roomId } }),
     prisma.appExperienceInsight.createMany({
       data: result.insights.map((i) => ({
         meetingId,
         stepId,
+        roomId,
         kind: i.kind,
         statement: i.statement,
         detail: i.detail,
@@ -593,6 +632,8 @@ async function ensureBreakoutSession(params: {
   runId: string;
   stepId: string;
   respondentUserId: string | null;
+  /** The room this participant is in, when the breakout has rooms (F15.5b). */
+  roomId?: string | null;
 }): Promise<string | null> {
   const existing = await prisma.appExperienceRunLeg.findFirst({
     where: { runId: params.runId, stepId: params.stepId },
@@ -606,7 +647,31 @@ async function ensureBreakoutSession(params: {
   });
   if (!step) return null;
 
-  const versionId = await resolveStepVersionId(step);
+  // A room may run its OWN questionnaire; null inherits the step's, which is the common case even
+  // when rooms exist — splitting a group does not always mean asking different questions.
+  const room = params.roomId
+    ? await prisma.appExperienceBreakoutRoom.findUnique({
+        where: { id: params.roomId },
+        select: { id: true, mode: true, questionnaireId: true, versionId: true },
+      })
+    : null;
+
+  if (room?.mode === 'scribe') {
+    // One session for the whole room. Whoever already claimed the pen owns it; everybody else is
+    // present and watching, with no session of their own.
+    const scribeLeg = await prisma.appExperienceRunLeg.findFirst({
+      where: { stepId: params.stepId, roomId: room.id },
+      select: { sessionId: true, runId: true },
+    });
+    if (scribeLeg) return scribeLeg.runId === params.runId ? scribeLeg.sessionId : null;
+  }
+
+  const target =
+    room?.questionnaireId || room?.versionId
+      ? { questionnaireId: room.questionnaireId, versionId: room.versionId }
+      : step;
+
+  const versionId = await resolveStepVersionId(target);
   if (!versionId) return null;
 
   const created = await createSessionForExperienceLeg({
@@ -628,6 +693,7 @@ async function ensureBreakoutSession(params: {
         runId: params.runId,
         stepId: step.id,
         sessionId: created.session.id,
+        roomId: params.roomId ?? null,
         ordinal,
         status: 'active',
       },
@@ -705,4 +771,111 @@ export async function participantState(params: {
         : null;
 
   return { sessionId, window };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Rooms (F15.5b)                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The rooms of a breakout, with live occupancy.
+ *
+ * `scribeTaken` matters more than it looks: a second person claiming the pen in a scribe room
+ * would write into the same session as the first, overwriting each other mid-sentence. The picker
+ * uses it to offer "join and watch" instead of "take the pen".
+ */
+export async function loadBreakoutRooms(params: {
+  meetingId: string;
+  stepId: string;
+}): Promise<BreakoutRoomView[]> {
+  const rooms = await prisma.appExperienceBreakoutRoom.findMany({
+    where: { stepId: params.stepId },
+    orderBy: { ordinal: 'asc' },
+    select: { id: true, name: true, ordinal: true, mode: true },
+  });
+  if (rooms.length === 0) return [];
+
+  const [occupancy, scribeLegs] = await Promise.all([
+    prisma.appExperienceRun.groupBy({
+      by: ['currentRoomId'],
+      where: { meetingId: params.meetingId, currentRoomId: { in: rooms.map((r) => r.id) } },
+      _count: { _all: true },
+    }),
+    prisma.appExperienceRunLeg.findMany({
+      where: { stepId: params.stepId, roomId: { in: rooms.map((r) => r.id) } },
+      select: { roomId: true },
+    }),
+  ]);
+
+  const counts = new Map(occupancy.map((o) => [o.currentRoomId, o._count._all]));
+  const taken = new Set(scribeLegs.map((l) => l.roomId));
+
+  return rooms.map((r) => ({
+    id: r.id,
+    name: r.name,
+    ordinal: r.ordinal,
+    mode: narrowToEnum(r.mode, BREAKOUT_ROOM_MODES, 'individual'),
+    occupancy: counts.get(r.id) ?? 0,
+    scribeTaken: taken.has(r.id),
+  }));
+}
+
+/**
+ * Put a participant in a room.
+ *
+ * In a `scribe` room this is also the act of CLAIMING the pen, if nobody holds it — the first
+ * person in writes, everyone after watches. That is deliberately first-come rather than a separate
+ * "become scribe" step: a room of people looking at each other deciding who types is exactly the
+ * friction a facilitated breakout cannot afford.
+ */
+export async function chooseRoom(params: {
+  meetingId: string;
+  runId: string;
+  roomId: string;
+}): Promise<{ ok: true; sessionId: string | null } | { ok: false; code: string; message: string }> {
+  const meeting = await prisma.appExperienceMeeting.findUnique({
+    where: { id: params.meetingId },
+    select: { currentStepId: true, breakoutEndsAt: true, breakoutGraceSeconds: true, status: true },
+  });
+  if (!meeting?.currentStepId) {
+    return { ok: false, code: 'NO_BREAKOUT_RUNNING', message: 'No breakout is running.' };
+  }
+
+  const room = await prisma.appExperienceBreakoutRoom.findFirst({
+    where: { id: params.roomId, stepId: meeting.currentStepId },
+    select: { id: true, mode: true },
+  });
+  if (!room) return { ok: false, code: 'NOT_FOUND', message: 'That room is not in this breakout.' };
+
+  const run = await prisma.appExperienceRun.findFirst({
+    where: { id: params.runId, meetingId: params.meetingId },
+    select: { id: true, respondentUserId: true },
+  });
+  if (!run) return { ok: false, code: 'NOT_FOUND', message: 'You are not in this meeting.' };
+
+  // Only while genuinely running — see `canChooseRoom`. Arriving at a room with seconds left, to a
+  // questionnaire you have not started, is worse than being told you missed it.
+  const phase = breakoutPhase(
+    meeting.breakoutEndsAt?.toISOString() ?? null,
+    meeting.breakoutGraceSeconds,
+    new Date()
+  );
+  if (phase !== 'running') {
+    return { ok: false, code: 'BREAKOUT_CLOSED', message: 'That breakout has finished.' };
+  }
+
+  await prisma.appExperienceRun.update({
+    where: { id: run.id },
+    data: { currentRoomId: room.id },
+  });
+
+  const sessionId = await ensureBreakoutSession({
+    runId: run.id,
+    stepId: meeting.currentStepId,
+    respondentUserId: run.respondentUserId,
+    roomId: room.id,
+  });
+
+  // Null in a scribe room where somebody else holds the pen — they are in, and watching.
+  return { ok: true, sessionId };
 }

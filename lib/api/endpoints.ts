@@ -761,6 +761,9 @@ export const API = {
       /** Join a live meeting (POST — respondent-facing, not admin-gated). */
       meetingJoin: (meetingId: string): string =>
         `/api/v1/app/experiences/meetings/${meetingId}/join`,
+      /** Breakout rooms in the current breakout: list (GET) + choose one (POST). */
+      meetingRooms: (meetingId: string): string =>
+        `/api/v1/app/experiences/meetings/${meetingId}/rooms`,
       /** The participant's own live state — which session, and may they answer (GET). */
       meetingParticipant: (meetingId: string, runId: string): string =>
         `/api/v1/app/experiences/meetings/${meetingId}/participant?runId=${runId}`,

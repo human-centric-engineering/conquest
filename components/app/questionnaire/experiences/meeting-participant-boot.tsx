@@ -26,10 +26,13 @@ import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { MeetingInsightPanel } from '@/components/app/questionnaire/experiences/meeting-insight-panel';
+import { BreakoutRoomPicker } from '@/components/app/questionnaire/experiences/breakout-room-picker';
 import {
   breakoutPhase,
   graceSecondsRemaining,
   secondsRemaining,
+  canChooseRoom,
+  type BreakoutRoomView,
   type MeetingInsightView,
   type MeetingLiveState,
 } from '@/lib/app/questionnaire/experiences/meeting/types';
@@ -75,6 +78,7 @@ export function MeetingParticipantBoot({
   const [session, setSession] = useState<{ id: string; token?: string } | null>(null);
   const [participantWindow, setParticipantWindow] = useState<ParticipantWindow | null>(null);
   const [live, setLive] = useState<LiveResponse | null>(null);
+  const [rooms, setRooms] = useState<BreakoutRoomView[]>([]);
   const [now, setNow] = useState<Date | null>(null);
   // Dedup the join across React 19 StrictMode's double-invoke, which would otherwise put two
   // participants in the room and make the facilitator's count wrong.
@@ -130,6 +134,22 @@ export function MeetingParticipantBoot({
       ]);
       setParticipantWindow(state.window);
       setLive(liveState);
+
+      // Rooms only exist for some breakouts, so this is a cheap extra read rather than a shape
+      // every meeting pays for.
+      if (liveState.currentStepId) {
+        try {
+          const roomState = await apiClient.get<{ rooms: BreakoutRoomView[] }>(
+            API.APP.EXPERIENCES.meetingRooms(meetingId),
+            authOptions
+          );
+          setRooms(roomState.rooms);
+        } catch {
+          // Non-critical — without rooms the participant simply answers directly.
+        }
+      } else {
+        setRooms([]);
+      }
       if (state.sessionId && state.sessionId !== sessionId) {
         // A breakout started since the last poll — this is the participant's session for it.
         setSession({ id: state.sessionId, token: state.sessionToken });
@@ -191,6 +211,33 @@ export function MeetingParticipantBoot({
     : null;
 
   const answering = Boolean(session && participantWindow?.canSubmit);
+
+  // A breakout with rooms, running, and this participant has not picked one yet. `canChooseRoom`
+  // excludes the grace window: arriving at a room with seconds left, to a questionnaire not yet
+  // started, is worse than being told you missed it.
+  const needsRoom =
+    !session &&
+    canChooseRoom({
+      breakoutRunning: Boolean(live?.currentStepId),
+      phase: phase ?? 'closed',
+      hasRooms: rooms.length > 0,
+    });
+
+  if (needsRoom && runId) {
+    return (
+      <BreakoutRoomPicker
+        meetingId={meetingId}
+        runId={runId}
+        rooms={rooms}
+        onChosen={(result) => {
+          // Null in a scribe room where somebody else holds the pen — they are in, and watching.
+          if (result.sessionId) {
+            setSession({ id: result.sessionId, token: result.sessionToken });
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl flex-col gap-3 px-4 py-4">

@@ -74,6 +74,11 @@ const handleCreate = withAdminAuth<{ id: string }>(
           roundId: body.roundId ?? null,
           purpose: body.purpose ?? null,
           selectionCriteria: body.selectionCriteria ?? null,
+          // Facilitated-meeting breakout meta (P15.5). Harmless on other step kinds — an author
+          // switching a step's kind keeps whatever they had typed rather than losing it.
+          durationSeconds: body.durationSeconds ?? null,
+          briefing: body.briefing ?? null,
+          synthesisFocus: body.synthesisFocus ?? null,
           ordinal: await nextStepOrdinal(id),
         },
         select: EXPERIENCE_STEP_SELECT,

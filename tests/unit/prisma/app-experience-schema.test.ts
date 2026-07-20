@@ -202,6 +202,83 @@ describe('run-scoped respondent report (F15.4b)', () => {
   });
 });
 
+describe('facilitated meetings + rooms (F15.5)', () => {
+  it('AppExperienceMeeting owns the live clock, the step owns the default', () => {
+    // The same agenda runs many times: the step says "this is meant to take 12 minutes", the
+    // meeting says "it started at 14:03".
+    const meeting = getModel('AppExperienceMeeting');
+    for (const name of [
+      'joinRef',
+      'status',
+      'currentStepId',
+      'breakoutStartedAt',
+      'breakoutEndsAt',
+      'breakoutDurationSeconds',
+      'breakoutGraceSeconds',
+    ]) {
+      expect(getField(meeting, name)).toBeDefined();
+    }
+    expect(getField(getModel('AppExperienceStep'), 'durationSeconds').type).toBe('Int');
+  });
+
+  it('keeps the meeting’s step pointer unmodelled (UG-1)', () => {
+    // Deleting a step from a draft agenda must not cascade away a meeting that already ran it.
+    const meeting = getModel('AppExperienceMeeting');
+    expect(getField(meeting, 'currentStepId').kind).toBe('scalar');
+    expect(meeting.fields.some((f) => f.kind === 'object' && f.type === 'AppExperienceStep')).toBe(
+      false
+    );
+  });
+
+  it('cascades a run and its insights from the meeting — both are respondent data', () => {
+    const run = getModel('AppExperienceRun');
+    expect(run.fields.some((f) => f.kind === 'object' && f.type === 'AppExperienceMeeting')).toBe(
+      true
+    );
+    const insight = getModel('AppExperienceInsight');
+    expect(
+      insight.fields.some((f) => f.kind === 'object' && f.type === 'AppExperienceMeeting')
+    ).toBe(true);
+  });
+
+  it('stores supportCount so the k-anonymity gate can re-apply on READ', () => {
+    // Raising insightMinSupport after a meeting must make the existing synthesis safer without
+    // regenerating it.
+    expect(getField(getModel('AppExperienceInsight'), 'supportCount').type).toBe('Int');
+  });
+
+  it('rooms cascade from their step but their target pointers do not (UG-1)', () => {
+    const room = getModel('AppExperienceBreakoutRoom');
+    // The room→step edge is pure config, so it IS a relation.
+    expect(room.fields.some((f) => f.kind === 'object' && f.type === 'AppExperienceStep')).toBe(
+      true
+    );
+    // Its questionnaire/version pointers are not.
+    for (const name of ['questionnaireId', 'versionId']) {
+      expect(getField(room, name).kind).toBe('scalar');
+    }
+    expect(
+      room.fields.some(
+        (f) =>
+          f.kind === 'object' && ['AppQuestionnaire', 'AppQuestionnaireVersion'].includes(f.type)
+      )
+    ).toBe(false);
+  });
+
+  it('places a participant by room on the RUN as well as the leg', () => {
+    // A participant watching a scribe write has no leg of their own, and the facilitator still
+    // needs to see them in a room.
+    expect(getField(getModel('AppExperienceRun'), 'currentRoomId').kind).toBe('scalar');
+    expect(getField(getModel('AppExperienceRunLeg'), 'roomId').kind).toBe('scalar');
+  });
+
+  it('scopes insights by room so rooms are never combined', () => {
+    // Rooms may have answered different questionnaires; combining them would resolve fills against
+    // the wrong data-slot vocabulary and silently drop most of them.
+    expect(getField(getModel('AppExperienceInsight'), 'roomId').kind).toBe('scalar');
+  });
+});
+
 describe('F15.4 migration SQL', () => {
   /** Read one migration by folder suffix. */
   function readMigration(suffix: string): string {

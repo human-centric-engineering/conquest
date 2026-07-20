@@ -65,6 +65,10 @@ export interface ExperienceStepRow {
   title: string;
   purpose: string | null;
   selectionCriteria: string | null;
+  /** Facilitated-meeting breakout meta (P15.5); absent on rows read before it existed. */
+  durationSeconds?: number | null;
+  briefing?: string | null;
+  synthesisFocus?: string | null;
   ordinal: number;
   createdAt: Date;
   updatedAt: Date;
@@ -114,6 +118,14 @@ export interface ExperienceStepView {
   /** Version number when the step is pinned; null when it resolves newest-launched at run time. */
   versionNumber: number | null;
   roundId: string | null;
+  /**
+   * Facilitated-meeting breakout meta (P15.5). Null on every other step kind — and on a breakout
+   * whose author has not set them, which is legitimate: an untimed breakout is one the facilitator
+   * ends by hand.
+   */
+  durationSeconds: number | null;
+  briefing: string | null;
+  synthesisFocus: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -182,6 +194,9 @@ export function toExperienceStepView(
     title: row.title,
     purpose: row.purpose,
     selectionCriteria: row.selectionCriteria,
+    durationSeconds: row.durationSeconds ?? null,
+    briefing: row.briefing ?? null,
+    synthesisFocus: row.synthesisFocus ?? null,
     ordinal: row.ordinal,
     questionnaireId: row.questionnaireId,
     questionnaireTitle: resolved.questionnaireTitle ?? null,

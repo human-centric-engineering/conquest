@@ -37,6 +37,12 @@ import {
   SYNTHESIS_EVERY_N_MIN,
 } from '@/lib/app/questionnaire/experiences/types';
 import {
+  BREAKOUT_BRIEFING_MAX_LENGTH,
+  BREAKOUT_MAX_DURATION_SECONDS,
+  BREAKOUT_MIN_DURATION_SECONDS,
+  BREAKOUT_SYNTHESIS_FOCUS_MAX_LENGTH,
+} from '@/lib/app/questionnaire/experiences/meeting/types';
+import {
   DATA_SLOT_KEY_MAX_LENGTH,
   ROUTING_RULE_OPERATORS,
   ROUTING_RULE_VALUE_MAX_LENGTH,
@@ -145,6 +151,17 @@ export const createExperienceStepSchema = z.object({
   roundId: idSchema.nullish(),
   purpose: z.string().max(EXPERIENCE_STEP_PURPOSE_MAX_LENGTH).nullish(),
   selectionCriteria: z.string().max(EXPERIENCE_STEP_SELECTION_CRITERIA_MAX_LENGTH).nullish(),
+  /** Facilitated meetings (P15.5): the breakout's default length. Null means untimed. */
+  durationSeconds: z
+    .number()
+    .int()
+    .min(BREAKOUT_MIN_DURATION_SECONDS)
+    .max(BREAKOUT_MAX_DURATION_SECONDS)
+    .nullish(),
+  /** What the facilitator says to the room before sending them off. */
+  briefing: z.string().max(BREAKOUT_BRIEFING_MAX_LENGTH).nullish(),
+  /** What this breakout's synthesis should look for. */
+  synthesisFocus: z.string().max(BREAKOUT_SYNTHESIS_FOCUS_MAX_LENGTH).nullish(),
 });
 
 export type CreateExperienceStepInput = z.infer<typeof createExperienceStepSchema>;
@@ -160,6 +177,17 @@ export const updateExperienceStepSchema = z
     roundId: idSchema.nullish(),
     purpose: z.string().max(EXPERIENCE_STEP_PURPOSE_MAX_LENGTH).nullish(),
     selectionCriteria: z.string().max(EXPERIENCE_STEP_SELECTION_CRITERIA_MAX_LENGTH).nullish(),
+    /** Facilitated meetings (P15.5): the breakout's default length. Null means untimed. */
+    durationSeconds: z
+      .number()
+      .int()
+      .min(BREAKOUT_MIN_DURATION_SECONDS)
+      .max(BREAKOUT_MAX_DURATION_SECONDS)
+      .nullish(),
+    /** What the facilitator says to the room before sending them off. */
+    briefing: z.string().max(BREAKOUT_BRIEFING_MAX_LENGTH).nullish(),
+    /** What this breakout's synthesis should look for. */
+    synthesisFocus: z.string().max(BREAKOUT_SYNTHESIS_FOCUS_MAX_LENGTH).nullish(),
   })
   .partial()
   .refine((value) => Object.keys(value).length > 0, {
