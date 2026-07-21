@@ -1094,6 +1094,7 @@ export function ConfigEditor({
                 <FieldHelp title="Data-slot attempts">
                   How many times the agent probes one data slot (topic) before it records its best
                   guess and moves on — so a respondent never gets stuck being asked the same thing.{' '}
+                  <code className="text-xs">1</code> = ask once and move on;{' '}
                   <code className="text-xs">2</code> = ask once, then one sharper re-ask. This is
                   the ceiling on how hard a <em>shaky</em> answer is deepened: a terse, vague, or
                   only-inferred answer (low confidence) is the kind the agent circles back on, and a

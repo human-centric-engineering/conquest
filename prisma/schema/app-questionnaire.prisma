@@ -207,7 +207,7 @@ model AppQuestionnaireConfig {
   maxQuestionsPerSession Int? // hard question cap; null = no cap
 
   // Modes.
-  voiceEnabled             Boolean @default(false) // allow voice input (F6.2)
+  voiceEnabled             Boolean @default(true) // allow voice input (F6.2)
   attachmentsEnabled       Boolean @default(false) // allow respondent file attachments (paperclip); gated also by the platform attachment-input flag
   contradictionMode        String  @default("off") // off | flag | probe (CONTRADICTION_MODES)
   contradictionWindowN     Int     @default(0) // N prior answers to check against; 0 when mode=off
@@ -225,8 +225,9 @@ model AppQuestionnaireConfig {
   abuseThreshold Int @default(4)
 
   // Data Slots feature: how many times a data slot is targeted before the agent records a
-  // best-effort provisional fill and moves on. 2 = ask once, re-ask once specifically, then park.
-  maxDataSlotAttempts Int @default(2)
+  // best-effort provisional fill and moves on. 1 = ask once, then park; 2 = ask once, re-ask once
+  // specifically, then park.
+  maxDataSlotAttempts Int @default(1)
 
   // Sensitivity awareness / safeguarding: when on (AND the platform flag
   // APP_QUESTIONNAIRES_SENSITIVITY_AWARENESS_ENABLED), the agent detects + remembers a sensitive
@@ -277,7 +278,7 @@ model AppQuestionnaireConfig {
   // APP_QUESTIONNAIRES_REASONING_STREAM_ENABLED is on. placement = overlay | inline (REASONING_PLACEMENTS);
   // persist = save the trace on each turn so it replays on resume / scroll-back. (lib/.../reasoning)
   reasoningStreamEnabled   Boolean @default(true)
-  reasoningStreamPlacement String  @default("overlay")
+  reasoningStreamPlacement String  @default("inline")
   // "Animated" placement timing: base dwell (ms) the summary stays open for up to two steps, plus
   // extra dwell (ms) per step beyond two. Total = dwell + max(0, steps - 2) * perItem. (reasoning-trace)
   reasoningStreamDwellMs   Int     @default(2000)
@@ -286,9 +287,9 @@ model AppQuestionnaireConfig {
 
   // Preview Turn Inspector (admin-only): when on, an admin previewing as a respondent can open a
   // per-turn console of the agent calls, raw prompts/responses, model, latency, and estimated cost.
-  // Off by default. Server-gated to preview sessions (AppQuestionnaireSession.isPreview), so it is
+  // On by default. Server-gated to preview sessions (AppQuestionnaireSession.isPreview), so it is
   // never surfaced to a real respondent. (lib/app/questionnaire/inspector)
-  previewInspectorEnabled Boolean @default(false)
+  previewInspectorEnabled Boolean @default(true)
 
   // Interviewer tone & persona (F-tone): ToneSettings — nine enable-toggle + 1–5 sliders plus a
   // free-text persona, controlling HOW the conversational interviewer responds. Off per dimension
@@ -299,16 +300,18 @@ model AppQuestionnaireConfig {
   // Selectable interviewer personas (F-persona). The persona library is FIXED (BUILT_IN_PERSONAS);
   // `personas` is a legacy column, always [] and ignored — the read path always returns the built-in
   // library (narrowPersonas, lib/.../persona/settings.ts). personaSelection = { enabled,
-  // defaultPersonaKey }: whether respondents may pick + which built-in persona is the default. Only
-  // surfaced when APP_QUESTIONNAIRES_PERSONA_SELECTION_ENABLED and personaSelection.enabled are on. (types.ts)
+  // defaultPersonaKey, allowRespondentSwitch, switcher }: `enabled` picks built-in-persona mode over
+  // the version's own hand-tuned `tone` (either/or, never both). Defaults to The Coach
+  // (neutral-coach), pinned — respondents cannot switch unless an admin turns that on. (types.ts)
   personas         Json @default("[]")
-  personaSelection Json @default("{}")
+  personaSelection Json @default("{\"enabled\":true,\"defaultPersonaKey\":\"neutral-coach\",\"allowRespondentSwitch\":false,\"switcher\":\"page\"}")
 
   // Interviewer strategy (questioning approach): { enabled, approach: funnel|open|targeted, probeDepth,
   // reflect, batchRelated }. When enabled, OVERRIDES the default open-invitation questioning prompt with
-  // the chosen openness arc + additive tactics. Off by default. Rendered into the phraser system prompt by
+  // the chosen openness arc + additive tactics. Defaults to ON: a funnel arc with probeDepth and
+  // batchRelated; reflect stays off. Rendered into the phraser system prompt by
   // buildInterviewerStrategyInstructions (lib/.../chat/interviewer-strategy.ts). (types.ts)
-  interviewerStrategy Json @default("{}")
+  interviewerStrategy Json @default("{\"enabled\":true,\"approach\":\"funnel\",\"probeDepth\":true,\"reflect\":false,\"batchRelated\":true}")
 
   // Respondent Report (report kind `respondent`): RespondentReportSettings — the per-respondent
   // report delivered after completion (mode, raw-content includes, AI generation knobs, delivery).
