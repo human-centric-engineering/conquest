@@ -19,11 +19,27 @@ import {
 import { DEFAULT_INTERVIEWER_STRATEGY } from '@/lib/app/questionnaire/types';
 
 describe('narrowInterviewerStrategy', () => {
-  it('returns the disabled default for garbage / missing input', () => {
-    expect(narrowInterviewerStrategy(undefined)).toEqual(DEFAULT_INTERVIEWER_STRATEGY);
-    expect(narrowInterviewerStrategy(null)).toEqual(DEFAULT_INTERVIEWER_STRATEGY);
-    expect(narrowInterviewerStrategy('nope')).toEqual(DEFAULT_INTERVIEWER_STRATEGY);
-    expect(narrowInterviewerStrategy({})).toEqual(DEFAULT_INTERVIEWER_STRATEGY);
+  /**
+   * Narrowing fails SAFE (every tactic off), which is deliberately NOT the same as the config
+   * default — that is now funnel + probeDepth + batchRelated, applied to new config rows via the
+   * column default. Asserting the all-off shape literally keeps the two apart: a legacy row storing
+   * `{}` must keep the built-in questioning prompt, never silently inherit today's default.
+   */
+  const ALL_OFF = {
+    enabled: false,
+    approach: DEFAULT_INTERVIEWER_STRATEGY.approach,
+    probeDepth: false,
+    reflect: false,
+    batchRelated: false,
+  };
+
+  it('fails safe to all-off for garbage / missing input, not to the config default', () => {
+    expect(narrowInterviewerStrategy(undefined)).toEqual(ALL_OFF);
+    expect(narrowInterviewerStrategy(null)).toEqual(ALL_OFF);
+    expect(narrowInterviewerStrategy('nope')).toEqual(ALL_OFF);
+    expect(narrowInterviewerStrategy({})).toEqual(ALL_OFF);
+    // Guard the distinction itself — if these ever converge, the assertion above is vacuous.
+    expect(narrowInterviewerStrategy({})).not.toEqual(DEFAULT_INTERVIEWER_STRATEGY);
   });
 
   it('coerces fields to strict booleans and a known approach', () => {

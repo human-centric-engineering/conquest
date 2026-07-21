@@ -588,9 +588,12 @@ export const PERSONA_KEY_MAX_LENGTH = 40;
 /** Stable key of the neutral default persona (objective coach/consultant). */
 export const DEFAULT_PERSONA_KEY = 'neutral-coach';
 
-/** Selection off, default = the neutral coach — today's behaviour (version tone prevails). */
+/**
+ * Built-in persona mode on, pinned to The Coach, respondents cannot switch — the balanced default
+ * voice governs the interviewer unless an admin hand-tunes a custom tone instead.
+ */
 export const DEFAULT_PERSONA_SELECTION: PersonaSelectionSettings = {
-  enabled: false,
+  enabled: true,
   defaultPersonaKey: DEFAULT_PERSONA_KEY,
   allowRespondentSwitch: false,
   switcher: 'page',
@@ -632,13 +635,17 @@ export type InterviewerStrategySettings = {
   batchRelated: boolean;
 };
 
-/** Disabled — today's default questioning approach, no override. */
+/**
+ * On by default: a funnel arc (open → targeted) that probes shallow answers and invites closely
+ * related gaps together. Reflect-&-confirm stays off — it costs a turn and the funnel already
+ * re-opens as coverage builds.
+ */
 export const DEFAULT_INTERVIEWER_STRATEGY: InterviewerStrategySettings = {
-  enabled: false,
+  enabled: true,
   approach: 'funnel',
-  probeDepth: false,
+  probeDepth: true,
   reflect: false,
-  batchRelated: false,
+  batchRelated: true,
 };
 
 /**
@@ -1148,7 +1155,7 @@ export type QuestionnaireConfigShape = {
    * See `lib/app/questionnaire/reasoning`.
    */
   reasoningStreamEnabled: boolean;
-  /** Where the reasoning trace renders ({@link REASONING_PLACEMENTS}); default `overlay`. */
+  /** Where the reasoning trace renders ({@link REASONING_PLACEMENTS}); default `inline`. */
   reasoningStreamPlacement: ReasoningPlacement;
   /**
    * "Animated" placement only: how long (ms) the newest turn's reasoning summary stays open before
@@ -1171,7 +1178,7 @@ export type QuestionnaireConfigShape = {
   /**
    * Preview Turn Inspector (admin-only): when on, an admin previewing as a respondent can open a
    * per-turn console showing the sequence of agent calls, their raw prompts/responses, the model
-   * used, latency, and estimated cost. Off by default. Server-gated to preview sessions
+   * used, latency, and estimated cost. On by default. Server-gated to preview sessions
    * (`AppQuestionnaireSession.isPreview`), so it is never surfaced to a real respondent. See
    * `lib/app/questionnaire/inspector`.
    */
@@ -1249,7 +1256,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   earlyFinishMinQuestions: 0,
   costBudgetUsd: null,
   maxQuestionsPerSession: null,
-  voiceEnabled: false,
+  voiceEnabled: true,
   attachmentsEnabled: false,
   contradictionMode: 'off',
   contradictionWindowN: 0,
@@ -1260,7 +1267,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   accessMode: 'invitation_only',
   inviteeFields: DEFAULT_INVITEE_FIELDS,
   abuseThreshold: 4,
-  maxDataSlotAttempts: 2,
+  maxDataSlotAttempts: 1,
   sensitivityAwareness: false,
   supportMessage: '',
   supportResourceUrl: '',
@@ -1271,12 +1278,13 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   inlineCorrectionEnabled: false,
   sessionResumeEnabled: true,
   reasoningStreamEnabled: true,
-  reasoningStreamPlacement: 'overlay',
+  reasoningStreamPlacement: 'inline',
   reasoningStreamDwellMs: 2000,
   reasoningStreamPerItemMs: 750,
   reasoningStreamPersist: true,
-  // Admin-only debugging surface — off by default; an operator turns it on per version.
-  previewInspectorEnabled: false,
+  // Admin-only debugging surface — on by default; server-gated to preview sessions, so a real
+  // respondent never sees it. An operator turns it off per version.
+  previewInspectorEnabled: true,
   tone: DEFAULT_TONE_SETTINGS,
   // Fixed library: the read-path narrower always returns BUILT_IN_PERSONAS regardless of this value.
   personas: [],

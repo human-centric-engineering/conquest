@@ -1127,6 +1127,16 @@ describe('ConfigEditor', () => {
 
   // ── Interviewer tone & persona (F-tone) ──────────────────────────────────────
 
+  /**
+   * Custom-voice mode. The tone dials and the free-text persona only render when built-in persona
+   * mode is OFF, and the config default is now Built-in persona (The Coach) — so every test that
+   * drives the custom tone editor opts out of the default explicitly.
+   */
+  const customVoice = (over: Partial<ConfigView> = {}): Partial<ConfigView> => ({
+    ...over,
+    personaSelection: { ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection, enabled: false },
+  });
+
   it('sends the full all-off tone block by default', () => {
     const { specs } = setup();
     clickSave();
@@ -1141,7 +1151,7 @@ describe('ConfigEditor', () => {
   });
 
   it('keeps a dimension slider hidden until its toggle is enabled', () => {
-    setup();
+    setup(customVoice());
     // The pole captions only render when the slider is shown.
     expect(screen.queryByText('Dispassionate')).not.toBeInTheDocument();
     fireEvent.click(switchNear(/^Empathy/));
@@ -1150,7 +1160,7 @@ describe('ConfigEditor', () => {
   });
 
   it('enables a dimension in the saved tone block when its toggle is switched on', () => {
-    const { specs } = setup();
+    const { specs } = setup(customVoice());
     fireEvent.click(switchNear(/^Empathy/));
     clickSave();
     const tone = bodyOf(specs).tone as Record<string, { enabled: boolean; level: number }>;
@@ -1158,7 +1168,7 @@ describe('ConfigEditor', () => {
   });
 
   it('reveals the persona textarea on toggle and sends the trimmed text on save', () => {
-    const { specs } = setup();
+    const { specs } = setup(customVoice());
     fireEvent.click(switchNear(/^Persona/));
     const textarea = screen.getByPlaceholderText(/supportive career coach/i);
     fireEvent.change(textarea, { target: { value: '  You are a blunt consultant.  ' } });
@@ -1168,7 +1178,7 @@ describe('ConfigEditor', () => {
   });
 
   it('previews the exact tone clause a dimension injects, from the real prompt source', () => {
-    setup();
+    setup(customVoice());
     // Mirroring is unipolar — it emits a clause even at the default midpoint (3).
     fireEvent.click(switchNear(/^Mirroring/));
     const clause = DIMENSION_PHRASES.mirroring[3];
@@ -1177,7 +1187,7 @@ describe('ConfigEditor', () => {
   });
 
   it('shows the neutral “adds nothing” message for a bipolar dimension at the midpoint', () => {
-    setup();
+    setup(customVoice());
     // Empathy is bipolar — the midpoint (3) is neutral-empty, so no clause is injected.
     expect(DIMENSION_PHRASES.empathy[3]).toBe('');
     fireEvent.click(switchNear(/^Empathy/));
@@ -1185,7 +1195,7 @@ describe('ConfigEditor', () => {
   });
 
   it('previews the exact persona clause the prompt receives', () => {
-    setup();
+    setup(customVoice());
     fireEvent.click(switchNear(/^Persona/));
     const textarea = screen.getByPlaceholderText(/supportive career coach/i);
     fireEvent.change(textarea, { target: { value: 'You are a blunt consultant' } });
@@ -1194,12 +1204,14 @@ describe('ConfigEditor', () => {
   });
 
   it('reflects a stored enabled dimension from config', () => {
-    setup({
-      tone: {
-        ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
-        formality: { enabled: true, level: 5 },
-      },
-    });
+    setup(
+      customVoice({
+        tone: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
+          formality: { enabled: true, level: 5 },
+        },
+      })
+    );
     // The slider's pole captions are visible because the dimension is enabled.
     expect(screen.getByText('Formal')).toBeInTheDocument();
   });
@@ -1207,12 +1219,14 @@ describe('ConfigEditor', () => {
   it('shows the signed −2…+2 dial value (stored 1–5 → display) and a scale legend', () => {
     const content = () => settingsContent();
     // Stored 5 (the max pole) shows as +2 on the display scale.
-    setup({
-      tone: {
-        ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
-        formality: { enabled: true, level: 5 },
-      },
-    });
+    setup(
+      customVoice({
+        tone: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
+          formality: { enabled: true, level: 5 },
+        },
+      })
+    );
     expect(content().getByText('+2')).toBeInTheDocument();
     // The scale legend explains the balanced-vs-intensity split (phrases unique to the legend).
     expect(content().getByText(/Each dial runs from/)).toBeInTheDocument();
@@ -1220,12 +1234,14 @@ describe('ConfigEditor', () => {
   });
 
   it('marks a balanced dial as neutral at 0 (stored midpoint 3)', () => {
-    setup({
-      tone: {
-        ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
-        empathy: { enabled: true, level: 3 }, // display 0, bipolar ⇒ neutral
-      },
-    });
+    setup(
+      customVoice({
+        tone: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.tone,
+          empathy: { enabled: true, level: 3 }, // display 0, bipolar ⇒ neutral
+        },
+      })
+    );
     expect(settingsContent().getByText('0 · neutral')).toBeInTheDocument();
   });
 
@@ -1233,7 +1249,7 @@ describe('ConfigEditor', () => {
 
   it('offers the either/or and starts in Custom voice mode when built-in mode is off', () => {
     const content = () => settingsContent();
-    setup();
+    setup(customVoice());
     expect(content().getByText('Custom voice')).toBeInTheDocument();
     expect(content().getByText('Built-in persona')).toBeInTheDocument();
     // Custom mode → tone dials shown, persona-library controls hidden.
