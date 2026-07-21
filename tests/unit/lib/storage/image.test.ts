@@ -361,5 +361,74 @@ describe('lib/storage/image', () => {
       expect(result.width).toBe(300);
       expect(result.height).toBe(250);
     });
+
+    describe('fit option', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+
+      it('defaults to a centred square crop, preserving the avatar behaviour', async () => {
+        const { processImage } = await import('@/lib/storage/image');
+
+        await processImage(jpegBuffer, { maxWidth: 500, maxHeight: 500 });
+
+        expect(mockSharpInstance.resize).toHaveBeenCalledWith(500, 500, {
+          fit: 'cover',
+          position: 'centre',
+        });
+      });
+
+      it("scales to fit inside the box without cropping when fit is 'inside'", async () => {
+        // A centre-cropped wordmark is unreadable, so logos and banners take this path.
+        const { processImage } = await import('@/lib/storage/image');
+
+        await processImage(jpegBuffer, { maxWidth: 1600, maxHeight: 400, fit: 'inside' });
+
+        expect(mockSharpInstance.resize).toHaveBeenCalledWith(1600, 400, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        });
+      });
+
+      it("passes the full box for 'inside' rather than the square-crop min()", async () => {
+        // The 'cover' branch collapses the box to min(w,h,…); 'inside' must not, or a
+        // 4:1 banner would be squeezed into a 400x400 square.
+        const { processImage } = await import('@/lib/storage/image');
+        mockSharpInstance.metadata.mockResolvedValue({ width: 3200, height: 800 });
+
+        await processImage(jpegBuffer, { maxWidth: 1600, maxHeight: 400, fit: 'inside' });
+
+        expect(mockSharpInstance.resize).toHaveBeenCalledWith(
+          1600,
+          400,
+          expect.objectContaining({ fit: 'inside' })
+        );
+      });
+    });
+  });
+
+  describe('readImageDimensions', () => {
+    it('returns the intrinsic dimensions sharp reports', async () => {
+      const { readImageDimensions } = await import('@/lib/storage/image');
+      mockSharpInstance.metadata.mockResolvedValue({ width: 1600, height: 400 });
+
+      await expect(readImageDimensions(Buffer.from('x'))).resolves.toEqual({
+        width: 1600,
+        height: 400,
+      });
+    });
+
+    it('returns null when metadata carries no dimensions', async () => {
+      const { readImageDimensions } = await import('@/lib/storage/image');
+      mockSharpInstance.metadata.mockResolvedValue({});
+
+      await expect(readImageDimensions(Buffer.from('x'))).resolves.toBeNull();
+    });
+
+    it('returns null instead of throwing when the buffer is undecodable', async () => {
+      // The caller treats null as a rejection, same as a magic-byte failure.
+      const { readImageDimensions } = await import('@/lib/storage/image');
+      mockSharpInstance.metadata.mockRejectedValue(new Error('unsupported image format'));
+
+      await expect(readImageDimensions(Buffer.from('x'))).resolves.toBeNull();
+    });
   });
 });

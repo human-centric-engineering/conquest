@@ -201,11 +201,13 @@ const MOCK_THEME: ResolvedTheme = {
   ctaColor: '#5469d4',
   accentColor: '#5469d4',
   logoUrl: null,
+  bannerUrl: null,
   welcomeCopy:
     "It's a short conversation — answer in your own words and we'll take care of the rest.",
   surfaceColor: null,
   ctaColorEnd: null,
   logoBackgroundColor: null,
+  hasBrandIdentity: false,
 };
 
 /** Build a minimal DB row for the session. Defaults to owned + active + no prior answers. */

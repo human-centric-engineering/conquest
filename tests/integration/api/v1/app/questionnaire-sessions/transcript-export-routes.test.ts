@@ -68,10 +68,12 @@ function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel
       ctaColor: '#000',
       accentColor: '#000',
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: 'hi',
       surfaceColor: null,
       ctaColorEnd: null,
       logoBackgroundColor: null,
+      hasBrandIdentity: false,
     },
     turns: [
       { speaker: 'interviewer', text: 'Hello?', at: '2026-06-01T09:55:00.000Z' },

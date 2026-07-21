@@ -52,10 +52,12 @@ const SENTINEL_THEME: ResolvedTheme = {
   ctaColor: '#sentinel',
   accentColor: '#sentinel',
   logoUrl: null,
+  bannerUrl: null,
   welcomeCopy: 'sentinel',
   surfaceColor: null,
   ctaColorEnd: null,
   logoBackgroundColor: null,
+  hasBrandIdentity: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -126,6 +128,7 @@ describe('resolveThemeForVersion', () => {
       ctaColor: '#aabbcc',
       accentColor: '#112233',
       logoUrl: 'https://example.com/logo.png',
+      bannerUrl: null,
       welcomeCopy: 'Branded copy',
     };
     mockVersionFindUnique.mockResolvedValue({
@@ -152,6 +155,7 @@ describe('resolveThemeForVersion', () => {
       ctaColor: null,
       accentColor: null,
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: null,
     } as never);
 
@@ -165,6 +169,8 @@ describe('resolveThemeForVersion', () => {
           ctaColor: true,
           accentColor: true,
           logoUrl: true,
+          // Respondent-surface only; the emails and export PDFs keep using the logo.
+          bannerUrl: true,
           welcomeCopy: true,
           surfaceColor: true,
           ctaColorEnd: true,
@@ -270,6 +276,7 @@ describe('resolveThemeForSession', () => {
       ctaColor: '#ff0000',
       accentColor: '#00ff00',
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: null,
     };
     mockSessionFindUnique.mockResolvedValue({

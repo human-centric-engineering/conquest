@@ -83,7 +83,9 @@ export function ModeToggle({ value, onChange, items = DEFAULT_ITEMS, className }
             onClick={() => onChange(id)}
             className={cn(
               'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors sm:px-3',
-              active ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+              active
+                ? 'text-[var(--app-on-cta,#fff)]'
+                : 'text-muted-foreground hover:text-foreground'
             )}
           >
             <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

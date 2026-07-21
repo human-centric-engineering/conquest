@@ -156,7 +156,7 @@ export function PersonaPicker({
           onClick={onContinue}
           disabled={busy}
           className={cn(
-            'inline-flex w-full items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition',
+            'inline-flex w-full items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-[var(--app-on-cta,#fff)] transition',
             'hover:opacity-95 focus-visible:ring-2 focus-visible:outline-none',
             'disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto'
           )}

@@ -530,14 +530,22 @@ model AppDemoClient {
   description String? // internal admin note ("Prepared for the Q1 2026 pitch")
   isActive    Boolean @default(true) // soft-disable without delete
 
-  // DEMO-ONLY (F3.4): theme columns. All nullable — null means "use the Sunrise
+  // DEMO-ONLY (F3.4): theme columns. All nullable — null means "use the ConQuest
   // default" (resolveTheme fills it). The invitation email reads all four (ctaColor =
   // button, accentColor = fallback-link colour, logoUrl = header image, welcomeCopy =
   // intro line); accentColor is ALSO the F7.1 CSS accent variable.
-  ctaColor    String? // CTA / primary button colour (hex, e.g. "#5469d4")
+  // Setting ANY visual column here makes the respondent session white-label; leaving them
+  // all null runs it in ConQuest colours (see ResolvedTheme.hasBrandIdentity).
+  ctaColor    String? // CTA / primary button colour (hex, e.g. "#0a1a3a")
   accentColor String? // secondary accent colour (hex); email fallback-link colour + F7.1 CSS var
-  logoUrl     String? // absolute https URL of the client logo shown in the email header
+  logoUrl     String? // https URL, or an app-relative /uploads/... path, of the client logo
   welcomeCopy String? // branded intro line for the invitation email body
+
+  // DEMO-ONLY (F7.2): full-bleed header banner replacing the session's header band.
+  // https URL or an app-relative /uploads/... path, same as logoUrl. Uploads are checked
+  // against BRAND_BANNER_SPEC (~4:1, min 800x200) before being accepted — see
+  // lib/app/questionnaire/theming/brand-image.ts.
+  bannerUrl String?
 
   // DEMO-ONLY (F7.1+): richer brand chrome for the respondent session. All optional —
   // each null/false leaves the surface looking as it did before. These let a brand be

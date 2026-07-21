@@ -39,7 +39,7 @@ import { summariseAudience } from '@/lib/app/questionnaire/export/build-session-
 export interface RespondentReportHeader {
   /** Brand logo URL from the attributed demo client, or null when none is configured. */
   logoUrl: string | null;
-  /** Resolved accent colour (demo-client value or the Sunrise default) for the header rule. */
+  /** Resolved accent colour (demo-client value or the ConQuest default) for the header rule. */
   accentColor: string;
   versionNumber: number;
   /** Raw support reference (`publicRef`); the UI groups it for display. */

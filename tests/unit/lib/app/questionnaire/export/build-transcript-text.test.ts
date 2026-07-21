@@ -32,10 +32,12 @@ function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel
       ctaColor: '#000',
       accentColor: '#000',
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: 'hi',
       surfaceColor: null,
       ctaColorEnd: null,
       logoBackgroundColor: null,
+      hasBrandIdentity: false,
     },
     turns: [
       {

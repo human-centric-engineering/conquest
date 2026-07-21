@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@react-email/render';
 
 import QuestionnaireInvitationEmail from '@/emails/questionnaire-invitation';
-import { resolveTheme, SUNRISE_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, CONQUEST_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
 
 /**
  * Render tests for the F3.4 themed invitation email. The key contract: with no theme
@@ -27,7 +27,7 @@ describe('QuestionnaireInvitationEmail — unthemed (Sunrise default)', () => {
 
   it('falls back to the Sunrise CTA colour and default welcome copy when no theme is passed', async () => {
     const html = await render(<QuestionnaireInvitationEmail {...baseProps} />);
-    expect(html).toContain(SUNRISE_THEME_DEFAULTS.ctaColor);
+    expect(html).toContain(CONQUEST_THEME_DEFAULTS.ctaColor);
     // The default tagline appears verbatim (HTML-escaped apostrophes).
     expect(html).toContain('answer in your own words');
   });

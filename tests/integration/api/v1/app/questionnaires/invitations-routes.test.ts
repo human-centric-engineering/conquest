@@ -67,7 +67,7 @@ import { auth } from '@/lib/auth/config';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { sendEmail } from '@/lib/email/send';
 import QuestionnaireInvitationEmail from '@/emails/questionnaire-invitation';
-import { SUNRISE_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
+import { CONQUEST_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
 import { inviteLimiter } from '@/lib/security/rate-limit';
 import {
   mockAdminUser,
@@ -244,7 +244,7 @@ describe('POST — send invitations', () => {
       expect.objectContaining({
         theme: expect.objectContaining({
           ctaColor: '#ff0000',
-          accentColor: SUNRISE_THEME_DEFAULTS.accentColor,
+          accentColor: CONQUEST_THEME_DEFAULTS.accentColor,
           logoUrl: 'https://acme.example/logo.png',
           welcomeCopy: 'Welcome to the Acme demo.',
         }),
@@ -272,10 +272,10 @@ describe('POST — send invitations', () => {
     expect(QuestionnaireInvitationEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         theme: expect.objectContaining({
-          ctaColor: SUNRISE_THEME_DEFAULTS.ctaColor,
-          accentColor: SUNRISE_THEME_DEFAULTS.accentColor,
+          ctaColor: CONQUEST_THEME_DEFAULTS.ctaColor,
+          accentColor: CONQUEST_THEME_DEFAULTS.accentColor,
           logoUrl: null,
-          welcomeCopy: SUNRISE_THEME_DEFAULTS.welcomeCopy,
+          welcomeCopy: CONQUEST_THEME_DEFAULTS.welcomeCopy,
         }),
       })
     );

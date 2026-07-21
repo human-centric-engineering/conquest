@@ -64,7 +64,7 @@ export function CompletionOffer({ onSubmit, busy, className }: CompletionOfferPr
           size="sm"
           onClick={onSubmit}
           disabled={busy}
-          className="text-white"
+          className="text-[var(--app-on-cta,#fff)]"
           style={{ backgroundColor: 'var(--app-cta-color, var(--color-primary))' }}
         >
           {busy ? 'Submitting…' : 'Submit responses'}

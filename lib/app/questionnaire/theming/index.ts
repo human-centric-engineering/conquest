@@ -9,7 +9,8 @@
 export {
   type DemoClientTheme,
   type ResolvedTheme,
-  SUNRISE_THEME_DEFAULTS,
+  CONQUEST_THEME_DEFAULTS,
+  cssUrl,
   readableTextColor,
   resolveTheme,
   themeToCssVariables,
@@ -23,3 +24,12 @@ export {
   themeFieldsSchema,
   type ThemeFieldsInput,
 } from '@/lib/app/questionnaire/theming/schemas';
+
+export {
+  BRAND_BANNER_SPEC,
+  BRAND_LOGO_SPEC,
+  isBrandImageSrc,
+  recommendedSize,
+  validateImageDimensions,
+  type BrandImageSpec,
+} from '@/lib/app/questionnaire/theming/brand-image';

@@ -5,8 +5,8 @@
  * logoUrl, welcomeCopy plus the F7.1+ chrome set: surfaceColor, ctaColorEnd,
  * logoBackgroundColor, logoBackgroundEnabled). `resolveTheme()` turns that partial,
  * possibly-null brand into a fully-populated {@link ResolvedTheme} by filling each gap
- * with the Sunrise default
- * — so an unthemed (or absent) client renders exactly as the platform always has.
+ * with the ConQuest default — so an unthemed (or absent) client renders as ConQuest
+ * rather than as an anonymous grey surface.
  * `themeToCssVariables()` projects a resolved theme into the CSS custom properties
  * the F7.1 user UI applies; the invitation email (F3.4's renderer) reads the resolved
  * values inline.
@@ -21,17 +21,22 @@
 
 /**
  * The raw theme columns as stored on a demo client — every field nullable, where
- * null means "fall back to the Sunrise default". Matches the `AppDemoClient` theme
+ * null means "fall back to the ConQuest default". Matches the `AppDemoClient` theme
  * column selection; kept as a hand-written contract so the module stays Prisma-free.
  */
 export interface DemoClientTheme {
-  /** CTA / primary button colour (hex), or null for the Sunrise default. */
+  /** CTA / primary button colour (hex), or null for the ConQuest default. */
   ctaColor: string | null;
-  /** Secondary accent colour (hex), or null for the Sunrise default. */
+  /** Secondary accent colour (hex), or null for the ConQuest default. */
   accentColor: string | null;
-  /** Absolute https logo URL, or null for "no logo". */
+  /** Logo image src (https URL or app-relative upload path), or null for "no logo". */
   logoUrl: string | null;
-  /** Branded invitation intro line, or null for the Sunrise default copy. */
+  /**
+   * Full-bleed header banner src (https URL or app-relative upload path), or null.
+   * When set it REPLACES the header band's contents — see BrandThemeProvider.
+   */
+  bannerUrl?: string | null;
+  /** Branded invitation intro line, or null for the ConQuest default copy. */
   welcomeCopy: string | null;
   // The F7.1+ chrome columns are OPTIONAL on this raw contract (the original four are
   // required): they landed later, and `resolveTheme` reads them defensively (`?? null` /
@@ -65,6 +70,8 @@ export interface ResolvedTheme {
   ctaColor: string;
   accentColor: string;
   logoUrl: string | null;
+  /** Full-bleed header banner, or null. Takes precedence over `logoUrl` in the band. */
+  bannerUrl: string | null;
   welcomeCopy: string;
   /** Brand header-band colour, or null when the client sets no surface (plain chrome). */
   surfaceColor: string | null;
@@ -76,23 +83,40 @@ export interface ResolvedTheme {
    * `surfaceColor`). Renderers paint this directly without re-deriving the fallback.
    */
   logoBackgroundColor: string | null;
+  /**
+   * Did the client supply ANY visual brand of its own (a colour, a logo, a surface)?
+   *
+   * This is the white-label switch. `true` → the client's brand is the only identity in
+   * the respondent area, exactly as app/brand-theme.css intends. `false` → there is no
+   * client brand to protect, so the renderer falls back to the ConQuest identity: the
+   * wordmark in the band and the ConQuest palette on the CTA.
+   *
+   * `welcomeCopy` is deliberately EXCLUDED from the test — it is copy, not identity, and
+   * a client that customises only its invitation line still gets ConQuest chrome.
+   */
+  hasBrandIdentity: boolean;
 }
 
 /**
- * Sunrise defaults — the platform look an unthemed client inherits. `ctaColor` /
- * `accentColor` are the hex the invitation email has always hardcoded (button +
- * link); `welcomeCopy` is the original invitation tagline. There is deliberately no
- * default logo (null → no logo rendered).
+ * ConQuest defaults — the look an unthemed (or absent) client inherits. `ctaColor` is
+ * the deep ConQuest navy and `accentColor` the bright ConQuest blue, matching the
+ * consumer palette in app/brand-theme.css; `welcomeCopy` is the original invitation
+ * tagline. There is deliberately no default logo (null → the RENDERER substitutes the
+ * ConQuest wordmark; see `hasBrandIdentity` below).
+ *
+ * These are FLAT hexes because their consumers — the invitation email and the export
+ * PDFs — have no CSS cascade and no light/dark mode to follow. The live respondent UI
+ * does, so it takes the mode-aware route instead (again, see `hasBrandIdentity`).
  */
-export const SUNRISE_THEME_DEFAULTS = {
-  ctaColor: '#5469d4',
-  accentColor: '#5469d4',
+export const CONQUEST_THEME_DEFAULTS = {
+  ctaColor: '#0a1a3a',
+  accentColor: '#2f6bff',
   welcomeCopy:
     "It's a short conversation — answer in your own words and we'll take care of the rest.",
 } as const;
 
 /**
- * Fill a (possibly null) demo-client theme with Sunrise defaults. Passing `null`
+ * Fill a (possibly null) demo-client theme with ConQuest defaults. Passing `null`
  * (no attributed client) yields the all-defaults theme, so the generic demo renders
  * identically to the pre-F3.4 plain email.
  */
@@ -104,14 +128,29 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
   const logoBackgroundColor = theme?.logoBackgroundEnabled
     ? (theme.logoBackgroundColor ?? surfaceColor)
     : null;
+  // Any one visual signal is enough to count as "branded" — a client that sets only a
+  // logo, or only a CTA colour, still owns the surface. Note this reads the RAW columns,
+  // not the resolved ones, so the defaults applied below can't make an unbranded client
+  // look branded.
+  const hasBrandIdentity = Boolean(
+    theme?.ctaColor ||
+    theme?.accentColor ||
+    theme?.logoUrl ||
+    theme?.bannerUrl ||
+    theme?.surfaceColor ||
+    theme?.ctaColorEnd ||
+    logoBackgroundColor
+  );
   return {
-    ctaColor: theme?.ctaColor ?? SUNRISE_THEME_DEFAULTS.ctaColor,
-    accentColor: theme?.accentColor ?? SUNRISE_THEME_DEFAULTS.accentColor,
+    ctaColor: theme?.ctaColor ?? CONQUEST_THEME_DEFAULTS.ctaColor,
+    accentColor: theme?.accentColor ?? CONQUEST_THEME_DEFAULTS.accentColor,
     logoUrl: theme?.logoUrl ?? null,
-    welcomeCopy: theme?.welcomeCopy ?? SUNRISE_THEME_DEFAULTS.welcomeCopy,
+    bannerUrl: theme?.bannerUrl ?? null,
+    welcomeCopy: theme?.welcomeCopy ?? CONQUEST_THEME_DEFAULTS.welcomeCopy,
     surfaceColor,
     ctaColorEnd: theme?.ctaColorEnd ?? null,
     logoBackgroundColor,
+    hasBrandIdentity,
   };
 }
 
@@ -153,16 +192,29 @@ export function readableTextColor(hex: string): string | null {
  * direct DB write that skips the Zod field.
  */
 export function themeToCssVariables(theme: ResolvedTheme): Record<string, string> {
-  const vars: Record<string, string> = {
-    '--app-cta-color': theme.ctaColor,
-    '--app-accent-color': theme.accentColor,
+  const vars: Record<string, string> = {};
+  // UNBRANDED: emit no colour variables at all. An inline style always beats a
+  // stylesheet, so emitting the flat ConQuest hexes here would PIN the light-mode
+  // palette and break dark mode. Omitting them instead lets the mode-aware
+  // `[data-brand='conquest']` block in app/brand-theme.css supply the CTA/accent,
+  // flipping navy → gold with the theme exactly as the consumer surface does.
+  if (theme.hasBrandIdentity) {
+    vars['--app-cta-color'] = theme.ctaColor;
+    vars['--app-accent-color'] = theme.accentColor;
     // A single paint value the CTA can drop into `background`: a linear gradient when an
     // end colour is set, otherwise the solid CTA colour. Keeping the branch here means
     // the renderer is just `background: var(--app-cta-gradient)` with no conditionals.
-    '--app-cta-gradient': theme.ctaColorEnd
+    vars['--app-cta-gradient'] = theme.ctaColorEnd
       ? `linear-gradient(135deg, ${theme.ctaColor}, ${theme.ctaColorEnd})`
-      : theme.ctaColor,
-  };
+      : theme.ctaColor;
+    // The CTA's own foreground, chosen for contrast against the client's CTA colour. The
+    // buttons paint their background from `--app-cta-gradient` directly and so never
+    // consult the platform's `primary`/`primary-foreground` pair — without this a client
+    // who picks a pale CTA gets white-on-pale. Unbranded clients are covered by the
+    // `[data-brand='conquest']` block in app/brand-theme.css instead, which is mode-aware.
+    const onCta = readableTextColor(theme.ctaColor);
+    if (onCta) vars['--app-on-cta'] = onCta;
+  }
   if (theme.surfaceColor) {
     vars['--app-surface-color'] = theme.surfaceColor;
     // The readable text colour for content laid on the band (title / dates), chosen for
@@ -174,10 +226,24 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
     vars['--app-logo-bg'] = theme.logoBackgroundColor;
   }
   if (theme.logoUrl) {
-    // CSS string escape: backslash-escape `"`, `\`, and newlines, then wrap in quotes
-    // so the URL can't terminate the url() context.
-    const escaped = theme.logoUrl.replace(/["\\\n\r]/g, '\\$&');
-    vars['--app-logo-url'] = `url("${escaped}")`;
+    vars['--app-logo-url'] = cssUrl(theme.logoUrl);
+  }
+  if (theme.bannerUrl) {
+    vars['--app-banner-url'] = cssUrl(theme.bannerUrl);
   }
   return vars;
+}
+
+/**
+ * Wrap a URL as a **quoted** CSS `url("…")`, backslash-escaping `"`, `\` and newlines
+ * first so the value cannot terminate the `url()` context — a stray `)` or `;` would
+ * otherwise inject an extra declaration into whatever element the vars are spread onto.
+ *
+ * The single sink for brand image URLs entering CSS. Even though the stored value is
+ * validated at the write boundary, this escapes again at the point of use: the function
+ * is exported and a value can still arrive via a seed or a direct DB write that skips
+ * the Zod field. Defence in depth.
+ */
+export function cssUrl(url: string): string {
+  return `url("${url.replace(/["\\\n\r]/g, '\\$&')}")`;
 }

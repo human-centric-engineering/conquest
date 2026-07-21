@@ -184,7 +184,7 @@ export function ProfileCaptureGate({
         <Button
           type="button"
           onClick={onSubmitted}
-          className="gap-2 text-white sm:flex-1"
+          className="gap-2 text-[var(--app-on-cta,#fff)] sm:flex-1"
           style={{ background: CTA_FILL }}
         >
           {proceedLabel ?? 'Continue'}
@@ -266,7 +266,7 @@ export function ProfileCaptureGate({
         <Button
           type="submit"
           disabled={submitting}
-          className="mt-2 w-full gap-2 text-white"
+          className="mt-2 w-full gap-2 text-[var(--app-on-cta,#fff)]"
           style={{ background: CTA_FILL }}
         >
           {submitting ? 'Checking…' : (proceedLabel ?? 'Continue')}

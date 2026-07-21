@@ -799,6 +799,10 @@ export const API = {
       byId: (id: string): string => `/api/v1/app/demo-clients/${id}`,
       /** DEMO-ONLY (F6.4): reset the session graph for a client's questionnaires (POST). */
       resetSessions: (id: string): string => `/api/v1/app/demo-clients/${id}/reset-sessions`,
+      /** DEMO-ONLY (F7.2): brand logo image — upload (POST, multipart) / remove (DELETE). */
+      logo: (id: string): string => `/api/v1/app/demo-clients/${id}/logo`,
+      /** DEMO-ONLY (F7.2): full-bleed header banner — upload (POST, multipart) / remove (DELETE). */
+      banner: (id: string): string => `/api/v1/app/demo-clients/${id}/banner`,
       /** The client's private knowledge corpus (GET — client-scoped list, grounds its reports). */
       knowledge: (id: string): string => `/api/v1/app/demo-clients/${id}/knowledge`,
     },

@@ -89,7 +89,7 @@ export function SessionResumeGate({
             onClick={onContinue}
             disabled={busy}
             style={{ background: CTA_FILL }}
-            className="h-11 w-full text-base text-white"
+            className="h-11 w-full text-base text-[var(--app-on-cta,#fff)]"
           >
             {busy ? (
               <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />

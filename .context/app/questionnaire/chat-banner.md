@@ -61,6 +61,41 @@ colour drives the whole band. With no surface the band sits on the neutral respo
 Status dots use fixed semantic hues (emerald / amber / sky) that read on both light and dark
 surfaces; the closed dot is muted `currentColor`.
 
+## Three band modes
+
+The band has three mutually exclusive forms, decided in `BrandThemeProvider`:
+
+| Condition                | What renders                                                            |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `bannerUrl` set          | **Full-bleed banner** — replaces the band; title moves to a strip below |
+| `hasBrandIdentity` true  | The client band above (logo / surface colour / three zones)             |
+| `hasBrandIdentity` false | **ConQuest band** — the wordmark plus the ConQuest palette              |
+
+### ConQuest default (unbranded)
+
+An unbranded questionnaire used to render **no band at all** (`showBand` required a surface,
+logo or title) on a grey canvas. It now always gets a band carrying the `<ConquestWordmark>`,
+and `data-brand="conquest"` on the wrapper switches the whole surface to the ConQuest palette.
+
+Two details that look odd until you know why:
+
+- The wordmark is the **component**, not an image. It is CSS type (Fraunces, two-tone), so it
+  stays crisp at any size and already follows `.dark` — a flat PNG would do neither.
+- `themeToCssVariables` emits **no colour vars** in this mode, and `--cq-band-bg` / `-fg` /
+  `-border` come from `app/brand-theme.css`. The ConQuest CTA flips navy→gold with the theme
+  and an inline style cannot express that; inline would also _win_ over the stylesheet, pinning
+  light mode. See [demo-clients.md](./demo-clients.md#theming-module-f34).
+
+### Custom banner (F7.2)
+
+`bannerUrl` replaces the band outright — no logo, no wordmark, no band colours in that strip —
+because the image is the client's own composition and drawing our chrome over it would fight it.
+The box is `aspect-[4/1]`, matching `BRAND_BANNER_SPEC`, so an accepted upload fills it exactly
+at every width; `bg-cover` absorbs the ±12% ratio tolerance.
+
+The title renders **below** the banner rather than overlaid. Overlaying would need a scrim and
+would still depend on the legibility of an image we have never seen.
+
 ## Keeping the admin preview faithful
 
 `components/admin/demo-clients/demo-client-theme-preview.tsx` (`ChromePreview`) renders a
@@ -72,6 +107,10 @@ var. Update it alongside any band layout change so the admin "branding" preview 
 - `tests/unit/lib/app/questionnaire/header/schedule.test.ts` — every status/date branch.
 - `tests/unit/lib/app/questionnaire/header/resolve.test.ts` — Prisma-mocked; asserts the round
   second-query only fires when `roundId` is set.
-- `tests/unit/lib/app/questionnaire/theming/theme.test.ts` — `readableTextColor` + `--app-on-surface`.
-- `tests/unit/components/app/questionnaire/chat/brand-theme-provider.test.tsx` — title/eyebrow/
-  schedule/no-band/surface-contrast rendering.
+- `tests/unit/lib/app/questionnaire/theming/theme.test.ts` — `readableTextColor`,
+  `--app-on-surface`, `hasBrandIdentity`, and the no-colour-vars-when-unbranded rule.
+- `tests/unit/lib/app/questionnaire/theming/brand-image.test.ts` — the logo/banner dimension
+  specs and the `/uploads/` src predicate.
+- `tests/unit/components/app/questionnaire/chat/brand-theme-provider.test.tsx` — all three band
+  modes (including that a banner suppresses both the logo and the wordmark), plus title/
+  eyebrow/schedule/no-band/surface-contrast rendering.

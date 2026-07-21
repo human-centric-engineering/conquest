@@ -202,6 +202,42 @@ describe('POST /api/v1/app/demo-clients (create)', () => {
       })
     );
   });
+
+  it('persists the F7.2 bannerUrl alongside the logo', async () => {
+    prismaMock.appDemoClient.create.mockResolvedValue({
+      ...ROW,
+      bannerUrl: 'https://acme.example/banner.jpg',
+    });
+    await createPOST(jsonReq({ name: 'Acme Bank', bannerUrl: 'https://acme.example/banner.jpg' }));
+    expect(prismaMock.appDemoClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ bannerUrl: 'https://acme.example/banner.jpg' }),
+      })
+    );
+  });
+
+  it('accepts an uploaded /uploads/ path, not just an https URL', async () => {
+    // The local storage provider serves from public/uploads/, so an https-only rule would
+    // reject every logo uploaded in development.
+    prismaMock.appDemoClient.create.mockResolvedValue(ROW);
+    const res = await createPOST(
+      jsonReq({ name: 'Acme Bank', logoUrl: '/uploads/demo-clients/dc-1/logo/logo.png?v=1' })
+    );
+    expect(res.status).toBe(201);
+    expect(prismaMock.appDemoClient.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          logoUrl: '/uploads/demo-clients/dc-1/logo/logo.png?v=1',
+        }),
+      })
+    );
+  });
+
+  it('rejects a brand image src that is neither https nor an upload path', async () => {
+    const res = await createPOST(jsonReq({ name: 'Acme Bank', bannerUrl: 'javascript:alert(1)' }));
+    expect(res.status).toBe(400);
+    expect(prismaMock.appDemoClient.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/v1/app/demo-clients/:id (detail)', () => {

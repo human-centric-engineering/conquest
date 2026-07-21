@@ -259,7 +259,7 @@ export function QuestionnaireSplash({
             <button
               type="button"
               onClick={onProceed}
-              className="group focus-visible:ring-ring relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_-14px_rgba(0,0,0,0.55)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-0 active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none sm:w-auto"
+              className="group focus-visible:ring-ring relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-5 py-2.5 text-sm font-semibold text-[var(--app-on-cta,#fff)] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_-14px_rgba(0,0,0,0.55)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-0 active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none sm:w-auto"
               style={{ background: CTA_FILL }}
             >
               <span

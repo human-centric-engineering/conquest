@@ -240,6 +240,7 @@ function makeDemoClientApiRow(
     ctaColor: null,
     accentColor: null,
     logoUrl: null,
+    bannerUrl: null,
     welcomeCopy: null,
     surfaceColor: null,
     ctaColorEnd: null,

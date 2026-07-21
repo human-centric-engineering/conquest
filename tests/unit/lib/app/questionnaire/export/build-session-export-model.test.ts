@@ -16,7 +16,7 @@ import {
   buildSessionExportModel,
   type SessionExportInput,
 } from '@/lib/app/questionnaire/export/build-session-export-model';
-import { SUNRISE_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
+import { CONQUEST_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
 
 function input(over: Partial<SessionExportInput> = {}): SessionExportInput {
   return {
@@ -120,7 +120,7 @@ describe('buildSessionExportModel', () => {
   describe('theme resolution', () => {
     it('fills Sunrise defaults when no demo-client theme is attributed', () => {
       const model = buildSessionExportModel(input({ theme: null }));
-      expect(model.theme.accentColor).toBe(SUNRISE_THEME_DEFAULTS.accentColor);
+      expect(model.theme.accentColor).toBe(CONQUEST_THEME_DEFAULTS.accentColor);
       expect(model.theme.logoUrl).toBeNull();
     });
 
