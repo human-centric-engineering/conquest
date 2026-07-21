@@ -468,3 +468,62 @@ experiment's agent in the same change that makes pins executable.
 `app/api/v1/admin/orchestration/experiments/[id]/run/route.ts` ·
 `lib/orchestration/evaluations/stats/winner.ts` ·
 [[development-plan#Carried Sunrise patches]] · `.context/app/planning/features/f14.15.md`.
+
+---
+
+### UG-13 — Maintenance tick does unconditional DB work, so a scale-to-zero database never suspends
+
+_Status:_ **raised-upstream** ([sunrise#442](https://github.com/human-centric-engineering/sunrise/issues/442)) · _Opened:_ 2026-07-21 · _Surfaced by:_ Neon compute-hours investigation
+
+**Gap.** `runMaintenanceTick()` fans out to its background tasks
+**unconditionally** — there is no "is there any work?" pre-check, and none of the
+tasks is time-throttled. An idle tick costs ~20 queries in core (~24 with the app
+tasks), at least one of which is a write. On a long-running Postgres this is
+invisible; on a **scale-to-zero database** (Neon, Aurora Serverless v2) it means
+the compute **never idles**, so a near-zero-traffic deployment bills as if it ran
+continuously.
+
+Note the cost driver is **cadence, not query count**: autosuspend keys off compute
+idle time, so one query a minute defeats a 5-minute timer exactly as well as
+twenty. Making the tick cheaper does not help on its own.
+
+Three core sub-bugs found alongside it, all documented on the issue:
+
+1. `useHealthCheck` has **no `document.visibilityState` gating**
+   (`components/status/use-health-check.ts`), so the admin overview's 30s
+   `/api/health` poll — which runs `SELECT 1` — pins the DB awake from a
+   forgotten browser tab, _with the cron disabled entirely_. The gating pattern
+   already exists at `lib/hooks/use-auto-refresh.ts:78` and
+   `components/admin/admin-sidebar.tsx:419`; it just isn't applied here.
+2. Queued **evaluation runs have no inline kick** — `processPendingEvaluationRuns`
+   is reachable only from the tick, so their start latency is exactly the cadence.
+3. `queueMessageEmbedding` uses a **bare `void`** (`chat/streaming-handler.ts`),
+   which Vercel freezes once the response is sent — so `backfillMissingEmbeddings`
+   is likely load-bearing rather than the safety net it is described as.
+
+**Why upstream.** Every file above is platform-owned, and every Sunrise fork
+deployed on a serverless DB inherits the bill. The per-tick constants
+(`MAX_PER_TICK`, `WORKER_TIME_BUDGET_MS = 45s` "leaves headroom in a 60s cron",
+the `take:` caps) are all hardcoded to a 60s cadence, which is precisely what
+stops a fork from safely slowing its own cron.
+
+**Proposed fix.** An env-evaluated (never DB-read — the settings lookup would
+itself defeat autosuspend) enable/cadence seam, with the per-tick caps and
+`stuckExecutionThresholdMins` derived from the configured cadence rather than
+hardcoded; plus `after()` kicks at the enqueue sites so deferred work stops being
+cadence-bound. Suggested **not** off-by-default: in stock Sunrise the tick is the
+sole trigger for webhook/hook retries, orphan/zombie recovery and scheduled
+workflows, so off-by-default would present as a bug.
+
+**Interim mitigation.** ConQuest owns its own cadence — `vercel.json` and
+`app/api/v1/cron/maintenance/route.ts` are **app files, not in core** (core only
+_recommends_ 60s at `.context/orchestration/scheduling.md`). Cron dropped to
+hourly (`0 * * * *`), which is safe here because ConQuest's production data path
+populates **none** of the platform tables the frequent tasks sweep — see
+[`maintenance-cron.md`](../questionnaire/maintenance-cron.md) for the audit and
+the conditions that would invalidate it.
+
+**References.** `vercel.json` · `app/api/v1/cron/maintenance/route.ts` ·
+`lib/orchestration/maintenance/run-tick.ts` · `lib/orchestration/retention.ts` ·
+`components/status/use-health-check.ts` ·
+[`.context/app/questionnaire/maintenance-cron.md`](../questionnaire/maintenance-cron.md).

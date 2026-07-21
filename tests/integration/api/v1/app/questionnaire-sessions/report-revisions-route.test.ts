@@ -19,6 +19,14 @@ vi.mock('@/lib/app/questionnaire/report/revision', () => ({
   enqueueRespondentReportRevision: vi.fn(),
   getRespondentReportRevisionsView: vi.fn(),
 }));
+// after() has no request scope in unit tests — capture the callback, don't auto-run it.
+const afterMock = vi.hoisted(() => ({ after: vi.fn() }));
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return { ...actual, after: afterMock.after };
+});
+const workerMock = vi.hoisted(() => ({ processQueuedReportRevisions: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/report/worker', () => workerMock);
 
 import { GET, POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/report/revisions/route';
 import { auth } from '@/lib/auth/config';
@@ -64,6 +72,11 @@ beforeEach(() => {
     delivered: null,
     revisions: [],
   });
+  workerMock.processQueuedReportRevisions.mockResolvedValue({
+    claimed: 0,
+    completed: 0,
+    failed: 0,
+  });
 });
 
 describe('POST …/report/revisions', () => {
@@ -93,6 +106,33 @@ describe('POST …/report/revisions', () => {
         settings: expect.objectContaining({ mode: 'narrative' }),
       })
     );
+  });
+
+  it('kicks the revision worker via after() so the re-run does not wait for the cron', async () => {
+    const res = await POST(req({ config: { mode: 'narrative' } }), ctx);
+    expect(res.status).toBe(202);
+
+    // The kick is scheduled via after(); running the captured callback drives the revision.
+    expect(afterMock.after).toHaveBeenCalledTimes(1);
+    expect(workerMock.processQueuedReportRevisions).not.toHaveBeenCalled();
+    await (afterMock.after.mock.calls[0][0] as () => Promise<void>)();
+    expect(workerMock.processQueuedReportRevisions).toHaveBeenCalledTimes(1);
+  });
+
+  it('still returns 202 when the kick itself fails (cron remains the backstop)', async () => {
+    workerMock.processQueuedReportRevisions.mockRejectedValue(new Error('worker exploded'));
+    const res = await POST(req({ config: { mode: 'narrative' } }), ctx);
+    expect(res.status).toBe(202);
+    // The swallowed rejection must not surface as an unhandled error.
+    await expect(
+      (afterMock.after.mock.calls[0][0] as () => Promise<void>)()
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not kick the worker when the enqueue is rejected', async () => {
+    const res = await POST(req({ config: { mode: 'raw' } }), ctx);
+    expect(res.status).toBe(400);
+    expect(afterMock.after).not.toHaveBeenCalled();
   });
 
   it('falls back to the version config when no config is sent', async () => {
