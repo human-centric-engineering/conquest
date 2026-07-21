@@ -105,6 +105,33 @@ describe('QuestionnaireChat', () => {
     expect(screen.getByText('Ada')).toBeInTheDocument();
   });
 
+  /**
+   * The consuming half of the respondent text-size contract. SessionWorkspace publishes
+   * `--cq-chat-scale`, but the size only changes if the transcript opts in via `.cq-chat-scale`
+   * (globals.css) AND the bubbles leave their own size unpinned so they inherit it. Both are
+   * invisible to the workspace's own tests, which mock this component out entirely.
+   *
+   * @see .context/app/questionnaire/chat-text-size.md
+   */
+  it('opts the transcript into the respondent text scale and lets bubbles inherit it', () => {
+    hookReturn = makeReturn({
+      turns: [
+        { role: 'assistant', content: 'What is your name?' },
+        { role: 'user', content: 'Ada' },
+      ],
+    });
+    const { container } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    const transcript = container.querySelector('.cq-chat-scale');
+    expect(transcript).not.toBeNull();
+
+    // The user bubble must NOT pin its own font-size: re-adding a `text-*` class here silently
+    // breaks the preference for that element while every other test stays green.
+    const bubble = screen.getByText('Ada');
+    expect(transcript?.contains(bubble)).toBe(true);
+    expect(bubble.className).not.toMatch(/\btext-(xs|sm|base|lg|xl)\b/);
+  });
+
   it('shows a thinking indicator while streaming with no text yet', () => {
     hookReturn = makeReturn({ streaming: true, streamingText: '', canSend: false });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);

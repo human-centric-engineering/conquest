@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import { CHAT_TEXT_SCALE_STORAGE_KEY } from '@/lib/app/questionnaire/chat/text-scale';
 
 const sendMessage = vi.fn();
 const applyStatus = vi.fn();
@@ -228,6 +229,9 @@ function formReturn(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The text-size preference is a real localStorage write, so clear it between tests or a stepped
+  // size leaks into the next case.
+  window.localStorage.clear();
   // Sensible defaults so a render in any mode doesn't crash; mode tests override as needed.
   streamHook.mockReturnValue({ canSend: true, status: 'idle', sendMessage, kickoff, applyStatus });
   panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
@@ -709,6 +713,61 @@ describe('SessionWorkspace', () => {
     setup({ canSend: false });
     fireEvent.click(screen.getByText('revisit'));
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Chat text size — the PUBLISHING half. The stepper and the transcript live in different
+   * subtrees, joined only by the `--cq-chat-scale` custom property this component puts on its
+   * root, so these pin the value that property actually carries after a step, a restore, and a
+   * corrupt read. QuestionnaireChat is mocked here, so the consuming half (the transcript opting
+   * in via `.cq-chat-scale`) is asserted in `chat/questionnaire-chat.test.tsx` instead.
+   */
+  describe('chat text size', () => {
+    /**
+     * The div carrying the custom property. Queried by its own testid rather than by climbing to the
+     * nearest styled ancestor — that climb silently retargets to any styled wrapper introduced
+     * between the bar and the root, and the resulting `''` reads as a real value.
+     */
+    const scaleRoot = () => screen.getByTestId('workspace-scale-root');
+    const scale = () => scaleRoot().style.getPropertyValue('--cq-chat-scale');
+
+    it('publishes the default scale so an untouched session renders unchanged', () => {
+      setup();
+      expect(scale()).toBe('1');
+    });
+
+    it('raises the scale exactly one rung when the respondent steps up', () => {
+      setup();
+      fireEvent.click(screen.getByRole('button', { name: 'Increase text size' }));
+      // Index 1 → 2, i.e. 1.15. Pinned exactly: a broken step that jumped to the top of the ladder
+      // would still be "larger", so a comparison would pass on the wrong value.
+      expect(scale()).toBe('1.15');
+    });
+
+    it('writes the chosen index to storage', () => {
+      setup();
+      fireEvent.click(screen.getByRole('button', { name: 'Increase text size' }));
+      expect(window.localStorage.getItem(CHAT_TEXT_SCALE_STORAGE_KEY)).toBe('2');
+    });
+
+    it('restores a stored preference on mount', () => {
+      window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(3));
+      setup();
+      expect(scale()).toBe('1.3');
+    });
+
+    it('falls back to the default scale when storage holds something unusable', () => {
+      // A stale index from an older ladder. A NaN reaching the calc() would drop the transcript's
+      // font-size declaration entirely, so this must resolve to a real number.
+      window.localStorage.setItem(CHAT_TEXT_SCALE_STORAGE_KEY, JSON.stringify(99));
+      setup();
+      expect(scale()).toBe('1');
+    });
+
+    it('hides the stepper on the form surface, where there is no transcript to scale', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="form" />);
+      expect(screen.queryByRole('button', { name: 'Increase text size' })).toBeNull();
+    });
   });
 
   it('swaps to the completion confirmation (not the chat) once submitted', () => {

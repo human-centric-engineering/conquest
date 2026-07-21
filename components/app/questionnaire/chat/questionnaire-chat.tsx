@@ -195,7 +195,9 @@ function UserBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-end">
       <div
-        className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+        // No font-size class: the size is inherited from the `.cq-chat-scale` transcript wrapper so
+        // the respondent's preference drives it.
+        className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 leading-relaxed whitespace-pre-wrap"
         style={{
           backgroundColor:
             'color-mix(in srgb, var(--app-accent-color, var(--color-primary)) 12%, transparent)',
@@ -330,7 +332,9 @@ function TypewriterAssistantTurn({
           <TurnNotices warnings={warnings} />
         </>
       ) : (
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+        // Size inherited from `.cq-chat-scale` — the typing text must match the settled Markdown it
+        // becomes, or the reply visibly jumps size the moment the typewriter finishes.
+        <p className="leading-relaxed whitespace-pre-wrap">
           {content.slice(0, shown)}
           <span className="terminal-caret" aria-hidden="true">
             ▋
@@ -553,9 +557,11 @@ export function QuestionnaireChat({
           conversation scrolls. Never shown in the read-only admin viewer (the admin isn't the
           recorded party). Renders nothing once the product is `stable`. */}
       {!readOnly && <ReleaseStageNotice className="mx-4 mt-4 sm:mx-6" />}
-      {/* Transcript */}
+      {/* Transcript. `cq-chat-scale` resolves the respondent's text-size preference from the
+          `--cq-chat-scale` custom property SessionWorkspace sets; the bubbles below inherit it
+          rather than pinning their own size. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        <div className="mx-auto flex max-w-2xl flex-col gap-6">
+        <div className="cq-chat-scale mx-auto flex max-w-2xl flex-col gap-6">
           {/* Experiences, `stitched` continuity (P15.3): the earlier legs of this run, replayed
               above the live conversation so the journey reads as one. Rendered as its own block
               rather than concatenated into `turns` — the reveal cursor, the typewriter and the

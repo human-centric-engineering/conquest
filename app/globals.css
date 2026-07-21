@@ -261,6 +261,22 @@
     display: none; /* Safari + older WebKit/Blink */
   }
 
+  /* Respondent chat text scale. `--cq-chat-scale` is set by SessionWorkspace from the respondent's
+     stored preference; 1 reproduces the historical `text-sm`, so an untouched session is unchanged.
+     Applied to the transcript wrapper and INHERITED by the bubbles, which is why they carry no
+     font-size class of their own — one property drives the whole conversation. Chrome/UI text on the
+     strip keeps its explicit `text-xs`, so the control never resizes itself. */
+  .cq-chat-scale {
+    font-size: calc(0.875rem * var(--cq-chat-scale, 1));
+  }
+  /* `prose-sm` pins its own root font-size, which would otherwise ignore the scale. Re-inherit it:
+     Tailwind Typography sizes children in `em`, so the whole Markdown block — headings, lists, code
+     — scales proportionally from the one inherited value. Descendant selector (0,2,0) deliberately
+     out-specifies `.prose-sm` (0,1,0) so this holds regardless of layer order. */
+  .cq-chat-scale :is(.prose) {
+    font-size: inherit;
+  }
+
   @keyframes terminal-blink {
     to {
       visibility: hidden;
