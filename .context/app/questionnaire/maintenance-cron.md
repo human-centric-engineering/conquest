@@ -105,9 +105,13 @@ Revisit the cadence if any of these become true:
 - Upstream fix tracked as **UG-13** in
   [`../planning/upstream-gaps.md`](../planning/upstream-gaps.md) →
   [sunrise#442](https://github.com/human-centric-engineering/sunrise/issues/442).
-- The admin overview's `/api/health` poll (`SELECT 1` every 30s, **no visibility
-  gating**) keeps the DB awake from a forgotten browser tab independently of this
-  cron. That fix is platform-owned and is part of #442.
+- The admin overview's `/api/health` poll (`SELECT 1` every 30s) would otherwise
+  keep the DB awake from a forgotten browser tab **independently of this cron** —
+  one parked tab returns the bill to ~730 h/month and negates the hourly cadence
+  entirely. Fixed here as a **carried Sunrise patch** (visibility gating in
+  `components/status/use-health-check.ts`); see Carried Sunrise patches in
+  [`../planning/development-plan.md`](../planning/development-plan.md). Retires
+  when #442 lands upstream.
 - Operator visibility for all of this — what runs on a timer, its purpose, and
   whether it actually ran — is proposed upstream as
   [sunrise#443](https://github.com/human-centric-engineering/sunrise/issues/443).
