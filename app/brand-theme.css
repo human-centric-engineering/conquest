@@ -165,6 +165,53 @@
     sans-serif;
 }
 
+/* ==== Respondent — ConQuest default brand ====
+ * Set by BrandThemeProvider as `data-brand='conquest'` when the client supplied NO
+ * visual identity of its own (see `ResolvedTheme.hasBrandIdentity`). The white-label
+ * rule above still holds: the moment a client sets a colour or a logo, this attribute
+ * is absent and the client's inline `--app-*` vars are the only identity inside.
+ *
+ * Why CSS and not inline vars: the ConQuest CTA FLIPS with the surface — deep navy on
+ * cream, gold on navy — mirroring the consumer palette. An inline style can't express
+ * that, so themeToCssVariables() emits NOTHING for an unbranded client and these
+ * declarations fill the gap. Gold always pairs with ink, never white.
+ *
+ * `--app-cta-gradient` is declared explicitly because the CTA reads it FIRST; leaving
+ * it to fall through to `--app-cta-color` would work, but only by accident of the
+ * fallback chain, and a future `--app-cta-gradient` default elsewhere would silently win.
+ *
+ * `--cq-band-*` drive the default header band that carries the ConQuest wordmark: cream
+ * paper with ink text in light, elevated navy with cream text in dark. The wordmark's
+ * own two-tone colouring follows `.dark` from its CSS module, so the band tone must move
+ * with it or the ink "Con" would vanish. */
+[data-surface='respondent'][data-brand='conquest'] {
+  --app-cta-color: #0a1a3a; /* deep ConQuest navy */
+  --app-cta-gradient: #0a1a3a;
+  --app-accent-color: #2f6bff; /* bright ConQuest blue — focus / accent */
+  --cq-band-bg: #fffcf5; /* paper */
+  --cq-band-fg: #16213d; /* ink */
+  --cq-band-border: #e7dccd; /* warm hairline */
+}
+
+.dark [data-surface='respondent'][data-brand='conquest'] {
+  --app-cta-color: #ffc73a; /* gold — the dark-surface CTA */
+  --app-cta-gradient: #ffc73a;
+  --app-accent-color: #5b8bff; /* blue-bright on navy */
+  --cq-band-bg: #112650; /* ink-700 — elevated navy */
+  --cq-band-fg: #f2eede; /* cream */
+  --cq-band-border: #1f2f52;
+}
+
+/* Gold CTA needs ink on top, never white — the respondent canvas's neutral
+ * `--color-primary-foreground` (#18181b light / #ffffff dark) would put WHITE on gold in
+ * dark mode and fail contrast. Pin the pairing to the brand instead. */
+[data-surface='respondent'][data-brand='conquest'] {
+  --color-primary-foreground: #fbf6ec; /* cream on navy */
+}
+.dark [data-surface='respondent'][data-brand='conquest'] {
+  --color-primary-foreground: #0a1a3a; /* ink on gold */
+}
+
 /* ==== Respondent backdrop ====
  * The respondent pin only re-tokenises its own subtree (the BrandThemeProvider
  * cards), so the surrounding <main> — an ANCESTOR of the pin — still shows the

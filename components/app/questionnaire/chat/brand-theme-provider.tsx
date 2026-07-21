@@ -29,6 +29,7 @@
 import type { CSSProperties } from 'react';
 
 import { cn } from '@/lib/utils';
+import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { themeToCssVariables, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import { buildScheduleView, type ScheduleStatus } from '@/lib/app/questionnaire/header/schedule';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
@@ -82,14 +83,21 @@ export function BrandThemeProvider({
   const hasSurface = Boolean(theme.surfaceColor);
   const hasBackdrop = Boolean(theme.logoBackgroundColor);
   const hasLogo = Boolean(theme.logoUrl);
+  // No client identity at all → ConQuest owns the surface. Drives BOTH the wordmark in
+  // the band and (via `data-brand`) the mode-aware ConQuest palette in brand-theme.css.
+  const isConquest = !theme.hasBrandIdentity;
+  // Either mark anchors the left of the band, so the title anchors opposite it.
+  const hasMark = hasLogo || isConquest;
 
   const title = header?.title?.trim() ?? '';
   const round = header?.round ?? null;
   // SSR-computed against the render-time clock: a day-granularity window, fresh enough for a header.
   const schedule = round ? buildScheduleView(round, new Date()) : null;
 
-  // Worth a band when there's a surface to paint, a logo to carry, or a title to show.
-  const showBand = hasSurface || hasLogo || Boolean(title);
+  // Worth a band when there's a surface to paint, a mark to carry, or a title to show.
+  // An unbranded questionnaire ALWAYS gets one: the ConQuest wordmark is the whole point,
+  // so it must not depend on a title being present.
+  const showBand = hasSurface || hasMark || Boolean(title);
 
   return (
     // `data-surface="respondent"` re-scopes the central questionnaire area to a
@@ -98,21 +106,41 @@ export function BrandThemeProvider({
     // the only identity inside, while the surrounding header / footer / cookie
     // modal stay ConQuest. Renders identically live (/q) and logged-in
     // (/questionnaires) since both wrap their chat in this provider.
-    <div data-surface="respondent" style={style} className={cn('flex h-full flex-col', className)}>
+    <div
+      data-surface="respondent"
+      data-brand={isConquest ? 'conquest' : undefined}
+      style={style}
+      className={cn('flex h-full flex-col', className)}
+    >
       {showBand && (
         <header
           className={cn(
             'flex shrink-0 items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6',
-            // No surface → sit on the neutral canvas with a hairline rule to separate the band.
-            !hasSurface && 'border-b border-current/10'
+            // No surface → a hairline rule separates the band from the canvas below.
+            !hasSurface && 'border-b',
+            // Client surface absent and no ConQuest band tone → the neutral canvas.
+            !hasSurface && !isConquest && 'border-current/10'
           )}
           style={
             hasSurface
               ? { backgroundColor: 'var(--app-surface-color)', color: 'var(--app-on-surface)' }
-              : undefined
+              : isConquest
+                ? {
+                    backgroundColor: 'var(--cq-band-bg)',
+                    color: 'var(--cq-band-fg)',
+                    borderColor: 'var(--cq-band-border)',
+                  }
+                : undefined
           }
         >
-          {hasLogo && <LogoMark hasBackdrop={hasBackdrop} />}
+          {hasLogo ? (
+            <LogoMark hasBackdrop={hasBackdrop} />
+          ) : (
+            // Unbranded → the ConQuest lockup stands in for the client logo. Real type
+            // rather than an image asset: crisp at any size and it already follows dark
+            // mode, which a flat PNG could not.
+            isConquest && <ConquestWordmark size="page" showSubtitle className="shrink-0" />
+          )}
 
           {/* Two-anchor header. With a logo, the title anchors hard RIGHT opposite it — the empty
               middle is deliberate negative space, not waste. With no logo the title leads from the
@@ -121,14 +149,14 @@ export function BrandThemeProvider({
             <div
               className={cn(
                 'flex min-w-0 flex-1 flex-col gap-0.5',
-                hasLogo ? 'items-end text-right' : 'items-start text-left'
+                hasMark ? 'items-end text-right' : 'items-start text-left'
               )}
             >
               {title && (
                 <p
                   className={cn(
                     'max-w-full truncate leading-tight font-semibold',
-                    hasLogo ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'
+                    hasMark ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'
                   )}
                 >
                   {title}
@@ -141,7 +169,7 @@ export function BrandThemeProvider({
                 <div
                   className={cn(
                     'hidden max-w-full items-center gap-2 text-xs font-medium opacity-75 sm:flex',
-                    hasLogo ? 'justify-end' : 'justify-start'
+                    hasMark ? 'justify-end' : 'justify-start'
                   )}
                 >
                   {round?.name && <span className="min-w-0 truncate">{round.name}</span>}

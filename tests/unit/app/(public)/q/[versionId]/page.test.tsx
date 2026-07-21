@@ -130,6 +130,7 @@ const MOCK_THEME: ResolvedTheme = {
   surfaceColor: null,
   ctaColorEnd: null,
   logoBackgroundColor: null,
+  hasBrandIdentity: false,
 };
 
 function makeParams(versionId: string = VERSION_ID) {

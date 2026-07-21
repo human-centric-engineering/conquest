@@ -206,6 +206,7 @@ const MOCK_THEME: ResolvedTheme = {
   surfaceColor: null,
   ctaColorEnd: null,
   logoBackgroundColor: null,
+  hasBrandIdentity: false,
 };
 
 /** Build a minimal DB row for the session. Defaults to owned + active + no prior answers. */

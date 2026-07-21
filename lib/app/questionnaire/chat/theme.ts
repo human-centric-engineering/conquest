@@ -2,7 +2,7 @@
  * DEMO-ONLY (F7.1): resolve the respondent chat surface's brand theme.
  *
  * Walks a session (or version) to its questionnaire's attributed demo client and resolves the
- * four nullable theme columns into a fully-populated {@link ResolvedTheme} (Sunrise defaults
+ * four nullable theme columns into a fully-populated {@link ResolvedTheme} (ConQuest defaults
  * fill any gap). The pure projection into CSS custom properties lives in the theming module;
  * this is just the Prisma seam. A fork that strips demo tenancy drops this file and passes
  * `resolveTheme(null)` everywhere.

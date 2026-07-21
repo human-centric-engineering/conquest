@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@react-email/render';
 
 import RespondentReportReadyEmail from '@/emails/respondent-report-ready';
-import { resolveTheme, SUNRISE_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
+import { resolveTheme, CONQUEST_THEME_DEFAULTS } from '@/lib/app/questionnaire/theming';
 
 /**
  * Render tests for the report-ready email. Contract: it shows the questionnaire title + a link back
@@ -25,7 +25,7 @@ describe('RespondentReportReadyEmail — unthemed (Sunrise default)', () => {
 
   it('falls back to the Sunrise CTA colour and renders no logo when no theme is passed', async () => {
     const html = await render(<RespondentReportReadyEmail {...baseProps} />);
-    expect(html).toContain(SUNRISE_THEME_DEFAULTS.ctaColor);
+    expect(html).toContain(CONQUEST_THEME_DEFAULTS.ctaColor);
     expect(html).not.toContain('<img');
   });
 });

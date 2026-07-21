@@ -4,7 +4,7 @@
  * Pure Zod — no Prisma / Next — so the demo-client admin routes validate at the
  * boundary and the form component shares the inferred types. Each field is form-
  * friendly: an empty string (a cleared input) coerces to `null` so the column stores
- * null (→ Sunrise default via resolveTheme) rather than an empty string. Colours must
+ * null (→ ConQuest default via resolveTheme) rather than an empty string. Colours must
  * be hex; the logo must be an absolute https URL. The {@link themeFields} bag is
  * spread into the demo-client create/update schemas.
  */

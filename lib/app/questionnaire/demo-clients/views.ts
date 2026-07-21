@@ -26,16 +26,16 @@ export interface DemoClientView {
   description: string | null;
   /** Soft-disable flag — an inactive client is excluded from the attribution picker. */
   isActive: boolean;
-  // DEMO-ONLY (F3.4): brand theme — null on any field means "use the Sunrise default"
+  // DEMO-ONLY (F3.4): brand theme — null on any field means "use the ConQuest default"
   // (resolveTheme fills it). The invitation email renders all four; accentColor is the
   // email's fallback-link colour and doubles as the F7.1 CSS-variable accent.
-  /** CTA / primary button colour (hex), or null for the Sunrise default. */
+  /** CTA / primary button colour (hex), or null for the ConQuest default. */
   ctaColor: string | null;
   /** Accent colour (hex) — email fallback-link colour + F7.1 accent; null = default. */
   accentColor: string | null;
   /** Absolute https logo URL shown in the invitation email, or null. */
   logoUrl: string | null;
-  /** Branded invitation intro line, or null for the Sunrise default copy. */
+  /** Branded invitation intro line, or null for the ConQuest default copy. */
   welcomeCopy: string | null;
   // DEMO-ONLY (F7.1+): respondent-session chrome. All optional; null/false = no band.
   /** Deep brand "chrome" colour (hex) — session header band + default logo backdrop. */

@@ -2,8 +2,8 @@
  * DemoClientThemePreview — admin-facing visual preview of a demo client's brand.
  *
  * compact mode shows only configured fields ("once they've been configured"); full
- * mode shows the resolved brand (defaults filled). Logo uses the escaped
- * `--app-logo-url` background, never a raw <img src>.
+ * mode shows the resolved brand (defaults filled). Logo uses an escaped `url()`
+ * background, never a raw <img src>.
  *
  * @see components/admin/demo-clients/demo-client-theme-preview.tsx
  */
@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import { DemoClientThemePreview } from '@/components/admin/demo-clients/demo-client-theme-preview';
-import { SUNRISE_THEME_DEFAULTS, type DemoClientTheme } from '@/lib/app/questionnaire/theming';
+import { CONQUEST_THEME_DEFAULTS, type DemoClientTheme } from '@/lib/app/questionnaire/theming';
 
 const UNCONFIGURED: DemoClientTheme = {
   ctaColor: null,
@@ -50,9 +50,7 @@ describe('DemoClientThemePreview — compact (table)', () => {
 
     const logo = logoBox(container);
     expect(logo).not.toBeNull();
-    expect((logo as HTMLElement).style.getPropertyValue('--app-logo-url')).toBe(
-      'url("https://example.com/logo.png")'
-    );
+    expect((logo as HTMLElement).style.backgroundImage).toBe('url("https://example.com/logo.png")');
     expect(screen.queryByText('Default')).not.toBeInTheDocument();
   });
 
@@ -73,13 +71,13 @@ describe('DemoClientThemePreview — full (detail / live preview)', () => {
   it('renders the resolved cta/accent hex and welcome copy, with "No logo" when unset', () => {
     render(<DemoClientThemePreview theme={UNCONFIGURED} />);
 
-    // Sunrise defaults fill the gaps.
-    expect(screen.getByText(`CTA ${SUNRISE_THEME_DEFAULTS.ctaColor}`)).toBeInTheDocument();
-    expect(screen.getByText(`Accent ${SUNRISE_THEME_DEFAULTS.accentColor}`)).toBeInTheDocument();
-    expect(screen.getByText(`“${SUNRISE_THEME_DEFAULTS.welcomeCopy}”`)).toBeInTheDocument();
+    // ConQuest defaults fill the gaps.
+    expect(screen.getByText(`CTA ${CONQUEST_THEME_DEFAULTS.ctaColor}`)).toBeInTheDocument();
+    expect(screen.getByText(`Accent ${CONQUEST_THEME_DEFAULTS.accentColor}`)).toBeInTheDocument();
+    expect(screen.getByText(`“${CONQUEST_THEME_DEFAULTS.welcomeCopy}”`)).toBeInTheDocument();
     expect(screen.getByText('No logo')).toBeInTheDocument();
     expect(
-      screen.getByText('Nothing configured — these are the Sunrise defaults.')
+      screen.getByText('Nothing configured — this questionnaire runs in ConQuest colours.')
     ).toBeInTheDocument();
   });
 
@@ -95,15 +93,15 @@ describe('DemoClientThemePreview — full (detail / live preview)', () => {
       />
     );
     expect(screen.getByText('CTA #abcdef')).toBeInTheDocument();
-    // accentColor null → resolved to the Sunrise default
-    expect(screen.getByText(`Accent ${SUNRISE_THEME_DEFAULTS.accentColor}`)).toBeInTheDocument();
+    // accentColor null → resolved to the ConQuest default
+    expect(screen.getByText(`Accent ${CONQUEST_THEME_DEFAULTS.accentColor}`)).toBeInTheDocument();
     expect(screen.getByText('“Welcome aboard”')).toBeInTheDocument();
-    expect((logoBox(container) as HTMLElement).style.getPropertyValue('--app-logo-url')).toBe(
+    expect((logoBox(container) as HTMLElement).style.backgroundImage).toBe(
       'url("https://example.com/brand.svg")'
     );
     expect(screen.queryByText('No logo')).not.toBeInTheDocument();
     expect(
-      screen.queryByText('Nothing configured — these are the Sunrise defaults.')
+      screen.queryByText('Nothing configured — this questionnaire runs in ConQuest colours.')
     ).not.toBeInTheDocument();
   });
 });

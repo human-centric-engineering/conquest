@@ -45,7 +45,7 @@ const hexOrBlank = z
   .string()
   .trim()
   .refine((v) => v === '' || HEX_COLOR_PATTERN.test(v), {
-    message: 'Hex colour like #5469d4 (or leave blank for the default)',
+    message: 'Hex colour like #0a1a3a (or leave blank for the default)',
   });
 
 const formSchema = z.object({
@@ -59,7 +59,7 @@ const formSchema = z.object({
     }),
   description: z.string().trim().max(500),
   isActive: z.boolean(),
-  // DEMO-ONLY (F3.4): brand theme for the invitation email. Blank = Sunrise default.
+  // DEMO-ONLY (F3.4): brand theme for the invitation email. Blank = ConQuest default.
   ctaColor: hexOrBlank,
   accentColor: hexOrBlank,
   logoUrl: z.string().trim().refine(isBlankOrHttpsUrl, {
@@ -115,7 +115,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
   const logoBackgroundEnabled = watch('logoBackgroundEnabled');
 
   // Live brand preview: reflect only valid inputs (a half-typed hex / non-https URL
-  // shows the default rather than a broken swatch); blank → null → Sunrise default.
+  // shows the default rather than a broken swatch); blank → null → ConQuest default.
   const [
     ctaColor,
     accentColor,
@@ -149,7 +149,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
     setIsLoading(true);
     setError(null);
     try {
-      // Empty theme field → null so the column clears to the Sunrise default.
+      // Empty theme field → null so the column clears to the ConQuest default.
       const themeOrNull = (v: string) => (v.trim() === '' ? null : v.trim());
       const body = {
         name: values.name,
@@ -252,15 +252,19 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
         />
       </div>
 
-      {/* DEMO-ONLY (F3.4 / F7.1+): brand theming. Every field is optional — blank falls
-          back to the Sunrise default, so an unthemed client sends the plain email and shows
-          the plain session chrome. Colours apply to BOTH the invitation email and the
-          respondent question session (and the admin "Preview as respondent"). */}
+      {/* DEMO-ONLY (F3.4 / F7.1+): brand theming. Every field is optional. Setting ANY
+          visual field claims the surface: the session becomes white-label and the client's
+          brand is the only identity inside it. Setting NONE leaves the session in ConQuest
+          colours with the ConQuest wordmark in the header band (see `hasBrandIdentity` in
+          lib/app/questionnaire/theming/theme.ts). Colours apply to BOTH the invitation email
+          and the respondent question session (and the admin "Preview as respondent"). */}
       <fieldset className="space-y-4 rounded-md border px-4 py-4">
         <legend className="px-1 text-sm font-medium">Brand theming</legend>
         <p className="text-muted-foreground -mt-1 text-xs">
           Optional. Applied to the invitation email and the respondent question session (visible via
-          &ldquo;Preview as respondent&rdquo;). Leave a field blank to use the Sunrise default.
+          &ldquo;Preview as respondent&rdquo;). Set nothing and the session runs in ConQuest colours
+          with the ConQuest banner; set any field and this client&apos;s brand takes over the
+          session entirely.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -286,14 +290,14 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
             <Label htmlFor="accentColor" className="flex items-center gap-1">
               Accent colour
               <FieldHelp title="Accent colour">
-                Hex secondary/accent colour (e.g. <code className="text-xs">#5469d4</code>). Colours
-                the email&apos;s fallback link and the respondent UI; blank uses the Sunrise
+                Hex secondary/accent colour (e.g. <code className="text-xs">#2f6bff</code>). Colours
+                the email&apos;s fallback link and the respondent UI; blank uses the ConQuest
                 default.
               </FieldHelp>
             </Label>
             <Input
               id="accentColor"
-              placeholder="#5469d4"
+              placeholder="#2f6bff"
               disabled={isLoading}
               {...register('accentColor')}
             />
@@ -307,12 +311,12 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
               CTA colour
               <FieldHelp title="Call-to-action colour">
                 Hex colour for the email&apos;s primary button (e.g.{' '}
-                <code className="text-xs">#5469d4</code>). Blank uses the Sunrise default.
+                <code className="text-xs">#0a1a3a</code>). Blank uses the ConQuest default.
               </FieldHelp>
             </Label>
             <Input
               id="ctaColor"
-              placeholder="#5469d4"
+              placeholder="#0a1a3a"
               disabled={isLoading}
               {...register('ctaColor')}
             />
@@ -404,7 +408,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
             <FieldHelp title="Welcome copy">
               A short branded intro line shown in the invitation email body and as the
               session&apos;s opening greeting, after &ldquo;You&apos;ve been invited to complete
-              &lt;questionnaire&gt;.&rdquo; Blank uses the Sunrise default copy.
+              &lt;questionnaire&gt;.&rdquo; Blank uses the ConQuest default copy.
             </FieldHelp>
           </Label>
           <Textarea

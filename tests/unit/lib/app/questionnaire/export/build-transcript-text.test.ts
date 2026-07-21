@@ -36,6 +36,7 @@ function model(over: Partial<TranscriptExportModel> = {}): TranscriptExportModel
       surfaceColor: null,
       ctaColorEnd: null,
       logoBackgroundColor: null,
+      hasBrandIdentity: false,
     },
     turns: [
       {

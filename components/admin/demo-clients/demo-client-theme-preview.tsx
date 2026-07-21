@@ -9,7 +9,7 @@
  * respondent will see (the same surface band + gradient CTA the session renders).
  *
  * Reuses the theming module rather than re-deriving anything: `resolveTheme()` fills
- * nulls with the Sunrise defaults (and resolves the logo backdrop), and the logo uses
+ * nulls with the ConQuest defaults (and resolves the logo backdrop), and the logo uses
  * the same escaped `--app-logo-url` background approach as {@link BrandThemeProvider}
  * (never a raw `<img src>`), keeping that sink's CSS-injection hardening.
  *
@@ -26,6 +26,7 @@ import type { CSSProperties } from 'react';
 
 import { cn } from '@/lib/utils';
 import {
+  cssUrl,
   resolveTheme,
   themeToCssVariables,
   type DemoClientTheme,
@@ -63,18 +64,8 @@ function LogoThumb({
   backdrop?: string | null;
   compact?: boolean;
 }) {
-  // Reuse the escaped url("…") the theming sink produces, applied as a background so a
-  // hostile stored value can't break out of url() (mirrors BrandThemeProvider). The
-  // remaining theme fields are irrelevant to the logo var, so pass nulls/empties.
-  const style = themeToCssVariables({
-    ctaColor: '',
-    accentColor: '',
-    logoUrl,
-    welcomeCopy: '',
-    surfaceColor: null,
-    ctaColorEnd: null,
-    logoBackgroundColor: null,
-  }) as CSSProperties;
+  // Escape through the shared theming sink so a hostile stored value can't break out of
+  // url() (the same helper themeToCssVariables uses for --app-logo-url).
   return (
     <span
       role="img"
@@ -85,9 +76,8 @@ function LogoThumb({
         backdrop && 'rounded px-2'
       )}
       style={{
-        backgroundImage: 'var(--app-logo-url)',
+        backgroundImage: cssUrl(logoUrl),
         ...(backdrop ? { backgroundColor: backdrop } : {}),
-        ...style,
       }}
     />
   );
@@ -235,7 +225,7 @@ export function DemoClientThemePreview({
       <p className="text-muted-foreground text-sm italic">&ldquo;{resolved.welcomeCopy}&rdquo;</p>
       {!configured && (
         <p className="text-muted-foreground text-xs">
-          Nothing configured — these are the Sunrise defaults.
+          Nothing configured — this questionnaire runs in ConQuest colours.
         </p>
       )}
     </div>

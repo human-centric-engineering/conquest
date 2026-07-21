@@ -56,6 +56,7 @@ const SENTINEL_THEME: ResolvedTheme = {
   surfaceColor: null,
   ctaColorEnd: null,
   logoBackgroundColor: null,
+  hasBrandIdentity: false,
 };
 
 // ---------------------------------------------------------------------------

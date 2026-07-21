@@ -11,6 +11,7 @@ import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-th
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
 
+/** A client that supplied its own colours — the white-label path. */
 const BASE: ResolvedTheme = {
   ctaColor: '#112233',
   accentColor: '#445566',
@@ -19,7 +20,11 @@ const BASE: ResolvedTheme = {
   surfaceColor: null,
   ctaColorEnd: null,
   logoBackgroundColor: null,
+  hasBrandIdentity: true,
 };
+
+/** A client with no visual identity at all — the ConQuest fallback path. */
+const UNBRANDED: ResolvedTheme = { ...BASE, hasBrandIdentity: false };
 
 /** A header far enough inside an open window to read "Open · closes in N days". */
 function openHeader(over: Partial<BandHeader['round'] & object> = {}): BandHeader {
@@ -116,7 +121,9 @@ describe('BrandThemeProvider', () => {
       expect(screen.queryByText(/Open|Closed|Opens|Closing/)).not.toBeInTheDocument();
     });
 
-    it('renders no band at all with no surface, no logo, and no header', () => {
+    it('renders no band for a BRANDED client with no surface, no logo, and no header', () => {
+      // A client that set only colours has nothing to put in a band, so there isn't one.
+      // Contrast with the unbranded case below, which always gets the ConQuest wordmark.
       const { container } = render(
         <BrandThemeProvider theme={BASE}>
           <span>child</span>
@@ -138,6 +145,63 @@ describe('BrandThemeProvider', () => {
       const band = container.querySelector('header') as HTMLElement;
       expect(band.style.backgroundColor).toBe('var(--app-surface-color)');
       expect(band.style.color).toBe('var(--app-on-surface)');
+    });
+  });
+
+  describe('ConQuest default brand (no client identity)', () => {
+    it('renders a band with the ConQuest wordmark even with no logo and no header', () => {
+      // The whole point of the fallback: an unbranded questionnaire must never render
+      // as an anonymous grey surface, and must not depend on a title being present.
+      const { container } = render(
+        <BrandThemeProvider theme={UNBRANDED}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(container.querySelector('header')).toBeInTheDocument();
+      expect(screen.getByLabelText('ConQuest')).toBeInTheDocument();
+      expect(screen.getByText('Con')).toBeInTheDocument();
+      expect(screen.getByText('Quest')).toBeInTheDocument();
+    });
+
+    it('marks the wrapper data-brand="conquest" so the mode-aware CSS palette applies', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={UNBRANDED}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect((container.firstChild as HTMLElement).dataset.brand).toBe('conquest');
+    });
+
+    it('paints the band with the mode-aware band tokens, not a fixed hex', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={UNBRANDED}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const band = container.querySelector('header') as HTMLElement;
+      expect(band.style.backgroundColor).toBe('var(--cq-band-bg)');
+      expect(band.style.color).toBe('var(--cq-band-fg)');
+    });
+
+    it('anchors the title opposite the wordmark, as it does opposite a client logo', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={UNBRANDED} header={{ title: 'Standalone Survey', round: null }}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.getByText('Standalone Survey')).toBeInTheDocument();
+      expect(container.querySelector('.items-end')).toBeInTheDocument();
+    });
+
+    it('yields to a client logo — the wordmark never competes with real branding', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={{ ...BASE, logoUrl: 'https://acme.example/logo.png' }}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.queryByLabelText('ConQuest')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Brand logo')).toBeInTheDocument();
+      expect((container.firstChild as HTMLElement).dataset.brand).toBeUndefined();
     });
   });
 });

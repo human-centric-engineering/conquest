@@ -9,7 +9,8 @@
 export {
   type DemoClientTheme,
   type ResolvedTheme,
-  SUNRISE_THEME_DEFAULTS,
+  CONQUEST_THEME_DEFAULTS,
+  cssUrl,
   readableTextColor,
   resolveTheme,
   themeToCssVariables,

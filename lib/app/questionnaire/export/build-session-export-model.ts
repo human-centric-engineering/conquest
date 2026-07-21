@@ -47,7 +47,7 @@ export interface SessionExportInput {
   completedAt: string | null;
   /** ISO generation timestamp (the seam stamps it; the builder has no clock). */
   generatedAt: string;
-  /** Demo-client theme columns (or null for the Sunrise default). */
+  /** Demo-client theme columns (or null for the ConQuest default). */
   theme: DemoClientTheme | null;
   status: SessionStatus;
   sections: PanelSectionInput[];

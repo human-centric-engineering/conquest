@@ -35,6 +35,7 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
       surfaceColor: null,
       ctaColorEnd: null,
       logoBackgroundColor: null,
+      hasBrandIdentity: false,
     },
     sections: [],
     answeredCount: 0,
