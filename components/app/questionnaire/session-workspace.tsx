@@ -21,7 +21,7 @@
  * prop-drilling.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, ClipboardList, Drama, ListChecks, MessageSquare } from 'lucide-react';
 
@@ -31,6 +31,7 @@ import { useQuestionnaireSessionStream } from '@/lib/hooks/use-questionnaire-ses
 import { useAnswerPanel } from '@/lib/hooks/use-answer-panel';
 import { useFormAnswers } from '@/lib/hooks/use-form-answers';
 import { useSessionLifecycle } from '@/lib/hooks/use-session-lifecycle';
+import { useLocalStorage } from '@/lib/hooks/use-local-storage';
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 import { AnswerSlotPanel } from '@/components/app/questionnaire/panel/answer-slot-panel';
 import { AnswerReviewDrawer } from '@/components/app/questionnaire/panel/answer-review-drawer';
@@ -42,6 +43,14 @@ import {
 } from '@/lib/app/questionnaire/panel/newly-filled';
 import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction-targets';
 import { ModeToggle, type ToggleItem } from '@/components/app/questionnaire/mode-toggle';
+import { ChatTextSize } from '@/components/app/questionnaire/chat/chat-text-size';
+import {
+  CHAT_TEXT_SCALE_STORAGE_KEY,
+  DEFAULT_CHAT_TEXT_SCALE_INDEX,
+  normalizeScaleIndex,
+  scaleForIndex,
+  stepScaleIndex,
+} from '@/lib/app/questionnaire/chat/text-scale';
 import { QuestionnaireSplash } from '@/components/app/questionnaire/intro/questionnaire-splash';
 import { PersonaPicker } from '@/components/app/questionnaire/persona/persona-picker';
 import {
@@ -295,6 +304,22 @@ export function SessionWorkspace({
   const [reviewOpen, setReviewOpen] = useState(false);
   // The `indicator`-mode "change your interviewer" modal (no carousel persona page in that switcher).
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
+  // Respondent-owned chat text size, persisted globally rather than per session: someone who needs
+  // larger text needs it in the next leg of an Experience too, and should not re-set it each time.
+  // `useLocalStorage` hydrates after mount (SSR-safe), so the first paint is the default size and
+  // settles to the stored one — a font-size change only, no layout shift beyond reflow.
+  const [storedTextScaleIndex, setTextScaleIndex] = useLocalStorage<number>(
+    CHAT_TEXT_SCALE_STORAGE_KEY,
+    DEFAULT_CHAT_TEXT_SCALE_INDEX
+  );
+  // Storage is untrusted (stale ladder, another tab, hand-edited); normalise before it can reach a
+  // `calc()`, where a NaN would silently drop the transcript's font-size entirely.
+  const textScaleIndex = normalizeScaleIndex(storedTextScaleIndex);
+  // CSS custom properties aren't part of `CSSProperties`, so the var is declared on its own typed
+  // const rather than asserted inline.
+  const chatScaleStyle: CSSProperties & Record<'--cq-chat-scale', string> = {
+    '--cq-chat-scale': String(scaleForIndex(textScaleIndex)),
+  };
   // Both reads refetch on each clean turn-settle. The stream reads its `onTurnSettled`
   // through a ref, so routing the refetches through refs here breaks the declaration
   // cycle (stream needs the settle handler; the hooks below need the stream's applyStatus).
@@ -787,9 +812,19 @@ export function SessionWorkspace({
   // The interviewer chip only makes sense on the chat surface (not while reading the intro / on the
   // form / on the picker page itself).
   const showChipHere = showInterviewerChip && activeView === 'chat';
+  // The text-size stepper rides with the chat surface only: on the form, intro and persona pages
+  // there is no transcript for it to act on, and a control that appears to do nothing is worse than
+  // one that is absent.
+  const showTextSize = activeView === 'chat';
   const trailingControls =
-    showToggle || showReviewTrigger || showChipHere ? (
+    showToggle || showReviewTrigger || showChipHere || showTextSize ? (
       <>
+        {showTextSize && (
+          <ChatTextSize
+            index={textScaleIndex}
+            onStep={(direction) => setTextScaleIndex(stepScaleIndex(textScaleIndex, direction))}
+          />
+        )}
         {showChipHere && (
           <CurrentInterviewerChip
             label={currentPersonaLabel}
@@ -960,7 +995,16 @@ export function SessionWorkspace({
     ) : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    // `--cq-chat-scale` is consumed by the `.cq-chat-scale` utility on the transcript (globals.css).
+    // Set here, on the common ancestor of the strip control and the chat, so one property drives the
+    // conversation while the strip's own `text-xs` chrome stays fixed.
+    <div
+      className="flex h-full min-h-0 flex-col gap-3"
+      style={chatScaleStyle}
+      // Stable hook for the text-scale tests. Without it they have to climb the tree for the
+      // nearest styled ancestor, which silently retargets the moment any styled wrapper is added.
+      data-testid="workspace-scale-root"
+    >
       {/* Final completion sweep (F7.3): the early-finish path surfaces the held probe in a modal over
           the exit action. The normal (mid-conversation) path shows it in the chat instead (no modal),
           so this only opens when the held submit was an early finish. Either way the probe is also a

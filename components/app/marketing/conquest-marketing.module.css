@@ -1107,10 +1107,11 @@
   letter-spacing: -0.02em;
   line-height: 1.05;
   font-size: clamp(34px, 5.4vw, 60px);
-  /* Balance the display lines so the closing italic never dangles alone. */
+  /* Balance the display lines so the closing italic never dangles alone. Balance only redistributes
+     across the lines the text already needs, so it is safe on the pages that force their own break
+     with a <br> (home). Deliberately NO max-width here: this class is shared by home, contact and
+     waitlist, and a ch-based cap would force an extra line into home's hand-broken two-line hero. */
   text-wrap: balance;
-  max-width: 18ch;
-  margin-inline: auto;
 }
 .finalTitle em {
   font-style: italic;
