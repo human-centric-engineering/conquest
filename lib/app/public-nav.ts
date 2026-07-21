@@ -25,17 +25,19 @@
  *
  * Full guide: CUSTOMIZATION.md §4 · lib/public-nav/types.ts
  */
-import { Home, Mail, Tag } from 'lucide-react';
+import { Home, Layers, Mail, Tag } from 'lucide-react';
 
 import type { PublicNavItem } from '@/lib/public-nav/types';
 
 /**
  * Header nav. Replaces the Sunrise default wholesale with the ConQuest marketing
- * set — Home / Pricing / Contact for now (the ConQuest pitch is the homepage, and
- * Sunrise's default "About" is dropped). `/` is exact; the rest prefix-match.
+ * set — Home / Capabilities / Pricing / Contact (the ConQuest pitch is the
+ * homepage, and Sunrise's default "About" is dropped). `/` is exact; the rest
+ * prefix-match.
  */
 export const publicNavItems: PublicNavItem[] | null = [
   { href: '/', label: 'Home', icon: Home, exact: true },
+  { href: '/capabilities', label: 'Capabilities', icon: Layers },
   { href: '/pricing', label: 'Pricing', icon: Tag },
   { href: '/contact', label: 'Contact', icon: Mail },
 ];
@@ -46,6 +48,7 @@ export const publicNavItems: PublicNavItem[] | null = [
  */
 export const footerNavItems: PublicNavItem[] | null = [
   { href: '/', label: 'Home' },
+  { href: '/capabilities', label: 'Capabilities' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/contact', label: 'Contact' },
 ];
