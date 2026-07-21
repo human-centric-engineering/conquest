@@ -15,12 +15,14 @@ describe('resolveTheme', () => {
       ctaColor: null,
       accentColor: null,
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: null,
     });
     expect(resolved).toEqual({
       ctaColor: CONQUEST_THEME_DEFAULTS.ctaColor,
       accentColor: CONQUEST_THEME_DEFAULTS.accentColor,
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: CONQUEST_THEME_DEFAULTS.welcomeCopy,
       // F7.1+ chrome: no surface, solid CTA, no logo backdrop when nothing is set.
       surfaceColor: null,
@@ -42,6 +44,7 @@ describe('resolveTheme', () => {
       ctaColor: '#ff0000',
       accentColor: null,
       logoUrl: 'https://acme.example/logo.png',
+      bannerUrl: null,
       welcomeCopy: 'Welcome to the Acme demo.',
     };
     const resolved = resolveTheme(theme);
@@ -58,6 +61,7 @@ describe('resolveTheme', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: 'https://acme.example/logo.svg',
+        bannerUrl: null,
         welcomeCopy: null,
       }).logoUrl
     ).toBe('https://acme.example/logo.svg');
@@ -68,6 +72,7 @@ describe('resolveTheme', () => {
       ctaColor: '#280039',
       accentColor: null,
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: null,
       surfaceColor: '#280039',
       ctaColorEnd: '#FF03DF',
@@ -82,6 +87,7 @@ describe('resolveTheme', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         logoBackgroundColor: '#280039',
         logoBackgroundEnabled: false,
@@ -94,6 +100,7 @@ describe('resolveTheme', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         surfaceColor: '#111111',
         logoBackgroundColor: '#280039',
@@ -107,6 +114,7 @@ describe('resolveTheme', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         surfaceColor: '#280039',
         logoBackgroundColor: null,
@@ -120,6 +128,7 @@ describe('resolveTheme', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         logoBackgroundEnabled: true,
       });
@@ -189,11 +198,33 @@ describe('themeToCssVariables', () => {
         ctaColor: '#280039',
         accentColor: '#FF03DF',
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
       })
     );
     expect(vars['--app-cta-color']).toBe('#280039');
     expect(vars['--app-accent-color']).toBe('#FF03DF');
+  });
+
+  it('pairs a readable foreground with the CTA, so a pale brand is not white-on-white', () => {
+    // The CTAs paint their background from --app-cta-gradient directly and never consult
+    // the platform primary/primary-foreground pair, so the pairing has to travel with the
+    // brand or every button hardcodes white and hopes.
+    const dark = themeToCssVariables(
+      resolveTheme({ ctaColor: '#0a1a3a', accentColor: null, logoUrl: null, welcomeCopy: null })
+    );
+    const pale = themeToCssVariables(
+      resolveTheme({ ctaColor: '#ffe680', accentColor: null, logoUrl: null, welcomeCopy: null })
+    );
+    expect(dark['--app-on-cta']).toBe('#ffffff');
+    expect(pale['--app-on-cta']).toBe('#1a1a1a');
+  });
+
+  it('omits --app-on-cta for an unbranded client, leaving the mode-aware CSS to pair it', () => {
+    // ConQuest flips navy → gold with the theme; a flat inline value would pin one of them
+    // and put white on gold in dark mode (~1.7:1).
+    const vars = themeToCssVariables(resolveTheme(null));
+    expect(vars['--app-on-cta']).toBeUndefined();
   });
 
   it('emits NO colour variables for an unbranded client, so the ConQuest CSS defaults win', () => {
@@ -216,6 +247,7 @@ describe('themeToCssVariables', () => {
         ctaColor: '#280039',
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
       })
     );
@@ -228,6 +260,7 @@ describe('themeToCssVariables', () => {
         ctaColor: '#280039',
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         ctaColorEnd: '#FF03DF',
       })
@@ -245,6 +278,7 @@ describe('themeToCssVariables', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         surfaceColor: '#280039',
         logoBackgroundColor: '#280039',
@@ -261,6 +295,7 @@ describe('themeToCssVariables', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         surfaceColor: '#16243f', // deep navy
       })
@@ -274,6 +309,7 @@ describe('themeToCssVariables', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: null,
+        bannerUrl: null,
         welcomeCopy: null,
         surfaceColor: '#f4f1ea', // pale cream
       })
@@ -307,6 +343,7 @@ describe('readableTextColor', () => {
         ctaColor: null,
         accentColor: null,
         logoUrl: 'https://acme.example/logo.png',
+        bannerUrl: null,
         welcomeCopy: null,
       })
     );
@@ -320,6 +357,7 @@ describe('readableTextColor', () => {
       ctaColor: '#000',
       accentColor: '#000',
       logoUrl: 'https://x/a.png");background:url("https://evil/x.png',
+      bannerUrl: null,
       welcomeCopy: 'hi',
       surfaceColor: null,
       ctaColorEnd: null,

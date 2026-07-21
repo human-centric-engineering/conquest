@@ -85,7 +85,7 @@ export function EarlyFinishControl({ onFinish, busy, className }: EarlyFinishCon
           size="sm"
           onClick={onFinish}
           disabled={busy}
-          className="text-white"
+          className="text-[var(--app-on-cta,#fff)]"
           style={{ backgroundColor: 'var(--app-cta-color, var(--color-primary))' }}
         >
           {busy ? 'Finishing…' : 'Finish up & get my report'}

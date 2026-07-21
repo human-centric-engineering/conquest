@@ -30,6 +30,7 @@ export const DEMO_CLIENT_SELECT = {
   ctaColor: true,
   accentColor: true,
   logoUrl: true,
+  bannerUrl: true,
   welcomeCopy: true,
   // DEMO-ONLY (F7.1+): respondent-session chrome columns.
   surfaceColor: true,
@@ -71,6 +72,7 @@ export function toDemoClientView(row: DemoClientRow): DemoClientView {
     ctaColor: row.ctaColor,
     accentColor: row.accentColor,
     logoUrl: row.logoUrl,
+    bannerUrl: row.bannerUrl,
     welcomeCopy: row.welcomeCopy,
     surfaceColor: row.surfaceColor,
     ctaColorEnd: row.ctaColorEnd,

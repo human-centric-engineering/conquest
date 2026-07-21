@@ -202,14 +202,21 @@
   --cq-band-border: #1f2f52;
 }
 
-/* Gold CTA needs ink on top, never white — the respondent canvas's neutral
- * `--color-primary-foreground` (#18181b light / #ffffff dark) would put WHITE on gold in
- * dark mode and fail contrast. Pin the pairing to the brand instead. */
+/* The CTA's own foreground. Gold needs ink on top, never white: white on #ffc73a is about
+ * 1.7:1 and fails WCAG outright, so the pairing has to move with the CTA rather than being
+ * hardcoded at each button.
+ *
+ * This is `--app-on-cta` and NOT `--color-primary-foreground` because the respondent CTAs
+ * paint their background from `--app-cta-gradient` directly, bypassing the `primary` token
+ * pair entirely — re-tokenising `primary` looked like a fix but nothing on these buttons
+ * ever read it. Branded clients get their own value from `themeToCssVariables`
+ * (readableTextColor of the client's CTA); these two declarations cover the ConQuest
+ * default, where the CTA flips navy → gold with the mode. */
 [data-surface='respondent'][data-brand='conquest'] {
-  --color-primary-foreground: #fbf6ec; /* cream on navy */
+  --app-on-cta: #fbf6ec; /* cream on navy */
 }
 .dark [data-surface='respondent'][data-brand='conquest'] {
-  --color-primary-foreground: #0a1a3a; /* ink on gold */
+  --app-on-cta: #0a1a3a; /* ink on gold */
 }
 
 /* ==== Respondent backdrop ====

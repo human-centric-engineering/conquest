@@ -754,7 +754,7 @@ export function QuestionnaireChat({
                   // "press me" affordance. Only applies when idle — the red
                   // recording/transcribing cues are left untouched. Uses the
                   // solid CTA var (falls back to the platform primary).
-                  idleClassName="border-transparent bg-[var(--app-cta-color,var(--color-primary))] text-white shadow-sm hover:text-white hover:opacity-90 hover:bg-[var(--app-cta-color,var(--color-primary))]"
+                  idleClassName="border-transparent bg-[var(--app-cta-color,var(--color-primary))] text-[var(--app-on-cta,#fff)] shadow-sm hover:text-[var(--app-on-cta,#fff)] hover:opacity-90 hover:bg-[var(--app-cta-color,var(--color-primary))]"
                   extraHeaders={accessToken ? { 'X-Session-Token': accessToken } : undefined}
                   onTranscript={(text) => {
                     setVoiceError(null);
@@ -768,7 +768,7 @@ export function QuestionnaireChat({
                 onClick={handleSend}
                 disabled={!composerReady || input.trim().length === 0}
                 aria-label="Send"
-                className="shrink-0 text-white"
+                className="shrink-0 text-[var(--app-on-cta,#fff)]"
                 // The CTA gradient var resolves to a brand gradient (ctaColor→ctaColorEnd)
                 // when set, else the solid CTA colour; a soft brand-tinted glow gives the
                 // pill the lift the email can't. Both fall back to the platform primary.

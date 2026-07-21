@@ -44,9 +44,10 @@ Sunrise's [multi-tenancy doc][mt] warns against.
 | `name`                  | String   | display name ("Acme Bank Demo")                                                                   |
 | `description`           | String?  | internal admin note                                                                               |
 | `isActive`              | Boolean  | soft-disable; excluded from the attribution picker                                                |
-| `ctaColor`              | String?  | **F3.4** hex CTA / button colour; null → Sunrise default                                          |
+| `ctaColor`              | String?  | **F3.4** hex CTA / button colour; null → ConQuest default                                         |
 | `accentColor`           | String?  | **F3.4** hex accent; email fallback-link colour + F7.1 CSS var; null → default                    |
-| `logoUrl`               | String?  | **F3.4** absolute https logo for the invitation email; null → none                                |
+| `logoUrl`               | String?  | **F3.4** logo (https URL **or** `/uploads/...`) for the email + session band; null → none         |
+| `bannerUrl`             | String?  | **F7.2** full-bleed session header banner (https or `/uploads/...`); null → none                  |
 | `welcomeCopy`           | String?  | **F3.4** branded invitation intro line; null → default copy                                       |
 | `surfaceColor`          | String?  | **F7.1+** hex brand "chrome" colour — session header band + default logo backdrop; null → no band |
 | `ctaColorEnd`           | String?  | **F7.1+** hex CTA gradient end; set → CTA renders `ctaColor → ctaColorEnd`; null → solid CTA      |
@@ -59,8 +60,13 @@ Sunrise's [multi-tenancy doc][mt] warns against.
 keep working; **no backfill**.
 
 **Theme columns are all nullable** (`logoBackgroundEnabled` defaults `false`) — null/off
-on any field means "use the Sunrise default" (`resolveTheme()` fills it), so an unthemed
-client renders exactly as before. The **F7.1+ chrome set** (`surfaceColor`, `ctaColorEnd`,
+on any field means "use the ConQuest default" (`resolveTheme()` fills it).
+
+**Setting any ONE visual column flips the whole surface to white-label.** That is what
+`ResolvedTheme.hasBrandIdentity` records (see below): a client that sets so much as a CTA
+colour owns the respondent area outright, and a client that sets nothing gets ConQuest
+branding rather than an anonymous grey page. `welcomeCopy` is excluded from the test — it
+is copy, not identity. The **F7.1+ chrome set** (`surfaceColor`, `ctaColorEnd`,
 `logoBackgroundColor`, `logoBackgroundEnabled`) makes a brand _suggestive_ — a deep header
 band, a gradient CTA, a backdrop for logos drawn to sit on one — without trying to clone the
 client's site. They are optional on the raw `DemoClientTheme` contract (absent === null), so
@@ -75,23 +81,93 @@ clone-for-client (P3+) is the remaining distributed P2.5 work. See the
 columns into a usable brand:
 
 - `resolveTheme(client | null)` → a `ResolvedTheme` with every gap filled by
-  `SUNRISE_THEME_DEFAULTS` (`logoUrl` stays nullable — there is no default logo).
-  `null` (generic demo) resolves to the all-defaults theme.
-- `themeToCssVariables(theme)` → `--app-cta-color` / `--app-accent-color` /
-  `--app-cta-gradient` (always; a `linear-gradient(...)` when `ctaColorEnd` is set, else
-  the solid CTA colour) plus, when set, `--app-surface-color`, `--app-logo-bg`, and
-  `--app-logo-url`. The **F7.1** user UI spreads these onto a container; the invitation
+  `CONQUEST_THEME_DEFAULTS` (`logoUrl` stays nullable — there is no default logo _image_;
+  the renderer substitutes the ConQuest wordmark instead). `null` (generic demo) resolves
+  to the all-defaults theme.
+- `hasBrandIdentity` — true when the client set any of `ctaColor`, `accentColor`,
+  `logoUrl`, `bannerUrl`, `surfaceColor`, `ctaColorEnd`, or a resolved logo backdrop. It
+  reads the RAW columns, never the resolved ones, so the defaults it applies can't make an
+  unbranded client look branded.
+- `themeToCssVariables(theme)` → when `hasBrandIdentity`, `--app-cta-color` /
+  `--app-accent-color` / `--app-cta-gradient` (a `linear-gradient(...)` when `ctaColorEnd`
+  is set, else the solid CTA colour), plus `--app-surface-color`, `--app-logo-bg`,
+  `--app-logo-url`, `--app-banner-url` when those are set.
+
+  **When `hasBrandIdentity` is false it emits NO colour variables at all.** That is
+  deliberate, not an omission: an inline style beats the stylesheet, so writing the flat
+  ConQuest hexes here would pin light mode and break the dark-mode flip. Instead the
+  mode-aware `[data-surface='respondent'][data-brand='conquest']` block in
+  `app/brand-theme.css` supplies them (navy on cream → gold on navy), matching the
+  consumer palette. The **F7.1** user UI spreads these onto a container; the invitation
   email reads the resolved values inline instead.
+
+- `--app-on-cta` — the CTA's own foreground, emitted as `readableTextColor(ctaColor)` for a
+  branded client and supplied by the mode-aware `[data-brand='conquest']` block otherwise.
+  It exists because the respondent CTAs paint their background from `--app-cta-gradient`
+  directly and never consult the platform's `primary` / `primary-foreground` pair — so
+  re-tokenising `primary` looks like a fix but nothing reads it. Without this the ConQuest
+  dark-mode CTA (gold) carried hardcoded white text at ~1.7:1.
+- `cssUrl(url)` — the single sink wrapping a brand image as a quoted, escaped `url("…")`
+  so a stored value cannot break out of the `url()` context. Used by
+  `themeToCssVariables` and by the admin preview thumbnail.
 - `resolveTheme` also resolves the **logo backdrop** once: `logoBackgroundColor` is null
   whenever `logoBackgroundEnabled` is off, otherwise the explicit colour falling back to
   `surfaceColor` — so renderers paint it directly without re-deriving the toggle.
-- `themeFields` (Zod) validate hex colours + an absolute https logo URL (+ the boolean
-  toggle); they spread into the demo-client create/update schemas. An empty colour form
-  field coerces to null (= reset to the Sunrise default).
+- `themeFields` (Zod) validate hex colours + brand image sources (+ the boolean toggle);
+  they spread into the demo-client create/update schemas. An empty colour form field
+  coerces to null (= reset to the ConQuest default).
+- `isBrandImageSrc(value)` — accepts an absolute `https://` URL **or** an app-relative
+  `/uploads/...` path. The relative branch exists because the local storage provider
+  serves uploads from `public/uploads/`; it rejects traversal, backslashes and `//` so it
+  can only ever address our own upload tree.
 
 **First renderer = the invitation email (F3.4).** The send seam resolves the theme
 from the invitation's denormalised `demoClientId` snapshot — see [invitations.md].
 The F7.1 chat surface is the second consumer (via `themeToCssVariables`).
+
+### Brand images: upload or link (F7.2)
+
+Both the logo and the banner accept **either** a pasted `https://` URL **or** an uploaded
+file. Both paths write the same column, so `PATCH /api/v1/app/demo-clients/:id` is
+unchanged — upload simply returns a URL the form writes into the same field.
+
+| Route                                     | Spec                                    | Stored as | Where it renders                        |
+| ----------------------------------------- | --------------------------------------- | --------- | --------------------------------------- |
+| `POST/DELETE .../demo-clients/:id/logo`   | any shape, min 80x40, max box 1200x1200 | PNG       | email header, session band, export PDFs |
+| `POST/DELETE .../demo-clients/:id/banner` | ~4:1 (±12%), min 800x200, box 1600x400  | JPEG      | respondent session header only          |
+
+- **PNG for the logo** because it needs transparency and is rendered by the invitation
+  email and the export PDFs, where WebP support is patchy. **JPEG for the banner** because
+  banners are photographic and transparency is meaningless once it fills the band.
+- **Dimensions are checked before processing** (`readImageDimensions` → `validateImageDimensions`),
+  so a wrong-shaped export is rejected with its measured size in the message rather than
+  silently reshaped. The browser pre-checks the same rules for instant feedback; the server
+  re-checks because the client check is UX, not a boundary.
+- `processImage` is called with `fit: 'inside'`. Its default is a centred **square crop**
+  (the avatar shape) which would destroy a wordmark — this was the one platform change the
+  feature needed, added as an option so the avatar path is untouched.
+- Keys are fixed per client and kind (`demo-clients/<id>/<kind>/<kind>.<ext>`) so
+  re-uploading overwrites; the stored URL carries `?v=<timestamp>` to defeat the cache.
+- **An upload persists immediately; a typed URL does not.** `POST` writes the column
+  server-side and `DELETE` clears it, both before the form is saved — so **Cancel cannot
+  undo an upload or a removal**. There is no draft state for a binary, and the alternative
+  (store on upload, persist on save) strands an orphaned object for every abandoned
+  upload. The field says "uploads apply immediately" so the admin isn't surprised.
+- **Remove always calls `DELETE`** when upload is available. It cannot gate on a
+  `/uploads/` prefix to detect "one of ours": only the LOCAL provider returns relative
+  paths, while S3 and Vercel Blob return absolute https URLs indistinguishable from a
+  pasted link — so a prefix check skipped cleanup on every real deployment and left the
+  object public in the bucket. The route is idempotent, so calling it for a typed URL is
+  a harmless no-op.
+- **Storage is optional.** When no provider is configured `isStorageEnabled()` is false,
+  the routes 503 with actionable copy, and the admin field degrades to URL-only. Upload
+  also needs a saved client (the key includes its id), so the create form shows "Save the
+  client first to upload a file".
+
+**A banner REPLACES the header band** rather than sitting inside it: the logo, title and
+band colours no longer render in that strip, so the banner must carry the branding itself.
+The title moves to its own strip below — the alternative, overlaying it, depends on the
+legibility of an image we have never seen.
 
 ### FK delete policy (AD2)
 
@@ -160,17 +236,19 @@ a typed-confirmation guard and an anonymous-mode refusal. See
   - **Management** (`/:id/management`) — the destructive demo-ops: **Reset sessions** and
     **Delete** (disabled with an explanation while questionnaires are still attributed —
     act on the delete guard from the Overview tab's row menus).
-- Both forms carry a **"Brand theming"** fieldset (F3.4 / F7.1+): CTA colour, accent
-  colour, logo URL, welcome copy, plus a **"Session chrome"** sub-block — surface colour,
+- Both forms carry a **"Brand theming"** fieldset (F3.4 / F7.1+ / F7.2): CTA colour, accent
+  colour, **logo** and **header banner** (each a `<BrandImageField>` — paste a URL or
+  upload a file), welcome copy, plus a **"Session chrome"** sub-block — surface colour,
   CTA gradient end, and an **"Apply a colour behind the logo"** toggle (the requested
   device, with an optional colour that defaults to the surface colour). Each field is
-  optional with a `<FieldHelp>`; blank = the Sunrise default. Colours apply to **both** the
-  invitation email and the respondent question session (visible via "Preview as
-  respondent"). The edit form shows a **live `<DemoClientThemePreview>`** under the fieldset
+  optional with a `<FieldHelp>`; leaving **everything** blank runs the session in ConQuest
+  colours with the ConQuest wordmark in the band, while setting any one field hands the
+  surface to the client. Colours apply to **both** the invitation email and the respondent question
+  session (visible via "Preview as respondent"). The edit form shows a **live `<DemoClientThemePreview>`** under the fieldset
   (valid inputs only — a half-typed hex shows the default, not a broken swatch).
 - **Brand preview (`<DemoClientThemePreview>`).** Surfaces the configured brand back
   to the admin — the gap that a client could set theme fields and see nothing. Reuses
-  `resolveTheme()` and the same escaped `--app-logo-url` background as `BrandThemeProvider`
+  `resolveTheme()` and the same escaped `url()` sink (`cssUrl`) as `BrandThemeProvider`
   (never a raw `<img src>`), and renders a **miniature of the session chrome** (surface
   band + logo backdrop + gradient send button) so the admin recognises the brand before
   opening "Preview as respondent". Two modes: **compact** on the list's

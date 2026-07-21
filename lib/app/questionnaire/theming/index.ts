@@ -24,3 +24,12 @@ export {
   themeFieldsSchema,
   type ThemeFieldsInput,
 } from '@/lib/app/questionnaire/theming/schemas';
+
+export {
+  BRAND_BANNER_SPEC,
+  BRAND_LOGO_SPEC,
+  isBrandImageSrc,
+  recommendedSize,
+  validateImageDimensions,
+  type BrandImageSpec,
+} from '@/lib/app/questionnaire/theming/brand-image';

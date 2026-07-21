@@ -31,6 +31,7 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
       ctaColor: '#000',
       accentColor: '#000',
       logoUrl: null,
+      bannerUrl: null,
       welcomeCopy: '',
       surfaceColor: null,
       ctaColorEnd: null,

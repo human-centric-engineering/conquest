@@ -12,6 +12,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
+import { isStorageEnabled } from '@/lib/storage/client';
 import { getDemoClientDetailCached } from '@/lib/app/questionnaire/demo-clients/detail-data';
 
 export const metadata: Metadata = {
@@ -28,5 +29,7 @@ export default async function DemoClientBrandingTab({ params }: PageProps) {
   const client = await getDemoClientDetailCached(id);
   if (!client) notFound();
 
-  return <DemoClientForm client={client} />;
+  // Resolved here, not in the form: isStorageEnabled() reads server-only env, and the
+  // form is a client component. False → the brand image fields offer URL entry only.
+  return <DemoClientForm client={client} uploadEnabled={isStorageEnabled()} />;
 }

@@ -57,6 +57,7 @@ const handleCreate = withAdminAuth(async (request: NextRequest, session) => {
         ...(body.ctaColor !== undefined ? { ctaColor: body.ctaColor } : {}),
         ...(body.accentColor !== undefined ? { accentColor: body.accentColor } : {}),
         ...(body.logoUrl !== undefined ? { logoUrl: body.logoUrl } : {}),
+        ...(body.bannerUrl !== undefined ? { bannerUrl: body.bannerUrl } : {}),
         ...(body.welcomeCopy !== undefined ? { welcomeCopy: body.welcomeCopy } : {}),
         // DEMO-ONLY (F7.1+): respondent-session chrome columns.
         ...(body.surfaceColor !== undefined ? { surfaceColor: body.surfaceColor } : {}),

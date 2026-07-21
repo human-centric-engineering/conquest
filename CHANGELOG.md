@@ -18,6 +18,16 @@ release process.
 
 ### Added
 
+- **`processImage({ fit })`** — `lib/storage/image.ts` gains an optional `fit` option:
+  `'cover'` (the default, unchanged — crop to a centred square, the avatar shape) or
+  `'inside'` (scale to fit the max box, preserving aspect ratio, never enlarging). The
+  function previously always square-cropped, which silently destroys any non-square image
+  such as a logo or a banner. Additive and default-preserving — existing callers, including
+  the avatar upload path, are byte-for-byte unaffected.
+- **`readImageDimensions(buffer)`** — new export from `lib/storage/image.ts` returning an
+  image's intrinsic `{ width, height }` (or `null` when undecodable) without processing it,
+  so callers can enforce dimension rules *before* accepting an upload. The platform
+  previously had no way to inspect dimensions.
 - **`AiEvaluationRun.agentVersionId`** — new optional column recording the `AiAgentVersion` a
   dataset-driven evaluation run is pinned to (null = run the agent's live config). Previously
   `AiExperimentVariant.agentVersionId` was written at create time and read nowhere, so every

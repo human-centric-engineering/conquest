@@ -83,6 +83,7 @@ export function BrandThemeProvider({
   const hasSurface = Boolean(theme.surfaceColor);
   const hasBackdrop = Boolean(theme.logoBackgroundColor);
   const hasLogo = Boolean(theme.logoUrl);
+  const hasBanner = Boolean(theme.bannerUrl);
   // No client identity at all → ConQuest owns the surface. Drives BOTH the wordmark in
   // the band and (via `data-brand`) the mode-aware ConQuest palette in brand-theme.css.
   const isConquest = !theme.hasBrandIdentity;
@@ -112,66 +113,24 @@ export function BrandThemeProvider({
       style={style}
       className={cn('flex h-full flex-col', className)}
     >
-      {showBand && (
-        <header
-          className={cn(
-            'flex shrink-0 items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6',
-            // No surface → a hairline rule separates the band from the canvas below.
-            !hasSurface && 'border-b',
-            // Client surface absent and no ConQuest band tone → the neutral canvas.
-            !hasSurface && !isConquest && 'border-current/10'
-          )}
-          style={
-            hasSurface
-              ? { backgroundColor: 'var(--app-surface-color)', color: 'var(--app-on-surface)' }
-              : isConquest
-                ? {
-                    backgroundColor: 'var(--cq-band-bg)',
-                    color: 'var(--cq-band-fg)',
-                    borderColor: 'var(--cq-band-border)',
-                  }
-                : undefined
-          }
-        >
-          {hasLogo ? (
-            <LogoMark hasBackdrop={hasBackdrop} />
-          ) : (
-            // Unbranded → the ConQuest lockup stands in for the client logo. Real type
-            // rather than an image asset: crisp at any size and it already follows dark
-            // mode, which a flat PNG could not.
-            isConquest && <ConquestWordmark size="page" showSubtitle className="shrink-0" />
-          )}
-
-          {/* Two-anchor header. With a logo, the title anchors hard RIGHT opposite it — the empty
-              middle is deliberate negative space, not waste. With no logo the title leads from the
-              LEFT instead. `flex-1 min-w-0` lets a long title truncate cleanly against the logo. */}
-          {(title || round?.name || schedule) && (
-            <div
-              className={cn(
-                'flex min-w-0 flex-1 flex-col gap-0.5',
-                hasMark ? 'items-end text-right' : 'items-start text-left'
-              )}
-            >
-              {title && (
-                <p
-                  className={cn(
-                    'max-w-full truncate leading-tight font-semibold',
-                    hasMark ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'
-                  )}
-                >
-                  {title}
-                </p>
-              )}
-
-              {/* Round / status / dates — one muted line beneath the title; hidden on narrow screens
-                  so the title keeps priority. */}
+      {/* A custom banner REPLACES the band entirely — it is the client's own composition,
+          so we neither overlay the title on it (legibility depends on an image we've never
+          seen) nor pad around it. The aspect-ratio box matches BRAND_BANNER_SPEC, so the
+          4:1 image fills it exactly at every width; `bg-cover` absorbs the ±12% ratio
+          tolerance the upload allows. The title moves below, in its own strip. */}
+      {hasBanner ? (
+        <>
+          <div
+            role="img"
+            aria-label={title ? `${title} banner` : 'Questionnaire banner'}
+            className="aspect-[4/1] w-full shrink-0 bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: 'var(--app-banner-url)' }}
+          />
+          {title && (
+            <div className="shrink-0 border-b px-4 py-2.5 sm:px-6">
+              <p className="truncate text-base leading-tight font-semibold sm:text-lg">{title}</p>
               {(round?.name || schedule) && (
-                <div
-                  className={cn(
-                    'hidden max-w-full items-center gap-2 text-xs font-medium opacity-75 sm:flex',
-                    hasMark ? 'justify-end' : 'justify-start'
-                  )}
-                >
+                <div className="mt-0.5 hidden items-center gap-2 text-xs font-medium opacity-75 sm:flex">
                   {round?.name && <span className="min-w-0 truncate">{round.name}</span>}
                   {round?.name && schedule && (
                     <span aria-hidden className="opacity-50">
@@ -199,7 +158,97 @@ export function BrandThemeProvider({
               )}
             </div>
           )}
-        </header>
+        </>
+      ) : (
+        showBand && (
+          <header
+            className={cn(
+              'flex shrink-0 items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6',
+              // No surface → a hairline rule separates the band from the canvas below.
+              !hasSurface && 'border-b',
+              // Client surface absent and no ConQuest band tone → the neutral canvas.
+              !hasSurface && !isConquest && 'border-current/10'
+            )}
+            style={
+              hasSurface
+                ? { backgroundColor: 'var(--app-surface-color)', color: 'var(--app-on-surface)' }
+                : isConquest
+                  ? {
+                      backgroundColor: 'var(--cq-band-bg)',
+                      color: 'var(--cq-band-fg)',
+                      borderColor: 'var(--cq-band-border)',
+                    }
+                  : undefined
+            }
+          >
+            {hasLogo ? (
+              <LogoMark hasBackdrop={hasBackdrop} />
+            ) : (
+              // Unbranded → the ConQuest lockup stands in for the client logo. Real type
+              // rather than an image asset: crisp at any size and it already follows dark
+              // mode, which a flat PNG could not.
+              isConquest && <ConquestWordmark size="page" showSubtitle className="shrink-0" />
+            )}
+
+            {/* Two-anchor header. With a logo, the title anchors hard RIGHT opposite it — the empty
+              middle is deliberate negative space, not waste. With no logo the title leads from the
+              LEFT instead. `flex-1 min-w-0` lets a long title truncate cleanly against the logo. */}
+            {(title || round?.name || schedule) && (
+              <div
+                className={cn(
+                  'flex min-w-0 flex-1 flex-col gap-0.5',
+                  hasMark ? 'items-end text-right' : 'items-start text-left'
+                )}
+              >
+                {title && (
+                  <p
+                    className={cn(
+                      'max-w-full truncate leading-tight font-semibold',
+                      hasMark ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'
+                    )}
+                  >
+                    {title}
+                  </p>
+                )}
+
+                {/* Round / status / dates — one muted line beneath the title; hidden on narrow screens
+                  so the title keeps priority. */}
+                {(round?.name || schedule) && (
+                  <div
+                    className={cn(
+                      'hidden max-w-full items-center gap-2 text-xs font-medium opacity-75 sm:flex',
+                      hasMark ? 'justify-end' : 'justify-start'
+                    )}
+                  >
+                    {round?.name && <span className="min-w-0 truncate">{round.name}</span>}
+                    {round?.name && schedule && (
+                      <span aria-hidden className="opacity-50">
+                        ·
+                      </span>
+                    )}
+                    {schedule && (
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[schedule.status])}
+                        />
+                        {schedule.statusLabel}
+                      </span>
+                    )}
+                    {schedule?.dateRange && (
+                      <span aria-hidden className="opacity-50">
+                        ·
+                      </span>
+                    )}
+                    {schedule?.dateRange && (
+                      <span className="shrink-0 tabular-nums">{schedule.dateRange}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </header>
+        )
       )}
       <div className="min-h-0 flex-1">{children}</div>
     </div>

@@ -83,7 +83,7 @@ export function FinalCheckModal({
             type="button"
             onClick={onClarify}
             disabled={busy}
-            className="text-white"
+            className="text-[var(--app-on-cta,#fff)]"
             style={{ backgroundColor: 'var(--app-cta-color, var(--color-primary))' }}
           >
             Clarify in chat

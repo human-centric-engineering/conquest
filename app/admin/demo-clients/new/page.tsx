@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 
 import { DemoClientForm } from '@/components/admin/demo-clients/demo-client-form';
+import { isStorageEnabled } from '@/lib/storage/client';
 
 export const metadata: Metadata = {
   title: 'New demo client',
@@ -29,7 +30,7 @@ export default function NewDemoClientPage() {
         <h1 className="text-2xl font-semibold">New demo client</h1>
       </header>
 
-      <DemoClientForm />
+      <DemoClientForm uploadEnabled={isStorageEnabled()} />
     </div>
   );
 }

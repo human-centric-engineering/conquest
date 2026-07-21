@@ -33,12 +33,19 @@ import {
   DEMO_CLIENT_SLUG_PATTERN,
   type DemoClientView,
 } from '@/lib/app/questionnaire/demo-clients';
-import { HEX_COLOR_PATTERN, WELCOME_COPY_MAX, isHttpsUrl } from '@/lib/app/questionnaire/theming';
+import {
+  BRAND_BANNER_SPEC,
+  BRAND_LOGO_SPEC,
+  HEX_COLOR_PATTERN,
+  WELCOME_COPY_MAX,
+  isBrandImageSrc,
+} from '@/lib/app/questionnaire/theming';
+import { BrandImageField } from '@/components/admin/demo-clients/brand-image-field';
 
-/** True for an empty field or an absolute https URL — shares the server's https
- *  predicate (isHttpsUrl) so the form and the API can't drift. */
-function isBlankOrHttpsUrl(value: string): boolean {
-  return value === '' || isHttpsUrl(value);
+/** True for an empty field, an https URL, or one of our own upload paths — shares the
+ *  server's predicate (isBrandImageSrc) so the form and the API can't drift. */
+function isBlankOrBrandImage(value: string): boolean {
+  return value === '' || isBrandImageSrc(value);
 }
 
 const hexOrBlank = z
@@ -62,8 +69,11 @@ const formSchema = z.object({
   // DEMO-ONLY (F3.4): brand theme for the invitation email. Blank = ConQuest default.
   ctaColor: hexOrBlank,
   accentColor: hexOrBlank,
-  logoUrl: z.string().trim().refine(isBlankOrHttpsUrl, {
-    message: 'Absolute https:// URL (or leave blank)',
+  logoUrl: z.string().trim().refine(isBlankOrBrandImage, {
+    message: 'Absolute https:// URL or an uploaded image (or leave blank)',
+  }),
+  bannerUrl: z.string().trim().refine(isBlankOrBrandImage, {
+    message: 'Absolute https:// URL or an uploaded image (or leave blank)',
   }),
   welcomeCopy: z.string().trim().max(WELCOME_COPY_MAX),
   // DEMO-ONLY (F7.1+): respondent-session chrome. All optional; blank = no band.
@@ -78,9 +88,15 @@ type FormValues = z.infer<typeof formSchema>;
 export interface DemoClientFormProps {
   /** Present in edit mode; absent in create mode. */
   client?: DemoClientView;
+  /**
+   * Whether the server has a storage provider configured. Resolved on the server
+   * (`isStorageEnabled()`) and passed down, because this is a client component and the
+   * check reads server-only env. False → the brand image fields degrade to URL-only.
+   */
+  uploadEnabled?: boolean;
 }
 
-export function DemoClientForm({ client }: DemoClientFormProps) {
+export function DemoClientForm({ client, uploadEnabled = false }: DemoClientFormProps) {
   const router = useRouter();
   const isEdit = client !== undefined;
   const [isLoading, setIsLoading] = useState(false);
@@ -103,6 +119,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
       ctaColor: client?.ctaColor ?? '',
       accentColor: client?.accentColor ?? '',
       logoUrl: client?.logoUrl ?? '',
+      bannerUrl: client?.bannerUrl ?? '',
       welcomeCopy: client?.welcomeCopy ?? '',
       surfaceColor: client?.surfaceColor ?? '',
       ctaColorEnd: client?.ctaColorEnd ?? '',
@@ -120,6 +137,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
     ctaColor,
     accentColor,
     logoUrl,
+    bannerUrl,
     welcomeCopy,
     surfaceColor,
     ctaColorEnd,
@@ -128,6 +146,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
     'ctaColor',
     'accentColor',
     'logoUrl',
+    'bannerUrl',
     'welcomeCopy',
     'surfaceColor',
     'ctaColorEnd',
@@ -137,7 +156,8 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
   const livePreviewTheme = {
     ctaColor: validHex(ctaColor),
     accentColor: validHex(accentColor),
-    logoUrl: isHttpsUrl(logoUrl.trim()) ? logoUrl.trim() : null,
+    logoUrl: isBrandImageSrc(logoUrl.trim()) ? logoUrl.trim() : null,
+    bannerUrl: isBrandImageSrc(bannerUrl.trim()) ? bannerUrl.trim() : null,
     welcomeCopy: welcomeCopy.trim() === '' ? null : welcomeCopy.trim(),
     surfaceColor: validHex(surfaceColor),
     ctaColorEnd: validHex(ctaColorEnd),
@@ -159,6 +179,7 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
         ctaColor: themeOrNull(values.ctaColor),
         accentColor: themeOrNull(values.accentColor),
         logoUrl: themeOrNull(values.logoUrl),
+        bannerUrl: themeOrNull(values.bannerUrl),
         welcomeCopy: themeOrNull(values.welcomeCopy),
         surfaceColor: themeOrNull(values.surfaceColor),
         ctaColorEnd: themeOrNull(values.ctaColorEnd),
@@ -345,23 +366,46 @@ export function DemoClientForm({ client }: DemoClientFormProps) {
         {/* DEMO-ONLY (F7.1+): respondent-session chrome. The logo sits at the top of the
             session header; the toggle below paints a backdrop for logos drawn to sit on one. */}
         <div className="space-y-4 border-t pt-4">
-          <div className="space-y-2">
-            <Label htmlFor="logoUrl" className="flex items-center gap-1">
-              Logo URL
-              <FieldHelp title="Logo URL">
-                Absolute <code className="text-xs">https://</code> URL of the client logo shown at
-                the top of the invitation email and the respondent session header. Blank shows no
+          <BrandImageField
+            id="logoUrl"
+            label="Logo"
+            spec={BRAND_LOGO_SPEC}
+            demoClientId={client?.id}
+            uploadEnabled={uploadEnabled}
+            value={logoUrl}
+            onChange={(v) => setValue('logoUrl', v, { shouldDirty: true, shouldValidate: true })}
+            disabled={isLoading}
+            error={errors.logoUrl?.message}
+            help={
+              <>
+                The client logo shown at the top of the invitation email and the respondent session
+                header. Either paste an absolute <code className="text-xs">https://</code> URL or
+                upload an image. Any shape — it is scaled to fit the header slot. Blank shows no
                 logo.
-              </FieldHelp>
-            </Label>
-            <Input
-              id="logoUrl"
-              placeholder="https://acme.example/logo.png"
-              disabled={isLoading}
-              {...register('logoUrl')}
-            />
-            <FormError message={errors.logoUrl?.message} />
-          </div>
+              </>
+            }
+          />
+
+          <BrandImageField
+            id="bannerUrl"
+            label="Header banner"
+            spec={BRAND_BANNER_SPEC}
+            demoClientId={client?.id}
+            uploadEnabled={uploadEnabled}
+            value={bannerUrl}
+            onChange={(v) => setValue('bannerUrl', v, { shouldDirty: true, shouldValidate: true })}
+            disabled={isLoading}
+            error={errors.bannerUrl?.message}
+            help={
+              <>
+                A full-bleed banner that <strong>replaces</strong> the respondent session&apos;s
+                header band — the logo, title and colours above it no longer show in that strip, so
+                the banner should carry the branding itself. Roughly 4:1;{' '}
+                <code className="text-xs">1600x400</code> is ideal. Respondent session only — the
+                invitation email and export PDFs keep using the logo.
+              </>
+            }
+          />
 
           {/* The requested device: a checkbox to paint a solid colour behind the logo —
               for logos (like Merlin5's) drawn to sit on their brand backdrop. */}

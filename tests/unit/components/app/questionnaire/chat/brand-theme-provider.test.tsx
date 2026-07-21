@@ -16,6 +16,7 @@ const BASE: ResolvedTheme = {
   ctaColor: '#112233',
   accentColor: '#445566',
   logoUrl: null,
+  bannerUrl: null,
   welcomeCopy: 'hello',
   surfaceColor: null,
   ctaColorEnd: null,
@@ -145,6 +146,91 @@ describe('BrandThemeProvider', () => {
       const band = container.querySelector('header') as HTMLElement;
       expect(band.style.backgroundColor).toBe('var(--app-surface-color)');
       expect(band.style.color).toBe('var(--app-on-surface)');
+    });
+  });
+
+  describe('custom banner (full-bleed band replacement)', () => {
+    const BANNERED: ResolvedTheme = { ...BASE, bannerUrl: 'https://acme.example/banner.jpg' };
+
+    it('emits --app-banner-url as an escaped url()', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={BANNERED}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect((container.firstChild as HTMLElement).style.getPropertyValue('--app-banner-url')).toBe(
+        'url("https://acme.example/banner.jpg")'
+      );
+    });
+
+    it('replaces the band entirely — no header element, no logo, no wordmark', () => {
+      // The banner is the client's own composition; we do not draw our chrome over it.
+      const { container } = render(
+        <BrandThemeProvider
+          theme={{ ...BANNERED, logoUrl: 'https://acme.example/logo.png' }}
+          header={openHeader()}
+        >
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(container.querySelector('header')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Brand logo')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('ConQuest')).not.toBeInTheDocument();
+    });
+
+    it('renders the banner in a 4:1 box matching the upload spec', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={BANNERED}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const banner = screen.getByRole('img', { name: 'Questionnaire banner' });
+      expect(banner).toBeInTheDocument();
+      expect(banner.className).toContain('aspect-[4/1]');
+      expect(container.querySelector('[style*="--app-banner-url"]')).toBeTruthy();
+    });
+
+    it('moves the title below the banner rather than overlaying it', () => {
+      // Legibility over an arbitrary uploaded image cannot be guaranteed, so the title
+      // gets its own strip instead of a scrim.
+      render(
+        <BrandThemeProvider theme={BANNERED} header={openHeader()}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const banner = screen.getByRole('img', { name: /banner/ });
+      const title = screen.getByText('Customer Experience Survey');
+      expect(banner).toBeInTheDocument();
+      expect(title).toBeInTheDocument();
+      expect(banner.contains(title)).toBe(false);
+    });
+
+    it('keeps the round and schedule metadata visible under the banner', () => {
+      render(
+        <BrandThemeProvider theme={BANNERED} header={openHeader()}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.getByText('Round 3 · Spring Cohort')).toBeInTheDocument();
+      expect(screen.getByText(/^Open/)).toBeInTheDocument();
+    });
+
+    it('names the banner after the questionnaire when a title is present', () => {
+      render(
+        <BrandThemeProvider theme={BANNERED} header={{ title: 'Staff Survey', round: null }}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.getByRole('img', { name: 'Staff Survey banner' })).toBeInTheDocument();
+    });
+
+    it('counts as brand identity, so a banner alone suppresses the ConQuest fallback', () => {
+      const { container } = render(
+        <BrandThemeProvider theme={{ ...BANNERED, hasBrandIdentity: true }}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect((container.firstChild as HTMLElement).dataset.brand).toBeUndefined();
     });
   });
 

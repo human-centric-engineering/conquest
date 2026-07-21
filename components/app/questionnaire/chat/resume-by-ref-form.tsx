@@ -122,7 +122,7 @@ export function ResumeByRefForm({ versionId, label, className }: ResumeByRefForm
           size="sm"
           disabled={busy || ref.trim().length === 0}
           style={{ background: CTA_FILL }}
-          className="text-white"
+          className="text-[var(--app-on-cta,#fff)]"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : 'Continue'}
         </Button>

@@ -33,8 +33,10 @@ export interface DemoClientView {
   ctaColor: string | null;
   /** Accent colour (hex) — email fallback-link colour + F7.1 accent; null = default. */
   accentColor: string | null;
-  /** Absolute https logo URL shown in the invitation email, or null. */
+  /** Logo image src (https URL or /uploads/... path) shown in the email + session band, or null. */
   logoUrl: string | null;
+  /** Full-bleed header banner src for the respondent session, or null. */
+  bannerUrl: string | null;
   /** Branded invitation intro line, or null for the ConQuest default copy. */
   welcomeCopy: string | null;
   // DEMO-ONLY (F7.1+): respondent-session chrome. All optional; null/false = no band.

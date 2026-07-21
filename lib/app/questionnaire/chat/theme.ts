@@ -21,6 +21,9 @@ async function loadClientTheme(demoClientId: string | null): Promise<ResolvedThe
       ctaColor: true,
       accentColor: true,
       logoUrl: true,
+      // The banner is respondent-surface only — the emails and export PDFs deliberately
+      // keep rendering the logo, where a 4:1 full-bleed image has no place.
+      bannerUrl: true,
       welcomeCopy: true,
       surfaceColor: true,
       ctaColorEnd: true,

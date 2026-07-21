@@ -159,6 +159,16 @@ export interface ProcessImageOptions {
   quality?: number;
   /** Output format (default: keeps original format, but GIF converts to PNG) */
   format?: 'jpeg' | 'png' | 'webp';
+  /**
+   * How the image fills the max dimensions (default: `'cover'`).
+   *
+   * - `'cover'` — crop to a SQUARE at the centre. The avatar shape, and the historic
+   *   behaviour of this function.
+   * - `'inside'` — scale to fit INSIDE the box, preserving aspect ratio and never
+   *   enlarging. Required for logos and banners, which are not square and must not be
+   *   cropped — a centre-cropped wordmark is unreadable.
+   */
+  fit?: 'cover' | 'inside';
 }
 
 /**
@@ -228,19 +238,28 @@ export async function processImage(
     }
   }
 
-  // Resize and crop to square (for avatars)
-  // Always crop to square; only shrink, don't enlarge
-  const targetSize = Math.min(
-    maxWidth,
-    maxHeight,
-    metadata.width || maxWidth,
-    metadata.height || maxHeight
-  );
+  // Resize. Two shapes, both shrink-only:
+  //  - 'inside' (logos, banners): preserve aspect ratio, fit within the box, never crop.
+  //  - 'cover'  (avatars, the default): crop to a centred square.
+  if (options.fit === 'inside') {
+    image = image.resize(maxWidth, maxHeight, {
+      fit: 'inside',
+      withoutEnlargement: true, // never upscale a small logo into a blurry one
+    });
+  } else {
+    // Always crop to square; only shrink, don't enlarge
+    const targetSize = Math.min(
+      maxWidth,
+      maxHeight,
+      metadata.width || maxWidth,
+      metadata.height || maxHeight
+    );
 
-  image = image.resize(targetSize, targetSize, {
-    fit: 'cover', // Crop to fill exact dimensions (square for avatars)
-    position: 'centre', // Crop from centre
-  });
+    image = image.resize(targetSize, targetSize, {
+      fit: 'cover', // Crop to fill exact dimensions (square for avatars)
+      position: 'centre', // Crop from centre
+    });
+  }
 
   // Apply format and quality
   switch (outputFormat) {
@@ -268,7 +287,7 @@ export async function processImage(
     processedSize: processedBuffer.length,
     width: processedMetadata.width,
     height: processedMetadata.height,
-    targetSize,
+    fit: options.fit ?? 'cover',
   });
 
   return {
@@ -277,6 +296,28 @@ export async function processImage(
     width: processedMetadata.width || maxWidth,
     height: processedMetadata.height || maxHeight,
   };
+}
+
+/**
+ * Read an image's intrinsic pixel dimensions without processing it.
+ *
+ * Used to enforce dimension rules BEFORE an upload is accepted, so the caller can reject
+ * with the measured size in the message rather than silently resizing something unusable
+ * (a 200px-wide "banner" scaled up is a blurry banner, not a valid one).
+ *
+ * Returns null when the buffer isn't a decodable image or carries no dimensions — the
+ * caller treats that as a rejection, same as a magic-byte failure.
+ */
+export async function readImageDimensions(
+  buffer: Buffer
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const { width, height } = await sharp(buffer).metadata();
+    if (!width || !height) return null;
+    return { width, height };
+  } catch {
+    return null;
+  }
 }
 
 /**

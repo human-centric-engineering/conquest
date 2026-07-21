@@ -11,6 +11,8 @@
 
 import { z } from 'zod';
 
+import { isBrandImageSrc } from '@/lib/app/questionnaire/theming/brand-image';
+
 /** #rgb or #rrggbb. Case-insensitive; the only colour shape the email/CSS consume. */
 export const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
@@ -37,14 +39,21 @@ const colorField = z
     message: 'Must be a hex colour like #5469d4',
   });
 
-/** Empty string → null; otherwise validate as an absolute https URL. */
-const logoUrlField = z
+/**
+ * Empty string → null; otherwise an https URL or one of our own upload paths.
+ *
+ * NOT https-only: the local storage provider serves uploads from `public/uploads/`, so a
+ * logo uploaded in development is `/uploads/...` on our own origin. `isBrandImageSrc`
+ * owns that distinction (and keeps the relative branch narrow enough that it can only
+ * address our upload tree).
+ */
+const brandImageField = z
   .string()
   .trim()
   .transform((v) => (v.length === 0 ? null : v))
   .nullable()
-  .refine((v) => v === null || isHttpsUrl(v), {
-    message: 'Must be an absolute https:// URL',
+  .refine((v) => v === null || isBrandImageSrc(v), {
+    message: 'Must be an absolute https:// URL or an uploaded image',
   });
 
 /** Empty string → null; otherwise a bounded single line of intro copy. */
@@ -67,7 +76,8 @@ const welcomeCopyField = z
 export const themeFields = {
   ctaColor: colorField.optional(),
   accentColor: colorField.optional(),
-  logoUrl: logoUrlField.optional(),
+  logoUrl: brandImageField.optional(),
+  bannerUrl: brandImageField.optional(),
   welcomeCopy: welcomeCopyField.optional(),
   surfaceColor: colorField.optional(),
   ctaColorEnd: colorField.optional(),

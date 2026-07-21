@@ -126,6 +126,7 @@ const MOCK_THEME: ResolvedTheme = {
   ctaColor: '#5469d4',
   accentColor: '#5469d4',
   logoUrl: null,
+  bannerUrl: null,
   welcomeCopy: 'Welcome to our survey — it only takes a few minutes.',
   surfaceColor: null,
   ctaColorEnd: null,

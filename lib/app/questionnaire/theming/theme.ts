@@ -29,8 +29,13 @@ export interface DemoClientTheme {
   ctaColor: string | null;
   /** Secondary accent colour (hex), or null for the ConQuest default. */
   accentColor: string | null;
-  /** Absolute https logo URL, or null for "no logo". */
+  /** Logo image src (https URL or app-relative upload path), or null for "no logo". */
   logoUrl: string | null;
+  /**
+   * Full-bleed header banner src (https URL or app-relative upload path), or null.
+   * When set it REPLACES the header band's contents — see BrandThemeProvider.
+   */
+  bannerUrl?: string | null;
   /** Branded invitation intro line, or null for the ConQuest default copy. */
   welcomeCopy: string | null;
   // The F7.1+ chrome columns are OPTIONAL on this raw contract (the original four are
@@ -65,6 +70,8 @@ export interface ResolvedTheme {
   ctaColor: string;
   accentColor: string;
   logoUrl: string | null;
+  /** Full-bleed header banner, or null. Takes precedence over `logoUrl` in the band. */
+  bannerUrl: string | null;
   welcomeCopy: string;
   /** Brand header-band colour, or null when the client sets no surface (plain chrome). */
   surfaceColor: string | null;
@@ -129,6 +136,7 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
     theme?.ctaColor ||
     theme?.accentColor ||
     theme?.logoUrl ||
+    theme?.bannerUrl ||
     theme?.surfaceColor ||
     theme?.ctaColorEnd ||
     logoBackgroundColor
@@ -137,6 +145,7 @@ export function resolveTheme(theme: DemoClientTheme | null): ResolvedTheme {
     ctaColor: theme?.ctaColor ?? CONQUEST_THEME_DEFAULTS.ctaColor,
     accentColor: theme?.accentColor ?? CONQUEST_THEME_DEFAULTS.accentColor,
     logoUrl: theme?.logoUrl ?? null,
+    bannerUrl: theme?.bannerUrl ?? null,
     welcomeCopy: theme?.welcomeCopy ?? CONQUEST_THEME_DEFAULTS.welcomeCopy,
     surfaceColor,
     ctaColorEnd: theme?.ctaColorEnd ?? null,
@@ -198,6 +207,13 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
     vars['--app-cta-gradient'] = theme.ctaColorEnd
       ? `linear-gradient(135deg, ${theme.ctaColor}, ${theme.ctaColorEnd})`
       : theme.ctaColor;
+    // The CTA's own foreground, chosen for contrast against the client's CTA colour. The
+    // buttons paint their background from `--app-cta-gradient` directly and so never
+    // consult the platform's `primary`/`primary-foreground` pair — without this a client
+    // who picks a pale CTA gets white-on-pale. Unbranded clients are covered by the
+    // `[data-brand='conquest']` block in app/brand-theme.css instead, which is mode-aware.
+    const onCta = readableTextColor(theme.ctaColor);
+    if (onCta) vars['--app-on-cta'] = onCta;
   }
   if (theme.surfaceColor) {
     vars['--app-surface-color'] = theme.surfaceColor;
@@ -211,6 +227,9 @@ export function themeToCssVariables(theme: ResolvedTheme): Record<string, string
   }
   if (theme.logoUrl) {
     vars['--app-logo-url'] = cssUrl(theme.logoUrl);
+  }
+  if (theme.bannerUrl) {
+    vars['--app-banner-url'] = cssUrl(theme.bannerUrl);
   }
   return vars;
 }

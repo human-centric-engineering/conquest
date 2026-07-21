@@ -68,6 +68,7 @@ const handleUpdate = withAdminAuth<{ id: string }>(async (request, session, { pa
         ...(body.ctaColor !== undefined ? { ctaColor: body.ctaColor } : {}),
         ...(body.accentColor !== undefined ? { accentColor: body.accentColor } : {}),
         ...(body.logoUrl !== undefined ? { logoUrl: body.logoUrl } : {}),
+        ...(body.bannerUrl !== undefined ? { bannerUrl: body.bannerUrl } : {}),
         ...(body.welcomeCopy !== undefined ? { welcomeCopy: body.welcomeCopy } : {}),
         // DEMO-ONLY (F7.1+): respondent-session chrome columns.
         ...(body.surfaceColor !== undefined ? { surfaceColor: body.surfaceColor } : {}),
