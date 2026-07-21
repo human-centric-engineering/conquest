@@ -166,6 +166,25 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}): UseHealthCh
   }, [fetchHealth]);
 
   /**
+   * One polling tick — skipped entirely while the tab is hidden.
+   *
+   * `/api/health` runs `SELECT 1` against the database. On a scale-to-zero
+   * Postgres (Neon, Aurora Serverless v2) a background tab polling every 30s is
+   * on its own enough to defeat autosuspend, so a dashboard left open in a
+   * forgotten tab bills compute around the clock. Mirrors the gating already
+   * used by the admin sidebar's badge poll and `lib/hooks/use-auto-refresh.ts`.
+   *
+   * Deliberately NOT applied to the manual `refresh()` or the on-mount fetch —
+   * both are user-driven and must always hit the network.
+   *
+   * @see https://github.com/human-centric-engineering/sunrise/issues/442
+   */
+  const pollTick = useCallback(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    void fetchHealth();
+  }, [fetchHealth]);
+
+  /**
    * Start polling
    */
   const startPolling = useCallback(() => {
@@ -173,11 +192,9 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}): UseHealthCh
       clearInterval(intervalRef.current);
     }
 
-    intervalRef.current = setInterval(() => {
-      void fetchHealth();
-    }, pollingInterval);
+    intervalRef.current = setInterval(pollTick, pollingInterval);
     setState((prev) => ({ ...prev, isPolling: true }));
-  }, [fetchHealth, pollingInterval]);
+  }, [pollTick, pollingInterval]);
 
   /**
    * Stop polling
@@ -205,18 +222,28 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}): UseHealthCh
 
     if (autoStart) {
       // Start polling after initial fetch
-      intervalRef.current = setInterval(() => {
-        void fetchHealth();
-      }, pollingInterval);
+      intervalRef.current = setInterval(pollTick, pollingInterval);
+    }
+
+    // Ticks are skipped while hidden, so refresh once on return rather than
+    // leaving the panel showing data that could be a full interval stale.
+    const handleVisibility = (): void => {
+      if (document.visibilityState === 'visible') void fetchHealth();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
     }
 
     return () => {
       mountedRef.current = false;
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     };
-  }, [fetchHealth, autoStart, pollingInterval]);
+  }, [fetchHealth, pollTick, autoStart, pollingInterval]);
 
   return {
     ...state,

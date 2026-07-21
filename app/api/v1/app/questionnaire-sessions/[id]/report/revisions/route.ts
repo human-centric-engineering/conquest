@@ -9,12 +9,14 @@
  *   Admin-only. Queues a re-run of the session's respondent report. `config` is the (possibly edited)
  *   report settings — the "new instructions/settings" for this run; omitted → the session's current
  *   version config is used. `instructions` is a short free-text note shown in the history. Generation is
- *   ASYNC: this only appends a `queued` revision that the maintenance worker then drives. Only the AI
+ *   ASYNC: this appends a `queued` revision and kicks the worker via `after()` so generation starts
+ *   within seconds; the maintenance cron stays the backstop if that kick is cut off. Only the AI
  *   report modes (`raw_plus_insights`, `narrative`) generate a report; a `raw` config is rejected.
  *
- *   Gate order: withAdminAuth → per-admin re-run sub-cap → validate → resolve settings → enqueue.
+ *   Gate order: withAdminAuth → per-admin re-run sub-cap → validate → resolve settings → enqueue → kick.
  */
 
+import { after } from 'next/server';
 import { z } from 'zod';
 
 import { successResponse, errorResponse } from '@/lib/api/responses';
@@ -30,6 +32,7 @@ import {
   enqueueRespondentReportRevision,
   getRespondentReportRevisionsView,
 } from '@/lib/app/questionnaire/report/revision';
+import { processQueuedReportRevisions } from '@/lib/app/questionnaire/report/worker';
 import { reportRerunLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
 /** Body: the edited report settings (optional — defaults to the version config) + a short note. */
@@ -91,6 +94,24 @@ const handleEnqueue = withAdminAuth<{ id: string }>(async (request, session, { p
   });
 
   log.info('Report re-run queued', { adminId, sessionId, revisionNumber, mode: settings.mode });
+
+  // Kick the revision worker after the response (serverless-safe) so the re-run starts within
+  // seconds rather than waiting for the next maintenance cron. Mirrors the respondent-facing
+  // retry route; a bare `void` would be frozen by Vercel once the response is sent. The worker
+  // claims via a lease, so this kick and the cron drain can never double-process a revision.
+  after(async () => {
+    try {
+      await processQueuedReportRevisions();
+    } catch (err) {
+      log.error('Report re-run kick failed', {
+        adminId,
+        sessionId,
+        revisionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   return successResponse({ revisionNumber, revisionId, status: 'queued' as const }, undefined, {
     status: 202,
   });

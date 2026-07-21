@@ -725,4 +725,94 @@ describe('useHealthCheck', () => {
       expect(onStatusChange).not.toHaveBeenCalled();
     });
   });
+
+  // ── Background-tab gating ──────────────────────────────────────────────────
+  //
+  // `/api/health` runs `SELECT 1`. A hidden tab polling every 30s is on its own
+  // enough to defeat a scale-to-zero database's autosuspend, so ticks must be
+  // skipped while hidden. See sunrise#442.
+
+  describe('background-tab gating', () => {
+    /** Drive `document.visibilityState` and fire the corresponding event. */
+    function setVisibility(state: 'visible' | 'hidden'): void {
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(state);
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    it('skips polling ticks while the tab is hidden', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(validOkPayload), { status: 200 })
+      );
+      renderHook(() => useHealthCheck({ pollingInterval: POLLING_INTERVAL_MS }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1); // on-mount fetch
+
+      await act(async () => {
+        setVisibility('hidden');
+        await Promise.resolve();
+      });
+      // Hiding alone must not fetch.
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Several intervals pass with the tab hidden — no further requests.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3 + 100);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('resumes polling once the tab becomes visible again', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(validOkPayload), { status: 200 })
+      );
+      renderHook(() => useHealthCheck({ pollingInterval: POLLING_INTERVAL_MS }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        setVisibility('hidden');
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 2 + 100);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Returning to the tab refreshes immediately rather than showing data
+      // that could be a full interval stale.
+      await act(async () => {
+        setVisibility('visible');
+        await Promise.resolve();
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      // ...and the regular cadence resumes.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS + 100);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('still fetches on a manual refresh() while hidden (user-driven)', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(validOkPayload), { status: 200 })
+      );
+      const { result } = renderHook(() => useHealthCheck({ pollingInterval: POLLING_INTERVAL_MS }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        setVisibility('hidden');
+        await Promise.resolve();
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+  });
 });
