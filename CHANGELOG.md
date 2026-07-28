@@ -16,6 +16,54 @@ release process.
 
 ## [Unreleased]
 
+### Security
+
+- **The chat handler now refuses tool names outside the agent's advertised
+  set.** Dispatch previously took the tool name straight off the model's emitted
+  call, while the dispatcher synthesizes a default-ALLOW binding when no
+  `AiAgentCapability` row exists — so a capability an agent was never granted
+  would execute, unrestricted. Reachable via prompt injection, or via a
+  conversation resumed across a capability being revoked (the model's own
+  earlier calls sit in history and invite imitation). ([#476])
+- **`sanitizeUrl()` no longer passes control-character-obfuscated schemes.**
+  `java<TAB>script:`, `java<LF>script:`, `javascript<TAB>:` and a leading C0
+  control all bypassed the check, because it ran on `trim()` (leading/trailing
+  whitespace only) while browsers strip tab/newline/CR from anywhere in a URL
+  before parsing the scheme. Only the inspected copy is normalised — the URL
+  returned to callers is unchanged. ([#437])
+- **`PATCH /api/v1/users/me` clears `emailVerified` when the address changes**
+  and re-sends verification. Previously an account that verified one address
+  could become a *verified* holder of any unregistered address in one request,
+  turning `user.email` from "an address this person controls" into "any unused
+  string they typed" — a privilege-escalation primitive for invitation
+  redemption and domain allowlists keyed on the address. ([#466])
+
+### Added
+
+- **`CAPABILITY_BINDING_MODE`** env var (`permissive` | `strict`, default
+  `permissive` — unchanged behaviour). `strict` makes a missing
+  `AiAgentCapability` row DENY instead of synthesizing a default-allow binding.
+  Opt-in because it retroactively revokes capabilities agents relied on
+  implicitly, including `mcp-system`. ([#476])
+
+### Fixed
+
+- **MCP tool dispatch warms the capability registry.** A process that had only
+  served MCP — no chat or workflow request yet — had an empty in-memory
+  registry, so every MCP tool call failed with `Unknown capability`, built-ins
+  included, while `tools/list` still listed them. ([#457])
+- **Boot-registered context contributors and capability handlers survive to
+  request time.** Both registries are now backed by `globalThis`, as the Prisma
+  client already was. Under Next 16 + Turbopack `instrumentation.ts` runs in a
+  separate module graph from route handlers, so a framework tier registering at
+  boot silently vanished on the request path. ([#462])
+
+[#437]: https://github.com/human-centric-engineering/sunrise/issues/437
+[#457]: https://github.com/human-centric-engineering/sunrise/issues/457
+[#462]: https://github.com/human-centric-engineering/sunrise/issues/462
+[#466]: https://github.com/human-centric-engineering/sunrise/issues/466
+[#476]: https://github.com/human-centric-engineering/sunrise/issues/476
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
