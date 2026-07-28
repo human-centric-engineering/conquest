@@ -1,9 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { nextFontStub } from './tests/mocks/next-font-plugin';
 
 export default defineConfig({
-  plugins: [react()],
+  // `nextFontStub` stands in for `next/font/*`, which the Next compiler strips
+  // at build time and Vitest therefore cannot execute. See the plugin's header.
+  plugins: [react(), nextFontStub()],
   test: {
     // Use happy-dom for fast DOM testing (alternative to jsdom)
     environment: 'happy-dom',
@@ -14,8 +17,20 @@ export default defineConfig({
     // Include test files
     include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
 
-    // Exclude files
-    exclude: ['node_modules', 'dist', '.next', 'coverage', '**/*.config.{js,ts}', '.claude/**'],
+    // Exclude files. `tests/e2e` is forward-looking: Sunrise ships no Playwright
+    // suite, but a fork that adds one puts specs there using the conventional
+    // `.spec.ts` suffix, which the include glob above would otherwise collect.
+    // Vitest would then run files importing `@playwright/test`, and the failures
+    // don't obviously say "wrong runner". Costs nothing while the dir is absent.
+    exclude: [
+      'node_modules',
+      'dist',
+      '.next',
+      'coverage',
+      '**/*.config.{js,ts}',
+      '.claude/**',
+      'tests/e2e/**',
+    ],
 
     // Enable global test APIs (describe, it, expect, etc.)
     globals: true,
@@ -50,8 +65,13 @@ export default defineConfig({
       },
     },
 
-    // Test timeout (useful for async tests)
-    testTimeout: 10000,
+    // Test timeout (useful for async tests). 10s is comfortable for the
+    // platform's own suite but tight once a fork adds heavier component and
+    // integration tests — async server-component renders and `userEvent`-driven
+    // form flows do 1-3s of real work and inflate well past that under CI
+    // contention. The resulting failures are flaky rather than deterministic,
+    // which makes them expensive to chase, so the default is generous.
+    testTimeout: 30000,
 
     // Mock CSS modules
     css: false,
