@@ -239,13 +239,11 @@ does **not** change them after shipping them, so the edits you make merge cleanl
 when you pull an upstream release. (Contrast the marketing pages, which Sunrise
 _does_ keep improving — those stay sync-safe via the thin-shim in
 [§6](#6-landing-page--routes), not by editing the platform file in place.) The stable
-contract the platform depends on is each file's _export_ (`appEnvSchema`,
-`registerAppRateLimits`, `initAppCapabilities`, `initAppNav`,
-`registerAppDriftProbes`, the `publicNavItems` / `footerNavItems` /
-`footerLegalItems` lists, `emailOverrides`) — which the core imports — **not**
-the body, which is yours. Keep the export name and signature;
-everything inside is free to change. (Detailed examples live here in this guide,
-not in the files, precisely so the files stay small and conflict-free.)
+contract the platform depends on is each file's _export_ — the symbol named in
+the table below, which the core imports — **not** the body, which is yours. Keep
+the export name and signature; everything inside is free to change. (Detailed
+examples live here in this guide, not in the files, precisely so the files stay
+small and conflict-free.)
 
 | Edit this file                             | To register                                   | Auto-wired by (runtime)                                          |
 | ------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------------- |
@@ -263,8 +261,19 @@ not in the files, precisely so the files stay small and conflict-free.)
 | `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent             | `resolveAgentDocumentAccess()` (server route-handler)            |
 | `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards       | the chat handler's `collectGuardFloors()` (server route-handler) |
 | `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing           | the chat handler's `emitGuardEvent()` (server route-handler)     |
+| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                 | the agent field registry (server + agent form)                   |
+| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`     | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)     |
 
-**Why four files and not one bootstrap call?** Next.js bundles middleware,
+> **Filling a seam is expected to fail one row of a core test.**
+> `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
+> contract is what stops a stray default from applying to every install. When you
+> fill a seam, **pin the new value** in that file's `SEAM_DEFAULTS` table rather
+> than deleting the row (`expect(appEslintConfig).toEqual(myTierConfig)`, not a
+> deletion). Pinning keeps the protection for the seams you have _not_ filled.
+> One row per seam, so your diff stays a line — see the FORK NOTE at the top of
+> that file.
+
+**Why one file per concern and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
 registration only takes effect in the realm where it runs. So each concern lives
 in its own file, imported by the consumer in the matching realm. (It also keeps
