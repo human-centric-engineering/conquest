@@ -124,6 +124,55 @@ describe('Input Sanitization', () => {
       expect(sanitizeUrl('')).toBe('');
       expect(sanitizeUrl(null as unknown as string)).toBe('');
     });
+
+    // Regression: the scheme check used to run on `url.trim().toLowerCase()`,
+    // but `trim()` removes only LEADING/TRAILING whitespace. The WHATWG URL
+    // parser strips tab/newline/CR from anywhere in a URL and drops leading C0
+    // controls BEFORE reading the scheme, so each vector below was returned
+    // unchanged by the sanitizer and then executed by the browser as
+    // `javascript:`.
+    describe('control-character scheme bypass', () => {
+      const TAB = String.fromCharCode(0x09);
+      const NEWLINE = String.fromCharCode(0x0a);
+      const CR = String.fromCharCode(0x0d);
+      const C0_CONTROL = String.fromCharCode(0x01);
+
+      it('should block a tab inside the scheme', () => {
+        expect(sanitizeUrl(`java${TAB}script:alert(1)`)).toBe('');
+      });
+
+      it('should block a newline inside the scheme', () => {
+        expect(sanitizeUrl(`java${NEWLINE}script:alert(1)`)).toBe('');
+      });
+
+      it('should block a carriage return inside the scheme', () => {
+        expect(sanitizeUrl(`java${CR}script:alert(1)`)).toBe('');
+      });
+
+      it('should block a tab before the colon', () => {
+        expect(sanitizeUrl(`javascript${TAB}:alert(1)`)).toBe('');
+      });
+
+      it('should block a leading C0 control character', () => {
+        // `trim()` removes whitespace but NOT \x01-\x08 / \x0e-\x1f.
+        expect(sanitizeUrl(`${C0_CONTROL}javascript:alert(1)`)).toBe('');
+      });
+
+      it('should block control-character obfuscation of every dangerous scheme', () => {
+        expect(sanitizeUrl(`da${TAB}ta:text/html,<script>alert(1)</script>`)).toBe('');
+        expect(sanitizeUrl(`vb${NEWLINE}script:msgbox("xss")`)).toBe('');
+        expect(sanitizeUrl(`fi${TAB}le:///etc/passwd`)).toBe('');
+      });
+
+      it('should return safe URLs VERBATIM, not the stripped copy', () => {
+        // Only the inspected copy is normalised. Rewriting the returned value
+        // would corrupt legitimate URLs — a space in a path is valid, and
+        // callers rely on getting back exactly what they passed in.
+        expect(sanitizeUrl('https://example.com/a b')).toBe('https://example.com/a b');
+        expect(sanitizeUrl('https://example.com/a?b=c#d')).toBe('https://example.com/a?b=c#d');
+        expect(sanitizeUrl('mailto:someone@example.com')).toBe('mailto:someone@example.com');
+      });
+    });
   });
 
   describe('sanitizeRedirectUrl', () => {
