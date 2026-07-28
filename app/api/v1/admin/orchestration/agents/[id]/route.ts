@@ -22,7 +22,7 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -48,14 +48,6 @@ import {
   type SystemInstructionsHistoryEntry,
 } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
-
-function parseAgentId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid agent id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
 
 /**
  * Cap on each string value inside an outbound `changes` payload. Agents'
@@ -89,7 +81,7 @@ function truncateChangesForPayload(
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseAgentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'agent id' });
 
   const agent = await prisma.aiAgent.findUnique({
     where: { id },
@@ -119,7 +111,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseAgentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'agent id' });
 
   const current = await prisma.aiAgent.findUnique({
     where: { id },
@@ -490,7 +482,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseAgentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'agent id' });
 
   const current = await prisma.aiAgent.findUnique({ where: { id } });
   if (!current || current.deletedAt !== null) throw new NotFoundError(`Agent ${id} not found`);

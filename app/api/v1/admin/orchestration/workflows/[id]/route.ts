@@ -14,8 +14,8 @@ import { Prisma } from '@prisma/client';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { ConflictError, ForbiddenError, NotFoundError } from '@/lib/api/errors';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -24,18 +24,10 @@ import { updateWorkflowSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
 import { notifyMcpWorkflowsChanged } from '@/lib/orchestration/mcp/resource-update-hooks';
 
-function parseWorkflowId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid workflow id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseWorkflowId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'workflow id' });
 
   const workflow = await prisma.aiWorkflow.findUnique({
     where: { id },
@@ -52,7 +44,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseWorkflowId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'workflow id' });
 
   const current = await prisma.aiWorkflow.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Workflow ${id} not found`);
@@ -150,7 +142,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseWorkflowId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'workflow id' });
 
   const current = await prisma.aiWorkflow.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Workflow ${id} not found`);
