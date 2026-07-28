@@ -14,6 +14,7 @@ import { successResponse, errorResponse } from '@/lib/api/responses';
 import { UnauthorizedError, ErrorCodes } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { updateUserSchema, deleteAccountSchema } from '@/lib/validations/user';
+import { auth } from '@/lib/auth/config';
 import { withAuth } from '@/lib/auth/guards';
 import { humanAdminWhere } from '@/lib/auth/account';
 import { eraseUser } from '@/lib/privacy/erase-user';
@@ -74,6 +75,9 @@ export const GET = withAuth(async (request, session) => {
  * - Request body matches updateUserSchema
  * - Email is unique (if being changed)
  *
+ * Changing the email address CLEARS `emailVerified` and re-triggers
+ * verification — see the inline note below for why that matters.
+ *
  * @param request - Request with JSON body { name?, email?, bio?, phone?, timezone?, location? }
  * @returns Updated user profile
  * @throws UnauthorizedError if not authenticated
@@ -100,10 +104,29 @@ export const PATCH = withAuth(async (request, session) => {
     }
   }
 
-  // Update user with all provided fields
+  // Is this request actually changing the address?
+  //
+  // Emails are stored lower-cased by the auth layer, but compare
+  // case-insensitively anyway so a no-op re-submit of the same address (a form
+  // that PATCHes every field) doesn't gratuitously unverify the account.
+  const emailChanged =
+    body.email !== undefined && body.email.toLowerCase() !== session.user.email.toLowerCase();
+
+  // Clear `emailVerified` whenever the address changes.
+  //
+  // Without this, `user.email` stops meaning "an address this person
+  // demonstrably controls" and becomes "any unused string this person typed",
+  // while every downstream consumer still reads it as the former. An account
+  // that verified mallory@example.com could become a *verified*
+  // ceo@bigco.example in one request. That is a privilege-escalation primitive
+  // for anything keyed on the address — invitation redemption that matches on
+  // `user.email`, domain allowlists ("@company.com implies elevated access"),
+  // and audit trails attributing actions to an address the actor never proved
+  // they own. The attacker needs only an ordinary account, and the target
+  // address must simply not already be registered.
   const updatedUser = await prisma.user.update({
     where: { id: session.user.id },
-    data: body,
+    data: { ...body, ...(emailChanged ? { emailVerified: false } : {}) },
     select: {
       id: true,
       name: true,
@@ -121,6 +144,22 @@ export const PATCH = withAuth(async (request, session) => {
       preferences: true,
     },
   });
+
+  // Re-trigger verification for the new address so the flag can become true
+  // again the only legitimate way. Best-effort: the address is already changed
+  // and unverified at this point, so a mail failure must not fail the request —
+  // it just means the user re-requests verification from the UI, which the
+  // existing POST /api/auth/send-verification-email route already supports.
+  if (emailChanged) {
+    log.info('Email changed — cleared emailVerified, sending verification to the new address');
+    try {
+      await auth.api.sendVerificationEmail({ body: { email: updatedUser.email } });
+    } catch (sendError) {
+      log.error('Failed to send verification email after email change', sendError, {
+        userId: session.user.id,
+      });
+    }
+  }
 
   log.info('User profile updated');
 
