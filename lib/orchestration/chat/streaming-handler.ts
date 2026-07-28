@@ -941,7 +941,8 @@ export class StreamingChatHandler {
           ? (agent.metadata as Record<string, unknown>)
           : null;
       const responseFormat = agentMetadata?.responseFormat as
-        import('@/lib/orchestration/llm/types').LlmResponseFormat | undefined;
+        | import('@/lib/orchestration/llm/types').LlmResponseFormat
+        | undefined;
 
       // Remaining fallback providers for mid-stream retry
       const remainingFallbacks = [...resolvedFallbackProviders];
@@ -953,6 +954,27 @@ export class StreamingChatHandler {
       // skipped and the LLM receives a "temporarily unavailable" message.
       const toolFailureCounts = new Map<string, number>();
       const TOOL_FAILURE_THRESHOLD = 2;
+
+      /**
+       * The tools this agent is actually allowed to call this turn.
+       *
+       * `toolDefinitions` is the set advertised to the model, built by
+       * `getCapabilityDefinitions(agent.id)` from `AiAgentCapability` rows that
+       * are explicitly enabled AND whose capability is active AND which the
+       * dispatcher holds. Dispatch, however, took the tool name straight off
+       * the model's emitted call — so a name the agent was never granted still
+       * reached `capabilityDispatcher.dispatch`, where a MISSING pivot row
+       * synthesizes a default-ALLOW binding and executes it unrestricted.
+       *
+       * That makes advertise and dispatch disagree in the dangerous direction:
+       * a prompt-injected document (or a conversation resumed across a
+       * capability being revoked, where the model's own earlier calls sit in
+       * history and invite imitation) can name any globally-registered slug and
+       * have it run. Checking the emitted name against the advertised set
+       * closes it without changing the binding model — see the note on
+       * `getAgentBinding` in the dispatcher for the other half.
+       */
+      const advertisedToolNames = new Set(toolDefinitions.map((t) => t.name));
 
       // Citation accumulator. Populated by citation-producing tools
       // (currently `search_knowledge_base`); markers are monotonic
@@ -1666,18 +1688,37 @@ export class StreamingChatHandler {
           // backward compatibility with existing SSE consumers.
           const tc = toolCallArray[0];
 
-          // Skip tool if it has failed too many times consecutively
+          // Refuse a tool the agent never advertised, then skip one that has
+          // failed too many times consecutively. Both produce the same shape:
+          // a refusal result that is persisted, mirrored to the eval log, and
+          // pushed onto `messages` as an assistant+tool pair. That pairing is
+          // mandatory — an assistant toolCall with no matching tool result
+          // makes the NEXT provider call 400.
           const failCount = toolFailureCounts.get(tc.name) ?? 0;
-          if (failCount >= TOOL_FAILURE_THRESHOLD) {
-            log.warn('Skipping tool after repeated failures', {
+          const refusal = !advertisedToolNames.has(tc.name)
+            ? {
+                code: 'tool_not_advertised',
+                message: `Tool '${tc.name}' is not available to this agent`,
+                logMessage: 'Refusing tool not advertised to this agent',
+              }
+            : failCount >= TOOL_FAILURE_THRESHOLD
+              ? {
+                  code: 'tool_unavailable',
+                  message: `Tool '${tc.name}' is temporarily unavailable after ${failCount} consecutive failures`,
+                  logMessage: 'Skipping tool after repeated failures',
+                }
+              : null;
+
+          if (refusal) {
+            log.warn(refusal.logMessage, {
               tool: tc.name,
               failures: failCount,
             });
             const unavailableResult = {
               success: false,
               error: {
-                code: 'tool_unavailable',
-                message: `Tool '${tc.name}' is temporarily unavailable after ${failCount} consecutive failures`,
+                code: refusal.code,
+                message: refusal.message,
               },
             };
             await this.persistMessage({
@@ -1864,7 +1905,25 @@ export class StreamingChatHandler {
 
           for (const tc of toolCallArray) {
             const failCount = toolFailureCounts.get(tc.name) ?? 0;
-            if (failCount >= TOOL_FAILURE_THRESHOLD) {
+
+            // Same two refusals as the single-call path above, in the same
+            // order: a tool the agent never advertised never reaches the
+            // dispatcher, then the repeated-failure circuit breaker.
+            if (!advertisedToolNames.has(tc.name)) {
+              log.warn('Refusing tool not advertised to this agent (parallel)', {
+                tool: tc.name,
+              });
+              skippedResults.push({
+                tc,
+                result: {
+                  success: false,
+                  error: {
+                    code: 'tool_not_advertised',
+                    message: `Tool '${tc.name}' is not available to this agent`,
+                  },
+                },
+              });
+            } else if (failCount >= TOOL_FAILURE_THRESHOLD) {
               log.warn('Skipping tool after repeated failures (parallel)', {
                 tool: tc.name,
                 failures: failCount,
