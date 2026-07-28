@@ -16,6 +16,47 @@ release process.
 
 ## [Unreleased]
 
+### Added
+
+- **`slugify(value)`** in `lib/utils.ts` — filename/URL-safe slug. Returns the
+  bare slug including the empty string (callers apply their own fallback, e.g.
+  `slugify(title) || 'report'`); pure and client-safe, so the same helper works
+  in a download button and in a server-side filename. ([#451])
+- **`validatePathParam(raw, schema, options?)`** in `lib/api/validation.ts` —
+  completes the validation family alongside `validateRequestBody` and
+  `validateQueryParams`. Throws the same `ValidationError` that `handleAPIError`
+  maps to a 400. Sixteen `[id]` routes drop their hand-rolled copies. ([#435])
+
+### Changed
+
+- **CI heap ceiling is now the `CI_NODE_HEAP_MB` repo variable** (default
+  `5120`, unchanged). Forks whose lint job dies with exit 134 raise it in repo
+  settings instead of editing `ci.yml`, so the fix survives an upstream sync.
+  ([#452])
+- **`tests/unit/lib/app/defaults.test.ts` is table-driven.** Filling a
+  `lib/app/*` seam is expected to fail one row; pin the new value rather than
+  deleting the row. Coverage also rose from 9 seams to 14. ([#480])
+- **Vitest `testTimeout` raised to 30s** (from 10s) for forks with heavier
+  component and integration tests. ([#454])
+
+### Fixed
+
+- **`next/font/google` and `next/font/local` now resolve under Vitest.** Font
+  loaders run at module scope, so a fork adding brand typography previously saw
+  every test importing that layout fail at import time. Loader names are derived
+  from Next's own declarations, so no fork edits a platform test file. ([#455])
+- **Secret scanning keeps `--results=verified,unknown`** and ships a
+  fixture/docs path allowlist instead, so forks do not have to trade away the
+  unverifiable-secret class to stop false positives on example DSNs. ([#453])
+
+[#435]: https://github.com/human-centric-engineering/sunrise/issues/435
+[#451]: https://github.com/human-centric-engineering/sunrise/issues/451
+[#452]: https://github.com/human-centric-engineering/sunrise/issues/452
+[#453]: https://github.com/human-centric-engineering/sunrise/issues/453
+[#454]: https://github.com/human-centric-engineering/sunrise/issues/454
+[#455]: https://github.com/human-centric-engineering/sunrise/issues/455
+[#480]: https://github.com/human-centric-engineering/sunrise/issues/480
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
