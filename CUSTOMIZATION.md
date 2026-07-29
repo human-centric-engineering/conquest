@@ -111,12 +111,16 @@ under either tier**, so both merge cleanly on upgrade. A framework fork owns
 **App name (the brand seam):**
 
 - Set **`NEXT_PUBLIC_APP_NAME`** in your `.env` — this renames the app across
-  page-title metadata (all layouts + auth pages), the **header/footer brand**,
-  and the email templates in one place, no file edits. Defaults to `"Sunrise"`
-  when unset. Consumed via `lib/brand.ts` (`BRAND.name`); import that constant
-  if you add new brand-bearing surfaces. Marketing-page **body copy**
-  (`app/(public)/*`) is not driven by this seam — re-skin it with the thin-shim
-  pattern in [§6](#6-landing-page--routes) so your content stays sync-safe.
+  page-title metadata (all layouts + auth pages), the settings and knowledge-base
+  **tab titles** (written straight to `document.title`, so they would otherwise
+  override the layout template), the legal/contact pages' metadata
+  (`privacy`, `terms`, `contact`), the **header/footer brand**, and the email
+  templates in one place, no file edits. Defaults to `"Sunrise"` when unset.
+  Consumed via `lib/brand.ts` (`BRAND.name`); import that constant if you add new
+  brand-bearing surfaces. Marketing-page **body copy** (`app/(public)/*`,
+  including `about/`'s description of the template itself) is not driven by this
+  seam — re-skin it with the thin-shim pattern in
+  [§6](#6-landing-page--routes) so your content stays sync-safe.
 
 **Legal entity / copyright holder (`BRAND.legalName`):**
 

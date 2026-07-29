@@ -3,21 +3,21 @@ import Link from 'next/link';
 import { Mail, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ContactForm } from '@/components/forms/contact-form';
+import { BRAND } from '@/lib/brand';
+
+const description = `Get in touch with the ${BRAND.name} team. Questions, feedback, or just want to say hello? We would love to hear from you.`;
 
 export const metadata: Metadata = {
   title: 'Contact',
-  description:
-    'Get in touch with the Sunrise team. Questions, feedback, or just want to say hello? We would love to hear from you.',
+  description,
   openGraph: {
-    title: 'Contact - Sunrise',
-    description:
-      'Get in touch with the Sunrise team. Questions, feedback, or just want to say hello? We would love to hear from you.',
+    title: `Contact - ${BRAND.name}`,
+    description,
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Contact - Sunrise',
-    description:
-      'Get in touch with the Sunrise team. Questions, feedback, or just want to say hello? We would love to hear from you.',
+    title: `Contact - ${BRAND.name}`,
+    description,
   },
 };
 

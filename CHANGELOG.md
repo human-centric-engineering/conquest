@@ -31,6 +31,15 @@ release process.
 
 ### Fixed
 
+- **Tab titles and legal-page metadata now route through the `BRAND` seam**
+  (#432). `SETTINGS_TAB_TITLES` and `KNOWLEDGE_TAB_TITLES` hardcoded `"Sunrise"`,
+  and `useUrlTabs` writes them straight to `document.title` — so a fork with
+  `NEXT_PUBLIC_APP_NAME` set still showed "Sunrise" in the browser tab on
+  `/settings` and the admin knowledge base, overriding correct layout metadata.
+  The static metadata on `app/(public)/{privacy,terms,contact}` had the same
+  hardcode. All now interpolate `BRAND.name`. `about/` is deliberately left
+  alone — its copy describes the template itself and is fork-replaced body copy.
+
 - **Route-group error boundaries no longer double-log and double-report on
   session expiry** (#433). The logging effect included `isSessionExpired` in its
   dependency array while also setting it, so a session-expiry error re-ran the
