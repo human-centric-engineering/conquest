@@ -16,6 +16,37 @@ release process.
 
 ## [Unreleased]
 
+### Added
+
+- **`<RouteErrorBoundary>` — one shared body for every route group's
+  `error.tsx`** (#434). New `components/errors/route-error-boundary.tsx` holds
+  the logging, Sentry reporting, optional session-expiry detection and recovery
+  card that the four `app/**/error.tsx` files each carried a near-identical copy
+  of; those files are now thin wrappers. A fork adding a route group writes a
+  ~10-line wrapper with its own `boundaryName`, `tag` and `fallback` instead of
+  a fifth copy. `fallback.navigate: 'reload'` opts into a full document load for
+  boundaries where the shell itself may be broken. `app/global-error.tsx` is
+  unchanged — it replaces the root layout and renders its own `<html>`/`<body>`.
+  See [`.context/ui/components.md`](./.context/ui/components.md).
+
+### Fixed
+
+- **Route-group error boundaries no longer double-log and double-report on
+  session expiry** (#433). The logging effect included `isSessionExpired` in its
+  dependency array while also setting it, so a session-expiry error re-ran the
+  effect and produced two `logger.error` lines and two Sentry events. The shared
+  boundary reports once per error (deps `[error]`) and drops `isSessionExpired`
+  from the Sentry `extra` — it was always `false` at report time anyway.
+
+### Changed
+
+- **Error-boundary log message is now `'Route error boundary triggered'` for all
+  four route groups** (#434), replacing the four per-group messages
+  (`'Root error boundary triggered'`, `'Admin route error boundary triggered'`,
+  …). The boundary is still identified by the structured `boundaryName` field,
+  which is what log queries should key on. `app/global-error.tsx` keeps its own
+  `'Global error boundary triggered'` message.
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
