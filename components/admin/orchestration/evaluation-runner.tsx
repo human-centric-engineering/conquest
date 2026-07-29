@@ -381,6 +381,19 @@ export function EvaluationRunner({ evaluation }: EvaluationRunnerProps) {
                   return updated;
                 });
               }
+            } else if (parsed.type === 'budget_exceeded_per_turn') {
+              // Terminal on the tool-loop-abort path — the handler returns
+              // straight after this frame and the SSE stream closes cleanly,
+              // so no `done`/`error` follows. Without this branch the run
+              // ends silently on a partial turn.
+              typing.flush();
+              const typed = parseChatStreamEvent(block);
+              setChatError(
+                typed?.type === 'budget_exceeded_per_turn'
+                  ? typed.message
+                  : "The agent's per-turn cost limit was reached before it finished."
+              );
+              return;
             } else if (parsed.type === 'error') {
               typing.flush();
               setChatError('The agent ran into a problem. Check the server logs for details.');

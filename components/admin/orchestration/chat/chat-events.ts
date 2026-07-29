@@ -103,6 +103,21 @@ export const chatStreamEventSchema = z.discriminatedUnion('type', [
     inputBreakdown: inputBreakdownSchema.optional(),
     sideEffectModels: z.array(sideEffectModelUsageSchema).optional(),
   }),
+  /**
+   * Terminal on one path. The tool-loop-abort branch of the streaming
+   * handler yields this and `return`s with no trailing `done`/`error`, and
+   * `lib/api/sse.ts` closes cleanly on generator return — so a consumer that
+   * drops this frame sees the stream end normally with an empty or partial
+   * assistant turn and no explanation. Treat it as a user-facing terminal
+   * error: surface `message` and stop streaming.
+   */
+  z.object({
+    type: z.literal('budget_exceeded_per_turn'),
+    code: z.literal('budget_exceeded_per_turn'),
+    message: z.string(),
+    usedUsd: z.number(),
+    limitUsd: z.number(),
+  }),
   z.object({ type: z.literal('error'), code: z.string(), message: z.string() }),
 ]);
 
