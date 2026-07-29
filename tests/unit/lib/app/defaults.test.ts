@@ -44,6 +44,8 @@ import { appProtectedRoutes } from '@/lib/app/protected-routes';
 import { appEnvSchema } from '@/lib/app/env';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
+import { initAppUserCreatedHooks } from '@/lib/app/user-created';
+import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
 
@@ -166,6 +168,20 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     // The root eslint.config.mjs spreads this array last; that spread itself is
     // exercised by every `npm run lint` run.
     assert: () => expect(appEslintConfig).toEqual([]),
+  },
+  {
+    seam: 'lib/app/jobs.ts',
+    risk: 'a stray job would run on every install\u2019s maintenance tick',
+    assert: () => {
+      __resetAppJobsForTests();
+      // getAppJobs() triggers the lazy init, so this exercises the REAL seam.
+      expect(getAppJobs()).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/user-created.ts',
+    risk: 'a stray hook would run on every signup on every install',
+    assert: () => expect(initAppUserCreatedHooks()).toBeUndefined(),
   },
   {
     seam: 'lib/app/csp.ts',

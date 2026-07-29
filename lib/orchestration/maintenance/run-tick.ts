@@ -22,6 +22,7 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
 
 /** Module-level guard against overlapping tick executions. */
 let tickRunning = false;
@@ -108,6 +109,11 @@ export async function runMaintenanceTick(): Promise<TickResult> {
     enforceRetentionPolicies(),
     processPendingExecutions(),
     processPendingEvaluationRuns(),
+    // Fork-owned seam (#469). Last in the list so its index doesn't shift the
+    // BACKGROUND_TASK_NAMES mapping above, and so app work never delays
+    // Sunrise's own maintenance. `runDueAppJobs` never throws and returns
+    // undefined when no jobs are registered, so vanilla Sunrise is unaffected.
+    runDueAppJobs(),
   ])
     .then((settled) => {
       const summary = Object.fromEntries(
@@ -119,8 +125,17 @@ export async function runMaintenanceTick(): Promise<TickResult> {
           ];
         })
       );
+      // App jobs sit one past the named platform tasks. Only logged when the
+      // fork actually registered something, so the line stays unchanged upstream.
+      const appJobsResult = settled[BACKGROUND_TASK_NAMES.length];
+      const appJobs =
+        appJobsResult?.status === 'fulfilled'
+          ? appJobsResult.value
+          : { error: String(appJobsResult?.reason) };
+
       logger.info('Maintenance tick background tasks completed', {
         ...summary,
+        ...(appJobs ? { appJobs } : {}),
         totalDurationMs: Date.now() - startMs,
       });
     })

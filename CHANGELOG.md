@@ -65,6 +65,34 @@ release process.
 
 ### Added
 
+- **`lib/app/user-created.ts` — a fork-owned seam at user creation** (#464). A
+  fork that needed to react to a new account (provision a profile row, seed a
+  workspace, start onboarding, push to a CRM) had to add code to
+  `userCreateAfterHook` in `lib/auth/config.ts` — a security-sensitive platform
+  file, and a merge conflict on every upstream sync. Register hooks with
+  `registerUserCreatedHook(key, hook)`; each receives
+  `{ userId, email, name, signupMethod, viaInvitation }`, so it can tell an OAuth
+  account (address already verified) from an email/password one. Dispatched last
+  in the after-hook, so a hook sees the account fully initialised. A hook
+  **cannot reject a signup** — it runs after the row exists, and a throw is
+  logged and swallowed rather than reporting a completed signup as an error. To
+  gate signup itself, see #463. Empty registry = today's behaviour.
+
+- **`lib/app/jobs.ts` — a fork-owned seam for recurring app work** (#469). The
+  scheduler ran workflow schedules only, so an app's own periodic job needed
+  either a second cron process and deployment target or an edit to `run-tick.ts`.
+  Register with `registerAppJob({ name, intervalMs, run })` and the existing
+  maintenance tick runs it when due; the return value is folded into the tick's
+  completion log line. Two honest limits, documented on the seam: `intervalMs` is
+  a **minimum** gap bounded below by the tick interval (60s), and last-run times
+  live in process memory — so a multi-instance deployment runs each job about
+  once per instance per interval, and a restart re-arms everything. Write jobs to
+  be idempotent; a job needing exactly-once cluster-wide semantics needs its own
+  lease. A job still running is never started again (per-job in-flight guard), a
+  non-positive `intervalMs` is refused at registration rather than silently
+  meaning "every tick", and a rejecting job is contained. Empty registry =
+  today's behaviour, byte-for-byte.
+
 - **`NavSection.titleNode` — a fork's own brand lockup in an admin nav section
   header** (#448). Optional `ReactNode` on `registerNavSection({ … })`; when set,
   the sidebar renders it in place of the default uppercase `title` label and
