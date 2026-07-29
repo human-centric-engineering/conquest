@@ -533,8 +533,17 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
           {sections.map((section) => (
             <div key={section.title}>
               {!collapsed && (
-                <h3 className="text-muted-foreground mb-2 px-2 text-xs font-semibold tracking-wider uppercase">
-                  {section.title}
+                <h3
+                  // A custom node carries no text of its own (a wordmark image,
+                  // say), so `title` stays the accessible name for the heading.
+                  aria-label={section.titleNode ? section.title : undefined}
+                  className={cn(
+                    'mb-2 px-2',
+                    !section.titleNode &&
+                      'text-muted-foreground text-xs font-semibold tracking-wider uppercase'
+                  )}
+                >
+                  {section.titleNode ?? section.title}
                 </h3>
               )}
               {section.items && (

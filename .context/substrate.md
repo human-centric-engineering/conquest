@@ -42,7 +42,9 @@ Entry point for the `.context/` documentation system. Load specific domains base
 > **Two fork tiers are reserved — Sunrise must never create or write under
 > either.** `/app` is the **leaf-fork** tier: `.context/app/` is the fork-owned
 > documentation tree (mirroring this platform substrate), alongside the
-> `lib/app/**` scaffold. `/framework` is the **framework-layer** tier for a fork
+> `lib/app/**` scaffold and `prisma/schema/app.prisma` (ships empty; the
+> platform's own app-domain models live in `platform.prisma`).
+> `/framework` is the **framework-layer** tier for a fork
 > that sits between Sunrise and its own leaf forks (e.g. Daybreak):
 > `.context/framework/`, `lib/framework/`, `prisma/schema/framework-*.prisma`,
 > and the `framework_` table prefix. Keeping both empty upstream is what lets a

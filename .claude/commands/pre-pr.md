@@ -148,7 +148,7 @@ For each changed file from Step 2, decide whether it touches the public surface 
   - `lib/api/server-fetch.ts` (serverFetch contract)
   - `lib/logging/index.ts` and `lib/logging/types.ts` (logger surface)
   - Anything under `app/api/v1/admin/orchestration/**` (orchestration admin API surface — see `.context/api/orchestration-endpoints.md`)
-- **Published Prisma model interfaces** — flag if `prisma/schema/` files change models the orchestration admin API exposes (`User`, `Ai*` models — see `.context/orchestration/admin-api.md`). Do NOT flag if only an `app.prisma` (fork-owned) model changes.
+- **Published Prisma model interfaces** — flag if `prisma/schema/` files change models the orchestration admin API exposes (`User`, `Ai*` models — see `.context/orchestration/admin-api.md`). Do NOT flag if only an `app.prisma` model changes — that file is fork-reserved and ships empty upstream, so a core PR touching it is itself worth questioning.
 - **The CHANGELOG / VERSIONING contract itself** — flag if `VERSIONING.md` or `CHANGELOG.md` is removed or has its `[Unreleased]` section deleted without a release-rename.
 
 If ANY public-surface path above is in the diff AND `CHANGELOG.md` is NOT in the diff, flag it as: `Public-surface change without CHANGELOG entry — intentional? See VERSIONING.md "Covered" list.` Include the specific files that triggered the flag.

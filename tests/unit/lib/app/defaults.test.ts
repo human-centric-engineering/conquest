@@ -22,6 +22,7 @@ import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/publ
 import { emailOverrides } from '@/lib/app/emails';
 import { initApp } from '@/lib/app/bootstrap';
 import { initAppKnowledgeAccessContributors } from '@/lib/app/knowledge-access-contributors';
+import { appFrameSrc } from '@/lib/app/csp';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
@@ -92,6 +93,12 @@ describe('lib/app/ bootstrap defaults are no-ops', () => {
     // (Behavioural reach into the resolver is covered by
     // resolveAgentDocumentAccess.test.ts.)
     expect(initAppKnowledgeAccessContributors()).toBeUndefined();
+  });
+
+  it('the CSP frame-src seam is empty by default (= "self" only)', () => {
+    // A stray origin here would widen the iframe policy for every install, and
+    // these values are spliced straight into a response header.
+    expect(appFrameSrc).toEqual([]);
   });
 
   it('the ESLint config seam is an empty array by default', () => {

@@ -266,7 +266,9 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 
 > **Two namespace tiers are reserved for downstream forks — Sunrise core must
 > never create files or tables under either.** `/app` is the **leaf-fork** tier
-> (`.context/app/`, `lib/app/**` fork-owned scaffold). `/framework` is the
+> (`.context/app/`, `lib/app/**` fork-owned scaffold, and
+> `prisma/schema/app.prisma` — which ships empty; the platform's own app-domain
+> models live in `prisma/schema/platform.prisma`). `/framework` is the
 > **framework-layer** tier for forks that sit _between_ Sunrise and their own
 > leaf forks (e.g. Daybreak): `lib/framework/`, `.context/framework/`,
 > `prisma/schema/framework-*.prisma`, and the `framework_` table prefix. Keeping

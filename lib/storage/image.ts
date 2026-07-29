@@ -159,6 +159,19 @@ export interface ProcessImageOptions {
   quality?: number;
   /** Output format (default: keeps original format, but GIF converts to PNG) */
   format?: 'jpeg' | 'png' | 'webp';
+  /**
+   * How the image fills the max dimensions (default: `'cover'`).
+   *
+   * - `'cover'` — crop to a SQUARE at the centre, sized to the smaller of
+   *   `maxWidth`/`maxHeight`. The avatar shape, and this function's historic
+   *   behaviour.
+   * - `'inside'` — scale to fit INSIDE the `maxWidth` × `maxHeight` box,
+   *   preserving aspect ratio. Required for logos and banners, which a centre
+   *   crop destroys.
+   *
+   * Both shapes are shrink-only: neither upscales a small source.
+   */
+  fit?: 'cover' | 'inside';
 }
 
 /**
@@ -175,7 +188,8 @@ export interface ProcessedImage {
  * Process an image: validate, resize, and optimize
  *
  * - Validates the image using magic bytes
- * - Crops to square and resizes to max dimensions (centre crop)
+ * - Resizes to the max dimensions — centre-cropped square by default
+ *   (`fit: 'cover'`), or aspect-preserving with `fit: 'inside'`
  * - Optimizes quality for smaller file size
  * - Converts GIF to PNG (Sharp has limited GIF support)
  *
@@ -185,15 +199,18 @@ export interface ProcessedImage {
  *
  * @example
  * ```typescript
- * const result = await processImage(buffer, { maxWidth: 500, maxHeight: 500 });
- * console.log(result.width, result.height); // Resized dimensions
+ * // Avatar — centre-cropped square
+ * const avatar = await processImage(buffer, { maxWidth: 500, maxHeight: 500 });
+ *
+ * // Logo or banner — never cropped, never enlarged
+ * const logo = await processImage(buffer, { maxWidth: 800, maxHeight: 200, fit: 'inside' });
  * ```
  */
 export async function processImage(
   buffer: Buffer,
   options: ProcessImageOptions = {}
 ): Promise<ProcessedImage> {
-  const { maxWidth = 500, maxHeight = 500, quality = 85 } = options;
+  const { maxWidth = 500, maxHeight = 500, quality = 85, fit = 'cover' } = options;
 
   // Validate magic bytes first
   const validation = validateImageMagicBytes(buffer);
@@ -228,19 +245,21 @@ export async function processImage(
     }
   }
 
-  // Resize and crop to square (for avatars)
-  // Always crop to square; only shrink, don't enlarge
-  const targetSize = Math.min(
-    maxWidth,
-    maxHeight,
-    metadata.width || maxWidth,
-    metadata.height || maxHeight
-  );
+  // Resize. Both modes only shrink — neither enlarges a small source.
+  //
+  // 'cover' crops to a centred square sized to the smallest of the caps and the
+  // source (the avatar shape). 'inside' treats maxWidth × maxHeight as a real
+  // bounding box and preserves aspect ratio — a centre crop would ruin a logo
+  // or a banner.
+  const targetSize =
+    fit === 'cover'
+      ? Math.min(maxWidth, maxHeight, metadata.width || maxWidth, metadata.height || maxHeight)
+      : null;
 
-  image = image.resize(targetSize, targetSize, {
-    fit: 'cover', // Crop to fill exact dimensions (square for avatars)
-    position: 'centre', // Crop from centre
-  });
+  image =
+    targetSize === null
+      ? image.resize(maxWidth, maxHeight, { fit: 'inside', withoutEnlargement: true })
+      : image.resize(targetSize, targetSize, { fit: 'cover', position: 'centre' });
 
   // Apply format and quality
   switch (outputFormat) {
@@ -268,6 +287,7 @@ export async function processImage(
     processedSize: processedBuffer.length,
     width: processedMetadata.width,
     height: processedMetadata.height,
+    fit,
     targetSize,
   });
 

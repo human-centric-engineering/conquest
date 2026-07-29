@@ -69,7 +69,7 @@ findable in the same place in every fork.)
 
 **Two reserved fork tiers — `/app` (leaf) and `/framework`.** The `/app` surface
 above is the **leaf-fork** tier: fork Sunrise directly and build your product in
-`lib/app/**` + `.context/app/`. Some forks instead build a reusable
+`lib/app/**`, `.context/app/`, and `prisma/schema/app.prisma`. Some forks instead build a reusable
 **framework layer** that sits _between_ Sunrise and their own leaf forks (e.g.
 Daybreak). For those, Sunrise reserves a second tier one level up —
 `lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`, and
@@ -111,12 +111,16 @@ under either tier**, so both merge cleanly on upgrade. A framework fork owns
 **App name (the brand seam):**
 
 - Set **`NEXT_PUBLIC_APP_NAME`** in your `.env` — this renames the app across
-  page-title metadata (all layouts + auth pages), the **header/footer brand**,
-  and the email templates in one place, no file edits. Defaults to `"Sunrise"`
-  when unset. Consumed via `lib/brand.ts` (`BRAND.name`); import that constant
-  if you add new brand-bearing surfaces. Marketing-page **body copy**
-  (`app/(public)/*`) is not driven by this seam — re-skin it with the thin-shim
-  pattern in [§6](#6-landing-page--routes) so your content stays sync-safe.
+  page-title metadata (all layouts + auth pages), the settings and knowledge-base
+  **tab titles** (written straight to `document.title`, so they would otherwise
+  override the layout template), the legal/contact pages' metadata
+  (`privacy`, `terms`, `contact`), the **header/footer brand**, and the email
+  templates in one place, no file edits. Defaults to `"Sunrise"` when unset.
+  Consumed via `lib/brand.ts` (`BRAND.name`); import that constant if you add new
+  brand-bearing surfaces. Marketing-page **body copy** (`app/(public)/*`,
+  including `about/`'s description of the template itself) is not driven by this
+  seam — re-skin it with the thin-shim pattern in
+  [§6](#6-landing-page--routes) so your content stays sync-safe.
 
 **Legal entity / copyright holder (`BRAND.legalName`):**
 
@@ -263,6 +267,7 @@ not in the files, precisely so the files stay small and conflict-free.)
 | `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent             | `resolveAgentDocumentAccess()` (server route-handler)            |
 | `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards       | the chat handler's `collectGuardFloors()` (server route-handler) |
 | `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing           | the chat handler's `emitGuardEvent()` (server route-handler)     |
+| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                 | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)      |
 
 **Why four files and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -406,6 +411,21 @@ direct grants follow) so the cached decision re-composes. See
 `initAppNav()` with `registerNavSection({ … })` calls; the admin sidebar renders
 your sections after the core ones. Keep this file client-safe (registrar + icon
 imports only — no server code). Use a `title` distinct from the core sections.
+To render your own brand lockup as the section header instead of the default
+uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
+remains the React key, the registry's dedupe key, and the heading's accessible
+name, so a wordmark image can't cost you the label.
+
+**Third-party iframes — `lib/app/csp.ts`.** `frame-src` is `'self'` in both the
+dev and prod CSP. If your app embeds a third-party iframe (an onboarding or
+marketing video is the usual case), list the hosts in `appFrameSrc` rather than
+editing `lib/security/headers.ts`; the platform folds them into the global CSP.
+Only exact `https://` origins are accepted (a left-most wildcard and a port are
+fine) — anything else is dropped and logged at warn, because these values are
+spliced into a response header. Keep the list exactly as broad as the feature:
+build iframe `src`s only on these hosts from a **validated id**, never from an
+admin's raw input, so a hostile stored value yields no iframe at all. See
+[`.context/security/overview.md`](./.context/security/overview.md#third-party-iframes--the-frame-src-seam).
 
 **Database drift probes — `lib/app/db-drift.ts`.** Register the Prisma-_unmodelled_
 DB objects your app adds — hand-written FK constraints, custom indexes (GIN/HNSW),
@@ -425,8 +445,11 @@ using the probe factories from `@/lib/db/drift-probes` (`indexExists`,
 **Modifying the schema:**
 
 - Edit the schema in `prisma/schema/` — Sunrise's models are split into domain
-  files there; **put your own app models in `prisma/schema/app.prisma`** to keep
-  them clearly separate from the platform's
+  files there; **put your own app models in `prisma/schema/app.prisma`**, which
+  Sunrise ships **empty** and never adds models to (the platform's own
+  app-domain models live in `platform.prisma`). It is fork-reserved in the same
+  way `lib/app/**` and `.context/app/` are, so your models there merge cleanly
+  on every upstream sync
 - Add/modify models as needed
 - Create + apply a migration: `npm run db:migrate:dev` (dev) /
   `npm run db:migrate:deploy` (prod / CI)
@@ -795,8 +818,10 @@ the database migration history — your app's migrations and Sunrise's share one
 directory.
 
 **What does _not_ conflict.** Your own new files (routes, components, `lib/`
-modules, `prisma/schema/app.prisma`, and your docs under `.context/app/`) are
-invisible to upstream, so they never conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
+modules, and your docs under `.context/app/`) are invisible to upstream, so they
+never conflict. `prisma/schema/app.prisma` is fork-reserved the same way —
+Sunrise ships it empty and adds no models to it, so the models you put there
+survive every sync untouched. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
 are **fork-owned scaffold**: Sunrise ships them empty and doesn't re-edit them,
 so the registrations you add there merge cleanly too — no special handling. The
 files that _can_ conflict are the ones both you and upstream edit (the migration

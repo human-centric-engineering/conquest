@@ -21,6 +21,8 @@
  */
 
 import { NextResponse } from 'next/server';
+import { appFrameSrc } from '@/lib/app/csp';
+import { logger } from '@/lib/logging';
 
 /**
  * Content Security Policy directive configuration
@@ -144,6 +146,39 @@ export function buildCSP(config: CSPConfig): string {
 }
 
 /**
+ * An exact `https://` origin, optionally wildcarded at the left-most label and
+ * optionally with a port: `https://player.vimeo.com`, `https://*.example.com`.
+ *
+ * Deliberately narrow. These values are spliced straight into a header, so a
+ * `;`, a space, a bare `*`, or a `data:` scheme would either widen the policy
+ * or break the directives that follow it.
+ */
+const FRAME_SRC_ORIGIN = /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/i;
+
+/**
+ * Validate the fork's `frame-src` additions once, at module load — not per
+ * request. An invalid entry is dropped and logged rather than silently trusted.
+ */
+function resolveAppFrameSrc(): string[] {
+  const accepted: string[] = [];
+
+  for (const origin of appFrameSrc) {
+    if (FRAME_SRC_ORIGIN.test(origin)) {
+      accepted.push(origin);
+      continue;
+    }
+    logger.warn('Ignoring invalid frame-src origin from lib/app/csp.ts', {
+      origin,
+      expected: 'an exact https:// origin, e.g. https://player.vimeo.com',
+    });
+  }
+
+  return accepted;
+}
+
+const APP_FRAME_SRC = resolveAppFrameSrc();
+
+/**
  * Get analytics provider domains for CSP allowlisting
  *
  * Reads configured analytics env vars and returns domains that need to be
@@ -198,7 +233,8 @@ function getAnalyticsCSPDomains(): { scriptSrc: string[]; connectSrc: string[] }
 /**
  * Get CSP configuration for current environment
  *
- * Automatically includes analytics provider domains when configured.
+ * Automatically includes analytics provider domains when configured, and any
+ * `frame-src` origins the fork declared in `lib/app/csp.ts`.
  *
  * @param nonce - Optional per-request nonce for inline script allowlisting
  * @returns CSP configuration object
@@ -210,6 +246,11 @@ export function getCSPConfig(nonce?: string): CSPConfig {
   // Add per-request nonce to script-src (production only — dev already has 'unsafe-inline')
   if (nonce && process.env.NODE_ENV === 'production') {
     base['script-src'] = [...base['script-src'], `'nonce-${nonce}'`];
+  }
+
+  // Add the fork's own iframe hosts (lib/app/csp.ts — empty in vanilla Sunrise)
+  if (APP_FRAME_SRC.length > 0) {
+    base['frame-src'] = [...new Set([...base['frame-src'], ...APP_FRAME_SRC])];
   }
 
   // Add analytics provider domains

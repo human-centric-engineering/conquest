@@ -6,11 +6,98 @@ Sunrise includes several utility components that solve common UI challenges. The
 
 ## Component Library
 
-| Component       | Purpose                        | File                               |
-| --------------- | ------------------------------ | ---------------------------------- |
-| `ErrorCard`     | Error boundary UI with actions | `components/ui/error-card.tsx`     |
-| `ClientDate`    | Hydration-safe date formatting | `components/ui/client-date.tsx`    |
-| `PasswordInput` | Password field with toggle     | `components/ui/password-input.tsx` |
+| Component            | Purpose                           | File                                         |
+| -------------------- | --------------------------------- | -------------------------------------------- |
+| `RouteErrorBoundary` | Shared body for every `error.tsx` | `components/errors/route-error-boundary.tsx` |
+| `ErrorCard`          | Error boundary UI with actions    | `components/ui/error-card.tsx`               |
+| `ClientDate`         | Hydration-safe date formatting    | `components/ui/client-date.tsx`              |
+| `PasswordInput`      | Password field with toggle        | `components/ui/password-input.tsx`           |
+
+## RouteErrorBoundary
+
+Every route group needs its own `error.tsx` — Next.js requires the file per
+segment — but the body is the same each time: log the error, report it to
+Sentry, optionally check whether the session died, and render a recovery card.
+`RouteErrorBoundary` holds that body, so each `app/**/error.tsx` is a thin
+`'use client'` wrapper. A fork adding a route group writes ~10 lines instead of
+copying a fourth near-identical boundary.
+
+### Usage
+
+```tsx
+'use client';
+
+import { Home } from 'lucide-react';
+import { RouteErrorBoundary } from '@/components/errors/route-error-boundary';
+
+export default function HubError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}): React.ReactElement {
+  return (
+    <RouteErrorBoundary
+      error={error}
+      reset={reset}
+      boundaryName="HubError"
+      tag="hub"
+      title="Something went wrong"
+      description="An error occurred while loading this page. This has been logged."
+      checkSession
+      fallback={{ label: 'Hub home', href: '/hub', icon: <Home className="mr-2 h-4 w-4" /> }}
+    />
+  );
+}
+```
+
+### Props
+
+| Prop                 | Type                          | Default     | Description                                                      |
+| -------------------- | ----------------------------- | ----------- | ---------------------------------------------------------------- |
+| `error`              | `Error & { digest?: string }` | (required)  | The error Next.js hands the boundary                             |
+| `reset`              | `() => void`                  | (required)  | The reset callback Next.js hands the boundary                    |
+| `boundaryName`       | `string`                      | (required)  | Identifies the boundary in logs, e.g. `"AdminError"`             |
+| `tag`                | `string`                      | (required)  | Sentry `boundary` tag, e.g. `"admin"`                            |
+| `title`              | `string`                      | (required)  | Card title                                                       |
+| `description`        | `string`                      | (required)  | Card description                                                 |
+| `fallback`           | `RouteErrorFallbackAction`    | (required)  | Secondary action shown next to "Try again"                       |
+| `checkSession`       | `boolean`                     | `false`     | Show a "Session Expired → Sign in" card when the session is gone |
+| `extra`              | `Record<string, string>`      | `undefined` | Extra Sentry context merged alongside the digest                 |
+| `containerClassName` | `string`                      | `undefined` | Forwarded to `ErrorCard`                                         |
+| `footer`             | `ReactNode`                   | `undefined` | Forwarded to `ErrorCard`                                         |
+
+### RouteErrorFallbackAction Type
+
+```typescript
+interface RouteErrorFallbackAction {
+  label: string;
+  href: string;
+  icon?: ReactNode;
+  /** 'router' (default) soft-navigates; 'reload' does a full document load */
+  navigate?: 'router' | 'reload';
+}
+```
+
+### Notes
+
+- **Report once per error.** The logging effect depends on `[error]` only. It
+  must never depend on the session-expiry state it sets — that made the effect
+  self-triggering, and every session-expiry error produced two log lines and two
+  Sentry events.
+- **`navigate: 'reload'`** for the root and public boundaries: the shell itself
+  may be what broke, so a full document load is the honest recovery. Inside a
+  working shell (protected, admin) the default `router.push` is right.
+- **`checkSession`** only makes sense behind authentication. It calls
+  `authClient.getSession()` and destructures the result — better-auth always
+  resolves to a `{ data, error }` envelope, so the session is `data`, and a null
+  `data` is the expiry signal. A rejected call is treated as expired too.
+  Testing the envelope itself for truthiness never fires: that was the bug that
+  left the expiry card reachable only on a network failure.
+- `app/global-error.tsx` is deliberately NOT a wrapper — it replaces the root
+  layout, so it renders its own `<html>`/`<body>` and cannot import the shared
+  card.
 
 ## ErrorCard
 

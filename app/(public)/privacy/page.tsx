@@ -1,16 +1,19 @@
 import type { Metadata } from 'next';
+import { BRAND } from '@/lib/brand';
+
+const description = `Privacy Policy for ${BRAND.name}. Learn how we collect, use, and protect your data.`;
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
-  description: 'Privacy Policy for Sunrise. Learn how we collect, use, and protect your data.',
+  description,
   openGraph: {
-    title: 'Privacy Policy - Sunrise',
-    description: 'Privacy Policy for Sunrise. Learn how we collect, use, and protect your data.',
+    title: `Privacy Policy - ${BRAND.name}`,
+    description,
   },
   twitter: {
     card: 'summary',
-    title: 'Privacy Policy - Sunrise',
-    description: 'Privacy Policy for Sunrise. Learn how we collect, use, and protect your data.',
+    title: `Privacy Policy - ${BRAND.name}`,
+    description,
   },
 };
 

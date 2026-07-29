@@ -327,4 +327,47 @@ describe('AdminSidebar – nav registry integration (Seam 4)', () => {
     const appIsAfterSystem = Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(appIsAfterSystem, 'app section must render after the core "System" section').toBe(true);
   });
+
+  // #448: a fork's brand wordmark in its section header
+  it('renders titleNode in place of the uppercase label, keeping title as the accessible name', () => {
+    registerNavSection({
+      title: 'Acme',
+      // A raw <img> is the point: titleNode takes arbitrary JSX, and a fork's
+      // wordmark is exactly the case that must not be rewritten to next/image.
+      // eslint-disable-next-line @next/next/no-img-element
+      titleNode: <img src="/acme.svg" alt="" data-testid="wordmark" />,
+      items: [
+        {
+          href: '/admin/acme',
+          label: 'Acme Home',
+          icon: StubIcon,
+          description: 'Acme landing',
+        },
+      ],
+    });
+
+    render(<AdminSidebar />);
+
+    expect(screen.getByTestId('wordmark')).toBeInTheDocument();
+    // The literal title text is not rendered — the node replaced it …
+    expect(screen.queryByText('Acme')).not.toBeInTheDocument();
+    // … but the heading still exposes it as its accessible name.
+    const heading = screen.getByRole('heading', { name: 'Acme' });
+    expect(heading).toContainElement(screen.getByTestId('wordmark'));
+    // The uppercase treatment is dropped so a wordmark isn't restyled.
+    expect(heading.className).not.toContain('uppercase');
+  });
+
+  it('keeps the uppercase label when no titleNode is given', () => {
+    registerNavSection({
+      title: 'Plain Section',
+      items: [{ href: '/admin/plain', label: 'Plain Page', icon: StubIcon, description: 'Plain' }],
+    });
+
+    render(<AdminSidebar />);
+
+    const heading = screen.getByRole('heading', { name: 'Plain Section' });
+    expect(heading.className).toContain('uppercase');
+    expect(heading).not.toHaveAttribute('aria-label');
+  });
 });

@@ -140,6 +140,37 @@ const csp = buildCSP(customConfig);
 
 > **Note**: `extendCSP()` is available for routes needing additional CSP permissions (e.g., embedding YouTube videos). Base CSP is applied automatically via `setSecurityHeaders()`.
 
+### Third-party iframes — the `frame-src` seam
+
+`frame-src` is `'self'` in both policies. A fork that legitimately embeds a
+third-party iframe (a marketing or onboarding video is the common case) declares
+the hosts in **`lib/app/csp.ts`** instead of editing this security-sensitive
+platform file:
+
+```typescript
+// lib/app/csp.ts — fork-owned scaffold, empty in vanilla Sunrise
+export const appFrameSrc: string[] = [
+  'https://www.youtube-nocookie.com',
+  'https://player.vimeo.com',
+];
+```
+
+`getCSPConfig()` folds these into `frame-src` for both the dev and prod policy,
+so the global CSP `setSecurityHeaders()` sets already carries them — no
+per-route `extendCSP()` needed.
+
+**Only exact `https://` origins are accepted** — optionally a left-most wildcard
+(`https://*.example.com`) and a port. A bare `*`, a `data:` scheme, a path, a
+CSP keyword, or anything containing whitespace or `;` is **dropped and logged at
+warn** at module load, because these values are spliced into a response header.
+
+Keep the list exactly as broad as the feature. The safety argument that makes an
+allowlist acceptable is that the fork's resolver only ever builds iframe `src`s
+on these hosts, from a **validated id** — never from an admin's raw input — so a
+hostile stored value resolves to `null` (no iframe) upstream of the CSP ever
+mattering. Prefer the privacy-preserving host where one exists
+(`youtube-nocookie.com` over `youtube.com`).
+
 ### Analytics CSP Auto-Configuration
 
 When analytics providers are configured via environment variables, their domains are automatically added to CSP:

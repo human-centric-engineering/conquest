@@ -16,6 +16,94 @@ release process.
 
 ## [Unreleased]
 
+### Added
+
+- **`NavSection.titleNode` — a fork's own brand lockup in an admin nav section
+  header** (#448). Optional `ReactNode` on `registerNavSection({ … })`; when set,
+  the sidebar renders it in place of the default uppercase `title` label and
+  drops the uppercase treatment. `title` stays required — it remains the React
+  key, the registry's dedupe key, and the heading's `aria-label`, so a wordmark
+  image cannot degrade the accessible name. Converts a two-file platform edit
+  (`lib/admin-nav/registry.ts` + `components/admin/admin-sidebar.tsx`) that
+  conflicted on every upstream sync into a supported extension point.
+
+- **`lib/app/csp.ts` — a fork-owned seam for third-party iframe hosts** (#450).
+  `frame-src` was hardcoded to `'self'` in both policies, so a fork embedding a
+  YouTube or Vimeo player had to edit `lib/security/headers.ts` — a
+  security-sensitive platform file, and a recurring merge conflict. Export
+  origins from `appFrameSrc` and `getCSPConfig()` folds them into the global CSP.
+  Only exact `https://` origins are accepted (left-most wildcard and port
+  allowed); anything else is dropped and logged at warn at module load, since
+  these values are spliced into a response header. Empty in vanilla Sunrise —
+  locked by `tests/unit/lib/app/defaults.test.ts`. See
+  [`.context/security/overview.md`](./.context/security/overview.md#third-party-iframes--the-frame-src-seam).
+
+- **`ProcessImageOptions.fit` — an aspect-preserving mode for logos and
+  banners** (#447). `processImage()` hardcoded a centre-cropped square, which is
+  right for avatars (what it was built for) and wrong for every non-square
+  upload. `fit: 'inside'` treats `maxWidth` × `maxHeight` as a real bounding box
+  and preserves aspect ratio; `fit: 'cover'` (the default) keeps today's
+  behaviour exactly, so no existing caller changes. Both modes remain
+  shrink-only. See [`.context/storage/overview.md`](./.context/storage/overview.md).
+
+- **`<RouteErrorBoundary>` — one shared body for every route group's
+  `error.tsx`** (#434). New `components/errors/route-error-boundary.tsx` holds
+  the logging, Sentry reporting, optional session-expiry detection and recovery
+  card that the four `app/**/error.tsx` files each carried a near-identical copy
+  of; those files are now thin wrappers. A fork adding a route group writes a
+  ~10-line wrapper with its own `boundaryName`, `tag` and `fallback` instead of
+  a fifth copy. `fallback.navigate: 'reload'` opts into a full document load for
+  boundaries where the shell itself may be broken. `app/global-error.tsx` is
+  unchanged — it replaces the root layout and renders its own `<html>`/`<body>`.
+  See [`.context/ui/components.md`](./.context/ui/components.md).
+
+### Fixed
+
+- **Tab titles and legal-page metadata now route through the `BRAND` seam**
+  (#432). `SETTINGS_TAB_TITLES` and `KNOWLEDGE_TAB_TITLES` hardcoded `"Sunrise"`,
+  and `useUrlTabs` writes them straight to `document.title` — so a fork with
+  `NEXT_PUBLIC_APP_NAME` set still showed "Sunrise" in the browser tab on
+  `/settings` and the admin knowledge base, overriding correct layout metadata.
+  The static metadata on `app/(public)/{privacy,terms,contact}` had the same
+  hardcode. All now interpolate `BRAND.name`. `about/` is deliberately left
+  alone — its copy describes the template itself and is fork-replaced body copy.
+
+- **The protected error boundary's "Session Expired" card now actually renders
+  when a session expires.** The session check tested `authClient.getSession()`
+  for truthiness, but better-auth always resolves that call to a
+  `{ data, error }` envelope — never `null` — so the condition never fired and
+  the sign-in prompt only appeared when the request itself threw. The check now
+  destructures `{ data: session }`, matching the other call sites in the repo.
+  Pre-existing on `main` (`app/(protected)/error.tsx`), carried into the shared
+  boundary by this release's refactor and fixed there.
+
+- **Route-group error boundaries no longer double-log and double-report on
+  session expiry** (#433). The logging effect included `isSessionExpired` in its
+  dependency array while also setting it, so a session-expiry error re-ran the
+  effect and produced two `logger.error` lines and two Sentry events. The shared
+  boundary reports once per error (deps `[error]`) and drops `isSessionExpired`
+  from the Sentry `extra` — it was always `false` at report time anyway.
+
+### Changed
+
+- **`prisma/schema/app.prisma` is now genuinely fork-reserved and ships empty**
+  (#429). It shipped three platform models — `ContactSubmission`, `FeatureFlag`,
+  `AuthBootstrap` — while the fork-facing docs described it as the place for a
+  fork's own models, "clearly separate from the platform's". The three model
+  definitions move verbatim into the existing `prisma/schema/platform.prisma`.
+  Because the schema is multi-file, moving a model block between files changes
+  no table and produces **no migration** — the models, their `@@map` names, and
+  the generated client are unchanged. This makes the leaf tier symmetric with
+  the framework tier's `prisma/schema/framework-*.prisma`. Forks that already
+  added models to `app.prisma` need no action.
+
+- **Error-boundary log message is now `'Route error boundary triggered'` for all
+  four route groups** (#434), replacing the four per-group messages
+  (`'Root error boundary triggered'`, `'Admin route error boundary triggered'`,
+  …). The boundary is still identified by the structured `boundaryName` field,
+  which is what log queries should key on. `app/global-error.tsx` keeps its own
+  `'Global error boundary triggered'` message.
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
