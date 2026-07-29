@@ -34,6 +34,17 @@ const serverEnvSchema = z.object({
     message:
       'DATABASE_URL must be a valid PostgreSQL connection string (e.g., postgresql://user:password@localhost:5432/dbname)',
   }),
+  DATABASE_POOL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'Maximum pg connections held by this process. Defaults to 10, which suits one ' +
+        'long-running server (docker-compose, Render, Railway). On a function-per-request ' +
+        'platform every warm instance holds its own pool, so set 1 and put a transaction ' +
+        'pooler in front. See .context/environment/database-env.md.'
+    ),
 
   // Authentication (better-auth)
   BETTER_AUTH_URL: z.string().url({

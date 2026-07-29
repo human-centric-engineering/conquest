@@ -46,8 +46,33 @@ const globalForPrisma = globalThis as unknown as {
   pool: Pool | undefined;
 };
 
-// Create connection pool (reuse across hot reloads in development)
-const pool = globalForPrisma.pool ?? new Pool({ connectionString: env.DATABASE_URL });
+/**
+ * Connection pool (reused across hot reloads in development).
+ *
+ * `max` defaults to 10 — node-postgres's own default, and the right size for
+ * Sunrise's documented deploy target: a single long-running process
+ * (docker-compose, Render, Railway) that genuinely wants a warm pool.
+ *
+ * A function-per-request platform is the opposite case. Each warm instance
+ * holds its own pool, so 20 instances × 10 = 200 connections against a Postgres
+ * that may allow far fewer — surfacing as intermittent `too many connections`
+ * errors that correlate with traffic rather than with any one query. Those
+ * deploys set `DATABASE_POOL_MAX=1` and put a transaction pooler in front
+ * (PgBouncer, Neon `-pooler`, Supabase `:6543`, Vercel `POSTGRES_PRISMA_URL`);
+ * the pooler multiplexes, so one connection per instance is plenty.
+ *
+ * `connectionTimeoutMillis` matters independently of `max`: without it a request
+ * that cannot get a connection hangs until the platform kills it, instead of
+ * failing fast with a usable error.
+ */
+const pool =
+  globalForPrisma.pool ??
+  new Pool({
+    connectionString: env.DATABASE_URL,
+    max: env.DATABASE_POOL_MAX ?? 10,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+  });
 
 if (env.NODE_ENV !== 'production') globalForPrisma.pool = pool;
 

@@ -48,6 +48,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   LOCAL_TIMEOUT_MS,
   ProviderError,
+  buildRequestOptions,
   toProviderError,
   withRetry,
   type LlmProvider,
@@ -169,10 +170,12 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       isLocal: this.isLocal,
     });
 
+    const requestOptions = buildRequestOptions(options);
+
     let completion: ChatCompletion;
     try {
       completion = await withRetry<ChatCompletion>(
-        () => this.client.chat.completions.create(params),
+        () => this.client.chat.completions.create(params, requestOptions),
         {
           maxRetries: this.maxRetries,
           isLocal: this.isLocal,
@@ -248,7 +251,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 
     let stream: AsyncIterable<ChatCompletionChunk>;
     try {
-      stream = await this.client.chat.completions.create(params);
+      stream = await this.client.chat.completions.create(params, buildRequestOptions(options));
     } catch (err) {
       throw toProviderError(err, 'OpenAI-compatible chat stream failed');
     }

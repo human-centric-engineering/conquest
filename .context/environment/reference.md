@@ -6,7 +6,7 @@ Complete reference for all environment variables used in Sunrise.
 
 | Category       | File                                 | Variables                                                                         |
 | -------------- | ------------------------------------ | --------------------------------------------------------------------------------- |
-| Database       | [database-env.md](./database-env.md) | `DATABASE_URL`                                                                    |
+| Database       | [database-env.md](./database-env.md) | `DATABASE_URL`, `DATABASE_POOL_MAX`                                               |
 | Authentication | [auth-env.md](./auth-env.md)         | `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_*`                               |
 | Email          | [email-env.md](./email-env.md)       | `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `CONTACT_EMAIL`                |
 | Storage        | [storage-env.md](./storage-env.md)   | `STORAGE_PROVIDER`, `S3_*`, `BLOB_READ_WRITE_TOKEN`, `MAX_FILE_SIZE_MB`           |
@@ -17,6 +17,7 @@ Complete reference for all environment variables used in Sunrise.
 | Variable                                                  | Required | Type         | Default       | Description                           |
 | --------------------------------------------------------- | -------- | ------------ | ------------- | ------------------------------------- |
 | [`DATABASE_URL`](./database-env.md)                       | ✅ Yes   | URL          | -             | PostgreSQL connection string          |
+| [`DATABASE_POOL_MAX`](./database-env.md)                  | ❌ No    | Integer      | `10`          | Max pg connections per process        |
 | [`BETTER_AUTH_URL`](./auth-env.md)                        | ✅ Yes   | URL          | -             | Application base URL                  |
 | [`BETTER_AUTH_SECRET`](./auth-env.md)                     | ✅ Yes   | String (32+) | -             | JWT signing secret                    |
 | [`GOOGLE_CLIENT_ID`](./auth-env.md)                       | ❌ No    | String       | -             | Google OAuth client ID                |
