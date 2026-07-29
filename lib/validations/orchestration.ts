@@ -947,6 +947,26 @@ export function resolveWidgetConfig(stored: unknown): WidgetConfig {
 // Webhook Schemas
 // ============================================================================
 
+/**
+ * Platform webhook event types.
+ *
+ * **Deliberately closed — a fork does NOT extend this list** (decided with #465,
+ * which opened `HOOK_EVENT_TYPES`). Two reasons:
+ *
+ *  1. The event-hook registry already covers the case. A hook's only action type
+ *     *is* a webhook (`HookAction = WebhookAction`), so a fork emits
+ *     `emitHookEvent('app.invoice.paid', data)` and registers an `AiEventHook`
+ *     with a webhook action — fork-owned event, HTTP POST, no platform edit.
+ *     Widening this list too would be a second path to the same outcome.
+ *  2. These values are rendered directly into `<select>` options
+ *     (`webhook-form.tsx`, `webhook-dlq-table.tsx`) and cross-referenced against
+ *     `WIRED_WEBHOOK_EVENT_TYPES` to grey out events that never fire. A
+ *     fork-namespaced value has no label, no wired-ness answer, and no emit-site
+ *     row in the docs — so it would render as an unexplained option.
+ *
+ * If you are reaching for this to emit your own event, use the hook registry
+ * (`lib/orchestration/hooks/types.ts`, `app.*` / `framework.*`) instead.
+ */
 export const WEBHOOK_EVENT_TYPES = [
   'budget_exceeded',
   'workflow_failed',

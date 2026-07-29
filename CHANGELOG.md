@@ -174,6 +174,40 @@ release process.
 
 ### Changed
 
+- **BREAKING: `HookEventType` is open to fork-owned events** (#465).
+  `HOOK_EVENT_TYPES` was a closed list, so a fork could neither emit its own
+  domain event through the hook registry nor subscribe a webhook to one — it had
+  to add entries to a platform array, conflicting on every sync and risking a
+  collision with a name a future release takes. `HookEventType` is now
+  `CoreHookEventType | \`app.${string}\` | \`framework.${string}\``, matching
+  the reserved tiers in CUSTOMIZATION.md, and the admin hook routes accept the
+  wider set so a fork can subscribe through the same API. **Forks:** an
+  exhaustive `switch` over `HookEventType` with an `assertNever` default now
+  fails to compile. That is the intended failure — a compile-time prompt to
+  decide what your code does with an event it doesn't know, instead of a silent
+  runtime fall-through. The core enum is kept as one arm of the Zod union rather
+  than replaced with `z.string()`, because that schema also validates
+  `AiEventHookDelivery.payload` read back from the database.
+  A namespaced union rather than a registration seam, deliberately: these schemas
+  are built at module load, before any `initApp()` runs, and #462 showed boot
+  order across module realms isn't guaranteed under Turbopack.
+  `WEBHOOK_EVENT_TYPES` stays **closed** and is now documented as such — a hook's
+  only action type *is* a webhook, so the hook registry already gives a fork the
+  whole path, and those values are rendered straight into `<select>` options and
+  cross-referenced against `WIRED_WEBHOOK_EVENT_TYPES`, where a fork-namespaced
+  value would have no label and no wired-ness answer.
+
+- **A fork can now ADD an email kind, not just override one** (#468).
+  `EmailPropsMap` is an `interface`, so declaration merging already worked in
+  principle — but `defaultTemplates` was a total mapped type over `EmailKind`,
+  which made every fork-added kind a compile error in a platform file the fork
+  can't edit without a conflict. It is now `Partial`, and `resolveEmailTemplate`
+  throws naming the kind when there is neither an override nor a default. Throwing
+  rather than rendering `undefined` is deliberate: a blank email is far harder to
+  diagnose than a failed send. The interface now documents the `declare module`
+  recipe and recommends namespacing keys `app.` / `framework.`. No runtime change
+  for the four platform kinds.
+
 - **`prisma/schema/app.prisma` is now genuinely fork-reserved and ships empty**
   (#429). It shipped three platform models — `ContactSubmission`, `FeatureFlag`,
   `AuthBootstrap` — while the fork-facing docs described it as the place for a
