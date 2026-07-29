@@ -267,6 +267,7 @@ not in the files, precisely so the files stay small and conflict-free.)
 | `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent             | `resolveAgentDocumentAccess()` (server route-handler)            |
 | `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards       | the chat handler's `collectGuardFloors()` (server route-handler) |
 | `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing           | the chat handler's `emitGuardEvent()` (server route-handler)     |
+| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                 | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)      |
 
 **Why four files and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -414,6 +415,17 @@ To render your own brand lockup as the section header instead of the default
 uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
+
+**Third-party iframes — `lib/app/csp.ts`.** `frame-src` is `'self'` in both the
+dev and prod CSP. If your app embeds a third-party iframe (an onboarding or
+marketing video is the usual case), list the hosts in `appFrameSrc` rather than
+editing `lib/security/headers.ts`; the platform folds them into the global CSP.
+Only exact `https://` origins are accepted (a left-most wildcard and a port are
+fine) — anything else is dropped and logged at warn, because these values are
+spliced into a response header. Keep the list exactly as broad as the feature:
+build iframe `src`s only on these hosts from a **validated id**, never from an
+admin's raw input, so a hostile stored value yields no iframe at all. See
+[`.context/security/overview.md`](./.context/security/overview.md#third-party-iframes--the-frame-src-seam).
 
 **Database drift probes — `lib/app/db-drift.ts`.** Register the Prisma-_unmodelled_
 DB objects your app adds — hand-written FK constraints, custom indexes (GIN/HNSW),

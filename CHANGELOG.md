@@ -27,6 +27,17 @@ release process.
   (`lib/admin-nav/registry.ts` + `components/admin/admin-sidebar.tsx`) that
   conflicted on every upstream sync into a supported extension point.
 
+- **`lib/app/csp.ts` — a fork-owned seam for third-party iframe hosts** (#450).
+  `frame-src` was hardcoded to `'self'` in both policies, so a fork embedding a
+  YouTube or Vimeo player had to edit `lib/security/headers.ts` — a
+  security-sensitive platform file, and a recurring merge conflict. Export
+  origins from `appFrameSrc` and `getCSPConfig()` folds them into the global CSP.
+  Only exact `https://` origins are accepted (left-most wildcard and port
+  allowed); anything else is dropped and logged at warn at module load, since
+  these values are spliced into a response header. Empty in vanilla Sunrise —
+  locked by `tests/unit/lib/app/defaults.test.ts`. See
+  [`.context/security/overview.md`](./.context/security/overview.md#third-party-iframes--the-frame-src-seam).
+
 - **`ProcessImageOptions.fit` — an aspect-preserving mode for logos and
   banners** (#447). `processImage()` hardcoded a centre-cropped square, which is
   right for avatars (what it was built for) and wrong for every non-square
