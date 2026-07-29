@@ -156,6 +156,29 @@ Images are automatically processed before upload:
 
 Supported formats: JPEG, PNG, WebP, GIF
 
+### Fit: square crop vs. bounding box
+
+`processImage` takes a `fit` option. Both modes only ever shrink — neither
+upscales a small source into a blurry large one.
+
+| `fit`               | Result                                                                            | Use for        |
+| ------------------- | --------------------------------------------------------------------------------- | -------------- |
+| `'cover'` (default) | Centre-cropped **square**, sized to the smaller of `maxWidth`/`maxHeight`         | Avatars        |
+| `'inside'`          | Scaled to fit **inside** the `maxWidth` × `maxHeight` box, aspect ratio preserved | Logos, banners |
+
+```typescript
+// Avatar — square, centre-cropped (what uploadAvatar() does)
+await processImage(buffer, { maxWidth: 500, maxHeight: 500 });
+
+// Logo — the caps are a real bounding box; nothing is cropped
+await processImage(buffer, { maxWidth: 800, maxHeight: 200, fit: 'inside' });
+```
+
+`'cover'` collapses the two caps to a single square dimension, so a
+`800 × 200` request under the default fit yields a `200 × 200` square. Pass
+`fit: 'inside'` whenever the image is not square by nature — a centre-cropped
+wordmark or banner is unusable.
+
 ### Client-Side Crop
 
 The `AvatarUpload` component includes an integrated crop dialog (react-easy-crop). The cropping functionality is also available as a standalone `AvatarCropDialog` component (`components/forms/avatar-crop-dialog.tsx`) for reuse across the app:

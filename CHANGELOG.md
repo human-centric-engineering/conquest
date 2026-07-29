@@ -27,6 +27,14 @@ release process.
   (`lib/admin-nav/registry.ts` + `components/admin/admin-sidebar.tsx`) that
   conflicted on every upstream sync into a supported extension point.
 
+- **`ProcessImageOptions.fit` — an aspect-preserving mode for logos and
+  banners** (#447). `processImage()` hardcoded a centre-cropped square, which is
+  right for avatars (what it was built for) and wrong for every non-square
+  upload. `fit: 'inside'` treats `maxWidth` × `maxHeight` as a real bounding box
+  and preserves aspect ratio; `fit: 'cover'` (the default) keeps today's
+  behaviour exactly, so no existing caller changes. Both modes remain
+  shrink-only. See [`.context/storage/overview.md`](./.context/storage/overview.md).
+
 - **`<RouteErrorBoundary>` — one shared body for every route group's
   `error.tsx`** (#434). New `components/errors/route-error-boundary.tsx` holds
   the logging, Sentry reporting, optional session-expiry detection and recovery

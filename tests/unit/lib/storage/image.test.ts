@@ -319,6 +319,54 @@ describe('lib/storage/image', () => {
       });
     });
 
+    // #447: logos and banners are non-square and must never be centre-cropped
+    it('should fit inside the max box, preserving aspect ratio, when fit is "inside"', async () => {
+      const { processImage } = await import('@/lib/storage/image');
+
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+
+      await processImage(jpegBuffer, { maxWidth: 800, maxHeight: 200, fit: 'inside' });
+
+      // Both caps are honoured as a real bounding box — NOT collapsed to the
+      // min of the two the way the square path does it.
+      expect(mockSharpInstance.resize).toHaveBeenCalledWith(800, 200, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    });
+
+    it('should not enlarge a source smaller than the box when fit is "inside"', async () => {
+      const { processImage } = await import('@/lib/storage/image');
+
+      mockSharpInstance.metadata.mockResolvedValue({ width: 120, height: 40 });
+
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+      await processImage(jpegBuffer, { maxWidth: 800, maxHeight: 200, fit: 'inside' });
+
+      const [, , opts] = mockSharpInstance.resize.mock.calls[0] as [
+        number,
+        number,
+        { withoutEnlargement?: boolean },
+      ];
+      expect(opts.withoutEnlargement).toBe(true);
+
+      mockSharpInstance.metadata.mockResolvedValue({ width: 1000, height: 1000 });
+    });
+
+    it('should default to the square crop when fit is omitted', async () => {
+      const { processImage } = await import('@/lib/storage/image');
+
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+
+      await processImage(jpegBuffer, { maxWidth: 800, maxHeight: 200 });
+
+      // Historic behaviour: the smaller cap wins and the result is a square.
+      expect(mockSharpInstance.resize).toHaveBeenCalledWith(200, 200, {
+        fit: 'cover',
+        position: 'centre',
+      });
+    });
+
     it('should use custom quality option for JPEG', async () => {
       const { processImage } = await import('@/lib/storage/image');
 
