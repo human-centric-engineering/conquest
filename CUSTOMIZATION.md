@@ -410,6 +410,10 @@ direct grants follow) so the cached decision re-composes. See
 `initAppNav()` with `registerNavSection({ … })` calls; the admin sidebar renders
 your sections after the core ones. Keep this file client-safe (registrar + icon
 imports only — no server code). Use a `title` distinct from the core sections.
+To render your own brand lockup as the section header instead of the default
+uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
+remains the React key, the registry's dedupe key, and the heading's accessible
+name, so a wordmark image can't cost you the label.
 
 **Database drift probes — `lib/app/db-drift.ts`.** Register the Prisma-_unmodelled_
 DB objects your app adds — hand-written FK constraints, custom indexes (GIN/HNSW),

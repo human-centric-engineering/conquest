@@ -18,6 +18,15 @@ release process.
 
 ### Added
 
+- **`NavSection.titleNode` — a fork's own brand lockup in an admin nav section
+  header** (#448). Optional `ReactNode` on `registerNavSection({ … })`; when set,
+  the sidebar renders it in place of the default uppercase `title` label and
+  drops the uppercase treatment. `title` stays required — it remains the React
+  key, the registry's dedupe key, and the heading's `aria-label`, so a wordmark
+  image cannot degrade the accessible name. Converts a two-file platform edit
+  (`lib/admin-nav/registry.ts` + `components/admin/admin-sidebar.tsx`) that
+  conflicted on every upstream sync into a supported extension point.
+
 - **`<RouteErrorBoundary>` — one shared body for every route group's
   `error.tsx`** (#434). New `components/errors/route-error-boundary.tsx` holds
   the logging, Sentry reporting, optional session-expiry detection and recovery
