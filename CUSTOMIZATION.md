@@ -69,7 +69,7 @@ findable in the same place in every fork.)
 
 **Two reserved fork tiers — `/app` (leaf) and `/framework`.** The `/app` surface
 above is the **leaf-fork** tier: fork Sunrise directly and build your product in
-`lib/app/**` + `.context/app/`. Some forks instead build a reusable
+`lib/app/**`, `.context/app/`, and `prisma/schema/app.prisma`. Some forks instead build a reusable
 **framework layer** that sits _between_ Sunrise and their own leaf forks (e.g.
 Daybreak). For those, Sunrise reserves a second tier one level up —
 `lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`, and
@@ -445,8 +445,11 @@ using the probe factories from `@/lib/db/drift-probes` (`indexExists`,
 **Modifying the schema:**
 
 - Edit the schema in `prisma/schema/` — Sunrise's models are split into domain
-  files there; **put your own app models in `prisma/schema/app.prisma`** to keep
-  them clearly separate from the platform's
+  files there; **put your own app models in `prisma/schema/app.prisma`**, which
+  Sunrise ships **empty** and never adds models to (the platform's own
+  app-domain models live in `platform.prisma`). It is fork-reserved in the same
+  way `lib/app/**` and `.context/app/` are, so your models there merge cleanly
+  on every upstream sync
 - Add/modify models as needed
 - Create + apply a migration: `npm run db:migrate:dev` (dev) /
   `npm run db:migrate:deploy` (prod / CI)
@@ -815,8 +818,10 @@ the database migration history — your app's migrations and Sunrise's share one
 directory.
 
 **What does _not_ conflict.** Your own new files (routes, components, `lib/`
-modules, `prisma/schema/app.prisma`, and your docs under `.context/app/`) are
-invisible to upstream, so they never conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
+modules, and your docs under `.context/app/`) are invisible to upstream, so they
+never conflict. `prisma/schema/app.prisma` is fork-reserved the same way —
+Sunrise ships it empty and adds no models to it, so the models you put there
+survive every sync untouched. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
 are **fork-owned scaffold**: Sunrise ships them empty and doesn't re-edit them,
 so the registrations you add there merge cleanly too — no special handling. The
 files that _can_ conflict are the ones both you and upstream edit (the migration

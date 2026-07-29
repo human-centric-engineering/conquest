@@ -77,6 +77,17 @@ release process.
 
 ### Changed
 
+- **`prisma/schema/app.prisma` is now genuinely fork-reserved and ships empty**
+  (#429). It shipped three platform models — `ContactSubmission`, `FeatureFlag`,
+  `AuthBootstrap` — while the fork-facing docs described it as the place for a
+  fork's own models, "clearly separate from the platform's". The three model
+  definitions move verbatim into the existing `prisma/schema/platform.prisma`.
+  Because the schema is multi-file, moving a model block between files changes
+  no table and produces **no migration** — the models, their `@@map` names, and
+  the generated client are unchanged. This makes the leaf tier symmetric with
+  the framework tier's `prisma/schema/framework-*.prisma`. Forks that already
+  added models to `app.prisma` need no action.
+
 - **Error-boundary log message is now `'Route error boundary triggered'` for all
   four route groups** (#434), replacing the four per-group messages
   (`'Root error boundary triggered'`, `'Admin route error boundary triggered'`,
