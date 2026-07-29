@@ -38,7 +38,46 @@ import type {
  *      `pdf-parse` import would drag pdfjs — and this crash — into every such
  *      route. Loading on first parse keeps merely importing this module cheap
  *      and side-effect-free.
+ *
+ * We also register the pdfjs worker on `globalThis` here — see
+ * `registerPdfWorker` below for why that has to happen on the main thread.
  */
+
+/**
+ * Make the pdfjs worker reachable in a traced serverless bundle.
+ *
+ * With no worker registered, pdfjs falls back to a "fake worker" it loads via
+ * `import(GlobalWorkerOptions.workerSrc)` — a *variable* specifier defaulting to
+ * the relative `'./pdf.worker.mjs'`. Nothing static can see through that:
+ * Vercel's Node file tracer never uploads `pdf.worker.mjs` into the function, so
+ * every PDF upload fails with "Setting up fake worker failed: Cannot find
+ * module …/pdf.worker.mjs". It works locally, which makes it a deploy-time
+ * surprise.
+ *
+ * pdfjs checks `globalThis.pdfjsWorker?.WorkerMessageHandler` before attempting
+ * that import (`#mainThreadWorkerMessageHandler` in `pdf.mjs`), so populating it
+ * from a **literal** specifier fixes both halves at once: the literal is
+ * traceable, so the worker file ships, and pdfjs then uses it directly instead
+ * of resolving anything at runtime.
+ *
+ * `pdfjs-dist` is pdf-parse's own dependency rather than one we declare, which
+ * is deliberate — declaring it separately could resolve a second copy whose
+ * `WorkerMessageHandler` doesn't match the pdf.mjs doing the checking. It stays
+ * in `serverExternalPackages` (see `next.config.js`) either way.
+ *
+ * Failure to register is not fatal: pdfjs still has its fallback, which works
+ * anywhere the file happens to be resolvable (local dev, Docker). We log
+ * nothing here because this module is deliberately dependency-free at import
+ * time; a genuine failure surfaces from pdfjs itself with its own message.
+ */
+async function registerPdfWorker(globalScope: Record<string, unknown>): Promise<void> {
+  if (typeof globalScope.pdfjsWorker !== 'undefined') return;
+  try {
+    globalScope.pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.mjs');
+  } catch {
+    // Leave `pdfjsWorker` unset so pdfjs takes its own fallback path.
+  }
+}
 let pdfParseModulePromise: Promise<typeof import('pdf-parse')> | null = null;
 
 function loadPdfParse(): Promise<typeof import('pdf-parse')> {
@@ -51,6 +90,8 @@ function loadPdfParse(): Promise<typeof import('pdf-parse')> {
         globalScope.Path2D = canvas.Path2D;
         globalScope.ImageData = canvas.ImageData;
       }
+      // Before pdf-parse loads: pdfjs memoises its worker lookup on first use.
+      await registerPdfWorker(globalScope);
       return import('pdf-parse');
     })().catch((err: unknown) => {
       // Don't cache a failed load — a transient import failure shouldn't
