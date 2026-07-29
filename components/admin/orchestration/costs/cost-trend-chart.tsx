@@ -90,8 +90,15 @@ function buildPlotRows(
   const trendList = fillZeroDays(trend ?? []);
   if (trendList.length === 0) return [];
 
+  // `perModel` comes from `/costs?groupBy=model`, whose rows carry a bare model
+  // id and no provider — so unlike the summary's `byModel` (#436) we can't key
+  // this lookup by provider. First-write-wins is the best available guard: the
+  // static registry is merged ahead of DB-only rows, so a seeded example row
+  // under a second provider can't displace the real entry for a shared id.
   const tierByModel = new Map<string, 'budget' | 'mid' | 'frontier' | 'local'>();
-  for (const m of models ?? []) tierByModel.set(m.id, m.tier);
+  for (const m of models ?? []) {
+    if (!tierByModel.has(m.id)) tierByModel.set(m.id, m.tier);
+  }
 
   // If perModel data is available, proportionally split each day's
   // total by the 30-day tier distribution. This is not perfect

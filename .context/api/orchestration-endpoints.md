@@ -466,8 +466,12 @@ Same auth/ownership/rate-limit posture as `/status`, but returns everything the 
   "snapshot": {
     /* id, status, currentStep, errorMessage, tokens, cost, dates — same shape as /status */
   },
-  "trace": [/* persisted ExecutionTraceEntry[] */],
-  "costEntries": [/* per-LLM-call cost rows keyed by stepId */],
+  "trace": [
+    /* persisted ExecutionTraceEntry[] */
+  ],
+  "costEntries": [
+    /* per-LLM-call cost rows keyed by stepId */
+  ],
   "currentRunningSteps": [
     {
       "stepId": "analyse_chat",
@@ -582,7 +586,9 @@ Streams a single chat turn as **Server-Sent Events** (`text/event-stream`). Requ
   "agentSlug": "<slug>",
   "message": "User message text",
   "conversationId": "<cuid>", // optional — creates new conversation when absent
-  "entityContext": {/* optional — record of string → unknown */},
+  "entityContext": {
+    /* optional — record of string → unknown */
+  },
 }
 ```
 
@@ -1054,7 +1060,7 @@ Response: `{ groupBy, rows: [{ key, label?, totalCostUsd, inputTokens, outputTok
 
 ### `GET /costs/summary`
 
-Dashboard summary. Returns `{ totals: { today, week, month }, byAgent: [...], byModel: [...], trend: [...30 UTC days], localSavings }`. Per-agent rows include `utilisation = monthSpend / monthlyBudgetUsd` (null when no budget is set).
+Dashboard summary. Returns `{ totals: { today, week, month }, byAgent: [...], byModel: [...], trend: [...30 UTC days], localSavings }`. `byModel` rows are `{ model, provider, monthSpend }` — the provider is required to resolve a model id that exists under more than one provider. Per-agent rows include `utilisation = monthSpend / monthlyBudgetUsd` (null when no budget is set).
 
 `localSavings` is `{ usd, methodology, sampleSize, dateFrom, dateTo } | null`. `methodology` is currently always `tier_fallback` (the only reachable mode — local rows have local model ids, so there is never a direct hosted equivalent). The field is kept as a union to allow additional modes without a response-shape break. The whole value is `null` when `calculateLocalSavings()` errored — the rest of the summary still renders. See [`../admin/orchestration-costs.md` § Local savings methodology](../admin/orchestration-costs.md#local-savings-methodology) for the algorithm.
 

@@ -24,6 +24,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Usd } from '@/components/admin/orchestration/costs/usd';
+import { buildModelIndex, lookupModel } from '@/components/admin/orchestration/costs/model-index';
 import type { CostSummaryModelRow } from '@/lib/orchestration/llm/cost-reports';
 import type { ModelInfo } from '@/lib/orchestration/llm/types';
 
@@ -39,17 +40,15 @@ function tierVariant(tier?: string): 'default' | 'secondary' | 'outline' {
 }
 
 export function PerModelBreakdownTable({ rows, models }: PerModelBreakdownTableProps) {
-  const modelById = React.useMemo(() => {
-    const map = new Map<string, ModelInfo>();
-    for (const m of models ?? []) map.set(m.id, m);
-    return map;
-  }, [models]);
+  const modelIndex = React.useMemo(() => buildModelIndex(models), [models]);
 
   const enriched = React.useMemo(() => {
     const list = rows ?? [];
     return list
       .map((row) => {
-        const info = modelById.get(row.model);
+        // Provider-keyed: two catalogue entries can share a model id, and the
+        // cost log knows which provider actually served the spend (#436).
+        const info = lookupModel(modelIndex, row.provider, row.model);
         const isLocal = info?.tier === 'local';
         return {
           ...row,
@@ -59,7 +58,7 @@ export function PerModelBreakdownTable({ rows, models }: PerModelBreakdownTableP
         };
       })
       .sort((a, b) => b.displaySpend - a.displaySpend);
-  }, [rows, modelById]);
+  }, [rows, modelIndex]);
 
   return (
     <Card data-testid="per-model-breakdown-table">
@@ -99,7 +98,9 @@ export function PerModelBreakdownTable({ rows, models }: PerModelBreakdownTableP
             </TableHeader>
             <TableBody>
               {enriched.map((row) => (
-                <TableRow key={row.model}>
+                // Keyed by provider too — the same model id can appear twice,
+                // once per provider that served it.
+                <TableRow key={`${row.provider}::${row.model}`}>
                   <TableCell className="font-mono text-xs">
                     <div className="flex items-center gap-2">
                       <span>{row.info?.name ?? row.model}</span>
@@ -113,7 +114,9 @@ export function PerModelBreakdownTable({ rows, models }: PerModelBreakdownTableP
                       <div className="text-muted-foreground text-[10px]">{row.model}</div>
                     )}
                   </TableCell>
-                  <TableCell className="text-sm">{row.info?.provider ?? '—'}</TableCell>
+                  {/* From the cost log, not the catalogue — this is the
+                      provider that actually served and billed the spend. */}
+                  <TableCell className="text-sm">{row.provider || '—'}</TableCell>
                   <TableCell>
                     {row.info?.tier ? (
                       <Badge variant={tierVariant(row.info.tier)} className="capitalize">

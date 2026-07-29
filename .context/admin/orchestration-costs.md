@@ -39,9 +39,30 @@ The server shell fires four parallel null-safe fetches via `serverFetch()`. Any 
 | Trend chart (totals)   | `GET /costs/summary` (`trend[]`)                            | Daily total only — tier split synthesised client-side  |
 | Trend chart (per-tier) | `GET /costs?groupBy=model&dateFrom=<30d>&dateTo=<today>`    | Rows bucketed to tiers via `/models` on the client     |
 | Per-agent table        | `GET /costs/summary` (`byAgent[]`)                          | Joined with `monthlyBudgetUsd` server-side             |
-| Per-model table        | `GET /costs/summary` (`byModel[]`) + `GET /models`          | Joined to annotate provider / tier / local badge       |
+| Per-model table        | `GET /costs/summary` (`byModel[]`) + `GET /models`          | Keyed `provider::modelId` — see below                  |
 | Local vs cloud panel   | `GET /costs/summary.localSavings` + `byModel[]` + `/models` | `localSavings: null` → muted placeholder, never throws |
 | Budget alerts list     | `GET /costs/alerts`                                         | Returns `{ alerts, globalCap }` — sorted by severity   |
+
+### Per-model rows carry their provider
+
+`byModel[]` rows are `{ model, provider, monthSpend }`, grouped by both columns of
+`AiCostLog`. The provider is load-bearing, not decoration: the same bare `modelId`
+can exist under several providers in the matrix — `gpt-4o` ships under `openai`
+and (inactive) under `microsoft` — so a catalogue lookup keyed on the id alone
+resolves to whichever entry was merged last, and `mergeDbModelsWithRegistry`
+appends DB-only rows at the end. That is how genuine OpenAI spend came to render
+as `microsoft / "GPT-4o (Azure)"`.
+
+Consumers use `buildModelIndex` / `lookupModel`
+(`components/admin/orchestration/costs/model-index.ts`), which matches
+`provider::modelId` first and falls back to the bare id only for providers absent
+from the catalogue. The Provider column shows `row.provider` from the cost log —
+the provider that actually billed — not the catalogue entry's own provider field.
+
+The trend chart is the exception: its rows come from `GET /costs?groupBy=model`,
+which groups by model alone, so its tier lookup stays bare-id and first-write-wins.
+A shared id whose two entries sit in different tiers can still be bucketed to the
+wrong wedge there.
 
 Before fetching, the page also calls `refreshFromOpenRouter()` once so the model registry's per-token rates are at most 24 h stale. The call is heavily cached and a no-op on warm pages.
 
