@@ -94,9 +94,55 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   },
 }));
 
+/**
+ * Every tool name these tests make the model emit.
+ *
+ * The handler refuses any tool call whose name is not in the agent's ADVERTISED
+ * set (`getCapabilityDefinitions`), because dispatching a name the agent was
+ * never granted is a privilege-escalation path — a missing `AiAgentCapability`
+ * row synthesizes a default-ALLOW binding in the dispatcher.
+ *
+ * These suites exercise dispatch mechanics rather than authorization, so the
+ * fixture has to advertise what they dispatch. That is also simply more
+ * realistic than the `[]` it used to return: a real agent that calls
+ * `search_knowledge_base` necessarily has it advertised. Authorization itself
+ * is covered by the dedicated "unadvertised tool" tests below, which override
+ * this mock.
+ */
+const ADVERTISED_TEST_TOOLS = [
+  'admin_action',
+  'bad_tool',
+  'broken_tool',
+  'do_thing',
+  'error_tool',
+  'failing',
+  'flaky_tool',
+  'get_weather',
+  'good_tool',
+  'hang_tool',
+  'lookup_order',
+  'loop_tool',
+  'mock',
+  'one_tool',
+  'run_workflow',
+  'search',
+  'search_knowledge_base',
+  'silent_tool',
+  'some_tool',
+  'tool_a',
+  'tool_alpha',
+  'tool_b',
+  'tool_beta',
+  'tool_x',
+].map((name) => ({
+  name,
+  description: `Test capability ${name}`,
+  parameters: { type: 'object', properties: {} },
+}));
+
 vi.mock('@/lib/orchestration/capabilities/registry', () => ({
   registerBuiltInCapabilities: vi.fn(),
-  getCapabilityDefinitions: vi.fn().mockResolvedValue([]),
+  getCapabilityDefinitions: vi.fn(),
 }));
 
 vi.mock('@/lib/orchestration/chat/context-builder', () => ({
@@ -274,6 +320,13 @@ const baseRequest = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+
+  // Advertise every tool these suites dispatch. The handler refuses tool names
+  // outside the agent's advertised set, so a fixture that advertised nothing
+  // while emitting tool calls would exercise the refusal path in every test
+  // rather than the dispatch path they are actually about. See the note on
+  // ADVERTISED_TEST_TOOLS.
+  vi.mocked(getCapabilityDefinitions).mockResolvedValue(ADVERTISED_TEST_TOOLS);
 
   // Sensible defaults
   (checkBudget as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -485,7 +538,8 @@ describe('StreamingChatHandler', () => {
     // The locked context block was included in the messages passed to chatStream
     const allChatStreamCalls = provider.chatStream.mock.calls as unknown as unknown[][];
     const chatStreamMessages = allChatStreamCalls[0]?.[0] as
-      Array<{ role: string; content: string }> | undefined;
+      | Array<{ role: string; content: string }>
+      | undefined;
     expect(chatStreamMessages).toBeDefined();
     const hasLockedCtx = (chatStreamMessages ?? []).some(
       (m) => m.role === 'system' && m.content.includes('LOCKED CONTEXT')
@@ -3414,7 +3468,8 @@ describe('input guard global settings fallback (block)', () => {
 
     // Assert: input_blocked error is emitted
     const errorEvt = events.find((e) => (e as { type: string }).type === 'error') as
-      { type: 'error'; code: string } | undefined;
+      | { type: 'error'; code: string }
+      | undefined;
     expect(errorEvt).toBeDefined();
     expect(errorEvt?.code).toBe('input_blocked');
 
@@ -3705,7 +3760,8 @@ describe('mid-loop budget re-check with limit:null', () => {
 
     // Assert: budget_exceeded error event emitted after the tool call
     const errorEvt = events.find((e) => (e as { type: string }).type === 'error') as
-      { type: 'error'; code: string; message: string } | undefined;
+      | { type: 'error'; code: string; message: string }
+      | undefined;
     expect(errorEvt).toBeDefined();
     expect(errorEvt?.code).toBe('budget_exceeded');
     // When limit is null, the message should use "its" rather than "$X.XX"
@@ -4121,7 +4177,8 @@ describe('evaluation log mirroring', () => {
     // The turn-3 skipped result must carry the tool_unavailable code.
     const turn3Skip = skippedResultRows[skippedResultRows.length - 1];
     const out = turn3Skip.data.outputData as
-      { success: boolean; error?: { code: string } } | undefined;
+      | { success: boolean; error?: { code: string } }
+      | undefined;
     expect(out?.success).toBe(false);
     expect(out?.error?.code).toBe('tool_unavailable');
   });
@@ -4864,5 +4921,142 @@ describe('forced knowledge retrieval (knowledgeRetrievalMode)', () => {
       capabilityEnabled: false,
     });
     expect(options.toolChoice).toBeUndefined();
+  });
+});
+
+/**
+ * Advertised-set enforcement.
+ *
+ * The dispatcher synthesizes a default-ALLOW binding when no `AiAgentCapability`
+ * pivot row exists, so a tool name the agent was never granted would previously
+ * dispatch — unrestricted. Two things make that reachable rather than
+ * theoretical: a prompt-injected document can make the model emit an arbitrary
+ * registered slug, and a conversation resumed across a capability being revoked
+ * carries the model's own earlier calls to the removed tool in its history,
+ * which is exactly the sort of thing a model imitates.
+ */
+describe('StreamingChatHandler — unadvertised tool refusal', () => {
+  beforeEach(() => {
+    // This agent is granted exactly one tool.
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search_knowledge_base',
+        description: 'Search the knowledge base',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+  });
+
+  function providerEmitting(toolName: string) {
+    return mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc1', name: toolName, arguments: { target: 'anything' } },
+        },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+      [
+        { type: 'text', content: 'Understood.' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 3 }, finishReason: 'stop' },
+      ],
+    ]);
+  }
+
+  it('never dispatches a tool the agent does not advertise', async () => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('run_workflow'),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(baseRequest));
+
+    // The whole point: the dispatcher is never reached for the ungranted tool.
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('still dispatches a tool the agent DOES advertise', async () => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('search_knowledge_base'),
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { results: [] },
+    });
+
+    await collect(streamChat(baseRequest));
+
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      'search_knowledge_base',
+      { target: 'anything' },
+      expect.objectContaining({ agentId: 'agent-1' })
+    );
+  });
+
+  it('persists a tool-result row so the next provider call is not malformed', async () => {
+    // An assistant message carrying a toolCall with NO matching tool result
+    // makes the next provider request 400. The refusal path must therefore
+    // still write the pair, exactly like the repeated-failure skip does.
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('run_workflow'),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(baseRequest));
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const toolMsgs = createCalls.filter((c: any) => c[0].data.role === 'tool');
+    expect(toolMsgs).toHaveLength(1);
+
+    const content = JSON.parse(toolMsgs[0][0].data.content as string) as {
+      success: boolean;
+      error: { code: string };
+    };
+    expect(content.success).toBe(false);
+    expect(content.error.code).toBe('tool_not_advertised');
+  });
+
+  it('refuses unadvertised tools in the parallel batch while dispatching granted ones', async () => {
+    const provider = mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc1', name: 'search_knowledge_base', arguments: { q: 'a' } },
+        },
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc2', name: 'run_workflow', arguments: { slug: 'evil' } },
+        },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+      [
+        { type: 'text', content: 'Done.' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 3 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: {},
+    });
+
+    await collect(streamChat(baseRequest));
+
+    // Exactly one dispatch — the granted tool. The batch is not refused wholesale.
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      'search_knowledge_base',
+      { q: 'a' },
+      expect.anything()
+    );
+
+    // Both tool calls still get a result row, so the follow-up request is valid.
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const toolMsgs = createCalls.filter((c: any) => c[0].data.role === 'tool');
+    expect(toolMsgs).toHaveLength(2);
   });
 });

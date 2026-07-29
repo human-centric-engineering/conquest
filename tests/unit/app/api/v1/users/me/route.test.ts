@@ -102,9 +102,15 @@ vi.mock('@/lib/api/context', () => ({
 }));
 
 // auth config — needed transitively by guards.ts when not mocked; mock the
-// identity guard above means this path is not reached, but kept for safety
+// identity guard above means this path is not reached, but kept for safety.
+// `sendVerificationEmail` IS reached: PATCH calls it when the email changes.
 vi.mock('@/lib/auth/config', () => ({
-  auth: { api: { getSession: vi.fn() } },
+  auth: {
+    api: {
+      getSession: vi.fn(),
+      sendVerificationEmail: vi.fn().mockResolvedValue(undefined),
+    },
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -112,6 +118,7 @@ vi.mock('@/lib/auth/config', () => ({
 // ---------------------------------------------------------------------------
 
 import { prisma } from '@/lib/db/client';
+import { auth } from '@/lib/auth/config';
 import { humanAdminWhere } from '@/lib/auth/account';
 import { eraseUser } from '@/lib/privacy/erase-user';
 import { serverTrack } from '@/lib/analytics/server';
@@ -569,5 +576,166 @@ describe('PATCH /api/v1/users/me', () => {
         data: { name: 'Updated Name' },
       })
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/users/me — email change re-verification
+// ---------------------------------------------------------------------------
+
+/**
+ * `emailVerified` is the platform's assertion that a user controls an address.
+ * The PATCH handler used to spread the request body straight into
+ * `prisma.user.update`, so an account that had verified one address could
+ * become a *verified* holder of any unregistered address in a single request —
+ * leaving the flag false in fact while true in the database.
+ *
+ * That matters wherever the pairing is trusted: invitation redemption that
+ * resolves by matching `user.email` hands the invitation's tier to whoever
+ * claims the address first, and any allowlist keyed on an email domain can be
+ * joined by typing the address.
+ */
+describe('PATCH /api/v1/users/me — email change', () => {
+  const UPDATED_SHAPE = {
+    name: 'Test User',
+    image: null,
+    role: 'USER',
+    accountType: 'HUMAN' as const,
+    bio: null,
+    phone: null,
+    timezone: 'UTC',
+    location: null,
+    preferences: null,
+    createdAt: new Date('2025-01-01'),
+    updatedAt: new Date('2025-06-01'),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(auth.api.sendVerificationEmail).mockResolvedValue(undefined as never);
+  });
+
+  it('clears emailVerified when the address changes', async () => {
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: 'new@example.com',
+      emailVerified: false,
+      ...UPDATED_SHAPE,
+    });
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'new@example.com' },
+    });
+
+    await PATCH(request, session);
+
+    const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
+      data: { emailVerified?: boolean };
+    };
+    expect(updateArg.data.emailVerified).toBe(false);
+  });
+
+  it('sends verification to the NEW address after the change', async () => {
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: 'new@example.com',
+      emailVerified: false,
+      ...UPDATED_SHAPE,
+    });
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'new@example.com' },
+    });
+
+    await PATCH(request, session);
+
+    expect(auth.api.sendVerificationEmail).toHaveBeenCalledWith({
+      body: { email: 'new@example.com' },
+    });
+  });
+
+  it('does NOT touch emailVerified when the email is absent from the body', async () => {
+    // A name-only edit must not log the user out of their verified state.
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: session.user.email,
+      emailVerified: true,
+      ...UPDATED_SHAPE,
+    });
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { name: 'Renamed' },
+    });
+
+    await PATCH(request, session);
+
+    const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
+      data: { emailVerified?: boolean };
+    };
+    expect(updateArg.data.emailVerified).toBeUndefined();
+    expect(auth.api.sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('does NOT unverify when the submitted email matches the current one', async () => {
+    // Forms that PATCH every field re-submit the unchanged address. Treating
+    // that as a change would unverify accounts on an ordinary profile save.
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: session.user.email,
+      emailVerified: true,
+      ...UPDATED_SHAPE,
+    });
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      // Different case, same address — comparison is case-insensitive.
+      body: { email: session.user.email.toUpperCase() },
+    });
+
+    await PATCH(request, session);
+
+    const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
+      data: { emailVerified?: boolean };
+    };
+    expect(updateArg.data.emailVerified).toBeUndefined();
+    expect(auth.api.sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('still succeeds when the verification email fails to send', async () => {
+    // The address is already changed and unverified by this point, so a mail
+    // failure must not fail the request — the user can re-request from the UI.
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: 'new@example.com',
+      emailVerified: false,
+      ...UPDATED_SHAPE,
+    });
+    vi.mocked(auth.api.sendVerificationEmail).mockRejectedValue(new Error('SMTP down'));
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'new@example.com' },
+    });
+
+    const response = await PATCH(request, session);
+
+    expect(response.status).toBe(200);
   });
 });

@@ -120,7 +120,26 @@ export function stripHtml(input: string): string {
 export function sanitizeUrl(url: string): string {
   if (!url || typeof url !== 'string') return '';
 
-  const normalized = url.trim().toLowerCase();
+  // Strip ASCII control characters, space and DEL BEFORE the scheme check, so
+  // the guard inspects what the browser will actually parse.
+  //
+  // The WHATWG URL parser removes tab (U+0009), newline (U+000A) and carriage
+  // return (U+000D) from ANYWHERE in a URL, and strips leading C0 controls,
+  // before it reads the scheme. `String.prototype.trim()` only removes
+  // leading/trailing whitespace, so an exact `startsWith` on the trimmed string
+  // missed every one of these while the browser still executed them:
+  //
+  //   'java\tscript:alert(1)'   — tab inside the scheme
+  //   'java\nscript:alert(1)'   — newline inside the scheme
+  //   'javascript\t:alert(1)'   — tab before the colon
+  //   '\x01javascript:alert(1)' — leading C0 control (trim removes whitespace,
+  //                               not \x01-\x08 / \x0e-\x1f)
+  //
+  // This is the known sanitizer-bypass class that @braintree/sanitize-url and
+  // DOMPurify strip for. Only the inspected COPY is stripped; the original is
+  // what gets returned, so a legitimate URL is never rewritten.
+  // eslint-disable-next-line no-control-regex -- matching control chars is the point
+  const normalized = url.replace(/[\u0000-\u0020\u007f]/g, '').toLowerCase();
 
   // Check for dangerous protocols
   for (const protocol of DANGEROUS_PROTOCOLS) {

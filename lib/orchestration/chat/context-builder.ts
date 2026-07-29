@@ -70,9 +70,34 @@ function cacheKey(type: string, id: string, userId?: string): string {
  */
 type ContextContributor = (id: string, request: ContextRequest) => Promise<string>;
 
-const contributors = new Map<string, ContextContributor>();
+/**
+ * The contributor registry, backed by `globalThis`.
+ *
+ * Next 16 + Turbopack loads `instrumentation.ts` in a SEPARATE module graph
+ * from route handlers and RSC, so a plain module-scoped `Map` is a different
+ * object in each graph. A tier that registers only at boot (via
+ * `instrumentation.ts` -> `initApp()`) would then find an empty registry on the
+ * request path — silently, with no error: the agent simply lacks the context
+ * block. Core's own lazy `ensureAppContributorsInited()` masks this for the app
+ * tier, but nothing covers a framework tier sitting between core and the app.
+ *
+ * Backing the store with `globalThis` makes one registry visible to every
+ * graph, exactly as `lib/db/client.ts` already does for the Prisma client. It
+ * also means registrations survive a dev hot-reload.
+ */
+const globalForContributors = globalThis as unknown as {
+  sunriseChatContextContributors?: Map<string, ContextContributor>;
+};
 
-/** Whether the auto-wired app contributor init (`lib/app/context-contributors.ts`) has run. */
+const contributors: Map<string, ContextContributor> =
+  (globalForContributors.sunriseChatContextContributors ??= new Map<string, ContextContributor>());
+
+/**
+ * Whether the auto-wired app contributor init (`lib/app/context-contributors.ts`)
+ * has run. Deliberately module-scoped, NOT on `globalThis`: it is a per-graph
+ * "have I run the fork's init in THIS bundle yet" latch, and re-running an
+ * idempotent (register-by-type) init against the shared store is harmless.
+ */
 let appInited = false;
 
 /**

@@ -84,6 +84,20 @@ const serverEnvSchema = z.object({
         'silently run unscoped queries.'
     ),
 
+  // Capability authorization model (see lib/orchestration/capabilities/dispatcher.ts)
+  CAPABILITY_BINDING_MODE: z
+    .enum(['permissive', 'strict'])
+    .default('permissive')
+    .describe(
+      'How the capability dispatcher treats a MISSING `AiAgentCapability` row. ' +
+        '"permissive" (default) synthesizes a default-allow binding, so deleting a grant does ' +
+        'NOT revoke a capability — it widens it, by dropping any customConfig pin. Revoke by ' +
+        'setting isEnabled:false and keeping the row. "strict" makes a missing row deny instead. ' +
+        'Strict is opt-in because it retroactively revokes every capability an agent relied on ' +
+        'implicitly, including the mcp-system agent, which dispatches built-ins with no pivot ' +
+        'rows in a default install — audit AiAgentCapability before enabling it.'
+    ),
+
   // Logging Configuration (optional)
   LOG_LEVEL: z
     .enum(['debug', 'info', 'warn', 'error'])
