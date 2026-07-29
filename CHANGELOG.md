@@ -18,27 +18,28 @@ release process.
 
 ### Security
 
-- **`sanitizeUrl` no longer lets an embedded control character smuggle a
-  dangerous protocol past the check** (#437). It normalised with
-  `url.trim().toLowerCase()`, which only strips leading and trailing whitespace —
-  so `java\tscript:`, `java\nscript:`, `java\x00script:` and a leading NBSP or
-  BOM all failed the `startsWith()` test while a browser, which discards those
-  characters before resolving the scheme, navigated to `javascript:` anyway. All
-  C0 controls, DEL and Unicode whitespace are now removed from the string under
-  test. The check can only get stricter: `replace` deletes characters and
-  preserves order, and no denied protocol contains a strippable character, so
-  every URL blocked before is still blocked. A passing URL is still returned
-  byte-for-byte — the docstring now says so, and warns against putting the result
-  in a response header.
-- **BREAKING: changing your email address now clears `emailVerified` and sends a
-  fresh verification to the new address** (#466). `PATCH /api/v1/users/me` passed
-  the request body straight to `prisma.user.update`, so a caller could move the
-  account onto an address nobody controls while the account stayed marked
-  verified. The profile form strips `email` client-side, so the only way in was a
-  direct API call — exactly the path that matters. *Forks that PATCH `email`
-  programmatically must now re-verify.* The email-change path additionally
-  carries a per-flow cap (shared with resend-verification) because it sends mail
-  to a caller-supplied address.
+- **The chat handler now refuses tool names outside the agent's advertised
+  set.** Dispatch previously took the tool name straight off the model's emitted
+  call, while the dispatcher synthesizes a default-ALLOW binding when no
+  `AiAgentCapability` row exists — so a capability an agent was never granted
+  would execute, unrestricted. Reachable via prompt injection, or via a
+  conversation resumed across a capability being revoked (the model's own
+  earlier calls sit in history and invite imitation). ([#476])
+
+- **`sanitizeUrl()` no longer passes control-character-obfuscated schemes.**
+  `java<TAB>script:`, `java<LF>script:`, `javascript<TAB>:` and a leading C0
+  control all bypassed the check, because it ran on `trim()` (leading/trailing
+  whitespace only) while browsers strip tab/newline/CR from anywhere in a URL
+  before parsing the scheme. Only the inspected copy is normalised — the URL
+  returned to callers is unchanged. ([#437])
+
+- **`PATCH /api/v1/users/me` clears `emailVerified` when the address changes**
+  and re-sends verification. Previously an account that verified one address
+  could become a *verified* holder of any unregistered address in one request,
+  turning `user.email` from "an address this person controls" into "any unused
+  string they typed" — a privilege-escalation primitive for invitation
+  redemption and domain allowlists keyed on the address. ([#466])
+
 - **An API key can no longer change the account's email address** (#466,
   found reviewing that fix). `withAuth` accepts an API key of **any** scope, and
   keys are self-service — so a `chat`-scoped key handed to a third-party
@@ -50,6 +51,7 @@ release process.
   `isApiKeySession()` in `lib/auth/api-keys.ts`. Non-identity profile fields are
   unaffected. Re-authentication, old-address notification and session revocation
   remain open — tracked in #489.
+
 - **JSON API responses now carry `Cache-Control: private, no-cache`** (#487).
   Nothing set a cache directive, and a response with a validator (an `ETag`,
   which several routes send) but no freshness information is *heuristically
@@ -102,6 +104,99 @@ release process.
   unchanged — it replaces the root layout and renders its own `<html>`/`<body>`.
   See [`.context/ui/components.md`](./.context/ui/components.md).
 
+- **`slugify(value)`** in `lib/utils.ts` — filename/URL-safe slug. Returns the
+  bare slug including the empty string (callers apply their own fallback, e.g.
+  `slugify(title) || 'report'`); pure and client-safe, so the same helper works
+  in a download button and in a server-side filename. ([#451])
+
+- **`validatePathParam(raw, schema, options?)`** in `lib/api/validation.ts` —
+  completes the validation family alongside `validateRequestBody` and
+  `validateQueryParams`. Throws the same `ValidationError` that `handleAPIError`
+  maps to a 400. Sixteen `[id]` routes drop their hand-rolled copies. ([#435])
+
+- **`CAPABILITY_BINDING_MODE`** env var (`permissive` | `strict`, default
+  `permissive` — unchanged behaviour). `strict` makes a missing
+  `AiAgentCapability` row DENY instead of synthesizing a default-allow binding.
+  Opt-in because it retroactively revokes capabilities agents relied on
+  implicitly, including `mcp-system`. ([#476])
+
+- **`DATABASE_POOL_MAX`** — optional cap on pg connections per process, default
+  `10` (unchanged behaviour). Serverless deploys set `1` behind a transaction
+  pooler; every warm instance holds its own pool, so the default exhausts a
+  small Postgres under load. The pool also sets 10s idle and connection
+  timeouts, so exhaustion now fails fast instead of hanging until the platform
+  kills the request. ([#445])
+
+- **Workflow schedules show their last run time**, alongside the existing next
+  run. `AiWorkflowSchedule.lastRunAt` was already on the wire.
+
+[#436]: https://github.com/human-centric-engineering/sunrise/issues/436
+[#456]: https://github.com/human-centric-engineering/sunrise/issues/456
+[#461]: https://github.com/human-centric-engineering/sunrise/issues/461
+
+- **`framework:*` is now a reserved script namespace, and CI runs
+  `framework:ci-checks`** (#483). CUSTOMIZATION.md §7 reserved `app:*` for the
+  leaf-fork tier but left a framework-tier fork (one sitting between Sunrise and
+  its own forks) with nowhere to put a script — while `scripts/smoke/README.md`
+  actively told it to add to Sunrise-owned `smoke:*`. Both are corrected, and
+  `scripts/app/` + `scripts/framework/` are now documented as tier-owned
+  directories. The `lint` job calls `framework:ci-checks --if-present`, mirroring
+  the existing `app:ci-checks` seam, so the reservation is real rather than a
+  promise.
+
+### Changed
+
+- **`prisma/schema/app.prisma` is now genuinely fork-reserved and ships empty**
+  (#429). It shipped three platform models — `ContactSubmission`, `FeatureFlag`,
+  `AuthBootstrap` — while the fork-facing docs described it as the place for a
+  fork's own models, "clearly separate from the platform's". The three model
+  definitions move verbatim into the existing `prisma/schema/platform.prisma`.
+  Because the schema is multi-file, moving a model block between files changes
+  no table and produces **no migration** — the models, their `@@map` names, and
+  the generated client are unchanged. This makes the leaf tier symmetric with
+  the framework tier's `prisma/schema/framework-*.prisma`. Forks that already
+  added models to `app.prisma` need no action.
+
+- **Error-boundary log message is now `'Route error boundary triggered'` for all
+  four route groups** (#434), replacing the four per-group messages
+  (`'Root error boundary triggered'`, `'Admin route error boundary triggered'`,
+  …). The boundary is still identified by the structured `boundaryName` field,
+  which is what log queries should key on. `app/global-error.tsx` keeps its own
+  `'Global error boundary triggered'` message.
+
+- **CI heap ceiling is now the `CI_NODE_HEAP_MB` repo variable** (default
+  `5120`, unchanged). Forks whose lint job dies with exit 134 raise it in repo
+  settings instead of editing `ci.yml`, so the fix survives an upstream sync.
+  ([#452])
+
+- **`tests/unit/lib/app/defaults.test.ts` is table-driven.** Filling a
+  `lib/app/*` seam is expected to fail one row; pin the new value rather than
+  deleting the row. Coverage also rose from 9 seams to 14. ([#480])
+
+- **Vitest `testTimeout` raised to 30s** (from 10s) for forks with heavier
+  component and integration tests. ([#454])
+
+- **`streamChat` batches its three pre-token reads** (context, user memories,
+  capability definitions) into one `Promise.all`, cutting the delay before the
+  first token from three serial database round trips to one. No behavioural
+  change. ([#449])
+
+[#444]: https://github.com/human-centric-engineering/sunrise/issues/444
+[#445]: https://github.com/human-centric-engineering/sunrise/issues/445
+[#446]: https://github.com/human-centric-engineering/sunrise/issues/446
+[#449]: https://github.com/human-centric-engineering/sunrise/issues/449
+
+- **`CostSummaryModelRow` carries `provider`.** `GET /costs/summary`'s `byModel[]`
+  rows are now `{ model, provider, monthSpend }`, grouped by both columns of
+  `AiCostLog`. Consumers resolving a spend row to a catalogue entry must key on
+  `provider::modelId` — `components/admin/orchestration/costs/model-index.ts`
+  (`buildModelIndex` / `lookupModel`) is the shared helper. ([#436])
+
+- **The Azure `gpt-4o` seed row ships inactive.** It shares a model id with the
+  OpenAI row; an unconfigured example provider shouldn't compete for that id.
+  Applied on create only, so a re-seed never deactivates a row an operator
+  turned on. ([#436])
+
 ### Fixed
 
 - **Tab titles and legal-page metadata now route through the `BRAND` seam**
@@ -129,25 +224,72 @@ release process.
   boundary reports once per error (deps `[error]`) and drops `isSessionExpired`
   from the Sentry `extra` — it was always `false` at report time anyway.
 
-### Changed
+- **`next/font/google` and `next/font/local` now resolve under Vitest.** Font
+  loaders run at module scope, so a fork adding brand typography previously saw
+  every test importing that layout fail at import time. Loader names are derived
+  from Next's own declarations, so no fork edits a platform test file. ([#455])
 
-- **`prisma/schema/app.prisma` is now genuinely fork-reserved and ships empty**
-  (#429). It shipped three platform models — `ContactSubmission`, `FeatureFlag`,
-  `AuthBootstrap` — while the fork-facing docs described it as the place for a
-  fork's own models, "clearly separate from the platform's". The three model
-  definitions move verbatim into the existing `prisma/schema/platform.prisma`.
-  Because the schema is multi-file, moving a model block between files changes
-  no table and produces **no migration** — the models, their `@@map` names, and
-  the generated client are unchanged. This makes the leaf tier symmetric with
-  the framework tier's `prisma/schema/framework-*.prisma`. Forks that already
-  added models to `app.prisma` need no action.
+- **Secret scanning keeps `--results=verified,unknown`** and ships a
+  fixture/docs path allowlist instead, so forks do not have to trade away the
+  unverifiable-secret class to stop false positives on example DSNs. ([#453])
 
-- **Error-boundary log message is now `'Route error boundary triggered'` for all
-  four route groups** (#434), replacing the four per-group messages
-  (`'Root error boundary triggered'`, `'Admin route error boundary triggered'`,
-  …). The boundary is still identified by the structured `boundaryName` field,
-  which is what log queries should key on. `app/global-error.tsx` keeps its own
-  `'Global error boundary triggered'` message.
+[#435]: https://github.com/human-centric-engineering/sunrise/issues/435
+[#451]: https://github.com/human-centric-engineering/sunrise/issues/451
+[#452]: https://github.com/human-centric-engineering/sunrise/issues/452
+[#453]: https://github.com/human-centric-engineering/sunrise/issues/453
+[#454]: https://github.com/human-centric-engineering/sunrise/issues/454
+[#455]: https://github.com/human-centric-engineering/sunrise/issues/455
+[#480]: https://github.com/human-centric-engineering/sunrise/issues/480
+
+- **MCP tool dispatch warms the capability registry.** A process that had only
+  served MCP — no chat or workflow request yet — had an empty in-memory
+  registry, so every MCP tool call failed with `Unknown capability`, built-ins
+  included, while `tools/list` still listed them. ([#457])
+
+- **Boot-registered context contributors and capability handlers survive to
+  request time.** Both registries are now backed by `globalThis`, as the Prisma
+  client already was. Under Next 16 + Turbopack `instrumentation.ts` runs in a
+  separate module graph from route handlers, so a framework tier registering at
+  boot silently vanished on the request path. ([#462])
+
+[#437]: https://github.com/human-centric-engineering/sunrise/issues/437
+[#457]: https://github.com/human-centric-engineering/sunrise/issues/457
+[#462]: https://github.com/human-centric-engineering/sunrise/issues/462
+[#466]: https://github.com/human-centric-engineering/sunrise/issues/466
+[#476]: https://github.com/human-centric-engineering/sunrise/issues/476
+
+- **`LlmOptions.timeoutMs` and `signal` reach the provider SDKs.** Both were
+  documented but dropped, so a call that needed longer than the client default
+  died at the default with no indication the option had been ignored. All four
+  adapter paths (`chat` and `chatStream` on Anthropic and OpenAI-compatible)
+  now forward them; setting neither leaves the provider default in charge.
+  ([#444])
+
+- **PDF parsing survives serverless file tracing.** The pdfjs worker is
+  registered on `globalThis` from a literal import specifier, so it ships in the
+  function bundle — previously every PDF upload on Vercel failed with "Setting
+  up fake worker failed", while working locally. ([#446])
+
+- **`chatStreamEventSchema` models `budget_exceeded_per_turn`.** The variant was
+  missing, so `parseChatStreamEvent` returned null and consumers dropped the
+  frame — and on the tool-loop-abort path it is the last frame sent, leaving an
+  empty assistant turn with no explanation. ([#461])
+
+- **Per-model cost rows no longer borrow another provider's label.** Spend served
+  by OpenAI's `gpt-4o` could render as `microsoft` / "GPT-4o (Azure)". ([#436])
+
+- **`costLogRetentionDays` below `executionRetentionDays` is rejected** at all
+  three write paths (settings form, Zod schema, PATCH route against the persisted
+  row). Cost logs must outlive the executions that reference them or the
+  drill-down empties out under a retained execution. Installs already in that
+  state get a warning per retention sweep. ([#456])
+
+- **`prisma/schema/orchestration-agents.prisma` is formatted per the pinned
+  Prisma, and CI now enforces it** (#482). `model AiAgent`'s attribute column was
+  one short of what `prisma format` produces, so every fork's first `prisma format`
+  dirtied a core file it never edited. Prettier doesn't touch `.prisma`, so
+  `format:check` couldn't see the drift; the `lint` job now runs `prisma format`
+  and fails on a non-empty diff. Whitespace only — no schema or client change.
 
 ## [0.7.0] — 2026-07-09
 

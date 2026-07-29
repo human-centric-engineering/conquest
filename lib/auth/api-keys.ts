@@ -19,6 +19,29 @@ export type ApiKeyScope = 'chat' | 'analytics' | 'knowledge' | 'webhook' | 'admi
 
 const VALID_SCOPES = new Set<ApiKeyScope>(['chat', 'analytics', 'knowledge', 'webhook', 'admin']);
 
+/**
+ * Prefix on the synthetic `session.id` that `resolveApiKey` mints, so an
+ * API-key principal is distinguishable from a real cookie session downstream.
+ */
+export const API_KEY_SESSION_ID_PREFIX = 'apikey_';
+
+/**
+ * True when this principal authenticated with an API key rather than a browser
+ * session.
+ *
+ * `withAuth` accepts an API key of **any** scope and hands the handler a
+ * session-shaped object, so a route cannot tell the two apart without asking.
+ * That is fine for reading data, and wrong for anything that mutates identity:
+ * API keys are self-service (`POST /api/v1/user/api-keys`) and a scope like
+ * `chat` is meant to convey "talk to my agents", not "change my email address".
+ *
+ * Use this to refuse identity-mutating operations to key-authenticated callers.
+ * See `PATCH /api/v1/users/me`.
+ */
+export function isApiKeySession(session: AuthSession): boolean {
+  return session.session.id.startsWith(API_KEY_SESSION_ID_PREFIX);
+}
+
 /** Generate a new API key string. */
 export function generateApiKey(): string {
   const random = randomBytes(32).toString('hex');
@@ -84,7 +107,7 @@ export async function resolveApiKey(
   // Build a session-like object from the API key's user
   const session: AuthSession = {
     session: {
-      id: `apikey_${apiKey.id}`,
+      id: `${API_KEY_SESSION_ID_PREFIX}${apiKey.id}`,
       userId: apiKey.userId,
       token: '',
       expiresAt: apiKey.expiresAt ?? new Date(Date.now() + 86400000),

@@ -161,6 +161,19 @@ jobs:
         if: needs.config.outputs.code == 'true'
         run: npm run lint
       - run: npm run format:check
+      # Prettier does not format .prisma files, so drift from the pinned Prisma's
+      # own formatter is invisible to format:check. Without this, an unformatted
+      # schema lands on main and every fork's next `prisma format` — which
+      # `migrate dev` runs implicitly — dirties a core file it never edited (#482).
+      - name: Prisma schema format check
+        if: needs.config.outputs.code == 'true'
+        run: |
+          npx prisma format --schema prisma/schema
+          if ! git diff --exit-code -- prisma/schema; then
+            echo "::error::prisma/schema is not formatted per the pinned Prisma."
+            echo "Run 'npx prisma format --schema prisma/schema' and commit the result."
+            exit 1
+          fi
       # Fork-owned CI checks seam. A fork adds an `app:ci-checks` script to
       # package.json (a boundary check, migration-hygiene lint, etc.); vanilla
       # Sunrise ships no such script, so `--if-present` makes this a no-op here
@@ -169,6 +182,13 @@ jobs:
       - name: Fork checks (if present)
         if: needs.config.outputs.code == 'true'
         run: npm run app:ci-checks --if-present
+      # Same seam for the framework tier — a fork that sits between Sunrise and
+      # its own leaf forks (see CUSTOMIZATION.md §7) owns `framework:*` scripts.
+      # Reserving the namespace upstream is what keeps it merge-clean; a reserved
+      # namespace with nothing running it is only half a seam. See #483.
+      - name: Framework checks (if present)
+        if: needs.config.outputs.code == 'true'
+        run: npm run framework:ci-checks --if-present
 
   build:
     name: Build

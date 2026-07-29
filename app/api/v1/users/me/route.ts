@@ -17,6 +17,7 @@ import { updateUserSchema, deleteAccountSchema } from '@/lib/validations/user';
 import { auth } from '@/lib/auth/config';
 import { withAuth } from '@/lib/auth/guards';
 import { humanAdminWhere } from '@/lib/auth/account';
+import { isApiKeySession } from '@/lib/auth/api-keys';
 import { eraseUser } from '@/lib/privacy/erase-user';
 import { getRouteLogger } from '@/lib/api/context';
 import { serverTrack } from '@/lib/analytics/server';
@@ -89,6 +90,26 @@ export const PATCH = withAuth(async (request, session) => {
 
   // Validate request body
   const body = await validateRequestBody(request, updateUserSchema);
+
+  // Changing the address that owns the account is an identity mutation, and must
+  // come from a real browser session.
+  //
+  // `withAuth` also accepts an API key of ANY scope (see lib/auth/guards.ts), and
+  // keys are self-service. Without this check a `chat`-scoped key — handed to a
+  // third-party integration, or read out of a CI config — could move the account
+  // to an attacker's address, and the verification mail sent below would deliver
+  // them a live token. With `autoSignInAfterVerification` enabled that token
+  // mints a real session, so a read-ish scope would escalate to full account
+  // takeover. Non-identity profile fields stay available over a key.
+  if (body.email !== undefined && isApiKeySession(session)) {
+    log.warn('Rejected API-key attempt to change account email', {
+      userId: session.user.id,
+    });
+    return errorResponse('Changing your email address requires a browser session', {
+      code: ErrorCodes.FORBIDDEN,
+      status: 403,
+    });
+  }
 
   // Check email uniqueness if changing email
   if (body.email) {

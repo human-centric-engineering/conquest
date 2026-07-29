@@ -100,6 +100,11 @@ Prefer numbered `[n] description` stdout markers over ad-hoc logging — it make
 
 1. Create `scripts/smoke/<slice>.ts` following the template above.
 2. Add an `npm run smoke:<slice>` entry to `package.json`.
+   **Forks: `smoke:*` is a Sunrise-owned namespace** — adding to it will conflict
+   on your next upstream merge. Use `app:smoke:<slice>` (leaf fork) or
+   `framework:smoke:<slice>` (framework tier), with the script under
+   `scripts/app/smoke/` or `scripts/framework/smoke/`. See
+   [CUSTOMIZATION.md §7](../../CUSTOMIZATION.md#7-package-json-and-dependencies).
 3. Add a row to the **Current scripts** table above.
 4. Run it locally twice in a row to prove idempotency.
 5. Mention it in the slice's `.context/` documentation under a **Smoke testing** heading so future readers know to run it when touching that code.

@@ -615,6 +615,55 @@ describe('PATCH /api/v1/users/me — email change', () => {
     vi.mocked(auth.api.sendVerificationEmail).mockResolvedValue(undefined as never);
   });
 
+  // `withAuth` accepts an API key of ANY scope, and keys are self-service. So
+  // without a gate a `chat`-scoped key could move the account to an attacker's
+  // address — and the verification mail above would hand them a live token,
+  // which `autoSignInAfterVerification` turns into a real session. Read-ish
+  // scope escalating to account takeover.
+  it('refuses an email change from an API-key principal', async () => {
+    const session = buildUserSession('USER');
+    // resolveApiKey mints session ids with this prefix; isApiKeySession matches it.
+    session.session.id = 'apikey_ck_some_key_id';
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'attacker@evil.com' },
+    });
+
+    const response = await PATCH(request, session);
+
+    expect(response.status).toBe(403);
+    // Nothing written, and critically no token mailed to the new address.
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(auth.api.sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('still lets an API-key principal edit non-identity profile fields', async () => {
+    // The gate is scoped to the email path — a key must not lose its legitimate
+    // ability to update a profile.
+    const session = buildUserSession('USER');
+    session.session.id = 'apikey_ck_some_key_id';
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: session.user.email,
+      emailVerified: true,
+      ...UPDATED_SHAPE,
+    });
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { bio: 'set via api key' },
+    });
+
+    const response = await PATCH(request, session);
+
+    expect(response.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalled();
+  });
+
   it('clears emailVerified when the address changes', async () => {
     const session = buildUserSession('USER');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);

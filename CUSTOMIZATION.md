@@ -691,21 +691,36 @@ touches so that merge stays clean.
 - ✅ **Add your app's scripts under an `app:*` namespace** — e.g.
   `app:import`, `app:report`, `app:backfill`. Namespacing guarantees they never
   collide with a script a future Sunrise release adds.
+- ✅ **A framework-tier fork uses `framework:*`** — if you sit _between_ Sunrise
+  and your own leaf forks (see the two reserved tiers in
+  [The app/platform model](#the-appplatform-model)), take `framework:*` and leave
+  `app:*` free for the forks downstream of you. Same rule, one tier up.
 - ❌ **Never edit or remove an existing Sunrise script.** Wrap it from an
-  `app:*` script if you need to extend its behavior.
+  `app:*` (or `framework:*`) script if you need to extend its behavior.
 
 ```jsonc
 {
   "scripts": {
     "dev": "next dev", // ← Sunrise-owned: leave untouched
-    "app:import": "tsx scripts/app/import.ts", // ← yours: app:* namespace
+    "app:import": "tsx scripts/app/import.ts", // ← leaf fork: app:* namespace
     "app:report": "tsx scripts/app/report.ts",
+    "framework:sync": "tsx scripts/framework/sync.ts", // ← framework tier
   },
 }
 ```
 
+The same split applies to the `scripts/` directory itself: `scripts/app/` is
+leaf-fork-owned, `scripts/framework/` is framework-tier-owned, and everything
+else under `scripts/` is Sunrise's. Neither subdirectory exists upstream — that
+is what lets a fork create one without a merge conflict.
+
+Two script names are **called by CI if they exist** and are otherwise a no-op:
+`app:ci-checks` and `framework:ci-checks` (see the `lint` job in
+`.github/workflows/ci.yml`). Define one to run your own boundary checks or
+migration-hygiene lint on every PR without editing the workflow.
+
 Following this convention means `package.json` merges cleanly on every upgrade:
-your dependencies and `app:*` scripts sit in regions upstream never edits.
+your dependencies and namespaced scripts sit in regions upstream never edits.
 
 ---
 
