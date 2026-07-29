@@ -71,6 +71,7 @@ function setEnv(vars: Record<string, string | undefined>) {
     'REQUIRE_EMAIL_VERIFICATION',
     'EMAIL_FROM',
     'TENANCY_MODE',
+    'DATABASE_POOL_MAX',
   ];
   for (const key of keysToManage) {
     delete process.env[key];
@@ -267,6 +268,46 @@ describe('server path (typeof window === undefined)', () => {
 
       // Assert
       expect(env.REQUIRE_EMAIL_VERIFICATION).toBeUndefined();
+    });
+  });
+
+  describe('DATABASE_POOL_MAX', () => {
+    it('should stay undefined when absent so lib/db/client.ts applies its own default', async () => {
+      // Arrange
+      setEnv(validServerEnv);
+
+      // Act
+      const env = await importEnv();
+
+      // Assert — the default lives in client.ts, not here; absent must not coerce to NaN
+      expect(env.DATABASE_POOL_MAX).toBeUndefined();
+    });
+
+    it('should coerce the string form to a number (env vars are always strings)', async () => {
+      // Arrange — the serverless setting
+      setEnv({ ...validServerEnv, DATABASE_POOL_MAX: '1' });
+
+      // Act
+      const env = await importEnv();
+
+      // Assert
+      expect(env.DATABASE_POOL_MAX).toBe(1);
+    });
+
+    it('should throw when set to 0 (a pool of zero can never serve a query)', async () => {
+      // Arrange
+      setEnv({ ...validServerEnv, DATABASE_POOL_MAX: '0' });
+
+      // Act & Assert
+      await expect(importEnv()).rejects.toThrow();
+    });
+
+    it('should throw when set to a non-numeric value', async () => {
+      // Arrange
+      setEnv({ ...validServerEnv, DATABASE_POOL_MAX: 'lots' });
+
+      // Act & Assert
+      await expect(importEnv()).rejects.toThrow();
     });
   });
 

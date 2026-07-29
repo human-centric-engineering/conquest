@@ -47,12 +47,14 @@ function clearGlobalCache(): void {
 async function importClientWithEnv(opts: {
   NODE_ENV: string;
   DATABASE_URL?: string;
+  DATABASE_POOL_MAX?: number;
   TENANCY_MODE?: string;
   preSeededGlobal?: { prisma?: unknown; pool?: unknown };
 }) {
   const {
     NODE_ENV,
     DATABASE_URL = 'postgresql://user:pass@localhost:5432/testdb',
+    DATABASE_POOL_MAX,
     TENANCY_MODE,
     preSeededGlobal,
   } = opts;
@@ -83,11 +85,19 @@ async function importClientWithEnv(opts: {
 
   // Only set TENANCY_MODE on the mock env when the test supplies it, so the
   // "undefined behaves like single" back-compat case is genuinely undefined.
-  const mockEnvValue: { DATABASE_URL: string; NODE_ENV: string; TENANCY_MODE?: string } = {
+  const mockEnvValue: {
+    DATABASE_URL: string;
+    NODE_ENV: string;
+    DATABASE_POOL_MAX?: number;
+    TENANCY_MODE?: string;
+  } = {
     DATABASE_URL,
     NODE_ENV,
   };
   if (TENANCY_MODE !== undefined) mockEnvValue.TENANCY_MODE = TENANCY_MODE;
+  // Left genuinely absent when the test doesn't supply it, so the default-10
+  // path is exercised the way an install with no override sees it.
+  if (DATABASE_POOL_MAX !== undefined) mockEnvValue.DATABASE_POOL_MAX = DATABASE_POOL_MAX;
 
   // Reset the module registry and re-register mocks (vi.doMock is not hoisted)
   vi.resetModules();
@@ -151,9 +161,45 @@ describe('lib/db/client', () => {
       });
 
       // Assert — Pool was constructed with the correct connectionString
-      expect(MockPool).toHaveBeenCalledWith({
-        connectionString: 'postgresql://testuser:testpass@db:5432/appdb',
+      expect(MockPool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionString: 'postgresql://testuser:testpass@db:5432/appdb',
+        })
+      );
+    });
+
+    it('should default max to 10 when DATABASE_POOL_MAX is unset', async () => {
+      // Arrange + Act — no override, the shape a plain docker-compose install sees
+      const { MockPool } = await importClientWithEnv({ NODE_ENV: 'production' });
+
+      // Assert — node-postgres' own default, sized for one long-running process
+      expect(MockPool).toHaveBeenCalledWith(expect.objectContaining({ max: 10 }));
+    });
+
+    it('should use DATABASE_POOL_MAX when set (serverless sets 1)', async () => {
+      // Arrange + Act — the serverless configuration: one connection per warm instance
+      const { MockPool } = await importClientWithEnv({
+        NODE_ENV: 'production',
+        DATABASE_POOL_MAX: 1,
       });
+
+      // Assert
+      expect(MockPool).toHaveBeenCalledWith(expect.objectContaining({ max: 1 }));
+    });
+
+    it('should set both pool timeouts so exhaustion fails fast instead of hanging', async () => {
+      // Arrange + Act
+      const { MockPool } = await importClientWithEnv({ NODE_ENV: 'production' });
+
+      // Assert — connectionTimeoutMillis is what turns "no free connection" into
+      // an error the caller can log, rather than a request that hangs until the
+      // platform kills it.
+      expect(MockPool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          idleTimeoutMillis: 10_000,
+          connectionTimeoutMillis: 10_000,
+        })
+      );
     });
 
     it('should pass the Pool instance to PrismaPg adapter', async () => {

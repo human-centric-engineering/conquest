@@ -13,6 +13,46 @@ Configuration for PostgreSQL database connection via Prisma ORM.
   - `lib/db/client.ts` - Prisma client initialization
   - `prisma/schema/` - Database migrations
 
+## `DATABASE_POOL_MAX`
+
+- **Purpose:** Maximum pg connections held by this process
+- **Required:** ❌ No
+- **Type:** Positive integer
+- **Default:** `10`
+- **Used By:** `lib/db/client.ts` — the `pg` `Pool` constructor
+
+The default of 10 is node-postgres's own, and it fits Sunrise's documented
+deploy target: one long-running process that wants a warm pool.
+
+**Set it to `1` on serverless.** On a function-per-request platform each warm
+instance holds its own pool, so 20 instances × 10 = 200 connections against a
+Postgres that may allow far fewer. The symptom is intermittent
+`too many connections` / `remaining connection slots are reserved` errors that
+track traffic rather than any particular query. `DATABASE_POOL_MAX=1` is only
+safe **behind a transaction pooler**, which multiplexes those single connections:
+
+| Platform | Pooled connection string      |
+| -------- | ----------------------------- |
+| Neon     | the `-pooler` host            |
+| Supabase | port `:6543` (not `:5432`)    |
+| Vercel   | `POSTGRES_PRISMA_URL`         |
+| Self-run | PgBouncer in transaction mode |
+
+Point `DATABASE_URL` at the pooled endpoint, then set `DATABASE_POOL_MAX=1`.
+Setting it to 1 against a direct (unpooled) connection serialises every query in
+the instance instead — slow, not broken, but not what you want.
+
+The pool also sets `idleTimeoutMillis` and `connectionTimeoutMillis` to 10s,
+neither configurable. The connection timeout is what makes exhaustion legible: a
+request that cannot get a connection fails fast with an error instead of hanging
+until the platform kills the function.
+
+```bash
+# Serverless, behind Neon's pooler
+DATABASE_URL="postgresql://user:pass@ep-xxx-pooler.eu-west-2.aws.neon.tech/sunrise?sslmode=require"
+DATABASE_POOL_MAX=1
+```
+
 ## Examples
 
 ### Local Development
