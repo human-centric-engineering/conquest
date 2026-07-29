@@ -485,7 +485,8 @@ describe('StreamingChatHandler', () => {
     // The locked context block was included in the messages passed to chatStream
     const allChatStreamCalls = provider.chatStream.mock.calls as unknown as unknown[][];
     const chatStreamMessages = allChatStreamCalls[0]?.[0] as
-      Array<{ role: string; content: string }> | undefined;
+      | Array<{ role: string; content: string }>
+      | undefined;
     expect(chatStreamMessages).toBeDefined();
     const hasLockedCtx = (chatStreamMessages ?? []).some(
       (m) => m.role === 'system' && m.content.includes('LOCKED CONTEXT')
@@ -3414,7 +3415,8 @@ describe('input guard global settings fallback (block)', () => {
 
     // Assert: input_blocked error is emitted
     const errorEvt = events.find((e) => (e as { type: string }).type === 'error') as
-      { type: 'error'; code: string } | undefined;
+      | { type: 'error'; code: string }
+      | undefined;
     expect(errorEvt).toBeDefined();
     expect(errorEvt?.code).toBe('input_blocked');
 
@@ -3705,7 +3707,8 @@ describe('mid-loop budget re-check with limit:null', () => {
 
     // Assert: budget_exceeded error event emitted after the tool call
     const errorEvt = events.find((e) => (e as { type: string }).type === 'error') as
-      { type: 'error'; code: string; message: string } | undefined;
+      | { type: 'error'; code: string; message: string }
+      | undefined;
     expect(errorEvt).toBeDefined();
     expect(errorEvt?.code).toBe('budget_exceeded');
     // When limit is null, the message should use "its" rather than "$X.XX"
@@ -4121,7 +4124,8 @@ describe('evaluation log mirroring', () => {
     // The turn-3 skipped result must carry the tool_unavailable code.
     const turn3Skip = skippedResultRows[skippedResultRows.length - 1];
     const out = turn3Skip.data.outputData as
-      { success: boolean; error?: { code: string } } | undefined;
+      | { success: boolean; error?: { code: string } }
+      | undefined;
     expect(out?.success).toBe(false);
     expect(out?.error?.code).toBe('tool_unavailable');
   });
@@ -4864,5 +4868,78 @@ describe('forced knowledge retrieval (knowledgeRetrievalMode)', () => {
       capabilityEnabled: false,
     });
     expect(options.toolChoice).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-token read batching (#449)
+// ---------------------------------------------------------------------------
+
+describe('pre-token read batching', () => {
+  it('issues the context, memory and capability reads concurrently', async () => {
+    // Arrange — gate all three reads so none can resolve until every one has
+    // been *started*. Run serially, only the first would ever start, and the
+    // wait below would time out. This is the whole point of the change: the
+    // pre-token cost should be the slowest round trip, not the sum of three.
+    const started: string[] = [];
+    const release: Array<() => void> = [];
+    const gate = (mock: ReturnType<typeof vi.fn>, label: string, value: unknown): void => {
+      // A deliberately pending promise is the mechanism under test.
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      mock.mockImplementation(() => {
+        started.push(label);
+        return new Promise((resolve) => release.push(() => resolve(value)));
+      });
+    };
+
+    gate(buildContext as ReturnType<typeof vi.fn>, 'context', '=== LOCKED CONTEXT ===\ndata');
+    gate(prisma.aiUserMemory.findMany as ReturnType<typeof vi.fn>, 'memory', []);
+    gate(getCapabilityDefinitions as ReturnType<typeof vi.fn>, 'capabilities', []);
+
+    const provider = mockProvider([
+      [{ type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'stop' }],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    // Act — drive the stream without awaiting it, then let the reads land
+    const pending = collect(streamChat({ ...baseRequest, contextType: 'pattern', contextId: '7' }));
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(3));
+    } finally {
+      // Always release, or a failed expectation leaves the generator hanging.
+      for (const resolve of release) resolve();
+    }
+    await pending;
+
+    // Assert — all three in flight together
+    expect(started).toEqual(expect.arrayContaining(['context', 'memory', 'capabilities']));
+  });
+
+  it('still applies the capability definitions it loaded in the batch', async () => {
+    // Arrange — hoisting the read must not change what the tool loop sees
+    (getCapabilityDefinitions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { name: 'lookup_order', description: 'Look up an order', parameters: { type: 'object' } },
+    ]);
+
+    const provider = mockProvider([
+      [{ type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'stop' }],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    // Act
+    await collect(streamChat(baseRequest));
+
+    // Assert — the definition reached the provider call as a tool
+    const calls = (provider.chatStream as ReturnType<typeof vi.fn>).mock.calls;
+    const options = calls[0]?.[1] as { tools?: Array<{ name: string }> } | undefined;
+    expect(options?.tools).toEqual([
+      { name: 'lookup_order', description: 'Look up an order', parameters: { type: 'object' } },
+    ]);
   });
 });

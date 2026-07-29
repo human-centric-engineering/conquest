@@ -813,20 +813,32 @@ export class StreamingChatHandler {
         }
       }
 
-      const contextBlock =
+      // Three independent reads, none of which depends on the others, and all
+      // of which sit between the request and the first token the user sees.
+      // Run serially they cost the sum of three app→Postgres round trips —
+      // which is most of the pre-token latency when the two aren't co-located,
+      // as on serverless. Batched, the cost is the slowest one.
+      //
+      // `capabilityDefinitions` isn't consumed until the tool loop below; it's
+      // hoisted here because nothing between the two points affects it. Keep it
+      // that way — moving a read that depends on the resolved prompt or the
+      // built messages into this batch would be a real reordering, not a
+      // scheduling change.
+      const [contextBlock, memoryRows, capabilityDefinitions] = await Promise.all([
         request.contextType && request.contextId
-          ? await buildContext(request.contextType, request.contextId, {
+          ? buildContext(request.contextType, request.contextId, {
               userId: request.userId,
             })
-          : null;
-
-      // Load per-user-per-agent memories for context injection
-      const memoryRows = await prisma.aiUserMemory.findMany({
-        where: { userId: request.userId, agentId: agent.id },
-        orderBy: { updatedAt: 'desc' },
-        take: 50,
-        select: { key: true, value: true },
-      });
+          : Promise.resolve(null),
+        // Per-user-per-agent memories for context injection
+        prisma.aiUserMemory.findMany({
+          where: { userId: request.userId, agentId: agent.id },
+          orderBy: { updatedAt: 'desc' },
+          take: 50,
+          select: { key: true, value: true },
+        }),
+        getCapabilityDefinitions(agent.id),
+      ]);
 
       // Resolve the context window for token-aware truncation.
       // Agent-level maxHistoryTokens overrides the model's context window.
@@ -868,7 +880,6 @@ export class StreamingChatHandler {
       });
       let messages: LlmMessage[] = initialMessages;
 
-      const capabilityDefinitions = await getCapabilityDefinitions(agent.id);
       const toolDefinitions: LlmToolDefinition[] = capabilityDefinitions.map((def) => ({
         name: def.name,
         description: def.description,
@@ -941,7 +952,8 @@ export class StreamingChatHandler {
           ? (agent.metadata as Record<string, unknown>)
           : null;
       const responseFormat = agentMetadata?.responseFormat as
-        import('@/lib/orchestration/llm/types').LlmResponseFormat | undefined;
+        | import('@/lib/orchestration/llm/types').LlmResponseFormat
+        | undefined;
 
       // Remaining fallback providers for mid-stream retry
       const remainingFallbacks = [...resolvedFallbackProviders];
