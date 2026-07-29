@@ -29,7 +29,7 @@
  * ];
  * ```
  *
- * Full guide: CUSTOMIZATION.md §4 · .context/security/headers.md
+ * Full guide: CUSTOMIZATION.md §4 · .context/security/overview.md
  */
 
 /** Extra `frame-src` origins. Empty = platform default (`'self'` only). */

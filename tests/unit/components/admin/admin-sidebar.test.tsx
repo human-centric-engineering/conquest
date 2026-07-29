@@ -332,6 +332,9 @@ describe('AdminSidebar – nav registry integration (Seam 4)', () => {
   it('renders titleNode in place of the uppercase label, keeping title as the accessible name', () => {
     registerNavSection({
       title: 'Acme',
+      // A raw <img> is the point: titleNode takes arbitrary JSX, and a fork's
+      // wordmark is exactly the case that must not be rewritten to next/image.
+      // eslint-disable-next-line @next/next/no-img-element
       titleNode: <img src="/acme.svg" alt="" data-testid="wordmark" />,
       items: [
         {

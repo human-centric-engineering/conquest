@@ -90,7 +90,11 @@ interface RouteErrorFallbackAction {
   may be what broke, so a full document load is the honest recovery. Inside a
   working shell (protected, admin) the default `router.push` is right.
 - **`checkSession`** only makes sense behind authentication. It calls
-  `authClient.getSession()`; a rejected call is treated as expired.
+  `authClient.getSession()` and destructures the result — better-auth always
+  resolves to a `{ data, error }` envelope, so the session is `data`, and a null
+  `data` is the expiry signal. A rejected call is treated as expired too.
+  Testing the envelope itself for truthiness never fires: that was the bug that
+  left the expiry card reachable only on a network failure.
 - `app/global-error.tsx` is deliberately NOT a wrapper — it replaces the root
   layout, so it renders its own `<html>`/`<body>` and cannot import the shared
   card.
