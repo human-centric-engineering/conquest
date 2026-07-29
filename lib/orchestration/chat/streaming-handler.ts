@@ -509,6 +509,26 @@ export class StreamingChatHandler {
       //
       // Each failure produces a discrete SSE error code so the UI can
       // map to a precise user-facing message.
+      // Resolve the turn shape once, up front (#474). Exactly one of `message`
+      // (the user typed) or `openingTurn` (the app composed an agent-first turn)
+      // drives everything downstream: whether a `role:'user'` row is persisted,
+      // what the injection scanner sees, and how the conversation is titled.
+      const openingContent = request.openingTurn?.content?.trim() ?? '';
+      const userText = request.message?.trim() ?? '';
+      if (!userText && !openingContent) {
+        // `message` became optional to allow an opening turn, so an empty turn is
+        // now expressible and has to be rejected explicitly rather than silently
+        // sending an empty user message to the provider.
+        throw new ChatError(
+          'invalid_request',
+          'A chat turn requires either `message` or `openingTurn.content`.'
+        );
+      }
+      // A user message always wins: if the caller sent both, the person's own
+      // words are the turn, and the opener is ignored rather than prepended.
+      const isOpeningTurn = !userText;
+      const turnText = isOpeningTurn ? openingContent : userText;
+
       const attachments = request.attachments ?? [];
       const hasImageAttachments = attachments.some((a) => a.mediaType.startsWith('image/'));
       const hasPdfAttachments = attachments.some((a) => a.mediaType === 'application/pdf');
@@ -624,11 +644,21 @@ export class StreamingChatHandler {
 
       // Persist the user message up front so a mid-stream crash still
       // leaves an audit trail.
-      const userMessage = await this.persistMessage({
-        conversationId: conversation.id,
-        role: 'user',
-        content: request.message,
-      });
+      //
+      // An opening turn (#474) persists NOTHING here: the whole point is that no
+      // `role:'user'` row appears in the person's transcript carrying words they
+      // did not write. The opener reaches the model as a `system` message via the
+      // message-builder instead.
+      const userMessage = isOpeningTurn
+        ? null
+        : await this.persistMessage({
+            conversationId: conversation.id,
+            role: 'user',
+            content: turnText,
+            // Fork-owned marker (#475), stored under a namespaced key so it can
+            // never collide with a platform metadata field.
+            ...(request.messageMetadata ? { metadata: { app: request.messageMetadata } } : {}),
+          });
 
       // Log a single `vision` cost row when the turn carries
       // attachments. Fires once per turn, regardless of how the chat
@@ -653,27 +683,39 @@ export class StreamingChatHandler {
       }
 
       // Mirror to the evaluation log when this chat turn is running
-      // inside an evaluation session. No-op otherwise.
-      await this.writeEvaluationLog({
-        contextType: request.contextType,
-        contextId: request.contextId,
-        userId: request.userId,
-        eventType: 'user_input',
-        content: request.message,
-        messageId: userMessage.id,
-      });
+      // inside an evaluation session. No-op otherwise. Skipped for an opening
+      // turn — there was no user input to mirror.
+      if (userMessage) {
+        await this.writeEvaluationLog({
+          contextType: request.contextType,
+          contextId: request.contextId,
+          userId: request.userId,
+          eventType: 'user_input',
+          content: turnText,
+          messageId: userMessage.id,
+        });
+      }
 
-      yield { type: 'start', conversationId: conversation.id, messageId: userMessage.id };
-
-      // Emit hook event for message creation
-      emitHookEvent('message.created', {
+      yield {
+        type: 'start',
         conversationId: conversation.id,
-        messageId: userMessage.id,
-        agentSlug: request.agentSlug,
-        agentId: agent.id,
-        userId: request.userId,
-        role: 'user',
-      });
+        // Omitted on an opening turn: there is no user message to reference.
+        ...(userMessage ? { messageId: userMessage.id } : {}),
+      };
+
+      // Emit hook event for message creation. Not fired for an opening turn —
+      // no message.created event, because no message was created; a subscriber
+      // reacting to "the user said something" must not see a phantom.
+      if (userMessage) {
+        emitHookEvent('message.created', {
+          conversationId: conversation.id,
+          messageId: userMessage.id,
+          agentSlug: request.agentSlug,
+          agentId: agent.id,
+          userId: request.userId,
+          role: 'user',
+        });
+      }
 
       // Guard-floor seam: a fork can RAISE any of the three inline guards
       // (input / output / citation) to a minimum mode for this turn, keyed on
@@ -699,7 +741,12 @@ export class StreamingChatHandler {
       };
 
       // Input guard — mode-dependent behaviour
-      const scanResult = scanForInjection(request.message);
+      // Only user-supplied text is scanned. An opening turn is composed by the
+      // app's own server code, so scanning it would flag the app's instructions
+      // to its own agent as an injection attempt.
+      const scanResult = isOpeningTurn
+        ? { flagged: false as const, patterns: [] as string[] }
+        : scanForInjection(turnText);
       if (scanResult.flagged) {
         log.warn('Potential prompt injection detected', {
           agentSlug: request.agentSlug,
@@ -866,7 +913,8 @@ export class StreamingChatHandler {
         systemInstructions: resolvedPrompt.systemInstructions,
         contextBlock,
         history: historyRows,
-        newUserMessage: request.message,
+        newUserMessage: isOpeningTurn ? '' : turnText,
+        ...(isOpeningTurn ? { openingTurn: turnText } : {}),
         attachments: request.attachments,
         conversationSummary,
         userMemories: memoryRows.length > 0 ? memoryRows : undefined,
@@ -902,7 +950,7 @@ export class StreamingChatHandler {
           : agent.knowledgeRetrievalMode === 'first_turn' && isFirstUserTurn
             ? { name: SEARCH_KNOWLEDGE_SLUG }
             : agent.knowledgeRetrievalMode === 'keywords' &&
-                matchesKnowledgeTrigger(request.message, agent.knowledgeTriggerKeywords)
+                matchesKnowledgeTrigger(turnText, agent.knowledgeTriggerKeywords)
               ? { name: SEARCH_KNOWLEDGE_SLUG }
               : undefined;
 
@@ -2324,7 +2372,10 @@ export class StreamingChatHandler {
     const data: Prisma.AiConversationUncheckedCreateInput = {
       userId: request.userId,
       agentId: agent.id,
-      title: request.message.slice(0, 80),
+      // Title from whichever text this turn carries. An opening turn has no user
+      // message, so the opener stands in — a conversation titled from the agent's
+      // own prompt still reads sensibly in the list, and an empty title does not.
+      title: (request.message?.trim() || request.openingTurn?.content?.trim() || '').slice(0, 80),
     };
     if (request.contextType !== undefined) data.contextType = request.contextType;
     if (request.contextId !== undefined) data.contextId = request.contextId;

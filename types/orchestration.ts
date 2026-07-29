@@ -849,7 +849,11 @@ export interface SupervisorReport {
  * The API layer converts these to SSE frames.
  */
 export type ChatEvent =
-  | { type: 'start'; conversationId: string; messageId: string }
+  // `messageId` is the persisted user message. Absent on an agent-opened turn
+  // (#474), which persists no user row by design. The shared validator
+  // (`chat-events.ts`) already had this optional; the TS type was stricter
+  // than the wire contract. No bundled consumer reads it off `start`.
+  | { type: 'start'; conversationId: string; messageId?: string }
   | { type: 'content'; delta: string }
   | { type: 'status'; message: string }
   | {
@@ -1150,6 +1154,22 @@ export interface MessageMetadata {
    * may show only the configurable user-facing copy.
    */
   budgetExceededDetail?: { usedUsd: number; limitUsd: number };
+  /**
+   * Fork-owned metadata, supplied by the caller via
+   * `ChatRequest.messageMetadata` and stored verbatim (#475).
+   *
+   * Namespaced under a single `app` key so it can never collide with a platform
+   * field above — including one a future release adds. The platform never reads
+   * or interprets its contents.
+   *
+   * The use case this exists for: recording *why* a turn happened when the
+   * reason is the app's, not the user's — a scheduled check-in, a replay, an
+   * agent-initiated follow-up, or a server-composed opening turn (#474).
+   * Without it the only options were to encode a sentinel string in the message
+   * text and keep a list of every version ever shipped, or to `UPDATE` a
+   * core-owned table after the fact.
+   */
+  app?: Record<string, unknown>;
 }
 
 // ============================================================================

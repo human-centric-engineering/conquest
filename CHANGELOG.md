@@ -65,6 +65,31 @@ release process.
 
 ### Added
 
+- **`ChatRequest.openingTurn` — a turn the agent opens** (#474). `streamChat`
+  required a non-empty `message` and persisted it as a `role:'user'` row before
+  calling the model. Right for a support chatbot; wrong for a facilitated product
+  whose method is to orient the person first — the app had to send a stage
+  direction *as the user*, leaving text in someone's own transcript that they did
+  not write, in the model's history for the rest of the conversation, and
+  filterable only by exact string match against a list of every trigger string
+  ever shipped. With `openingTurn` set, `message` may be omitted: no user row is
+  persisted, no `message.created` fires for a user role, and the content reaches
+  the model as a `system` message. `message` wins if both are supplied. A turn
+  with neither is rejected — `message` becoming optional made the empty turn
+  expressible, so it is now refused explicitly.
+  `ChatEvent` `start.messageId` is consequently optional; the shared validator in
+  `chat-events.ts` already had it optional, so the TS type was stricter than the
+  wire contract, and no bundled consumer reads it off `start`.
+
+- **`ChatRequest.messageMetadata` — caller metadata on the message row** (#475).
+  `costLogMetadata` lands on `AiCostLog`; there was nothing for the message
+  itself, so an app that caused a turn for its own reasons had nowhere to record
+  that fact except inside the message text or an `UPDATE` against a core-owned
+  table. Stored verbatim under `MessageMetadata.app`, namespaced so it can never
+  collide with a platform field including one a future release adds. The handler
+  never inspects it. Together with #474 this replaces sentinel-string detection
+  with a structural tag.
+
 - **`lib/app/user-created.ts` — a fork-owned seam at user creation** (#464). A
   fork that needed to react to a new account (provision a profile row, seed a
   workspace, start onboarding, push to a CRM) had to add code to
@@ -173,6 +198,23 @@ release process.
   promise.
 
 ### Changed
+
+- **`runStructuredCompletion`'s non-persistence is now contractual** (#472). The
+  module writes nothing — no database client imported, no row created, no prompt
+  or completion logged — but that was only *incidentally* true. Its docstring
+  promised layering neutrality ("no evaluation coupling, no Next.js imports"),
+  which says nothing about writes, while a downstream fork's user-facing privacy
+  claim (calendar-event titles categorised into aggregate buckets, only the
+  totals stored) depended on the stronger property. Adding prompt logging for
+  debugging or completion persistence for eval replay would have been consistent
+  with everything the file said about itself and would have broken that claim
+  without touching the fork's code. The guarantee is now stated explicitly and
+  enforced by `structured-completion-no-persistence.test.ts`, which fails on a
+  database/storage import or a `prisma.*` call. Cost metadata (token counts, USD)
+  is still returned to callers and is outside the guarantee — aggregate counts
+  carry no prompt content. Persisting here in future is a breaking change to a
+  documented guarantee: opt-in flag defaulting to off, CHANGELOG entry, and a
+  deliberate test update rather than a deletion.
 
 - **BREAKING: `HookEventType` is open to fork-owned events** (#465).
   `HOOK_EVENT_TYPES` was a closed list, so a fork could neither emit its own

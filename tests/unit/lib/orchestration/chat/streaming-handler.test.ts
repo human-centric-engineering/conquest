@@ -205,6 +205,7 @@ const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/
 const { getCapabilityDefinitions } = await import('@/lib/orchestration/capabilities/registry');
 const { buildContext, invalidateContext } =
   await import('@/lib/orchestration/chat/context-builder');
+const { emitHookEvent } = await import('@/lib/orchestration/hooks/registry');
 const { streamChat } = await import('@/lib/orchestration/chat/streaming-handler');
 const { CostOperation } = await import('@/types/orchestration');
 const { getBreaker } = await import('@/lib/orchestration/llm/circuit-breaker');
@@ -5127,5 +5128,170 @@ describe('pre-token read batching', () => {
     expect(options?.tools).toEqual([
       { name: 'lookup_order', description: 'Look up an order', parameters: { type: 'object' } },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent-opened turns and app message metadata (#474, #475)
+// ---------------------------------------------------------------------------
+
+describe('agent-opened turns (#474)', () => {
+  /** A provider that just replies with text and finishes. */
+  const replying = () =>
+    mockProvider([
+      [
+        { type: 'text', content: 'Welcome. What would you like to fix?' },
+        { type: 'done', usage: { inputTokens: 20, outputTokens: 8 }, finishReason: 'stop' },
+      ],
+    ]);
+
+  const openingRequest = {
+    agentSlug: 'helper',
+    userId: 'u1',
+    openingTurn: { content: 'Open this moment, then stop and wait for them.' },
+  };
+
+  beforeEach(() => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: replying(),
+      usedSlug: 'anthropic',
+    });
+  });
+
+  it('persists NO user message for an opening turn', async () => {
+    // The whole point of the issue: nothing may appear in the person's own
+    // transcript carrying words they did not write.
+    await collect(streamChat(openingRequest));
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRows = createCalls.filter((c: any) => c[0].data.role === 'user');
+    expect(userRows).toHaveLength(0);
+  });
+
+  it('sends the opener to the provider as a system message, never as a user one', async () => {
+    const provider = replying();
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(openingRequest));
+
+    const messages = (provider.chatStream as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    const opener = messages.find((m) => m.content === openingRequest.openingTurn.content);
+    expect(opener).toBeDefined();
+    expect(opener?.role).toBe('system');
+    // And no user-role message at all this turn.
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(0);
+  });
+
+  it('omits messageId from the start event when there is no user message', async () => {
+    const events = (await collect(streamChat(openingRequest))) as Array<Record<string, unknown>>;
+    const start = events.find((e) => e.type === 'start');
+
+    expect(start).toBeDefined();
+    expect(start?.conversationId).toBeDefined();
+    expect(start?.messageId).toBeUndefined();
+  });
+
+  it('emits no user-role message.created, but still emits the assistant one', async () => {
+    // A subscriber reacting to "the user said something" must not see a phantom.
+    // The ASSISTANT event must still fire — the agent genuinely created a message,
+    // and suppressing it would break anything watching for agent output.
+    await collect(streamChat(openingRequest));
+
+    const created = (emitHookEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: any) => c[0] === 'message.created'
+    );
+    const roles = created.map((c: any) => c[1].role);
+    expect(roles).not.toContain('user');
+    expect(roles).toContain('assistant');
+  });
+
+  it('still streams the assistant reply and persists it', async () => {
+    // Skipping the user row must not skip the turn.
+    const events = (await collect(streamChat(openingRequest))) as Array<Record<string, unknown>>;
+
+    expect(events.some((e) => e.type === 'content')).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(createCalls.filter((c: any) => c[0].data.role === 'assistant').length).toBeGreaterThan(
+      0
+    );
+  });
+
+  it('rejects a turn carrying neither message nor openingTurn', async () => {
+    // `message` became optional to allow openers, so this now type-checks — which
+    // is exactly why the runtime guard is needed. No cast: if a future change made
+    // this a type error again, that would be worth knowing.
+    const events = (await collect(streamChat({ agentSlug: 'helper', userId: 'u1' }))) as Array<
+      Record<string, unknown>
+    >;
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+  });
+
+  it('rejects a whitespace-only message with no openingTurn', async () => {
+    const events = (await collect(
+      streamChat({ agentSlug: 'helper', userId: 'u1', message: '   ' })
+    )) as Array<Record<string, unknown>>;
+
+    expect(events.find((e) => e.type === 'error')).toBeDefined();
+  });
+
+  it('prefers a real user message when both are supplied', async () => {
+    // The person's own words are the turn; the opener is ignored, not prepended.
+    await collect(
+      streamChat({
+        ...baseRequest,
+        openingTurn: { content: 'IGNORED OPENER' },
+      })
+    );
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRows = createCalls.filter((c: any) => c[0].data.role === 'user');
+    expect(userRows).toHaveLength(1);
+    expect(userRows[0][0].data.content).toBe(baseRequest.message);
+  });
+});
+
+describe('app message metadata (#475)', () => {
+  beforeEach(() => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: mockProvider([
+        [
+          { type: 'text', content: 'ok' },
+          { type: 'done', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'stop' },
+        ],
+      ]),
+      usedSlug: 'anthropic',
+    });
+  });
+
+  it('stores caller metadata under a namespaced `app` key', async () => {
+    // Namespaced so it can never collide with a platform field — including one a
+    // future release adds.
+    await collect(
+      streamChat({ ...baseRequest, messageMetadata: { synthetic: true, trigger: 'phase-2' } })
+    );
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRow = createCalls.find((c: any) => c[0].data.role === 'user');
+    expect(userRow?.[0].data.metadata).toEqual({
+      app: { synthetic: true, trigger: 'phase-2' },
+    });
+  });
+
+  it('writes no metadata key when the caller supplies none', async () => {
+    await collect(streamChat(baseRequest));
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRow = createCalls.find((c: any) => c[0].data.role === 'user');
+    expect(userRow?.[0].data.metadata).toBeUndefined();
   });
 });
