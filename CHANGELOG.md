@@ -16,6 +16,51 @@ release process.
 
 ## [Unreleased]
 
+### Security
+
+- **`sanitizeUrl` no longer lets an embedded control character smuggle a
+  dangerous protocol past the check** (#437). It normalised with
+  `url.trim().toLowerCase()`, which only strips leading and trailing whitespace —
+  so `java\tscript:`, `java\nscript:`, `java\x00script:` and a leading NBSP or
+  BOM all failed the `startsWith()` test while a browser, which discards those
+  characters before resolving the scheme, navigated to `javascript:` anyway. All
+  C0 controls, DEL and Unicode whitespace are now removed from the string under
+  test. The check can only get stricter: `replace` deletes characters and
+  preserves order, and no denied protocol contains a strippable character, so
+  every URL blocked before is still blocked. A passing URL is still returned
+  byte-for-byte — the docstring now says so, and warns against putting the result
+  in a response header.
+- **BREAKING: changing your email address now clears `emailVerified` and sends a
+  fresh verification to the new address** (#466). `PATCH /api/v1/users/me` passed
+  the request body straight to `prisma.user.update`, so a caller could move the
+  account onto an address nobody controls while the account stayed marked
+  verified. The profile form strips `email` client-side, so the only way in was a
+  direct API call — exactly the path that matters. *Forks that PATCH `email`
+  programmatically must now re-verify.* The email-change path additionally
+  carries a per-flow cap (shared with resend-verification) because it sends mail
+  to a caller-supplied address.
+- **An API key can no longer change the account's email address** (#466,
+  found reviewing that fix). `withAuth` accepts an API key of **any** scope, and
+  keys are self-service — so a `chat`-scoped key handed to a third-party
+  integration could have moved the account to an attacker's address, and the new
+  verification mail would have delivered them a working token. With
+  `autoSignInAfterVerification` enabled that token mints a real session, turning
+  a read-ish scope into full account takeover. `PATCH /api/v1/users/me` now
+  returns 403 on the email path for key-authenticated callers, via the new
+  `isApiKeySession()` in `lib/auth/api-keys.ts`. Non-identity profile fields are
+  unaffected. Re-authentication, old-address notification and session revocation
+  remain open — tracked in #489.
+- **JSON API responses now carry `Cache-Control: private, no-cache`** (#487).
+  Nothing set a cache directive, and a response with a validator (an `ETag`,
+  which several routes send) but no freshness information is *heuristically
+  cacheable* — RFC 9111 §4.2.2 lets a shared cache store it and invent an expiry.
+  Applied in `successResponse`/`errorResponse` and the 304 from
+  `checkConditional`, so the 200 and 304 on an endpoint agree. Deliberately
+  `no-cache` rather than `no-store`, which would forbid the client copy and
+  defeat the conditional-GET path the ETags exist for. It is a default, spread
+  before caller headers, so a route serving genuinely public data can override
+  it; routes returning a raw `Response` never pass through here.
+
 ### Added
 
 - **`NavSection.titleNode` — a fork's own brand lockup in an admin nav section
