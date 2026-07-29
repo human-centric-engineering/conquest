@@ -16,6 +16,40 @@ release process.
 
 ## [Unreleased]
 
+### Added
+
+- **`DATABASE_POOL_MAX`** — optional cap on pg connections per process, default
+  `10` (unchanged behaviour). Serverless deploys set `1` behind a transaction
+  pooler; every warm instance holds its own pool, so the default exhausts a
+  small Postgres under load. The pool also sets 10s idle and connection
+  timeouts, so exhaustion now fails fast instead of hanging until the platform
+  kills the request. ([#445])
+
+### Fixed
+
+- **`LlmOptions.timeoutMs` and `signal` reach the provider SDKs.** Both were
+  documented but dropped, so a call that needed longer than the client default
+  died at the default with no indication the option had been ignored. All four
+  adapter paths (`chat` and `chatStream` on Anthropic and OpenAI-compatible)
+  now forward them; setting neither leaves the provider default in charge.
+  ([#444])
+- **PDF parsing survives serverless file tracing.** The pdfjs worker is
+  registered on `globalThis` from a literal import specifier, so it ships in the
+  function bundle — previously every PDF upload on Vercel failed with "Setting
+  up fake worker failed", while working locally. ([#446])
+
+### Changed
+
+- **`streamChat` batches its three pre-token reads** (context, user memories,
+  capability definitions) into one `Promise.all`, cutting the delay before the
+  first token from three serial database round trips to one. No behavioural
+  change. ([#449])
+
+[#444]: https://github.com/human-centric-engineering/sunrise/issues/444
+[#445]: https://github.com/human-centric-engineering/sunrise/issues/445
+[#446]: https://github.com/human-centric-engineering/sunrise/issues/446
+[#449]: https://github.com/human-centric-engineering/sunrise/issues/449
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
