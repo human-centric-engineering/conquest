@@ -1875,3 +1875,70 @@ describe('AnthropicProvider.chatStream — structured output extraction (json_sc
     expect((caught as { code?: string }).code).toBe('truncated_no_output');
   });
 });
+
+describe('AnthropicProvider per-request timeout and signal', () => {
+  it('forwards timeoutMs and signal to the SDK on chat()', async () => {
+    // Arrange — the case that surfaced this: a long extraction on a reasoning
+    // model, where the client-default timeout killed the request mid-job.
+    createMock.mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'claude-sonnet-4-6',
+      stop_reason: 'end_turn',
+    });
+    const controller = new AbortController();
+
+    // Act
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'hi' }], {
+      model: 'claude-sonnet-4-6',
+      timeoutMs: 600_000,
+      signal: controller.signal,
+    });
+
+    // Assert — second argument, not folded into the message params
+    expect(createMock.mock.calls[0][1]).toEqual({
+      timeout: 600_000,
+      signal: controller.signal,
+    });
+  });
+
+  it('forwards timeoutMs and signal to the SDK on chatStream()', async () => {
+    // Arrange
+    createMock.mockResolvedValue(makeStream([{ type: 'message_stop' }]));
+    const controller = new AbortController();
+
+    // Act
+    const provider = makeProvider();
+    for await (const _chunk of provider.chatStream([{ role: 'user', content: 'hi' }], {
+      model: 'claude-haiku-4-5',
+      timeoutMs: 600_000,
+      signal: controller.signal,
+    })) {
+      // drain
+    }
+
+    // Assert
+    expect(createMock.mock.calls[0][1]).toEqual({
+      timeout: 600_000,
+      signal: controller.signal,
+    });
+  });
+
+  it('omits request options entirely when the caller sets neither', async () => {
+    // Arrange
+    createMock.mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'claude-sonnet-4-6',
+      stop_reason: 'end_turn',
+    });
+
+    // Act
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'hi' }], { model: 'claude-sonnet-4-6' });
+
+    // Assert — undefined, so the client's construction-time timeout still applies
+    expect(createMock.mock.calls[0][1]).toBeUndefined();
+  });
+});

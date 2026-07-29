@@ -340,6 +340,21 @@ Uniform across every provider via `withRetry` + `fetchWithTimeout` (internal hel
 | Max retries     | 2 (overridable via `maxRetries`)             | 2 (overridable)             |
 | Backoff         | 500ms → 1s → 2s + ±25% jitter, capped at 10s | same                        |
 
+Two timeout levels exist and they are not the same knob. The table above is
+the **provider-level** default, fixed when the client is constructed from
+`AiProviderConfig.timeoutMs`. A single call can override it via
+`LlmOptions.timeoutMs`, which both adapters forward to the SDK as a per-request
+option (`buildRequestOptions` in `provider.ts`) — use it for the occasional call
+that genuinely runs long, e.g. document extraction on a reasoning model, rather
+than raising the provider default for everything. `LlmOptions.signal` rides
+along the same path, so a caller's abort cancels the in-flight HTTP request on
+the streaming paths too, not just between retries. Set neither and nothing is
+sent, leaving the provider-level default in charge.
+
+Note the per-request timeout bounds each attempt, not the retry sequence: pass
+a `signal` (e.g. `AbortSignal.timeout(...)`) when you need an absolute ceiling
+across retries, which is what `structured-completion.ts` does.
+
 Worst-case wall time on retriable failures: 3 attempts × 120s + ~3s of
 backoff ≈ 6 min for cloud, ~3 min for local. Workflow `llm_call` /
 `agent_call` steps run inside engine-level step timeouts that further

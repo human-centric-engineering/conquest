@@ -150,6 +150,10 @@ export async function runStructuredCompletion<T>(
         model: opts.model,
         temperature,
         maxTokens,
+        // Both halves: the signal bounds the whole attempt sequence (it is
+        // absolute, so retries share it), `timeoutMs` caps the individual HTTP
+        // request inside the provider SDK.
+        timeoutMs,
         signal: firstSignal,
         ...(responseFormat ? { responseFormat } : {}),
       });
@@ -192,6 +196,7 @@ export async function runStructuredCompletion<T>(
           model: opts.model,
           temperature: 0,
           maxTokens,
+          timeoutMs,
           signal: retrySignal,
           ...(responseFormat ? { responseFormat } : {}),
         }
