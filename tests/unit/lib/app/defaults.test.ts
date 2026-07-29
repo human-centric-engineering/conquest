@@ -43,6 +43,7 @@ import { appAgentFields } from '@/lib/app/agent-fields';
 import { appProtectedRoutes } from '@/lib/app/protected-routes';
 import { appEnvSchema } from '@/lib/app/env';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
+import { appFrameSrc } from '@/lib/app/csp';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
 
@@ -165,6 +166,13 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     // The root eslint.config.mjs spreads this array last; that spread itself is
     // exercised by every `npm run lint` run.
     assert: () => expect(appEslintConfig).toEqual([]),
+  },
+  {
+    seam: 'lib/app/csp.ts',
+    risk: 'a stray origin would widen the iframe policy on every install',
+    // These values are spliced straight into a response header, so an
+    // accidental default here is a security change, not a cosmetic one.
+    assert: () => expect(appFrameSrc).toEqual([]),
   },
 ];
 
