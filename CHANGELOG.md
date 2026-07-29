@@ -68,6 +68,15 @@ release process.
   hardcode. All now interpolate `BRAND.name`. `about/` is deliberately left
   alone — its copy describes the template itself and is fork-replaced body copy.
 
+- **The protected error boundary's "Session Expired" card now actually renders
+  when a session expires.** The session check tested `authClient.getSession()`
+  for truthiness, but better-auth always resolves that call to a
+  `{ data, error }` envelope — never `null` — so the condition never fired and
+  the sign-in prompt only appeared when the request itself threw. The check now
+  destructures `{ data: session }`, matching the other call sites in the repo.
+  Pre-existing on `main` (`app/(protected)/error.tsx`), carried into the shared
+  boundary by this release's refactor and fixed there.
+
 - **Route-group error boundaries no longer double-log and double-report on
   session expiry** (#433). The logging effect included `isSessionExpired` in its
   dependency array while also setting it, so a session-expiry error re-ran the

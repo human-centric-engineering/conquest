@@ -114,7 +114,11 @@ export function RouteErrorBoundary({
 
     const verifySession = async (): Promise<void> => {
       try {
-        const session = await authClient.getSession();
+        // better-auth always resolves to a `{ data, error }` envelope — the
+        // session itself is `data`. Testing the envelope for truthiness would
+        // never fire, so the expiry card would only ever appear on a thrown
+        // request.
+        const { data: session } = await authClient.getSession();
         if (!session) {
           setIsSessionExpired(true);
           logger.warn('Session expired in error boundary', { boundaryName });

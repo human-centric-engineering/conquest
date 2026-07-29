@@ -40,9 +40,22 @@ import { authClient } from '@/lib/auth/client';
 
 const error = Object.assign(new Error('boom'), { digest: 'digest-1' });
 
-/** Cast a stand-in through better-auth's wide session result type. */
+/**
+ * better-auth resolves `getSession()` to a `{ data, error }` envelope — never a
+ * bare session and never `null`. Mocking the real shape is what makes the
+ * expiry branch below a genuine test of the source's check.
+ */
 type SessionResult = Awaited<ReturnType<typeof authClient.getSession>>;
-const sessionResult = (value: unknown): SessionResult => value as SessionResult;
+const envelope = (value: unknown): SessionResult => value as SessionResult;
+
+const validSession = (): SessionResult =>
+  envelope({ data: { session: { id: 'sess-1' }, user: { id: 'user-1' } }, error: null });
+
+const expiredSession = (): SessionResult =>
+  envelope({
+    data: null,
+    error: { status: 401, statusText: 'UNAUTHORIZED', message: 'Session expired' },
+  });
 
 function renderBoundary(props: Partial<React.ComponentProps<typeof RouteErrorBoundary>> = {}) {
   const reset = vi.fn();
@@ -64,9 +77,7 @@ function renderBoundary(props: Partial<React.ComponentProps<typeof RouteErrorBou
 describe('RouteErrorBoundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authClient.getSession).mockResolvedValue(
-      sessionResult({ data: { session: {}, user: {} } })
-    );
+    vi.mocked(authClient.getSession).mockResolvedValue(validSession());
   });
 
   describe('reporting', () => {
@@ -102,7 +113,7 @@ describe('RouteErrorBoundary', () => {
 
     // #433: the expiry state change used to re-run the reporting effect
     it('does not re-report when the session check resolves to expired', async () => {
-      vi.mocked(authClient.getSession).mockResolvedValue(sessionResult(null));
+      vi.mocked(authClient.getSession).mockResolvedValue(expiredSession());
 
       renderBoundary({ checkSession: true });
 
@@ -114,7 +125,7 @@ describe('RouteErrorBoundary', () => {
 
   describe('session expiry', () => {
     it('shows the sign-in card when the session is gone', async () => {
-      vi.mocked(authClient.getSession).mockResolvedValue(sessionResult(null));
+      vi.mocked(authClient.getSession).mockResolvedValue(expiredSession());
 
       renderBoundary({ checkSession: true });
 
@@ -122,6 +133,16 @@ describe('RouteErrorBoundary', () => {
       await userEvent.click(signIn);
       expect(mockPush).toHaveBeenCalledWith('/login');
       expect(screen.queryByText('Try again')).not.toBeInTheDocument();
+    });
+
+    it('keeps the normal error card when the session is still valid', async () => {
+      // The other half of the branch: `data` present means the session is fine,
+      // so the boundary must NOT swap in the sign-in card.
+      renderBoundary({ checkSession: true });
+
+      await waitFor(() => expect(authClient.getSession).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+      expect(screen.queryByText('Session Expired')).not.toBeInTheDocument();
     });
 
     it('treats a failed session lookup as expired', async () => {
