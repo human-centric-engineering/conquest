@@ -10,7 +10,24 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseChatStreamEvent } from '@/components/admin/orchestration/chat/chat-events';
+import {
+  parseChatStreamEvent,
+  type ChatStreamEvent,
+} from '@/components/admin/orchestration/chat/chat-events';
+import type { ChatEvent } from '@/types/orchestration';
+
+/**
+ * Compile-time drift guard (#461).
+ *
+ * The client schema is a hand-maintained mirror of the canonical `ChatEvent`
+ * union. When they drifted, `parseChatStreamEvent` returned null for the
+ * unmodelled variant and consumers silently dropped a terminal frame — a
+ * failure with no runtime signal at all. Both aliases resolve to `never` only
+ * while each side covers the other, so the annotations below stop compiling the
+ * moment a variant is added to one side alone.
+ */
+type UnmodelledByClient = Exclude<ChatEvent['type'], ChatStreamEvent['type']>;
+type UnknownToServer = Exclude<ChatStreamEvent['type'], ChatEvent['type']>;
 
 function frame(event: string, payload: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}`;
@@ -146,5 +163,54 @@ describe('parseChatStreamEvent', () => {
     if (!parsed || parsed.type !== 'citations') throw new Error('wrong variant');
     expect(parsed.citations[0].marker).toBe(1);
     expect(parsed.citations[0].similarity).toBeCloseTo(0.83);
+  });
+});
+
+describe('schema/type parity', () => {
+  it('covers the canonical ChatEvent union in both directions', () => {
+    // The assertion is the type annotation, not the runtime value: either
+    // alias resolving to anything but `never` makes this file fail to compile.
+    const everyServerEventIsModelled: UnmodelledByClient extends never ? true : never = true;
+    const noInventedClientEvents: UnknownToServer extends never ? true : never = true;
+
+    expect(everyServerEventIsModelled).toBe(true);
+    expect(noInventedClientEvents).toBe(true);
+  });
+});
+
+describe('budget_exceeded_per_turn', () => {
+  it('parses the cap event so consumers can surface it', () => {
+    // Regression (#461): the variant was missing from the union, so the
+    // parser returned null and every consumer dropped the frame. On the
+    // tool-loop-abort path it is the LAST frame sent — no `done`/`error`
+    // follows — so dropping it leaves an empty turn and no explanation.
+    const parsed = parseChatStreamEvent(
+      frame('budget_exceeded_per_turn', {
+        type: 'budget_exceeded_per_turn',
+        code: 'budget_exceeded_per_turn',
+        message: 'This response exceeded the per-turn cost limit of $0.5000.',
+        usedUsd: 0.7312,
+        limitUsd: 0.5,
+      })
+    );
+
+    if (!parsed || parsed.type !== 'budget_exceeded_per_turn') throw new Error('wrong variant');
+    expect(parsed.message).toContain('per-turn cost limit');
+    expect(parsed.usedUsd).toBeCloseTo(0.7312);
+    expect(parsed.limitUsd).toBeCloseTo(0.5);
+  });
+
+  it('rejects a cap event missing the cost figures', () => {
+    // The emitter always sends both; a frame without them is malformed
+    // rather than a shape we should half-render.
+    const parsed = parseChatStreamEvent(
+      frame('budget_exceeded_per_turn', {
+        type: 'budget_exceeded_per_turn',
+        code: 'budget_exceeded_per_turn',
+        message: 'capped',
+      })
+    );
+
+    expect(parsed).toBeNull();
   });
 });

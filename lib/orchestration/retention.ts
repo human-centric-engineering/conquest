@@ -85,6 +85,8 @@ export async function enforceRetentionPolicies(): Promise<RetentionResult> {
     }
   }
 
+  await warnOnIncoherentRetention();
+
   const webhookResult = await pruneWebhookDeliveries();
   const hookResult = await pruneHookDeliveries();
   const costLogResult = await pruneCostLogs();
@@ -349,6 +351,39 @@ export async function pruneMcpAuditLogs(maxAgeDays?: number): Promise<PruneResul
     logger.info('MCP audit log rows pruned', { deleted: result.count, maxAgeDays: days });
   }
   return { deleted: result.count };
+}
+
+/**
+ * Log once per sweep when cost-log retention is shorter than execution
+ * retention.
+ *
+ * `AiWorkflowExecution.totalCostUsd` is a scalar column, so it outlives the
+ * `AiCostLog` rows behind it: prune the logs first and an execution keeps
+ * reporting spend while its breakdown reads empty. The settings route rejects
+ * the combination at write time, but installs configured before that check
+ * existed stay silently in this state — nobody re-saves settings to find out.
+ *
+ * One extra settings read per sweep, not per prune. Failure to read is
+ * ignored: a warning is not worth failing the sweep over.
+ */
+async function warnOnIncoherentRetention(): Promise<void> {
+  const row = await prisma.aiOrchestrationSettings
+    .findUnique({
+      where: { slug: 'global' },
+      select: { costLogRetentionDays: true, executionRetentionDays: true },
+    })
+    .catch(() => null);
+
+  const costLogDays = row?.costLogRetentionDays ?? null;
+  const executionDays = row?.executionRetentionDays ?? null;
+  // Either window unset means that class isn't pruned at all — no coupling.
+  if (costLogDays === null || executionDays === null) return;
+  if (costLogDays >= executionDays) return;
+
+  logger.warn(
+    'Retention windows are incoherent: cost logs are pruned before the executions that reference them, so cost breakdowns will read empty for executions still on file',
+    { costLogRetentionDays: costLogDays, executionRetentionDays: executionDays }
+  );
 }
 
 /** Read a named retention column from the singleton settings row. */

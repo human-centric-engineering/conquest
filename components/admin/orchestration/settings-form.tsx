@@ -90,47 +90,71 @@ const nullableNumber = z
   .union([z.literal(''), z.coerce.number()])
   .transform((v) => (v === '' ? null : v));
 
-const settingsFormSchema = z.object({
-  // Safety
-  inputGuardMode: z.enum(GUARD_MODES),
-  outputGuardMode: z.enum(GUARD_MODES),
-  citationGuardMode: z.enum(GUARD_MODES),
-  // Limits
-  globalMonthlyBudgetUsd: nullableNumber.pipe(z.number().nonnegative().max(1_000_000).nullable()),
-  // Per-execution / per-turn defaults (improvement #39 runaway-loop
-  // guard). Min 0.01 matches the API-side validator; an empty field
-  // becomes null, which means "no org default."
-  defaultMaxCostPerExecutionUsd: nullableNumber.pipe(z.number().min(0.01).max(10_000).nullable()),
-  defaultMaxCostPerTurnUsd: nullableNumber.pipe(z.number().min(0.01).max(10_000).nullable()),
-  maxConversationsPerUser: nullableNumber.pipe(z.number().int().positive().max(10_000).nullable()),
-  maxMessagesPerConversation: nullableNumber.pipe(
-    z.number().int().positive().max(10_000).nullable()
-  ),
-  stuckExecutionThresholdMins: nullableNumber.pipe(z.number().int().min(1).max(1440).nullable()),
-  // Retention
-  webhookRetentionDays: nullableNumber.pipe(z.number().int().positive().max(365).nullable()),
-  costLogRetentionDays: nullableNumber.pipe(z.number().int().positive().max(365).nullable()),
-  auditLogRetentionDays: nullableNumber.pipe(z.number().int().positive().max(3650).nullable()),
-  executionRetentionDays: nullableNumber.pipe(z.number().int().positive().max(3650).nullable()),
-  evaluationRetentionDays: nullableNumber.pipe(z.number().int().positive().max(3650).nullable()),
-  // Approvals
-  approvalTimeout: nullableNumber.pipe(z.number().int().positive().max(3_600_000).nullable()),
-  approvalDefaultAction: z.enum(APPROVAL_ACTIONS),
-  // Voice input
-  voiceInputGloballyEnabled: z.boolean(),
-  // Image / PDF attachments
-  imageInputGloballyEnabled: z.boolean(),
-  documentInputGloballyEnabled: z.boolean(),
-  // Search
-  keywordBoostWeight: nullableNumber.pipe(z.number().min(-0.2).max(0).nullable()),
-  vectorWeight: nullableNumber.pipe(z.number().min(0.1).max(2.0).nullable()),
-  hybridEnabled: z.boolean(),
-  bm25Weight: nullableNumber.pipe(z.number().min(0.1).max(2.0).nullable()),
-  // Escalation
-  escalationEnabled: z.boolean(),
-  escalationPriorityFilter: z.enum(ESCALATION_PRIORITY_FILTERS),
-  escalationWebhookUrl: z.string().url().max(2000).or(z.literal('')).optional(),
-});
+const settingsFormSchema = z
+  .object({
+    // Safety
+    inputGuardMode: z.enum(GUARD_MODES),
+    outputGuardMode: z.enum(GUARD_MODES),
+    citationGuardMode: z.enum(GUARD_MODES),
+    // Limits
+    globalMonthlyBudgetUsd: nullableNumber.pipe(z.number().nonnegative().max(1_000_000).nullable()),
+    // Per-execution / per-turn defaults (improvement #39 runaway-loop
+    // guard). Min 0.01 matches the API-side validator; an empty field
+    // becomes null, which means "no org default."
+    defaultMaxCostPerExecutionUsd: nullableNumber.pipe(z.number().min(0.01).max(10_000).nullable()),
+    defaultMaxCostPerTurnUsd: nullableNumber.pipe(z.number().min(0.01).max(10_000).nullable()),
+    maxConversationsPerUser: nullableNumber.pipe(
+      z.number().int().positive().max(10_000).nullable()
+    ),
+    maxMessagesPerConversation: nullableNumber.pipe(
+      z.number().int().positive().max(10_000).nullable()
+    ),
+    stuckExecutionThresholdMins: nullableNumber.pipe(z.number().int().min(1).max(1440).nullable()),
+    // Retention
+    webhookRetentionDays: nullableNumber.pipe(z.number().int().positive().max(365).nullable()),
+    costLogRetentionDays: nullableNumber.pipe(z.number().int().positive().max(365).nullable()),
+    auditLogRetentionDays: nullableNumber.pipe(z.number().int().positive().max(3650).nullable()),
+    executionRetentionDays: nullableNumber.pipe(z.number().int().positive().max(3650).nullable()),
+    evaluationRetentionDays: nullableNumber.pipe(z.number().int().positive().max(3650).nullable()),
+    // Approvals
+    approvalTimeout: nullableNumber.pipe(z.number().int().positive().max(3_600_000).nullable()),
+    approvalDefaultAction: z.enum(APPROVAL_ACTIONS),
+    // Voice input
+    voiceInputGloballyEnabled: z.boolean(),
+    // Image / PDF attachments
+    imageInputGloballyEnabled: z.boolean(),
+    documentInputGloballyEnabled: z.boolean(),
+    // Search
+    keywordBoostWeight: nullableNumber.pipe(z.number().min(-0.2).max(0).nullable()),
+    vectorWeight: nullableNumber.pipe(z.number().min(0.1).max(2.0).nullable()),
+    hybridEnabled: z.boolean(),
+    bm25Weight: nullableNumber.pipe(z.number().min(0.1).max(2.0).nullable()),
+    // Escalation
+    escalationEnabled: z.boolean(),
+    escalationPriorityFilter: z.enum(ESCALATION_PRIORITY_FILTERS),
+    escalationWebhookUrl: z.string().url().max(2000).or(z.literal('')).optional(),
+  })
+  /**
+   * Cost logs must outlive the executions that reference them (#456).
+   * `totalCostUsd` is a scalar on the execution row, so pruning the logs first
+   * leaves an execution reporting real spend over an empty breakdown. The API
+   * rejects the pair too — this just puts the message next to the field instead
+   * of at the top of the form after a round trip.
+   */
+  .refine(
+    (v) => {
+      const costLog = Number(v.costLogRetentionDays);
+      const execution = Number(v.executionRetentionDays);
+      // Blank means "never prune this class" — no coupling to break.
+      if (!v.costLogRetentionDays || !v.executionRetentionDays) return true;
+      if (Number.isNaN(costLog) || Number.isNaN(execution)) return true;
+      return costLog >= execution;
+    },
+    {
+      message: 'Must be at least as long as execution retention, or cost breakdowns empty out',
+      path: ['costLogRetentionDays'],
+    }
+  );
 
 type SettingsFormData = z.input<typeof settingsFormSchema>;
 
@@ -753,7 +777,9 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
               Cost log retention (days)
               <FieldHelp title="Cost log cleanup">
                 Cost log entries older than this are automatically deleted. Leave blank to keep all
-                records indefinitely. The cost dashboard aggregates are not affected.
+                records indefinitely. The cost dashboard aggregates are not affected. Keep this at
+                least as long as execution retention below — an execution keeps showing its total
+                cost after its cost logs go, so a shorter window leaves the breakdown empty.
               </FieldHelp>
             </Label>
             <Input

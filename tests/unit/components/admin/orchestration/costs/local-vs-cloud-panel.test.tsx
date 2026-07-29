@@ -18,7 +18,10 @@ import type { LocalSavingsResult } from '@/types/orchestration';
 import type { ModelInfo } from '@/lib/orchestration/llm/types';
 
 function makeSummary(localSavings: LocalSavingsResult | null, cloudSpend = 0): CostSummary {
-  const byModel = cloudSpend > 0 ? [{ model: 'claude-sonnet-4-6', monthSpend: cloudSpend }] : [];
+  const byModel =
+    cloudSpend > 0
+      ? [{ model: 'claude-sonnet-4-6', provider: 'anthropic', monthSpend: cloudSpend }]
+      : [];
   return {
     totals: { today: 0, week: 0, month: cloudSpend },
     byAgent: [],

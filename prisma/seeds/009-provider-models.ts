@@ -695,6 +695,14 @@ const unit: SeedUnit = {
         toolUse: 'strong',
         bestRole: 'Enterprise GPT layer',
         costPerMillionTokens: 6.25, // Azure GPT-4o: ($2.50 in + $10 out) / 2
+        // Seeded INACTIVE. This row shares `modelId: 'gpt-4o'` with the OpenAI
+        // row, and an unconfigured example provider has no business competing
+        // for that id in catalogue lookups — it is how genuine OpenAI spend
+        // came to be labelled "microsoft / GPT-4o (Azure)" (#436). Operators
+        // running Azure OpenAI activate it in the model matrix. Applied on
+        // create only, so re-seeding never deactivates a row an operator turned
+        // on.
+        isActive: false,
       },
 
       // ========================================================================
@@ -910,6 +918,10 @@ const unit: SeedUnit = {
           slug: model.slug,
           ...data,
           isDefault: true,
+          // Only on create — a row an operator activated must survive a
+          // re-seed. Defaults to true; see the Azure GPT-4o row for why one
+          // ships off.
+          isActive: model.isActive ?? true,
           createdBy,
         },
       });
