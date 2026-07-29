@@ -2880,6 +2880,30 @@ export const updateOrchestrationSettingsSchema = z
     {
       message: 'At least one field must be provided',
     }
+  )
+  /**
+   * Cost logs must outlive the executions that reference them.
+   *
+   * `AiWorkflowExecution.totalCostUsd` is a scalar on the execution row, so it
+   * survives its `AiCostLog` rows being pruned. Prune the logs first and an
+   * operator sees an execution reporting real spend with an empty breakdown
+   * beneath it, and no way to tell a retention artefact from a cost-capture
+   * bug. See `lib/orchestration/retention.ts`.
+   *
+   * This catches the whole-form save the settings UI sends. A patch that
+   * carries only one of the two is checked against the persisted value in the
+   * settings route — the schema can't see the current row from here.
+   */
+  .refine(
+    (v) =>
+      v.costLogRetentionDays == null ||
+      v.executionRetentionDays == null ||
+      v.costLogRetentionDays >= v.executionRetentionDays,
+    {
+      message:
+        'Cost log retention must be at least as long as execution retention, or the cost breakdown empties out for executions you are still keeping',
+      path: ['costLogRetentionDays'],
+    }
   );
 
 // ============================================================================
