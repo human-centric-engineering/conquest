@@ -22,14 +22,12 @@ import type { ChatEvent } from '@/types/orchestration';
  * The client schema is a hand-maintained mirror of the canonical `ChatEvent`
  * union. When they drifted, `parseChatStreamEvent` returned null for the
  * unmodelled variant and consumers silently dropped a terminal frame — a
- * failure with no runtime signal at all. These two aliases resolve to `never`
- * only while both directions stay covered, so `npm run type-check` fails the
- * moment a variant is added to one side and not the other.
+ * failure with no runtime signal at all. Both aliases resolve to `never` only
+ * while each side covers the other, so the annotations below stop compiling the
+ * moment a variant is added to one side alone.
  */
 type UnmodelledByClient = Exclude<ChatEvent['type'], ChatStreamEvent['type']>;
 type UnknownToServer = Exclude<ChatStreamEvent['type'], ChatEvent['type']>;
-const _everyServerEventIsModelled: UnmodelledByClient extends never ? true : never = true;
-const _noInventedClientEvents: UnknownToServer extends never ? true : never = true;
 
 function frame(event: string, payload: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}`;
@@ -165,6 +163,18 @@ describe('parseChatStreamEvent', () => {
     if (!parsed || parsed.type !== 'citations') throw new Error('wrong variant');
     expect(parsed.citations[0].marker).toBe(1);
     expect(parsed.citations[0].similarity).toBeCloseTo(0.83);
+  });
+});
+
+describe('schema/type parity', () => {
+  it('covers the canonical ChatEvent union in both directions', () => {
+    // The assertion is the type annotation, not the runtime value: either
+    // alias resolving to anything but `never` makes this file fail to compile.
+    const everyServerEventIsModelled: UnmodelledByClient extends never ? true : never = true;
+    const noInventedClientEvents: UnknownToServer extends never ? true : never = true;
+
+    expect(everyServerEventIsModelled).toBe(true);
+    expect(noInventedClientEvents).toBe(true);
   });
 });
 
