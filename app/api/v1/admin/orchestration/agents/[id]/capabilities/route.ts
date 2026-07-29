@@ -20,8 +20,8 @@ import { z } from 'zod';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { ConflictError, NotFoundError } from '@/lib/api/errors';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
@@ -58,18 +58,10 @@ function collectMissingEnvVars(customConfig: unknown): string[] {
   return findUnsetEnvVarReferences(parsed.data.forcedUrl, parsed.data.forcedHeaders);
 }
 
-function parseAgentId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid agent id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawAgentId } = await params;
-  const agentId = parseAgentId(rawAgentId);
+  const agentId = validatePathParam(rawAgentId, cuidSchema, { label: 'agent id' });
 
   const agent = await prisma.aiAgent.findUnique({ where: { id: agentId } });
   if (!agent) throw new NotFoundError(`Agent ${agentId} not found`);
@@ -89,7 +81,7 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
   const log = await getRouteLogger(request);
   const { id: rawAgentId } = await params;
-  const agentId = parseAgentId(rawAgentId);
+  const agentId = validatePathParam(rawAgentId, cuidSchema, { label: 'agent id' });
 
   const agent = await prisma.aiAgent.findUnique({ where: { id: agentId } });
   if (!agent) throw new NotFoundError(`Agent ${agentId} not found`);

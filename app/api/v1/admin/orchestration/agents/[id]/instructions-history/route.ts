@@ -17,7 +17,8 @@
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
+import { NotFoundError } from '@/lib/api/errors';
+import { validatePathParam } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { logger } from '@/lib/logging';
 import {
@@ -26,18 +27,10 @@ import {
 } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
 
-function parseAgentId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid agent id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseAgentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'agent id' });
 
   const agent = await prisma.aiAgent.findUnique({
     where: { id },

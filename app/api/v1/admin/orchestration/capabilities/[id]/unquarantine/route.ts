@@ -13,7 +13,8 @@
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
+import { NotFoundError } from '@/lib/api/errors';
+import { validatePathParam } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
@@ -22,19 +23,11 @@ import { cuidSchema } from '@/lib/validations/common';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
 
-function parseCapabilityId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid capability id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseCapabilityId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'capability id' });
 
   const current = await prisma.aiCapability.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Capability ${id} not found`);
