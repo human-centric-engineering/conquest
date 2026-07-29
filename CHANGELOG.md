@@ -16,6 +16,41 @@ release process.
 
 ## [Unreleased]
 
+### Changed
+
+- **`CostSummaryModelRow` carries `provider`.** `GET /costs/summary`'s `byModel[]`
+  rows are now `{ model, provider, monthSpend }`, grouped by both columns of
+  `AiCostLog`. Consumers resolving a spend row to a catalogue entry must key on
+  `provider::modelId` — `components/admin/orchestration/costs/model-index.ts`
+  (`buildModelIndex` / `lookupModel`) is the shared helper. ([#436])
+- **The Azure `gpt-4o` seed row ships inactive.** It shares a model id with the
+  OpenAI row; an unconfigured example provider shouldn't compete for that id.
+  Applied on create only, so a re-seed never deactivates a row an operator
+  turned on. ([#436])
+
+### Fixed
+
+- **`chatStreamEventSchema` models `budget_exceeded_per_turn`.** The variant was
+  missing, so `parseChatStreamEvent` returned null and consumers dropped the
+  frame — and on the tool-loop-abort path it is the last frame sent, leaving an
+  empty assistant turn with no explanation. ([#461])
+- **Per-model cost rows no longer borrow another provider's label.** Spend served
+  by OpenAI's `gpt-4o` could render as `microsoft` / "GPT-4o (Azure)". ([#436])
+- **`costLogRetentionDays` below `executionRetentionDays` is rejected** at all
+  three write paths (settings form, Zod schema, PATCH route against the persisted
+  row). Cost logs must outlive the executions that reference them or the
+  drill-down empties out under a retained execution. Installs already in that
+  state get a warning per retention sweep. ([#456])
+
+### Added
+
+- **Workflow schedules show their last run time**, alongside the existing next
+  run. `AiWorkflowSchedule.lastRunAt` was already on the wire.
+
+[#436]: https://github.com/human-centric-engineering/sunrise/issues/436
+[#456]: https://github.com/human-centric-engineering/sunrise/issues/456
+[#461]: https://github.com/human-centric-engineering/sunrise/issues/461
+
 ## [0.7.0] — 2026-07-09
 
 > **Alpha release.** Ninth tagged Sunrise release. **MINOR bump** — adds new
