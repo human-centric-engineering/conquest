@@ -9,6 +9,11 @@ import {
 import { getStorageCapabilities } from '@/lib/storage/providers/types';
 import { logger } from '@/lib/logging';
 
+// Root paths here are inert strings — `fs` is mocked, so nothing is ever
+// written. They deliberately avoid `/tmp`: CodeQL's js/insecure-temporary-file
+// traces an OS-temp-dir literal through the provider to its `writeFile` and
+// flags the sink in `local.ts`, so a hardcoded `/tmp` root in a test fails the
+// build on production code that is doing nothing wrong.
 vi.mock('fs/promises', () => {
   const mockWriteFile = vi.fn();
   const mockUnlink = vi.fn();
@@ -86,7 +91,7 @@ describe('lib/storage/providers/local', () => {
         vi.mocked(mkdir).mockResolvedValue(undefined);
         vi.mocked(writeFile).mockResolvedValue(undefined);
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads', baseUrl: '/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads', baseUrl: '/uploads' });
         const file = Buffer.from('test content');
 
         const result = await provider.upload(file, {
@@ -112,7 +117,7 @@ describe('lib/storage/providers/local', () => {
         vi.mocked(existsSync).mockReturnValue(true);
         vi.mocked(writeFile).mockResolvedValue(undefined);
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
         const file = Buffer.from('test');
 
         await provider.upload(file, {
@@ -144,7 +149,7 @@ describe('lib/storage/providers/local', () => {
         vi.mocked(existsSync).mockReturnValue(true);
         vi.mocked(unlink).mockResolvedValue(undefined);
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         const result = await provider.delete('avatars/user-123/avatar.jpg');
 
@@ -159,7 +164,7 @@ describe('lib/storage/providers/local', () => {
       it('should handle missing file gracefully (ENOENT)', async () => {
         vi.mocked(existsSync).mockReturnValue(false);
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         const result = await provider.delete('nonexistent.jpg');
 
@@ -171,7 +176,7 @@ describe('lib/storage/providers/local', () => {
         vi.mocked(existsSync).mockReturnValue(true);
         vi.mocked(unlink).mockRejectedValue(new Error('Permission denied'));
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         const result = await provider.delete('protected.jpg');
 
@@ -189,7 +194,7 @@ describe('lib/storage/providers/local', () => {
         vi.mocked(existsSync).mockReturnValue(true);
         vi.mocked(rm).mockResolvedValue(undefined);
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         const result = await provider.deletePrefix('avatars/user-123/');
 
@@ -208,7 +213,7 @@ describe('lib/storage/providers/local', () => {
       it('should handle non-existent directory gracefully', async () => {
         vi.mocked(existsSync).mockReturnValue(false);
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         const result = await provider.deletePrefix('avatars/user-999/');
 
@@ -224,7 +229,7 @@ describe('lib/storage/providers/local', () => {
         vi.mocked(existsSync).mockReturnValue(true);
         vi.mocked(rm).mockRejectedValue(new Error('Permission denied'));
 
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         const result = await provider.deletePrefix('avatars/user-123/');
 
@@ -238,7 +243,7 @@ describe('lib/storage/providers/local', () => {
     });
 
     describe('private objects', () => {
-      const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
+      const TWO_ROOTS = { baseDir: '/srv/test-uploads', privateDir: '/srv/test-private' };
 
       it('writes a public:false upload to the private root, never the public one', async () => {
         vi.mocked(existsSync).mockReturnValue(true);
@@ -253,10 +258,10 @@ describe('lib/storage/providers/local', () => {
         });
 
         const writtenPath = vi.mocked(writeFile).mock.calls[0]?.[0] as string;
-        expect(writtenPath).toContain('/tmp/private/');
+        expect(writtenPath).toContain('/srv/test-private/');
         // The bug this fixes: the file used to land under public/uploads/,
         // where Next serves it to anyone who guesses the key.
-        expect(writtenPath).not.toContain('/tmp/uploads/');
+        expect(writtenPath).not.toContain('/srv/test-uploads/');
       });
 
       it('returns the signed route path rather than a statically served URL', async () => {
@@ -285,7 +290,7 @@ describe('lib/storage/providers/local', () => {
           contentType: 'image/jpeg',
         });
 
-        expect(vi.mocked(writeFile).mock.calls[0]?.[0]).toContain('/tmp/uploads/');
+        expect(vi.mocked(writeFile).mock.calls[0]?.[0]).toContain('/srv/test-uploads/');
         expect(result.url).toBe('/uploads/avatars/user-1/avatar.jpg');
       });
 
@@ -335,7 +340,7 @@ describe('lib/storage/providers/local', () => {
     });
 
     describe('deletion spans both roots', () => {
-      const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
+      const TWO_ROOTS = { baseDir: '/srv/test-uploads', privateDir: '/srv/test-private' };
 
       it('deletes a key from the private root as well as the public one', async () => {
         vi.mocked(existsSync).mockReturnValue(true);
@@ -345,8 +350,8 @@ describe('lib/storage/providers/local', () => {
         const result = await provider.delete('documents/user-1/contract.pdf');
 
         const paths = vi.mocked(unlink).mock.calls.map((call) => call[0] as string);
-        expect(paths.some((p) => p.startsWith('/tmp/private/'))).toBe(true);
-        expect(paths.some((p) => p.startsWith('/tmp/uploads/'))).toBe(true);
+        expect(paths.some((p) => p.startsWith('/srv/test-private/'))).toBe(true);
+        expect(paths.some((p) => p.startsWith('/srv/test-uploads/'))).toBe(true);
         expect(result).toEqual({ success: true, key: 'documents/user-1/contract.pdf' });
       });
 
@@ -361,8 +366,8 @@ describe('lib/storage/providers/local', () => {
         const result = await provider.deletePrefix('avatars/user-123/');
 
         const paths = vi.mocked(rm).mock.calls.map((call) => call[0] as string);
-        expect(paths.some((p) => p.startsWith('/tmp/private/'))).toBe(true);
-        expect(paths.some((p) => p.startsWith('/tmp/uploads/'))).toBe(true);
+        expect(paths.some((p) => p.startsWith('/srv/test-private/'))).toBe(true);
+        expect(paths.some((p) => p.startsWith('/srv/test-uploads/'))).toBe(true);
         expect(result).toEqual({ success: true, key: 'avatars/user-123/' });
       });
 
@@ -384,7 +389,7 @@ describe('lib/storage/providers/local', () => {
     });
 
     describe('download', () => {
-      const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
+      const TWO_ROOTS = { baseDir: '/srv/test-uploads', privateDir: '/srv/test-private' };
 
       /** A rejection shaped like Node's, since `download()` branches on `.code`. */
       function errno(code: string): NodeJS.ErrnoException {
@@ -396,7 +401,7 @@ describe('lib/storage/providers/local', () => {
       it('reads a private object back as bytes', async () => {
         const body = Buffer.from('secret contents');
         vi.mocked(readFile).mockImplementation((p) =>
-          typeof p === 'string' && p.startsWith('/tmp/private/')
+          typeof p === 'string' && p.startsWith('/srv/test-private/')
             ? Promise.resolve(body)
             : Promise.reject(errno('ENOENT'))
         );
@@ -412,7 +417,7 @@ describe('lib/storage/providers/local', () => {
       it('falls back to the public root when the key is not private', async () => {
         const body = Buffer.from('avatar bytes');
         vi.mocked(readFile).mockImplementation((p) =>
-          typeof p === 'string' && p.startsWith('/tmp/uploads/')
+          typeof p === 'string' && p.startsWith('/srv/test-uploads/')
             ? Promise.resolve(body)
             : Promise.reject(errno('ENOENT'))
         );
@@ -421,7 +426,7 @@ describe('lib/storage/providers/local', () => {
         const object = await provider.download('avatars/user-1/avatar.jpg');
 
         // Private root tried first, then the public one.
-        expect(vi.mocked(readFile).mock.calls[0]?.[0]).toContain('/tmp/private/');
+        expect(vi.mocked(readFile).mock.calls[0]?.[0]).toContain('/srv/test-private/');
         expect(object.body.toString()).toBe('avatar bytes');
       });
 
@@ -465,7 +470,7 @@ describe('lib/storage/providers/local', () => {
 
     describe('key validation', () => {
       it('should throw for invalid key with path traversal in upload()', async () => {
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         await expect(
           provider.upload(Buffer.from('test'), {
@@ -476,13 +481,13 @@ describe('lib/storage/providers/local', () => {
       });
 
       it('should throw for invalid key with path traversal in delete()', async () => {
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         await expect(provider.delete('../etc/passwd')).rejects.toThrow('must not contain ".."');
       });
 
       it('should throw for invalid key with path traversal in deletePrefix()', async () => {
-        const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
+        const provider = new LocalProvider({ baseDir: '/srv/test-uploads' });
 
         await expect(provider.deletePrefix('../etc/')).rejects.toThrow('must not contain ".."');
       });
