@@ -62,10 +62,49 @@ const ALL_TASKS = [
   processPendingEvaluationRuns,
 ];
 
+const RETENTION_IDLE = {
+  deleted: 0,
+  agentsProcessed: 0,
+  webhookDeliveriesDeleted: 0,
+  hookDeliveriesDeleted: 0,
+  costLogsDeleted: 0,
+  auditLogsDeleted: 0,
+  executionsDeleted: 0,
+  evaluationSessionsDeleted: 0,
+  evaluationRunsDeleted: 0,
+  mcpAuditLogsDeleted: 0,
+};
+
+/** Every task reporting "nothing found" — the idle deployment this feature targets. */
+function mockIdleTasks(): void {
+  vi.mocked(processPendingRetries).mockResolvedValue(0);
+  vi.mocked(processPendingHookRetries).mockResolvedValue(0);
+  vi.mocked(processOrphanedExecutions).mockResolvedValue({
+    recovered: 0,
+    exhausted: 0,
+    errors: [],
+  });
+  vi.mocked(reapZombieExecutions).mockResolvedValue({
+    reaped: 0,
+    stalePending: 0,
+    abandonedApprovals: 0,
+  });
+  vi.mocked(backfillMissingEmbeddings).mockResolvedValue({ processed: 0, failed: 0 });
+  vi.mocked(enforceRetentionPolicies).mockResolvedValue(RETENTION_IDLE);
+  vi.mocked(processPendingExecutions).mockResolvedValue({ recovered: 0, failed: 0, errors: [] });
+  vi.mocked(processPendingEvaluationRuns).mockResolvedValue({
+    claimed: 0,
+    completed: 0,
+    released: 0,
+    failed: 0,
+    cancelled: 0,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetPlatformJobsForTests();
-  for (const task of ALL_TASKS) vi.mocked(task).mockResolvedValue(undefined as never);
+  mockIdleTasks();
 });
 
 describe('PLATFORM_JOB_NAMES', () => {
@@ -95,12 +134,13 @@ describe('PLATFORM_JOB_NAMES', () => {
 
 describe('runDuePlatformJobs', () => {
   it('runs every task on a cold start and keys the summary by task name', async () => {
-    vi.mocked(enforceRetentionPolicies).mockResolvedValue({ deleted: 7 } as never);
+    const retentionResult = { ...RETENTION_IDLE, deleted: 7 };
+    vi.mocked(enforceRetentionPolicies).mockResolvedValue(retentionResult);
 
-    const summary = await runDuePlatformJobs(T0);
+    const { summary } = await runDuePlatformJobs(T0);
 
     for (const task of ALL_TASKS) expect(task).toHaveBeenCalledTimes(1);
-    expect(summary.retention).toEqual({ deleted: 7 });
+    expect(summary.retention).toEqual(retentionResult);
     expect(Object.keys(summary)).toEqual([...PLATFORM_JOB_NAMES]);
   });
 
@@ -120,7 +160,7 @@ describe('runDuePlatformJobs', () => {
     await runDuePlatformJobs(T0);
     vi.clearAllMocks();
 
-    const summary = await runDuePlatformJobs(T0 + MINUTE);
+    const { summary } = await runDuePlatformJobs(T0 + MINUTE);
 
     expect(processPendingRetries).toHaveBeenCalledTimes(1);
     expect(processPendingHookRetries).toHaveBeenCalledTimes(1);
@@ -165,12 +205,11 @@ describe('runDuePlatformJobs', () => {
 
   it('contains a rejecting task and still runs the rest', async () => {
     vi.mocked(reapZombieExecutions).mockRejectedValue(new Error('DB down'));
-    vi.mocked(enforceRetentionPolicies).mockResolvedValue({ deleted: 0 } as never);
 
-    const summary = await runDuePlatformJobs(T0);
+    const { summary } = await runDuePlatformJobs(T0);
 
     expect(summary.zombieReaper).toEqual({ error: 'Error: DB down' });
-    expect(summary.retention).toEqual({ deleted: 0 });
+    expect(summary.retention).toEqual(RETENTION_IDLE);
     expect(logger.error).toHaveBeenCalledWith(
       'maintenance task failed',
       expect.objectContaining({ task: 'zombieReaper', error: 'DB down' })
@@ -180,9 +219,9 @@ describe('runDuePlatformJobs', () => {
   it('never rejects, so the tick log line always gets written', async () => {
     for (const task of ALL_TASKS) vi.mocked(task).mockRejectedValue(new Error('everything down'));
 
-    await expect(runDuePlatformJobs(T0)).resolves.toEqual(
-      expect.objectContaining({ retention: { error: 'Error: everything down' } })
-    );
+    const { summary } = await runDuePlatformJobs(T0);
+
+    expect(summary.retention).toEqual({ error: 'Error: everything down' });
   });
 
   it('does not start a second copy of a task that is still running', async () => {
@@ -198,7 +237,7 @@ describe('runDuePlatformJobs', () => {
 
     const first = runDuePlatformJobs(T0);
     // An hour later it is very much due — but it is also still running.
-    const summary = await runDuePlatformJobs(T0 + 60 * MINUTE);
+    const { summary } = await runDuePlatformJobs(T0 + 60 * MINUTE);
 
     expect(reapZombieExecutions).toHaveBeenCalledTimes(1);
     expect(summary.zombieReaper).toBe(THROTTLED);
@@ -214,5 +253,100 @@ describe('runDuePlatformJobs', () => {
     await runDuePlatformJobs(T0 + 5 * MINUTE);
 
     expect(reapZombieExecutions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runDuePlatformJobs — foundWork', () => {
+  // This flag is the idle gate's licence to skip ticks entirely. A false
+  // negative here is the one failure that loses work rather than costing
+  // queries, so each predicate is pinned individually.
+
+  it('is false when every task reports nothing', async () => {
+    const { foundWork } = await runDuePlatformJobs(T0);
+
+    expect(foundWork).toBe(false);
+  });
+
+  it.each([
+    ['webhookRetries', () => vi.mocked(processPendingRetries).mockResolvedValue(1)],
+    ['hookRetries', () => vi.mocked(processPendingHookRetries).mockResolvedValue(1)],
+    [
+      'orphanSweep — recovered',
+      () =>
+        vi
+          .mocked(processOrphanedExecutions)
+          .mockResolvedValue({ recovered: 1, exhausted: 0, errors: [] }),
+    ],
+    [
+      'orphanSweep — errors',
+      () =>
+        vi.mocked(processOrphanedExecutions).mockResolvedValue({
+          recovered: 0,
+          exhausted: 0,
+          errors: [{ executionId: 'exec_1', error: 'boom' }],
+        }),
+    ],
+    [
+      'zombieReaper',
+      () =>
+        vi
+          .mocked(reapZombieExecutions)
+          .mockResolvedValue({ reaped: 0, stalePending: 1, abandonedApprovals: 0 }),
+    ],
+    [
+      'embeddingBackfill',
+      () => vi.mocked(backfillMissingEmbeddings).mockResolvedValue({ processed: 25, failed: 0 }),
+    ],
+    [
+      'retention',
+      () =>
+        vi
+          .mocked(enforceRetentionPolicies)
+          .mockResolvedValue({ ...RETENTION_IDLE, mcpAuditLogsDeleted: 3 }),
+    ],
+    [
+      'pendingExecutionRecovery',
+      () =>
+        vi
+          .mocked(processPendingExecutions)
+          .mockResolvedValue({ recovered: 1, failed: 0, errors: [] }),
+    ],
+    [
+      'evaluationRuns — a claimed run needs the next time-slice',
+      () =>
+        vi.mocked(processPendingEvaluationRuns).mockResolvedValue({
+          claimed: 1,
+          completed: 0,
+          released: 1,
+          failed: 0,
+          cancelled: 0,
+        }),
+    ],
+  ])('is true when %s found something', async (_label, arrange) => {
+    arrange();
+
+    const { foundWork } = await runDuePlatformJobs(T0);
+
+    expect(foundWork).toBe(true);
+  });
+
+  it('is true when a task rejects, because the outcome is unknown', async () => {
+    vi.mocked(enforceRetentionPolicies).mockRejectedValue(new Error('DB down'));
+
+    const { foundWork } = await runDuePlatformJobs(T0);
+
+    expect(foundWork).toBe(true);
+  });
+
+  it('is false when the only tasks that could have found work were throttled', async () => {
+    // A throttled task says nothing either way — it must not be reported as
+    // work, or the gate could never arm on a busy-then-idle deployment.
+    vi.mocked(enforceRetentionPolicies).mockResolvedValue({ ...RETENTION_IDLE, deleted: 5 });
+    await runDuePlatformJobs(T0);
+
+    const { foundWork, summary } = await runDuePlatformJobs(T0 + MINUTE);
+
+    expect(summary.retention).toBe(THROTTLED);
+    expect(foundWork).toBe(false);
   });
 });

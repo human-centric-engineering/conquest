@@ -112,6 +112,24 @@ export function getAppJobs(): AppJob[] {
 }
 
 /**
+ * Shortest interval any registered job asked for, or `null` when a fork has
+ * registered none.
+ *
+ * Read by the tick's idle gate (#442): the gate must not skip further ahead than
+ * a fork's own cadence, or a job registered at 5 minutes would quietly become a
+ * 30-minute job. Registering any job therefore means this deployment is never
+ * fully idle — which is what the fork asked for.
+ */
+export function getAppJobsMinIntervalMs(): number | null {
+  ensureAppJobsInited();
+  let min: number | null = null;
+  for (const job of jobs.values()) {
+    if (min === null || job.intervalMs < min) min = job.intervalMs;
+  }
+  return min;
+}
+
+/**
  * Run every registered job whose interval has elapsed.
  *
  * Never throws, and never lets one job affect another: jobs run in parallel and

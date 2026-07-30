@@ -23,6 +23,7 @@ import { logger } from '@/lib/logging';
 import { getResendClient, getDefaultSender, isEmailEnabled } from '@/lib/email/client';
 import EventNotification from '@/emails/event-notification';
 import { matchesEntityScope } from '@/lib/orchestration/webhooks/event-entity-keys';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 const DISPATCH_TIMEOUT_MS = 5000;
 
@@ -342,6 +343,10 @@ async function attemptDelivery(
 
   if (!exhausted && nextRetryAt && retryDelay) {
     scheduleRetry(deliveryId, delivery.subscriptionId, retryDelay);
+    // The in-process timer above is the normal retry path; the maintenance tick
+    // drains anything it loses. Tell the tick's idle gate a row is now waiting,
+    // so it does not skip past it (#442).
+    noteMaintenanceWork('webhook-delivery-retry');
   }
 
   logger.warn('Webhook delivery failed', {

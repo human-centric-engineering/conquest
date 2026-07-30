@@ -16,6 +16,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { cuidSchema } from '@/lib/validations/common';
 import { createScheduleSchema } from '@/lib/validations/orchestration';
 import { isValidCron, getNextRunAt } from '@/lib/orchestration/scheduling';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 export const GET = withAdminAuth<{ id: string }>(async (_request, _session, { params }) => {
   const { id: rawId } = await params;
@@ -81,6 +82,10 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
       createdBy: session.user.id,
     },
   });
+
+  // A new schedule can be due sooner than an already-armed idle gate would next
+  // sweep, so disarm it and let the next tick recompute the horizon (#442).
+  if (nextRunAt) noteMaintenanceWork('schedule-created');
 
   logAdminAction({
     userId: session.user.id,

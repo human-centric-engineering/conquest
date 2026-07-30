@@ -17,6 +17,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { cuidSchema } from '@/lib/validations/common';
 import { updateScheduleSchema } from '@/lib/validations/orchestration';
 import { isValidCron, getNextRunAt } from '@/lib/orchestration/scheduling';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 type Params = { id: string; scheduleId: string };
 
@@ -81,6 +82,10 @@ export const PATCH = withAdminAuth<Params>(async (request, session, { params }) 
       nextRunAt,
     },
   });
+
+  // The edited schedule can be due sooner than an already-armed idle gate would
+  // next sweep, so disarm it and let the next tick recompute the horizon (#442).
+  if (nextRunAt) noteMaintenanceWork('schedule-updated');
 
   logAdminAction({
     userId: session.user.id,

@@ -25,6 +25,7 @@ import { getClientIP } from '@/lib/security/ip';
 import { resolveApiKey, hasScope } from '@/lib/auth/api-keys';
 import { slugSchema } from '@/lib/validations/common';
 import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 const triggerSlugSchema = slugSchema.pipe(z.string().max(100));
 const webhookInputSchema = z.record(z.string(), z.unknown());
@@ -121,6 +122,10 @@ export async function POST(
           : {}),
       },
     });
+
+    // A `pending` execution's recovery sweep is tick-owned, so the idle gate
+    // must not be allowed to skip past it (#442).
+    noteMaintenanceWork('webhook-trigger-execution');
 
     logger.info('Webhook triggered workflow execution', {
       workflowSlug: slug,

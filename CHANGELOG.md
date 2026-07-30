@@ -250,6 +250,29 @@ release process.
 
 ### Changed
 
+- **The maintenance tick can now skip entirely, doing zero database work**
+  (#442). Per-task intervals cut how much a tick does; they cannot make it do
+  nothing, and nothing is what a scale-to-zero Postgres (Neon, Aurora Serverless
+  v2) needs before it will autosuspend — one query a minute defeats a 5-minute
+  timer exactly as well as twenty do. A sweep that finds nothing now arms an
+  **idle gate**, and subsequent ticks return `200 { skipped: true, reason:
+  'idle', resumesAt }` before any Prisma call. Skipping is bounded three ways:
+  the gate never skips past known future work (the next `nextRunAt`, via the new
+  `getNextScheduleRunAt()`, and the shortest registered app-job interval, via the
+  new `getAppJobsMinIntervalMs()`); it re-verifies against the database at least
+  every `MAINTENANCE_IDLE_MAX_SKIP_MS` (**new env var**, default 30 min, `0`
+  disables the gate); and request paths that create tick-owned work — a delivery
+  retry, a created or edited schedule, a queued evaluation run, an execution
+  enqueued by a webhook or inbound trigger — call the new `noteMaintenanceWork()`
+  to disarm it immediately. It refuses to arm unless the sweep proved there was
+  nothing to do: a task that found something, a task that failed, a fired
+  schedule, an errored sweep, or a failed horizon probe all leave it disarmed.
+  State is per-process, so a restart always sweeps and multi-instance forks
+  should lower the cap. **New:** `POST …/maintenance/tick?force=1` sweeps
+  regardless (it does not bypass the overlap guard), and the skip response now
+  carries `reason` — previously the only skip was the overlap guard and the
+  reason string was fixed.
+
 - **Maintenance-tick background tasks now run on per-task minimum intervals**
   (#442). All eight ran on every tick, so at the documented 60s cadence the
   retention sweep — whose windows are measured in days — ran 1,440 times a day

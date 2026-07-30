@@ -15,12 +15,18 @@
  */
 
 import { logger } from '@/lib/logging';
-import { processDueSchedules } from '@/lib/orchestration/scheduling';
-import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
+import { processDueSchedules, getNextScheduleRunAt } from '@/lib/orchestration/scheduling';
+import { runDueAppJobs, getAppJobsMinIntervalMs } from '@/lib/orchestration/maintenance/app-jobs';
 import {
   PLATFORM_JOB_NAMES,
   runDuePlatformJobs,
 } from '@/lib/orchestration/maintenance/platform-jobs';
+import {
+  armIdleGate,
+  idleGateResumesAt,
+  noteMaintenanceWork,
+  shouldSkipIdleTick,
+} from '@/lib/orchestration/maintenance/idle-gate';
 
 /** Module-level guard against overlapping tick executions. */
 let tickRunning = false;
@@ -56,23 +62,105 @@ const BACKGROUND_TASK_MAX_MS = 5 * 60 * 1000;
 export type ScheduleResult = Awaited<ReturnType<typeof processDueSchedules>> | { error: string };
 
 export interface TickResult {
-  /** Skipped because a previous tick was still running. */
+  /** Skipped — either a previous tick is still running, or the gate is armed. */
   skipped: boolean;
+  /** Why it was skipped. Present only when `skipped`. */
+  reason?: 'previous tick still running' | 'idle';
+  /** When an idle skip will next sweep (epoch ms). Present only for `reason: 'idle'`. */
+  resumesAtMs?: number;
   /** Result of the awaited schedules sweep — undefined when `skipped`. */
   schedules?: ScheduleResult;
   /** Tick start time (epoch ms). */
   startMs: number;
 }
 
+export interface RunMaintenanceTickOptions {
+  /**
+   * Sweep even when the idle gate is armed. For the operator-facing `?force=1`
+   * on the admin route and for anything that needs a guaranteed sweep; does not
+   * bypass the overlap guard, which protects against concurrency rather than
+   * repetition.
+   */
+  force?: boolean;
+}
+
+interface MaybeArmIdleGateInput {
+  startMs: number;
+  schedules: ScheduleResult;
+  platformFoundWork: boolean;
+}
+
+/**
+ * Decide whether this sweep earned the right to skip the next few ticks.
+ *
+ * Refuses to arm unless the sweep proved there is nothing to do: any task that
+ * found something, any task that failed, a fired schedule, or a schedules sweep
+ * that errored all leave the gate disarmed, because a tick that does not know
+ * the state must not license skipping. Returns the skip-until time, or `0` when
+ * the gate was left disarmed.
+ *
+ * Arming costs **one** indexed lookup (`getNextScheduleRunAt`), and only on the
+ * sweep that arms — against the ~20 queries every skipped tick avoids.
+ */
+async function maybeArmIdleGate({
+  startMs,
+  schedules,
+  platformFoundWork,
+}: MaybeArmIdleGateInput): Promise<number> {
+  const scheduleWork = 'error' in schedules || schedules.processed > 0;
+  if (platformFoundWork || scheduleWork) {
+    // Clears any horizon left over from an earlier arming, so the logs and the
+    // gate agree.
+    noteMaintenanceWork('maintenance-tick');
+    return 0;
+  }
+
+  try {
+    // A fork's own cadence bounds the gate — see `getAppJobsMinIntervalMs`.
+    const appJobsMinIntervalMs = getAppJobsMinIntervalMs();
+    let nextWorkAtMs = appJobsMinIntervalMs === null ? null : startMs + appJobsMinIntervalMs;
+
+    const nextRunAt = await getNextScheduleRunAt(new Date(startMs));
+    if (nextRunAt) {
+      nextWorkAtMs = Math.min(nextWorkAtMs ?? Number.POSITIVE_INFINITY, nextRunAt.getTime());
+    }
+
+    return armIdleGate({ now: Date.now(), nextWorkAtMs });
+  } catch (err) {
+    // Not knowing the horizon is exactly the case where skipping is unsafe. The
+    // catch also covers the gate itself: a bug in here must cost an extra sweep,
+    // never the tick's completion log line.
+    logger.warn('Maintenance tick: schedule horizon unavailable; leaving the idle gate disarmed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    noteMaintenanceWork('horizon-unavailable');
+    return 0;
+  }
+}
+
 /**
  * Run one maintenance tick. The schedules sweep is awaited; the rest of
  * the chain settles in the background under the overlap guard.
  */
-export async function runMaintenanceTick(): Promise<TickResult> {
+export async function runMaintenanceTick(
+  options: RunMaintenanceTickOptions = {}
+): Promise<TickResult> {
   const startMs = Date.now();
+
+  // First statement, before the overlap guard and before any Prisma call: the
+  // whole point is that an idle tick costs zero database round-trips (#442).
+  if (!options.force && shouldSkipIdleTick(startMs)) {
+    const resumesAtMs = idleGateResumesAt();
+    logger.info('Maintenance tick skipped — nothing due', {
+      resumesAtMs,
+      resumesInMs: resumesAtMs - startMs,
+    });
+    return { skipped: true, reason: 'idle', resumesAtMs, startMs };
+  }
+
   if (tickRunning) {
     logger.info('Maintenance tick skipped — previous tick still running');
-    return { skipped: true, startMs };
+    return { skipped: true, reason: 'previous tick still running', startMs };
   }
 
   tickRunning = true;
@@ -104,11 +192,13 @@ export async function runMaintenanceTick(): Promise<TickResult> {
     // jobs are registered, so vanilla Sunrise is unaffected.
     runDueAppJobs(),
   ])
-    .then(([platformResult, appJobsResult]) => {
-      const summary =
+    .then(async ([platformResult, appJobsResult]) => {
+      const platform =
         platformResult.status === 'fulfilled'
           ? platformResult.value
-          : { error: String(platformResult.reason) };
+          : // A rejection here is the registry, not a sweep. Treat it as work so
+            // the gate stays disarmed and the next tick looks again.
+            { summary: { error: String(platformResult.reason) }, foundWork: true };
       // Only logged when the fork actually registered something, so the line
       // stays unchanged upstream.
       const appJobs =
@@ -116,9 +206,16 @@ export async function runMaintenanceTick(): Promise<TickResult> {
           ? appJobsResult.value
           : { error: String(appJobsResult.reason) };
 
+      const idleUntilMs = await maybeArmIdleGate({
+        startMs,
+        schedules,
+        platformFoundWork: platform.foundWork,
+      });
+
       logger.info('Maintenance tick background tasks completed', {
-        ...summary,
+        ...platform.summary,
         ...(appJobs ? { appJobs } : {}),
+        ...(idleUntilMs > 0 ? { idleUntilMs } : {}),
         totalDurationMs: Date.now() - startMs,
       });
     })

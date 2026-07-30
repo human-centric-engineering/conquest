@@ -166,7 +166,45 @@ Forks add their own recurring work through `registerAppJob`, which shares the th
 }
 ```
 
+A tick the idle gate skipped returns **200** with `{ skipped: true, reason: 'idle' | 'previous tick still running' }` instead — see below.
+
 The schedules result is concretely reported. Per-task background results are NOT in the response — they are written to the application logger as `Maintenance tick background tasks completed` once the chain settles. This decouples HTTP duration from retention-sweep / embedding-backfill runtime so external cron callers can use a short HTTP timeout (e.g. 30s) without ever cutting off mid-task. Engine work inside `processDueSchedules` was already detached via `void drainEngine`, so the synchronous portion only includes DB-claim work.
+
+### The idle gate — a tick that does no database work at all
+
+Per-task intervals cut how much a tick does; they cannot make it do **nothing**, and nothing is what a scale-to-zero Postgres (Neon, Aurora Serverless v2) needs before it will autosuspend. One query a minute defeats a 5-minute autosuspend timer exactly as effectively as twenty do.
+
+So a sweep that finds nothing arms the **idle gate** (`lib/orchestration/maintenance/idle-gate.ts`), and subsequent ticks return before any Prisma call:
+
+```jsonc
+// 200 OK — no database round-trips were made
+{
+  "success": true,
+  "data": { "skipped": true, "reason": "idle", "resumesAt": "2026-07-30T12:30:00.000Z" },
+}
+```
+
+**Why skipping is sound.** Every latency-critical task's future work is announced by a timestamp column only a _request_ can write — `nextRetryAt` on the two delivery tables (written by the dispatch paths, which also arm the in-process `setTimeout` that does the actual retry; the tick's drain is a crash backstop), `AiWorkflowSchedule.nextRunAt`, a queued evaluation run, a `pending` execution. On a genuinely idle deployment there is no writer, so the state cannot change between ticks.
+
+Three things keep that argument honest:
+
+| Mechanism                   | What it prevents                                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The horizon**             | Arming takes the earliest known future work — the next `nextRunAt` (one indexed lookup via `getNextScheduleRunAt`) and the shortest registered app-job interval. A schedule due in 40s still fires in 40s.          |
+| **The cap**                 | `MAINTENANCE_IDLE_MAX_SKIP_MS` (default 30 min) bounds how long the gate may skip without re-checking, so a write this process could not observe is picked up within that window rather than never.                 |
+| **`noteMaintenanceWork()`** | Request paths that create tick-owned work — delivery retry scheduled, schedule created/edited, evaluation run queued, execution enqueued by a trigger — disarm the gate immediately instead of waiting for the cap. |
+
+The gate refuses to arm at all unless the sweep proved there was nothing to do: any task that found something, any task that **failed**, a fired schedule, an errored schedules sweep, or a failed horizon probe all leave it disarmed. Not knowing the state is precisely the case where skipping is unsafe.
+
+**Tuning.** Lowering the cap does not make schedules more punctual — the horizon already handles that — it only shortens how long an unobservable write can go unnoticed:
+
+- **Single instance on scale-to-zero Postgres:** leave the default, or raise it above your autosuspend timer so the compute can actually idle. This is the setting the feature exists for.
+- **Multiple instances:** lower it (5 min is a reasonable choice). Each instance keeps its own gate, so instance A can be armed while instance B takes the write.
+- **`MAINTENANCE_IDLE_MAX_SKIP_MS=0`:** gate disabled, every tick sweeps — the pre-#442 behaviour.
+
+State is per-process by necessity: persisting a `lastTickAt` would cost exactly the query per tick the gate exists to remove, and a DB-backed "should I skip?" switch is self-defeating for the same reason. A fresh instance starts **disarmed**, so a cold start always sweeps.
+
+**Forcing a sweep:** `POST …/maintenance/tick?force=1` ignores the gate. It does not bypass the overlap guard, which protects against concurrency rather than repetition. A forced sweep that finds nothing re-arms the gate as usual.
 
 **Overlap protection:** A module-level `tickRunning` flag wraps the **entire** chain — synchronous schedules plus background tasks. If a tick is still running (synchronous _or_ background) when the next cron fires, the endpoint returns `{ skipped: true }` immediately. The guard releases when the background chain settles. A 5-minute liveness watchdog force-releases the guard if the background chain hangs (logs `Maintenance tick: background chain exceeded max duration` as the operational signal), and a per-tick monotonic token prevents a late-settling old chain from accidentally releasing a newer tick's guard. See [Resilience — Maintenance Tick Overlap Protection](./resilience.md#maintenance-tick-overlap-protection) for the full discussion.
 

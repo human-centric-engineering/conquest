@@ -194,6 +194,27 @@ export async function drainEngine(
 }
 
 /**
+ * When the next enabled schedule is due, or `null` if none is.
+ *
+ * One indexed lookup on `(isEnabled, nextRunAt)`. Exists for the maintenance
+ * tick's idle gate (#442): it is what lets the tick skip ticks entirely without
+ * ever making a schedule fire late, since the gate refuses to skip past the
+ * horizon this returns.
+ *
+ * Deliberately separate from `processDueSchedules` rather than folded into its
+ * result: it is only needed on the sweep that arms the gate, and
+ * `ScheduleProcessResult` is a documented shape.
+ */
+export async function getNextScheduleRunAt(from: Date = new Date()): Promise<Date | null> {
+  const next = await prisma.aiWorkflowSchedule.findFirst({
+    where: { isEnabled: true, nextRunAt: { gt: from } },
+    orderBy: { nextRunAt: 'asc' },
+    select: { nextRunAt: true },
+  });
+  return next?.nextRunAt ?? null;
+}
+
+/**
  * Find and execute all due workflow schedules.
  *
  * Should be called periodically (every ~60 seconds). Each call uses
