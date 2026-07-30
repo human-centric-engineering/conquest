@@ -11,6 +11,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const initAppUserCreatedHooks = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/app/user-created', () => ({ initAppUserCreatedHooks }));
 
+// Mocked so the two `err instanceof Error ? err.message : String(err)` fallbacks
+// can be asserted on what they actually produce. A fork throwing a bare string
+// is the case those exist for, and "it didn't crash" would not distinguish a
+// readable log line from an unreadable one.
+const loggerError = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logging', () => ({
+  logger: { error: loggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
 import {
   registerUserCreatedHook,
   dispatchUserCreated,
@@ -29,6 +38,7 @@ const ctx: UserCreatedContext = {
 beforeEach(() => {
   __resetUserCreatedHooksForTests();
   initAppUserCreatedHooks.mockReset().mockImplementation(() => {});
+  loggerError.mockClear();
 });
 
 afterEach(() => {
@@ -93,6 +103,44 @@ describe('dispatchUserCreated', () => {
     });
 
     await expect(dispatchUserCreated(ctx)).resolves.toBeUndefined();
+  });
+
+  it('logs a readable message when a hook throws a non-Error', async () => {
+    // Nothing stops a fork throwing a string, and `err.message` on one is
+    // undefined — the log line would name the hook and then say nothing about
+    // why it failed.
+    initAppUserCreatedHooks.mockImplementation(() =>
+      registerUserCreatedHook('app:string-throw', () => {
+        // Throwing a non-Error is exactly the case under test; a fork can and will.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- see above
+        throw 'CRM returned 503';
+      })
+    );
+
+    await expect(dispatchUserCreated(ctx)).resolves.toBeUndefined();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'user-created hook failed',
+      expect.objectContaining({
+        hook: 'app:string-throw',
+        userId: ctx.userId,
+        error: 'CRM returned 503',
+      })
+    );
+  });
+
+  it('logs a readable message when the app init throws a non-Error', async () => {
+    initAppUserCreatedHooks.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- see above
+      throw 'missing STRIPE_SECRET_KEY';
+    });
+
+    await expect(dispatchUserCreated(ctx)).resolves.toBeUndefined();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'user-created: initAppUserCreatedHooks threw — app hooks disabled',
+      expect.objectContaining({ error: 'missing STRIPE_SECRET_KEY' })
+    );
   });
 
   it('runs the app init exactly once across many dispatches', async () => {

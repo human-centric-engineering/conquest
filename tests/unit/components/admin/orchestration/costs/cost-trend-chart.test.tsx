@@ -8,20 +8,63 @@
  * - Empty state when all trend totals are zero (zero-fill makes this visible)
  * - Zero-fill: chart renders 30 days even when only some days have spend
  *
- * Note: recharts renders to SVG under happy-dom. We assert the SVG element
- * is present and that the empty-state copy renders correctly. We do NOT
- * assert specific chart internals (pixel values, axis ticks) as recharts'
- * SVG structure is not a stable API.
+ * - Tier split: proportional attribution, unknown-model rows, first-write-wins
+ *   on a duplicated model id, and the single-bucket fallback
+ * - Axis / tooltip formatters
+ *
+ * Note: recharts is mocked with introspectable pass-through divs (the same
+ * pattern as evaluation-trend-chart.test.tsx). Under happy-dom the real
+ * ResponsiveContainer measures 0x0 and never renders its children, so the
+ * computed plot rows and the axis/tooltip formatters were unreachable — the
+ * component's actual arithmetic could not be asserted at all. The mock captures
+ * the `data` prop and the two formatter callbacks instead.
  *
  * @see components/admin/orchestration/costs/cost-trend-chart.tsx
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+
+// ---------------------------------------------------------------------------
+// recharts mock — introspectable pass-through divs
+// ---------------------------------------------------------------------------
+
+let capturedTickFormatter: ((v: number) => string) | undefined;
+let capturedTooltipFormatter: ((value: unknown, name: unknown) => [string, string]) | undefined;
+
+vi.mock('recharts', () => ({
+  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="responsive-container">{children}</div>
+  ),
+  ComposedChart: ({
+    children,
+    data,
+  }: {
+    children: React.ReactNode;
+    data: Record<string, unknown>[];
+  }) => (
+    <div data-testid="composed-chart" data-data={JSON.stringify(data)}>
+      {children}
+    </div>
+  ),
+  Area: ({ dataKey }: { dataKey: string }) => <div data-testid="area" data-area-key={dataKey} />,
+  CartesianGrid: () => <div data-testid="cartesian-grid" />,
+  XAxis: () => <div data-testid="x-axis" />,
+  YAxis: ({ tickFormatter }: { tickFormatter?: (v: number) => string }) => {
+    capturedTickFormatter = tickFormatter;
+    return <div data-testid="y-axis" />;
+  },
+  Tooltip: ({ formatter }: { formatter?: (value: unknown, name: unknown) => [string, string] }) => {
+    capturedTooltipFormatter = formatter;
+    return <div data-testid="tooltip" />;
+  },
+  Legend: () => <div data-testid="legend" />,
+}));
 
 import { CostTrendChart } from '@/components/admin/orchestration/costs/cost-trend-chart';
 import type { CostSummaryTrendPoint } from '@/lib/orchestration/llm/cost-reports';
 import type { ModelInfo } from '@/lib/orchestration/llm/types';
+import { formatUsd } from '@/lib/utils/format-currency';
 
 function makeTrendPoint(date: string, totalCostUsd: number): CostSummaryTrendPoint {
   return { date, totalCostUsd };
@@ -119,5 +162,162 @@ describe('CostTrendChart', () => {
       render(<CostTrendChart trend={null} perModel={null} models={null} />);
       expect(screen.getByText('30-day spend trend')).toBeInTheDocument();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+interface PlotRow {
+  date: string;
+  budget: number;
+  mid: number;
+  frontier: number;
+  local: number;
+  total: number;
+}
+
+/** The rows the component actually handed to recharts. */
+function plotRows(): PlotRow[] {
+  const raw = screen.getByTestId('composed-chart').getAttribute('data-data');
+  return JSON.parse(raw ?? '[]') as PlotRow[];
+}
+
+function model(id: string, tier: ModelInfo['tier'], provider = 'anthropic'): ModelInfo {
+  return {
+    id,
+    name: id,
+    provider,
+    tier,
+    inputCostPerMillion: 1,
+    outputCostPerMillion: 5,
+    maxContext: 200_000,
+    supportsTools: true,
+  };
+}
+
+describe('CostTrendChart tier split', () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  it('splits a day total by the 30-day tier distribution', () => {
+    // 3:1 budget:frontier over the window, so a $100 day splits $75/$25.
+    render(
+      <CostTrendChart
+        trend={[makeTrendPoint(today, 100)]}
+        perModel={[
+          { key: 'cheap', totalCostUsd: 30 },
+          { key: 'pricey', totalCostUsd: 10 },
+        ]}
+        models={[model('cheap', 'budget'), model('pricey', 'frontier')]}
+      />
+    );
+
+    const day = plotRows().find((r) => r.date === today)!;
+    expect(day.budget).toBeCloseTo(75, 6);
+    expect(day.frontier).toBeCloseTo(25, 6);
+    expect(day.mid).toBe(0);
+    expect(day.local).toBe(0);
+    // The split is an attribution of the real total, never a restatement of it.
+    expect(day.budget + day.mid + day.frontier + day.local).toBeCloseTo(day.total, 6);
+  });
+
+  it('ignores a perModel row whose model is not in the catalogue', () => {
+    // A model deleted from the registry still has cost rows. Counting it into a
+    // tier would be a guess; it is skipped, so the remaining split is unchanged.
+    render(
+      <CostTrendChart
+        trend={[makeTrendPoint(today, 50)]}
+        perModel={[
+          { key: 'cheap', totalCostUsd: 40 },
+          { key: 'ghost-model', totalCostUsd: 999 },
+        ]}
+        models={[model('cheap', 'budget')]}
+      />
+    );
+
+    const day = plotRows().find((r) => r.date === today)!;
+    expect(day.budget).toBeCloseTo(50, 6);
+    expect(day.frontier).toBe(0);
+  });
+
+  it('keeps the first catalogue entry when a model id appears twice', () => {
+    // First-write-wins (#436). The static registry is merged ahead of DB-only
+    // rows, so a seeded example under a second provider must not displace the
+    // real entry and drag that spend into the wrong tier.
+    render(
+      <CostTrendChart
+        trend={[makeTrendPoint(today, 80)]}
+        perModel={[{ key: 'gpt-4o', totalCostUsd: 20 }]}
+        models={[model('gpt-4o', 'mid', 'openai'), model('gpt-4o', 'frontier', 'microsoft')]}
+      />
+    );
+
+    const day = plotRows().find((r) => r.date === today)!;
+    expect(day.mid).toBeCloseTo(80, 6);
+    expect(day.frontier).toBe(0);
+  });
+
+  it('attributes everything to a single bucket when no tier data is available', () => {
+    // No models, so tierSum is 0 — the chart must still show the real total
+    // rather than a flat zero line that reads as "no spend".
+    render(<CostTrendChart trend={[makeTrendPoint(today, 42)]} perModel={[]} models={[]} />);
+
+    const day = plotRows().find((r) => r.date === today)!;
+    expect(day.total).toBeCloseTo(42, 6);
+    expect(day.mid).toBeCloseTo(42, 6);
+    expect(day.budget).toBe(0);
+  });
+
+  it('zero-fills a day with no spend even when tier data exists', () => {
+    render(
+      <CostTrendChart
+        trend={[makeTrendPoint(today, 10)]}
+        perModel={[{ key: 'cheap', totalCostUsd: 5 }]}
+        models={[model('cheap', 'budget')]}
+      />
+    );
+
+    const rows = plotRows();
+    expect(rows).toHaveLength(30);
+    const blank = rows.find((r) => r.date !== today)!;
+    expect(blank).toMatchObject({ budget: 0, mid: 0, frontier: 0, local: 0, total: 0 });
+  });
+});
+
+describe('CostTrendChart formatters', () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  function renderChart() {
+    render(
+      <CostTrendChart
+        trend={[makeTrendPoint(today, 1234.5)]}
+        perModel={[{ key: 'cheap', totalCostUsd: 5 }]}
+        models={[model('cheap', 'budget')]}
+      />
+    );
+  }
+
+  it('formats Y-axis ticks compactly', () => {
+    renderChart();
+    // Compact form keeps a 30-day axis legible; the full value belongs in the
+    // tooltip, not on every gridline.
+    expect(capturedTickFormatter?.(1234.5)).toBe(formatUsd(1234.5, { compact: true }));
+  });
+
+  it('formats tooltip values at full precision with the series name', () => {
+    renderChart();
+    expect(capturedTooltipFormatter?.(12.3456, 'budget')).toEqual([formatUsd(12.3456), 'budget']);
+  });
+
+  it('coerces a non-numeric tooltip value rather than rendering NaN', () => {
+    renderChart();
+    expect(capturedTooltipFormatter?.('7.5', 'mid')).toEqual([formatUsd(7.5), 'mid']);
+    expect(capturedTooltipFormatter?.('not-a-number', 'mid')).toEqual([formatUsd(0), 'mid']);
+  });
+
+  it('renders an empty series name rather than "null"', () => {
+    renderChart();
+    expect(capturedTooltipFormatter?.(1, null)).toEqual([formatUsd(1), '']);
   });
 });
