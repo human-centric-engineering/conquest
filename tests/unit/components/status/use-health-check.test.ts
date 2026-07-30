@@ -415,39 +415,40 @@ describe('useHealthCheck', () => {
   // ── Polling lifecycle ──────────────────────────────────────────────────────
 
   describe('polling lifecycle', () => {
-    it('schedules repeated fetches at pollingInterval after startPolling()', async () => {
-      // Initial fetch + 2 polling ticks = 3 total
-      mockFetchOnce(validOkPayload);
-      mockFetchOnce(validOkPayload);
-      mockFetchOnce(validOkPayload);
+    it('startPolling() refreshes immediately and then every interval', async () => {
+      // Initial fetch + the refresh on resume + 2 polling ticks = 4 total.
+      // The immediate refresh is deliberate: "Resume" on the status page should
+      // show fresh data rather than waiting out a full interval.
+      for (let i = 0; i < 4; i++) mockFetchOnce(validOkPayload);
 
       const { result } = renderHook(() =>
         useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS })
       );
 
-      // Initial fetch
+      // Initial fetch — `autoStart: false` must still populate the UI once.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
       expect(global.fetch).toHaveBeenCalledTimes(1);
 
-      // Start polling and advance through two intervals
       act(() => {
         result.current.startPolling();
       });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 2);
       });
 
-      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(global.fetch).toHaveBeenCalledTimes(4);
       expect(result.current.isPolling).toBe(true);
     });
 
-    it('calling startPolling while already polling clears the previous interval — no double-fetch per tick', async () => {
-      // Initial + 1 tick after restart (not 2 — the old interval must be gone)
-      mockFetchOnce(validOkPayload);
-      mockFetchOnce(validOkPayload);
+    it('calling startPolling while already polling is a no-op — no double-fetch per tick', async () => {
+      for (let i = 0; i < 4; i++) mockFetchOnce(validOkPayload);
 
       const { result } = renderHook(() =>
         useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS })
@@ -457,45 +458,36 @@ describe('useHealthCheck', () => {
         await vi.advanceTimersByTimeAsync(0);
       });
 
-      // First startPolling
       act(() => {
         result.current.startPolling();
       });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2); // initial + resume refresh
 
-      // Advance halfway through the first interval, then call startPolling again.
-      // This clears the first interval and replaces it with a new one starting now.
+      // Halfway through the interval, ask to start again. Polling is already on,
+      // so nothing re-arms: no extra fetch, and the running interval keeps its
+      // original phase rather than being pushed out.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
       });
-
       act(() => {
         result.current.startPolling();
       });
 
-      // Finding #9: contract is "still polling after restart" — if a future bug flipped
-      // isPolling false mid-call, the fetch-count check below wouldn't catch it.
       expect(result.current.isPolling).toBe(true);
-
-      // Finding #10: tighten per-tick distribution.
-      // At INTERVAL/2 into the new interval — no premature tick should have fired.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
-      });
-      // Still only the 1 initial fetch — the old interval was cleared and the new one
-      // hasn't elapsed yet (only half elapsed so far).
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-
-      // Advance the remaining half — exactly one tick fires at INTERVAL after restart.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
-      });
-      // 1 initial + 1 tick from the new interval = 2 total; no double-fire
       expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      // The remaining half of the ORIGINAL interval fires exactly one tick.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS / 2);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(3);
     });
 
-    it('stopPolling clears the interval and flips isPolling to false', async () => {
-      mockFetchOnce(validOkPayload);
-      // After stopPolling, no further fetches should run even if time advances
+    it('stopPolling stops further fetches and flips isPolling to false', async () => {
+      for (let i = 0; i < 2; i++) mockFetchOnce(validOkPayload);
 
       const { result } = renderHook(() =>
         useHealthCheck({ autoStart: false, pollingInterval: POLLING_INTERVAL_MS })
@@ -508,7 +500,11 @@ describe('useHealthCheck', () => {
       act(() => {
         result.current.startPolling();
       });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
       expect(result.current.isPolling).toBe(true);
+      expect(global.fetch).toHaveBeenCalledTimes(2); // initial + resume refresh
 
       act(() => {
         result.current.stopPolling();
@@ -519,8 +515,47 @@ describe('useHealthCheck', () => {
         await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
       });
 
-      // Only the initial fetch ran; nothing after stopPolling
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('pauses while the tab is hidden and refreshes when it comes back (#442)', async () => {
+      // /api/health runs SELECT 1, so an unattended background tab used to keep
+      // a scale-to-zero database awake by itself — 2,880 queries a day.
+      for (let i = 0; i < 4; i++) mockFetchOnce(validOkPayload);
+
+      renderHook(() => useHealthCheck({ pollingInterval: POLLING_INTERVAL_MS }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
       expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Back in the foreground: refresh at once, then resume the cadence.
+      hidden.mockReturnValue(false);
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+
+      hidden.mockRestore();
     });
 
     it('unmount clears the polling interval — no further fetches after the component unmounts', async () => {

@@ -250,6 +250,25 @@ release process.
 
 ### Changed
 
+- **`getOrchestrationSettings()` reads before it writes, and caches for 30s**
+  (#442). It was an unconditional `upsert` — a write, taking a row lock, on every
+  call, including several per maintenance tick — for a row that is created once
+  in the lifetime of an install. It now does a `findUnique` and only upserts when
+  the row is absent (still an upsert there, so two instances booting at once
+  can't race the unique constraint on `slug`), behind a 30s TTL cache modelled on
+  `settings-resolver.ts`. The new `invalidateOrchestrationSettingsCache()` is
+  called from the settings PATCH route, so a save is visible immediately.
+
+- **`useHealthCheck` pauses polling while the tab is hidden** (#442). It ran two
+  bare `setInterval`s, so a forgotten admin tab issued `GET /api/health` — and
+  therefore `SELECT 1` — every 30 seconds indefinitely, enough on its own to keep
+  a scale-to-zero database awake. It now runs on `useAutoRefresh`, which already
+  pauses on `document.hidden` and handles being hidden at mount. **Two semantic
+  shifts for callers:** `isPolling` now means "polling is enabled" rather than "a
+  timer is armed", so it stays `true` across a visibility pause; and
+  `startPolling()` refreshes immediately instead of waiting out an interval.
+  `autoStart: false` still fetches once on mount.
+
 - **The maintenance tick can now skip entirely, doing zero database work**
   (#442). Per-task intervals cut how much a tick does; they cannot make it do
   nothing, and nothing is what a scale-to-zero Postgres (Neon, Aurora Serverless
@@ -399,6 +418,31 @@ release process.
   turned on. ([#436])
 
 ### Fixed
+
+- **The retention sweep reads the settings row once instead of eight times**
+  (#442). `resolveRetentionDays()` fetched the same singleton row per prune, so
+  one sweep spent eight round-trips retrieving six columns — 1,440 times a day at
+  the documented tick cadence, and all of it wasted on a default install where
+  every window is `null` and every prune no-ops. `enforceRetentionPolicies()` now
+  calls the new `loadRetentionWindows()` once and passes each window down. The
+  individual `pruneX()` functions are unchanged for direct callers, but their
+  first parameter widens to `number | null | undefined`: `undefined` still means
+  "resolve it yourself", an explicit `null` now means "skip". The coherence
+  warning reads from the same loaded windows rather than issuing its own query.
+
+- **The MCP config cache no longer collides with the maintenance-tick interval**
+  (#442). `CACHE_TTL_MS` was 60s — exactly the tick cadence — so the retention
+  sweep's `getMcpServerConfig()` call was a coin-flip between a hit and a miss,
+  and the miss path is an `upsert`, i.e. a write taking a row lock, roughly every
+  other tick. Raised to 5 minutes; invalidation on admin mutation was already
+  explicit, so nothing goes stale that wasn't already.
+
+- **The embedding backfill's anti-join has an index to use** (#442). It filters
+  `AiMessage` on `role` and orders by `createdAt`, but the table was indexed on
+  `role` alone, so proving the backlog empty meant a scan plus a sort that grew
+  with the table — every tick, forever. Adds `@@index([role, createdAt])` and
+  drops the now leading-column-redundant `@@index([role])`. **Migration:**
+  `20260730140000_add_message_role_createdat_index`.
 
 - **Tab titles and legal-page metadata now route through the `BRAND` seam**
   (#432). `SETTINGS_TAB_TITLES` and `KNOWLEDGE_TAB_TITLES` hardcoded `"Sunrise"`,

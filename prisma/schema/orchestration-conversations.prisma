@@ -152,7 +152,13 @@ model AiMessage {
 
   @@index([conversationId])
   @@index([conversationId, createdAt])
-  @@index([role])
+  // Serves the embedding-backfill anti-join in
+  // `lib/orchestration/chat/message-embedder.ts`, which filters on `role` and
+  // orders by `createdAt` (#442). Replaces the bare `@@index([role])`, which is
+  // its redundant leading-column prefix. The `LENGTH(content) > 20` predicate
+  // stays unindexed on purpose: a partial index needs raw SQL, and therefore a
+  // drift probe to maintain forever, to save a filter on an already-narrow scan.
+  @@index([role, createdAt])
   @@index([createdAt])
   @@index([rating])
   @@index([agentVersionId])

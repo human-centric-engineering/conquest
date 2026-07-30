@@ -10,7 +10,7 @@
  * @see lib/orchestration/settings.ts
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 
 // ─── Mock dependencies before module import ───────────────────────────────────
@@ -18,6 +18,7 @@ import { Prisma } from '@prisma/client';
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiOrchestrationSettings: {
+      findUnique: vi.fn(),
       upsert: vi.fn(),
     },
   },
@@ -52,6 +53,7 @@ import {
   parseEscalationConfig,
   hydrateSettings,
   getOrchestrationSettings,
+  invalidateOrchestrationSettingsCache,
   clampStuckThreshold,
   STUCK_THRESHOLD_BOUNDS,
 } from '@/lib/orchestration/settings';
@@ -593,6 +595,8 @@ describe('hydrateSettings', () => {
 describe('getOrchestrationSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Module-level cache outlives a test — every test starts cold.
+    invalidateOrchestrationSettingsCache();
     vi.mocked(computeDefaultModelMap).mockReturnValue({
       routing: 'claude-haiku-4-5',
       chat: 'claude-haiku-4-5',
@@ -605,46 +609,44 @@ describe('getOrchestrationSettings', () => {
     });
   });
 
-  it('calls prisma.aiOrchestrationSettings.upsert with slug "global"', async () => {
-    vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(makeRow() as never);
+  it('reads the existing row without writing (#442)', async () => {
+    // This used to be an unconditional upsert — a write, taking a row lock, on
+    // every read, including several per maintenance tick.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(makeRow() as never);
 
     await getOrchestrationSettings();
 
-    expect(prisma.aiOrchestrationSettings.upsert).toHaveBeenCalledOnce();
-    expect(prisma.aiOrchestrationSettings.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { slug: 'global' } })
-    );
+    expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledWith({
+      where: { slug: 'global' },
+    });
+    expect(prisma.aiOrchestrationSettings.upsert).not.toHaveBeenCalled();
   });
 
-  it('passes computed defaults as the create payload', async () => {
+  it('creates the singleton when the row is missing', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(makeRow() as never);
 
     await getOrchestrationSettings();
 
     expect(prisma.aiOrchestrationSettings.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { slug: 'global' },
         create: expect.objectContaining({
           slug: 'global',
           globalMonthlyBudgetUsd: null,
           searchConfig: Prisma.JsonNull,
           lastSeededAt: null,
         }),
+        // Still an upsert rather than a create: two instances booting at once
+        // would otherwise race the unique constraint on `slug`. The empty
+        // update is what makes losing that race harmless.
+        update: {},
       })
     );
   });
 
-  it('passes an empty update object so existing rows are not overwritten', async () => {
-    vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(makeRow() as never);
-
-    await getOrchestrationSettings();
-
-    expect(prisma.aiOrchestrationSettings.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: {} })
-    );
-  });
-
   it('returns the hydrated OrchestrationSettings shape', async () => {
-    vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(makeRow() as never);
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(makeRow() as never);
 
     const result = await getOrchestrationSettings();
 
@@ -658,7 +660,7 @@ describe('getOrchestrationSettings', () => {
 
   it('merges stored values correctly in the returned result', async () => {
     // Stored row has chat overridden; everything else falls back to computed
-    vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
       makeRow({ defaultModels: { chat: 'claude-sonnet-4-6' } }) as never
     );
 
@@ -670,8 +672,8 @@ describe('getOrchestrationSettings', () => {
     expect(result.defaultModels.embeddings).toBe('claude-haiku-4-5');
   });
 
-  it('returns entirely computed defaults when the upsert row has invalid stored models', async () => {
-    vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(
+  it('returns entirely computed defaults when the stored models are invalid', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
       makeRow({ defaultModels: null }) as never
     );
 
@@ -686,12 +688,64 @@ describe('getOrchestrationSettings', () => {
     });
   });
 
-  it('propagates a prisma upsert rejection', async () => {
-    vi.mocked(prisma.aiOrchestrationSettings.upsert).mockRejectedValue(
+  it('propagates a prisma read rejection', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockRejectedValue(
       new Error('DB connection failed')
     );
 
     await expect(getOrchestrationSettings()).rejects.toThrow('DB connection failed');
+  });
+
+  it('does not cache a failed read', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique)
+      .mockRejectedValueOnce(new Error('DB connection failed'))
+      .mockResolvedValueOnce(makeRow() as never);
+
+    await expect(getOrchestrationSettings()).rejects.toThrow('DB connection failed');
+
+    await expect(getOrchestrationSettings()).resolves.toMatchObject({ slug: 'global' });
+  });
+
+  describe('30s cache', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('serves a second call within the TTL without touching the database', async () => {
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(makeRow() as never);
+
+      await getOrchestrationSettings();
+      await vi.advanceTimersByTimeAsync(29_000);
+      await getOrchestrationSettings();
+
+      expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledOnce();
+    });
+
+    it('re-reads once the TTL has elapsed', async () => {
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(makeRow() as never);
+
+      await getOrchestrationSettings();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await getOrchestrationSettings();
+
+      expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-reads immediately after an explicit invalidation', async () => {
+      // The settings PATCH route calls this, so a save is visible at once
+      // rather than up to 30s later.
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(makeRow() as never);
+
+      await getOrchestrationSettings();
+      invalidateOrchestrationSettingsCache();
+      await getOrchestrationSettings();
+
+      expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledTimes(2);
+    });
   });
 });
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { HealthCheckResponse } from '@/lib/monitoring';
 import { healthCheckResponseSchema } from '@/lib/validations/monitoring';
+import { useAutoRefresh } from '@/lib/hooks/use-auto-refresh';
 
 /**
  * Health check state
@@ -52,6 +53,16 @@ export interface UseHealthCheckReturn extends HealthCheckState {
  * React hook for polling the health check endpoint and managing health state.
  * Automatically handles polling, error states, and status change notifications.
  *
+ * Polling runs through `useAutoRefresh`, so it **pauses while the tab is
+ * hidden**. `/api/health` runs `SELECT 1` against the database, and a forgotten
+ * admin tab used to issue one every 30 seconds forever — enough on its own to
+ * keep a scale-to-zero Postgres awake, independent of the maintenance tick
+ * (#442).
+ *
+ * `isPolling` therefore means "polling is enabled", not "a timer is armed right
+ * now": it stays `true` across a visibility pause, which is what the status
+ * page's Resume affordance should key off.
+ *
  * @example
  * ```tsx
  * function MyComponent() {
@@ -86,9 +97,6 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}): UseHealthCh
 
   // Track previous status for change detection
   const previousStatus = useRef<'ok' | 'error' | null>(null);
-
-  // Polling interval ref
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Track if mounted to avoid state updates after unmount
   const mountedRef = useRef(true);
@@ -165,58 +173,33 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}): UseHealthCh
     await fetchHealth();
   }, [fetchHealth]);
 
-  /**
-   * Start polling
-   */
+  /** Resume polling. Also refreshes immediately, so "Resume" feels instant. */
   const startPolling = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-
-    intervalRef.current = setInterval(() => {
-      void fetchHealth();
-    }, pollingInterval);
     setState((prev) => ({ ...prev, isPolling: true }));
-  }, [fetchHealth, pollingInterval]);
+  }, []);
 
-  /**
-   * Stop polling
-   */
+  /** Pause polling. */
   const stopPolling = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
     setState((prev) => ({ ...prev, isPolling: false }));
   }, []);
 
-  // Initial fetch and setup polling
   useEffect(() => {
     mountedRef.current = true;
-
-    // Create an async function to handle initial fetch
-    // This is called in a callback context (from an immediately-invoked async function)
-    // which is the recommended pattern for effects that need async operations
-    const initFetch = async () => {
-      await fetchHealth();
-    };
-
-    void initFetch();
-
-    if (autoStart) {
-      // Start polling after initial fetch
-      intervalRef.current = setInterval(() => {
-        void fetchHealth();
-      }, pollingInterval);
-    }
-
     return () => {
       mountedRef.current = false;
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
     };
-  }, [fetchHealth, autoStart, pollingInterval]);
+  }, []);
+
+  // Polling, the visibility pause, and the mount fetch all come from the shared
+  // hook — see the module docstring for why this is not a bare setInterval.
+  useAutoRefresh(fetchHealth, pollingInterval, { enabled: state.isPolling });
+
+  // `useAutoRefresh` does nothing while disabled, so `autoStart: false` would
+  // otherwise leave a consumer rendering "loading" forever.
+  useEffect(() => {
+    if (autoStart) return;
+    void fetchHealth();
+  }, [autoStart, fetchHealth]);
 
   return {
     ...state,

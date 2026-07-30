@@ -85,10 +85,15 @@ Each prune is a small, uniform addition to `lib/orchestration/retention.ts`:
 1. Add a nullable `xRetentionDays` column to `AiOrchestrationSettings` (datamodel-diff
    migration — see [data-erasure.md](../privacy/data-erasure.md) for why DB-free
    diffing avoids the HNSW/tsvector index-drop trap).
-2. Add a `pruneX()` function (resolve the window via `resolveRetentionDays`, skip
-   when null, `deleteMany` by `createdAt < cutoff` — and a terminal-status filter
-   for any table with in-flight rows).
-3. Call it in `enforceRetentionPolicies()` and add its count to `RetentionResult`.
+2. Add a `pruneX()` function taking `maxAgeDays?: number | null` — `undefined`
+   means "resolve it yourself" (via `resolveRetentionDays`, for direct callers),
+   an explicit `null` means "skip". Then `deleteMany` by `createdAt < cutoff`,
+   plus a terminal-status filter for any table with in-flight rows.
+3. Add the column to `RetentionWindows` and `loadRetentionWindows()`, call the
+   prune from `enforceRetentionPolicies()` **passing the loaded window**, and add
+   its count to `RetentionResult`. The sweep reads the settings row exactly once
+   (#442); a prune that resolves its own window inside the sweep puts a
+   round-trip back per tick.
 4. Surface the setting: Zod schema (`lib/validations/orchestration.ts`), the
    settings PATCH route, the settings form (with `<FieldHelp>`), and the backup
    exporter/importer/schema for config round-trip.
