@@ -15,7 +15,7 @@ the platform's data lifecycle; on-demand subject erasure is separate — see
 | Webhook deliveries (non-DLQ)                                                                 | `webhookRetentionDays`               | global settings |                                                 |
 | Webhook DLQ (`exhausted`)                                                                    | `webhookDlqRetentionDays`            | global settings | Falls back to `webhookRetentionDays` when null. |
 | Event-hook deliveries                                                                        | `webhookRetentionDays`               | global settings | Same class as webhook deliveries.               |
-| Cost logs                                                                                    | `costLogRetentionDays`               | global settings | Dashboard aggregates are unaffected.            |
+| Cost logs                                                                                    | `costLogRetentionDays`               | global settings | Must be ≥ `executionRetentionDays` — see below. |
 | Admin audit logs                                                                             | `auditLogRetentionDays`              | global settings | Max 3650 days (10y) for compliance regimes.     |
 | **Workflow executions** (+ steps, dispatches, lease events, per-step cost, inbound payloads) | `executionRetentionDays`             | global settings | **Terminal only** — see below.                  |
 | **Evaluation history** (`AiEvaluationSession` / `Run` + their logs/cases)                    | `evaluationRetentionDays`            | global settings | **Terminal only** — see below.                  |
@@ -42,6 +42,21 @@ is `SetNull`, so a pruned parent never takes its reruns with it. Deleting an eva
 session removes its logs; deleting a run removes its cases. Experiment-variant
 links and rescore lineage are `SetNull`, so pruning never breaks a retained
 experiment.
+
+## Keep `costLogRetentionDays ≥ executionRetentionDays` (enforced)
+
+`AiWorkflowExecution.totalCostUsd` is a scalar column on the execution row, so it
+survives the `AiCostLog` rows behind it. Prune the logs first and an operator sees
+an execution reporting real spend with an empty cost breakdown underneath — and no
+way to tell a retention artefact from a bug in cost capture. Dashboard aggregates
+are unaffected; it's the per-execution drill-down that empties.
+
+Unlike the evaluation coupling below, this one is **enforced in code**, in three
+places: the settings form blocks the save client-side, the Zod schema rejects a
+whole-form save, and the PATCH route re-checks the patch against the persisted row
+(so moving either side alone is caught). Installs already configured this way
+predate the check and never re-save settings, so `enforceRetentionPolicies()` also
+logs a warning once per sweep when it sees the pair.
 
 ## Keep `evaluationRetentionDays ≤ executionRetentionDays`
 

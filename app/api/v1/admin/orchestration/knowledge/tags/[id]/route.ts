@@ -25,8 +25,8 @@ import { Prisma } from '@prisma/client';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { ConflictError, NotFoundError } from '@/lib/api/errors';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { updateKnowledgeTagSchema } from '@/lib/validations/orchestration';
@@ -34,18 +34,10 @@ import { cuidSchema } from '@/lib/validations/common';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { invalidateAllAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 
-function parseTagId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid tag id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseTagId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'tag id' });
 
   // Return the actual linked documents and agents — drives the drill-down in
   // the Tags admin so operators can see exactly which docs/agents a tag
@@ -94,7 +86,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseTagId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'tag id' });
 
   const current = await prisma.knowledgeTag.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Knowledge tag ${id} not found`);
@@ -143,7 +135,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseTagId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'tag id' });
 
   const { searchParams } = new URL(request.url);
   const force = searchParams.get('force') === 'true';

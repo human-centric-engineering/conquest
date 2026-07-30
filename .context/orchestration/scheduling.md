@@ -207,6 +207,57 @@ Webhook subscription URLs are validated via Zod schema refinements that call `ch
 
 Full CRUD for webhooks is available at `/admin/orchestration/event-subscriptions` (page label: "Event Subscriptions"). See [Webhook Management UI](../admin/orchestration-webhooks.md).
 
+## App jobs — the fork seam on the tick
+
+Forks that need their own periodic work register it on the existing maintenance
+tick rather than standing up a second scheduler.
+
+`lib/orchestration/maintenance/app-jobs.ts` holds the registry;
+`lib/app/jobs.ts` is the fork-owned scaffold that fills it (ships empty, so
+vanilla Sunrise pays nothing — `runDueAppJobs()` short-circuits on an empty
+registry).
+
+```typescript
+// lib/app/jobs.ts
+import { registerAppJob } from '@/lib/orchestration/maintenance/app-jobs';
+
+export function initAppJobs(): void {
+  registerAppJob({
+    name: 'app:prune-draft-invoices',
+    intervalMs: 6 * 60 * 60 * 1000,
+    run: async () => ({ pruned: await pruneDrafts() }),
+  });
+}
+```
+
+| Export                | Purpose                                                         |
+| --------------------- | --------------------------------------------------------------- |
+| `registerAppJob(job)` | Register. Idempotent by `name` — re-registering replaces.       |
+| `getAppJobs()`        | Registered jobs in first-registration order (admin surface).    |
+| `runDueAppJobs(now?)` | Called by the tick. Returns a per-job summary for its log line. |
+
+Semantics that differ from the platform's own scheduled work:
+
+- **`intervalMs` is a minimum gap, not a guarantee.** Last-run times are
+  in-process, so a multi-instance deployment runs each job about once per
+  instance per interval and a restart re-arms everything. Jobs must be
+  idempotent. Exactly-once cluster-wide needs a lease — see `execution-reaper`.
+- **The clock is start-to-start.** `lastRunAt` is stamped before `run()`, not
+  after.
+- **A job still in flight is skipped**, however long ago it became due, so a job
+  slower than its own interval cannot stack up concurrent runs.
+- **`intervalMs` that is non-positive or `NaN` is refused at registration** and
+  logged, rather than defaulted to something that would run every tick.
+- **Failures are contained.** Jobs run in parallel; a rejection is logged, folded
+  into the summary as `{ error }`, and does not affect the tick or other jobs.
+- **`initAppJobs()` runs once, lazily, latched before it runs** — a throwing init
+  degrades to "no app jobs" instead of retrying every tick.
+
+Jobs not yet due are reported as `skipped: <count>` in the summary, so the
+cadence is visible in the tick log rather than inferred from silence.
+
+See [`CUSTOMIZATION.md` §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface).
+
 ## Retention Pruning
 
 `enforceRetentionPolicies()` in `lib/orchestration/retention.ts` handles five types of cleanup:

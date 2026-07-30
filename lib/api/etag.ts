@@ -13,6 +13,7 @@
  */
 
 import { createHash } from 'crypto';
+import { DEFAULT_CACHE_CONTROL } from '@/lib/api/responses';
 
 /**
  * Compute a weak ETag from any JSON-serialisable data.
@@ -36,7 +37,11 @@ export function checkConditional(request: Request, etag: string): Response | nul
   if (ifNoneMatch && ifNoneMatch === etag) {
     return new Response(null, {
       status: 304,
-      headers: { ETag: etag },
+      // Shares the constant with `successResponse` so the 200 and the 304 on the
+      // same endpoint can't drift apart. A 304 without a directive would let a
+      // shared cache apply its own heuristic freshness to the very entry it is
+      // revalidating — the same gap the 200 path had (#487).
+      headers: { ETag: etag, 'Cache-Control': DEFAULT_CACHE_CONTROL },
     });
   }
   return null;

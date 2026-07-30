@@ -8,7 +8,7 @@ name: CI
 # allocation — harmless on 16GB, necessary on 7GB), fan-out of the static checks,
 # and a 4-way sharded test matrix.
 #
-# One economics knob — repo variable `CI_TEST_SCOPE`:
+# Economics knob 1 — repo variable `CI_TEST_SCOPE`:
 #   • unset / "full" (DEFAULT) — full suite, 4-way sharded, on every PR and on
 #     main. The strong gate; sharding keeps it fast (free minutes absorb the
 #     ~1.6x billed-minutes of fan-out).
@@ -38,8 +38,15 @@ concurrency:
 # Raise Node's heap cap globally. It is a ceiling, not a reservation: on a 16GB
 # public runner it is never approached; on a 7GB private-fork runner it stops
 # `tsc` / `next build` OOMing (exit 134) when Node's default heap caps near ~2GB.
+#
+# Economics knob 2 — repo variable `CI_NODE_HEAP_MB` (default 5120):
+# 5120 is sized for base Sunrise. A fork with a meaningful amount of added code
+# can push type-aware ESLint past it and the lint job dies with **exit 134**
+# (SIGABRT / OOM) — an opaque failure with no message pointing at memory. Raise
+# it in repo settings (Settings → Secrets and variables → Actions → Variables)
+# rather than editing this file, so the change survives every upstream sync.
 env:
-  NODE_OPTIONS: '--max-old-space-size=5120'
+  NODE_OPTIONS: '--max-old-space-size=${{ vars.CI_NODE_HEAP_MB || 5120 }}'
 
 jobs:
   config:
@@ -154,6 +161,19 @@ jobs:
         if: needs.config.outputs.code == 'true'
         run: npm run lint
       - run: npm run format:check
+      # Prettier does not format .prisma files, so drift from the pinned Prisma's
+      # own formatter is invisible to format:check. Without this, an unformatted
+      # schema lands on main and every fork's next `prisma format` — which
+      # `migrate dev` runs implicitly — dirties a core file it never edited (#482).
+      - name: Prisma schema format check
+        if: needs.config.outputs.code == 'true'
+        run: |
+          npx prisma format --schema prisma/schema
+          if ! git diff --exit-code -- prisma/schema; then
+            echo "::error::prisma/schema is not formatted per the pinned Prisma."
+            echo "Run 'npx prisma format --schema prisma/schema' and commit the result."
+            exit 1
+          fi
       # Fork-owned CI checks seam. A fork adds an `app:ci-checks` script to
       # package.json (a boundary check, migration-hygiene lint, etc.); vanilla
       # Sunrise ships no such script, so `--if-present` makes this a no-op here
@@ -162,6 +182,13 @@ jobs:
       - name: Fork checks (if present)
         if: needs.config.outputs.code == 'true'
         run: npm run app:ci-checks --if-present
+      # Same seam for the framework tier — a fork that sits between Sunrise and
+      # its own leaf forks (see CUSTOMIZATION.md §7) owns `framework:*` scripts.
+      # Reserving the namespace upstream is what keeps it merge-clean; a reserved
+      # namespace with nothing running it is only half a seam. See #483.
+      - name: Framework checks (if present)
+        if: needs.config.outputs.code == 'true'
+        run: npm run framework:ci-checks --if-present
 
   build:
     name: Build

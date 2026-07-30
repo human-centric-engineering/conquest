@@ -1,0 +1,49 @@
+# TruffleHog path allowlist — see .github/workflows/secret-scan.yml
+#
+# Newline-separated regexes matched against the file path. Paths listed here are
+# NOT scanned.
+#
+# Why this file exists: the scan runs `--results=verified,unknown`, and the
+# `unknown` class matches by STRUCTURE rather than validity. A Postgres DSN in a
+# test fixture or a docs example matches the Postgres detector, cannot be
+# verified (it points at nothing real), and so blocks a merge on a string that
+# was never a secret. Realistic-looking connection strings are unavoidable in
+# integration tests and database docs.
+#
+# Scope rule: only paths whose whole purpose is illustrative or fixture data.
+# Real source (`lib/`, `app/`, `components/`, `proxy.ts`) stays scanned — a
+# credential committed there is exactly what this workflow is for. Forks adding
+# their own fixture directories should append to this file rather than dropping
+# to `--results=verified`, which also discards genuinely unverifiable secrets
+# (a credential for a service TruffleHog has no verifier for, or a revoked but
+# still-committed key).
+
+# Test fixtures — integration tests need realistic DSNs to exercise parsing.
+^tests/
+
+# Documentation and AI-agent substrate — worked examples, deployment guides.
+# Deliberately NOT a blanket `\.md$`: a pasted credential in a README is a real
+# finding, so only the directories that exist to hold examples are exempt.
+^\.context/
+^\.claude/
+^docs/
+^DOCKER-TESTING\.md$
+
+# Environment and deployment templates — placeholder credentials by definition.
+^\.env\.example$
+^docker-compose(\.[a-z]+)?\.yml$
+
+# One-off investigation scripts (not shipped, not deployed).
+^scripts/spikes/
+
+# The Postgres tripwire itself. Its job is to hold DSN-shaped patterns, so the
+# structural detectors will always have something to match on. Its git history
+# also carries a literal example DSN in an explanatory comment (since removed —
+# see the note in the file) and the PR scan reads the WHOLE commit range, so
+# removing the line from the working tree does not retire the finding.
+#
+# The coverage lost is narrow and already compensated: the `Postgres DSN
+# tripwire` step below runs over EVERY tracked file regardless of path, so a real
+# DSN pasted into this script is still caught. What is genuinely given up is
+# TruffleHog's OTHER detectors on this one 70-line CI script.
+^scripts/ci/check-postgres-dsn\.sh$

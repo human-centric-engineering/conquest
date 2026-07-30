@@ -71,6 +71,14 @@ vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
   processPendingEvaluationRuns: vi.fn(),
 }));
 
+// The fork seam (#469). Left unmocked, the real empty registry always resolves
+// `undefined`, so neither the "a fork registered jobs" nor the rejection arm of
+// the summary ever ran. Mocked with the same default so existing tests see no
+// change.
+vi.mock('@/lib/orchestration/maintenance/app-jobs', () => ({
+  runDueAppJobs: vi.fn(),
+}));
+
 // ─── Imports ────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
@@ -86,6 +94,7 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import {
   POST,
@@ -164,6 +173,8 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     vi.mocked(processPendingExecutions).mockResolvedValue(DEFAULT_PENDING_RECOVERY_RESULT);
     vi.mocked(processOrphanedExecutions).mockResolvedValue(DEFAULT_ORPHAN_RESULT);
     vi.mocked(processPendingEvaluationRuns).mockResolvedValue(DEFAULT_EVAL_RUN_RESULT);
+    // Vanilla default: no fork jobs registered.
+    vi.mocked(runDueAppJobs).mockResolvedValue(undefined);
   });
 
   // ── Authentication ───────────────────────────────────────────────────────
@@ -299,6 +310,60 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     // Background tasks still kick off even when schedules fail
     // (8 tasks since evaluationRuns added in Phase 1).
     expect(body.data.backgroundTasks).toHaveLength(8);
+  });
+
+  it('returns a readable schedules.error when processDueSchedules rejects a non-Error', async () => {
+    // A thrown string has no `.message`; without the String() fallback the
+    // payload would report `{ error: undefined }` and the operator would see a
+    // failed sweep with no reason.
+    vi.mocked(processDueSchedules).mockRejectedValue('PG connection reset');
+
+    const response = await POST(makeRequest());
+    const body = await parseJson<{ data: { schedules: { error: string } } }>(response);
+
+    expect(body.data.schedules).toEqual({ error: 'PG connection reset' });
+  });
+
+  it('omits appJobs from the summary when no fork job is registered', async () => {
+    // Vanilla Sunrise: the seam must not add a key to the tick's log line.
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const [, payload] = vi
+      .mocked(logger.info)
+      .mock.calls.find(([msg]) => msg === 'Maintenance tick background tasks completed')!;
+    expect(payload).not.toHaveProperty('appJobs');
+  });
+
+  it('folds a fork job summary into the tick log line', async () => {
+    vi.mocked(runDueAppJobs).mockResolvedValue({ 'app:sweep': { pruned: 4 }, skipped: 1 });
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({ appJobs: { 'app:sweep': { pruned: 4 }, skipped: 1 } })
+    );
+  });
+
+  it('surfaces an app-jobs rejection as { error } without losing the platform summary', async () => {
+    // `runDueAppJobs` contains its own failures, so this arm is defensive — but
+    // it is the arm that decides whether a seam bug takes the whole log line
+    // down with it, so it is worth pinning.
+    vi.mocked(runDueAppJobs).mockRejectedValue(new Error('registry exploded'));
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({
+        appJobs: { error: expect.stringContaining('registry exploded') },
+        // The platform tasks are still reported.
+        webhookRetries: DEFAULT_RETRY_RESULT,
+      })
+    );
   });
 
   it('still kicks off background tasks when schedules reject', async () => {
@@ -475,6 +540,64 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       expect(second.status).toBe(202);
       const secondBody = await parseJson<{ data: { skipped?: boolean } }>(second);
       expect(secondBody.data.skipped).toBeUndefined();
+    });
+
+    it('a fired watchdog returns early when the guard was already released', async () => {
+      // The `!tickRunning` arm. The existing "settles immediately" test asserts
+      // no warning, but gets that from `.finally` clearing the timer — the
+      // watchdog body never runs there. This arms the watchdog, drops the guard
+      // without settling the chain, and lets it actually fire.
+      const hung = createDeferred<typeof DEFAULT_REAPER_RESULT>();
+      vi.mocked(reapZombieExecutions).mockReturnValue(hung.promise);
+
+      await POST(makeRequest()); // token 1, watchdog 1 armed, chain pending
+      __test_setTickRunning(false); // guard down, timer still armed
+
+      await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
+
+      // Token still matches, so the guard check is what short-circuits: no
+      // warning about a chain that is no longer holding anything.
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        'Maintenance tick: background chain exceeded max duration; releasing guard',
+        expect.objectContaining({ maxDurationMs: BACKGROUND_TASK_MAX_MS })
+      );
+
+      hung.resolve(DEFAULT_REAPER_RESULT);
+    });
+
+    it('an old watchdog firing after a newer tick started leaves the new guard alone', async () => {
+      // The `currentTickToken !== myTickToken` arm. Reaching it needs tick 1's
+      // watchdog pending while a later tick owns the token — which the normal
+      // paths never produce, because tick 1's `.finally` clears its own watchdog
+      // and its watchdog firing is what releases the guard. Forcing the guard
+      // down is what `__test_setTickRunning` is exported for.
+      const hung = createDeferred<typeof DEFAULT_REAPER_RESULT>();
+      vi.mocked(reapZombieExecutions).mockReturnValue(hung.promise);
+
+      await POST(makeRequest()); // token 1, watchdog 1 armed, chain pending
+      __test_setTickRunning(false);
+
+      // Tick 2 completes normally, so ITS watchdog is cleared and only the stale
+      // one is left armed — otherwise both fire on the same advance and tick 2's
+      // legitimate warning masks what tick 1's did.
+      vi.mocked(reapZombieExecutions).mockResolvedValue(DEFAULT_REAPER_RESULT);
+      const second = await POST(makeRequest()); // token 2
+      expect(second.status).toBe(202);
+      await vi.advanceTimersByTimeAsync(0); // tick 2 settles, clears watchdog 2
+
+      await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
+
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        'Maintenance tick: background chain exceeded max duration; releasing guard',
+        expect.objectContaining({ maxDurationMs: BACKGROUND_TASK_MAX_MS })
+      );
+
+      // And a fresh tick is still accepted — the stale watchdog touched nothing.
+      const third = await POST(makeRequest());
+      const thirdBody = await parseJson<{ data: { skipped?: boolean } }>(third);
+      expect(thirdBody.data.skipped).toBeUndefined();
+
+      hung.resolve(DEFAULT_REAPER_RESULT);
     });
 
     it('a late-settling old chain does not release a newer tick guard (token ownership)', async () => {

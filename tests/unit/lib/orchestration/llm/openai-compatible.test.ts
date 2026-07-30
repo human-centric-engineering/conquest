@@ -1770,3 +1770,78 @@ describe('buildBaseParams', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-request timeout / signal (#444)
+// ---------------------------------------------------------------------------
+
+describe('per-request timeout and signal', () => {
+  it('forwards timeoutMs and signal to the SDK on chat()', async () => {
+    // Arrange — a caller that genuinely needs longer than the client default
+    chatCreateMock.mockResolvedValue(makeChatCompletion('hello', 'stop'));
+    const controller = new AbortController();
+
+    // Act
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'hi' }], {
+      model: 'gpt-4o',
+      timeoutMs: 600_000,
+      signal: controller.signal,
+    });
+
+    // Assert — second argument, not baked into params
+    expect(chatCreateMock.mock.calls[0]?.[1]).toEqual({
+      timeout: 600_000,
+      signal: controller.signal,
+    });
+  });
+
+  it('forwards timeoutMs and signal to the SDK on chatStream()', async () => {
+    // Arrange
+    chatCreateMock.mockResolvedValue(toAsyncIterable([makeChunk({ finishReason: 'stop' })]));
+    const controller = new AbortController();
+
+    // Act
+    const provider = makeProvider();
+    for await (const _chunk of provider.chatStream([{ role: 'user', content: 'hi' }], {
+      model: 'gpt-4o',
+      timeoutMs: 600_000,
+      signal: controller.signal,
+    })) {
+      // drain
+    }
+
+    // Assert
+    expect(chatCreateMock.mock.calls[0]?.[1]).toEqual({
+      timeout: 600_000,
+      signal: controller.signal,
+    });
+  });
+
+  it('omits request options entirely when the caller sets neither', async () => {
+    // Arrange
+    chatCreateMock.mockResolvedValue(makeChatCompletion('hello', 'stop'));
+
+    // Act
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'hi' }], { model: 'gpt-4o' });
+
+    // Assert — undefined, so the client's construction-time timeout still applies
+    expect(chatCreateMock.mock.calls[0]?.[1]).toBeUndefined();
+  });
+
+  it('sends only timeout when no signal was supplied', async () => {
+    // Arrange
+    chatCreateMock.mockResolvedValue(makeChatCompletion('hello', 'stop'));
+
+    // Act
+    const provider = makeProvider();
+    await provider.chat([{ role: 'user', content: 'hi' }], {
+      model: 'gpt-4o',
+      timeoutMs: 5_000,
+    });
+
+    // Assert — no `signal: undefined` key, which some SDK versions treat as a value
+    expect(chatCreateMock.mock.calls[0]?.[1]).toEqual({ timeout: 5_000 });
+  });
+});

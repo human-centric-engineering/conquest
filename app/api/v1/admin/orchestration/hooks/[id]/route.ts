@@ -18,7 +18,7 @@ import { getClientIP } from '@/lib/security/ip';
 import { invalidateHookCache } from '@/lib/orchestration/hooks/registry';
 import { toSafeHook } from '@/lib/orchestration/hooks/serialize';
 import {
-  HOOK_EVENT_TYPES,
+  hookEventTypeSchema,
   RESERVED_HEADER_ERROR,
   hasReservedHookHeader,
 } from '@/lib/orchestration/hooks/types';
@@ -29,7 +29,8 @@ import { z } from 'zod';
 
 const updateHookSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  eventType: z.enum(HOOK_EVENT_TYPES).optional(),
+  // Accepts fork-namespaced types — see the create route (#465).
+  eventType: hookEventTypeSchema.optional(),
   action: z
     .object({
       type: z.literal('webhook'),

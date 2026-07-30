@@ -4,6 +4,7 @@
  * Tests for validation utilities in lib/api/validation.ts
  * - validateRequestBody() - Request body parsing and validation
  * - validateQueryParams() - Query parameter validation
+ * - validatePathParam() - Dynamic route segment validation
  * - parsePaginationParams() - Pagination parameter parsing with defaults
  */
 
@@ -13,9 +14,11 @@ import { NextRequest } from 'next/server';
 import {
   validateRequestBody,
   validateQueryParams,
+  validatePathParam,
   parsePaginationParams,
 } from '@/lib/api/validation';
 import { ValidationError } from '@/lib/api/errors';
+import { cuidSchema } from '@/lib/validations/common';
 
 describe('validateRequestBody()', () => {
   describe('valid JSON body', () => {
@@ -790,5 +793,73 @@ describe('parsePaginationParams()', () => {
       expect(result.page).toBe(3);
       expect(result.limit).toBe(20);
     });
+  });
+});
+
+describe('validatePathParam()', () => {
+  const VALID_CUID = 'clh3k2j9x0000qwer1234asdf';
+
+  it('should return the parsed value for a valid segment', () => {
+    expect(validatePathParam(VALID_CUID, cuidSchema)).toBe(VALID_CUID);
+  });
+
+  it('should return the SCHEMA output, not the raw input', () => {
+    // Guards the contract for transforming schemas: a route relying on the
+    // coercion would silently receive a string if this returned `raw`.
+    const numeric = z.coerce.number().int().positive();
+    const result = validatePathParam('42', numeric);
+
+    expect(result).toBe(42);
+    expect(typeof result).toBe('number');
+  });
+
+  it('should throw ValidationError — the type handleAPIError maps to 400', () => {
+    // A bare Error here would surface as a 500 at every migrated route.
+    expect(() => validatePathParam('not-a-cuid', cuidSchema)).toThrow(ValidationError);
+  });
+
+  it('should name the segment in the message via `label`', () => {
+    expect(() => validatePathParam('nope', cuidSchema, { label: 'capability id' })).toThrow(
+      'Invalid capability id'
+    );
+    // Default keeps the generic wording.
+    expect(() => validatePathParam('nope', cuidSchema)).toThrow('Invalid id');
+  });
+
+  it("should report failures under the `field` key, defaulting to 'id'", () => {
+    try {
+      validatePathParam('nope', cuidSchema, { label: 'agent id' });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      // `details` is what the client receives alongside the 400.
+      expect((error as ValidationError).details).toEqual({ id: ['Invalid ID format'] });
+    }
+
+    try {
+      validatePathParam('nope', cuidSchema, { field: 'capId' });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as ValidationError).details).toEqual({ capId: ['Invalid ID format'] });
+    }
+  });
+
+  it("should surface the schema's own messages rather than restating them", () => {
+    // Single source of truth: the detail text comes from the schema, so a
+    // schema whose message changes cannot leave 16 routes contradicting it.
+    const schema = z.string().min(5, 'too short').startsWith('x', 'must start with x');
+
+    try {
+      validatePathParam('a', schema, { label: 'slug' });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as ValidationError).details).toEqual({
+        id: ['too short', 'must start with x'],
+      });
+    }
+  });
+
+  it('should reject an empty segment', () => {
+    expect(() => validatePathParam('', cuidSchema)).toThrow(ValidationError);
   });
 });

@@ -250,23 +250,41 @@ return new Response(buffer, {
 
 ## Caching Guidelines
 
-### No Cache (Default for API Routes)
+### The default is applied for you
+
+Every JSON envelope response carries `Cache-Control: private, no-cache`. You do
+not set it — `successResponse()` and `errorResponse()` in `lib/api/responses.ts`
+apply `DEFAULT_CACHE_CONTROL`, and `checkConditional()` in `lib/api/etag.ts`
+sends the same value on its 304 so the 200 and 304 on an endpoint agree.
+
+Before this, nothing set a cache directive at all. A response carrying a
+validator (an `ETag`, which several routes send) but no freshness information is
+_heuristically cacheable_ — RFC 9111 §4.2.2 lets a shared cache store it and
+invent an expiry.
+
+**Why `no-cache` and not `no-store`.** `no-store` forbids the client keeping a
+copy, which would defeat the conditional-GET path the ETags exist for.
+`no-cache` lets the browser store and revalidate; `private` keeps shared caches
+out of it entirely.
+
+Routes that return a raw `Response` — SSE streams, file downloads, the Markdown
+exports — never pass through the envelope and set their own headers.
+
+### Overriding it
+
+The default is spread _before_ caller headers, so a route serving genuinely
+public data can replace it:
 
 ```typescript
-headers: { 'Cache-Control': 'no-store, max-age=0' }
+// Static, non-user-specific data. Note the arity: `headers` is in the THIRD
+// argument — the second is `meta`.
+return successResponse(data, undefined, {
+  headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400' },
+});
 ```
 
-### Private Cache (User-Specific Data)
-
-```typescript
-headers: { 'Cache-Control': 'private, max-age=300' }
-```
-
-### Public Cache (Static Data)
-
-```typescript
-headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400' }
-```
+Only do this when the payload is identical for every caller. If the response
+varies by session, leave the default alone.
 
 ## Related Documentation
 

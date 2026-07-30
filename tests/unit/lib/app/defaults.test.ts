@@ -1,18 +1,33 @@
 /**
- * Tests: lib/app/ bootstrap files ship as no-op defaults
+ * Tests: lib/app/ seams ship as no-op defaults
  *
- * The auto-wired bootstrap hooks (`lib/app/rate-limit.ts`, `lib/app/capabilities.ts`,
- * `lib/app/context-contributors.ts`, `lib/app/admin-nav.ts`) must register NOTHING
- * out of the box — the template
- * ships them empty and forks fill them in. The wiring tests
- * (`bootstrap-wiring.test.ts`, `admin-nav-wiring.test.tsx`) replace these hooks
- * with registering versions; this file exercises the REAL defaults to lock in
- * the no-op contract (a stray default registration would silently apply to
- * every install).
+ * Every `lib/app/*` file is a fork-owned scaffold that Sunrise ships EMPTY. This
+ * file exercises the REAL defaults to lock in that contract — a stray default
+ * registration would silently apply to every install (a lint rule every fork
+ * inherits, an auth email swapped out, a restricted agent's document access
+ * widened).
  *
- * @see lib/app/rate-limit.ts · lib/app/capabilities.ts · lib/app/admin-nav.ts
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — filling a seam is EXPECTED to fail a row here
+ * ---------------------------------------------------------------------------
+ * This test asserts a property every fork is expected to violate: the seams
+ * exist precisely so you fill them. When you fill one, **pin the new value**
+ * rather than deleting the row:
+ *
+ *     // BEFORE (Sunrise default)
+ *     assert: () => expect(appEslintConfig).toEqual([]),
+ *     // AFTER  (fork spreads its own tier config)
+ *     assert: () => expect(appEslintConfig).toEqual(frameworkEslintConfig),
+ *
+ * Pinning keeps the protection for the seams you have NOT filled; deleting the
+ * row loses it silently. The table below is the whole surface — one row per
+ * seam — so a fork's diff here is a line, not a rewrite. See CUSTOMIZATION.md §4.
+ *
+ * @see lib/app/ · CUSTOMIZATION.md §4
  */
 
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect, afterEach } from 'vitest';
 import { registerAppRateLimits } from '@/lib/app/rate-limit';
 import { initAppCapabilities } from '@/lib/app/capabilities';
@@ -22,90 +37,184 @@ import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/publ
 import { emailOverrides } from '@/lib/app/emails';
 import { initApp } from '@/lib/app/bootstrap';
 import { initAppKnowledgeAccessContributors } from '@/lib/app/knowledge-access-contributors';
-import { appFrameSrc } from '@/lib/app/csp';
+import { initAppGuardFloorContributors } from '@/lib/app/guard-floor-contributors';
+import { initAppGuardEventContributors } from '@/lib/app/guard-event-contributors';
+import { appAgentFields } from '@/lib/app/agent-fields';
+import { appProtectedRoutes } from '@/lib/app/protected-routes';
+import { appEnvSchema } from '@/lib/app/env';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
+import { appFrameSrc } from '@/lib/app/csp';
+import { initAppUserCreatedHooks } from '@/lib/app/user-created';
+import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
+
+/**
+ * One row per `lib/app/*` seam.
+ *
+ * - `seam` — the file a fork edits, and the test name.
+ * - `risk` — what a stray default here would do to every install. This is the
+ *   reason the row exists; keep it accurate if you pin a fork value.
+ * - `assert` — runs the REAL default and asserts it registers/overrides nothing.
+ *   May be async.
+ */
+interface SeamDefault {
+  seam: string;
+  risk: string;
+  assert: () => void | Promise<void>;
+}
+
+/**
+ * Seam files deliberately absent from the table below, with the reason. The
+ * drift guard at the bottom of this file allows exactly these two.
+ */
+const UNASSERTED_SEAMS = new Set([
+  // Asserted behaviourally instead — see tests/unit/lib/db/drift-probes.test.ts.
+  'lib/app/db-drift.ts',
+  // The one seam that ships real logic (a classifier) rather than an empty
+  // value, so "registers nothing" is not the contract. Covered by its own tests.
+  'lib/app/surface.ts',
+]);
+
+const SEAM_DEFAULTS: SeamDefault[] = [
+  {
+    seam: 'lib/app/rate-limit.ts',
+    risk: 'a stray tier or rule would re-cap every install',
+    assert: () => {
+      registerAppRateLimits();
+      // No app rules → the effective policy is the base policy BY IDENTITY.
+      expect(getEffectiveRateLimitPolicy()).toBe(RATE_LIMIT_POLICY);
+    },
+  },
+  {
+    seam: 'lib/app/capabilities.ts',
+    risk: 'a stray capability would be dispatchable on every install',
+    // Behavioural reach into the dispatcher is covered by bootstrap-wiring.test.ts.
+    assert: () => expect(initAppCapabilities()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/context-contributors.ts',
+    risk: 'a stray contributor would inject prompt context into every chat turn',
+    // Behavioural reach into buildContext is covered by context-builder.test.ts.
+    assert: () => expect(initAppContextContributors()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/admin-nav.ts',
+    risk: 'a stray section would appear in every install’s admin sidebar',
+    assert: () => {
+      __resetNavRegistryForTests();
+      initAppNav();
+      expect(getRegisteredNavSections()).toHaveLength(0);
+    },
+  },
+  {
+    seam: 'lib/app/public-nav.ts',
+    risk: 'a stray non-null list would silently REPLACE the marketing nav',
+    assert: () => {
+      expect(publicNavItems).toBeNull();
+      expect(footerNavItems).toBeNull();
+      expect(footerLegalItems).toBeNull();
+    },
+  },
+  {
+    seam: 'lib/app/emails.ts',
+    risk: 'a stray override would swap an auth email for every install',
+    assert: () => expect(emailOverrides).toEqual({}),
+  },
+  {
+    seam: 'lib/app/bootstrap.ts',
+    risk: 'a stray default would run one-time work on every install boot',
+    // That instrumentation calls this in all envs, try/catch-isolated, is
+    // covered by tests/unit/instrumentation.test.ts.
+    assert: async () => {
+      await expect(initApp()).resolves.toBeUndefined();
+    },
+  },
+  {
+    seam: 'lib/app/knowledge-access-contributors.ts',
+    risk: 'a stray contributor would widen every restricted agent’s document access',
+    // Behavioural reach into the resolver is covered by resolveAgentDocumentAccess.test.ts.
+    assert: () => expect(initAppKnowledgeAccessContributors()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/guard-floor-contributors.ts',
+    risk: 'a stray contributor would raise the guard floor on every install',
+    assert: () => expect(initAppGuardFloorContributors()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/guard-event-contributors.ts',
+    risk: 'a stray observer would receive every install’s inline-chat guard events',
+    assert: () => expect(initAppGuardEventContributors()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/agent-fields.ts',
+    risk: 'a stray descriptor would add a field to every install’s agent form',
+    assert: () => expect(appAgentFields).toEqual([]),
+  },
+  {
+    seam: 'lib/app/protected-routes.ts',
+    risk: 'a stray path would put a public route behind auth on every install',
+    assert: () => expect(appProtectedRoutes).toEqual([]),
+  },
+  {
+    seam: 'lib/app/env.ts',
+    risk: 'a stray key would make an unset env var fail boot on every install',
+    // An empty z.object() accepts (and strips) anything → parses {} to {}.
+    assert: () => expect(appEnvSchema.parse({})).toEqual({}),
+  },
+  {
+    seam: 'lib/app/eslint.config.mjs',
+    risk: 'a stray flat-config block would apply lint rules to every fork',
+    // The root eslint.config.mjs spreads this array last; that spread itself is
+    // exercised by every `npm run lint` run.
+    assert: () => expect(appEslintConfig).toEqual([]),
+  },
+  {
+    seam: 'lib/app/jobs.ts',
+    risk: 'a stray job would run on every install\u2019s maintenance tick',
+    assert: () => {
+      __resetAppJobsForTests();
+      // getAppJobs() triggers the lazy init, so this exercises the REAL seam.
+      expect(getAppJobs()).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/user-created.ts',
+    risk: 'a stray hook would run on every signup on every install',
+    assert: () => expect(initAppUserCreatedHooks()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/csp.ts',
+    risk: 'a stray origin would widen the iframe policy on every install',
+    // These values are spliced straight into a response header, so an
+    // accidental default here is a security change, not a cosmetic one.
+    assert: () => expect(appFrameSrc).toEqual([]),
+  },
+];
 
 afterEach(() => {
   __resetNavRegistryForTests();
 });
 
-describe('lib/app/ bootstrap defaults are no-ops', () => {
-  it('registerAppRateLimits registers no tiers or rules by default', () => {
-    // Act — run the real (empty) hook
-    registerAppRateLimits();
-
-    // Assert — no app rules → the effective policy is the base policy by identity
-    expect(getEffectiveRateLimitPolicy()).toBe(RATE_LIMIT_POLICY);
+describe('lib/app/ seams ship empty', () => {
+  it.each(SEAM_DEFAULTS)('$seam registers nothing by default', async ({ assert }) => {
+    await assert();
   });
 
-  it('initAppCapabilities is a no-op by default', () => {
-    // The real default does nothing and returns void; forks add
-    // registerAppCapability() calls. (Behavioural reach into the dispatcher is
-    // covered by bootstrap-wiring.test.ts.)
-    expect(initAppCapabilities()).toBeUndefined();
-  });
+  it('has a row for every seam file in lib/app/', () => {
+    // Drift guard: adding a `lib/app/*` seam without adding a row above would
+    // leave it silently unprotected. Reads the directory rather than trusting
+    // the table to be complete.
+    const dir = path.join(process.cwd(), 'lib/app');
+    const onDisk = readdirSync(dir)
+      .filter((f) => /\.(ts|mjs)$/.test(f) && !f.endsWith('.d.ts'))
+      .map((f) => `lib/app/${f}`);
 
-  it('initAppContextContributors is a no-op by default', () => {
-    // The real default registers no prompt-context loaders and returns void;
-    // forks add registerContextContributor() calls. (Behavioural reach into
-    // buildContext is covered by context-builder.test.ts.)
-    expect(initAppContextContributors()).toBeUndefined();
-  });
+    const covered = new Set(SEAM_DEFAULTS.map((s) => s.seam));
+    const missing = onDisk.filter((f) => !covered.has(f) && !UNASSERTED_SEAMS.has(f));
+    const stale = [...covered].filter((f) => !onDisk.includes(f));
 
-  it('initAppNav registers no admin nav sections by default', () => {
-    // Arrange — clean registry
-    __resetNavRegistryForTests();
-
-    // Act — run the real (empty) hook
-    initAppNav();
-
-    // Assert — nothing registered
-    expect(getRegisteredNavSections()).toHaveLength(0);
-  });
-
-  it('public-nav overrides are all null by default (= use platform defaults)', () => {
-    // A stray non-null list here would silently replace the marketing nav for
-    // every install (issue #347 ships these unset).
-    expect(publicNavItems).toBeNull();
-    expect(footerNavItems).toBeNull();
-    expect(footerLegalItems).toBeNull();
-  });
-
-  it('email overrides are empty by default (= use platform templates)', () => {
-    // A stray override here would silently swap an auth email for every install.
-    expect(emailOverrides).toEqual({});
-  });
-
-  it('initApp does no boot work by default (resolves to undefined)', async () => {
-    // The real default is an empty async fn; forks fill it. A stray default
-    // would run one-time work on every install boot. (The instrumentation
-    // wiring — that register() calls this in all envs, isolated in try/catch —
-    // is covered by tests/unit/instrumentation.test.ts.)
-    await expect(initApp()).resolves.toBeUndefined();
-  });
-
-  it('initAppKnowledgeAccessContributors is a no-op by default', () => {
-    // The real default registers no access contributors and returns void; forks
-    // add registerAgentAccessContributor() calls. A stray default would silently
-    // widen every restricted agent's document access on every install.
-    // (Behavioural reach into the resolver is covered by
-    // resolveAgentDocumentAccess.test.ts.)
-    expect(initAppKnowledgeAccessContributors()).toBeUndefined();
-  });
-
-  it('the CSP frame-src seam is empty by default (= "self" only)', () => {
-    // A stray origin here would widen the iframe policy for every install, and
-    // these values are spliced straight into a response header.
-    expect(appFrameSrc).toEqual([]);
-  });
-
-  it('the ESLint config seam is an empty array by default', () => {
-    // A stray flat-config block here would silently apply lint rules to every
-    // fork (the root eslint.config.mjs spreads this array last). Forks fill it;
-    // vanilla Sunrise ships it empty. The root spread itself is exercised by
-    // every `npm run lint` run.
-    expect(appEslintConfig).toEqual([]);
+    expect(missing, 'lib/app/ seam with no row in SEAM_DEFAULTS').toEqual([]);
+    expect(stale, 'SEAM_DEFAULTS row for a file that no longer exists').toEqual([]);
   });
 });

@@ -43,6 +43,7 @@ import {
   DEFAULT_MAX_RETRIES,
   DEFAULT_TIMEOUT_MS,
   ProviderError,
+  buildRequestOptions,
   toProviderError,
   withRetry,
   type LlmProvider,
@@ -137,14 +138,19 @@ export class AnthropicProvider implements LlmProvider {
       hasTools: Boolean(options.tools?.length),
     });
 
+    const requestOptions = buildRequestOptions(options);
+
     let message: Message;
     try {
-      message = await withRetry<Message>(() => this.client.messages.create(params), {
-        maxRetries: this.maxRetries,
-        isLocal: this.isLocal,
-        ...(options.signal !== undefined ? { signal: options.signal } : {}),
-        operation: 'anthropic.messages.create',
-      });
+      message = await withRetry<Message>(
+        () => this.client.messages.create(params, requestOptions),
+        {
+          maxRetries: this.maxRetries,
+          isLocal: this.isLocal,
+          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          operation: 'anthropic.messages.create',
+        }
+      );
     } catch (err) {
       throw toProviderError(err, 'Anthropic chat request failed');
     }
@@ -220,7 +226,7 @@ export class AnthropicProvider implements LlmProvider {
 
     let stream: Stream<RawMessageStreamEvent>;
     try {
-      stream = await this.client.messages.create(params);
+      stream = await this.client.messages.create(params, buildRequestOptions(options));
     } catch (err) {
       throw toProviderError(err, 'Anthropic chat stream failed');
     }

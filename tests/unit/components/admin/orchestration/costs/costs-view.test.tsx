@@ -109,7 +109,7 @@ const MOCK_SUMMARY: CostSummary = {
       utilisation: null,
     },
   ],
-  byModel: [{ model: 'claude-haiku-4-5', monthSpend: 8.0 }],
+  byModel: [{ model: 'claude-haiku-4-5', provider: 'anthropic', monthSpend: 8.0 }],
   trend: [{ date: '2026-04-14', totalCostUsd: 1.2 }],
   localSavings: null,
 };

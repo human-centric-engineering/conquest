@@ -94,9 +94,55 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   },
 }));
 
+/**
+ * Every tool name these tests make the model emit.
+ *
+ * The handler refuses any tool call whose name is not in the agent's ADVERTISED
+ * set (`getCapabilityDefinitions`), because dispatching a name the agent was
+ * never granted is a privilege-escalation path — a missing `AiAgentCapability`
+ * row synthesizes a default-ALLOW binding in the dispatcher.
+ *
+ * These suites exercise dispatch mechanics rather than authorization, so the
+ * fixture has to advertise what they dispatch. That is also simply more
+ * realistic than the `[]` it used to return: a real agent that calls
+ * `search_knowledge_base` necessarily has it advertised. Authorization itself
+ * is covered by the dedicated "unadvertised tool" tests below, which override
+ * this mock.
+ */
+const ADVERTISED_TEST_TOOLS = [
+  'admin_action',
+  'bad_tool',
+  'broken_tool',
+  'do_thing',
+  'error_tool',
+  'failing',
+  'flaky_tool',
+  'get_weather',
+  'good_tool',
+  'hang_tool',
+  'lookup_order',
+  'loop_tool',
+  'mock',
+  'one_tool',
+  'run_workflow',
+  'search',
+  'search_knowledge_base',
+  'silent_tool',
+  'some_tool',
+  'tool_a',
+  'tool_alpha',
+  'tool_b',
+  'tool_beta',
+  'tool_x',
+].map((name) => ({
+  name,
+  description: `Test capability ${name}`,
+  parameters: { type: 'object', properties: {} },
+}));
+
 vi.mock('@/lib/orchestration/capabilities/registry', () => ({
   registerBuiltInCapabilities: vi.fn(),
-  getCapabilityDefinitions: vi.fn().mockResolvedValue([]),
+  getCapabilityDefinitions: vi.fn(),
 }));
 
 vi.mock('@/lib/orchestration/chat/context-builder', () => ({
@@ -159,6 +205,7 @@ const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/
 const { getCapabilityDefinitions } = await import('@/lib/orchestration/capabilities/registry');
 const { buildContext, invalidateContext } =
   await import('@/lib/orchestration/chat/context-builder');
+const { emitHookEvent } = await import('@/lib/orchestration/hooks/registry');
 const { streamChat } = await import('@/lib/orchestration/chat/streaming-handler');
 const { CostOperation } = await import('@/types/orchestration');
 const { getBreaker } = await import('@/lib/orchestration/llm/circuit-breaker');
@@ -274,6 +321,13 @@ const baseRequest = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+
+  // Advertise every tool these suites dispatch. The handler refuses tool names
+  // outside the agent's advertised set, so a fixture that advertised nothing
+  // while emitting tool calls would exercise the refusal path in every test
+  // rather than the dispatch path they are actually about. See the note on
+  // ADVERTISED_TEST_TOOLS.
+  vi.mocked(getCapabilityDefinitions).mockResolvedValue(ADVERTISED_TEST_TOOLS);
 
   // Sensible defaults
   (checkBudget as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -4864,5 +4918,438 @@ describe('forced knowledge retrieval (knowledgeRetrievalMode)', () => {
       capabilityEnabled: false,
     });
     expect(options.toolChoice).toBeUndefined();
+  });
+});
+
+/**
+ * Advertised-set enforcement.
+ *
+ * The dispatcher synthesizes a default-ALLOW binding when no `AiAgentCapability`
+ * pivot row exists, so a tool name the agent was never granted would previously
+ * dispatch — unrestricted. Two things make that reachable rather than
+ * theoretical: a prompt-injected document can make the model emit an arbitrary
+ * registered slug, and a conversation resumed across a capability being revoked
+ * carries the model's own earlier calls to the removed tool in its history,
+ * which is exactly the sort of thing a model imitates.
+ */
+describe('StreamingChatHandler — unadvertised tool refusal', () => {
+  beforeEach(() => {
+    // This agent is granted exactly one tool.
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search_knowledge_base',
+        description: 'Search the knowledge base',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+  });
+
+  function providerEmitting(toolName: string) {
+    return mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc1', name: toolName, arguments: { target: 'anything' } },
+        },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+      [
+        { type: 'text', content: 'Understood.' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 3 }, finishReason: 'stop' },
+      ],
+    ]);
+  }
+
+  it('never dispatches a tool the agent does not advertise', async () => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('run_workflow'),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(baseRequest));
+
+    // The whole point: the dispatcher is never reached for the ungranted tool.
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('still dispatches a tool the agent DOES advertise', async () => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('search_knowledge_base'),
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { results: [] },
+    });
+
+    await collect(streamChat(baseRequest));
+
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      'search_knowledge_base',
+      { target: 'anything' },
+      expect.objectContaining({ agentId: 'agent-1' })
+    );
+  });
+
+  it('persists a tool-result row so the next provider call is not malformed', async () => {
+    // An assistant message carrying a toolCall with NO matching tool result
+    // makes the next provider request 400. The refusal path must therefore
+    // still write the pair, exactly like the repeated-failure skip does.
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('run_workflow'),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(baseRequest));
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const toolMsgs = createCalls.filter((c: any) => c[0].data.role === 'tool');
+    expect(toolMsgs).toHaveLength(1);
+
+    const content = JSON.parse(toolMsgs[0][0].data.content as string) as {
+      success: boolean;
+      error: { code: string };
+    };
+    expect(content.success).toBe(false);
+    expect(content.error.code).toBe('tool_not_advertised');
+  });
+
+  it('refuses unadvertised tools in the parallel batch while dispatching granted ones', async () => {
+    const provider = mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc1', name: 'search_knowledge_base', arguments: { q: 'a' } },
+        },
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc2', name: 'run_workflow', arguments: { slug: 'evil' } },
+        },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+      [
+        { type: 'text', content: 'Done.' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 3 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: {},
+    });
+
+    await collect(streamChat(baseRequest));
+
+    // Exactly one dispatch — the granted tool. The batch is not refused wholesale.
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      'search_knowledge_base',
+      { q: 'a' },
+      expect.anything()
+    );
+
+    // Both tool calls still get a result row, so the follow-up request is valid.
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const toolMsgs = createCalls.filter((c: any) => c[0].data.role === 'tool');
+    expect(toolMsgs).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-token read batching (#449)
+// ---------------------------------------------------------------------------
+
+describe('pre-token read batching', () => {
+  it('issues the context, memory and capability reads concurrently', async () => {
+    // Arrange — gate all three reads so none can resolve until every one has
+    // been *started*. Run serially, only the first would ever start, and the
+    // wait below would time out. This is the whole point of the change: the
+    // pre-token cost should be the slowest round trip, not the sum of three.
+    const started: string[] = [];
+    const release: Array<() => void> = [];
+    const gate = (mock: ReturnType<typeof vi.fn>, label: string, value: unknown): void => {
+      // A deliberately pending promise is the mechanism under test.
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      mock.mockImplementation(() => {
+        started.push(label);
+        return new Promise((resolve) => release.push(() => resolve(value)));
+      });
+    };
+
+    gate(buildContext as ReturnType<typeof vi.fn>, 'context', '=== LOCKED CONTEXT ===\ndata');
+    gate(prisma.aiUserMemory.findMany as ReturnType<typeof vi.fn>, 'memory', []);
+    gate(getCapabilityDefinitions as ReturnType<typeof vi.fn>, 'capabilities', []);
+
+    const provider = mockProvider([
+      [{ type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'stop' }],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    // Act — drive the stream without awaiting it, then let the reads land
+    const pending = collect(streamChat({ ...baseRequest, contextType: 'pattern', contextId: '7' }));
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(3));
+    } finally {
+      // Always release, or a failed expectation leaves the generator hanging.
+      for (const resolve of release) resolve();
+    }
+    await pending;
+
+    // Assert — all three in flight together
+    expect(started).toEqual(expect.arrayContaining(['context', 'memory', 'capabilities']));
+  });
+
+  it('still applies the capability definitions it loaded in the batch', async () => {
+    // Arrange — hoisting the read must not change what the tool loop sees
+    (getCapabilityDefinitions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { name: 'lookup_order', description: 'Look up an order', parameters: { type: 'object' } },
+    ]);
+
+    const provider = mockProvider([
+      [{ type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'stop' }],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    // Act
+    await collect(streamChat(baseRequest));
+
+    // Assert — the definition reached the provider call as a tool
+    const calls = (provider.chatStream as ReturnType<typeof vi.fn>).mock.calls;
+    const options = calls[0]?.[1] as { tools?: Array<{ name: string }> } | undefined;
+    expect(options?.tools).toEqual([
+      { name: 'lookup_order', description: 'Look up an order', parameters: { type: 'object' } },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent-opened turns and app message metadata (#474, #475)
+// ---------------------------------------------------------------------------
+
+describe('agent-opened turns (#474)', () => {
+  /** A provider that just replies with text and finishes. */
+  const replying = () =>
+    mockProvider([
+      [
+        { type: 'text', content: 'Welcome. What would you like to fix?' },
+        { type: 'done', usage: { inputTokens: 20, outputTokens: 8 }, finishReason: 'stop' },
+      ],
+    ]);
+
+  const openingRequest = {
+    agentSlug: 'helper',
+    userId: 'u1',
+    openingTurn: { content: 'Open this moment, then stop and wait for them.' },
+  };
+
+  beforeEach(() => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: replying(),
+      usedSlug: 'anthropic',
+    });
+  });
+
+  it('persists NO user message for an opening turn', async () => {
+    // The whole point of the issue: nothing may appear in the person's own
+    // transcript carrying words they did not write.
+    await collect(streamChat(openingRequest));
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRows = createCalls.filter((c: any) => c[0].data.role === 'user');
+    expect(userRows).toHaveLength(0);
+  });
+
+  it('sends the opener to the provider as a system message, never as a user one', async () => {
+    const provider = replying();
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(openingRequest));
+
+    const messages = (provider.chatStream as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    const opener = messages.find((m) => m.content === openingRequest.openingTurn.content);
+    expect(opener).toBeDefined();
+    expect(opener?.role).toBe('system');
+    // And no user-role message at all this turn.
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(0);
+  });
+
+  it('omits messageId from the start event when there is no user message', async () => {
+    const events = (await collect(streamChat(openingRequest))) as Array<Record<string, unknown>>;
+    const start = events.find((e) => e.type === 'start');
+
+    expect(start).toBeDefined();
+    expect(start?.conversationId).toBeDefined();
+    expect(start?.messageId).toBeUndefined();
+  });
+
+  it('emits no user-role message.created, but still emits the assistant one', async () => {
+    // A subscriber reacting to "the user said something" must not see a phantom.
+    // The ASSISTANT event must still fire — the agent genuinely created a message,
+    // and suppressing it would break anything watching for agent output.
+    await collect(streamChat(openingRequest));
+
+    const created = (emitHookEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: any) => c[0] === 'message.created'
+    );
+    const roles = created.map((c: any) => c[1].role);
+    expect(roles).not.toContain('user');
+    expect(roles).toContain('assistant');
+  });
+
+  it('still streams the assistant reply and persists it', async () => {
+    // Skipping the user row must not skip the turn.
+    const events = (await collect(streamChat(openingRequest))) as Array<Record<string, unknown>>;
+
+    expect(events.some((e) => e.type === 'content')).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(createCalls.filter((c: any) => c[0].data.role === 'assistant').length).toBeGreaterThan(
+      0
+    );
+  });
+
+  it('rejects a turn carrying neither message nor openingTurn', async () => {
+    // `message` became optional to allow openers, so this now type-checks — which
+    // is exactly why the runtime guard is needed. No cast: if a future change made
+    // this a type error again, that would be worth knowing.
+    const events = (await collect(streamChat({ agentSlug: 'helper', userId: 'u1' }))) as Array<
+      Record<string, unknown>
+    >;
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+  });
+
+  it('rejects a whitespace-only message with no openingTurn', async () => {
+    const events = (await collect(
+      streamChat({ agentSlug: 'helper', userId: 'u1', message: '   ' })
+    )) as Array<Record<string, unknown>>;
+
+    expect(events.find((e) => e.type === 'error')).toBeDefined();
+  });
+
+  describe('attachment-only turns are not empty turns', () => {
+    // The embed surface deliberately permits an empty `message` when files are
+    // attached — a vision turn is commonly one photo with no caption — and its
+    // route-level check already requires text OR an attachment
+    // (app/api/v1/embed/chat/stream/route.ts). Gating only on empty text would
+    // reject those turns at the handler after the route let them through.
+    const PNG_BASE64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+    const photoTurn = {
+      agentSlug: 'helper',
+      userId: 'u1',
+      message: '',
+      attachments: [{ name: 'photo.png', mediaType: 'image/png', data: PNG_BASE64 }],
+    };
+
+    beforeEach(() => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ enableImageInput: true, enableDocumentInput: true })
+      );
+      (prisma.aiOrchestrationSettings.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        imageInputGloballyEnabled: true,
+        documentInputGloballyEnabled: true,
+      });
+      // The suite-wide `vi.clearAllMocks()` clears call records but not
+      // implementations, so the `mockRejectedValue` the attachment-gate suite
+      // installs on this spy leaks forward. Put it back to "model supports it".
+      (assertModelSupportsAttachments as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    });
+
+    it('streams a turn carrying only an attachment', async () => {
+      const events = (await collect(streamChat(photoTurn))) as Array<Record<string, unknown>>;
+
+      expect(events.find((e) => e.type === 'error')).toBeUndefined();
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+    });
+
+    it('treats it as a user turn, not an opener', async () => {
+      // The distinction matters: an opener persists no user row, so misreading
+      // an attachment-only turn as one would silently drop the person's file
+      // from their own transcript.
+      await collect(streamChat(photoTurn));
+
+      const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+      const userRows = createCalls.filter((c: any) => c[0].data.role === 'user');
+      expect(userRows).toHaveLength(1);
+      expect(userRows[0][0].data.content).toBe('');
+    });
+
+    it('still rejects a turn with no text, no opener and no attachments', async () => {
+      const events = (await collect(
+        streamChat({ agentSlug: 'helper', userId: 'u1', message: '', attachments: [] })
+      )) as Array<Record<string, unknown>>;
+
+      expect(events.find((e) => e.type === 'error')).toBeDefined();
+    });
+  });
+
+  it('prefers a real user message when both are supplied', async () => {
+    // The person's own words are the turn; the opener is ignored, not prepended.
+    await collect(
+      streamChat({
+        ...baseRequest,
+        openingTurn: { content: 'IGNORED OPENER' },
+      })
+    );
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRows = createCalls.filter((c: any) => c[0].data.role === 'user');
+    expect(userRows).toHaveLength(1);
+    expect(userRows[0][0].data.content).toBe(baseRequest.message);
+  });
+});
+
+describe('app message metadata (#475)', () => {
+  beforeEach(() => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: mockProvider([
+        [
+          { type: 'text', content: 'ok' },
+          { type: 'done', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'stop' },
+        ],
+      ]),
+      usedSlug: 'anthropic',
+    });
+  });
+
+  it('stores caller metadata under a namespaced `app` key', async () => {
+    // Namespaced so it can never collide with a platform field — including one a
+    // future release adds.
+    await collect(
+      streamChat({ ...baseRequest, messageMetadata: { synthetic: true, trigger: 'phase-2' } })
+    );
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRow = createCalls.find((c: any) => c[0].data.role === 'user');
+    expect(userRow?.[0].data.metadata).toEqual({
+      app: { synthetic: true, trigger: 'phase-2' },
+    });
+  });
+
+  it('writes no metadata key when the caller supplies none', async () => {
+    await collect(streamChat(baseRequest));
+
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userRow = createCalls.find((c: any) => c[0].data.role === 'user');
+    expect(userRow?.[0].data.metadata).toBeUndefined();
   });
 });

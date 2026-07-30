@@ -528,7 +528,7 @@ The workflow edit page (`/admin/orchestration/workflows/[id]`) includes a `<Work
 
 Features:
 
-- List of schedules with name, cron expression badge, next run time, enabled toggle, delete button
+- List of schedules with name, cron expression badge, next run time, last run time (`never run yet` until the scheduler first fires it), enabled toggle, delete button
 - Empty state with CalendarClock icon
 - Create dialog: name, cron expression (with helper text), input template (JSON textarea), enabled toggle
 - Toggle enabled/disabled via PATCH

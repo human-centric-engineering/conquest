@@ -34,6 +34,17 @@ const serverEnvSchema = z.object({
     message:
       'DATABASE_URL must be a valid PostgreSQL connection string (e.g., postgresql://user:password@localhost:5432/dbname)',
   }),
+  DATABASE_POOL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'Maximum pg connections held by this process. Defaults to 10, which suits one ' +
+        'long-running server (docker-compose, Render, Railway). On a function-per-request ' +
+        'platform every warm instance holds its own pool, so set 1 and put a transaction ' +
+        'pooler in front. See .context/environment/database-env.md.'
+    ),
 
   // Authentication (better-auth)
   BETTER_AUTH_URL: z.string().url({
@@ -82,6 +93,20 @@ const serverEnvSchema = z.object({
         'in .context/architecture/multi-tenancy.md. Setting "multi" without that work makes the ' +
         'Prisma client throw at startup (see the tenancy seam in lib/db/client.ts) rather than ' +
         'silently run unscoped queries.'
+    ),
+
+  // Capability authorization model (see lib/orchestration/capabilities/dispatcher.ts)
+  CAPABILITY_BINDING_MODE: z
+    .enum(['permissive', 'strict'])
+    .default('permissive')
+    .describe(
+      'How the capability dispatcher treats a MISSING `AiAgentCapability` row. ' +
+        '"permissive" (default) synthesizes a default-allow binding, so deleting a grant does ' +
+        'NOT revoke a capability — it widens it, by dropping any customConfig pin. Revoke by ' +
+        'setting isEnabled:false and keeping the row. "strict" makes a missing row deny instead. ' +
+        'Strict is opt-in because it retroactively revokes every capability an agent relied on ' +
+        'implicitly, including the mcp-system agent, which dispatches built-ins with no pivot ' +
+        'rows in a default install — audit AiAgentCapability before enabling it.'
     ),
 
   // Logging Configuration (optional)

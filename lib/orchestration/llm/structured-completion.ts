@@ -14,6 +14,37 @@
  * tag their own `phase` (see the field docs) so spans/costs are labelled by
  * whatever operation is running (`'summary'`/`'scoring'` for evaluations, a
  * caller-specific string like `'slot-extraction'` for anything else).
+ *
+ * ## Contract: this module PERSISTS NOTHING (#472)
+ *
+ * Neither the prompt nor the completion is written anywhere. No database client
+ * is imported, no row is created, and nothing is logged that contains prompt or
+ * completion text. A call goes to the provider, the response is parsed, and the
+ * text is returned to the caller and then forgotten.
+ *
+ * **This is a guarantee, not an accident of the current implementation.** It was
+ * previously only incidentally true — the docstring promised *layering*
+ * neutrality ("no evaluation coupling, no Next.js imports"), which says nothing
+ * about writes. Callers had begun to depend on the stronger property: a fork
+ * categorising calendar-event titles into aggregate buckets persists only the
+ * per-bucket totals and makes a user-facing privacy claim that no title,
+ * attendee or description is ever stored. Under the weaker reading, adding
+ * prompt logging for debugging or completion persistence for eval replay would
+ * have been an entirely reasonable change that silently broke that claim without
+ * touching a line of the fork's code.
+ *
+ * So it is now contractual, and enforced by
+ * `tests/unit/lib/orchestration/llm/structured-completion-no-persistence.test.ts`,
+ * which fails if this module gains a database import or a `prisma.*` call.
+ *
+ * If a future feature genuinely needs to persist here, that is a **breaking
+ * change to a documented guarantee**: it needs an opt-in flag defaulting to off,
+ * a CHANGELOG entry saying so, and the test above updated deliberately rather
+ * than deleted to make a build pass.
+ *
+ * Note the boundary: cost *metadata* (token counts, USD) is returned to the
+ * caller, and a caller may well persist that. Aggregate token counts carry no
+ * prompt content, so that is outside this guarantee.
  */
 
 import { calculateCost } from '@/lib/orchestration/llm/cost-tracker';
@@ -150,6 +181,10 @@ export async function runStructuredCompletion<T>(
         model: opts.model,
         temperature,
         maxTokens,
+        // Both halves: the signal bounds the whole attempt sequence (it is
+        // absolute, so retries share it), `timeoutMs` caps the individual HTTP
+        // request inside the provider SDK.
+        timeoutMs,
         signal: firstSignal,
         ...(responseFormat ? { responseFormat } : {}),
       });
@@ -192,6 +227,7 @@ export async function runStructuredCompletion<T>(
           model: opts.model,
           temperature: 0,
           maxTokens,
+          timeoutMs,
           signal: retrySignal,
           ...(responseFormat ? { responseFormat } : {}),
         }

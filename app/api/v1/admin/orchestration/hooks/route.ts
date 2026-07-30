@@ -17,7 +17,7 @@ import { getClientIP } from '@/lib/security/ip';
 import { invalidateHookCache } from '@/lib/orchestration/hooks/registry';
 import { toSafeHook } from '@/lib/orchestration/hooks/serialize';
 import {
-  HOOK_EVENT_TYPES,
+  hookEventTypeSchema,
   RESERVED_HEADER_ERROR,
   hasReservedHookHeader,
 } from '@/lib/orchestration/hooks/types';
@@ -27,7 +27,9 @@ import { z } from 'zod';
 
 const createHookSchema = z.object({
   name: z.string().min(1).max(200),
-  eventType: z.enum(HOOK_EVENT_TYPES),
+  // Accepts `app.*` / `framework.*` too, so a fork can subscribe a hook to
+  // its own domain event through the same admin API (#465).
+  eventType: hookEventTypeSchema,
   action: z.object({
     type: z.literal('webhook'),
     url: z

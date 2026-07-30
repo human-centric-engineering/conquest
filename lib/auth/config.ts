@@ -11,6 +11,7 @@ import { sendEmail } from '@/lib/email/send';
 import { validateEmailConfig } from '@/lib/email/client';
 import { resolveEmailTemplate } from '@/lib/email/registry';
 import { logger } from '@/lib/logging';
+import { dispatchUserCreated } from '@/lib/auth/user-created-hooks';
 import {
   validateInvitationToken,
   deleteInvitationToken,
@@ -329,6 +330,19 @@ export async function userCreateAfterHook(
       signupMethod,
     });
   }
+
+  // Fork-owned seam (#464). Dispatched last, so an app hook sees the account in
+  // its fully initialised state — preferences set, invitation redeemed, welcome
+  // email decided. Never throws: `dispatchUserCreated` logs and swallows a
+  // failing hook, because the user row already exists by this point and failing
+  // here would report a successful signup to the caller as an error.
+  await dispatchUserCreated({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    signupMethod: isOAuthSignup ? 'oauth' : 'email',
+    viaInvitation: isPasswordInvitation,
+  });
 }
 
 /**

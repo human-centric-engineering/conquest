@@ -64,6 +64,16 @@ export interface CostSummaryAgentRow {
 
 export interface CostSummaryModelRow {
   model: string;
+  /**
+   * Provider slug that actually served the spend, from `AiCostLog.provider`.
+   *
+   * Load-bearing for display: the same bare `modelId` can exist under several
+   * providers in the catalogue (`gpt-4o` ships under both `openai` and
+   * `microsoft`), so a consumer resolving a row to `ModelInfo` must key on
+   * `provider::model` or it renders whichever catalogue entry happened to land
+   * last — a provider the operator may never have configured.
+   */
+  provider: string;
   monthSpend: number;
 }
 
@@ -300,8 +310,11 @@ export async function getCostSummary(): Promise<CostSummary> {
         where: { createdAt: { gte: monthStart }, agentId: { not: null } },
         _sum: { totalCostUsd: true },
       }),
+      // Grouped by provider as well as model: two providers can serve the same
+      // model id, and without the provider the UI can only guess which
+      // catalogue entry a spend row belongs to.
       prisma.aiCostLog.groupBy({
-        by: ['model'],
+        by: ['model', 'provider'],
         where: { createdAt: { gte: monthStart } },
         _sum: { totalCostUsd: true },
       }),
@@ -356,7 +369,11 @@ export async function getCostSummary(): Promise<CostSummary> {
     .sort((a, b) => b.monthSpend - a.monthSpend);
 
   const byModel: CostSummaryModelRow[] = byModelGrouped
-    .map((g) => ({ model: g.model, monthSpend: g._sum.totalCostUsd ?? 0 }))
+    .map((g) => ({
+      model: g.model,
+      provider: g.provider,
+      monthSpend: g._sum.totalCostUsd ?? 0,
+    }))
     .sort((a, b) => b.monthSpend - a.monthSpend);
 
   const trend: CostSummaryTrendPoint[] = trendRaw.map((r) => ({

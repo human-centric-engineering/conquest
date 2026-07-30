@@ -58,6 +58,13 @@ export interface BuildMessagesArgs {
   contextBlock: string | null;
   history: HistoryRow[];
   newUserMessage: string;
+  /**
+   * Server-composed opening content for a turn the agent opens (#474). When set
+   * — and `newUserMessage` is empty — it is appended as a `system` message
+   * instead of a `user` one, so the text steers the opening without appearing in
+   * the transcript as the person's own words.
+   */
+  openingTurn?: string;
   /** File attachments (images, documents) to include with the user message. */
   attachments?: ChatAttachment[];
   /** Rolling summary of messages older than the truncation window. */
@@ -149,9 +156,15 @@ export function buildMessagesAndBreakdown(args: BuildMessagesArgs): BuildMessage
   });
   const messages: LlmMessage[] = [{ role: 'system', content: systemPrompt }];
 
+  // A turn the agent opens (#474) carries no user text. Its content still counts
+  // toward the token budget and still needs a part in the breakdown, so estimate
+  // against whichever text this turn actually sends.
+  const isOpeningTurn = !args.newUserMessage && !!args.openingTurn;
+  const turnText = isOpeningTurn ? (args.openingTurn as string) : args.newUserMessage;
+
   const breakdown: InputBreakdown = {
     systemPrompt: makePart(systemPrompt, modelId),
-    userMessage: makePart(args.newUserMessage, modelId),
+    userMessage: makePart(turnText, modelId),
     totalEstimated: 0,
   };
 
@@ -195,7 +208,7 @@ export function buildMessagesAndBreakdown(args: BuildMessagesArgs): BuildMessage
     const reserveTokens = args.reserveTokens ?? 4096;
     const systemTokens = estimateMessagesTokens(messages, args.modelId);
     const userTokens = estimateMessagesTokens(
-      [{ role: 'user', content: args.newUserMessage }],
+      [{ role: isOpeningTurn ? 'system' : 'user', content: turnText }],
       args.modelId
     );
     const attachmentTokens = (args.attachments?.length ?? 0) * ATTACHMENT_OVERHEAD_TOKENS;
@@ -330,8 +343,13 @@ export function buildMessagesAndBreakdown(args: BuildMessagesArgs): BuildMessage
     };
   }
 
-  // Build the user message — multimodal if attachments are present
-  if (args.attachments && args.attachments.length > 0) {
+  // A turn the agent opens has no user message at all: the content goes in as a
+  // `system` instruction so the model is steered without the transcript
+  // attributing words to the person. Attachments are meaningless here (nobody
+  // uploaded anything), so this branch precedes the multimodal one.
+  if (isOpeningTurn) {
+    messages.push({ role: 'system', content: turnText });
+  } else if (args.attachments && args.attachments.length > 0) {
     const parts: ContentPart[] = [{ type: 'text', text: args.newUserMessage }];
     for (const attachment of args.attachments) {
       if (attachment.mediaType.startsWith('image/')) {

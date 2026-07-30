@@ -20,6 +20,7 @@ vi.mock('@/lib/logging', () => ({
 import { logger } from '@/lib/logging';
 import {
   ProviderError,
+  buildRequestOptions,
   toProviderError,
   fetchWithTimeout,
   withRetry,
@@ -492,5 +493,45 @@ describe('withRetry', () => {
       (err: unknown) => err instanceof ProviderError && err.code === 'aborted'
     );
     expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildRequestOptions
+// ---------------------------------------------------------------------------
+
+describe('buildRequestOptions', () => {
+  it('returns undefined when the caller sets neither timeoutMs nor signal', () => {
+    // The distinction matters: passing `{}` to the SDK is harmless, but
+    // undefined keeps "caller said nothing" readable at the call site and
+    // leaves the client's construction-time timeout in charge.
+    expect(buildRequestOptions({ model: 'gpt-4o' })).toBeUndefined();
+  });
+
+  it('maps timeoutMs to the SDK timeout field', () => {
+    expect(buildRequestOptions({ model: 'gpt-4o', timeoutMs: 600_000 })).toEqual({
+      timeout: 600_000,
+    });
+  });
+
+  it('passes the caller signal through', () => {
+    const controller = new AbortController();
+
+    expect(buildRequestOptions({ model: 'gpt-4o', signal: controller.signal })).toEqual({
+      signal: controller.signal,
+    });
+  });
+
+  it('includes both when both are supplied', () => {
+    const controller = new AbortController();
+
+    expect(
+      buildRequestOptions({ model: 'gpt-4o', timeoutMs: 1_000, signal: controller.signal })
+    ).toEqual({ timeout: 1_000, signal: controller.signal });
+  });
+
+  it('honours a zero timeout rather than treating it as unset', () => {
+    // 0 is falsy; an `if (options.timeoutMs)` guard would silently drop it.
+    expect(buildRequestOptions({ model: 'gpt-4o', timeoutMs: 0 })).toEqual({ timeout: 0 });
   });
 });

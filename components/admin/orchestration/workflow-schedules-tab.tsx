@@ -56,6 +56,12 @@ interface Schedule {
   cronExpression: string;
   isEnabled: boolean;
   nextRunAt: string | null;
+  /**
+   * Stamped by the scheduler tick when it dispatches a run. Null until the
+   * schedule has fired once — which is exactly what an operator checking
+   * "is this thing actually running?" needs to see.
+   */
+  lastRunAt: string | null;
   inputTemplate: Record<string, unknown> | null;
   createdAt: string;
 }
@@ -230,11 +236,13 @@ export function WorkflowSchedulesTab({ workflowId }: WorkflowSchedulesTabProps) 
                     </Badge>
                   )}
                 </div>
-                {s.nextRunAt && (
-                  <p className="text-muted-foreground text-xs">
-                    Next run: {new Date(s.nextRunAt).toLocaleString()}
-                  </p>
-                )}
+                <div className="text-muted-foreground flex flex-wrap gap-x-3 text-xs">
+                  {s.nextRunAt && <span>Next run: {new Date(s.nextRunAt).toLocaleString()}</span>}
+                  <span>
+                    Last run:{' '}
+                    {s.lastRunAt ? new Date(s.lastRunAt).toLocaleString() : 'never run yet'}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Switch

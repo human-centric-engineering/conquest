@@ -28,7 +28,12 @@ export interface ChatAttachment {
  * `AiConversation` scoped to `userId` + the resolved agent.
  */
 export interface ChatRequest {
-  message: string;
+  /**
+   * The user's message. Optional only when {@link ChatRequest.openingTurn} is
+   * set — a turn the agent opens has no user text by definition. One of the two
+   * must be present; the handler rejects a request carrying neither.
+   */
+  message?: string;
   agentSlug: string;
   userId: string;
   conversationId?: string;
@@ -76,6 +81,40 @@ export interface ChatRequest {
    * inspect these keys — they're a pass-through marker for analytics.
    */
   costLogMetadata?: Record<string, unknown>;
+  /**
+   * Free-form metadata stored on the `AiMessage` row this turn creates, under
+   * `MessageMetadata.app` (#475).
+   *
+   * Distinct from `costLogMetadata`, which lands on `AiCostLog` — this one is on
+   * the message itself, so a consumer reading the transcript can see it. Stored
+   * verbatim under a single namespaced key; the handler never inspects it.
+   *
+   * Use it to record that a turn happened because the *app* did something rather
+   * than because the user typed: a scheduled check-in, a replay, an
+   * agent-initiated follow-up. Pair it with {@link ChatRequest.openingTurn} to
+   * tag a server-composed opener structurally instead of by a sentinel string in
+   * the message text.
+   *
+   * @example { messageMetadata: { synthetic: true, trigger: 'phase-2-opener' } }
+   */
+  messageMetadata?: Record<string, unknown>;
+  /**
+   * Run a turn the **agent** opens, with no user message.
+   *
+   * Normally `message` is required and is persisted as a `role:'user'` row before
+   * the model is called. That is right for a support chatbot, and wrong for a
+   * facilitated product whose method is to orient the person first — under the
+   * old shape the app had to send a stage direction *as the user*, leaving text
+   * in someone's own transcript that they did not write, in the model's history
+   * for the rest of the conversation, and filterable only by exact string match.
+   *
+   * With `openingTurn` set, `message` may be omitted. The content is injected as
+   * a `system` message (not persisted as `user`), so it steers the opening
+   * without appearing as the person's words. See #474.
+   *
+   * @example { openingTurn: { content: 'Greet them and ask what they want to fix.' } }
+   */
+  openingTurn?: { content: string };
 }
 
 /** Return type of `streamChat` and `StreamingChatHandler.run`. */
