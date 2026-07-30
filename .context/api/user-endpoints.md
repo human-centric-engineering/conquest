@@ -24,7 +24,7 @@ GET /api/v1/users/me
     "name": "John Doe",
     "email": "john@example.com",
     "role": "USER",
-    "emailVerified": "2025-01-15T10:00:00.000Z",
+    "emailVerified": true,
     "image": "https://...",
     "bio": "Software developer with passion for building great products",
     "phone": "+1 (555) 123-4567",
@@ -74,6 +74,27 @@ PATCH /api/v1/users/me
 
 **Validation**: Uses `updateUserSchema` from `lib/validations/user.ts`
 
+### Changing `email` is an identity mutation
+
+Two rules apply to the `email` field only. Every other profile field is
+unaffected by both.
+
+**Session type.** `withAuth` accepts an API key of _any_ scope, and keys are
+self-service — so without a check, a `chat`-scoped key handed to a third-party
+integration could move the account to an attacker's address, and the
+verification mail would deliver them a working token. The handler rejects the
+email path for key-authenticated callers with **403 FORBIDDEN**, via
+`isApiKeySession()` from `lib/auth/api-keys.ts`. Changing your address requires
+a browser session.
+
+**Re-verification.** When the address actually changes (compared
+case-insensitively, so a form that PATCHes every field does not gratuitously
+unverify the account), the handler sets `emailVerified` to `false` and sends a
+new verification mail. Without this, `user.email` stops meaning "an address this
+person controls" and becomes "any unused string they typed", while every
+downstream consumer — invitation redemption, domain allowlists — still reads it
+as the former.
+
 **Response** (200 OK):
 
 ```json
@@ -83,7 +104,7 @@ PATCH /api/v1/users/me
     "id": "clxxxx",
     "name": "Jane Doe",
     "email": "jane@example.com",
-    "emailVerified": "2025-01-15T10:00:00.000Z",
+    "emailVerified": true,
     "image": "https://...",
     "role": "USER",
     "createdAt": "2025-01-01T08:00:00.000Z",
@@ -92,9 +113,12 @@ PATCH /api/v1/users/me
 }
 ```
 
+`emailVerified` comes back `false` when this request changed the address.
+
 **Error Responses**:
 
 - **401 Unauthorized**: No valid session
+- **403 Forbidden**: Caller is authenticated by API key and the body contains `email`
 - **400 Validation Error**: Invalid input data
 - **400 Email Taken**: Email already in use by another user
 
@@ -370,7 +394,7 @@ GET /api/v1/users/:id
     "name": "John Doe",
     "email": "john@example.com",
     "role": "USER",
-    "emailVerified": "2025-01-15T10:00:00.000Z",
+    "emailVerified": true,
     "image": "https://...",
     "createdAt": "2025-01-01T08:00:00.000Z",
     "updatedAt": "2025-01-10T12:00:00.000Z"

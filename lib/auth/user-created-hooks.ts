@@ -17,8 +17,9 @@
  * Sunrise's own non-blocking work (default preferences, invitation redemption).
  * A throw is logged and swallowed: the account has already been created, so
  * failing the request would leave the caller believing signup failed when it
- * did not. If you need to *reject* a signup, that is a different seam — see
- * `SIGNUP_MODE` in `lib/env.ts` (#463).
+ * did not. Rejecting a signup happens pre-creation, in `userCreateBeforeHook`
+ * (`databaseHooks.user.create.before`) — that is where the reserved-address and
+ * OAuth-invitation-mismatch refusals throw. No fork seam for it today.
  *
  * @see lib/auth/config.ts — `userCreateAfterHook`, the consumer
  * @see lib/app/user-created.ts — the fork-owned registration seam

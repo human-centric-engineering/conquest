@@ -18,8 +18,9 @@
  *
  * Runs AFTER the user row exists, so a hook **cannot reject a signup** — a
  * throw is logged and ignored rather than failing account creation, since the
- * account is already there. To turn signup off or make it invite-only, use
- * `SIGNUP_MODE` instead. Empty registry = today's behaviour, byte-for-byte.
+ * account is already there. Refusing a signup happens pre-creation, in
+ * `userCreateBeforeHook` (lib/auth/config.ts); there is no fork seam for it
+ * today. Empty registry = today's behaviour, byte-for-byte.
  *
  * Full guide: CUSTOMIZATION.md §4 · .context/auth/overview.md
  */

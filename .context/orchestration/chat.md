@@ -72,7 +72,7 @@ Everything is exported from `@/lib/orchestration/chat`:
 
 ```typescript
 interface ChatRequest {
-  message: string;
+  message?: string;
   agentSlug: string;
   userId: string;
   conversationId?: string;
@@ -80,10 +80,14 @@ interface ChatRequest {
   contextId?: string;
   entityContext?: Record<string, unknown>;
   scope?: Record<string, string>;
-  attachments?: { name: string; mimeType: string; data: string }[];
+  attachments?: { name: string; mediaType: string; data: string }[];
   requestId?: string;
+  visitorId?: string;
   signal?: AbortSignal;
   includeTrace?: boolean;
+  costLogMetadata?: Record<string, unknown>;
+  messageMetadata?: Record<string, unknown>;
+  openingTurn?: { content: string };
 }
 ```
 
@@ -94,6 +98,9 @@ interface ChatRequest {
 - `requestId` is a correlation ID for structured log tracing. When provided, the handler creates a scoped logger via `logger.withContext({ requestId })` so all log entries from the chat turn are traceable. The chat stream route extracts this from the `x-request-id` header automatically.
 - `signal` is forwarded into every `provider.chatStream` call.
 - `includeTrace` is the admin-only opt-in for inline tool-call diagnostics. See [Inline trace annotations](#inline-trace-annotations-admin-only) below.
+- `costLogMetadata` is merged into every `AiCostLog.metadata` row the call writes. Not inspected by the handler — a pass-through marker for analytics (the evaluation batch worker uses it to tag rows by role).
+- `messageMetadata` is stored on the `AiMessage` row this turn creates, under `MessageMetadata.app`. See [Agent-opened turns and app metadata](#agent-opened-turns-and-app-metadata) below.
+- `openingTurn` runs a turn the **agent** opens, with no user message. See the same section.
 
 ## `ChatEvent` Lifecycle
 
@@ -107,7 +114,7 @@ start → [warning]? → content* → [content_reset → content*]? → [status 
 
 Concretely:
 
-1. **`start`** — always emitted first, once the user message has been persisted and the conversation resolved. Carries `conversationId` and the persisted user `messageId`.
+1. **`start`** — always emitted first, once the user message has been persisted and the conversation resolved. Carries `conversationId`, and `messageId` for the persisted user message. `messageId` is **absent** on an agent-opened turn, which persists no user row — see [Agent-opened turns and app metadata](#agent-opened-turns-and-app-metadata).
 2. **`content`** — zero or more. One per `text` chunk from the provider. The `delta` is the incremental text; concatenate for the full assistant message.
 3. **`status`** — emitted before each LLM turn (`Thinking...` for the first, `Processing tool results...` for follow-ups) and before dispatching a tool call (e.g. `Executing search_knowledge_base`).
 4. **`capability_result`** — emitted after the dispatcher resolves. Carries `capabilitySlug` and the raw `CapabilityResult` object (including any `success: false` gates like `requires_approval`). For citation-producing capabilities (currently `search_knowledge_base`), each result item is augmented with a `marker: number` field — see [Citations](#citations) below.
@@ -117,6 +124,64 @@ Concretely:
 8. **`error`** — terminal alternative. Carries a stable `code` and user-safe `message`. See "Error codes" below.
 9. **`warning`** — non-terminal, may appear at any point. Carries `code` and `message`. Codes: `budget_warning` (agent at ≥80% spend), `input_flagged` (input guard detected a pattern), `output_flagged` (output guard detected a pattern), `citation_missing` / `citation_hallucinated` (citation guard detected a violation in `warn_and_continue` mode), `provider_retry` (falling back to next provider). Clients should display transiently and clear when the stream ends.
 10. **`content_reset`** — emitted when the provider fallback activates mid-stream. Carries `reason: 'provider_fallback'`. **Clients must discard all buffered `content` deltas** received before this event and start accumulating fresh.
+
+## Agent-opened turns and app metadata
+
+Two `ChatRequest` fields exist for apps that drive a conversation rather than
+just relay someone typing. Both are **fork-facing**: no HTTP route forwards
+them, and they are absent from `chatStreamRequestSchema`,
+`consumerChatRequestSchema` and the embed schema. The only callers are
+in-process — your own server code calling `streamChat` directly, and the
+evaluation drain.
+
+### `openingTurn` — a turn the agent opens
+
+```typescript
+await streamChat({
+  agentSlug: 'coach',
+  userId,
+  openingTurn: { content: 'Greet them and ask what they want to work on.' },
+  messageMetadata: { synthetic: true, trigger: 'session-start' },
+});
+```
+
+`message` may be omitted when `openingTurn` is set. What changes:
+
+|                        | Normal turn                      | Opening turn                                                                                                       |
+| ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `role:'user'` row      | persisted                        | **none**                                                                                                           |
+| `start.messageId`      | present                          | **absent**                                                                                                         |
+| `message.created` hook | fires for `user` and `assistant` | `assistant` only                                                                                                   |
+| Model sees the text as | `user`                           | **`system`**                                                                                                       |
+| Injection scanner      | runs                             | **skipped** — the text is composed by your own server, and scanning it would flag an app instructing its own agent |
+| Conversation title     | derived from `message`           | derived from the opener                                                                                            |
+
+`message` wins if both are supplied: the person's own words are the turn, and
+the opener is ignored rather than prepended.
+
+**A turn must carry something.** `message`, `openingTurn.content`, or at least
+one attachment — a request with none of the three is rejected with
+`invalid_request`. Attachments count because the embed surface accepts an empty
+`message` when files are attached (a photo with no caption). An attachment-only
+turn is a _user_ turn with empty text, not an opener: the `role:'user'` row is
+still written, carrying the files.
+
+**The skipped injection scan is why these fields are not on the wire.** If a
+route ever forwards `openingTurn` from a request body, untrusted text reaches
+the model as an unscanned `system` message. Keep the field server-side.
+
+### `messageMetadata` — caller metadata on the message row
+
+Stored verbatim on the `AiMessage` row this turn creates, under
+`MessageMetadata.app`. Namespaced under one key so it can never collide with a
+platform field, including one a future release adds. The handler never inspects
+it.
+
+Distinct from `costLogMetadata`, which lands on `AiCostLog`. Use
+`messageMetadata` when a consumer reading the _transcript_ needs to know why the
+turn happened — a scheduled check-in, a replay, an agent-initiated follow-up.
+Together with `openingTurn` it replaces detecting synthetic turns by matching a
+sentinel string against the message text.
 
 ## Voice input (transcription)
 

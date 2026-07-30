@@ -249,25 +249,27 @@ the export name and signature; everything inside is free to change. (Detailed
 examples live here in this guide, not in the files, precisely so the files stay
 small and conflict-free.)
 
-| Edit this file                             | To register                                   | Auto-wired by (runtime)                                          |
-| ------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------------- |
-| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)              | `lib/env.ts` startup parse (server)                              |
-| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                      | rate-limit middleware (middleware runtime)                       |
-| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)          | `proxy.ts` edge redirect-to-login (proxy runtime)                |
-| `lib/app/capabilities.ts`                  | agent capabilities (tools)                    | the capability registry (server route-handler)                   |
-| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types) | the chat context builder (server route-handler)                  |
-| `lib/app/admin-nav.ts`                     | admin sidebar sections                        | `admin-sidebar.tsx` (client)                                     |
-| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                  | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                     |
-| `lib/app/public-nav.ts`                    | public nav / footer link lists                | `public-nav.tsx`, `public-footer.tsx` (client)                   |
-| `lib/app/emails.ts`                        | auth email template overrides                 | `lib/email/registry.ts` (server)                                 |
-| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)         | `instrumentation.ts` `register()` (server, all envs)             |
-| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)    | root `eslint.config.mjs` spread (lint)                           |
-| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent             | `resolveAgentDocumentAccess()` (server route-handler)            |
-| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards       | the chat handler's `collectGuardFloors()` (server route-handler) |
-| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing           | the chat handler's `emitGuardEvent()` (server route-handler)     |
-| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                 | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)      |
-| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                 | the agent field registry (server + agent form)                   |
-| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`     | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)     |
+| Edit this file                             | To register                                        | Auto-wired by (runtime)                                          |
+| ------------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------- |
+| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                   | `lib/env.ts` startup parse (server)                              |
+| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                           | rate-limit middleware (middleware runtime)                       |
+| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)               | `proxy.ts` edge redirect-to-login (proxy runtime)                |
+| `lib/app/capabilities.ts`                  | agent capabilities (tools)                         | the capability registry (server route-handler)                   |
+| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)      | the chat context builder (server route-handler)                  |
+| `lib/app/admin-nav.ts`                     | admin sidebar sections                             | `admin-sidebar.tsx` (client)                                     |
+| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                       | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                     |
+| `lib/app/public-nav.ts`                    | public nav / footer link lists                     | `public-nav.tsx`, `public-footer.tsx` (client)                   |
+| `lib/app/emails.ts`                        | auth email template overrides                      | `lib/email/registry.ts` (server)                                 |
+| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)              | `instrumentation.ts` `register()` (server, all envs)             |
+| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`) | better-auth `user.create.after` (server)                         |
+| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)          | the maintenance tick (server)                                    |
+| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)         | root `eslint.config.mjs` spread (lint)                           |
+| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                  | `resolveAgentDocumentAccess()` (server route-handler)            |
+| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards            | the chat handler's `collectGuardFloors()` (server route-handler) |
+| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                | the chat handler's `emitGuardEvent()` (server route-handler)     |
+| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                      | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)      |
+| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                   |
+| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)     |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -300,6 +302,77 @@ carries zero framework vocabulary. A **framework-layer fork** (see the two-tier
 model below) boots its tier in `bootstrap.ts` and then delegates to a fresh
 reserved leaf hook (e.g. `lib/app/leaf-bootstrap.ts`), so a leaf-on-framework
 fork can still hook boot without colliding on `bootstrap.ts`.
+
+**Reacting to a new account — `lib/app/user-created.ts`.** To provision a
+profile row, seed a default workspace, start an onboarding sequence or push to a
+CRM when someone signs up, fill the empty `initAppUserCreatedHooks()`:
+
+```typescript
+// lib/app/user-created.ts — yours to edit
+import { registerUserCreatedHook } from '@/lib/auth/user-created-hooks';
+
+export function initAppUserCreatedHooks(): void {
+  registerUserCreatedHook('app:seed-workspace', async ({ userId, email, signupMethod }) => {
+    await prisma.appWorkspace.create({ data: { ownerId: userId, name: email } });
+  });
+}
+```
+
+better-auth's `user.create.after` hook calls the initializer once, then
+dispatches every registered hook. The context is
+`{ userId, email, name, signupMethod, viaInvitation }` — `signupMethod`
+distinguishes OAuth (address already verified) from email/password (not yet),
+and `viaInvitation` tells you the address was already proven.
+
+Hooks run **after** the user row exists, so one **cannot reject a signup**: a
+throw is logged and ignored rather than failing account creation, because the
+account is already there. Pre-creation rejection happens in `userCreateBeforeHook`
+(`lib/auth/config.ts`, better-auth's `databaseHooks.user.create.before`), which
+throws an `APIError` — that is where the reserved-address and
+OAuth-invitation-mismatch refusals live. There is no fork seam for it today; a
+fork that needs one edits that hook. Hooks are dispatched together, so a slow one delays the
+others — hand long work to a queue rather than awaiting it here. The `key` is
+for logging and for replacing a registration; register the same key twice and
+the second wins.
+
+**Recurring background work — `lib/app/jobs.ts`.** To run periodic work on the
+existing maintenance tick instead of standing up a second scheduler, fill the
+empty `initAppJobs()`:
+
+```typescript
+// lib/app/jobs.ts — yours to edit
+import { registerAppJob } from '@/lib/orchestration/maintenance/app-jobs';
+
+export function initAppJobs(): void {
+  registerAppJob({
+    name: 'app:prune-draft-invoices',
+    intervalMs: 6 * 60 * 60 * 1000, // 6 hours
+    run: async () => {
+      const { count } = await prisma.appInvoice.deleteMany({/* … */});
+      return { pruned: count }; // folded into the tick's log line
+    },
+  });
+}
+```
+
+`intervalMs` is a **minimum gap, not a guarantee**, and last-run times live in
+process memory. So a multi-instance deployment runs each job roughly once per
+instance per interval, and a restart re-arms everything. **Write jobs to be
+idempotent.** If a job must run exactly once cluster-wide it needs its own
+lease — see `execution-reaper` for that pattern.
+
+Three behaviours worth knowing:
+
+- **A slow job never stacks up.** A job still running from an earlier tick is
+  skipped, however long ago it became due — so a 5-minute job on a 1-minute
+  interval does not accumulate concurrent runs.
+- **A non-positive or `NaN` `intervalMs` is refused at registration**, loudly,
+  rather than defaulted. A job silently running every tick is worse than a
+  visible refusal.
+- **Failures are contained.** Jobs run in parallel; one throwing is logged, its
+  error folded into the tick's summary, and the others are unaffected. Whatever
+  `run()` returns is folded into the tick's log line, so return a small count
+  object rather than logging yourself.
 
 **ESLint boundary rules + CI checks — `lib/app/eslint.config.mjs`.** To enforce
 your tier's own import boundary (e.g. a `framework ↔ core` rule), add flat-config
