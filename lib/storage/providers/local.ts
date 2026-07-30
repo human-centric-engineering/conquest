@@ -33,6 +33,7 @@ import type {
   DeleteResult,
 } from '@/lib/storage/providers/types';
 import { validateStorageKey } from '@/lib/storage/providers/validate-key';
+import { buildStorageAccessUrl } from '@/lib/storage/access-tokens';
 import { logger } from '@/lib/logging';
 
 /** Where private objects live when not configured otherwise. Gitignored. */
@@ -69,13 +70,13 @@ export class LocalProvider implements StorageProvider {
   private privateDir: string;
 
   /**
-   * `signedUrls` stays false here and is turned on by the signed read route
-   * (`lib/storage/access-tokens.ts`), which is what makes a private object
-   * reachable over HTTP.
+   * `signedUrls` is served by `/api/v1/storage/<key>` with an HMAC token
+   * from `lib/storage/access-tokens.ts` — not by the filesystem, which has
+   * no notion of a URL.
    */
   readonly capabilities: Partial<StorageCapabilities> = {
     privateObjects: true,
-    signedUrls: false,
+    signedUrls: true,
     download: true,
   };
 
@@ -214,8 +215,27 @@ export class LocalProvider implements StorageProvider {
     throw new Error(`Object not found in local storage: ${key}`);
   }
 
-  // getSignedUrl is added by the signed read route (phase 3 of #490);
-  // until then a private object is reachable only via download().
+  /**
+   * Mint a time-limited URL for the signed read route.
+   *
+   * Unlike S3's presigned URLs this does not check that the object exists —
+   * the route resolves the key when the URL is used, and a token for a
+   * missing key simply 404s there.
+   */
+  // Signing is synchronous here — an HMAC, not a round trip like S3's
+  // presigner. It stays `async` regardless so a rejected key comes back as a
+  // rejected promise: the interface is `Promise<string>`, and a method that
+  // throws synchronously would slip past every caller's `.catch()`.
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getSignedUrl(key: string, expiresIn: number = 3600): Promise<string> {
+    validateStorageKey(key);
+
+    const { url } = buildStorageAccessUrl(key, expiresIn);
+
+    logger.debug('Generated signed URL for local storage', { key, expiresIn });
+
+    return url;
+  }
 }
 
 /**

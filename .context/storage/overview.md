@@ -10,6 +10,7 @@ lib/storage/
 ├── upload.ts              # uploadAvatar(), deleteFile(), deleteAvatar(), deleteByPrefix()
 ├── image.ts               # validateImageMagicBytes(), processImage(), getExtensionForMimeType(), isSupportedImageType()
 ├── constants.ts           # Client-safe constants (SUPPORTED_IMAGE_TYPES, IMAGE_EXTENSIONS)
+├── access-tokens.ts       # HMAC read tokens for the signed storage route
 └── providers/
     ├── types.ts           # StorageProvider interface, StorageCapabilities, getStorageCapabilities()
     ├── validate-key.ts    # validateStorageKey() - path traversal prevention
@@ -66,7 +67,7 @@ await storage.upload(buffer, { key, contentType, public: false });
 | Capability       | S3                                              | Vercel Blob | Local |
 | ---------------- | ----------------------------------------------- | ----------- | ----- |
 | `privateObjects` | `S3_USE_ACL` or `S3_OBJECTS_PRIVATE_BY_DEFAULT` | ✗           | ✓     |
-| `signedUrls`     | ✓                                               | ✗           | ✗     |
+| `signedUrls`     | ✓                                               | ✗           | ✓     |
 | `download`       | ✓                                               | ✗           | ✓     |
 
 **Read capabilities through `getStorageCapabilities(provider)` — never `provider.capabilities` directly.** The field is an optional `Partial<StorageCapabilities>` so that a fork's custom provider (see [Adding a New Provider](#adding-a-new-provider)) keeps compiling when a capability is added upstream. An undeclared capability means _cannot_, and the helper is what fills that in.
@@ -133,10 +134,10 @@ Development fallback. Uses `LocalProviderConfig` for typed configuration, built 
 
 Two roots:
 
-| Upload                   | Directory           | Served at                 | Read back via |
-| ------------------------ | ------------------- | ------------------------- | ------------- |
-| default (`public: true`) | `public/uploads/`   | `/uploads/<key>` (static) | direct URL    |
-| `public: false`          | `.storage/private/` | not served                | `download()`  |
+| Upload                   | Directory           | Served at                 | Read back via                  |
+| ------------------------ | ------------------- | ------------------------- | ------------------------------ |
+| default (`public: true`) | `public/uploads/`   | `/uploads/<key>` (static) | direct URL                     |
+| `public: false`          | `.storage/private/` | signed route only         | `download()`, `getSignedUrl()` |
 
 ```bash
 # All optional — these are the defaults
@@ -159,6 +160,37 @@ STORAGE_LOCAL_PRIVATE_DIR=.storage/private
 ### Rate Limiting
 
 The avatar upload endpoint (`/api/v1/users/me/avatar`) is protected by `uploadLimiter` from `lib/security/rate-limit.ts`. When the rate limit is exceeded, the endpoint returns HTTP 429 (Too Many Requests).
+
+### Signed Object Read
+
+```http
+GET /api/v1/storage/<key...>?token=<signed>
+```
+
+Serves a privately stored object. Mint the URL with `getSignedUrl()`:
+
+```typescript
+const storage = getStorageClient();
+const url = await storage!.getSignedUrl('documents/user-1/contract.pdf', 300); // 5 min
+// → /api/v1/storage/documents/user-1/contract.pdf?token=eyJrZXk...
+```
+
+Provider-agnostic — it works with anything declaring the `download` capability — but in practice it exists for the local provider, since S3 signs its own URLs directly against the bucket.
+
+**The token is the only credential, and it grants exactly one key.** There is deliberately no session fallback. Storage keys carry no ownership (`agent-uploads/{agentId}/{uuid}` names no user), so `withAuth()` here would let any authenticated user read any private object — worse than having no read path. The route compares the key inside the token against the key requested and 403s on a mismatch.
+
+Tokens are stateless HMAC-SHA256 over `BETTER_AUTH_SECRET` (`lib/storage/access-tokens.ts`, same shape as `lib/orchestration/approval-tokens.ts`) — no table, no migration. **Rotating `BETTER_AUTH_SECRET` invalidates every outstanding URL**, which is the intended lever if one leaks. Lifetime is capped at 7 days.
+
+| Status | Code                     | Meaning                                     |
+| ------ | ------------------------ | ------------------------------------------- |
+| 401    | `TOKEN_REQUIRED`         | No `token` query parameter                  |
+| 401    | `INVALID_TOKEN`          | Expired, tampered, or malformed             |
+| 403    | `TOKEN_KEY_MISMATCH`     | Valid token, but minted for a different key |
+| 404    | `NOT_FOUND`              | No such object                              |
+| 501    | `DOWNLOAD_NOT_SUPPORTED` | Provider has no `download` capability       |
+| 503    | `STORAGE_NOT_CONFIGURED` | No provider configured                      |
+
+Responses are always `application/octet-stream` with `Content-Disposition: attachment`, `nosniff`, and a `default-src 'none'` CSP — never the object's real content type. These are user-supplied bytes on the app's own origin, so rendering an uploaded `.html` or `.svg` inline would be stored XSS against a live session. To display an object, fetch it and build an object URL client-side.
 
 ### Upload Avatar
 
@@ -380,6 +412,7 @@ validateStorageKey(key); // Throws if invalid
 - Only authenticated users can upload
 - Users can only modify their own avatar
 - Storage keys are scoped per user to prevent enumeration
+- Private objects are read only through a signed, single-key, time-limited token — never a session. See [Signed Object Read](#signed-object-read) for why a session check would be strictly worse here.
 
 ### Avatar Cleanup on User Deletion
 

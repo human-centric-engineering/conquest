@@ -84,6 +84,19 @@ release process.
   delete an object but never read one back, which is what forced a fork keeping
   a user's uploaded file to discard the original bytes after parsing.
 
+- **`GET /api/v1/storage/<key>?token=…`, the signed object read route** (#490) —
+  serves a privately stored object, with stateless HMAC tokens from the new
+  `lib/storage/access-tokens.ts` (`generateStorageAccessToken`,
+  `verifyStorageAccessToken`, `buildStorageAccessUrl`; no table, no migration).
+  `LocalProvider.getSignedUrl()` mints them, which is what completes the local
+  provider's private-object story. **The token is the only credential and
+  grants exactly one key — there is deliberately no session fallback**, because
+  storage keys encode no ownership and a bare `withAuth()` would let any
+  authenticated user read any private object. Rotating `BETTER_AUTH_SECRET`
+  invalidates every outstanding URL. Responses are always
+  `application/octet-stream` + `Content-Disposition: attachment`, so
+  user-uploaded HTML or SVG can't execute on the app's origin.
+
 - **A private root for the local provider** (#490) — `LocalProviderConfig.privateDir`
   (default `.storage/private`, gitignored) holds anything uploaded with
   `public: false`, outside the tree Next serves. `createLocalProvider()` now

@@ -55,6 +55,15 @@ vi.mock('@/lib/logging', () => ({
   },
 }));
 
+// `getSignedUrl()` mints an HMAC token from BETTER_AUTH_SECRET, which the
+// unit environment does not set.
+vi.mock('@/lib/env', () => ({
+  env: {
+    BETTER_AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long',
+    BETTER_AUTH_URL: 'https://app.example.com',
+  },
+}));
+
 describe('lib/storage/providers/local', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -274,14 +283,30 @@ describe('lib/storage/providers/local', () => {
         expect(result.url).toBe('/uploads/avatars/user-1/avatar.jpg');
       });
 
-      it('declares privateObjects and download, but not signedUrls', () => {
+      it('declares privateObjects, signedUrls and download', () => {
         const provider = new LocalProvider(TWO_ROOTS);
 
         expect(getStorageCapabilities(provider)).toEqual({
           privateObjects: true,
-          signedUrls: false,
+          signedUrls: true,
           download: true,
         });
+      });
+
+      it('signs a URL pointing at the storage read route', async () => {
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        const url = await provider.getSignedUrl('documents/user-1/contract.pdf', 300);
+
+        expect(url).toMatch(/^\/api\/v1\/storage\/documents\/user-1\/contract\.pdf\?token=/);
+      });
+
+      it('refuses to sign a traversal key', async () => {
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await expect(provider.getSignedUrl('../../etc/passwd', 300)).rejects.toThrow(
+          'must not contain ".."'
+        );
       });
     });
 
