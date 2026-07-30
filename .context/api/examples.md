@@ -50,10 +50,10 @@ const users = await apiClient.get<PublicUser[]>(API.USERS.LIST, {
 });
 ```
 
-### POST/PATCH Requests
+### POST/PATCH/PUT Requests
 
 ```typescript
-// Update profile
+// Update profile — a delta, so PATCH
 const updated = await apiClient.patch<PublicUser>(API.USERS.ME, {
   body: { name: 'New Name', bio: 'Updated bio' },
 });
@@ -62,7 +62,16 @@ const updated = await apiClient.patch<PublicUser>(API.USERS.ME, {
 await apiClient.post(API.USERS.INVITE, {
   body: { email: 'user@example.com', role: 'USER' },
 });
+
+// Replace a sub-resource collection — the body is the complete new set, so PUT
+await apiClient.put('/api/v1/tasks/123/tags', {
+  body: { tags: ['urgent', 'design'] },
+});
 ```
+
+Use `put` when the endpoint's contract is "this is the whole thing now" — tags,
+members, assignees — and `patch` when the body is a partial update. Both take
+the same options and share the same error handling.
 
 ### DELETE Requests
 

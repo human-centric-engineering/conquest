@@ -69,6 +69,13 @@ release process.
 
 ### Added
 
+- **`apiClient.put()`** (#495) — the client exposed `get`/`post`/`patch`/`delete`
+  and no `put`, so a fork building a genuine whole-resource replacement (a
+  sub-resource collection such as tags, members or assignees) had to choose
+  between editing `lib/api/client.ts` — a merge conflict on every upgrade — and
+  shipping `PATCH` for something that is really a `PUT`. Same signature and same
+  `request()` plumbing as `patch`; no behaviour change for existing callers.
+
 - **`StorageCapabilities` on the storage provider interface** (#490) —
   `getStorageCapabilities(provider)` in `lib/storage/providers/types.ts` resolves
   what a backend can actually do (`privateObjects`, `signedUrls`, `download`), so
