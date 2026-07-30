@@ -142,6 +142,43 @@ describe('local provider — private objects on a real filesystem', () => {
     expect(existsSync(join(privateDir, key))).toBe(false);
   });
 
+  it('treats a key naming a directory as not found, not an errno', async () => {
+    // `documents/user-1` is a real directory once a file is written beneath
+    // it. Reading it must fall through to a clean "not found" rather than
+    // surfacing EISDIR from readFile.
+    await provider.upload(Buffer.from('confidential'), {
+      key: 'documents/user-1/contract.pdf',
+      contentType: 'application/pdf',
+      public: false,
+    });
+
+    await expect(provider.download('documents/user-1')).rejects.toThrow(/not found/i);
+  });
+
+  it('reports the size of the bytes it actually read', async () => {
+    const body = Buffer.from('exactly these bytes');
+    await provider.upload(body, {
+      key: 'documents/user-1/sized.bin',
+      contentType: 'application/octet-stream',
+      public: false,
+    });
+
+    const object = await provider.download('documents/user-1/sized.bin');
+
+    expect(object.size).toBe(object.body.length);
+    expect(object.size).toBe(body.length);
+  });
+
+  it('returns a valid URL for a private key containing a space', async () => {
+    const result = await provider.upload(Buffer.from('x'), {
+      key: 'documents/user 1/report.pdf',
+      contentType: 'application/pdf',
+      public: false,
+    });
+
+    expect(result.url).toBe('/api/v1/storage/documents/user%201/report.pdf');
+  });
+
   it('refuses to read a file outside the storage root via an absolute key', async () => {
     const secret = join(root, 'secret.txt');
     await writeFile(secret, 'do not read me');

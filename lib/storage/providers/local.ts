@@ -113,7 +113,14 @@ export class LocalProvider implements StorageProvider {
     // signed read route: the path alone won't serve the file — the route
     // requires a token from `getSignedUrl()` — but it is the object's
     // address, and it is not a URL that quietly works for everyone.
-    const url = isPrivate ? `/api/v1/storage/${key}` : `${this.baseUrl}/${key}`;
+    //
+    // Encoded per segment so a key with a space or `#` produces a valid URL,
+    // matching what `buildStorageAccessUrl()` emits for the same key. The
+    // public branch is left alone: it has always returned the raw key, and
+    // Next resolves it against the filesystem either way.
+    const url = isPrivate
+      ? `/api/v1/storage/${key.split('/').map(encodeURIComponent).join('/')}`
+      : `${this.baseUrl}/${key}`;
 
     logger.info('File uploaded to local storage', {
       key,
@@ -204,12 +211,19 @@ export class LocalProvider implements StorageProvider {
       const filePath = resolveWithin(root, key);
       if (!existsSync(filePath)) continue;
 
-      const [body, stats] = await Promise.all([readFile(filePath), stat(filePath)]);
-      // Directories exist too; reading one throws EISDIR rather than
-      // returning a useless object.
+      // Stat before reading, not alongside it: a key can name a directory
+      // (`documents/user-1`), and `readFile` on one rejects with EISDIR — so
+      // reading first would surface a confusing errno instead of falling
+      // through to the other root and then a clean "not found".
+      const stats = await stat(filePath);
       if (!stats.isFile()) continue;
 
-      return { key, body, size: stats.size };
+      const body = await readFile(filePath);
+
+      // Length of what we actually read, not what `stat` reported — the two
+      // can disagree if the file changed in between, and the caller is about
+      // to use this as a Content-Length.
+      return { key, body, size: body.length };
     }
 
     throw new Error(`Object not found in local storage: ${key}`);

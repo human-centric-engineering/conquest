@@ -119,7 +119,10 @@ export async function GET(
       // XSS with access to session cookies. A caller that needs to display the
       // object should fetch it and build its own object URL.
       'Content-Type': 'application/octet-stream',
-      'Content-Length': String(object.size),
+      // Measured from the body being sent, not the provider's `size` field.
+      // A provider that reported one and returned the other would produce a
+      // response the client either truncates or waits forever to finish.
+      'Content-Length': String(object.body.length),
       'Content-Disposition': `attachment; filename="${sanitizeFilename(filename)}"`,
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': "default-src 'none'; sandbox",

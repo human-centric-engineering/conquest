@@ -138,6 +138,18 @@ describe('GET /api/v1/storage/[...key]', () => {
       );
     });
 
+    it('measures Content-Length from the body, not the provider’s size field', async () => {
+      // A provider whose `size` disagrees with its bytes would otherwise
+      // produce a response the client truncates or hangs waiting on.
+      const body = Buffer.from('twelve bytes');
+      mockDownload.mockResolvedValue({ key: KEY, body, size: 99999 });
+      const { token } = generateStorageAccessToken(KEY, 300);
+
+      const response = await call(SEGMENTS, token);
+
+      expect(response.headers.get('content-length')).toBe(String(body.length));
+    });
+
     it('sanitises the filename in Content-Disposition', async () => {
       const key = 'documents/user-1/inv"oice; x.pdf';
       const { token } = generateStorageAccessToken(key, 300);
