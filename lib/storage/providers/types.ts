@@ -44,6 +44,59 @@ export interface DeleteResult {
 }
 
 /**
+ * What a storage provider can actually do
+ *
+ * `upload(buffer, { public: false })` means different things on different
+ * backends: private on S3 (with ACLs or a private-by-default bucket),
+ * impossible on Vercel Blob, and — before this contract existed — silently
+ * ignored on local. Callers that care must ask before writing, rather than
+ * sniffing `provider.name`.
+ *
+ * Read this through {@link getStorageCapabilities}, never off the provider
+ * directly: the field is an optional `Partial<>` so that a fork's custom
+ * provider (see `.context/storage/overview.md` → Extending) keeps compiling
+ * across an upgrade, and an absent field means "cannot", not "unknown".
+ */
+export interface StorageCapabilities {
+  /**
+   * `upload(file, { public: false })` produces an object that is not
+   * publicly readable. False means the option is accepted but cannot be
+   * honoured — treat a `public: false` upload as unsafe.
+   */
+  privateObjects: boolean;
+  /** `getSignedUrl()` is implemented and returns a working time-limited URL. */
+  signedUrls: boolean;
+  /** `download()` is implemented — a stored object can be read back as bytes. */
+  download: boolean;
+}
+
+/**
+ * The safe assumption for any capability a provider does not declare:
+ * it cannot do it.
+ */
+export const DEFAULT_STORAGE_CAPABILITIES: StorageCapabilities = {
+  privateObjects: false,
+  signedUrls: false,
+  download: false,
+};
+
+/**
+ * Resolve a provider's full capability set, filling undeclared capabilities
+ * with `false`.
+ *
+ * @example
+ * ```typescript
+ * const caps = getStorageCapabilities(storage);
+ * if (!caps.privateObjects) {
+ *   throw new Error(`${storage.name} cannot store private objects`);
+ * }
+ * ```
+ */
+export function getStorageCapabilities(provider: StorageProvider): StorageCapabilities {
+  return { ...DEFAULT_STORAGE_CAPABILITIES, ...provider.capabilities };
+}
+
+/**
  * Storage Provider Interface
  *
  * All storage providers must implement this interface to ensure
@@ -59,6 +112,12 @@ export interface DeleteResult {
 export interface StorageProvider {
   /** Provider name for logging and debugging */
   name: string;
+
+  /**
+   * What this provider can do. Optional: anything left undeclared is
+   * assumed unsupported. Read it via {@link getStorageCapabilities}.
+   */
+  readonly capabilities?: Partial<StorageCapabilities>;
 
   /**
    * Upload a file to storage

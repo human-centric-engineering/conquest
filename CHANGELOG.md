@@ -69,6 +69,20 @@ release process.
 
 ### Added
 
+- **`StorageCapabilities` on the storage provider interface** (#490) —
+  `getStorageCapabilities(provider)` in `lib/storage/providers/types.ts` resolves
+  what a backend can actually do (`privateObjects`, `signedUrls`, `download`), so
+  callers stop sniffing `provider.name` to find out. The field on `StorageProvider`
+  is an optional `Partial<StorageCapabilities>` and an undeclared capability reads
+  as **false**: a fork's custom provider keeps compiling across an upgrade and is
+  never assumed capable of something it does not implement. Read it through the
+  helper, never off the provider directly.
+
+- **`S3_OBJECTS_PRIVATE_BY_DEFAULT`** (#490) — declares that the bucket blocks
+  public access, so every object is already private without ACLs. This is the
+  AWS-recommended posture and is invisible at the SDK level; setting it is what
+  lets `S3Provider` claim `privateObjects` while leaving `S3_USE_ACL=false`.
+
 - **`assertStoredVectorDimensions(subject)`** in
   `lib/orchestration/knowledge/embedding-dimensions.ts` — the stored-vector
   dimension guard, no longer hard-wired to `aiKnowledgeChunk` (#491). `pgvector`
@@ -250,6 +264,17 @@ release process.
 
 ### Changed
 
+- **`upload_to_storage` refuses a private-upload binding the provider cannot
+  honour** (#490). A binding with `public: false` or `signedUrlTtlSeconds` now
+  fails with `private_objects_not_supported` — before any upload — when the
+  configured provider does not declare `privateObjects`. **This is a runtime
+  break worth planning for:** an agent binding with `signedUrlTtlSeconds` on S3
+  with ACLs off previously uploaded a *public* object and returned a signed URL
+  to it, which looked like it worked. Set `S3_OBJECTS_PRIVATE_BY_DEFAULT=true`
+  (or `S3_USE_ACL=true`) to restore it. `VercelBlobProvider.upload()` likewise
+  throws on `public: false` rather than storing the file publicly — that
+  provider has no private storage under any configuration.
+
 - **`getOrchestrationSettings()` reads before it writes, and caches for 30s**
   (#442). It was an unconditional `upsert` — a write, taking a row lock, on every
   call, including several per maintenance tick — for a row that is created once
@@ -429,6 +454,16 @@ release process.
   turned on. ([#436])
 
 ### Fixed
+
+- **`upload(file, { public: false })` is no longer silently ignored** (#490). The
+  option was accepted by every provider and honoured by roughly one: S3 dropped
+  it unless `S3_USE_ACL=true`, Vercel Blob dropped it always, and the local
+  provider wrote the file into `public/uploads/` where Next serves it statically
+  to anyone who can guess the key. A fork storing a user's document rather than a
+  public avatar got private storage, a public CDN URL, or a world-readable file
+  with no way to tell which apart from sniffing `provider.name`. Each provider
+  now declares what it can do, S3 warns once per process when it cannot enforce
+  the request, and Vercel Blob refuses outright.
 
 - **The retention sweep reads the settings row once instead of eight times**
   (#442). `resolveRetentionDays()` fetched the same singleton row per prune, so

@@ -42,6 +42,43 @@ S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
 ```
 
+## Object Visibility
+
+`upload()` takes a `public` option that defaults to `true`. Whether `public: false` can be honoured depends entirely on the backend, so **ask before you write**:
+
+```typescript
+import { getStorageCapabilities } from '@/lib/storage/providers/types';
+
+const storage = getStorageClient();
+if (!storage) return;
+
+const caps = getStorageCapabilities(storage);
+if (!caps.privateObjects) {
+  // Refuse up front. Uploading anyway publishes the file.
+  throw new Error(`${storage.name} cannot store private objects`);
+}
+
+await storage.upload(buffer, { key, contentType, public: false });
+```
+
+### Capabilities matrix
+
+| Capability       | S3                                              | Vercel Blob | Local |
+| ---------------- | ----------------------------------------------- | ----------- | ----- |
+| `privateObjects` | `S3_USE_ACL` or `S3_OBJECTS_PRIVATE_BY_DEFAULT` | ✗           | ✗     |
+| `signedUrls`     | ✓                                               | ✗           | ✗     |
+| `download`       | ✗                                               | ✗           | ✗     |
+
+**Read capabilities through `getStorageCapabilities(provider)` — never `provider.capabilities` directly.** The field is an optional `Partial<StorageCapabilities>` so that a fork's custom provider (see [Adding a New Provider](#adding-a-new-provider)) keeps compiling when a capability is added upstream. An undeclared capability means _cannot_, and the helper is what fills that in.
+
+### What each provider does with `public: false`
+
+- **S3** — sends `ACL: private` when `S3_USE_ACL=true`. Without ACLs it cannot verify object visibility from the SDK, so it logs a warning (once per process) and uploads anyway. This is deliberate: the AWS-recommended posture is Block Public Access plus a bucket policy, where every object is _already_ private and throwing would reject the safest configuration. Declare that posture with `S3_OBJECTS_PRIVATE_BY_DEFAULT=true`.
+- **Vercel Blob** — **throws**. Every blob is served from a public CDN URL; there is no configuration that makes this work, so an ambiguous warning would be dishonest.
+- **Local** — writes to `public/uploads/`, which Next serves statically. Declares `privateObjects: false`, so callers checking capabilities refuse before writing.
+
+The `upload_to_storage` agent capability enforces this automatically: a binding with `public: false` or `signedUrlTtlSeconds` on a provider that lacks `privateObjects` fails with `private_objects_not_supported` rather than handing the user a world-readable URL.
+
 ## Providers
 
 ### S3 Provider
@@ -59,6 +96,7 @@ S3_REGION=us-east-1                          # Default: us-east-1
 S3_ENDPOINT=https://s3.custom.com            # For S3-compatible services
 S3_PUBLIC_URL_BASE=https://cdn.example.com   # Custom CDN/domain
 S3_USE_ACL=true                              # Enable ACL (only for legacy buckets, off by default)
+S3_OBJECTS_PRIVATE_BY_DEFAULT=true           # Bucket blocks public access — declares privateObjects
 ```
 
 > **Note:** Modern S3 buckets (since April 2023) have ACLs disabled by default. Only set `S3_USE_ACL=true` for legacy buckets that use ACL-based access control.
@@ -69,9 +107,11 @@ S3Provider supports generating time-limited signed URLs for private file access:
 
 ```typescript
 const storage = getStorageClient();
-if (storage && storage.name === 's3') {
+// Check the capability, not the provider name — a fork may add another
+// backend that signs URLs, and `name === 's3'` would lock it out.
+if (storage && getStorageCapabilities(storage).signedUrls) {
   // Generate a signed URL valid for 1 hour (3600 seconds)
-  const signedUrl = await storage.getSignedUrl('documents/private-report.pdf', 3600);
+  const signedUrl = await storage.getSignedUrl!('documents/private-report.pdf', 3600);
 }
 ```
 
@@ -387,10 +427,24 @@ isSupportedImageType('image/svg+xml'); // false
 
 ```typescript
 // lib/storage/providers/cloudinary.ts
-import type { StorageProvider, UploadOptions, UploadResult, DeleteResult } from './types';
+import type {
+  StorageProvider,
+  StorageCapabilities,
+  UploadOptions,
+  UploadResult,
+  DeleteResult,
+} from '@/lib/storage/providers/types';
 
 export class CloudinaryProvider implements StorageProvider {
   readonly name = 'cloudinary';
+
+  // Optional. Anything you leave out is assumed unsupported, so a provider
+  // that omits this entirely is treated as public-only with no read path —
+  // safe, but it means callers will refuse private uploads.
+  readonly capabilities: Partial<StorageCapabilities> = {
+    privateObjects: true,
+    signedUrls: true,
+  };
 
   async upload(file: Buffer, options: UploadOptions): Promise<UploadResult> {
     // Implementation

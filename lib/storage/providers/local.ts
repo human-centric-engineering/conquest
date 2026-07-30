@@ -14,6 +14,7 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import type {
   StorageProvider,
+  StorageCapabilities,
   UploadOptions,
   UploadResult,
   DeleteResult,
@@ -41,6 +42,17 @@ export class LocalProvider implements StorageProvider {
   readonly name = 'local';
   private baseDir: string;
   private baseUrl: string;
+
+  /**
+   * Everything lands in `public/uploads/`, which Next serves statically to
+   * anyone who can guess the key — so `public: false` cannot be honoured
+   * and is declared unsupported rather than accepted and dropped.
+   */
+  readonly capabilities: Partial<StorageCapabilities> = {
+    privateObjects: false,
+    signedUrls: false,
+    download: false,
+  };
 
   constructor(config: LocalProviderConfig = {}) {
     this.baseDir = config.baseDir || join(process.cwd(), 'public', 'uploads');
