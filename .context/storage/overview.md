@@ -181,8 +181,11 @@ Provider-agnostic — it works with anything declaring the `download` capability
 
 Tokens are stateless HMAC-SHA256 over `BETTER_AUTH_SECRET` (`lib/storage/access-tokens.ts`, same shape as `lib/orchestration/approval-tokens.ts`) — no table, no migration. **Rotating `BETTER_AUTH_SECRET` invalidates every outstanding URL**, which is the intended lever if one leaks. Lifetime is capped at 7 days.
 
+`generateStorageAccessToken()` signs whatever key it is given — only `getSignedUrl()` validates first. The route therefore re-runs `validateStorageKey()` after the token checks, so a token minted directly for a traversal key is rejected with `INVALID_KEY` rather than reaching the filesystem.
+
 | Status | Code                     | Meaning                                     |
 | ------ | ------------------------ | ------------------------------------------- |
+| 400    | `INVALID_KEY`            | Token authentically names an unsafe key     |
 | 401    | `TOKEN_REQUIRED`         | No `token` query parameter                  |
 | 401    | `INVALID_TOKEN`          | Expired, tampered, or malformed             |
 | 403    | `TOKEN_KEY_MISMATCH`     | Valid token, but minted for a different key |

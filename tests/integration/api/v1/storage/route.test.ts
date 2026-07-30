@@ -224,6 +224,32 @@ describe('GET /api/v1/storage/[...key]', () => {
     });
   });
 
+  describe('key validation as defence in depth', () => {
+    it('refuses a traversal key even when the token authentically names it', async () => {
+      // `generateStorageAccessToken` signs whatever key it is handed — only
+      // `getSignedUrl()` validates first. So a token minted directly for a
+      // traversal key is authentic AND matches the request, clearing both
+      // earlier gates. `validateStorageKey` is what stops it reading
+      // /etc/passwd, and this pins that it still runs.
+      const { token } = generateStorageAccessToken('../../etc/passwd', 300);
+
+      const response = await call(['..', '..', 'etc', 'passwd'], token);
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('INVALID_KEY');
+      expect(mockDownload).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+    });
+
+    it('refuses a null-byte key that the token authentically names', async () => {
+      const { token } = generateStorageAccessToken('documents/a\0.pdf', 300);
+
+      const response = await call(['documents', 'a\0.pdf'], token);
+
+      expect(response.status).toBe(400);
+      expect(mockDownload).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+    });
+  });
+
   describe('provider conditions', () => {
     it('returns 503 when storage is not configured', async () => {
       mockStorageClient = null;
@@ -256,6 +282,16 @@ describe('GET /api/v1/storage/[...key]', () => {
 
     it('returns 404 when the object does not exist', async () => {
       mockDownload.mockRejectedValue(new Error('Object not found in local storage'));
+      const { token } = generateStorageAccessToken(KEY, 300);
+
+      const response = await call(SEGMENTS, token);
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error.code).toBe('NOT_FOUND');
+    });
+
+    it('returns 404 when the provider rejects with a non-Error value', async () => {
+      mockDownload.mockRejectedValue('a bare string, not an Error');
       const { token } = generateStorageAccessToken(KEY, 300);
 
       const response = await call(SEGMENTS, token);

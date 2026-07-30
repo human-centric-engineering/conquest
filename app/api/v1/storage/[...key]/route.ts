@@ -139,6 +139,8 @@ export async function GET(
  * the residue (quotes, control characters) rather than path traversal.
  */
 function sanitizeFilename(name: string): string {
-  const cleaned = name.replace(/[^\w.-]/g, '_').slice(0, 100);
-  return cleaned || 'download';
+  // Every rejected character maps to `_`, so a non-empty name always yields a
+  // non-empty result — the caller has already substituted 'download' for an
+  // empty final segment.
+  return name.replace(/[^\w.-]/g, '_').slice(0, 100);
 }
