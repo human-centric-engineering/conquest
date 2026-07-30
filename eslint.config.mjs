@@ -23,6 +23,11 @@ export default tseslint.config(
       'dist/**',
       '.vercel/**',
       '.swc/**',
+      // Istanbul's HTML report. Third-party bundled assets, not project source,
+      // and regenerated wholesale by every coverage run — leaving it linted
+      // fills the `--cache` with paths that no longer exist, so the next
+      // `npm run lint` dies with ENOENT before it reaches any source file.
+      'coverage/**',
       'public/**',
       'next-env.d.ts',
       // Agent scratch checkouts — each worktree carries its own tsconfig.json,
