@@ -13,10 +13,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
+import { mkdtemp, rm, mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { NextRequest } from 'next/server';
+
+/**
+ * Scratch roots live under the repo's gitignored `.storage/`, not `os.tmpdir()` —
+ * see the note in `local-private-objects.test.ts`.
+ */
+const SCRATCH_PARENT = join(process.cwd(), '.storage', 'test-runs');
 
 vi.mock('@/lib/env', () => ({
   env: {
@@ -38,7 +43,8 @@ const { GET } = await import('@/app/api/v1/storage/[...key]/route');
 let root: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'sunrise-signed-read-'));
+  await mkdir(SCRATCH_PARENT, { recursive: true });
+  root = await mkdtemp(join(SCRATCH_PARENT, 'signed-read-'));
   provider = new LocalProvider({
     baseDir: join(root, 'public', 'uploads'),
     privateDir: join(root, '.storage', 'private'),

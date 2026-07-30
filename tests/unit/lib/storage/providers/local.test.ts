@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFile, unlink, mkdir, rm, readFile, stat } from 'fs/promises';
+import { writeFile, unlink, mkdir, rm, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import {
   LocalProvider,
@@ -386,11 +386,20 @@ describe('lib/storage/providers/local', () => {
     describe('download', () => {
       const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
 
+      /** A rejection shaped like Node's, since `download()` branches on `.code`. */
+      function errno(code: string): NodeJS.ErrnoException {
+        const err: NodeJS.ErrnoException = new Error(code);
+        err.code = code;
+        return err;
+      }
+
       it('reads a private object back as bytes', async () => {
         const body = Buffer.from('secret contents');
-        vi.mocked(existsSync).mockImplementation((p) => String(p).startsWith('/tmp/private/'));
-        vi.mocked(readFile).mockResolvedValue(body);
-        vi.mocked(stat).mockResolvedValue({ size: body.length, isFile: () => true } as never);
+        vi.mocked(readFile).mockImplementation((p) =>
+          typeof p === 'string' && p.startsWith('/tmp/private/')
+            ? Promise.resolve(body)
+            : Promise.reject(errno('ENOENT'))
+        );
 
         const provider = new LocalProvider(TWO_ROOTS);
         const object = await provider.download('documents/user-1/contract.pdf');
@@ -402,24 +411,46 @@ describe('lib/storage/providers/local', () => {
 
       it('falls back to the public root when the key is not private', async () => {
         const body = Buffer.from('avatar bytes');
-        vi.mocked(existsSync).mockImplementation((p) => String(p).startsWith('/tmp/uploads/'));
-        vi.mocked(readFile).mockResolvedValue(body);
-        vi.mocked(stat).mockResolvedValue({ size: body.length, isFile: () => true } as never);
+        vi.mocked(readFile).mockImplementation((p) =>
+          typeof p === 'string' && p.startsWith('/tmp/uploads/')
+            ? Promise.resolve(body)
+            : Promise.reject(errno('ENOENT'))
+        );
 
         const provider = new LocalProvider(TWO_ROOTS);
         const object = await provider.download('avatars/user-1/avatar.jpg');
 
-        expect(vi.mocked(readFile).mock.calls[0]?.[0]).toContain('/tmp/uploads/');
+        // Private root tried first, then the public one.
+        expect(vi.mocked(readFile).mock.calls[0]?.[0]).toContain('/tmp/private/');
         expect(object.body.toString()).toBe('avatar bytes');
       });
 
       it('throws when the key exists in neither root', async () => {
-        vi.mocked(existsSync).mockReturnValue(false);
+        vi.mocked(readFile).mockRejectedValue(errno('ENOENT'));
 
         const provider = new LocalProvider(TWO_ROOTS);
 
         await expect(provider.download('missing.pdf')).rejects.toThrow(/not found/i);
-        expect(readFile).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+        // Both roots were attempted before giving up.
+        expect(readFile).toHaveBeenCalledTimes(2);
+      });
+
+      it('treats a key naming a directory as absent rather than surfacing EISDIR', async () => {
+        vi.mocked(readFile).mockRejectedValue(errno('EISDIR'));
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await expect(provider.download('documents/user-1')).rejects.toThrow(/not found/i);
+      });
+
+      it('propagates a genuine filesystem fault instead of reporting not-found', async () => {
+        // EACCES means the object may well exist and we failed to read it —
+        // reporting "not found" would turn a fault into a silent 404.
+        vi.mocked(readFile).mockRejectedValue(errno('EACCES'));
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await expect(provider.download('documents/user-1/contract.pdf')).rejects.toThrow('EACCES');
       });
 
       it('rejects a traversal key before touching the filesystem', async () => {

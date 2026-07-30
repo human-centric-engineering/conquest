@@ -19,9 +19,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { tmpdir } from 'os';
 import { join } from 'path';
 import { LocalProvider } from '@/lib/storage/providers/local';
+
+/**
+ * Scratch roots live under the repo's gitignored `.storage/`, not `os.tmpdir()`.
+ * The OS temp dir is world-readable, so writing test fixtures there is the very
+ * thing CWE-377 warns about — and CodeQL traces the flow from `tmpdir()` into
+ * the provider's `writeFile`, failing the build on our own test setup.
+ */
+const SCRATCH_PARENT = join(process.cwd(), '.storage', 'test-runs');
 
 let root: string;
 let publicDir: string;
@@ -29,7 +36,8 @@ let privateDir: string;
 let provider: LocalProvider;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'sunrise-storage-'));
+  await mkdir(SCRATCH_PARENT, { recursive: true });
+  root = await mkdtemp(join(SCRATCH_PARENT, 'storage-'));
   // Mirrors the real layout: the public root is inside a `public/` tree that
   // Next would serve, the private root is a sibling that it would not.
   publicDir = join(root, 'public', 'uploads');

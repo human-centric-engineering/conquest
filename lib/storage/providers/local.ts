@@ -24,7 +24,7 @@
  * @see .context/storage/overview.md for configuration documentation
  */
 
-import { writeFile, unlink, mkdir, rm, readFile, stat } from 'fs/promises';
+import { writeFile, unlink, mkdir, rm, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, dirname, resolve, sep } from 'path';
 import type {
@@ -120,15 +120,19 @@ export class LocalProvider implements StorageProvider {
     // write succeeds, so a failed upload never destroys the existing object.
     const staleRoot = isPrivate ? this.baseDir : this.privateDir;
     const stalePath = resolveWithin(staleRoot, key);
-    if (existsSync(stalePath)) {
-      try {
-        await unlink(stalePath);
-        logger.info('Removed stale copy of key from the other storage root', {
-          key,
-          stalePath,
-          newVisibility: isPrivate ? 'private' : 'public',
-        });
-      } catch (error) {
+    try {
+      // Unlink unconditionally and treat "wasn't there" as the success it is,
+      // rather than testing with `existsSync` first — the same TOCTOU reasoning
+      // as `download()`, and here the check would also be a wasted syscall on
+      // every upload.
+      await unlink(stalePath);
+      logger.info('Removed stale copy of key from the other storage root', {
+        key,
+        stalePath,
+        newVisibility: isPrivate ? 'private' : 'public',
+      });
+    } catch (error) {
+      if (errnoCode(error) !== 'ENOENT') {
         logger.error('Failed to remove stale copy from the other storage root', error, {
           key,
           stalePath,
@@ -244,21 +248,27 @@ export class LocalProvider implements StorageProvider {
 
     for (const root of [this.privateDir, this.baseDir]) {
       const filePath = resolveWithin(root, key);
-      if (!existsSync(filePath)) continue;
 
-      // Stat before reading, not alongside it: a key can name a directory
-      // (`documents/user-1`), and `readFile` on one rejects with EISDIR — so
-      // reading first would surface a confusing errno instead of falling
-      // through to the other root and then a clean "not found".
-      const stats = await stat(filePath);
-      if (!stats.isFile()) continue;
+      // Just read it, and let the failure classify the path. Checking
+      // existence (or stat-ing for `isFile`) first would be a TOCTOU race:
+      // the file can be replaced between the check and the read, so the
+      // answer would describe a file we did not open. `readFile` opens once
+      // and reports on that handle.
+      try {
+        const body = await readFile(filePath);
 
-      const body = await readFile(filePath);
-
-      // Length of what we actually read, not what `stat` reported — the two
-      // can disagree if the file changed in between, and the caller is about
-      // to use this as a Content-Length.
-      return { key, body, size: body.length };
+        // Length of what we actually read — the caller uses this as a
+        // Content-Length, so it must describe these exact bytes.
+        return { key, body, size: body.length };
+      } catch (error) {
+        // ENOENT — not in this root. EISDIR — the key names a directory
+        // (`documents/user-1`). Both mean "no object here": try the other
+        // root, then fall through to a clean "not found". Anything else
+        // (EACCES, EMFILE) is a real fault and must not be swallowed.
+        const code = errnoCode(error);
+        if (code === 'ENOENT' || code === 'EISDIR') continue;
+        throw error;
+      }
     }
 
     throw new Error(`Object not found in local storage: ${key}`);
@@ -296,6 +306,19 @@ export class LocalProvider implements StorageProvider {
  * codebase where a traversal would *read a secret* rather than write a
  * junk file — worth not depending on a single validator staying strict.
  */
+/**
+ * Read the `code` off a Node filesystem error without asserting a type onto
+ * it — `catch` binds `unknown`, and the project forbids `as` on values that
+ * did not come from a validated source.
+ */
+function errnoCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const { code } = error;
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+}
+
 function resolveWithin(root: string, key: string): string {
   const rootPath = resolve(root);
   const fullPath = resolve(rootPath, key);
