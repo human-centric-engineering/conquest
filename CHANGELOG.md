@@ -69,6 +69,49 @@ release process.
 
 ### Added
 
+- **`assertStoredVectorDimensions(subject)`** in
+  `lib/orchestration/knowledge/embedding-dimensions.ts` — the stored-vector
+  dimension guard, no longer hard-wired to `aiKnowledgeChunk` (#491). `pgvector`
+  fixes dimension at the column level, so changing the active embedding model
+  without re-embedding breaks every query against a vector table with a cast
+  error, after paying for the embedding round trip. The knowledge corpus was
+  guarded; a fork adding its own `vector(...)` table — the documented path,
+  since the platform KB is a global asset and per-user scoping there is an
+  anti-pattern — inherited the failure with none of the protection, and could
+  only get it by copying ~40 lines that would then never learn what the original
+  learns. The subject is two closures (`groupByDimension`, `exemplarModel`) plus
+  a `label` and a `remediation` string, so it carries no Prisma-delegate typing
+  and works for a table that is not a Prisma model at all. `search.ts` now binds
+  to it; behaviour and error text are unchanged.
+
+- **`capability.refused_not_advertised` hook event, and `warning` SSE frames on
+  a refused tool call** (#488). The handler already refused a tool name outside
+  the set advertised to the model for that turn, but said nothing: on the
+  single-call path no frame was emitted at all, so the turn carried on and the
+  UI showed an answer produced without the data the model asked for, with
+  nothing anywhere explaining why. Both refusal paths now yield
+  `{ type: 'warning', code }` — `tool_not_advertised` or `tool_unavailable` (the
+  repeated-failure breaker) — and the not-advertised case additionally emits the
+  new hook event, payload `{ conversationId, agentId, agentSlug, userId,
+  toolName, advertised }`. Only the not-advertised case is audited: a name
+  outside the advertised set is a hallucination or an injected tool call, which
+  is a security signal, whereas the breaker is operational and already logged.
+  `advertised` carries the tool set the model actually had, so a reviewer can
+  see what it invented the name from.
+
+- **`generatedColumnExists(table, column)`** in `lib/db/drift-probes.ts` — a
+  drift probe for a column that must be `GENERATED ALWAYS AS (...) STORED`
+  (#481). `columnExists` only asks whether a column of that name is present, so
+  a migration that dropped the column and recreated it as a plain one of the
+  same type passes the check while the column is never populated again. Probe A1
+  (`ai_knowledge_chunk.searchVector`) now uses it. That column backs the BM25
+  half of hybrid knowledge search, and the half-missing failure is worse than a
+  dropped index: a missing index means slow-but-correct, whereas a column that
+  stopped being generated means every row written after the migration holds
+  NULL — so search silently returns nothing for new content while old content
+  still matches, which reads as an ingestion bug. Forks probing their own
+  generated columns should prefer it over `columnExists`.
+
 - **`ChatRequest.openingTurn` — a turn the agent opens** (#474). `streamChat`
   required a non-empty `message` and persisted it as a `role:'user'` row before
   calling the model. Right for a support chatbot; wrong for a facilitated product

@@ -1781,6 +1781,31 @@ export class StreamingChatHandler {
               tool: tc.name,
               failures: failCount,
             });
+            // Tell the caller. Without this the turn simply carries on with the
+            // tool silently not run — the UI shows an answer produced without
+            // the data the model asked for, and nothing says so. The parallel
+            // branch below reports refusals through its `capability_results`
+            // frame; this one had no frame at all.
+            yield {
+              type: 'warning',
+              code: refusal.code,
+              message: refusal.message,
+            };
+            // Audit only the not-advertised case. A name outside the advertised
+            // set is a hallucination or an injected tool call, which is a
+            // security signal worth a subscribable event. `tool_unavailable` is
+            // the failure-threshold breaker doing its job — operational, and
+            // already in the logs.
+            if (refusal.code === 'tool_not_advertised') {
+              emitHookEvent('capability.refused_not_advertised', {
+                conversationId: conversation.id,
+                agentId: agent.id,
+                agentSlug: agent.slug,
+                userId: request.userId,
+                toolName: tc.name,
+                advertised: [...advertisedToolNames],
+              });
+            }
             const unavailableResult = {
               success: false,
               error: {
@@ -1980,6 +2005,14 @@ export class StreamingChatHandler {
               log.warn('Refusing tool not advertised to this agent (parallel)', {
                 tool: tc.name,
               });
+              emitHookEvent('capability.refused_not_advertised', {
+                conversationId: conversation.id,
+                agentId: agent.id,
+                agentSlug: agent.slug,
+                userId: request.userId,
+                toolName: tc.name,
+                advertised: [...advertisedToolNames],
+              });
               skippedResults.push({
                 tc,
                 result: {
@@ -2008,6 +2041,19 @@ export class StreamingChatHandler {
             } else {
               dispatchable.push(tc);
             }
+          }
+
+          // One warning per refusal, before the status frame. The refusals also
+          // ride the later `capability_results` frame, but that carries the raw
+          // result objects for the trace UI — `warning` is the channel a client
+          // is expected to surface to the person, and the single-call path emits
+          // the same codes, so the two paths stay symmetrical.
+          for (const skipped of skippedResults) {
+            yield {
+              type: 'warning',
+              code: skipped.result.error.code,
+              message: skipped.result.error.message,
+            };
           }
 
           const names = dispatchable.map((tc) => tc.name).join(', ');

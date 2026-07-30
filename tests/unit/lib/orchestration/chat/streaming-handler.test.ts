@@ -5014,6 +5014,62 @@ describe('StreamingChatHandler — unadvertised tool refusal', () => {
     expect(content.error.code).toBe('tool_not_advertised');
   });
 
+  it('emits a warning frame so the caller learns the tool was refused', async () => {
+    // Without this the turn just carries on: the UI shows an answer produced
+    // without the data the model asked for, and nothing anywhere says why.
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('run_workflow'),
+      usedSlug: 'anthropic',
+    });
+
+    const events = (await collect(streamChat(baseRequest))) as Array<Record<string, unknown>>;
+
+    const warning = events.find((e) => e.type === 'warning' && e.code === 'tool_not_advertised');
+    expect(warning).toBeDefined();
+    expect(warning?.message).toContain('run_workflow');
+    // Non-terminal: the turn still completes.
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('emits an audit event naming the tool and what the agent actually had', async () => {
+    // A name outside the advertised set is a hallucination or an injected tool
+    // call. `advertised` is on the payload so a reviewer can see what the model
+    // invented the name from.
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('run_workflow'),
+      usedSlug: 'anthropic',
+    });
+
+    await collect(streamChat(baseRequest));
+
+    expect(emitHookEvent).toHaveBeenCalledWith(
+      'capability.refused_not_advertised',
+      expect.objectContaining({
+        toolName: 'run_workflow',
+        agentSlug: 'helper',
+        advertised: ['search_knowledge_base'],
+      })
+    );
+  });
+
+  it('does not emit the refusal audit event when the tool WAS advertised', async () => {
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: providerEmitting('search_knowledge_base'),
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { results: [] },
+    });
+
+    await collect(streamChat(baseRequest));
+
+    const refusals = (emitHookEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: any) => c[0] === 'capability.refused_not_advertised'
+    );
+    expect(refusals).toHaveLength(0);
+  });
+
   it('refuses unadvertised tools in the parallel batch while dispatching granted ones', async () => {
     const provider = mockProvider([
       [
@@ -5055,6 +5111,49 @@ describe('StreamingChatHandler — unadvertised tool refusal', () => {
     const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
     const toolMsgs = createCalls.filter((c: any) => c[0].data.role === 'tool');
     expect(toolMsgs).toHaveLength(2);
+  });
+
+  it('warns and audits per refusal in the parallel batch, matching the single path', async () => {
+    // The parallel branch already reported refusals inside `capability_results`,
+    // but that frame carries raw result objects for the trace UI. `warning` is
+    // the channel a client surfaces to the person, so both paths must use it or
+    // a refusal is visible on one and silent on the other.
+    const provider = mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc1', name: 'search_knowledge_base', arguments: { q: 'a' } },
+        },
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc2', name: 'run_workflow', arguments: { slug: 'evil' } },
+        },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+      [
+        { type: 'text', content: 'Done.' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 3 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: {},
+    });
+
+    const events = (await collect(streamChat(baseRequest))) as Array<Record<string, unknown>>;
+
+    const warnings = events.filter((e) => e.type === 'warning' && e.code === 'tool_not_advertised');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain('run_workflow');
+
+    expect(emitHookEvent).toHaveBeenCalledWith(
+      'capability.refused_not_advertised',
+      expect.objectContaining({ toolName: 'run_workflow' })
+    );
   });
 });
 

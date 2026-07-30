@@ -52,6 +52,15 @@ export const HOOK_EVENT_TYPES = [
   // (`mode` and `expiresAt` are omitted on unquarantined).
   'capability.quarantined',
   'capability.unquarantined',
+  // The model asked for a tool the agent was never offered this turn (#488).
+  // Always one of two things: a hallucinated name, or an injected tool call —
+  // so it is a security signal, not an operational one, and it fires whether or
+  // not the capability exists elsewhere in the registry. The handler refuses
+  // the call; this event is how a fork notices it happened. Payload carries
+  // `{ conversationId, agentId, agentSlug, userId, toolName, advertised }`
+  // (`advertised` is the tool set the model actually had, so a reviewer can see
+  // what it invented the name from).
+  'capability.refused_not_advertised',
 ] as const;
 
 /** The event types Sunrise itself emits. */
