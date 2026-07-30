@@ -69,6 +69,21 @@ release process.
 
 ### Added
 
+- **`assertStoredVectorDimensions(subject)`** in
+  `lib/orchestration/knowledge/embedding-dimensions.ts` — the stored-vector
+  dimension guard, no longer hard-wired to `aiKnowledgeChunk` (#491). `pgvector`
+  fixes dimension at the column level, so changing the active embedding model
+  without re-embedding breaks every query against a vector table with a cast
+  error, after paying for the embedding round trip. The knowledge corpus was
+  guarded; a fork adding its own `vector(...)` table — the documented path,
+  since the platform KB is a global asset and per-user scoping there is an
+  anti-pattern — inherited the failure with none of the protection, and could
+  only get it by copying ~40 lines that would then never learn what the original
+  learns. The subject is two closures (`groupByDimension`, `exemplarModel`) plus
+  a `label` and a `remediation` string, so it carries no Prisma-delegate typing
+  and works for a table that is not a Prisma model at all. `search.ts` now binds
+  to it; behaviour and error text are unchanged.
+
 - **`capability.refused_not_advertised` hook event, and `warning` SSE frames on
   a refused tool call** (#488). The handler already refused a tool name outside
   the set advertised to the model for that turn, but said nothing: on the

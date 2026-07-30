@@ -15,7 +15,8 @@
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
-import { embedText, getActiveEmbeddingModelSummary } from '@/lib/orchestration/knowledge/embedder';
+import { embedText } from '@/lib/orchestration/knowledge/embedder';
+import { assertStoredVectorDimensions } from '@/lib/orchestration/knowledge/embedding-dimensions';
 import type { KnowledgeSearchResult, PatternSummary, SearchConfig } from '@/types/orchestration';
 import type { AiKnowledgeChunk } from '@/types/prisma';
 
@@ -86,47 +87,30 @@ async function resolveSearchWeights(): Promise<ResolvedSearchWeights> {
  * error message when there's drift.
  */
 async function assertActiveModelMatchesStoredVectors(): Promise<void> {
-  const active = await getActiveEmbeddingModelSummary();
-  if (!active) return;
-
-  const dimensionGroups = await prisma.aiKnowledgeChunk.groupBy({
-    by: ['embeddingDimension'],
-    where: { embeddingDimension: { not: null } },
-    _count: { _all: true },
-  });
-
-  if (dimensionGroups.length === 0) return;
-
-  const mismatched = dimensionGroups.filter((g) => g.embeddingDimension !== active.dimensions);
-  if (mismatched.length === 0) return;
-
-  // Surface one stored model name per mismatched dimension so the
-  // operator sees what produced the rows without spelunking through
-  // chunks themselves. `embeddingModel` can be null on legacy rows; the
-  // ?? 'unknown' guard preserves that case.
-  const exemplars = await Promise.all(
-    mismatched.map(async (g) => {
+  await assertStoredVectorDimensions({
+    label: 'chunk',
+    remediation: 'Run `npm run embeddings:reset` and re-upload documents to apply the new model.',
+    // `embeddingDimension: { not: null }` excludes rows predating Phase 1 —
+    // they were 1536 by construction, so counting them as an unknown dimension
+    // would report a mismatch that isn't one.
+    groupByDimension: async () => {
+      const groups = await prisma.aiKnowledgeChunk.groupBy({
+        by: ['embeddingDimension'],
+        where: { embeddingDimension: { not: null } },
+        _count: { _all: true },
+      });
+      return groups.map((g) => ({ dimension: g.embeddingDimension, count: g._count._all }));
+    },
+    // `embeddingModel` can be null on legacy rows; the guard renders that as
+    // 'unknown' rather than dropping the group.
+    exemplarModel: async (dimension) => {
       const row = await prisma.aiKnowledgeChunk.findFirst({
-        where: { embeddingDimension: g.embeddingDimension },
+        where: { embeddingDimension: dimension },
         select: { embeddingModel: true },
       });
-      return {
-        dimension: g.embeddingDimension,
-        count: g._count._all,
-        model: row?.embeddingModel ?? 'unknown',
-      };
-    })
-  );
-
-  const summary = exemplars
-    .map((e) => `${e.count} chunk(s) embedded by "${e.model}" at ${e.dimension} dims`)
-    .join('; ');
-
-  throw new Error(
-    `Embedding model mismatch: the active model "${active.modelId}" produces ` +
-      `${active.dimensions}-dim vectors, but the corpus contains: ${summary}. ` +
-      'Run `npm run embeddings:reset` and re-upload documents to apply the new model.'
-  );
+      return row?.embeddingModel ?? null;
+    },
+  });
 }
 
 /** Search filter options */
