@@ -30,7 +30,11 @@ release process.
   `java<TAB>script:`, `java<LF>script:`, `javascript<TAB>:` and a leading C0
   control all bypassed the check, because it ran on `trim()` (leading/trailing
   whitespace only) while browsers strip tab/newline/CR from anywhere in a URL
-  before parsing the scheme. Only the inspected copy is normalised — the URL
+  before parsing the scheme. The replacement character class also covers the
+  non-ASCII whitespace `trim()` used to remove (NBSP, BOM, U+2028, the U+2000
+  block, ideographic space), so the guard is nowhere narrower than the one it
+  replaced — those are not browser-executable, but leaving them out would have
+  been a silent narrowing. Only the inspected copy is normalised — the URL
   returned to callers is unchanged. ([#437])
 
 - **`PATCH /api/v1/users/me` clears `emailVerified` when the address changes**

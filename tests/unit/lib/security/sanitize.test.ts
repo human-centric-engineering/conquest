@@ -164,6 +164,40 @@ describe('Input Sanitization', () => {
         expect(sanitizeUrl(`fi${TAB}le:///etc/passwd`)).toBe('');
       });
 
+      // The switch from `trim()` to an explicit character class fixed the
+      // control-char bypass but dropped the non-ASCII whitespace `trim()` had
+      // been removing. None of these is browser-executable — scheme parsing
+      // fails on a non-ALPHA first character, so they are treated as relative
+      // URLs — but the class strips them so the guard is never narrower than
+      // the `trim()` it replaced.
+      it('should block unicode whitespace before the scheme', () => {
+        const NBSP = String.fromCharCode(0x00a0);
+        const BOM = String.fromCharCode(0xfeff);
+        const LINE_SEP = String.fromCharCode(0x2028);
+        const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
+
+        expect(sanitizeUrl(`${NBSP}javascript:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`${BOM}javascript:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`${LINE_SEP}javascript:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`${IDEOGRAPHIC_SPACE}javascript:alert(1)`)).toBe('');
+      });
+
+      it('should block unicode whitespace inside the scheme', () => {
+        const EN_QUAD = String.fromCharCode(0x2000);
+        const NARROW_NBSP = String.fromCharCode(0x202f);
+
+        expect(sanitizeUrl(`java${EN_QUAD}script:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`javascript${NARROW_NBSP}:alert(1)`)).toBe('');
+      });
+
+      it('should still return a URL whose PATH contains unicode whitespace', () => {
+        // The widened class must not start rewriting legitimate URLs — it only
+        // ever touches the inspected copy.
+        const NBSP = String.fromCharCode(0x00a0);
+        const url = `https://example.com/a${NBSP}b`;
+        expect(sanitizeUrl(url)).toBe(url);
+      });
+
       it('should return safe URLs VERBATIM, not the stripped copy', () => {
         // Only the inspected copy is normalised. Rewriting the returned value
         // would corrupt legitimate URLs — a space in a path is valid, and
