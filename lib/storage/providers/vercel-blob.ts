@@ -11,6 +11,7 @@
 import { put, del, list } from '@vercel/blob';
 import type {
   StorageProvider,
+  StorageCapabilities,
   UploadOptions,
   UploadResult,
   DeleteResult,
@@ -35,6 +36,18 @@ export class VercelBlobProvider implements StorageProvider {
   readonly name = 'vercel-blob';
   private token: string;
 
+  /**
+   * Everything is false, and stated rather than left to the default so it
+   * is clear this is a fact about the backend and not an oversight: blobs
+   * are public-only, there are no signed URLs, and reading bytes back goes
+   * through the public URL rather than the provider interface.
+   */
+  readonly capabilities: Partial<StorageCapabilities> = {
+    privateObjects: false,
+    signedUrls: false,
+    download: false,
+  };
+
   constructor(config: VercelBlobProviderConfig) {
     this.token = config.token;
     logger.debug('Vercel Blob provider initialized');
@@ -44,10 +57,22 @@ export class VercelBlobProvider implements StorageProvider {
     const { key, contentType } = options;
     validateStorageKey(key);
 
+    // Unlike S3, there is no configuration under which this provider could
+    // honour `public: false` — every blob is served from a public CDN URL.
+    // Refusing is the only honest answer: silently storing the object
+    // publicly is how a caller ends up publishing a user's file.
+    if (options.public === false) {
+      throw new Error(
+        'Vercel Blob cannot store private objects — every blob is publicly readable. ' +
+          'Use S3 (or the local provider) for private uploads, or check ' +
+          'getStorageCapabilities(provider).privateObjects before uploading.'
+      );
+    }
+
     // Vercel Blob uses the filename as the key
     // It automatically adds a unique prefix to prevent collisions
     const blob = await put(key, file, {
-      access: options.public !== false ? 'public' : 'public', // Vercel Blob only supports public
+      access: 'public', // Vercel Blob only supports public
       contentType,
       token: this.token,
       addRandomSuffix: false, // We handle uniqueness ourselves

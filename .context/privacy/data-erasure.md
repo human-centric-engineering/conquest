@@ -90,7 +90,12 @@ side effect first, since object storage can't enlist in a DB transaction):
    `AiAdminAuditLog` rows but leaves `clientIp` (an IP address = PII). The
    service nulls it before the link is gone.
 2. **Write an erasure receipt** — see below.
-3. **Remove avatar blobs** — `deleteByPrefix('avatars/{userId}/')`.
+3. **Remove avatar blobs** — `deleteByPrefix('avatars/{userId}/')`. On the local
+   provider this sweeps both storage roots (`public/uploads/` and the private
+   `.storage/private/`), so a file uploaded with `public: false` is erased too.
+   A provider that stored objects in more than one place and swept only one
+   would make this step a partial delete that still reported success — see
+   [`.context/storage/overview.md`](../storage/overview.md#local-provider).
 
 Apps and forks extend these same two reach-limits (residual-PII scrub, external
 resource cleanup) via registered hooks — see
