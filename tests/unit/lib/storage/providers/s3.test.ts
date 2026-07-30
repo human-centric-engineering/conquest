@@ -478,6 +478,60 @@ describe('lib/storage/providers/s3', () => {
       });
     });
 
+    describe('download', () => {
+      const baseConfig = {
+        bucket: 'test-bucket',
+        region: 'us-east-1',
+        accessKeyId: 'test-key',
+        secretAccessKey: 'test-secret',
+      };
+
+      it('returns the object bytes and content type', async () => {
+        const bytes = new Uint8Array(Buffer.from('report contents'));
+        mockSend.mockResolvedValueOnce({
+          Body: { transformToByteArray: vi.fn().mockResolvedValue(bytes) },
+          ContentType: 'application/pdf',
+        });
+
+        const provider = new S3Provider(baseConfig);
+        const object = await provider.download('documents/report.pdf');
+
+        expect(object.key).toBe('documents/report.pdf');
+        expect(object.body.toString()).toBe('report contents');
+        expect(object.size).toBe(bytes.length);
+        expect(object.contentType).toBe('application/pdf');
+      });
+
+      it('omits contentType when S3 does not report one', async () => {
+        mockSend.mockResolvedValueOnce({
+          Body: { transformToByteArray: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])) },
+        });
+
+        const provider = new S3Provider(baseConfig);
+        const object = await provider.download('documents/report.pdf');
+
+        expect(object.contentType).toBeUndefined();
+        expect(object.size).toBe(3);
+      });
+
+      it('throws when the response has no body', async () => {
+        mockSend.mockResolvedValueOnce({});
+
+        const provider = new S3Provider(baseConfig);
+
+        await expect(provider.download('missing.pdf')).rejects.toThrow(/not found/i);
+      });
+
+      it('rejects a traversal key before calling S3', async () => {
+        const provider = new S3Provider(baseConfig);
+
+        await expect(provider.download('../../etc/passwd')).rejects.toThrow(
+          'must not contain ".."'
+        );
+        expect(mockSend).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+      });
+    });
+
     describe('key validation', () => {
       it('should throw for invalid key with path traversal in upload', async () => {
         const provider = new S3Provider({

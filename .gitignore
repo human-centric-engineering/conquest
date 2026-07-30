@@ -189,6 +189,10 @@ yarn-debug.log*
 # Local file uploads (development only)
 public/uploads/
 
+# Local private object storage (development only) — uploads made with
+# `public: false`. Never served statically; read via the signed storage route.
+.storage/
+
 # Playwright MCP debug output
 .playwright-mcp/
 

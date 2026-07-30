@@ -44,6 +44,24 @@ export interface DeleteResult {
 }
 
 /**
+ * An object read back out of storage
+ */
+export interface StorageObject {
+  /** Storage key the object was read from */
+  key: string;
+  /** File content */
+  body: Buffer;
+  /** Size in bytes */
+  size: number;
+  /**
+   * MIME type, when the backend recorded one. Providers that do not store
+   * content type (the local filesystem) leave this undefined — the caller
+   * knows what it wrote.
+   */
+  contentType?: string;
+}
+
+/**
  * What a storage provider can actually do
  *
  * `upload(buffer, { public: false })` means different things on different
@@ -155,6 +173,22 @@ export interface StorageProvider {
    * @returns Signed URL with temporary access
    */
   getSignedUrl?(key: string, expiresIn: number): Promise<string>;
+
+  /**
+   * Read an object back as bytes (optional)
+   *
+   * Buffer-based rather than streaming: every path in this codebase is
+   * buffer-based behind a 5 MB default cap, so a stream would buy nothing
+   * and cost SDK-type reconciliation across providers.
+   *
+   * Only call this when `getStorageCapabilities(provider).download` is
+   * true.
+   *
+   * @param key - Storage key of the file
+   * @returns The object's bytes and metadata
+   * @throws If the object does not exist
+   */
+  download?(key: string): Promise<StorageObject>;
 }
 
 /**

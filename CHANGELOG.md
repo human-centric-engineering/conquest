@@ -78,6 +78,20 @@ release process.
   never assumed capable of something it does not implement. Read it through the
   helper, never off the provider directly.
 
+- **`download(key)` on `StorageProvider`** (#490) — an optional, `Buffer`-based
+  read path returning the new `StorageObject`. Implemented by S3 and local;
+  Vercel Blob declares it unsupported. The interface could previously write and
+  delete an object but never read one back, which is what forced a fork keeping
+  a user's uploaded file to discard the original bytes after parsing.
+
+- **A private root for the local provider** (#490) — `LocalProviderConfig.privateDir`
+  (default `.storage/private`, gitignored) holds anything uploaded with
+  `public: false`, outside the tree Next serves. `createLocalProvider()` now
+  takes a config argument and `createLocalProviderFromEnv()` reads
+  `STORAGE_LOCAL_BASE_DIR` / `STORAGE_LOCAL_BASE_URL` / `STORAGE_LOCAL_PRIVATE_DIR`
+  — the zero-argument factory meant `client.ts` could never configure the
+  provider at all.
+
 - **`S3_OBJECTS_PRIVATE_BY_DEFAULT`** (#490) — declares that the bucket blocks
   public access, so every object is already private without ACLs. This is the
   AWS-recommended posture and is invisible at the SDK level; setting it is what
@@ -464,6 +478,13 @@ release process.
   with no way to tell which apart from sniffing `provider.name`. Each provider
   now declares what it can do, S3 warns once per process when it cannot enforce
   the request, and Vercel Blob refuses outright.
+
+- **Local storage deletes now sweep the private root as well as the public one**
+  (#490). `delete()` and `deletePrefix()` only ever touched `baseDir`. With the
+  private root added, that would have made `eraseUser()` — which clears a user's
+  blobs via `deleteByPrefix('avatars/<userId>/')` — a partial delete, leaving
+  private files on disk after erasure. Both roots are swept, and a failure in
+  either is reported rather than masked by the other's success.
 
 - **The retention sweep reads the settings row once instead of eight times**
   (#442). `resolveRetentionDays()` fetched the same singleton row per prune, so

@@ -11,7 +11,7 @@ lib/storage/
 ├── image.ts               # validateImageMagicBytes(), processImage(), getExtensionForMimeType(), isSupportedImageType()
 ├── constants.ts           # Client-safe constants (SUPPORTED_IMAGE_TYPES, IMAGE_EXTENSIONS)
 └── providers/
-    ├── types.ts           # StorageProvider interface, provider config types
+    ├── types.ts           # StorageProvider interface, StorageCapabilities, getStorageCapabilities()
     ├── validate-key.ts    # validateStorageKey() - path traversal prevention
     ├── s3.ts              # AWS S3 / S3-compatible (S3ProviderConfig)
     ├── vercel-blob.ts     # Vercel Blob Storage (VercelBlobProviderConfig)
@@ -65,9 +65,9 @@ await storage.upload(buffer, { key, contentType, public: false });
 
 | Capability       | S3                                              | Vercel Blob | Local |
 | ---------------- | ----------------------------------------------- | ----------- | ----- |
-| `privateObjects` | `S3_USE_ACL` or `S3_OBJECTS_PRIVATE_BY_DEFAULT` | ✗           | ✗     |
+| `privateObjects` | `S3_USE_ACL` or `S3_OBJECTS_PRIVATE_BY_DEFAULT` | ✗           | ✓     |
 | `signedUrls`     | ✓                                               | ✗           | ✗     |
-| `download`       | ✗                                               | ✗           | ✗     |
+| `download`       | ✓                                               | ✗           | ✓     |
 
 **Read capabilities through `getStorageCapabilities(provider)` — never `provider.capabilities` directly.** The field is an optional `Partial<StorageCapabilities>` so that a fork's custom provider (see [Adding a New Provider](#adding-a-new-provider)) keeps compiling when a capability is added upstream. An undeclared capability means _cannot_, and the helper is what fills that in.
 
@@ -75,7 +75,7 @@ await storage.upload(buffer, { key, contentType, public: false });
 
 - **S3** — sends `ACL: private` when `S3_USE_ACL=true`. Without ACLs it cannot verify object visibility from the SDK, so it logs a warning (once per process) and uploads anyway. This is deliberate: the AWS-recommended posture is Block Public Access plus a bucket policy, where every object is _already_ private and throwing would reject the safest configuration. Declare that posture with `S3_OBJECTS_PRIVATE_BY_DEFAULT=true`.
 - **Vercel Blob** — **throws**. Every blob is served from a public CDN URL; there is no configuration that makes this work, so an ambiguous warning would be dishonest.
-- **Local** — writes to `public/uploads/`, which Next serves statically. Declares `privateObjects: false`, so callers checking capabilities refuse before writing.
+- **Local** — writes to a separate private root (`.storage/private/`, gitignored) that Next does not serve. Public uploads still go to `public/uploads/`. Read a private object back with `download()`.
 
 The `upload_to_storage` agent capability enforces this automatically: a binding with `public: false` or `signedUrlTtlSeconds` on a provider that lacks `privateObjects` fails with `private_objects_not_supported` rather than handing the user a world-readable URL.
 
@@ -129,11 +129,30 @@ Get token from: Vercel Dashboard → Storage → Blob
 
 ### Local Provider
 
-Development fallback. Files stored in `public/uploads/`. Uses `LocalProviderConfig` interface for typed configuration.
+Development fallback. Uses `LocalProviderConfig` for typed configuration, built by `createLocalProviderFromEnv()`.
+
+Two roots:
+
+| Upload                   | Directory           | Served at                 | Read back via |
+| ------------------------ | ------------------- | ------------------------- | ------------- |
+| default (`public: true`) | `public/uploads/`   | `/uploads/<key>` (static) | direct URL    |
+| `public: false`          | `.storage/private/` | not served                | `download()`  |
+
+```bash
+# All optional — these are the defaults
+STORAGE_LOCAL_BASE_DIR=public/uploads
+STORAGE_LOCAL_BASE_URL=/uploads
+STORAGE_LOCAL_PRIVATE_DIR=.storage/private
+```
 
 - No configuration required
 - Automatically enabled in development when no cloud provider configured
 - **Not for production** - files don't persist across deploys
+- `.storage/` is gitignored
+
+> **Keep the private root outside `public/`.** Pointing `STORAGE_LOCAL_PRIVATE_DIR` at anything Next serves statically re-creates the exact bug this split exists to fix.
+
+**Deletes span both roots.** Nothing records which root holds a given key, so `delete()` and `deletePrefix()` sweep both and `download()` checks private first. This matters for erasure: `eraseUser()` clears a user's blobs with `deleteByPrefix('avatars/<userId>/')`, and sweeping only the public root would leave their private files on disk.
 
 ## API Endpoints
 

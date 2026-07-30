@@ -19,6 +19,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type {
   StorageProvider,
   StorageCapabilities,
+  StorageObject,
   UploadOptions,
   UploadResult,
   DeleteResult,
@@ -75,6 +76,7 @@ export class S3Provider implements StorageProvider {
     return {
       privateObjects: this.useAcl || this.privateByDefault,
       signedUrls: true,
+      download: true,
     };
   }
 
@@ -239,6 +241,34 @@ export class S3Provider implements StorageProvider {
       logger.error('Failed to delete objects from S3 by prefix', error, { prefix });
       return { success: false, key: prefix };
     }
+  }
+
+  async download(key: string): Promise<StorageObject> {
+    validateStorageKey(key);
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    });
+
+    const response = await this.client.send(command);
+    if (!response.Body) {
+      throw new Error(`Object not found in S3: ${key}`);
+    }
+
+    // `transformToByteArray` is on the SDK's stream mixin in every runtime
+    // it supports (Node, browser, React Native), so there is no per-runtime
+    // branch to write here.
+    const bytes = await response.Body.transformToByteArray();
+    const body = Buffer.from(bytes);
+
+    logger.debug('Downloaded object from S3', { key, size: body.length });
+
+    return {
+      key,
+      body,
+      size: body.length,
+      ...(response.ContentType ? { contentType: response.ContentType } : {}),
+    };
   }
 
   async getSignedUrl(key: string, expiresIn: number = 3600): Promise<string> {

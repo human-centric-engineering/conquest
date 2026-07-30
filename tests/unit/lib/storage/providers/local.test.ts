@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFile, unlink, mkdir, rm } from 'fs/promises';
+import { writeFile, unlink, mkdir, rm, readFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import { LocalProvider, createLocalProvider } from '@/lib/storage/providers/local';
+import {
+  LocalProvider,
+  createLocalProvider,
+  createLocalProviderFromEnv,
+} from '@/lib/storage/providers/local';
+import { getStorageCapabilities } from '@/lib/storage/providers/types';
 import { logger } from '@/lib/logging';
 
 vi.mock('fs/promises', () => {
@@ -9,17 +14,23 @@ vi.mock('fs/promises', () => {
   const mockUnlink = vi.fn();
   const mockMkdir = vi.fn();
   const mockRm = vi.fn();
+  const mockReadFile = vi.fn();
+  const mockStat = vi.fn();
 
   return {
     writeFile: mockWriteFile,
     unlink: mockUnlink,
     mkdir: mockMkdir,
     rm: mockRm,
+    readFile: mockReadFile,
+    stat: mockStat,
     default: {
       writeFile: mockWriteFile,
       unlink: mockUnlink,
       mkdir: mockMkdir,
       rm: mockRm,
+      readFile: mockReadFile,
+      stat: mockStat,
     },
   };
 });
@@ -167,7 +178,9 @@ describe('lib/storage/providers/local', () => {
 
         const result = await provider.deletePrefix('avatars/user-123/');
 
-        expect(rm).toHaveBeenCalledWith(expect.stringContaining('avatars/user-123/'), {
+        // `resolve()` normalises away the trailing slash — immaterial to
+        // `rm`, which takes a directory either way.
+        expect(rm).toHaveBeenCalledWith(expect.stringContaining('avatars/user-123'), {
           recursive: true,
         });
         expect(result).toEqual({ success: true, key: 'avatars/user-123/' });
@@ -209,6 +222,167 @@ describe('lib/storage/providers/local', () => {
       });
     });
 
+    describe('private objects', () => {
+      const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
+
+      it('writes a public:false upload to the private root, never the public one', async () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(writeFile).mockResolvedValue(undefined);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await provider.upload(Buffer.from('secret'), {
+          key: 'documents/user-1/contract.pdf',
+          contentType: 'application/pdf',
+          public: false,
+        });
+
+        const writtenPath = vi.mocked(writeFile).mock.calls[0]?.[0] as string;
+        expect(writtenPath).toContain('/tmp/private/');
+        // The bug this fixes: the file used to land under public/uploads/,
+        // where Next serves it to anyone who guesses the key.
+        expect(writtenPath).not.toContain('/tmp/uploads/');
+      });
+
+      it('returns the signed route path rather than a statically served URL', async () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(writeFile).mockResolvedValue(undefined);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        const result = await provider.upload(Buffer.from('secret'), {
+          key: 'documents/user-1/contract.pdf',
+          contentType: 'application/pdf',
+          public: false,
+        });
+
+        expect(result.url).toBe('/api/v1/storage/documents/user-1/contract.pdf');
+      });
+
+      it('still writes public uploads to the public root with a static URL', async () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(writeFile).mockResolvedValue(undefined);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        const result = await provider.upload(Buffer.from('hi'), {
+          key: 'avatars/user-1/avatar.jpg',
+          contentType: 'image/jpeg',
+        });
+
+        expect(vi.mocked(writeFile).mock.calls[0]?.[0]).toContain('/tmp/uploads/');
+        expect(result.url).toBe('/uploads/avatars/user-1/avatar.jpg');
+      });
+
+      it('declares privateObjects and download, but not signedUrls', () => {
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        expect(getStorageCapabilities(provider)).toEqual({
+          privateObjects: true,
+          signedUrls: false,
+          download: true,
+        });
+      });
+    });
+
+    describe('deletion spans both roots', () => {
+      const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
+
+      it('deletes a key from the private root as well as the public one', async () => {
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(unlink).mockResolvedValue(undefined);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+        const result = await provider.delete('documents/user-1/contract.pdf');
+
+        const paths = vi.mocked(unlink).mock.calls.map((call) => call[0] as string);
+        expect(paths.some((p) => p.startsWith('/tmp/private/'))).toBe(true);
+        expect(paths.some((p) => p.startsWith('/tmp/uploads/'))).toBe(true);
+        expect(result).toEqual({ success: true, key: 'documents/user-1/contract.pdf' });
+      });
+
+      it('clears a prefix from both roots — the GDPR erasure path', async () => {
+        // eraseUser() calls deleteByPrefix('avatars/<id>/'). Sweeping only
+        // the public root would leave the user's private files on disk and
+        // turn erasure into a partial delete.
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(rm).mockResolvedValue(undefined);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+        const result = await provider.deletePrefix('avatars/user-123/');
+
+        const paths = vi.mocked(rm).mock.calls.map((call) => call[0] as string);
+        expect(paths.some((p) => p.startsWith('/tmp/private/'))).toBe(true);
+        expect(paths.some((p) => p.startsWith('/tmp/uploads/'))).toBe(true);
+        expect(result).toEqual({ success: true, key: 'avatars/user-123/' });
+      });
+
+      it('reports failure when the private root cannot be swept', async () => {
+        // A partial erasure must not report success — that is the difference
+        // between a retryable failure and silent non-compliance.
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(rm)
+          .mockRejectedValueOnce(new Error('Permission denied')) // private root
+          .mockResolvedValueOnce(undefined); // public root
+
+        const provider = new LocalProvider(TWO_ROOTS);
+        const result = await provider.deletePrefix('avatars/user-123/');
+
+        expect(result.success).toBe(false);
+        // The public root is still swept — one failure must not abort the other.
+        expect(rm).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    describe('download', () => {
+      const TWO_ROOTS = { baseDir: '/tmp/uploads', privateDir: '/tmp/private' };
+
+      it('reads a private object back as bytes', async () => {
+        const body = Buffer.from('secret contents');
+        vi.mocked(existsSync).mockImplementation((p) => String(p).startsWith('/tmp/private/'));
+        vi.mocked(readFile).mockResolvedValue(body);
+        vi.mocked(stat).mockResolvedValue({ size: body.length, isFile: () => true } as never);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+        const object = await provider.download('documents/user-1/contract.pdf');
+
+        expect(object.body.toString()).toBe('secret contents');
+        expect(object.size).toBe(body.length);
+        expect(object.key).toBe('documents/user-1/contract.pdf');
+      });
+
+      it('falls back to the public root when the key is not private', async () => {
+        const body = Buffer.from('avatar bytes');
+        vi.mocked(existsSync).mockImplementation((p) => String(p).startsWith('/tmp/uploads/'));
+        vi.mocked(readFile).mockResolvedValue(body);
+        vi.mocked(stat).mockResolvedValue({ size: body.length, isFile: () => true } as never);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+        const object = await provider.download('avatars/user-1/avatar.jpg');
+
+        expect(vi.mocked(readFile).mock.calls[0]?.[0]).toContain('/tmp/uploads/');
+        expect(object.body.toString()).toBe('avatar bytes');
+      });
+
+      it('throws when the key exists in neither root', async () => {
+        vi.mocked(existsSync).mockReturnValue(false);
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await expect(provider.download('missing.pdf')).rejects.toThrow(/not found/i);
+        expect(readFile).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+      });
+
+      it('rejects a traversal key before touching the filesystem', async () => {
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await expect(provider.download('../../etc/passwd')).rejects.toThrow(
+          'must not contain ".."'
+        );
+        expect(readFile).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+      });
+    });
+
     describe('key validation', () => {
       it('should throw for invalid key with path traversal in upload()', async () => {
         const provider = new LocalProvider({ baseDir: '/tmp/uploads' });
@@ -240,6 +414,58 @@ describe('lib/storage/providers/local', () => {
       const provider = createLocalProvider();
 
       expect(provider.name).toBe('local');
+    });
+
+    it('accepts configuration — it used to take no arguments at all', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+
+      const provider = createLocalProvider({ baseDir: '/custom/uploads', baseUrl: '/files' });
+      const result = await provider.upload(Buffer.from('x'), {
+        key: 'a.txt',
+        contentType: 'text/plain',
+      });
+
+      expect(vi.mocked(writeFile).mock.calls[0]?.[0]).toContain('/custom/uploads');
+      expect(result.url).toBe('/files/a.txt');
+    });
+  });
+
+  describe('createLocalProviderFromEnv', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('uses the configured private directory', async () => {
+      vi.stubEnv('STORAGE_LOCAL_PRIVATE_DIR', '/var/private-objects');
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+
+      const provider = createLocalProviderFromEnv();
+      await provider.upload(Buffer.from('secret'), {
+        key: 'doc.pdf',
+        contentType: 'application/pdf',
+        public: false,
+      });
+
+      expect(vi.mocked(writeFile).mock.calls[0]?.[0]).toContain('/var/private-objects');
+    });
+
+    it('defaults the private root to .storage/private when unset', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+
+      const provider = createLocalProviderFromEnv();
+      await provider.upload(Buffer.from('secret'), {
+        key: 'doc.pdf',
+        contentType: 'application/pdf',
+        public: false,
+      });
+
+      const writtenPath = vi.mocked(writeFile).mock.calls[0]?.[0] as string;
+      expect(writtenPath).toContain('.storage/private');
+      // Must not be under public/, or Next serves it statically.
+      expect(writtenPath).not.toContain('public/uploads');
     });
   });
 });

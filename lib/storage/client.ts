@@ -15,7 +15,7 @@
 import type { StorageProvider, StorageProviderType } from '@/lib/storage/providers/types';
 import { createS3ProviderFromEnv } from '@/lib/storage/providers/s3';
 import { createVercelBlobProviderFromEnv } from '@/lib/storage/providers/vercel-blob';
-import { createLocalProvider } from '@/lib/storage/providers/local';
+import { createLocalProviderFromEnv } from '@/lib/storage/providers/local';
 import { logger } from '@/lib/logging';
 
 let storageClient: StorageProvider | null = null;
@@ -109,7 +109,7 @@ function createProvider(
         return provider;
       }
       case 'local':
-        return createLocalProvider();
+        return createLocalProviderFromEnv();
       default:
         logger.error('Unknown storage provider', { provider: explicitProvider });
         return null;
@@ -134,7 +134,7 @@ function createProvider(
   // Fall back to local storage in development
   if (isDevelopment) {
     logger.debug('Using local storage provider (development fallback)');
-    return createLocalProvider();
+    return createLocalProviderFromEnv();
   }
 
   // No provider available
