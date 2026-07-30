@@ -8,21 +8,19 @@
  * Encapsulates the overlap guard, watchdog, schedule sweep, background
  * task chain, and per-task logging. Callers receive the schedules
  * result and a `skipped` flag so the HTTP route can shape its response.
+ *
+ * The background tasks themselves live in `platform-jobs.ts`, each with a
+ * minimum interval — a task held back by its interval reports `'skipped'` in
+ * the completion log line rather than being omitted (#442).
  */
 
 import { logger } from '@/lib/logging';
-import {
-  processDueSchedules,
-  processOrphanedExecutions,
-  processPendingExecutions,
-} from '@/lib/orchestration/scheduling';
-import { processPendingRetries } from '@/lib/orchestration/webhooks/dispatcher';
-import { processPendingHookRetries } from '@/lib/orchestration/hooks/registry';
-import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reaper';
-import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
-import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
-import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { processDueSchedules } from '@/lib/orchestration/scheduling';
 import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
+import {
+  PLATFORM_JOB_NAMES,
+  runDuePlatformJobs,
+} from '@/lib/orchestration/maintenance/platform-jobs';
 
 /** Module-level guard against overlapping tick executions. */
 let tickRunning = false;
@@ -41,16 +39,12 @@ export function __test_setTickRunning(value: boolean): void {
   tickRunning = value;
 }
 
-export const BACKGROUND_TASK_NAMES = [
-  'webhookRetries',
-  'hookRetries',
-  'orphanSweep',
-  'zombieReaper',
-  'embeddingBackfill',
-  'retention',
-  'pendingExecutionRecovery',
-  'evaluationRuns',
-] as const;
+/**
+ * Background task names, in run order — published by the tick route as
+ * `backgroundTasks`. Derived from `PLATFORM_JOBS` so the list and the tasks
+ * that actually run cannot drift apart.
+ */
+export const BACKGROUND_TASK_NAMES = PLATFORM_JOB_NAMES;
 
 /**
  * Watchdog timeout for the background chain. Five minutes is a generous
@@ -101,37 +95,26 @@ export async function runMaintenanceTick(): Promise<TickResult> {
   }, BACKGROUND_TASK_MAX_MS);
 
   void Promise.allSettled([
-    processPendingRetries(),
-    processPendingHookRetries(),
-    processOrphanedExecutions(),
-    reapZombieExecutions(),
-    backfillMissingEmbeddings(),
-    enforceRetentionPolicies(),
-    processPendingExecutions(),
-    processPendingEvaluationRuns(),
-    // Fork-owned seam (#469). Last in the list so its index doesn't shift the
-    // BACKGROUND_TASK_NAMES mapping above, and so app work never delays
-    // Sunrise's own maintenance. `runDueAppJobs` never throws and returns
-    // undefined when no jobs are registered, so vanilla Sunrise is unaffected.
+    // Sunrise's own tasks, each gated by its own minimum interval (#442). The
+    // helper contains per-task failures itself, so a rejection here would mean
+    // the registry rather than a sweep.
+    runDuePlatformJobs(startMs),
+    // Fork-owned seam (#469). Second so app work never delays Sunrise's own
+    // maintenance. `runDueAppJobs` never throws and returns undefined when no
+    // jobs are registered, so vanilla Sunrise is unaffected.
     runDueAppJobs(),
   ])
-    .then((settled) => {
-      const summary = Object.fromEntries(
-        BACKGROUND_TASK_NAMES.map((name, i) => {
-          const result = settled[i];
-          return [
-            name,
-            result.status === 'fulfilled' ? result.value : { error: String(result.reason) },
-          ];
-        })
-      );
-      // App jobs sit one past the named platform tasks. Only logged when the
-      // fork actually registered something, so the line stays unchanged upstream.
-      const appJobsResult = settled[BACKGROUND_TASK_NAMES.length];
+    .then(([platformResult, appJobsResult]) => {
+      const summary =
+        platformResult.status === 'fulfilled'
+          ? platformResult.value
+          : { error: String(platformResult.reason) };
+      // Only logged when the fork actually registered something, so the line
+      // stays unchanged upstream.
       const appJobs =
-        appJobsResult?.status === 'fulfilled'
+        appJobsResult.status === 'fulfilled'
           ? appJobsResult.value
-          : { error: String(appJobsResult?.reason) };
+          : { error: String(appJobsResult.reason) };
 
       logger.info('Maintenance tick background tasks completed', {
         ...summary,

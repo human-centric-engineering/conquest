@@ -95,6 +95,7 @@ import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embe
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
 import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
+import { __resetPlatformJobsForTests } from '@/lib/orchestration/maintenance/platform-jobs';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import {
   POST,
@@ -161,6 +162,10 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Per-task intervals (#442) are module-level state that outlives a single
+    // test. Without this, the second test in the file sees `retention` and
+    // friends still inside their interval and they never run.
+    __resetPlatformJobsForTests();
 
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 
@@ -276,6 +281,37 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
         pendingExecutionRecovery: DEFAULT_PENDING_RECOVERY_RESULT,
         evaluationRuns: DEFAULT_EVAL_RUN_RESULT,
         totalDurationMs: expect.any(Number),
+      })
+    );
+  });
+
+  it('a back-to-back tick re-runs only the responsive tasks (#442)', async () => {
+    // Two ticks a few ms apart stand in for two cron fires a minute apart: the
+    // retry drains must still run, and the sweeps whose own thresholds are
+    // minutes must not touch the database at all.
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+    vi.mocked(logger.info).mockClear();
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(processPendingRetries).toHaveBeenCalledTimes(2);
+    expect(processPendingHookRetries).toHaveBeenCalledTimes(2);
+    expect(processPendingEvaluationRuns).toHaveBeenCalledTimes(2);
+    expect(enforceRetentionPolicies).toHaveBeenCalledTimes(1);
+    expect(backfillMissingEmbeddings).toHaveBeenCalledTimes(1);
+    expect(reapZombieExecutions).toHaveBeenCalledTimes(1);
+    expect(processOrphanedExecutions).toHaveBeenCalledTimes(1);
+    expect(processPendingExecutions).toHaveBeenCalledTimes(1);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({
+        webhookRetries: DEFAULT_RETRY_RESULT,
+        retention: 'skipped',
+        embeddingBackfill: 'skipped',
+        zombieReaper: 'skipped',
       })
     );
   });
@@ -610,9 +646,12 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       // Watchdog fires for tick 1, releasing the guard.
       await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
 
-      // Tick 2 starts; hangs again. New token claims the guard.
-      const deferred2 = createDeferred<typeof DEFAULT_REAPER_RESULT>();
-      vi.mocked(reapZombieExecutions).mockReturnValue(deferred2.promise);
+      // Tick 2 starts; hangs again. New token claims the guard. It has to hang
+      // on a *different* task: the per-job in-flight latch (#442) means tick 1's
+      // still-pending reaper is skipped rather than started a second time, so
+      // re-deferring the reaper here would let tick 2's chain settle at once.
+      const deferred2 = createDeferred<number>();
+      vi.mocked(processPendingRetries).mockReturnValue(deferred2.promise);
 
       const second = await POST(makeRequest());
       expect(second.status).toBe(202);
@@ -628,7 +667,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       expect(stillSkippedBody.data.skipped).toBe(true);
 
       // Cleanup.
-      deferred2.resolve(DEFAULT_REAPER_RESULT);
+      deferred2.resolve(DEFAULT_RETRY_RESULT);
     });
   });
 });

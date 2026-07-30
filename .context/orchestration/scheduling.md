@@ -113,7 +113,7 @@ Called automatically by the unified maintenance tick **before** `reapZombieExecu
 
 ### Unified Maintenance Tick (admin-auth required, **preferred**)
 
-`POST /api/v1/admin/orchestration/maintenance/tick` — runs all periodic maintenance tasks in one call. **Returns `202 Accepted`** as soon as `processDueSchedules()` has claimed and fired any due schedules; the remaining seven tasks run as a fire-and-forget background chain inside the same overlap guard and log per-task results when they settle.
+`POST /api/v1/admin/orchestration/maintenance/tick` — runs all periodic maintenance tasks in one call. **Returns `202 Accepted`** as soon as `processDueSchedules()` has claimed and fired any due schedules; the remaining eight tasks run as a fire-and-forget background chain inside the same overlap guard and log per-task results when they settle. Each background task also has a minimum interval, so most ticks run only a subset — see the table below.
 
 1. `processDueSchedules()` — workflow cron schedules **(awaited synchronously)**
 2. `processPendingRetries()` — webhook subscription delivery retry queue _(background)_
@@ -123,6 +123,26 @@ Called automatically by the unified maintenance tick **before** `reapZombieExecu
 6. `backfillMissingEmbeddings()` — re-embed messages that failed initial embedding _(background)_
 7. `enforceRetentionPolicies()` — delete conversations past per-agent retention window, prune old webhook deliveries and cost log rows _(background)_
 8. `processPendingExecutions()` — recover orphaned `pending` workflow executions _(background)_
+9. `processPendingEvaluationRuns()` — drive one time-slice of the queued dataset-evaluation runs _(background)_
+
+**Per-task minimum intervals (#442).** The background tasks do **not** all run on every tick. Each declares the shortest gap at which running it can still find work, in `lib/orchestration/maintenance/platform-jobs.ts`:
+
+| Task                       | Interval   | Why                                                                 |
+| -------------------------- | ---------- | ------------------------------------------------------------------- |
+| `webhookRetries`           | every tick | backoff starts at 10s — a throttle would miss the first retry       |
+| `hookRetries`              | every tick | same 10s / 60s / 300s backoff                                       |
+| `orphanSweep`              | 2 min      | the lease is 3 min, so a faster sweep provably finds nothing        |
+| `zombieReaper`             | 5 min      | its own stale threshold is 30 min                                   |
+| `embeddingBackfill`        | 15 min     | best-effort re-embed of a failed write; the anti-join is unindexed  |
+| `retention`                | 1 hour     | windows are measured in days                                        |
+| `pendingExecutionRecovery` | 2 min      | its own stale-pending threshold is 2 min                            |
+| `evaluationRuns`           | every tick | the worker drives one time-slice per tick, so cadence is throughput |
+
+A task held back by its interval reports the string `'skipped'` under its own key in the completion log line — reported rather than omitted, so "did the sweep run?" is answerable from the logs. Intervals are **start-to-start** and held **in process memory**: persisting them would cost a DB round-trip per task per tick, which is the cost the throttle exists to remove. Consequences, both benign because every throttled task is idempotent: each instance in a multi-instance deployment keeps its own clock (so a task runs roughly once per instance per interval), and a restart re-arms everything immediately.
+
+The same table also gives each task an **in-flight latch** — a task still running from an earlier tick is never started a second time, even after the liveness watchdog below releases the overlap guard.
+
+Forks add their own recurring work through `registerAppJob`, which shares the throttle mechanism (`job-clock.ts`) but keeps a separate registry and clock, so a fork job named `retention` cannot throttle Sunrise's sweep — see [App jobs](#app-jobs--the-fork-seam-on-the-tick) below.
 
 **Response shape:**
 
@@ -139,6 +159,7 @@ Called automatically by the unified maintenance tick **before** `reapZombieExecu
       "embeddingBackfill",
       "retention",
       "pendingExecutionRecovery",
+      "evaluationRuns",
     ],
     "durationMs": 47,
   },
@@ -236,7 +257,8 @@ export function initAppJobs(): void {
 | `getAppJobs()`        | Registered jobs in first-registration order (admin surface).    |
 | `runDueAppJobs(now?)` | Called by the tick. Returns a per-job summary for its log line. |
 
-Semantics that differ from the platform's own scheduled work:
+Semantics — the first three are shared with the platform's own tasks, which use
+the same `job-clock.ts` mechanism (#442):
 
 - **`intervalMs` is a minimum gap, not a guarantee.** Last-run times are
   in-process, so a multi-instance deployment runs each job about once per

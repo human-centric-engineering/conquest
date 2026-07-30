@@ -3,7 +3,10 @@
 How Sunrise automatically deletes aged operational data. All pruning is enforced
 by `enforceRetentionPolicies()` in `lib/orchestration/retention.ts`, run as one
 task of the unified maintenance tick (`POST /api/v1/admin/orchestration/maintenance/tick`,
-called ~every 60s by an external cron). This is the **scheduled-purge** half of
+called ~every 60s by an external cron). The sweep itself is throttled to **at
+most once an hour** per process, since every window here is measured in days —
+see [per-task minimum intervals](./scheduling.md#unified-maintenance-tick-admin-auth-required-preferred).
+This is the **scheduled-purge** half of
 the platform's data lifecycle; on-demand subject erasure is separate — see
 [Account Deletion & Right to Erasure](../privacy/data-erasure.md).
 

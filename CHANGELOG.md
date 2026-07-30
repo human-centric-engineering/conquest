@@ -250,6 +250,29 @@ release process.
 
 ### Changed
 
+- **Maintenance-tick background tasks now run on per-task minimum intervals**
+  (#442). All eight ran on every tick, so at the documented 60s cadence the
+  retention sweep — whose windows are measured in days — ran 1,440 times a day
+  and the embedding backfill full-scanned the message table just as often. Each
+  task now declares the shortest gap at which it can still find work:
+  `webhookRetries`, `hookRetries` and `evaluationRuns` stay on every tick
+  (sub-minute backoff, one time-slice per tick); `orphanSweep` and
+  `pendingExecutionRecovery` 2 min; `zombieReaper` 5 min; `embeddingBackfill`
+  15 min; `retention` 1 hour. The table lives in
+  `lib/orchestration/maintenance/platform-jobs.ts` and
+  `BACKGROUND_TASK_NAMES` is now derived from it, so the route's published
+  `backgroundTasks` list cannot drift from what actually runs. **Two visible
+  effects:** a task held back by its interval reports the string `'skipped'`
+  under its own key in the `Maintenance tick background tasks completed` log
+  line (rather than its usual result object), so a log-based dashboard reading
+  e.g. `retention.deleted` will see `'skipped'` on most ticks; and a task still
+  running from an earlier tick is no longer started a second time when the
+  liveness watchdog releases the overlap guard. Intervals are start-to-start and
+  held in process memory — persisting them would cost a database round-trip per
+  task per tick, which is the cost this change exists to remove. Every throttled
+  task is idempotent, so on a multi-instance deployment the failure mode is
+  "runs more often than intended", never "misses work".
+
 - **`runStructuredCompletion`'s non-persistence is now contractual** (#472). The
   module writes nothing — no database client imported, no row created, no prompt
   or completion logged — but that was only *incidentally* true. Its docstring
