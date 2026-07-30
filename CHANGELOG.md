@@ -269,6 +269,17 @@ release process.
   `startPolling()` refreshes immediately instead of waiting out an interval.
   `autoStart: false` still fetches once on mount.
 
+- **Deployment guidance for scale-to-zero databases** (#442).
+  `scheduling.md` prescribed `* * * * *` with no note about what that costs on a
+  Postgres that autosuspends when idle — a fork following the documented path
+  inherited a database that was never allowed to sleep, and a bill to match. The
+  recommended cadence is unchanged (the idle gate makes those ticks free), but
+  the trade is now stated, with a `*/5` recipe for cutting serverless
+  invocations and the price named plainly: a workflow schedule can only be as
+  punctual as the cron that drives it. `resilience.md` also now records that
+  `tickRunning` is per-instance, so the overlap guarantee does not hold on
+  serverless.
+
 - **The maintenance tick can now skip entirely, doing zero database work**
   (#442). Per-task intervals cut how much a tick does; they cannot make it do
   nothing, and nothing is what a scale-to-zero Postgres (Neon, Aurora Serverless

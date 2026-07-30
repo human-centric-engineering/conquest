@@ -214,6 +214,31 @@ State is per-process by necessity: persisting a `lastTickAt` would cost exactly 
 * * * * * curl -s -X POST -H "Authorization: Bearer sk_..." https://your-app/api/v1/admin/orchestration/maintenance/tick
 ```
 
+#### Cadence on a scale-to-zero database
+
+If your Postgres autosuspends when idle (Neon, Aurora Serverless v2, paused Supabase), the tick used to bill you for a database that was never allowed to sleep: it did a fixed amount of work every 60 seconds whether or not there was anything to do, and autosuspend keys off compute idle time, so **one** query a minute defeats a 5-minute timer exactly as effectively as twenty. A deployment with near-zero traffic was billed as if it ran continuously — ~730 h/month.
+
+The idle gate above is the fix, and it works at the documented 60s cadence: the ticks still fire, they just cost nothing. Keep `* * * * *` and you get punctual workflow schedules **and** an idle database.
+
+Slow the cron down only for the _other_ cost — one serverless invocation per minute:
+
+```bash
+*/5 * * * * curl -s -X POST -H "Authorization: Bearer sk_..." https://your-app/api/v1/admin/orchestration/maintenance/tick
+```
+
+State the price plainly before choosing this: **a workflow schedule can only be as punctual as the cron that drives it.** At `*/5`, a schedule set to run every minute fires every five, and any schedule fires up to 5 minutes late. Nothing is lost — the sweeps are idempotent and catch up on the next fire — but "why did my 9:00 report arrive at 9:04?" has this as its answer.
+
+Checklist for a scale-to-zero deployment:
+
+| Setting                        | Value                                                         |
+| ------------------------------ | ------------------------------------------------------------- |
+| Cron cadence                   | `* * * * *` — the gate makes idle ticks free                  |
+| `MAINTENANCE_IDLE_MAX_SKIP_MS` | default (30 min), or above your autosuspend timer             |
+| Instances                      | one, or lower the cap — each instance keeps its own gate      |
+| Admin tabs left open           | fine — `useHealthCheck` pauses `SELECT 1` polling when hidden |
+
+Verify it works the way any query-count claim should be verified — enable Prisma query logging and watch an idle deployment. After the first sweep arms the gate you should see **no** queries until the horizon, then one short burst.
+
 **Dev-only in-process ticker.** `instrumentation.ts` arms a 60s `setInterval` that calls `runMaintenanceTick()` directly when `NODE_ENV === 'development'` (first fire ~3s after server startup, after the dev compile warm-up). This is dev-only because production deploys an external cron that is authoritative and survives serverless cold starts; the dev ticker just prevents the "I queued an eval run, why didn't it move?" friction. Opt out with `SUNRISE_DISABLE_DEV_TICK=1` when you want to test the manual flow. The HTTP route and the dev ticker share the same body (`lib/orchestration/maintenance/run-tick.ts`) so the overlap guard, watchdog, and task chain stay identical across both callers.
 
 **Operational note — log message change.** The previous synchronous tick wrote a single `Maintenance tick completed` log line containing all per-task results. With background execution, the per-task results are now written from the background chain's `.then()` as `Maintenance tick background tasks completed` once the chain settles. Any log-based dashboard or alert keyed on the old `Maintenance tick completed` string needs to be updated to match the new message before relying on it. The synchronous response itself only carries the `schedules` result and the `backgroundTasks` name list — see the response shape above.
