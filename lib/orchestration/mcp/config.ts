@@ -1,8 +1,12 @@
 /**
  * MCP Server Config Loader
  *
- * Singleton settings loader for MCP server configuration,
- * following the AiOrchestrationSettings upsert-on-read pattern.
+ * Singleton settings loader for MCP server configuration.
+ *
+ * Still upsert-on-read behind the cache below. `AiOrchestrationSettings` was
+ * the same shape until #442 moved it to read-first, and this row should follow
+ * — but its miss path runs far less often, so the change is not urgent enough
+ * to make here without the tests to match.
  *
  * Platform-agnostic: no Next.js imports.
  */

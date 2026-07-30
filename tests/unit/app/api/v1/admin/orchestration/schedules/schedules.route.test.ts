@@ -57,6 +57,12 @@ vi.mock('@/lib/orchestration/scheduling', () => ({
   processDueSchedules: vi.fn(),
 }));
 
+// The maintenance tick's idle gate (#442): a new or edited schedule can be due
+// sooner than an armed gate would next sweep.
+vi.mock('@/lib/orchestration/maintenance/idle-gate', () => ({
+  noteMaintenanceWork: vi.fn(),
+}));
+
 // ─── Imports ────────────────────────────────────────────────────────────────
 
 import {
@@ -72,6 +78,7 @@ import { POST as tickScheduler } from '@/app/api/v1/admin/orchestration/schedule
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { processDueSchedules } from '@/lib/orchestration/scheduling';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -237,6 +244,41 @@ describe('Schedule CRUD API', () => {
       expect(prisma.aiWorkflowSchedule.create).not.toHaveBeenCalled();
     });
 
+    it('wakes the maintenance tick so the new schedule can fire on time (#442)', async () => {
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(mockWorkflow as never);
+      vi.mocked(prisma.aiWorkflowSchedule.count).mockResolvedValue(0);
+      vi.mocked(prisma.aiWorkflowSchedule.create).mockResolvedValue(mockScheduleRecord);
+
+      await createSchedule(makePostRequest({ name: 'Daily run', cronExpression: '0 9 * * *' }), {
+        params: Promise.resolve({ id: VALID_WF_ID }),
+      });
+
+      expect(noteMaintenanceWork).toHaveBeenCalledWith('schedule-created');
+    });
+
+    it('does not wake the tick for a schedule created disabled', async () => {
+      // `isEnabled: false` means no `nextRunAt`, so there is nothing for the
+      // tick to wake up for — disarming the gate would just cost a sweep.
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(mockWorkflow as never);
+      vi.mocked(prisma.aiWorkflowSchedule.count).mockResolvedValue(0);
+      vi.mocked(prisma.aiWorkflowSchedule.create).mockResolvedValue({
+        ...mockScheduleRecord,
+        isEnabled: false,
+        nextRunAt: null,
+      });
+
+      const res = await createSchedule(
+        makePostRequest({ name: 'Paused', cronExpression: '0 9 * * *', isEnabled: false }),
+        { params: Promise.resolve({ id: VALID_WF_ID }) }
+      );
+
+      expect(res.status).toBe(201);
+      expect(prisma.aiWorkflowSchedule.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ nextRunAt: null }) })
+      );
+      expect(noteMaintenanceWork).not.toHaveBeenCalled();
+    });
+
     it('rejects invalid cron expression (400)', async () => {
       vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(mockWorkflow as never);
       vi.mocked(prisma.aiWorkflowSchedule.count).mockResolvedValue(0);
@@ -304,6 +346,26 @@ describe('Schedule CRUD API', () => {
 
       expect(res.status).toBe(200);
       expect(json.data.schedule.name).toBe('Updated name');
+    });
+
+    it('does not wake the tick when an update disables the schedule (#442)', async () => {
+      // Disabling clears `nextRunAt`, so there is no horizon to protect.
+      vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue(mockScheduleRecord);
+      vi.mocked(prisma.aiWorkflowSchedule.update).mockResolvedValue({
+        ...mockScheduleRecord,
+        isEnabled: false,
+        nextRunAt: null,
+      });
+
+      const res = await updateSchedule(makePatchRequest({ isEnabled: false }), {
+        params: Promise.resolve({ id: VALID_WF_ID, scheduleId: VALID_SCHED_ID }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(prisma.aiWorkflowSchedule.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ nextRunAt: null }) })
+      );
+      expect(noteMaintenanceWork).not.toHaveBeenCalled();
     });
 
     it('rejects invalid cron on update (400)', async () => {

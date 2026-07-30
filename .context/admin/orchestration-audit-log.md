@@ -214,7 +214,7 @@ Note: bulk agent actions write a **single** audit entry per operation (not per-a
 
 ## Retention
 
-Controlled by `AiOrchestrationSettings.auditLogRetentionDays` (nullable integer, days). Pruned by `pruneAuditLogs()` in `lib/orchestration/retention.ts`, which runs as part of `enforceRetentionPolicies()` on each maintenance tick (`POST /api/v1/admin/orchestration/maintenance/tick`).
+Controlled by `AiOrchestrationSettings.auditLogRetentionDays` (nullable integer, days). Pruned by `pruneAuditLogs()` in `lib/orchestration/retention.ts`, which runs as part of `enforceRetentionPolicies()` — at most **once an hour**, since every retention window is measured in days (see [per-task minimum intervals](../orchestration/scheduling.md#unified-maintenance-tick-admin-auth-required-preferred)), driven by `POST /api/v1/admin/orchestration/maintenance/tick`.
 
 - `auditLogRetentionDays = null` → **no pruning** (default — rows accumulate indefinitely, preserving the original "immutable audit trail" behaviour).
 - `auditLogRetentionDays = N` → rows with `createdAt < now - N days` are deleted. The count of pruned rows surfaces in the tick's `RetentionResult.auditLogsDeleted`.
