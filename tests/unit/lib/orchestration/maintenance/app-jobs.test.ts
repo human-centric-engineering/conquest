@@ -15,6 +15,7 @@ import {
   registerAppJob,
   runDueAppJobs,
   getAppJobs,
+  getAppJobsMinIntervalMs,
   __resetAppJobsForTests,
 } from '@/lib/orchestration/maintenance/app-jobs';
 
@@ -142,6 +143,35 @@ describe('runDueAppJobs', () => {
     await runDueAppJobs(3);
 
     expect(initAppJobs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getAppJobsMinIntervalMs', () => {
+  // The tick's idle gate (#442) will not skip further ahead than this, so a
+  // fork's 5-minute job cannot quietly become a 30-minute one.
+  it('returns null when a fork registered nothing', () => {
+    expect(getAppJobsMinIntervalMs()).toBeNull();
+  });
+
+  it('returns the shortest registered interval', () => {
+    initAppJobs.mockImplementation(() => {
+      registerAppJob({ name: 'app:nightly', intervalMs: 24 * HOUR, run: vi.fn() });
+      registerAppJob({ name: 'app:sweep', intervalMs: 5 * 60 * 1000, run: vi.fn() });
+      registerAppJob({ name: 'app:hourly', intervalMs: HOUR, run: vi.fn() });
+    });
+
+    expect(getAppJobsMinIntervalMs()).toBe(5 * 60 * 1000);
+  });
+
+  it('ignores a job that was refused at registration', () => {
+    initAppJobs.mockImplementation(() => {
+      registerAppJob({ name: 'app:bad', intervalMs: 0, run: vi.fn() });
+      registerAppJob({ name: 'app:good', intervalMs: HOUR, run: vi.fn() });
+    });
+
+    // A refused zero-interval job must not bound the gate at zero, which would
+    // disable it entirely.
+    expect(getAppJobsMinIntervalMs()).toBe(HOUR);
   });
 });
 

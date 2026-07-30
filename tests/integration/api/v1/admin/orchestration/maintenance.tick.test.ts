@@ -97,6 +97,7 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { __resetPlatformJobsForTests } from '@/lib/orchestration/maintenance/platform-jobs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,9 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Per-task intervals (#442) are module state that outlives a single test —
+    // clear them so every task is due again.
+    __resetPlatformJobsForTests();
     vi.mocked(processDueSchedules).mockResolvedValue(SCHEDULE_RESULT);
     vi.mocked(processPendingRetries).mockResolvedValue(3);
     vi.mocked(processPendingHookRetries).mockResolvedValue(2);

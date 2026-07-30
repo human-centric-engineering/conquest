@@ -35,6 +35,7 @@
 
 import { logger } from '@/lib/logging';
 import { initAppJobs } from '@/lib/app/jobs';
+import { createJobClock } from '@/lib/orchestration/maintenance/job-clock';
 
 /** A unit of app-owned recurring work. */
 export interface AppJob {
@@ -54,15 +55,12 @@ export interface AppJob {
 }
 
 const jobs = new Map<string, AppJob>();
-/** In-process last-run clock, keyed by job name. See the cadence caveat. */
-const lastRunAt = new Map<string, number>();
 /**
- * Jobs currently running. Prevents a job slower than its own interval from being
- * started again on the next tick and stacking up — the per-job equivalent of the
- * tick's `tickRunning` guard. Without this, a 5-minute job on a 1-minute
- * interval accumulates concurrent runs until something falls over.
+ * In-process start-to-start clock plus in-flight latch, keyed by job name. See
+ * the cadence caveat above; the same mechanism throttles Sunrise's own tasks in
+ * `platform-jobs.ts`.
  */
-const inFlight = new Set<string>();
+const clock = createJobClock();
 let appInited = false;
 
 /**
@@ -103,8 +101,7 @@ function ensureAppJobsInited(): void {
 /** Test-only: drop all jobs, clear the clock, and re-arm the one-shot app init. */
 export function __resetAppJobsForTests(): void {
   jobs.clear();
-  lastRunAt.clear();
-  inFlight.clear();
+  clock.reset();
   appInited = false;
 }
 
@@ -112,6 +109,24 @@ export function __resetAppJobsForTests(): void {
 export function getAppJobs(): AppJob[] {
   ensureAppJobsInited();
   return [...jobs.values()];
+}
+
+/**
+ * Shortest interval any registered job asked for, or `null` when a fork has
+ * registered none.
+ *
+ * Read by the tick's idle gate (#442): the gate must not skip further ahead than
+ * a fork's own cadence, or a job registered at 5 minutes would quietly become a
+ * 30-minute job. Registering any job therefore means this deployment is never
+ * fully idle — which is what the fork asked for.
+ */
+export function getAppJobsMinIntervalMs(): number | null {
+  ensureAppJobsInited();
+  let min: number | null = null;
+  for (const job of jobs.values()) {
+    if (min === null || job.intervalMs < min) min = job.intervalMs;
+  }
+  return min;
 }
 
 /**
@@ -130,13 +145,7 @@ export async function runDueAppJobs(
   ensureAppJobsInited();
   if (jobs.size === 0) return undefined;
 
-  const due = [...jobs.values()].filter((job) => {
-    // Still running from an earlier tick — never start a second copy, however
-    // long ago it became due.
-    if (inFlight.has(job.name)) return false;
-    const last = lastRunAt.get(job.name);
-    return last === undefined || now - last >= job.intervalMs;
-  });
+  const due = [...jobs.values()].filter((job) => clock.isDue(job.name, job.intervalMs, now));
 
   if (due.length === 0) return { skipped: jobs.size };
 
@@ -144,8 +153,7 @@ export async function runDueAppJobs(
     due.map(async (job) => {
       // Stamp before running, not after, so the interval measures start-to-start
       // rather than end-to-start.
-      lastRunAt.set(job.name, now);
-      inFlight.add(job.name);
+      clock.markStarted(job.name, now);
       try {
         return [job.name, await job.run()] as const;
       } catch (err) {
@@ -155,7 +163,7 @@ export async function runDueAppJobs(
         });
         return [job.name, { error: err instanceof Error ? err.message : String(err) }] as const;
       } finally {
-        inFlight.delete(job.name);
+        clock.markSettled(job.name);
       }
     })
   );

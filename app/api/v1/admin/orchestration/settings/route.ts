@@ -26,6 +26,7 @@ import { computeETag, checkConditional } from '@/lib/api/etag';
 import { computeDefaultModelMap } from '@/lib/orchestration/llm/model-registry';
 import { hydrateFromDb as hydrateModelRegistryFromDb } from '@/lib/orchestration/llm/model-registry-db-hydrate';
 import { invalidateSettingsCache } from '@/lib/orchestration/llm/settings-resolver';
+import { invalidateOrchestrationSettingsCache } from '@/lib/orchestration/settings';
 import { getEmbeddingModels } from '@/lib/orchestration/llm/embedding-models';
 import { parseAudioDefault } from '@/lib/orchestration/llm/audio-default';
 import { updateOrchestrationSettingsSchema } from '@/lib/validations/orchestration';
@@ -313,6 +314,9 @@ export const PATCH = withAdminAuth(async (request, session) => {
   });
 
   invalidateSettingsCache();
+  // The singleton itself is cached for 30s now (#442) — clear it here so a save
+  // is visible on the next read instead of up to 30s later.
+  invalidateOrchestrationSettingsCache();
 
   logAdminAction({
     userId: session.user.id,

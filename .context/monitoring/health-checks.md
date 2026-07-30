@@ -243,6 +243,24 @@ const { data, isLoading, error, refresh } = useHealthCheck({
 });
 ```
 
+**Polling pauses when the tab is hidden.** `useHealthCheck` runs on
+[`useAutoRefresh`](../ui/hooks.md), so a background tab stops polling and
+resumes — with an immediate refresh — when it comes forward. `/api/health` runs
+`SELECT 1` against the database, so a forgotten admin tab used to keep a
+scale-to-zero Postgres awake on its own, independent of the maintenance tick
+(#442).
+
+Two consequences for callers:
+
+- `isPolling` means "polling is enabled", not "a timer is armed right now" — it
+  stays `true` across a visibility pause, which is what a Resume affordance
+  should key off.
+- `startPolling()` also refreshes immediately, so resuming feels instant instead
+  of waiting out a full interval.
+
+`autoStart: false` still performs one fetch on mount, so a consumer never renders
+a permanent loading state.
+
 ### Formatting Utilities
 
 The status components include internal formatting functions:

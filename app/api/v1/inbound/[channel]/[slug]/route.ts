@@ -41,6 +41,7 @@ import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
 import { bootstrapInboundAdapters } from '@/lib/orchestration/inbound/bootstrap';
 import { getInboundAdapter } from '@/lib/orchestration/inbound/registry';
 import { resolveConversation } from '@/lib/orchestration/inbound/conversation-resolver';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 // Module-level bootstrap. Idempotent — first call registers adapters from env.
 bootstrapInboundAdapters();
@@ -368,6 +369,9 @@ export async function POST(
       },
     });
     executionId = execution.id;
+    // A `pending` execution's recovery sweep is tick-owned, so the idle gate
+    // must not be allowed to skip past it (#442).
+    noteMaintenanceWork('inbound-trigger-execution');
   } catch (err) {
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&

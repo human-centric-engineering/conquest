@@ -113,7 +113,7 @@ Called automatically by the unified maintenance tick **before** `reapZombieExecu
 
 ### Unified Maintenance Tick (admin-auth required, **preferred**)
 
-`POST /api/v1/admin/orchestration/maintenance/tick` — runs all periodic maintenance tasks in one call. **Returns `202 Accepted`** as soon as `processDueSchedules()` has claimed and fired any due schedules; the remaining seven tasks run as a fire-and-forget background chain inside the same overlap guard and log per-task results when they settle.
+`POST /api/v1/admin/orchestration/maintenance/tick` — runs all periodic maintenance tasks in one call. **Returns `202 Accepted`** as soon as `processDueSchedules()` has claimed and fired any due schedules; the remaining eight tasks run as a fire-and-forget background chain inside the same overlap guard and log per-task results when they settle. Each background task also has a minimum interval, so most ticks run only a subset — see the table below.
 
 1. `processDueSchedules()` — workflow cron schedules **(awaited synchronously)**
 2. `processPendingRetries()` — webhook subscription delivery retry queue _(background)_
@@ -123,6 +123,26 @@ Called automatically by the unified maintenance tick **before** `reapZombieExecu
 6. `backfillMissingEmbeddings()` — re-embed messages that failed initial embedding _(background)_
 7. `enforceRetentionPolicies()` — delete conversations past per-agent retention window, prune old webhook deliveries and cost log rows _(background)_
 8. `processPendingExecutions()` — recover orphaned `pending` workflow executions _(background)_
+9. `processPendingEvaluationRuns()` — drive one time-slice of the queued dataset-evaluation runs _(background)_
+
+**Per-task minimum intervals (#442).** The background tasks do **not** all run on every tick. Each declares the shortest gap at which running it can still find work, in `lib/orchestration/maintenance/platform-jobs.ts`:
+
+| Task                       | Interval   | Why                                                                 |
+| -------------------------- | ---------- | ------------------------------------------------------------------- |
+| `webhookRetries`           | every tick | backoff starts at 10s — a throttle would miss the first retry       |
+| `hookRetries`              | every tick | same 10s / 60s / 300s backoff                                       |
+| `orphanSweep`              | 2 min      | the lease is 3 min, so a faster sweep provably finds nothing        |
+| `zombieReaper`             | 5 min      | its own stale threshold is 30 min                                   |
+| `embeddingBackfill`        | 15 min     | best-effort re-embed of a failed write; the anti-join is unindexed  |
+| `retention`                | 1 hour     | windows are measured in days                                        |
+| `pendingExecutionRecovery` | 2 min      | its own stale-pending threshold is 2 min                            |
+| `evaluationRuns`           | every tick | the worker drives one time-slice per tick, so cadence is throughput |
+
+A task held back by its interval reports the string `'skipped'` under its own key in the completion log line — reported rather than omitted, so "did the sweep run?" is answerable from the logs. Intervals are **start-to-start** and held **in process memory**: persisting them would cost a DB round-trip per task per tick, which is the cost the throttle exists to remove. Consequences, both benign because every throttled task is idempotent: each instance in a multi-instance deployment keeps its own clock (so a task runs roughly once per instance per interval), and a restart re-arms everything immediately.
+
+The same table also gives each task an **in-flight latch** — a task still running from an earlier tick is never started a second time, even after the liveness watchdog below releases the overlap guard.
+
+Forks add their own recurring work through `registerAppJob`, which shares the throttle mechanism (`job-clock.ts`) but keeps a separate registry and clock, so a fork job named `retention` cannot throttle Sunrise's sweep — see [App jobs](#app-jobs--the-fork-seam-on-the-tick) below.
 
 **Response shape:**
 
@@ -139,13 +159,52 @@ Called automatically by the unified maintenance tick **before** `reapZombieExecu
       "embeddingBackfill",
       "retention",
       "pendingExecutionRecovery",
+      "evaluationRuns",
     ],
     "durationMs": 47,
   },
 }
 ```
 
+A tick the idle gate skipped returns **200** with `{ skipped: true, reason: 'idle' | 'previous tick still running' }` instead — see below.
+
 The schedules result is concretely reported. Per-task background results are NOT in the response — they are written to the application logger as `Maintenance tick background tasks completed` once the chain settles. This decouples HTTP duration from retention-sweep / embedding-backfill runtime so external cron callers can use a short HTTP timeout (e.g. 30s) without ever cutting off mid-task. Engine work inside `processDueSchedules` was already detached via `void drainEngine`, so the synchronous portion only includes DB-claim work.
+
+### The idle gate — a tick that does no database work at all
+
+Per-task intervals cut how much a tick does; they cannot make it do **nothing**, and nothing is what a scale-to-zero Postgres (Neon, Aurora Serverless v2) needs before it will autosuspend. One query a minute defeats a 5-minute autosuspend timer exactly as effectively as twenty do.
+
+So a sweep that finds nothing arms the **idle gate** (`lib/orchestration/maintenance/idle-gate.ts`), and subsequent ticks return before any Prisma call:
+
+```jsonc
+// 200 OK — no database round-trips were made
+{
+  "success": true,
+  "data": { "skipped": true, "reason": "idle", "resumesAt": "2026-07-30T12:30:00.000Z" },
+}
+```
+
+**Why skipping is sound.** Every latency-critical task's future work is announced by a timestamp column only a _request_ can write — `nextRetryAt` on the two delivery tables (written by the dispatch paths, which also arm the in-process `setTimeout` that does the actual retry; the tick's drain is a crash backstop), `AiWorkflowSchedule.nextRunAt`, a queued evaluation run, a `pending` execution. On a genuinely idle deployment there is no writer, so the state cannot change between ticks.
+
+Three things keep that argument honest:
+
+| Mechanism                   | What it prevents                                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The horizon**             | Arming takes the earliest known future work — the next `nextRunAt` (one indexed lookup via `getNextScheduleRunAt`) and the shortest registered app-job interval. A schedule due in 40s still fires in 40s.          |
+| **The cap**                 | `MAINTENANCE_IDLE_MAX_SKIP_MS` (default 30 min) bounds how long the gate may skip without re-checking, so a write this process could not observe is picked up within that window rather than never.                 |
+| **`noteMaintenanceWork()`** | Request paths that create tick-owned work — delivery retry scheduled, schedule created/edited, evaluation run queued, execution enqueued by a trigger — disarm the gate immediately instead of waiting for the cap. |
+
+The gate refuses to arm at all unless the sweep proved there was nothing to do: any task that found something, any task that **failed**, a fired schedule, an errored schedules sweep, or a failed horizon probe all leave it disarmed. Not knowing the state is precisely the case where skipping is unsafe.
+
+**Tuning.** Lowering the cap does not make schedules more punctual — the horizon already handles that — it only shortens how long an unobservable write can go unnoticed:
+
+- **Single instance on scale-to-zero Postgres:** leave the default, or raise it above your autosuspend timer so the compute can actually idle. This is the setting the feature exists for.
+- **Multiple instances:** lower it (5 min is a reasonable choice). Each instance keeps its own gate, so instance A can be armed while instance B takes the write.
+- **`MAINTENANCE_IDLE_MAX_SKIP_MS=0`:** gate disabled, every tick sweeps — the pre-#442 behaviour.
+
+State is per-process by necessity: persisting a `lastTickAt` would cost exactly the query per tick the gate exists to remove, and a DB-backed "should I skip?" switch is self-defeating for the same reason. A fresh instance starts **disarmed**, so a cold start always sweeps.
+
+**Forcing a sweep:** `POST …/maintenance/tick?force=1` ignores the gate. It does not bypass the overlap guard, which protects against concurrency rather than repetition. A forced sweep that finds nothing re-arms the gate as usual.
 
 **Overlap protection:** A module-level `tickRunning` flag wraps the **entire** chain — synchronous schedules plus background tasks. If a tick is still running (synchronous _or_ background) when the next cron fires, the endpoint returns `{ skipped: true }` immediately. The guard releases when the background chain settles. A 5-minute liveness watchdog force-releases the guard if the background chain hangs (logs `Maintenance tick: background chain exceeded max duration` as the operational signal), and a per-tick monotonic token prevents a late-settling old chain from accidentally releasing a newer tick's guard. See [Resilience — Maintenance Tick Overlap Protection](./resilience.md#maintenance-tick-overlap-protection) for the full discussion.
 
@@ -154,6 +213,31 @@ The schedules result is concretely reported. Per-task background results are NOT
 ```bash
 * * * * * curl -s -X POST -H "Authorization: Bearer sk_..." https://your-app/api/v1/admin/orchestration/maintenance/tick
 ```
+
+#### Cadence on a scale-to-zero database
+
+If your Postgres autosuspends when idle (Neon, Aurora Serverless v2, paused Supabase), the tick used to bill you for a database that was never allowed to sleep: it did a fixed amount of work every 60 seconds whether or not there was anything to do, and autosuspend keys off compute idle time, so **one** query a minute defeats a 5-minute timer exactly as effectively as twenty. A deployment with near-zero traffic was billed as if it ran continuously — ~730 h/month.
+
+The idle gate above is the fix, and it works at the documented 60s cadence: the ticks still fire, they just cost nothing. Keep `* * * * *` and you get punctual workflow schedules **and** an idle database.
+
+Slow the cron down only for the _other_ cost — one serverless invocation per minute:
+
+```bash
+*/5 * * * * curl -s -X POST -H "Authorization: Bearer sk_..." https://your-app/api/v1/admin/orchestration/maintenance/tick
+```
+
+State the price plainly before choosing this: **a workflow schedule can only be as punctual as the cron that drives it.** At `*/5`, a schedule set to run every minute fires every five, and any schedule fires up to 5 minutes late. Nothing is lost — the sweeps are idempotent and catch up on the next fire — but "why did my 9:00 report arrive at 9:04?" has this as its answer.
+
+Checklist for a scale-to-zero deployment:
+
+| Setting                        | Value                                                         |
+| ------------------------------ | ------------------------------------------------------------- |
+| Cron cadence                   | `* * * * *` — the gate makes idle ticks free                  |
+| `MAINTENANCE_IDLE_MAX_SKIP_MS` | default (30 min), or above your autosuspend timer             |
+| Instances                      | one, or lower the cap — each instance keeps its own gate      |
+| Admin tabs left open           | fine — `useHealthCheck` pauses `SELECT 1` polling when hidden |
+
+Verify it works the way any query-count claim should be verified — enable Prisma query logging and watch an idle deployment. After the first sweep arms the gate you should see **no** queries until the horizon, then one short burst.
 
 **Dev-only in-process ticker.** `instrumentation.ts` arms a 60s `setInterval` that calls `runMaintenanceTick()` directly when `NODE_ENV === 'development'` (first fire ~3s after server startup, after the dev compile warm-up). This is dev-only because production deploys an external cron that is authoritative and survives serverless cold starts; the dev ticker just prevents the "I queued an eval run, why didn't it move?" friction. Opt out with `SUNRISE_DISABLE_DEV_TICK=1` when you want to test the manual flow. The HTTP route and the dev ticker share the same body (`lib/orchestration/maintenance/run-tick.ts`) so the overlap guard, watchdog, and task chain stay identical across both callers.
 
@@ -236,7 +320,8 @@ export function initAppJobs(): void {
 | `getAppJobs()`        | Registered jobs in first-registration order (admin surface).    |
 | `runDueAppJobs(now?)` | Called by the tick. Returns a per-job summary for its log line. |
 
-Semantics that differ from the platform's own scheduled work:
+Semantics — the first three are shared with the platform's own tasks, which use
+the same `job-clock.ts` mechanism (#442):
 
 - **`intervalMs` is a minimum gap, not a guarantee.** Last-run times are
   in-process, so a multi-instance deployment runs each job about once per

@@ -85,14 +85,22 @@ export async function enforceRetentionPolicies(): Promise<RetentionResult> {
     }
   }
 
-  await warnOnIncoherentRetention();
+  // One settings read for the whole sweep. Each prune below would otherwise
+  // fetch the same singleton row again — eight round-trips for six columns
+  // (#442). Passing the windows explicitly is what makes them stop.
+  const windows = await loadRetentionWindows();
 
-  const webhookResult = await pruneWebhookDeliveries();
-  const hookResult = await pruneHookDeliveries();
-  const costLogResult = await pruneCostLogs();
-  const auditLogResult = await pruneAuditLogs();
-  const executionResult = await pruneExecutions();
-  const evaluationResult = await pruneEvaluationData();
+  warnOnIncoherentRetention(windows);
+
+  const webhookResult = await pruneWebhookDeliveries(
+    windows.webhookRetentionDays,
+    windows.webhookDlqRetentionDays
+  );
+  const hookResult = await pruneHookDeliveries(windows.webhookRetentionDays);
+  const costLogResult = await pruneCostLogs(windows.costLogRetentionDays);
+  const auditLogResult = await pruneAuditLogs(windows.auditLogRetentionDays);
+  const executionResult = await pruneExecutions(windows.executionRetentionDays);
+  const evaluationResult = await pruneEvaluationData(windows.evaluationRetentionDays);
   const mcpAuditResult = await pruneMcpAuditLogs();
 
   return {
@@ -133,12 +141,15 @@ export interface PruneResult {
  * Returns the combined deletion count.
  */
 export async function pruneWebhookDeliveries(
-  maxAgeDays?: number,
-  dlqMaxAgeDays?: number
+  maxAgeDays?: number | null,
+  dlqMaxAgeDays?: number | null
 ): Promise<PruneResult> {
-  const baseDays = maxAgeDays ?? (await resolveRetentionDays('webhookRetentionDays'));
+  const baseDays =
+    maxAgeDays !== undefined ? maxAgeDays : await resolveRetentionDays('webhookRetentionDays');
   const dlqDays =
-    dlqMaxAgeDays ?? (await resolveRetentionDays('webhookDlqRetentionDays')) ?? baseDays;
+    (dlqMaxAgeDays !== undefined
+      ? dlqMaxAgeDays
+      : await resolveRetentionDays('webhookDlqRetentionDays')) ?? baseDays;
 
   let deleted = 0;
 
@@ -184,8 +195,9 @@ export async function pruneWebhookDeliveries(
  * subscriptions — the two are the same class of dispatch-audit data.
  * Skips if no value is configured.
  */
-export async function pruneHookDeliveries(maxAgeDays?: number): Promise<PruneResult> {
-  const days = maxAgeDays ?? (await resolveRetentionDays('webhookRetentionDays'));
+export async function pruneHookDeliveries(maxAgeDays?: number | null): Promise<PruneResult> {
+  const days =
+    maxAgeDays !== undefined ? maxAgeDays : await resolveRetentionDays('webhookRetentionDays');
   if (days === null) return { deleted: 0 };
 
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -204,8 +216,9 @@ export async function pruneHookDeliveries(maxAgeDays?: number): Promise<PruneRes
  * Reads `costLogRetentionDays` from AiOrchestrationSettings if not passed.
  * Skips if no value is configured.
  */
-export async function pruneCostLogs(maxAgeDays?: number): Promise<PruneResult> {
-  const days = maxAgeDays ?? (await resolveRetentionDays('costLogRetentionDays'));
+export async function pruneCostLogs(maxAgeDays?: number | null): Promise<PruneResult> {
+  const days =
+    maxAgeDays !== undefined ? maxAgeDays : await resolveRetentionDays('costLogRetentionDays');
   if (days === null) return { deleted: 0 };
 
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -224,8 +237,9 @@ export async function pruneCostLogs(maxAgeDays?: number): Promise<PruneResult> {
  * Reads `auditLogRetentionDays` from AiOrchestrationSettings if not passed.
  * Skips if no value is configured.
  */
-export async function pruneAuditLogs(maxAgeDays?: number): Promise<PruneResult> {
-  const days = maxAgeDays ?? (await resolveRetentionDays('auditLogRetentionDays'));
+export async function pruneAuditLogs(maxAgeDays?: number | null): Promise<PruneResult> {
+  const days =
+    maxAgeDays !== undefined ? maxAgeDays : await resolveRetentionDays('auditLogRetentionDays');
   if (days === null) return { deleted: 0 };
 
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -257,8 +271,9 @@ export async function pruneAuditLogs(maxAgeDays?: number): Promise<PruneResult> 
  *
  * Filtered on `createdAt` for consistency with the other prunes.
  */
-export async function pruneExecutions(maxAgeDays?: number): Promise<PruneResult> {
-  const days = maxAgeDays ?? (await resolveRetentionDays('executionRetentionDays'));
+export async function pruneExecutions(maxAgeDays?: number | null): Promise<PruneResult> {
+  const days =
+    maxAgeDays !== undefined ? maxAgeDays : await resolveRetentionDays('executionRetentionDays');
   if (days === null) return { deleted: 0 };
 
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -295,8 +310,11 @@ export interface EvaluationPruneResult {
  * reference the executions they ran (no FK), so a longer eval window would
  * leave those references dangling once the executions are pruned.
  */
-export async function pruneEvaluationData(maxAgeDays?: number): Promise<EvaluationPruneResult> {
-  const days = maxAgeDays ?? (await resolveRetentionDays('evaluationRetentionDays'));
+export async function pruneEvaluationData(
+  maxAgeDays?: number | null
+): Promise<EvaluationPruneResult> {
+  const days =
+    maxAgeDays !== undefined ? maxAgeDays : await resolveRetentionDays('evaluationRetentionDays');
   if (days === null) return { sessionsDeleted: 0, runsDeleted: 0 };
 
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -363,19 +381,12 @@ export async function pruneMcpAuditLogs(maxAgeDays?: number): Promise<PruneResul
  * the combination at write time, but installs configured before that check
  * existed stay silently in this state — nobody re-saves settings to find out.
  *
- * One extra settings read per sweep, not per prune. Failure to read is
- * ignored: a warning is not worth failing the sweep over.
+ * Reads nothing itself — the sweep's single `loadRetentionWindows()` already has
+ * both values, and a failed read arrives here as `null`, which is silence.
  */
-async function warnOnIncoherentRetention(): Promise<void> {
-  const row = await prisma.aiOrchestrationSettings
-    .findUnique({
-      where: { slug: 'global' },
-      select: { costLogRetentionDays: true, executionRetentionDays: true },
-    })
-    .catch(() => null);
-
-  const costLogDays = row?.costLogRetentionDays ?? null;
-  const executionDays = row?.executionRetentionDays ?? null;
+function warnOnIncoherentRetention(windows: RetentionWindows): void {
+  const costLogDays = windows.costLogRetentionDays;
+  const executionDays = windows.executionRetentionDays;
   // Either window unset means that class isn't pruned at all — no coupling.
   if (costLogDays === null || executionDays === null) return;
   if (costLogDays >= executionDays) return;
@@ -384,6 +395,64 @@ async function warnOnIncoherentRetention(): Promise<void> {
     'Retention windows are incoherent: cost logs are pruned before the executions that reference them, so cost breakdowns will read empty for executions still on file',
     { costLogRetentionDays: costLogDays, executionRetentionDays: executionDays }
   );
+}
+
+/** The six global retention windows, in days. `null` = that class is never pruned. */
+export interface RetentionWindows {
+  webhookRetentionDays: number | null;
+  webhookDlqRetentionDays: number | null;
+  costLogRetentionDays: number | null;
+  auditLogRetentionDays: number | null;
+  executionRetentionDays: number | null;
+  evaluationRetentionDays: number | null;
+}
+
+const NO_RETENTION_WINDOWS: RetentionWindows = {
+  webhookRetentionDays: null,
+  webhookDlqRetentionDays: null,
+  costLogRetentionDays: null,
+  auditLogRetentionDays: null,
+  executionRetentionDays: null,
+  evaluationRetentionDays: null,
+};
+
+/**
+ * Read all six retention windows in **one** query.
+ *
+ * `resolveRetentionDays` reads the same singleton row once per prune, which cost
+ * a sweep seven or eight round-trips to fetch six columns (#442). This is a
+ * hoist, not a cache: every prune already takes an explicit window as its first
+ * parameter, the sweep just never passed one.
+ *
+ * Read failures degrade to "no windows configured", matching
+ * `resolveRetentionDays`' swallow-on-error contract — a transient settings-read
+ * failure skips the prunes rather than throwing out of the sweep.
+ */
+export async function loadRetentionWindows(): Promise<RetentionWindows> {
+  try {
+    const row = await prisma.aiOrchestrationSettings.findUnique({
+      where: { slug: 'global' },
+      select: {
+        webhookRetentionDays: true,
+        webhookDlqRetentionDays: true,
+        costLogRetentionDays: true,
+        auditLogRetentionDays: true,
+        executionRetentionDays: true,
+        evaluationRetentionDays: true,
+      },
+    });
+    if (!row) return NO_RETENTION_WINDOWS;
+    return {
+      webhookRetentionDays: row.webhookRetentionDays ?? null,
+      webhookDlqRetentionDays: row.webhookDlqRetentionDays ?? null,
+      costLogRetentionDays: row.costLogRetentionDays ?? null,
+      auditLogRetentionDays: row.auditLogRetentionDays ?? null,
+      executionRetentionDays: row.executionRetentionDays ?? null,
+      evaluationRetentionDays: row.evaluationRetentionDays ?? null,
+    };
+  } catch {
+    return NO_RETENTION_WINDOWS;
+  }
 }
 
 /** Read a named retention column from the singleton settings row. */

@@ -45,6 +45,8 @@ vi.mock('@/lib/orchestration/scheduling', () => ({
   processDueSchedules: vi.fn(),
   processPendingExecutions: vi.fn(),
   processOrphanedExecutions: vi.fn(),
+  // The idle gate's horizon probe (#442).
+  getNextScheduleRunAt: vi.fn(),
 }));
 
 vi.mock('@/lib/orchestration/webhooks/dispatcher', () => ({
@@ -77,6 +79,8 @@ vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
 // change.
 vi.mock('@/lib/orchestration/maintenance/app-jobs', () => ({
   runDueAppJobs: vi.fn(),
+  // Vanilla Sunrise registers none, so nothing bounds the idle gate's horizon.
+  getAppJobsMinIntervalMs: vi.fn(() => null),
 }));
 
 // ─── Imports ────────────────────────────────────────────────────────────────
@@ -87,6 +91,7 @@ import {
   processDueSchedules,
   processPendingExecutions,
   processOrphanedExecutions,
+  getNextScheduleRunAt,
 } from '@/lib/orchestration/scheduling';
 import { processPendingRetries } from '@/lib/orchestration/webhooks/dispatcher';
 import { processPendingHookRetries } from '@/lib/orchestration/hooks/registry';
@@ -95,6 +100,8 @@ import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embe
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
 import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
+import { __resetPlatformJobsForTests } from '@/lib/orchestration/maintenance/platform-jobs';
+import { __resetIdleGateForTests } from '@/lib/orchestration/maintenance/idle-gate';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import {
   POST,
@@ -103,10 +110,11 @@ import {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeRequest(): NextRequest {
-  return new NextRequest('http://localhost:3000/api/v1/admin/orchestration/maintenance/tick', {
-    method: 'POST',
-  });
+function makeRequest(query = ''): NextRequest {
+  return new NextRequest(
+    `http://localhost:3000/api/v1/admin/orchestration/maintenance/tick${query}`,
+    { method: 'POST' }
+  );
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
@@ -161,6 +169,11 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Per-task intervals and the idle gate (#442) are module-level state that
+    // outlives a single test. Without this, the second test in the file sees
+    // `retention` and friends still inside their interval and they never run.
+    __resetPlatformJobsForTests();
+    __resetIdleGateForTests();
 
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 
@@ -175,7 +188,52 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     vi.mocked(processPendingEvaluationRuns).mockResolvedValue(DEFAULT_EVAL_RUN_RESULT);
     // Vanilla default: no fork jobs registered.
     vi.mocked(runDueAppJobs).mockResolvedValue(undefined);
+    // No schedule on the horizon unless a test says otherwise.
+    vi.mocked(getNextScheduleRunAt).mockResolvedValue(null);
   });
+
+  /**
+   * Make every task report "nothing found", which is what lets the idle gate arm.
+   * The suite's defaults deliberately report work, so most tests never arm it.
+   */
+  function mockIdleSweep(): void {
+    vi.mocked(processDueSchedules).mockResolvedValue({
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      errors: [],
+    });
+    vi.mocked(processPendingRetries).mockResolvedValue(0);
+    vi.mocked(processPendingHookRetries).mockResolvedValue(0);
+    vi.mocked(processOrphanedExecutions).mockResolvedValue({
+      recovered: 0,
+      exhausted: 0,
+      errors: [],
+    });
+    vi.mocked(reapZombieExecutions).mockResolvedValue({
+      reaped: 0,
+      stalePending: 0,
+      abandonedApprovals: 0,
+    });
+    vi.mocked(backfillMissingEmbeddings).mockResolvedValue({ processed: 0, failed: 0 });
+    vi.mocked(enforceRetentionPolicies).mockResolvedValue({
+      ...DEFAULT_RETENTION_RESULT,
+      deleted: 0,
+    });
+    vi.mocked(processPendingExecutions).mockResolvedValue({
+      recovered: 0,
+      failed: 0,
+      errors: [],
+    });
+    vi.mocked(processPendingEvaluationRuns).mockResolvedValue(DEFAULT_EVAL_RUN_RESULT);
+  }
+
+  /** Run one tick and let its background chain settle. */
+  async function tick(query = ''): Promise<Response> {
+    const response = await POST(makeRequest(query));
+    await new Promise((resolve) => setImmediate(resolve));
+    return response;
+  }
 
   // ── Authentication ───────────────────────────────────────────────────────
 
@@ -276,6 +334,37 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
         pendingExecutionRecovery: DEFAULT_PENDING_RECOVERY_RESULT,
         evaluationRuns: DEFAULT_EVAL_RUN_RESULT,
         totalDurationMs: expect.any(Number),
+      })
+    );
+  });
+
+  it('a back-to-back tick re-runs only the responsive tasks (#442)', async () => {
+    // Two ticks a few ms apart stand in for two cron fires a minute apart: the
+    // retry drains must still run, and the sweeps whose own thresholds are
+    // minutes must not touch the database at all.
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+    vi.mocked(logger.info).mockClear();
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(processPendingRetries).toHaveBeenCalledTimes(2);
+    expect(processPendingHookRetries).toHaveBeenCalledTimes(2);
+    expect(processPendingEvaluationRuns).toHaveBeenCalledTimes(2);
+    expect(enforceRetentionPolicies).toHaveBeenCalledTimes(1);
+    expect(backfillMissingEmbeddings).toHaveBeenCalledTimes(1);
+    expect(reapZombieExecutions).toHaveBeenCalledTimes(1);
+    expect(processOrphanedExecutions).toHaveBeenCalledTimes(1);
+    expect(processPendingExecutions).toHaveBeenCalledTimes(1);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({
+        webhookRetries: DEFAULT_RETRY_RESULT,
+        retention: 'skipped',
+        embeddingBackfill: 'skipped',
+        zombieReaper: 'skipped',
       })
     );
   });
@@ -406,6 +495,149 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
     // Assert: guard fires before the background chain is ever constructed
     expect(processOrphanedExecutions).not.toHaveBeenCalled();
+  });
+
+  // ── Idle gate (#442) ─────────────────────────────────────────────────────
+
+  describe('idle gate', () => {
+    const ALL_TASKS = [
+      processDueSchedules,
+      processPendingRetries,
+      processPendingHookRetries,
+      processOrphanedExecutions,
+      reapZombieExecutions,
+      backfillMissingEmbeddings,
+      enforceRetentionPolicies,
+      processPendingExecutions,
+      processPendingEvaluationRuns,
+    ];
+
+    it('after a sweep that found nothing, the next tick does zero database work', async () => {
+      // The whole point of #442: not "fewer queries" but *none*, so a
+      // scale-to-zero Postgres can actually autosuspend.
+      mockIdleSweep();
+      await tick();
+      vi.clearAllMocks();
+
+      const response = await tick();
+      const body = await parseJson<{ data: { skipped: boolean; reason: string } }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.reason).toBe('idle');
+      for (const task of ALL_TASKS) expect(task).not.toHaveBeenCalled();
+      expect(getNextScheduleRunAt).not.toHaveBeenCalled();
+    });
+
+    it('reports when it will next sweep', async () => {
+      mockIdleSweep();
+      await tick();
+
+      const response = await tick();
+      const body = await parseJson<{ data: { resumesAt: string } }>(response);
+
+      expect(Date.parse(body.data.resumesAt)).toBeGreaterThan(Date.now());
+    });
+
+    it('does not arm when a task found work', async () => {
+      // Default mocks report work (3 retries, a reaped zombie, 2 schedules), so
+      // this is the active-deployment path: every tick keeps sweeping.
+      await tick();
+      vi.clearAllMocks();
+
+      const response = await tick();
+
+      expect(response.status).toBe(202);
+      expect(processDueSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not arm when the schedules sweep errored', async () => {
+      // A sweep that failed knows nothing about the state of the queue, so it
+      // must not license a skip.
+      mockIdleSweep();
+      vi.mocked(processDueSchedules).mockRejectedValue(new Error('DB down'));
+      await tick();
+      vi.clearAllMocks();
+      vi.mocked(processDueSchedules).mockResolvedValue(DEFAULT_SCHEDULE_RESULT);
+
+      const response = await tick();
+
+      expect(response.status).toBe(202);
+      expect(processDueSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not arm when the horizon probe fails', async () => {
+      mockIdleSweep();
+      vi.mocked(getNextScheduleRunAt).mockRejectedValue(new Error('probe failed'));
+
+      await tick();
+      const response = await tick();
+
+      expect(response.status).toBe(202);
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Maintenance tick: schedule horizon unavailable; leaving the idle gate disarmed',
+        expect.objectContaining({ error: 'probe failed' })
+      );
+    });
+
+    it('never skips past a due schedule', async () => {
+      // A schedule due in 40s must still fire on time — the gate takes the
+      // horizon from the probe instead of its own cap.
+      mockIdleSweep();
+      const dueAt = new Date(Date.now() + 40_000);
+      vi.mocked(getNextScheduleRunAt).mockResolvedValue(dueAt);
+
+      await tick();
+      const response = await tick();
+      const body = await parseJson<{ data: { resumesAt: string } }>(response);
+
+      expect(body.data.resumesAt).toBe(dueAt.toISOString());
+    });
+
+    it('?force=1 sweeps even while armed', async () => {
+      mockIdleSweep();
+      await tick();
+      vi.clearAllMocks();
+
+      const response = await tick('?force=1');
+
+      expect(response.status).toBe(202);
+      expect(processDueSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it('a normal tick right after a forced one is still skipped', async () => {
+      // `force` is a one-off override, not a reset: the forced sweep found
+      // nothing, so the gate re-arms.
+      mockIdleSweep();
+      await tick();
+      await tick('?force=1');
+      vi.clearAllMocks();
+
+      const response = await tick();
+      const body = await parseJson<{ data: { reason: string } }>(response);
+
+      expect(body.data.reason).toBe('idle');
+      expect(processDueSchedules).not.toHaveBeenCalled();
+    });
+
+    it('logs the armed horizon in the completion line', async () => {
+      mockIdleSweep();
+
+      await tick();
+
+      expect(logger.info).toHaveBeenCalledWith(
+        'Maintenance tick background tasks completed',
+        expect.objectContaining({ idleUntilMs: expect.any(Number) })
+      );
+    });
+
+    it('omits the horizon from the completion line when it did not arm', async () => {
+      await tick();
+
+      const [, payload] = vi
+        .mocked(logger.info)
+        .mock.calls.find(([msg]) => msg === 'Maintenance tick background tasks completed')!;
+      expect(payload).not.toHaveProperty('idleUntilMs');
+    });
   });
 
   // ── Overlap guard ────────────────────────────────────────────────────────
@@ -610,9 +842,12 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       // Watchdog fires for tick 1, releasing the guard.
       await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
 
-      // Tick 2 starts; hangs again. New token claims the guard.
-      const deferred2 = createDeferred<typeof DEFAULT_REAPER_RESULT>();
-      vi.mocked(reapZombieExecutions).mockReturnValue(deferred2.promise);
+      // Tick 2 starts; hangs again. New token claims the guard. It has to hang
+      // on a *different* task: the per-job in-flight latch (#442) means tick 1's
+      // still-pending reaper is skipped rather than started a second time, so
+      // re-deferring the reaper here would let tick 2's chain settle at once.
+      const deferred2 = createDeferred<number>();
+      vi.mocked(processPendingRetries).mockReturnValue(deferred2.promise);
 
       const second = await POST(makeRequest());
       expect(second.status).toBe(202);
@@ -628,7 +863,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       expect(stillSkippedBody.data.skipped).toBe(true);
 
       // Cleanup.
-      deferred2.resolve(DEFAULT_REAPER_RESULT);
+      deferred2.resolve(DEFAULT_RETRY_RESULT);
     });
   });
 });

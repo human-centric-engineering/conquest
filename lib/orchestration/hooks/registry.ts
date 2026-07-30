@@ -34,6 +34,7 @@ import {
   TIMESTAMP_HEADER,
   signHookPayload,
 } from '@/lib/orchestration/hooks/signing';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 /** Cache TTL — reload hooks from DB every 60 seconds */
 const CACHE_TTL_MS = 60_000;
@@ -288,6 +289,10 @@ async function attemptDelivery(
 
   if (!exhausted && nextRetryAt) {
     scheduleRetry(deliveryId, retryDelay ?? RETRY_DELAYS_MS[0]);
+    // The in-process timer above is the normal retry path; the maintenance tick
+    // drains anything it loses. Tell the tick's idle gate a row is now waiting,
+    // so it does not skip past it (#442).
+    noteMaintenanceWork('hook-delivery-retry');
   }
 
   logger.warn('Hook webhook delivery failed', {
