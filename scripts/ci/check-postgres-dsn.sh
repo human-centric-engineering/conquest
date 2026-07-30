@@ -39,7 +39,14 @@ readonly LOCAL_HOSTS='localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?|db|postgres|po
 # since what we actually care about is a real credential, not a real host.
 readonly PLACEHOLDER_CREDS='(user|username|myuser|postgres|admin|USER|USERNAME):(pass|password|passwd|mypassword|secret|changeme|placeholder|postgres|PASS|PASSWORD|<[^>]*>|\[[^]]*\]|\$\{[^}]*\})'
 
-# postgres://user:pass@host — capture userinfo and host so each can be tested.
+# Matches scheme://userinfo@host, capturing userinfo and host separately so each
+# can be tested against the two allowlists above.
+#
+# Deliberately NOT illustrated with a literal example DSN here: this file is
+# real source, so it is not on .trufflehog-exclude.txt (see the scope rule in
+# that file), and a spelled-out `scheme://user:pass@host` in this comment is
+# itself a Postgres-detector hit that fails the secret-scan job. The script
+# that exists to catch committed DSNs is the one place a sample DSN cannot go.
 readonly DSN_RE='postgres(ql)?://[^:/@[:space:]]+:[^@[:space:]]+@[^:/[:space:]"'"'"']+'
 
 fail=0

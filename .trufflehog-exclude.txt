@@ -35,3 +35,15 @@
 
 # One-off investigation scripts (not shipped, not deployed).
 ^scripts/spikes/
+
+# The Postgres tripwire itself. Its job is to hold DSN-shaped patterns, so the
+# structural detectors will always have something to match on. Its git history
+# also carries a literal example DSN in an explanatory comment (since removed —
+# see the note in the file) and the PR scan reads the WHOLE commit range, so
+# removing the line from the working tree does not retire the finding.
+#
+# The coverage lost is narrow and already compensated: the `Postgres DSN
+# tripwire` step below runs over EVERY tracked file regardless of path, so a real
+# DSN pasted into this script is still caught. What is genuinely given up is
+# TruffleHog's OTHER detectors on this one 70-line CI script.
+^scripts/ci/check-postgres-dsn\.sh$
