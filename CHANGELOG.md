@@ -69,6 +69,21 @@ release process.
 
 ### Added
 
+- **`capability.refused_not_advertised` hook event, and `warning` SSE frames on
+  a refused tool call** (#488). The handler already refused a tool name outside
+  the set advertised to the model for that turn, but said nothing: on the
+  single-call path no frame was emitted at all, so the turn carried on and the
+  UI showed an answer produced without the data the model asked for, with
+  nothing anywhere explaining why. Both refusal paths now yield
+  `{ type: 'warning', code }` — `tool_not_advertised` or `tool_unavailable` (the
+  repeated-failure breaker) — and the not-advertised case additionally emits the
+  new hook event, payload `{ conversationId, agentId, agentSlug, userId,
+  toolName, advertised }`. Only the not-advertised case is audited: a name
+  outside the advertised set is a hallucination or an injected tool call, which
+  is a security signal, whereas the breaker is operational and already logged.
+  `advertised` carries the tool set the model actually had, so a reviewer can
+  see what it invented the name from.
+
 - **`generatedColumnExists(table, column)`** in `lib/db/drift-probes.ts` — a
   drift probe for a column that must be `GENERATED ALWAYS AS (...) STORED`
   (#481). `columnExists` only asks whether a column of that name is present, so
