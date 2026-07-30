@@ -113,7 +113,14 @@ interface Data {
   url: string;
   size: number;
   contentType: string;
-  /** True when `url` is a time-limited signed URL; false for public URLs. */
+  /**
+   * True when `url` is a time-limited signed URL.
+   *
+   * False means the URL is unsigned — usually a public one, but a binding with
+   * `public: false` and no `signedUrlTtlSeconds` also lands here, and that URL
+   * is deliberately not openable (401 on the local read route, 403 on S3). Ask
+   * for `signedUrlTtlSeconds` if the caller needs to actually fetch it.
+   */
   signed: boolean;
   /** Set when the URL is signed — RFC3339 expiry timestamp. */
   expiresAt?: string;

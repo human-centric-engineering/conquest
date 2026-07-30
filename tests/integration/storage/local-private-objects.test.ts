@@ -142,6 +142,41 @@ describe('local provider — private objects on a real filesystem', () => {
     expect(existsSync(join(privateDir, key))).toBe(false);
   });
 
+  it('removes the world-readable copy when a key flips from public to private', async () => {
+    // Without this, `download()` would return the private bytes while the
+    // original stayed fetchable at /uploads/<key> — the exact exposure the
+    // private root exists to prevent, reintroduced by a re-upload.
+    const key = 'documents/user-1/report.pdf';
+    await provider.upload(Buffer.from('v1 public'), { key, contentType: 'application/pdf' });
+    expect(existsSync(join(publicDir, key))).toBe(true);
+
+    await provider.upload(Buffer.from('v2 private'), {
+      key,
+      contentType: 'application/pdf',
+      public: false,
+    });
+
+    expect(existsSync(join(privateDir, key))).toBe(true);
+    expect(existsSync(join(publicDir, key))).toBe(false);
+  });
+
+  it('removes the private copy when a key flips from private to public', async () => {
+    const key = 'documents/user-1/report.pdf';
+    await provider.upload(Buffer.from('v1 private'), {
+      key,
+      contentType: 'application/pdf',
+      public: false,
+    });
+
+    await provider.upload(Buffer.from('v2 public'), { key, contentType: 'application/pdf' });
+
+    expect(existsSync(join(publicDir, key))).toBe(true);
+    // Otherwise download() would keep serving the stale private bytes, since
+    // it checks the private root first.
+    expect(existsSync(join(privateDir, key))).toBe(false);
+    expect((await provider.download(key)).body.toString()).toBe('v2 public');
+  });
+
   it('treats a key naming a directory as not found, not an errno', async () => {
     // `documents/user-1` is a real directory once a file is written beneath
     // it. Reading it must fall through to a clean "not found" rather than

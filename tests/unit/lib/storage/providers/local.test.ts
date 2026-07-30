@@ -67,6 +67,12 @@ vi.mock('@/lib/env', () => ({
 describe('lib/storage/providers/local', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` clears calls but keeps implementations, so a
+    // `mockRejectedValue` set by one test would otherwise leak into the next.
+    // `upload()` now unlinks any stale copy in the opposite root, which makes
+    // that leakage visible well beyond the delete tests.
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(rm).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -281,6 +287,24 @@ describe('lib/storage/providers/local', () => {
 
         expect(vi.mocked(writeFile).mock.calls[0]?.[0]).toContain('/tmp/uploads/');
         expect(result.url).toBe('/uploads/avatars/user-1/avatar.jpg');
+      });
+
+      it('fails the upload when the stale copy in the other root cannot be removed', async () => {
+        // Reporting success here would tell the caller the object is private
+        // while the old copy is still served at /uploads/<key>.
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(writeFile).mockResolvedValue(undefined);
+        vi.mocked(unlink).mockRejectedValue(new Error('EACCES'));
+
+        const provider = new LocalProvider(TWO_ROOTS);
+
+        await expect(
+          provider.upload(Buffer.from('secret'), {
+            key: 'documents/user-1/contract.pdf',
+            contentType: 'application/pdf',
+            public: false,
+          })
+        ).rejects.toThrow(/may still be readable/i);
       });
 
       it('declares privateObjects, signedUrls and download', () => {

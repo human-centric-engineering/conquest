@@ -123,7 +123,7 @@ export async function GET(
       // A provider that reported one and returned the other would produce a
       // response the client either truncates or waits forever to finish.
       'Content-Length': String(object.body.length),
-      'Content-Disposition': `attachment; filename="${sanitizeFilename(filename)}"`,
+      'Content-Disposition': `attachment; filename="${toHeaderFilename(filename)}"`,
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': "default-src 'none'; sandbox",
       // The URL is a bearer credential with a short life. Shared caches must
@@ -134,11 +134,17 @@ export async function GET(
 }
 
 /**
- * Strip anything that could break out of the quoted `filename` parameter or
- * inject a second header. Storage keys are already validated, so this covers
- * the residue (quotes, control characters) rather than path traversal.
+ * Reduce a key's final segment to something safe inside a quoted
+ * `filename="…"` header parameter.
+ *
+ * Deliberately **not** `sanitizeFilename()` from `@/lib/security/sanitize`:
+ * that one is built for filesystem safety (traversal sequences, path
+ * separators, control characters) and preserves unicode and punctuation —
+ * including the double-quote, which is the one character that matters here,
+ * because it terminates the parameter and lets a crafted key append another.
+ * This is an allowlist for a header context, not a denylist for a path.
  */
-function sanitizeFilename(name: string): string {
+function toHeaderFilename(name: string): string {
   // Every rejected character maps to `_`, so a non-empty name always yields a
   // non-empty result — the caller has already substituted 'download' for an
   // empty final segment.

@@ -12,10 +12,13 @@
  *   Next serves. Readable only through `download()` or the signed route at
  *   `/api/v1/storage/<key>`.
  *
- * Deletes span both roots. A key is unique across the pair — the same key
- * is never stored in both — but which root holds it is not recorded
- * anywhere, so every read and delete checks private first and then public.
- * Missing this is how `eraseUser()` would leave a user's private files on
+ * A key is unique across the pair: `upload()` removes any copy from the
+ * opposite root after writing, so re-uploading a key with the other
+ * visibility cannot leave a stale — possibly world-readable — twin behind.
+ *
+ * Which root holds a key is not recorded anywhere, though, so every read and
+ * delete checks private first and then public. Deletes span both roots;
+ * missing that is how `eraseUser()` would leave a user's private files on
  * disk after erasure.
  *
  * @see .context/storage/overview.md for configuration documentation
@@ -108,6 +111,38 @@ export class LocalProvider implements StorageProvider {
 
     // Write file
     await writeFile(filePath, file);
+
+    // Enforce one-key-one-root. Re-uploading an existing key with the opposite
+    // visibility would otherwise leave the old copy in place, and since
+    // `download()` checks the private root first, flipping a key from public to
+    // private would return the private bytes while the original stayed
+    // world-readable at `/uploads/<key>` forever. Removal happens after the
+    // write succeeds, so a failed upload never destroys the existing object.
+    const staleRoot = isPrivate ? this.baseDir : this.privateDir;
+    const stalePath = resolveWithin(staleRoot, key);
+    if (existsSync(stalePath)) {
+      try {
+        await unlink(stalePath);
+        logger.info('Removed stale copy of key from the other storage root', {
+          key,
+          stalePath,
+          newVisibility: isPrivate ? 'private' : 'public',
+        });
+      } catch (error) {
+        logger.error('Failed to remove stale copy from the other storage root', error, {
+          key,
+          stalePath,
+        });
+        // Fail the upload even though the write succeeded. Returning success
+        // here would tell the caller the object is private while the old copy
+        // is still served at `/uploads/<key>` — exactly the silent failure this
+        // branch exists to remove. Retrying the upload is safe and idempotent.
+        throw new Error(
+          `Uploaded ${key} but could not remove the existing copy in the ` +
+            `${isPrivate ? 'public' : 'private'} root — the object may still be readable there`
+        );
+      }
+    }
 
     // A private object has no static URL by construction. Point at the
     // signed read route: the path alone won't serve the file — the route
