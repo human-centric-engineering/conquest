@@ -5244,6 +5244,64 @@ describe('agent-opened turns (#474)', () => {
     expect(events.find((e) => e.type === 'error')).toBeDefined();
   });
 
+  describe('attachment-only turns are not empty turns', () => {
+    // The embed surface deliberately permits an empty `message` when files are
+    // attached — a vision turn is commonly one photo with no caption — and its
+    // route-level check already requires text OR an attachment
+    // (app/api/v1/embed/chat/stream/route.ts). Gating only on empty text would
+    // reject those turns at the handler after the route let them through.
+    const PNG_BASE64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+    const photoTurn = {
+      agentSlug: 'helper',
+      userId: 'u1',
+      message: '',
+      attachments: [{ name: 'photo.png', mediaType: 'image/png', data: PNG_BASE64 }],
+    };
+
+    beforeEach(() => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ enableImageInput: true, enableDocumentInput: true })
+      );
+      (prisma.aiOrchestrationSettings.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        imageInputGloballyEnabled: true,
+        documentInputGloballyEnabled: true,
+      });
+      // The suite-wide `vi.clearAllMocks()` clears call records but not
+      // implementations, so the `mockRejectedValue` the attachment-gate suite
+      // installs on this spy leaks forward. Put it back to "model supports it".
+      (assertModelSupportsAttachments as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    });
+
+    it('streams a turn carrying only an attachment', async () => {
+      const events = (await collect(streamChat(photoTurn))) as Array<Record<string, unknown>>;
+
+      expect(events.find((e) => e.type === 'error')).toBeUndefined();
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+    });
+
+    it('treats it as a user turn, not an opener', async () => {
+      // The distinction matters: an opener persists no user row, so misreading
+      // an attachment-only turn as one would silently drop the person's file
+      // from their own transcript.
+      await collect(streamChat(photoTurn));
+
+      const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+      const userRows = createCalls.filter((c: any) => c[0].data.role === 'user');
+      expect(userRows).toHaveLength(1);
+      expect(userRows[0][0].data.content).toBe('');
+    });
+
+    it('still rejects a turn with no text, no opener and no attachments', async () => {
+      const events = (await collect(
+        streamChat({ agentSlug: 'helper', userId: 'u1', message: '', attachments: [] })
+      )) as Array<Record<string, unknown>>;
+
+      expect(events.find((e) => e.type === 'error')).toBeDefined();
+    });
+  });
+
   it('prefers a real user message when both are supplied', async () => {
     // The person's own words are the turn; the opener is ignored, not prepended.
     await collect(

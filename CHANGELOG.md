@@ -75,8 +75,12 @@ release process.
   ever shipped. With `openingTurn` set, `message` may be omitted: no user row is
   persisted, no `message.created` fires for a user role, and the content reaches
   the model as a `system` message. `message` wins if both are supplied. A turn
-  with neither is rejected — `message` becoming optional made the empty turn
-  expressible, so it is now refused explicitly.
+  with no `message`, no `openingTurn` and no attachments is rejected — `message`
+  becoming optional made the empty turn expressible, so it is now refused
+  explicitly. Attachments count as a turn: the embed surface allows an empty
+  `message` when files are attached (a photo with no caption), so gating on
+  empty text alone would have rejected vision turns its own route already
+  accepted.
   `ChatEvent` `start.messageId` is consequently optional; the shared validator in
   `chat-events.ts` already had it optional, so the TS type was stricter than the
   wire contract, and no bundled consumer reads it off `start`.

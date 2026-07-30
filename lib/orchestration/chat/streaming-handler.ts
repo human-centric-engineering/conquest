@@ -515,21 +515,30 @@ export class StreamingChatHandler {
       // what the injection scanner sees, and how the conversation is titled.
       const openingContent = request.openingTurn?.content?.trim() ?? '';
       const userText = request.message?.trim() ?? '';
-      if (!userText && !openingContent) {
+      const attachments = request.attachments ?? [];
+      if (!userText && !openingContent && attachments.length === 0) {
         // `message` became optional to allow an opening turn, so an empty turn is
         // now expressible and has to be rejected explicitly rather than silently
         // sending an empty user message to the provider.
+        //
+        // Attachments count as a turn. The embed surface deliberately allows an
+        // empty `message` when the person sent files — a vision turn is commonly
+        // a single photo with no text body — and its own boundary check
+        // (`app/api/v1/embed/chat/stream/route.ts`) already requires text OR an
+        // attachment. Rejecting on empty text alone would break that path.
         throw new ChatError(
           'invalid_request',
-          'A chat turn requires either `message` or `openingTurn.content`.'
+          'A chat turn requires `message`, `openingTurn.content`, or an attachment.'
         );
       }
       // A user message always wins: if the caller sent both, the person's own
       // words are the turn, and the opener is ignored rather than prepended.
-      const isOpeningTurn = !userText;
+      // An attachment-only turn is a *user* turn with empty text, not an opener —
+      // `openingContent` is empty there, so `turnText` stays '' and the
+      // `role:'user'` row is still persisted, carrying the attachments.
+      const isOpeningTurn = !userText && !!openingContent;
       const turnText = isOpeningTurn ? openingContent : userText;
 
-      const attachments = request.attachments ?? [];
       const hasImageAttachments = attachments.some((a) => a.mediaType.startsWith('image/'));
       const hasPdfAttachments = attachments.some((a) => a.mediaType === 'application/pdf');
       if (hasImageAttachments || hasPdfAttachments) {
