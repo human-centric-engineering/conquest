@@ -69,6 +69,19 @@ release process.
 
 ### Added
 
+- **`generatedColumnExists(table, column)`** in `lib/db/drift-probes.ts` — a
+  drift probe for a column that must be `GENERATED ALWAYS AS (...) STORED`
+  (#481). `columnExists` only asks whether a column of that name is present, so
+  a migration that dropped the column and recreated it as a plain one of the
+  same type passes the check while the column is never populated again. Probe A1
+  (`ai_knowledge_chunk.searchVector`) now uses it. That column backs the BM25
+  half of hybrid knowledge search, and the half-missing failure is worse than a
+  dropped index: a missing index means slow-but-correct, whereas a column that
+  stopped being generated means every row written after the migration holds
+  NULL — so search silently returns nothing for new content while old content
+  still matches, which reads as an ingestion bug. Forks probing their own
+  generated columns should prefer it over `columnExists`.
+
 - **`ChatRequest.openingTurn` — a turn the agent opens** (#474). `streamChat`
   required a non-empty `message` and persisted it as a `role:'user'` row before
   calling the model. Right for a support chatbot; wrong for a facilitated product
