@@ -116,6 +116,7 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { invalidateSettingsCache } from '@/lib/orchestration/llm/settings-resolver';
+import { invalidateOrchestrationSettingsCache } from '@/lib/orchestration/settings';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -195,6 +196,10 @@ async function parseJson<T>(res: Response): Promise<T> {
 describe('Admin Orchestration — /settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The settings singleton is cached for 30s (#442) — module state that
+    // outlives a test, so without this each GET would serve the row the
+    // previous test mocked.
+    invalidateOrchestrationSettingsCache();
   });
 
   describe('GET — Authentication & Authorization', () => {
