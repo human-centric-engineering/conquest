@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { FormError } from '@/components/forms/form-error';
 import { PasswordStrength } from '@/components/forms/password-strength';
 import { OAuthButtons } from '@/components/forms/oauth-buttons';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 /**
  * Signup Form Component
@@ -95,7 +96,7 @@ export function SignupForm() {
 
             if (session) {
               // Session created → verification not required or auto-verified (OAuth)
-              router.push('/dashboard');
+              router.push(AUTH_LANDING_ROUTE);
             } else {
               // No session → verification required, show "check email" page
               router.push('/verify-email?email=' + encodeURIComponent(data.email));
@@ -117,7 +118,7 @@ export function SignupForm() {
   return (
     <div className="space-y-4">
       {/* OAuth Buttons */}
-      <OAuthButtons callbackUrl="/dashboard" />
+      <OAuthButtons callbackUrl={AUTH_LANDING_ROUTE} />
 
       {/* Email/Password Form */}
       <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} className="space-y-4">

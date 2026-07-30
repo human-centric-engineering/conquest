@@ -48,6 +48,7 @@ import {
 } from '@/lib/admin-nav/registry';
 import { initAppNav } from '@/lib/app/admin-nav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Auto-wire the app's admin-nav registrations (fork-readiness — the `lib/app/`
 // bootstrap surface). Runs once when this client module loads (and during the
@@ -594,14 +595,14 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
         {/* Footer */}
         <div className="border-t p-4">
           <Link
-            href="/dashboard"
+            href={AUTH_LANDING_ROUTE}
             className={cn(
               'text-muted-foreground hover:text-foreground flex items-center gap-2 text-sm transition-colors',
               collapsed && 'justify-center'
             )}
           >
             <ChevronLeft className="h-4 w-4" />
-            {!collapsed && <span>Back to Dashboard</span>}
+            {!collapsed && <span>Back to {AUTH_LANDING_LABEL}</span>}
           </Link>
         </div>
       </div>

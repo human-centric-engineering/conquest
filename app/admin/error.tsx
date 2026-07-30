@@ -11,6 +11,7 @@
 
 import { LayoutDashboard } from 'lucide-react';
 import { RouteErrorBoundary } from '@/components/errors/route-error-boundary';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 export default function AdminError({
   error,
@@ -28,8 +29,8 @@ export default function AdminError({
       title="Admin Error"
       description="An error occurred in the admin panel. This has been logged."
       fallback={{
-        label: 'Dashboard',
-        href: '/dashboard',
+        label: AUTH_LANDING_LABEL,
+        href: AUTH_LANDING_ROUTE,
         icon: <LayoutDashboard className="mr-2 h-4 w-4" />,
       }}
     />

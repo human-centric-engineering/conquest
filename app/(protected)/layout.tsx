@@ -4,6 +4,7 @@ import { ProtectedNav } from '@/components/layouts/protected-nav';
 import { ProtectedFooter } from '@/components/layouts/protected-footer';
 import { MaintenanceWrapperWithAdminNotice } from '@/components/maintenance-wrapper';
 import { BRAND } from '@/lib/brand';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 export const metadata: Metadata = {
   title: {
@@ -30,7 +31,7 @@ export default function ProtectedLayout({
   return (
     <MaintenanceWrapperWithAdminNotice>
       <div className="bg-background flex min-h-screen flex-col">
-        <AppHeader logoHref="/dashboard" navigation={<ProtectedNav />} />
+        <AppHeader logoHref={AUTH_LANDING_ROUTE} navigation={<ProtectedNav />} />
         <main className="container mx-auto flex-1 px-4 py-8">{children}</main>
         <ProtectedFooter />
       </div>

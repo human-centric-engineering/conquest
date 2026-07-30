@@ -5,6 +5,7 @@ import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { InFlightExecutionBanner } from '@/components/admin/orchestration/in-flight-execution-banner';
 import { BRAND } from '@/lib/brand';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 export const metadata: Metadata = {
   title: {
@@ -35,7 +36,7 @@ export default async function AdminLayout({
 
   // Redirect to dashboard if not an admin
   if (session.user.role !== 'ADMIN') {
-    redirect('/dashboard');
+    redirect(AUTH_LANDING_ROUTE);
   }
 
   return (
