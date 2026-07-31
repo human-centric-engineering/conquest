@@ -121,6 +121,9 @@ function makeOriginal(overrides: Partial<Record<string, unknown>> = {}): Record<
     inputData: { hello: 'world' },
     budgetLimitUsd: 5,
     versionId: ORIGINAL_VERSION_ID,
+    // The rerun inherits this rather than claiming the run for the admin who
+    // pressed the button — see the system-owned case below.
+    userId: USER_ID,
     ...overrides,
   };
 }
@@ -218,6 +221,39 @@ describe('POST /executions/:id/rerun', () => {
       budgetLimitUsd: 5, // copied from the original
       parentExecutionId: EXEC_ID, // lineage link
     });
+  });
+
+  it('keeps a rerun of a system-owned run system-owned', async () => {
+    // A scheduled or inbound run carries `userId: null` (#502) and its
+    // `inputData` may be a third party's message, copied verbatim into the
+    // rerun. Stamping the admin who pressed rerun onto that row would
+    // re-create the mis-attribution: their erasure would cascade-delete the
+    // correspondence, and their subject-access export would disclose it.
+    vi.mocked(prisma.aiWorkflowExecution.findFirst).mockResolvedValue(
+      makeOriginal({ userId: null, inputData: { trigger: { from: '+15551234567' } } }) as never
+    );
+    vi.mocked(prepareWorkflowExecution).mockResolvedValue(happyPrepare(NEW_VERSION_ID));
+
+    await POST(makeRequest(), makeContext());
+
+    const [, , options] = engineExecuteMock.mock.calls[0];
+    expect(options).toMatchObject({ userId: null });
+  });
+
+  it('admits system-owned runs through the lookup, and no other admin\u2019s', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findFirst).mockResolvedValue(makeOriginal() as never);
+    vi.mocked(prepareWorkflowExecution).mockResolvedValue(happyPrepare(NEW_VERSION_ID));
+
+    await POST(makeRequest(), makeContext());
+
+    // Visibility is enforced in the query, so an id the caller can't see
+    // resolves to null and 404s without a second round-trip.
+    const where = vi.mocked(prisma.aiWorkflowExecution.findFirst).mock.calls[0][0]?.where as {
+      id: string;
+      OR: { userId: string | null }[];
+    };
+    expect(where.id).toBe(EXEC_ID);
+    expect(where.OR.map((arm) => arm.userId)).toEqual([USER_ID, null]);
   });
 
   it('explicit versionId override pins the helper to that version', async () => {

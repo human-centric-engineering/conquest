@@ -3,8 +3,9 @@
  *
  * GET /api/v1/admin/orchestration/executions
  *
- * Returns the caller's own workflow executions with optional filtering
- * by workflowId, status, and date range. Scoped to `session.user.id`.
+ * Returns the caller's own workflow executions plus system-owned runs
+ * (schedule- and inbound-triggered, `userId = null`), with optional
+ * filtering by workflowId, status, and date range.
  *
  * Authentication: Admin role required.
  */
@@ -15,6 +16,7 @@ import { prisma } from '@/lib/db/client';
 import { paginatedResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
+import { executionVisibilityWhere } from '@/lib/orchestration/access/execution-access';
 import { listExecutionsQuerySchema } from '@/lib/validations/orchestration';
 import { WorkflowStatus } from '@/types/orchestration';
 
@@ -27,16 +29,20 @@ export const GET = withAdminAuth(async (request, session) => {
   );
   const skip = (page - 1) * limit;
 
-  const where: Prisma.AiWorkflowExecutionWhereInput = {
-    userId: session.user.id,
-  };
-  if (workflowId) where.workflowId = workflowId;
-  if (status) where.status = status;
+  // Filters go in an AND alongside the visibility clause — assigning them
+  // onto the same object would sit beside its `OR` and widen, not narrow.
+  const filters: Prisma.AiWorkflowExecutionWhereInput = {};
+  if (workflowId) filters.workflowId = workflowId;
+  if (status) filters.status = status;
   if (startDate || endDate) {
-    where.createdAt = {};
-    if (startDate) where.createdAt.gte = startDate;
-    if (endDate) where.createdAt.lte = endDate;
+    filters.createdAt = {};
+    if (startDate) filters.createdAt.gte = startDate;
+    if (endDate) filters.createdAt.lte = endDate;
   }
+
+  const where: Prisma.AiWorkflowExecutionWhereInput = {
+    AND: [executionVisibilityWhere(session.user.id), filters],
+  };
 
   const [executions, total] = await Promise.all([
     prisma.aiWorkflowExecution.findMany({

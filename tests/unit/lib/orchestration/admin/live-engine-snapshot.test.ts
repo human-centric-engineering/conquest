@@ -273,22 +273,37 @@ describe('getLiveEngineSnapshot', () => {
   // in-flight card is intentionally NOT scoped (process-wide counter
   // with no user attribution) — that behaviour is also asserted here.
   describe('user-scoped snapshot', () => {
-    it('applies userId to all three execution-row queries when provided', async () => {
+    it('applies the visibility clause to all three execution-row queries when provided', async () => {
       const userId = 'user-abc';
 
       await getLiveEngineSnapshot({ userId });
 
-      // The running count, queued aggregate, and orphaned count must
-      // each carry `userId: 'user-abc'` in their where clause.
+      // The running count, queued aggregate, and orphaned count must each
+      // carry the caller's own runs plus system-owned ones (`userId: null`).
+      // Dropping the null arm would hide every scheduled and inbound run —
+      // exactly the rows this dashboard exists to catch stuck (#502).
+      const visibility = { OR: [{ userId }, { userId: null }] };
       const runningCall = vi.mocked(prisma.aiWorkflowExecution.count).mock.calls[0]?.[0];
       const queuedCall = vi.mocked(prisma.aiWorkflowExecution.aggregate).mock.calls[0]?.[0];
       const orphanedCall = vi.mocked(prisma.aiWorkflowExecution.count).mock.calls[1]?.[0];
-      expect(runningCall?.where).toMatchObject({ userId });
-      expect(queuedCall?.where).toMatchObject({ userId });
-      expect(orphanedCall?.where).toMatchObject({ userId });
+      expect(runningCall?.where).toMatchObject(visibility);
+      expect(queuedCall?.where).toMatchObject(visibility);
+      expect(orphanedCall?.where).toMatchObject(visibility);
     });
 
-    it('applies userId to the running-step age query via the execution relation', async () => {
+    it('does not admit another admin\u2019s runs into the counts', async () => {
+      await getLiveEngineSnapshot({ userId: 'user-abc' });
+
+      const runningCall = vi.mocked(prisma.aiWorkflowExecution.count).mock.calls[0]?.[0];
+      const arms = (runningCall?.where as { OR: { userId: string | null }[] }).OR;
+
+      // Two arms only. A third would mean the dashboard counts rows the
+      // executions list refuses to show.
+      expect(arms).toHaveLength(2);
+      expect(arms.map((arm) => arm.userId)).toEqual(['user-abc', null]);
+    });
+
+    it('applies the visibility clause to the running-step age query via the execution relation', async () => {
       const userId = 'user-def';
 
       await getLiveEngineSnapshot({ userId });
@@ -299,7 +314,7 @@ describe('getLiveEngineSnapshot', () => {
       // from other partners' running steps.
       expect(stepCall?.where).toMatchObject({
         completedAt: null,
-        execution: { userId },
+        execution: { OR: [{ userId }, { userId: null }] },
       });
     });
 

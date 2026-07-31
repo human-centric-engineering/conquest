@@ -22,8 +22,9 @@
  *     distinguish admin termination from natural failure.
  *
  * Authentication: Admin role required. Ownership: same as the cancel
- * route — rows are scoped to `session.user.id`; cross-user access
- * returns 404 (not 403) so admins cannot probe for other users' rows.
+ * route — the caller's own runs plus system-owned ones (`userId = null`);
+ * any other admin's own run returns 404 (not 403) so admins cannot probe
+ * for each other's rows.
  */
 
 import { z } from 'zod';
@@ -35,6 +36,7 @@ import { getRouteLogger } from '@/lib/api/context';
 import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { recordForceFailEvent } from '@/lib/orchestration/engine/lease';
 import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
@@ -81,10 +83,11 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   if (!existing) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
-  if (existing.userId !== session.user.id) {
-    // Same scoping as the cancel route — don't leak existence of other
-    // users' rows. Admin role gates the endpoint; row ownership gates
-    // the action.
+  if (!adminCanViewExecution(existing, session.user.id)) {
+    // Same scoping as the cancel route — don't leak existence of rows the
+    // caller can't see. Admin role gates the endpoint; row visibility gates
+    // the action. System-owned runs (`userId = null`) are visible to every
+    // admin: a stuck scheduled run is precisely what this route is for.
     throw new NotFoundError(`Execution ${id} not found`);
   }
 

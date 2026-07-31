@@ -3,9 +3,14 @@
  *
  * GET /api/v1/admin/orchestration/executions/counts?statuses=pending,running,paused_for_approval
  *
- * Returns the caller's own execution count per requested status as a single
- * groupBy query. Drives the admin-sidebar badge polling that previously
- * fanned out into N list-endpoint requests. Scoped to `session.user.id`.
+ * Returns a count per requested status as a single groupBy query, over the
+ * same rows the executions list shows: the caller's own runs plus
+ * system-owned ones. Drives the admin-sidebar badge polling that previously
+ * fanned out into N list-endpoint requests.
+ *
+ * The visibility clause must match the list route's exactly — a badge
+ * counting rows the list won't show sends the operator hunting for a
+ * pending approval that isn't there.
  *
  * Response shape:
  *   { counts: { [status]: number } }
@@ -21,6 +26,7 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
+import { executionVisibilityWhere } from '@/lib/orchestration/access/execution-access';
 import { executionCountsQuerySchema } from '@/lib/validations/orchestration';
 
 export const GET = withAdminAuth(async (request, session) => {
@@ -30,7 +36,9 @@ export const GET = withAdminAuth(async (request, session) => {
 
   const grouped = await prisma.aiWorkflowExecution.groupBy({
     by: ['status'],
-    where: { userId: session.user.id, status: { in: statuses } },
+    where: {
+      AND: [executionVisibilityWhere(session.user.id), { status: { in: statuses } }],
+    },
     _count: { _all: true },
   });
 

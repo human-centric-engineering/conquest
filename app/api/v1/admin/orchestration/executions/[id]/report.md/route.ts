@@ -9,8 +9,9 @@
  *
  * Includes the supervisor verdict block when present.
  *
- * Ownership: rows are scoped to `session.user.id`. Cross-user access
- * returns 404.
+ * Ownership: the caller's own runs, plus system-owned runs (`userId = null`
+ * — schedule- and inbound-triggered). Another admin's own run returns 404
+ * (not 403) — we never confirm existence of a row the caller cannot see.
  *
  * Authentication: Admin role required.
  */
@@ -20,6 +21,7 @@ import { prisma } from '@/lib/db/client';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logger } from '@/lib/logging';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { executionTraceSchema, supervisorReportSchema } from '@/lib/validations/orchestration';
 import {
   renderExecutionMarkdown,
@@ -51,7 +53,7 @@ export const GET = withAdminAuth<{ id: string }>(async (_request, session, { par
     where: { id },
     include: { workflow: { select: { name: true } } },
   });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
 
