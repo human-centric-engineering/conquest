@@ -27,6 +27,20 @@ export const updateUserSchema = z.object({
     .optional(),
   email: emailSchema.optional(),
 
+  /**
+   * Required alongside `email` for accounts that have a password (#489).
+   *
+   * Re-authentication for the identity mutation, mirroring what better-auth
+   * already demands of `changePassword`. Not validated against `passwordSchema`
+   * — that schema enforces the rules for a NEW password, and applying them here
+   * would reject a correct existing password that predates a rules change, or
+   * leak the current policy to a caller guessing at it.
+   *
+   * The route enforces the pairing (and exempts OAuth-only accounts, which have
+   * no password to confirm); the schema only has to accept the field.
+   */
+  currentPassword: z.string().min(1, 'Current password is required').optional(),
+
   // Extended profile fields (Phase 3.2)
   bio: z.string().max(500, 'Bio must be less than 500 characters').trim().optional().nullable(),
   phone: z

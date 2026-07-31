@@ -64,6 +64,32 @@ describe('resolveEmailTemplate', () => {
     // verifyEmail → still the platform default (override is per-kind)
     expect(resolveEmailTemplate('verifyEmail', verifyProps)).toEqual(VerifyEmail(verifyProps));
   });
+
+  it('lets a fork override changeEmailApproval (#489)', async () => {
+    // Named out separately from the generic "welcome" case above because this
+    // kind is the actual takeover control (#489) — a fork overriding it must
+    // still receive the address it should mail the approval to.
+    vi.resetModules();
+    const changeEmailProps = {
+      userName: 'Test User',
+      currentEmail: 'old@example.com',
+      newEmail: 'new@example.com',
+      approvalUrl: 'https://example.com/approve',
+      expiresAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const OverrideChangeEmail = (props: typeof changeEmailProps): React.ReactElement =>
+      React.createElement('div', { 'data-testid': 'override', id: props.currentEmail });
+    vi.doMock('@/lib/app/emails', () => ({
+      emailOverrides: { changeEmailApproval: OverrideChangeEmail },
+    }));
+
+    const { resolveEmailTemplate } = await import('@/lib/email/registry');
+
+    const { container } = render(resolveEmailTemplate('changeEmailApproval', changeEmailProps));
+    const overrideEl = container.querySelector('[data-testid="override"]');
+    expect(overrideEl).not.toBeNull();
+    expect(overrideEl?.id).toBe(changeEmailProps.currentEmail);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -140,6 +166,15 @@ describe('resolveEmailTemplate — fork-added kinds', () => {
         inviteeName: 'B',
         inviteeEmail: 'b@example.com',
         invitationUrl: 'https://example.com/i',
+        expiresAt: new Date(),
+      })
+    ).not.toThrow();
+    expect(() =>
+      resolveEmailTemplate('changeEmailApproval', {
+        userName: 'A',
+        currentEmail: 'old@example.com',
+        newEmail: 'new@example.com',
+        approvalUrl: 'https://example.com/approve',
         expiresAt: new Date(),
       })
     ).not.toThrow();

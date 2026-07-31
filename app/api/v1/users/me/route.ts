@@ -9,6 +9,7 @@
  */
 
 import { cookies } from 'next/headers';
+import { verifyPassword } from 'better-auth/crypto';
 import { prisma } from '@/lib/db/client';
 import { successResponse, errorResponse } from '@/lib/api/responses';
 import { UnauthorizedError, ErrorCodes } from '@/lib/api/errors';
@@ -76,11 +77,15 @@ export const GET = withAuth(async (request, session) => {
  * - Request body matches updateUserSchema
  * - Email is unique (if being changed)
  *
- * Changing the email address CLEARS `emailVerified` and re-triggers
- * verification — see the inline note below for why that matters.
+ * Changing the email address does NOT take effect in this request (#489). It
+ * starts better-auth's change flow: the address only moves once the CURRENT
+ * address approves and the new one is then verified. So a successful response
+ * still carries the old `email`, plus `emailChangeRequested: true` to say the
+ * flow began. Changing it also requires `currentPassword` on accounts that have
+ * one, and revokes the user's other sessions when it finally lands.
  *
- * @param request - Request with JSON body { name?, email?, bio?, phone?, timezone?, location? }
- * @returns Updated user profile
+ * @param request - Request with JSON body { name?, email?, currentPassword?, bio?, phone?, timezone?, location? }
+ * @returns Updated user profile, plus `emailChangeRequested`
  * @throws UnauthorizedError if not authenticated
  * @throws ValidationError if invalid data
  */
@@ -111,10 +116,80 @@ export const PATCH = withAuth(async (request, session) => {
     });
   }
 
+  // `currentPassword` is a credential, not a column — split it (and `email`,
+  // which no longer goes through Prisma at all) away from the profile fields
+  // before anything reaches `prisma.user.update`.
+  const { email: requestedEmail, currentPassword, ...profileFields } = body;
+
+  // Is this request actually changing the address?
+  //
+  // Emails are stored lower-cased by the auth layer, but compare
+  // case-insensitively anyway so a no-op re-submit of the same address (a form
+  // that PATCHes every field) doesn't start a pointless change flow.
+  const emailChanged =
+    requestedEmail !== undefined &&
+    requestedEmail.toLowerCase() !== session.user.email.toLowerCase();
+
+  // Re-authenticate BEFORE learning anything about the target address (#489).
+  //
+  // This has to run before the uniqueness check below, not after. A caller
+  // holding only a stolen session — no password — can still submit an
+  // arbitrary `email`; if uniqueness were checked first, EMAIL_TAKEN vs. "enter
+  // your password" would tell them, for free, whether any address they name is
+  // a registered account. Checking the password first means every caller
+  // without one gets the identical re-auth response regardless of the target
+  // address, so nothing about the account directory leaks to a bare session.
+  //
+  // Requiring the password here matches what better-auth already demands of
+  // `changePassword` and costs an attacker holding a stolen cookie something
+  // they usually do not have.
+  //
+  // OAuth-only accounts have no password to confirm — the same condition
+  // `sendResetPasswordHook` tests — so they are exempt rather than locked out of
+  // their own email change. They are not left unprotected: the approval step at
+  // the old address below is the control that actually stops the takeover, and
+  // it applies to every account. (The uniqueness check below is still reachable
+  // for these accounts without a password gate in front of it — an accepted,
+  // narrower trade-off of the same OAuth-only exemption, not a new gap.)
+  if (emailChanged) {
+    const passwordAccount = await prisma.account.findFirst({
+      where: { userId: session.user.id, password: { not: null } },
+      select: { password: true },
+    });
+
+    if (passwordAccount?.password) {
+      if (!currentPassword) {
+        return errorResponse('Your current password is required to change your email address', {
+          code: ErrorCodes.VALIDATION_ERROR,
+          status: 400,
+        });
+      }
+
+      const passwordValid = await verifyPassword({
+        hash: passwordAccount.password,
+        password: currentPassword,
+      });
+
+      if (!passwordValid) {
+        log.warn('Rejected email change with an incorrect password', {
+          userId: session.user.id,
+        });
+        return errorResponse('Current password is incorrect', {
+          code: ErrorCodes.FORBIDDEN,
+          status: 403,
+        });
+      }
+    } else {
+      log.info('Skipping password confirmation for an account with no password', {
+        userId: session.user.id,
+      });
+    }
+  }
+
   // Check email uniqueness if changing email
-  if (body.email) {
+  if (emailChanged) {
     const existingUser = await prisma.user.findUnique({
-      where: { email: body.email },
+      where: { email: requestedEmail },
     });
 
     if (existingUser && existingUser.id !== session.user.id) {
@@ -125,29 +200,10 @@ export const PATCH = withAuth(async (request, session) => {
     }
   }
 
-  // Is this request actually changing the address?
-  //
-  // Emails are stored lower-cased by the auth layer, but compare
-  // case-insensitively anyway so a no-op re-submit of the same address (a form
-  // that PATCHes every field) doesn't gratuitously unverify the account.
-  const emailChanged =
-    body.email !== undefined && body.email.toLowerCase() !== session.user.email.toLowerCase();
-
-  // Clear `emailVerified` whenever the address changes.
-  //
-  // Without this, `user.email` stops meaning "an address this person
-  // demonstrably controls" and becomes "any unused string this person typed",
-  // while every downstream consumer still reads it as the former. An account
-  // that verified mallory@example.com could become a *verified*
-  // ceo@bigco.example in one request. That is a privilege-escalation primitive
-  // for anything keyed on the address — invitation redemption that matches on
-  // `user.email`, domain allowlists ("@company.com implies elevated access"),
-  // and audit trails attributing actions to an address the actor never proved
-  // they own. The attacker needs only an ordinary account, and the target
-  // address must simply not already be registered.
+  // Apply the profile fields. The address is deliberately NOT among them.
   const updatedUser = await prisma.user.update({
     where: { id: session.user.id },
-    data: { ...body, ...(emailChanged ? { emailVerified: false } : {}) },
+    data: profileFields,
     select: {
       id: true,
       name: true,
@@ -166,17 +222,34 @@ export const PATCH = withAuth(async (request, session) => {
     },
   });
 
-  // Re-trigger verification for the new address so the flag can become true
-  // again the only legitimate way. Best-effort: the address is already changed
-  // and unverified at this point, so a mail failure must not fail the request —
-  // it just means the user re-requests verification from the UI, which the
-  // existing POST /api/auth/send-verification-email route already supports.
-  if (emailChanged) {
-    log.info('Email changed — cleared emailVerified, sending verification to the new address');
+  // Hand the address change to better-auth rather than writing it here (#489).
+  //
+  // This endpoint used to `prisma.user.update` the new address straight in and
+  // mail a verification link after the fact. That made one compromised session
+  // sufficient for permanent takeover: the address moved immediately, the link
+  // went to the attacker, and `autoSignInAfterVerification` turned it into a
+  // fresh session. The owner was never told.
+  //
+  // `auth.api.changeEmail` inverts that. Nothing is written until the CURRENT
+  // address approves (`sendChangeEmailConfirmationHook`) and the new one then
+  // verifies, so the reply below reports the change as *requested*, not done —
+  // `updatedUser.email` is still the old address, by design.
+  //
+  // Best-effort: the profile fields above are already saved, and better-auth
+  // swallows send failures internally, so a throw here must not fail the whole
+  // PATCH. `emailChangeRequested` in the response is what tells the caller
+  // whether the flow actually started.
+  let emailChangeRequested = false;
+  if (emailChanged && requestedEmail) {
     try {
-      await auth.api.sendVerificationEmail({ body: { email: updatedUser.email } });
-    } catch (sendError) {
-      log.error('Failed to send verification email after email change', sendError, {
+      await auth.api.changeEmail({
+        body: { newEmail: requestedEmail },
+        headers: request.headers,
+      });
+      emailChangeRequested = true;
+      log.info('Email change requested — approval sent to the current address');
+    } catch (changeError) {
+      log.error('Failed to start email change', changeError, {
         userId: session.user.id,
       });
     }
@@ -184,7 +257,7 @@ export const PATCH = withAuth(async (request, session) => {
 
   log.info('User profile updated');
 
-  return successResponse(updatedUser);
+  return successResponse({ ...updatedUser, emailChangeRequested });
 });
 
 /**
