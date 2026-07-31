@@ -352,6 +352,10 @@ jobs:
       - name: Drift check — Prisma-unmodelled DB objects
         run: npx tsx scripts/db/check-drift.ts
       - run: npx tsx scripts/smoke/erasure.ts
+      # Proves all ~28 subject-access queries execute against real Postgres —
+      # the unit suite mocks Prisma, so it never runs them
+      # (see .context/privacy/data-export.md).
+      - run: npx tsx scripts/smoke/export.ts
 
   docker:
     name: Docker Build

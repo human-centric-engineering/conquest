@@ -413,11 +413,22 @@ describe('AgentsTable', () => {
         return Promise.resolve(makeAgentsListResponse());
       });
 
-      // Provide fake URL.createObjectURL and a.click
-      vi.stubGlobal('URL', {
-        createObjectURL: vi.fn(() => 'blob:test'),
-        revokeObjectURL: vi.fn(),
-      });
+      // Stub only the two blob statics — NOT the `URL` global itself.
+      //
+      // `vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })` replaces the
+      // constructor with a plain object. The component then calls `a.click()`,
+      // happy-dom treats that as a navigation and does `new URL(href)`, and the
+      // resulting `TypeError: URL is not a constructor` is thrown inside
+      // happy-dom's async event dispatch — so it surfaces as an unhandled error
+      // rather than a test failure, and vitest fails the whole run with every
+      // test still green. It also outlived the test: `restoreAllMocks()` does not
+      // undo `stubGlobal` (that needs `unstubAllGlobals`), so the broken global
+      // leaked into later tests in this file.
+      //
+      // Spies keep the real constructor and are undone by the `restoreAllMocks()`
+      // in afterEach.
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
 
       render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
 

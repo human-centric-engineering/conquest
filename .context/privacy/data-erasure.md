@@ -56,11 +56,39 @@ from their parents, so only the root `User` relations carry the policy.
 ### System-owned runs
 
 `AiConversation.userId` and `AiWorkflowExecution.userId` are **nullable** (still
-`Cascade`). A real user's runs cascade-erase on deletion; schedule- and
-inbound-triggered runs are **system-owned** (`userId = null`) and unaffected.
-Consequently `userId` is `string | null` through the engine, and the
-`user-memory` capability returns a `no_user_context` error for system runs
-rather than assuming a user.
+`Cascade`), and the engine handles `string | null` throughout — the
+`user-memory` capability returns a `no_user_context` error rather than assuming
+a user.
+
+> **⚠️ The write paths do not yet match that design.** Schedule- and
+> inbound-triggered runs are supposed to be system-owned (`userId = null`), but
+> today they are stamped with the **operator who configured the trigger or
+> schedule**:
+>
+> | Where                                              | Writes                       |
+> | -------------------------------------------------- | ---------------------------- |
+> | `app/api/v1/inbound/[channel]/[slug]/route.ts:284` | `userId: trigger.createdBy`  |
+> | `app/api/v1/inbound/[channel]/[slug]/route.ts:361` | `userId: trigger.createdBy`  |
+> | `app/api/v1/inbound/[channel]/[slug]/route.ts:408` | `userId: trigger.createdBy`  |
+> | `lib/orchestration/scheduling/scheduler.ts:335`    | `userId: schedule.createdBy` |
+>
+> Two consequences, both live:
+>
+> 1. **Erasure over-deletes.** Because the FK is `Cascade`, erasing that one
+>    operator destroys every third party's inbound conversation and every
+>    inbound/scheduled execution record along with them — data that was never
+>    the operator's to erase.
+> 2. **Access over-discloses.** The rows match the operator on `userId`, so a
+>    subject-access export would hand them a third party's phone number, email
+>    body and attachments. `lib/privacy/export-sources.ts` filters these out
+>    explicitly (`channel: null`, `triggerSource: null`) — a containment filter
+>    over the mis-attribution, not a fix for it.
+>
+> Fixing the write paths to `userId: null` retires both, and lets the export
+> filters go. Tracked in
+> [#502](https://github.com/human-centric-engineering/sunrise/issues/502) —
+> delete this block when it lands. Until then, do not build new behaviour on the
+> assumption that `userId` on these rows identifies a data subject.
 
 ### Adding a new `User` relation (required step)
 
@@ -76,6 +104,11 @@ explicit `onDelete` — Prisma's default is `Restrict`, which makes
    link, not the column.
 3. Add an assertion to `scripts/smoke/erasure.ts` proving the new row is erased
    or de-attributed against a real DB.
+4. Declare what a **data subject** receives from it in `SUBJECT_DATA_SOURCES`
+   (`lib/privacy/export-sources.ts`) — the same decision, seen from the access
+   side. This one is enforced: `tests/unit/lib/privacy/export-sources.test.ts`
+   fails until the model is listed. See
+   [Subject Access Export](./data-export.md).
 
 When bringing an erasure branch up to date with `main`, **re-scan for new `User`
 relations the merge introduced** — they reintroduce this bug unnoticed.
@@ -214,7 +247,8 @@ demoted or deleted). See
 | ------------------------------------- | ----------------------------------------------------------------------- |
 | **Art. 17 — Right to erasure**        | ✅ Personal data cascaded, residual PII scrubbed, avatar blobs removed. |
 | **Art. 5(2) — Accountability**        | ✅ Append-only `DataErasureReceipt`.                                    |
-| **Art. 20 — Portability/export**      | ⏳ Not implemented — no user-facing data-export endpoint yet.           |
+| **Art. 15 — Right of access**         | ✅ `exportUserData()` — see [Subject Access Export](./data-export.md).  |
+| **Art. 20 — Portability/export**      | ✅ Same path; the bundle is structured, machine-readable JSON.          |
 | **Art. 5(1)(e) — Storage limitation** | ⏳ Retention purge is a separate feature (see roadmap).                 |
 
 ## Related Documentation
