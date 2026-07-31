@@ -18,6 +18,8 @@ import {
   getValidInvitation,
 } from '@/lib/utils/invitation-token';
 import { DEFAULT_USER_PREFERENCES } from '@/lib/validations/user';
+import { parseEmailChangeToken, getVerificationTokenFromRequest } from '@/lib/auth/change-email';
+import { revokeUserSessions } from '@/lib/auth/sessions';
 
 /**
  * Zod schema for OAuth invitation state passed via `additionalData`.
@@ -394,15 +396,61 @@ export async function sendResetPasswordHook(params: {
  *
  * Exported so unit tests can call the real implementation directly.
  */
-export async function afterEmailVerificationHook(user: {
-  id: string;
-  email: string;
-  name: string | null;
-}): Promise<void> {
+export async function afterEmailVerificationHook(
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+  },
+  request?: Request
+): Promise<void> {
   logger.info('Email verification completed', {
     userId: user.id,
     email: user.email,
   });
+
+  // better-auth fires this callback at the end of an email CHANGE too, not just
+  // a signup verification, and the `user` it passes is already updated — so
+  // nothing in it distinguishes the two. The token on the request does; see
+  // lib/auth/change-email.ts.
+  const emailChange = await parseEmailChangeToken(getVerificationTokenFromRequest(request));
+
+  if (emailChange) {
+    // The address has just changed. Two things follow, neither of which applies
+    // to a signup.
+    //
+    // 1. Revoke other sessions. This is the point the change actually commits,
+    //    and the whole reason #489 is a security issue: without this, a session
+    //    stolen before the change survives it. Anything holding a cookie from
+    //    before this moment loses it.
+    //
+    //    Best-effort by design. better-auth does NOT wrap this callback in its
+    //    error handling (unlike the send-email callbacks), so a throw here
+    //    surfaces as a failed verification click *after* the address has already
+    //    been written — the user would see an error for a change that did in
+    //    fact succeed. Log and continue instead.
+    try {
+      const current = await auth.api.getSession({ headers: request?.headers ?? new Headers() });
+      await revokeUserSessions({
+        userId: user.id,
+        exceptSessionToken: current?.session?.token,
+        reason: 'email_changed',
+      });
+    } catch (error) {
+      logger.error('Failed to revoke sessions after email change', error, {
+        userId: user.id,
+      });
+    }
+
+    // 2. Do not send the welcome email. This is an established user who moved
+    //    address, not a new signup; the guard below only asks whether
+    //    verification was required at signup, which is true in production and
+    //    would therefore greet them all over again.
+    logger.info('Skipping welcome email after an email change', {
+      userId: user.id,
+    });
+    return;
+  }
 
   // Only send welcome email here if verification was required at signup.
   // When verification is not required, the welcome email is sent immediately
@@ -447,21 +495,42 @@ export async function afterEmailVerificationHook(user: {
 export async function sendVerificationEmailHook({
   user,
   url,
+  token,
 }: {
   user: { id: string; email: string; name: string | null };
   url: string;
   token: string;
 }): Promise<void> {
-  // Check if this is an invitation acceptance - if so, skip verification email
-  // The invitation acceptance flow marks email as verified immediately
-  const invitation = await getValidInvitation(user.email);
+  // Is this the new-address leg of an email CHANGE rather than a signup?
+  //
+  // better-auth drives both through this one callback, and during a change it
+  // hands us `user.email` already set to the NEW address — so every check below
+  // that assumes "this address is being verified for the first time by its
+  // owner-to-be" is reading a different situation than it thinks.
+  //
+  // Concretely, the invitation skip immediately below would strand the change:
+  // an existing user moving to an address that happens to hold a pending
+  // invitation would get no verification email, no error, and an account stuck
+  // mid-change. The invitation skip exists for signup (where the accept-invite
+  // route marks the address verified itself), and a change is not that.
+  const emailChange = await parseEmailChangeToken(token);
 
-  if (invitation) {
-    logger.info('Skipping verification email for invitation acceptance', {
+  if (!emailChange) {
+    // Check if this is an invitation acceptance - if so, skip verification email
+    // The invitation acceptance flow marks email as verified immediately
+    const invitation = await getValidInvitation(user.email);
+
+    if (invitation) {
+      logger.info('Skipping verification email for invitation acceptance', {
+        userId: user.id,
+        email: user.email,
+      });
+      return; // Don't send verification email for invitation acceptance
+    }
+  } else {
+    logger.info('Sending verification email for an email change', {
       userId: user.id,
-      email: user.email,
     });
-    return; // Don't send verification email for invitation acceptance
   }
 
   // Replace the default callbackURL (/) with our verification callback page
@@ -475,6 +544,48 @@ export async function sendVerificationEmailHook({
       userName: user.name || 'User',
       verificationUrl,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+    }),
+  });
+}
+
+/**
+ * Send the approval request to the address currently on the account when a
+ * change to a new one is requested (#489).
+ *
+ * This is the control that makes a stolen session insufficient for account
+ * takeover. Nothing is written to the database when `/change-email` is called —
+ * better-auth only mints a token — so whoever holds the session can *ask* for
+ * the change, but only someone who can read the original inbox can approve it.
+ * Approving then triggers a second, separate verification at the new address.
+ *
+ * Note the asymmetry better-auth imposes: it only calls this hook when the
+ * current address is already verified. An account whose address was never
+ * verified has no inbox worth asking, so it goes straight to verifying the new
+ * one — no approval gate, by design.
+ *
+ * Exported so unit tests can call the real implementation directly.
+ */
+export async function sendChangeEmailConfirmationHook(params: {
+  user: { id: string; email: string; name: string | null };
+  newEmail: string;
+  url: string;
+  token: string;
+}): Promise<void> {
+  const { user, newEmail, url } = params;
+
+  logger.info('Sending email-change approval to the current address', {
+    userId: user.id,
+  });
+
+  await sendEmail({
+    to: user.email, // The CURRENT address — never `newEmail`.
+    subject: 'Approve the email change on your account',
+    react: resolveEmailTemplate('changeEmailApproval', {
+      userName: user.name || 'User',
+      currentEmail: user.email,
+      newEmail,
+      approvalUrl: url,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // matches emailVerification.expiresIn
     }),
   });
 }
@@ -569,6 +680,25 @@ export const auth = betterAuth({
         defaultValue: 'USER',
         required: false,
       },
+    },
+
+    // Email changes go through approval at the OLD address (#489).
+    //
+    // Without this, changing the address that owns the account needed nothing
+    // but a session — so one stolen cookie converted into permanent control,
+    // because a session expires and an email address does not. With it, the
+    // change is a two-step the attacker cannot finish: approve from the current
+    // inbox, then verify at the new one. The database is untouched until the
+    // second step, and `afterEmailVerificationHook` revokes other sessions when
+    // it lands.
+    //
+    // `updateEmailWithoutVerification` is deliberately left off. It would let an
+    // unverified account skip straight to a direct write, and the token it mints
+    // is indistinguishable from a signup token — which would blind the
+    // change-vs-signup discrimination the shared hooks depend on.
+    changeEmail: {
+      enabled: true,
+      sendChangeEmailConfirmation: sendChangeEmailConfirmationHook,
     },
   },
 

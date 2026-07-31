@@ -65,6 +65,7 @@ PATCH /api/v1/users/me
 {
   "name": "Jane Doe",
   "email": "jane@example.com",
+  "currentPassword": "required only alongside email",
   "bio": "Software developer",
   "phone": "+1 (555) 123-4567",
   "timezone": "America/New_York",
@@ -76,24 +77,33 @@ PATCH /api/v1/users/me
 
 ### Changing `email` is an identity mutation
 
-Two rules apply to the `email` field only. Every other profile field is
-unaffected by both.
+Three rules apply to the `email` field only. Every other profile field is
+unaffected by all of them.
+
+**The address does not change in this request.** Sending `email` _starts_ a
+change; it does not perform one. The handler delegates to better-auth's
+`changeEmail`, which mails an approval link to the address **currently** on the
+account and writes nothing until it is clicked — then verifies the new address
+before the swap. So the response still carries the old `email`, plus
+`emailChangeRequested: true`. Before this (#489), the address moved immediately
+and the verification link went to whoever asked, which made one compromised
+session enough for permanent account takeover.
+
+**Re-authentication.** `currentPassword` is required whenever `email` is
+present, and is checked against the stored credential. Accounts with no password
+(OAuth-only) are exempt — there is nothing to confirm — and rely on the approval
+step instead. Omitting it on a password account is a **400**; getting it wrong is
+a **403**.
 
 **Session type.** `withAuth` accepts an API key of _any_ scope, and keys are
 self-service — so without a check, a `chat`-scoped key handed to a third-party
-integration could move the account to an attacker's address, and the
-verification mail would deliver them a working token. The handler rejects the
-email path for key-authenticated callers with **403 FORBIDDEN**, via
-`isApiKeySession()` from `lib/auth/api-keys.ts`. Changing your address requires
-a browser session.
+integration could move the account to an attacker's address. The handler rejects
+the email path for key-authenticated callers with **403 FORBIDDEN**, via
+`isApiKeySession()` from `lib/auth/api-keys.ts`. Changing your address requires a
+browser session.
 
-**Re-verification.** When the address actually changes (compared
-case-insensitively, so a form that PATCHes every field does not gratuitously
-unverify the account), the handler sets `emailVerified` to `false` and sends a
-new verification mail. Without this, `user.email` stops meaning "an address this
-person controls" and becomes "any unused string they typed", while every
-downstream consumer — invitation redemption, domain allowlists — still reads it
-as the former.
+When the change finally completes, the user's other sessions are revoked. Full
+flow and its sharp edges: [`.context/auth/security.md`](../auth/security.md).
 
 **Response** (200 OK):
 
@@ -105,6 +115,7 @@ as the former.
     "name": "Jane Doe",
     "email": "jane@example.com",
     "emailVerified": true,
+    "emailChangeRequested": false,
     "image": "https://...",
     "role": "USER",
     "createdAt": "2025-01-01T08:00:00.000Z",
@@ -113,13 +124,20 @@ as the former.
 }
 ```
 
-`emailVerified` comes back `false` when this request changed the address.
+`email` is always the address **currently** on the account — a requested change
+is not reflected here until it is approved and verified.
+`emailChangeRequested` is `true` when this request started a change flow. It is
+`false` when no `email` was sent, when the submitted address matched the current
+one (compared case-insensitively, so a form that PATCHes every field does not
+start a pointless flow), or when the flow could not be started — the profile
+fields are saved either way.
 
 **Error Responses**:
 
 - **401 Unauthorized**: No valid session
 - **403 Forbidden**: Caller is authenticated by API key and the body contains `email`
-- **400 Validation Error**: Invalid input data
+- **403 Forbidden**: `currentPassword` is incorrect
+- **400 Validation Error**: Invalid input data, or `email` sent without `currentPassword` on a password account
 - **400 Email Taken**: Email already in use by another user
 
 ## Delete Current User (Self-Deletion)

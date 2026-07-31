@@ -18,6 +18,7 @@ import WelcomeEmail from '@/emails/welcome';
 import VerifyEmail from '@/emails/verify-email';
 import ResetPasswordEmail from '@/emails/reset-password';
 import InvitationEmail from '@/emails/invitation';
+import ChangeEmailApprovalEmail from '@/emails/change-email-approval';
 import { emailOverrides } from '@/lib/app/emails';
 
 /**
@@ -65,6 +66,20 @@ export interface EmailPropsMap {
     invitationUrl: string;
     expiresAt: Date;
   };
+  /**
+   * Sent to the address currently on the account when a change to a new one is
+   * requested. Nothing changes until the recipient approves, so a fork that
+   * overrides this must keep both the approval link and the "you didn't request
+   * this" path — it is the control that stops a stolen session from taking the
+   * account (#489).
+   */
+  changeEmailApproval: {
+    userName: string;
+    currentEmail: string;
+    newEmail: string;
+    approvalUrl: string;
+    expiresAt: Date;
+  };
 }
 
 /** The set of overridable auth emails. */
@@ -94,6 +109,7 @@ const defaultTemplates: { [K in EmailKind]?: EmailTemplate<K> } = {
   verifyEmail: VerifyEmail,
   resetPassword: ResetPasswordEmail,
   invitation: InvitationEmail,
+  changeEmailApproval: ChangeEmailApprovalEmail,
 };
 
 /**

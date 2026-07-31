@@ -80,7 +80,19 @@ vi.mock('@/lib/db/client', () => ({
       update: vi.fn(),
       count: vi.fn(),
     },
+    // PATCH looks up the credential row to decide whether to demand the
+    // current password before an email change (#489).
+    account: {
+      findFirst: vi.fn(),
+    },
   },
+}));
+
+// better-auth's password verifier — the real one is scrypt over a stored hash,
+// which unit tests have no reason to exercise. Default to "correct password";
+// individual cases override.
+vi.mock('better-auth/crypto', () => ({
+  verifyPassword: vi.fn().mockResolvedValue(true),
 }));
 
 // eraseUser — mock so real PII-scrubbing logic is never run in unit tests.
@@ -103,12 +115,13 @@ vi.mock('@/lib/api/context', () => ({
 
 // auth config — needed transitively by guards.ts when not mocked; mock the
 // identity guard above means this path is not reached, but kept for safety.
-// `sendVerificationEmail` IS reached: PATCH calls it when the email changes.
+// `changeEmail` IS reached: PATCH delegates the email change to it (#489).
 vi.mock('@/lib/auth/config', () => ({
   auth: {
     api: {
       getSession: vi.fn(),
       sendVerificationEmail: vi.fn().mockResolvedValue(undefined),
+      changeEmail: vi.fn().mockResolvedValue({ status: true }),
     },
   },
 }));
@@ -118,6 +131,7 @@ vi.mock('@/lib/auth/config', () => ({
 // ---------------------------------------------------------------------------
 
 import { prisma } from '@/lib/db/client';
+import { verifyPassword } from 'better-auth/crypto';
 import { auth } from '@/lib/auth/config';
 import { humanAdminWhere } from '@/lib/auth/account';
 import { eraseUser } from '@/lib/privacy/erase-user';
@@ -611,8 +625,12 @@ describe('PATCH /api/v1/users/me — email change', () => {
   };
 
   beforeEach(() => {
+    // `clearAllMocks` resets calls but NOT implementations, so any case that
+    // overrides one of these has to be undone here or it leaks into the next.
     vi.clearAllMocks();
     vi.mocked(auth.api.sendVerificationEmail).mockResolvedValue(undefined as never);
+    vi.mocked(auth.api.changeEmail).mockResolvedValue({ status: true });
+    vi.mocked(verifyPassword).mockResolvedValue(true);
   });
 
   // `withAuth` accepts an API key of ANY scope, and keys are self-service. So
@@ -664,37 +682,125 @@ describe('PATCH /api/v1/users/me — email change', () => {
     expect(prisma.user.update).toHaveBeenCalled();
   });
 
-  it('clears emailVerified when the address changes', async () => {
+  it('does NOT write the new address directly — it delegates to better-auth', async () => {
+    // The heart of #489. Writing the address here is what made one stolen
+    // session enough for permanent takeover: it moved immediately, the
+    // verification link went to the attacker, and autoSignInAfterVerification
+    // turned that into a fresh session. The address must not change until the
+    // CURRENT address has approved.
     const session = buildUserSession('USER');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    // Cast: the route `select`s only `password`, so a full Account is not what
+    // comes back at runtime.
+    vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
     vi.mocked(prisma.user.update).mockResolvedValue({
       id: session.user.id,
-      email: 'new@example.com',
-      emailVerified: false,
+      email: session.user.email,
+      emailVerified: true,
       ...UPDATED_SHAPE,
     });
 
     const request = createMockRequest({
       method: 'PATCH',
       url: 'http://localhost:3000/api/v1/users/me',
-      body: { email: 'new@example.com' },
+      body: { email: 'new@example.com', currentPassword: 'correct-horse' },
     });
 
-    await PATCH(request, session);
+    const response = await PATCH(request, session);
 
+    expect(response.status).toBe(200);
+    // The Prisma write must carry the profile fields only — never the address.
     const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
-      data: { emailVerified?: boolean };
+      data: Record<string, unknown>;
     };
-    expect(updateArg.data.emailVerified).toBe(false);
+    expect(updateArg.data.email).toBeUndefined();
+    // ...and `currentPassword` is a credential, not a column.
+    expect(updateArg.data.currentPassword).toBeUndefined();
+
+    expect(auth.api.changeEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { newEmail: 'new@example.com' } })
+    );
   });
 
-  it('sends verification to the NEW address after the change', async () => {
+  it('reports the change as requested, still returning the OLD address', async () => {
+    // The caller must be able to tell that nothing has moved yet, otherwise a
+    // UI will happily claim the address was updated.
     const session = buildUserSession('USER');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    // Cast: the route `select`s only `password`, so a full Account is not what
+    // comes back at runtime.
+    vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
     vi.mocked(prisma.user.update).mockResolvedValue({
       id: session.user.id,
-      email: 'new@example.com',
-      emailVerified: false,
+      email: session.user.email,
+      emailVerified: true,
+      ...UPDATED_SHAPE,
+    });
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'new@example.com', currentPassword: 'correct-horse' },
+    });
+
+    const body = await parseJSON<SuccessBody>(await PATCH(request, session));
+
+    expect(body.data.emailChangeRequested).toBe(true);
+    expect(body.data.email).toBe(session.user.email);
+  });
+
+  it('rejects an email change with no current password', async () => {
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    // Cast: the route `select`s only `password`, so a full Account is not what
+    // comes back at runtime.
+    vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'new@example.com' },
+    });
+
+    const response = await PATCH(request, session);
+
+    expect(response.status).toBe(400);
+    expect(auth.api.changeEmail).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an email change with the WRONG current password', async () => {
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    // Cast: the route `select`s only `password`, so a full Account is not what
+    // comes back at runtime.
+    vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
+    vi.mocked(verifyPassword).mockResolvedValue(false);
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'new@example.com', currentPassword: 'wrong' },
+    });
+
+    const response = await PATCH(request, session);
+
+    expect(response.status).toBe(403);
+    expect(auth.api.changeEmail).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('lets an OAuth-only account change email without a password', async () => {
+    // No credential row means there is no password to confirm. Locking these
+    // users out of their own email change would be a regression; the approval
+    // step at the old address is what actually guards the flow for them.
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.account.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      id: session.user.id,
+      email: session.user.email,
+      emailVerified: true,
       ...UPDATED_SHAPE,
     });
 
@@ -704,15 +810,14 @@ describe('PATCH /api/v1/users/me — email change', () => {
       body: { email: 'new@example.com' },
     });
 
-    await PATCH(request, session);
+    const response = await PATCH(request, session);
 
-    expect(auth.api.sendVerificationEmail).toHaveBeenCalledWith({
-      body: { email: 'new@example.com' },
-    });
+    expect(response.status).toBe(200);
+    expect(auth.api.changeEmail).toHaveBeenCalled();
   });
 
-  it('does NOT touch emailVerified when the email is absent from the body', async () => {
-    // A name-only edit must not log the user out of their verified state.
+  it('does not ask for a password when the email is not changing', async () => {
+    // A name-only edit must not start demanding credentials.
     const session = buildUserSession('USER');
     vi.mocked(prisma.user.update).mockResolvedValue({
       id: session.user.id,
@@ -727,18 +832,16 @@ describe('PATCH /api/v1/users/me — email change', () => {
       body: { name: 'Renamed' },
     });
 
-    await PATCH(request, session);
+    const response = await PATCH(request, session);
 
-    const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
-      data: { emailVerified?: boolean };
-    };
-    expect(updateArg.data.emailVerified).toBeUndefined();
-    expect(auth.api.sendVerificationEmail).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(prisma.account.findFirst).not.toHaveBeenCalled();
+    expect(auth.api.changeEmail).not.toHaveBeenCalled();
   });
 
-  it('does NOT unverify when the submitted email matches the current one', async () => {
+  it('does NOT start a change when the submitted email matches the current one', async () => {
     // Forms that PATCH every field re-submit the unchanged address. Treating
-    // that as a change would unverify accounts on an ordinary profile save.
+    // that as a change would demand a password on an ordinary profile save.
     const session = buildUserSession('USER');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.user.update).mockResolvedValue({
@@ -755,36 +858,41 @@ describe('PATCH /api/v1/users/me — email change', () => {
       body: { email: session.user.email.toUpperCase() },
     });
 
-    await PATCH(request, session);
+    const response = await PATCH(request, session);
 
-    const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
-      data: { emailVerified?: boolean };
-    };
-    expect(updateArg.data.emailVerified).toBeUndefined();
-    expect(auth.api.sendVerificationEmail).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(auth.api.changeEmail).not.toHaveBeenCalled();
+    const body = await parseJSON<SuccessBody>(response);
+    expect(body.data.emailChangeRequested).toBe(false);
   });
 
-  it('still succeeds when the verification email fails to send', async () => {
-    // The address is already changed and unverified by this point, so a mail
-    // failure must not fail the request — the user can re-request from the UI.
+  it('still returns 200 when starting the change throws', async () => {
+    // The profile fields are already committed by this point, so a failure to
+    // start the email flow must not fail the whole PATCH. The response says
+    // `emailChangeRequested: false` so the caller is not misled.
     const session = buildUserSession('USER');
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    // Cast: the route `select`s only `password`, so a full Account is not what
+    // comes back at runtime.
+    vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
     vi.mocked(prisma.user.update).mockResolvedValue({
       id: session.user.id,
-      email: 'new@example.com',
-      emailVerified: false,
+      email: session.user.email,
+      emailVerified: true,
       ...UPDATED_SHAPE,
     });
-    vi.mocked(auth.api.sendVerificationEmail).mockRejectedValue(new Error('SMTP down'));
+    vi.mocked(auth.api.changeEmail).mockRejectedValue(new Error('SMTP down'));
 
     const request = createMockRequest({
       method: 'PATCH',
       url: 'http://localhost:3000/api/v1/users/me',
-      body: { email: 'new@example.com' },
+      body: { email: 'new@example.com', currentPassword: 'correct-horse' },
     });
 
     const response = await PATCH(request, session);
 
     expect(response.status).toBe(200);
+    const body = await parseJSON<SuccessBody>(response);
+    expect(body.data.emailChangeRequested).toBe(false);
   });
 });

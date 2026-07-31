@@ -131,9 +131,61 @@ await authClient.changePassword({
   revokeOtherSessions: true,
 });
 
-// Database revocation
-// DELETE FROM session WHERE userId = 'user-id';
+// Revoke on any other identity change — used by the email-change flow
+import { revokeUserSessions } from '@/lib/auth/sessions';
+
+await revokeUserSessions({
+  userId: user.id,
+  exceptSessionToken: currentSession?.token, // omit to revoke everything
+  reason: 'email_changed',
+});
 ```
+
+`revokeUserSessions` (`lib/auth/sessions.ts`) is the codebase's only session
+delete. better-auth's own revocation is endpoint-scoped — it wants a request
+context that a verification callback does not have — so this goes at the
+`session` table directly. Omitting `exceptSessionToken` revokes everything,
+which is the correct degradation when the current session cannot be identified:
+one extra login beats leaving an attacker's session alive.
+
+## Email Change Security
+
+Changing the address that owns an account is an identity mutation, not a profile
+edit, and it is treated as one (#489). Three controls apply:
+
+1. **Approval at the OLD address.** `user.changeEmail.sendChangeEmailConfirmation`
+   mails an approval link to the address currently on the account. **Nothing is
+   written to the database until it is clicked** — better-auth only mints a
+   token — so a stolen session can _request_ a change but cannot complete one.
+   This is the control that matters; the other two are depth.
+2. **Re-authentication.** `PATCH /api/v1/users/me` requires `currentPassword`
+   alongside `email`. OAuth-only accounts (no credential row) are exempt, since
+   they have no password to confirm.
+3. **Session revocation.** When the change finally lands,
+   `afterEmailVerificationHook` revokes the user's other sessions.
+
+The flow is therefore **two clicks**: approve at the old address, then verify at
+the new one. `PATCH /api/v1/users/me` delegates to `auth.api.changeEmail` rather
+than writing the address, so a success response still carries the _old_ email
+plus `emailChangeRequested: true`.
+
+**Why it matters:** before this, one compromised session was enough for
+permanent takeover — the address moved immediately, the verification link went
+to the attacker, and `autoSignInAfterVerification` turned it into an independent
+session. A session expires; control of the account's address does not.
+
+**Two sharp edges when modifying this flow:**
+
+- better-auth drives the change through the _same_ callbacks as signup
+  verification (`sendVerificationEmail`, `afterEmailVerification`) with no
+  discriminator in their arguments — and during a change, `user.email` is already
+  the NEW address. Use `parseEmailChangeToken` (`lib/auth/change-email.ts`),
+  which reads the `updateTo` claim off the token. Skipping it re-breaks two
+  things: the invitation check strands changes to an invited address, and the
+  welcome email greets established users all over again.
+- `sendChangeEmailConfirmation` only fires when the current address is already
+  verified. An unverified account has no inbox worth asking, so it goes straight
+  to verifying the new address, with no approval gate.
 
 **Protection Against**:
 
