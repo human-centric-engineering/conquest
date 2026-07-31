@@ -79,8 +79,8 @@ BETTER_AUTH_SECRET="Ag8JfK3mN9pQr2StUv4WxY5zB7cD0eF1Gh2Ij3Kl4M="
 - **Type:** Enum — `open` | `invite_only`
 - **Default:** `open`
 - **Used By:**
-  - `lib/auth/config.ts` — the `hooks.before` signup gate and the OAuth branch of
-    `userCreateBeforeHook`
+  - `lib/auth/config.ts` — the `hooks.before` signup gate, and the default-deny
+    backstop in `userCreateBeforeHook` that covers every other creation path
   - `proxy.ts` — redirects `/signup` to `/login`
   - `app/(auth)/login/page.tsx` — omits the "Sign up" link
 
@@ -96,9 +96,11 @@ SIGNUP_MODE="invite_only"
 
 **Important Notes:**
 
-- `invite_only` closes **both** doors: `POST /api/auth/sign-up/email` **and**
-  un-invited OAuth account creation. Gating only the page would be cosmetic — the
-  API route is reachable whatever the UI renders.
+- `invite_only` closes `POST /api/auth/sign-up/email` **and** every other
+  un-invited account creation — OAuth callbacks, ID-token social sign-in, and any
+  auth plugin a fork adds later. The second gate is default-deny rather than a
+  list of endpoint paths. Gating only the page would be cosmetic — the API route
+  is reachable whatever the UI renders.
 - Existing users are unaffected; sign-in, password reset and the invitation flow
   all keep working.
 - On an empty database the first human may still sign up, and becomes ADMIN —

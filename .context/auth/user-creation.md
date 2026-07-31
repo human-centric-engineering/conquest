@@ -28,8 +28,8 @@ Sunrise supports three user creation patterns: **self-signup** (email/password o
 
 **Use Case**: Public user registration, SaaS signups, open community access
 
-> **This pattern can be switched off.** With `SIGNUP_MODE=invite_only`, both
-> `POST /api/auth/sign-up/email` and un-invited OAuth account creation are
+> **This pattern can be switched off.** With `SIGNUP_MODE=invite_only`,
+> `POST /api/auth/sign-up/email` and every other un-invited account creation are
 > refused, leaving the invitation pattern below as the only way in. Default is
 > `open`, which is what the flow here describes. See
 > [signup-modes.md](./signup-modes.md).
