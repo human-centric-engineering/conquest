@@ -48,6 +48,7 @@ import { parseInvitationMetadata } from '@/lib/validations/admin';
 import { prisma } from '@/lib/db/client';
 import { getRouteLogger } from '@/lib/api/context';
 import { auth } from '@/lib/auth/config';
+import { runInvitedSignup } from '@/lib/auth/signup-mode';
 import {
   acceptInviteLimiter,
   createRateLimitResponse,
@@ -136,13 +137,19 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Using auth.api directly to avoid HTTP round-trip and CSRF origin checks
     let newUserId: string;
     try {
-      const signupResult = await auth.api.signUpEmail({
-        body: {
-          name: metadata.name,
-          email,
-          password,
-        },
-      });
+      // Wrapped in `runInvitedSignup` so this survives SIGNUP_MODE=invite_only.
+      // The token was validated in step 2, and better-auth runs `hooks.before`
+      // for server-side `auth.api.*` calls too — without the exemption the
+      // invite_only gate would refuse the invitation flow it exists to serve.
+      const signupResult = await runInvitedSignup(() =>
+        auth.api.signUpEmail({
+          body: {
+            name: metadata.name,
+            email,
+            password,
+          },
+        })
+      );
       newUserId = signupResult.user.id;
     } catch (signupError) {
       const errorMessage = signupError instanceof Error ? signupError.message : 'Unknown error';
