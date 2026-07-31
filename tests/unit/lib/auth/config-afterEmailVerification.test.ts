@@ -137,6 +137,7 @@ vi.mock('@/lib/auth/change-email', () => ({
 
 vi.mock('@/lib/auth/sessions', () => ({
   revokeUserSessions: vi.fn().mockResolvedValue(0),
+  findMostRecentSessionToken: vi.fn().mockResolvedValue(null),
 }));
 
 /**
@@ -163,6 +164,8 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
   ) => Promise<void>;
   let parseEmailChangeToken: ReturnType<typeof vi.fn>;
   let revokeUserSessions: ReturnType<typeof vi.fn>;
+  let findMostRecentSessionToken: ReturnType<typeof vi.fn>;
+  let getSessionMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -195,6 +198,14 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
     parseEmailChangeToken.mockResolvedValue(null);
     revokeUserSessions = vi.mocked(sessions.revokeUserSessions);
     revokeUserSessions.mockResolvedValue(0);
+    findMostRecentSessionToken = vi.mocked(sessions.findMostRecentSessionToken);
+    findMostRecentSessionToken.mockResolvedValue(null);
+
+    // `auth` is a real module-level export of `betterAuth(...)`'s mocked
+    // return value — grab this call's `getSession` to control what "the
+    // current session" looks like per case.
+    getSessionMock = vi.mocked(authConfig.auth.api.getSession);
+    getSessionMock.mockResolvedValue(null);
 
     // Default: email sending succeeds
     sendEmail.mockResolvedValue({ success: true, status: 'sent', id: 'email-123' });
@@ -371,6 +382,40 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
 
       expect(revokeUserSessions).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'user-20', reason: 'email_changed' })
+      );
+    });
+
+    it('spares the session getSession can identify on the request', async () => {
+      getSessionMock.mockResolvedValue({ session: { token: 'visible-session-token' } });
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-24', email: 'new@example.com', name: 'Mover' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(revokeUserSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ exceptSessionToken: 'visible-session-token' })
+      );
+      // The database fallback must not be consulted when getSession already answered.
+      expect(findMostRecentSessionToken).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the newest session when the request carries no visible one', async () => {
+      // The bug this test guards against: clicking the new-address link from a
+      // device/browser with no app cookie is the ORDINARY case for a mail
+      // link, not an edge one. better-auth mints a session for it and calls
+      // this hook before that session's cookie is on the response, so
+      // getSession sees nothing. Treating "nothing visible" as "nothing to
+      // spare" would revoke the very session the click was completing.
+      getSessionMock.mockResolvedValue(null);
+      findMostRecentSessionToken.mockResolvedValue('just-minted-token');
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-25', email: 'new@example.com', name: 'Mover' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(findMostRecentSessionToken).toHaveBeenCalledWith('user-25');
+      expect(revokeUserSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ exceptSessionToken: 'just-minted-token' })
       );
     });
 

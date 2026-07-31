@@ -130,32 +130,27 @@ export const PATCH = withAuth(async (request, session) => {
     requestedEmail !== undefined &&
     requestedEmail.toLowerCase() !== session.user.email.toLowerCase();
 
-  // Check email uniqueness if changing email
-  if (emailChanged) {
-    const existingUser = await prisma.user.findUnique({
-      where: { email: requestedEmail },
-    });
-
-    if (existingUser && existingUser.id !== session.user.id) {
-      return errorResponse('Email already in use', {
-        code: ErrorCodes.EMAIL_TAKEN,
-        status: 400,
-      });
-    }
-  }
-
-  // Re-authenticate before starting an email change (#489).
+  // Re-authenticate BEFORE learning anything about the target address (#489).
   //
-  // A session alone used to be enough to move the address that owns the
-  // account. Requiring the password here matches what better-auth already
-  // demands of `changePassword` and costs an attacker holding a stolen cookie
-  // something they usually do not have.
+  // This has to run before the uniqueness check below, not after. A caller
+  // holding only a stolen session — no password — can still submit an
+  // arbitrary `email`; if uniqueness were checked first, EMAIL_TAKEN vs. "enter
+  // your password" would tell them, for free, whether any address they name is
+  // a registered account. Checking the password first means every caller
+  // without one gets the identical re-auth response regardless of the target
+  // address, so nothing about the account directory leaks to a bare session.
+  //
+  // Requiring the password here matches what better-auth already demands of
+  // `changePassword` and costs an attacker holding a stolen cookie something
+  // they usually do not have.
   //
   // OAuth-only accounts have no password to confirm — the same condition
   // `sendResetPasswordHook` tests — so they are exempt rather than locked out of
   // their own email change. They are not left unprotected: the approval step at
   // the old address below is the control that actually stops the takeover, and
-  // it applies to every account.
+  // it applies to every account. (The uniqueness check below is still reachable
+  // for these accounts without a password gate in front of it — an accepted,
+  // narrower trade-off of the same OAuth-only exemption, not a new gap.)
   if (emailChanged) {
     const passwordAccount = await prisma.account.findFirst({
       where: { userId: session.user.id, password: { not: null } },
@@ -187,6 +182,20 @@ export const PATCH = withAuth(async (request, session) => {
     } else {
       log.info('Skipping password confirmation for an account with no password', {
         userId: session.user.id,
+      });
+    }
+  }
+
+  // Check email uniqueness if changing email
+  if (emailChanged) {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: requestedEmail },
+    });
+
+    if (existingUser && existingUser.id !== session.user.id) {
+      return errorResponse('Email already in use', {
+        code: ErrorCodes.EMAIL_TAKEN,
+        status: 400,
       });
     }
   }

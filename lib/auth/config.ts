@@ -19,7 +19,16 @@ import {
 } from '@/lib/utils/invitation-token';
 import { DEFAULT_USER_PREFERENCES } from '@/lib/validations/user';
 import { parseEmailChangeToken, getVerificationTokenFromRequest } from '@/lib/auth/change-email';
-import { revokeUserSessions } from '@/lib/auth/sessions';
+import { revokeUserSessions, findMostRecentSessionToken } from '@/lib/auth/sessions';
+
+/**
+ * How long an email-verification token (signup, or either leg of an email
+ * change) is valid. Drives `emailVerification.expiresIn` below AND the
+ * "expires at" copy in the verification/approval emails — one constant so the
+ * two can't drift into telling the user a different expiry than better-auth
+ * actually enforces.
+ */
+const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Zod schema for OAuth invitation state passed via `additionalData`.
@@ -431,9 +440,16 @@ export async function afterEmailVerificationHook(
     //    fact succeed. Log and continue instead.
     try {
       const current = await auth.api.getSession({ headers: request?.headers ?? new Headers() });
+      // If this request carries no visible session, better-auth may have just
+      // minted one (the new-address click from a cookie-less browser/device is
+      // the ordinary case, not an edge one) — see
+      // findMostRecentSessionToken's doc for why the newest row is safe to
+      // spare here without weakening the revocation.
+      const exceptSessionToken =
+        current?.session?.token ?? (await findMostRecentSessionToken(user.id));
       await revokeUserSessions({
         userId: user.id,
-        exceptSessionToken: current?.session?.token,
+        exceptSessionToken,
         reason: 'email_changed',
       });
     } catch (error) {
@@ -543,7 +559,7 @@ export async function sendVerificationEmailHook({
     react: resolveEmailTemplate('verifyEmail', {
       userName: user.name || 'User',
       verificationUrl,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+      expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS),
     }),
   });
 }
@@ -585,7 +601,7 @@ export async function sendChangeEmailConfirmationHook(params: {
       currentEmail: user.email,
       newEmail,
       approvalUrl: url,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // matches emailVerification.expiresIn
+      expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS),
     }),
   });
 }
@@ -641,8 +657,9 @@ export const auth = betterAuth({
     // Automatically sign in user after successful email verification
     autoSignInAfterVerification: true,
 
-    // Token expiration time in seconds (24 hours to match email messaging)
-    expiresIn: 86400, // 24 hours
+    // Token expiration time in seconds, kept equal to EMAIL_VERIFICATION_TOKEN_TTL_MS
+    // so the emails' "expires at" copy matches what better-auth actually enforces.
+    expiresIn: EMAIL_VERIFICATION_TOKEN_TTL_MS / 1000,
 
     // Send verification email callback (better-auth calls this).
     // Hook body is defined above as `sendVerificationEmailHook` so unit tests

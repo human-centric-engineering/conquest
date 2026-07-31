@@ -234,7 +234,12 @@ describe('GET /api/v1/users/me', () => {
 
 describe('PATCH /api/v1/users/me', () => {
   beforeEach(() => {
+    // `clearAllMocks` resets call history but not a `mockResolvedValue` set by
+    // an earlier test, so give `account.findFirst` an explicit default here —
+    // otherwise a later test silently inherits whichever "has a password?"
+    // answer the previous one configured.
     vi.clearAllMocks();
+    vi.mocked(prisma.account.findFirst).mockResolvedValue(null);
   });
 
   describe('Authentication', () => {

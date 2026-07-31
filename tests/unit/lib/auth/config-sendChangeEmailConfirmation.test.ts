@@ -70,7 +70,10 @@ vi.mock('@/lib/auth/change-email', () => ({
   getVerificationTokenFromRequest: vi.fn(() => undefined),
 }));
 
-vi.mock('@/lib/auth/sessions', () => ({ revokeUserSessions: vi.fn().mockResolvedValue(0) }));
+vi.mock('@/lib/auth/sessions', () => ({
+  revokeUserSessions: vi.fn().mockResolvedValue(0),
+  findMostRecentSessionToken: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock('@/emails/welcome', () => ({
   default: vi.fn(() => React.createElement('div', {}, 'Welcome Email')),

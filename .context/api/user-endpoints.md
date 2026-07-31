@@ -77,8 +77,11 @@ PATCH /api/v1/users/me
 
 ### Changing `email` is an identity mutation
 
-Three rules apply to the `email` field only. Every other profile field is
-unaffected by all of them.
+Three rules apply when `email` is present. Rejecting the address change (missing
+or wrong `currentPassword`, or the address is taken) rejects the **whole
+request** — no profile fields are saved, matching normal REST behaviour for an
+error response. If you don't want a `name`/`bio`/etc. edit held hostage to the
+address-change rules, send it in a separate PATCH.
 
 **The address does not change in this request.** Sending `email` _starts_ a
 change; it does not perform one. The handler delegates to better-auth's
@@ -127,10 +130,15 @@ flow and its sharp edges: [`.context/auth/security.md`](../auth/security.md).
 `email` is always the address **currently** on the account — a requested change
 is not reflected here until it is approved and verified.
 `emailChangeRequested` is `true` when this request started a change flow. It is
-`false` when no `email` was sent, when the submitted address matched the current
-one (compared case-insensitively, so a form that PATCHes every field does not
-start a pointless flow), or when the flow could not be started — the profile
-fields are saved either way.
+`false` when no `email` was sent, or when the submitted address matched the
+current one (compared case-insensitively, so a form that PATCHes every field
+does not start a pointless flow) — in both cases every other profile field in
+the body is still saved normally, since neither is a rejection. It is also
+`false` when re-authentication and the uniqueness check passed but the
+`changeEmail` call itself failed to start (e.g. the mail provider is down): this
+is the one case where profile fields ARE saved (the write happens before that
+call, and a mail failure must not undo it) despite the flow not starting — a
+distinct case from the outright-rejected ones above, which save nothing.
 
 **Error Responses**:
 

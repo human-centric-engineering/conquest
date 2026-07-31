@@ -59,6 +59,21 @@ describe('parseEmailChangeToken', () => {
     expect(await parseEmailChangeToken('a-token')).toBeNull();
   });
 
+  it('returns null when updateTo is present but requestType is not the verified change type', async () => {
+    // better-auth's own verify-email handler switches on `requestType` across
+    // more branches than the two this module currently reaches through. Gating
+    // on `updateTo` alone would treat any future token shape carrying it under
+    // a different requestType as an ordinary email change; requiring the exact
+    // type is the safer failure if that ever happens.
+    verifyJWT.mockResolvedValue({
+      email: 'old@example.com',
+      updateTo: 'new@example.com',
+      requestType: 'change-email-confirmation',
+    });
+
+    expect(await parseEmailChangeToken('a-token')).toBeNull();
+  });
+
   it('returns null when there is no token at all', async () => {
     // `afterEmailVerification` can be reached without a Request, so the
     // undefined case is real rather than defensive padding.

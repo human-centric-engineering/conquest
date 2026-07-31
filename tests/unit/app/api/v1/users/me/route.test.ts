@@ -631,6 +631,7 @@ describe('PATCH /api/v1/users/me — email change', () => {
     vi.mocked(auth.api.sendVerificationEmail).mockResolvedValue(undefined as never);
     vi.mocked(auth.api.changeEmail).mockResolvedValue({ status: true });
     vi.mocked(verifyPassword).mockResolvedValue(true);
+    vi.mocked(prisma.account.findFirst).mockResolvedValue(null);
   });
 
   // `withAuth` accepts an API key of ANY scope, and keys are self-service. So
@@ -767,6 +768,35 @@ describe('PATCH /api/v1/users/me — email change', () => {
     expect(response.status).toBe(400);
     expect(auth.api.changeEmail).not.toHaveBeenCalled();
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('does not leak whether the target address is registered before the password gate', async () => {
+    // A caller holding only a stolen session (no password) must get the
+    // IDENTICAL response regardless of whether the address they name happens
+    // to be registered — otherwise EMAIL_TAKEN vs. "password required" is a
+    // free account-enumeration oracle that needs nothing but a stolen cookie.
+    // The uniqueness check must not run before the password gate does.
+    const session = buildUserSession('USER');
+    vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
+    // The target address IS registered to someone else — if uniqueness ran
+    // first, this would surface as EMAIL_TAKEN instead of "password required".
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: 'someone-else',
+      email: 'taken@example.com',
+    } as never);
+
+    const request = createMockRequest({
+      method: 'PATCH',
+      url: 'http://localhost:3000/api/v1/users/me',
+      body: { email: 'taken@example.com' },
+    });
+
+    const response = await PATCH(request, session);
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it('rejects an email change with the WRONG current password', async () => {

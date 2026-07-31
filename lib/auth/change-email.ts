@@ -90,9 +90,15 @@ export async function parseEmailChangeToken(
   const parsed = emailChangeClaimsSchema.safeParse(claims);
   if (!parsed.success) return null;
 
-  const { email, updateTo } = parsed.data;
-  // No `updateTo` means a signup/resend token — not a change.
-  if (!updateTo) return null;
+  const { email, updateTo, requestType } = parsed.data;
+  // Check both, not just `updateTo`: `requestType` is the discriminator
+  // better-auth's own verify-email handler switches on internally, across more
+  // branches than the two this codebase currently reaches through this
+  // callback pair. Gating on `updateTo` alone would misclassify any future
+  // token shape that carries `updateTo` under a `requestType` this function
+  // doesn't yet know about, as a plain email change — the safer failure here
+  // is to require the exact request type we've verified this hook receives.
+  if (!updateTo || requestType !== 'change-email-verification') return null;
 
   return { previousEmail: email, newEmail: updateTo };
 }
