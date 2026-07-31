@@ -79,6 +79,19 @@ subject receives from it breaks the build.
 **When that test fails, do not delete the row to make it pass.** That ships a
 short answer to a data subject. Add the model with a disposition.
 
+### The second guard — `npm run smoke:export`
+
+The unit suite mocks Prisma, so it verifies the _arguments_ the manifest builds
+and never that the resulting queries run. `scripts/smoke/export.ts` closes that
+gap against real Postgres (and runs in CI beside the erasure smoke): it creates a
+throwaway subject carrying a session token, a password hash, an API-key hash and
+a webhook secret, exports it, and asserts all ~28 sources executed and that not
+one of those four values appears anywhere in the serialised bundle. The
+credential check is a recursive sweep over the whole JSON rather than a per-table
+assertion, so a source added later without an `omit` fails there even if nobody
+wrote a test for it. Two counter-assertions (the subject's own IP address and
+their message text _are_ present) stop the sweep from passing on an empty export.
+
 ## The Three Dispositions
 
 Every `User`-linked model carries exactly one:

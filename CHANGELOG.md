@@ -128,7 +128,11 @@ release process.
   only — session tokens, password hashes, OAuth tokens, key hashes, HMAC
   secrets); and nothing is best-effort, so a source that throws fails the whole
   export, the deliberate opposite of the erasure path where hook failures are
-  swallowed so app trouble can never block a deletion.
+  swallowed so app trouble can never block a deletion. A second guard,
+  `npm run smoke:export`, runs in CI beside the erasure smoke and proves against
+  real Postgres what a mocked suite cannot: that all ~28 queries execute, and
+  that a planted session token, password hash, key hash and webhook secret
+  appear nowhere in the serialised bundle.
 
   New public surface: `exportUserData()` and `SubjectNotFoundError`
   (`lib/privacy/export-user.ts`), the `SUBJECT_DATA_SOURCES` / `EXCLUDED_SOURCES`
