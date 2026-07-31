@@ -32,24 +32,36 @@ starter template.
 
 ## What `invite_only` closes
 
-| Door                              | Closed in                                     | Behaviour            |
-| --------------------------------- | --------------------------------------------- | -------------------- |
-| `POST /api/auth/sign-up/email`    | `signupModeBeforeHook` (`lib/auth/config.ts`) | `403 FORBIDDEN`      |
-| Un-invited OAuth account creation | `userCreateBeforeHook` (`lib/auth/config.ts`) | `403 FORBIDDEN`      |
-| The `/signup` page                | `proxy.ts`                                    | Redirect to `/login` |
-| The "Sign up" link on `/login`    | `app/(auth)/login/page.tsx`                   | Not rendered         |
+| Door                                     | Closed in                                     | Behaviour            |
+| ---------------------------------------- | --------------------------------------------- | -------------------- |
+| `POST /api/auth/sign-up/email`           | `signupModeBeforeHook` (`lib/auth/config.ts`) | `403 FORBIDDEN`      |
+| **Any** other un-invited account created | `userCreateBeforeHook` (`lib/auth/config.ts`) | `403 FORBIDDEN`      |
+| The `/signup` page                       | `proxy.ts`                                    | Redirect to `/login` |
+| The "Sign up" link on `/login`           | `app/(auth)/login/page.tsx`                   | Not rendered         |
 
 **Gating the route is the part that matters.** `POST /api/auth/sign-up/email` is
 reachable regardless of what the UI renders, so hiding the page alone is
 cosmetic — that is exactly the gap this feature exists to close.
 
-**Both doors, not one.** A Google signup never touches `/sign-up/email`; it
-arrives at `userCreateBeforeHook` via `/callback/:provider`. Gating only the
-email endpoint would leave a fork "invite-only" while still accumulating
-self-created accounts through the Google button.
+**The second layer is default-deny, and deliberately path-independent.**
+Account creation arrives by more paths than the obvious two: a Google signup via
+`/callback/:id`, an ID-token sign-in via `POST /sign-in/social`, and whatever a
+plugin a fork enables later (magic-link, email-OTP, passkey) uses. Every one of
+them ends in a `user` insert, and every insert passes through
+`userCreateBeforeHook` — so under `invite_only` that hook refuses anything not
+explicitly authorised, rather than testing endpoint paths it would have to keep
+in sync forever.
+
+The two authorised paths are `isInvitedSignup()` (accept-invite, holding a
+validated token) and an OAuth signup that presented a valid invitation token.
+
+> An earlier version of this gate tested `ctx.path.includes('/callback/')` and
+> so missed `/sign-in/social`, which better-auth also creates accounts from.
+> If you extend this, do not reintroduce a path allowlist — the failure is
+> silent, which is the whole thing `invite_only` exists to prevent.
 
 **Only new accounts are refused.** `userCreateBeforeHook` does not run when an
-existing user signs in with OAuth, so established accounts are unaffected.
+existing user signs in, so established accounts are unaffected.
 `invite_only` closes account _creation_, not sign-in, password reset, or any
 other auth endpoint.
 

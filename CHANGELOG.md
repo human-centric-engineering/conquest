@@ -75,10 +75,11 @@ release process.
   close it. A fork whose product is invite-gated could only edit a core auth file
   or leave the front door open, which is easy not to notice: the invite flow
   works, the product *looks* gated, and accounts accumulate. `SIGNUP_MODE=invite_only`
-  closes `POST /api/auth/sign-up/email` (better-auth `hooks.before`), un-invited
-  OAuth account creation (`userCreateBeforeHook` — a Google signup never touches
-  the email path, so gating one door would leave the other open), and the
-  `/signup` page (proxy redirect). Only account *creation* is refused; sign-in,
+  closes `POST /api/auth/sign-up/email` (better-auth `hooks.before`), every other
+  un-invited account creation (`userCreateBeforeHook`, default-deny and
+  deliberately path-independent — a Google signup arrives via `/callback/:id` and
+  an ID-token sign-in via `/sign-in/social`, so an endpoint allowlist leaks
+  silently), and the `/signup` page (proxy redirect). Only account *creation* is refused; sign-in,
   password reset and invitation acceptance are unaffected. New
   `lib/auth/signup-mode.ts` exports `isInviteOnly()`, `isFirstHumanBootstrap()`
   and `runInvitedSignup()` — the last being how a server-side path that has

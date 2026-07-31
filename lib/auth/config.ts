@@ -147,23 +147,36 @@ export async function userCreateBeforeHook(
     }
   }
 
-  // invite_only gate for OAuth.
+  // invite_only gate — the backstop for every account-creation path.
   //
-  // The email/password door is closed by `signupModeBeforeHook`, which cannot
-  // see OAuth: a Google signup never touches `/sign-up/email`, it arrives here
-  // via `/callback/:provider`. Without this branch a fork running invite_only
-  // would still accumulate self-created accounts through the Google button —
-  // the same silent open door, one provider along.
+  // `signupModeBeforeHook` closes `/sign-up/email`, but it cannot see the others:
+  // a Google signup arrives here via `/callback/:id`, and better-auth also
+  // creates accounts from `POST /sign-in/social` with an `idToken` (a distinct
+  // endpoint path, so a `/callback/` test misses it). Plugins a fork enables
+  // later — magic-link, email-OTP, passkey — would each add another.
+  //
+  // So this is deliberately **default-deny and path-independent**: every user
+  // insert funnels through this hook, and under invite_only anything that is
+  // not explicitly authorised is refused. Enumerating endpoint paths is what
+  // let `/sign-in/social` through, and the next one would slip past the same
+  // way — silently, which is the exact failure invite_only exists to prevent.
+  //
+  // The two authorised paths:
+  // - `isInvitedSignup()` — accept-invite, already holding a validated token.
+  // - `oauthInvitationAccepted` — an OAuth signup that presented a valid token.
   //
   // Only NEW account creation is refused. This hook does not run when an
-  // existing user signs in with OAuth, so established accounts are unaffected.
-  if (isInviteOnly() && isOAuthSignup && !oauthInvitationAccepted) {
+  // existing user signs in, so established accounts are unaffected.
+  if (isInviteOnly() && !isInvitedSignup() && !oauthInvitationAccepted) {
     if (await isFirstHumanBootstrap()) {
-      logger.info('invite_only: admitting first-human OAuth signup on an empty database', {
+      logger.info('invite_only: admitting first-human signup on an empty database', {
         email: user.email,
       });
     } else {
-      logger.warn('invite_only: refusing un-invited OAuth signup', { email: user.email });
+      logger.warn('invite_only: refusing un-invited signup', {
+        email: user.email,
+        path: ctx?.path,
+      });
 
       throw new APIError('FORBIDDEN', {
         message: 'Sign-up is by invitation only.',

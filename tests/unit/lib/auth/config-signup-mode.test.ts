@@ -1,13 +1,14 @@
 /**
  * Unit Test: invite_only gates in lib/auth/config.ts
  *
- * Two doors, closed in two different places because they arrive by different
- * paths:
+ * Two layers, because account creation arrives by several paths:
  *
  * - `signupModeBeforeHook` — better-auth's `hooks.before`, covering
  *   POST /api/auth/sign-up/email.
- * - `userCreateBeforeHook` — the OAuth branch. A Google signup never touches
- *   /sign-up/email, so the route hook cannot see it.
+ * - `userCreateBeforeHook` — the default-deny backstop every user insert
+ *   passes through. It must NOT key off the endpoint path: a Google signup
+ *   arrives via /callback/:id, an ID-token sign-in via /sign-in/social, and a
+ *   plugin a fork enables later via something else again.
  *
  * The seam module itself (`isInviteOnly` / `isInvitedSignup` /
  * `isFirstHumanBootstrap`) is mocked here and tested for real in
@@ -196,7 +197,7 @@ describe('signupModeBeforeHook', () => {
   });
 });
 
-describe('userCreateBeforeHook — invite_only OAuth gate', () => {
+describe('userCreateBeforeHook — invite_only creation gate', () => {
   it('allows an un-invited OAuth signup in open mode', async () => {
     const result = await userCreateBeforeHook(oauthUser(), OAUTH_CTX);
 
@@ -274,14 +275,45 @@ describe('userCreateBeforeHook — invite_only OAuth gate', () => {
     expect(result.data.email).toBe('new@example.com');
   });
 
-  it('does not apply the OAuth gate to email/password creation', async () => {
-    // Email/password is the route hook's job. Applying this branch there too
-    // would refuse the accept-invite flow, which creates its user with a null
-    // context and is already exempt at the route hook.
+  it('refuses ID-token social sign-in, which is not a /callback/ path', async () => {
+    // better-auth also creates accounts from POST /sign-in/social with an
+    // idToken. It is a distinct endpoint path, so the gate must not key off
+    // '/callback/' — this is the path that slipped through the first version.
     vi.mocked(isInviteOnly).mockReturnValue(true);
 
-    const result = await userCreateBeforeHook(oauthUser(), null);
+    await expect(userCreateBeforeHook(oauthUser(), { path: '/sign-in/social' })).rejects.toThrow(
+      'Sign-up is by invitation only.'
+    );
+  });
 
-    expect(result.data.email).toBe('new@example.com');
+  it('refuses an unrecognised creation path, rather than defaulting to allow', async () => {
+    // Default-deny: a plugin a fork enables later (magic-link, email-OTP,
+    // passkey) must be refused by default rather than silently admitted.
+    vi.mocked(isInviteOnly).mockReturnValue(true);
+
+    await expect(
+      userCreateBeforeHook(oauthUser(), { path: '/some-future-plugin/sign-up' })
+    ).rejects.toThrow('Sign-up is by invitation only.');
+  });
+
+  it('refuses email/password creation reaching this hook, as defence in depth', async () => {
+    // signupModeBeforeHook already closed /sign-up/email; this hook refusing it
+    // too means a gap there cannot silently become an open door here.
+    vi.mocked(isInviteOnly).mockReturnValue(true);
+
+    await expect(userCreateBeforeHook(oauthUser(), null)).rejects.toThrow(
+      'Sign-up is by invitation only.'
+    );
+  });
+
+  it('exempts an invitation-authorised signup regardless of path', async () => {
+    // accept-invite runs inside runInvitedSignup() and creates its user with a
+    // null context — the exemption must not depend on the path either.
+    vi.mocked(isInviteOnly).mockReturnValue(true);
+    vi.mocked(isInvitedSignup).mockReturnValue(true);
+
+    const result = await userCreateBeforeHook(oauthUser('invited@example.com'), null);
+
+    expect(result.data.email).toBe('invited@example.com');
   });
 });
