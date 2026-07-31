@@ -101,13 +101,15 @@ async function main(): Promise<void> {
       data: { conversationId: conversation.id, role: 'user', content: 'remember my postcode' },
     });
 
-    // A third party's inbound traffic, attributed to THIS subject exactly as the
-    // inbound route attributes it (`userId = trigger.createdBy`). It matches the
-    // subject on `userId` and must still not appear in their export: the phone
-    // number and the message body belong to whoever sent them.
+    // A third party's inbound traffic, written the way the inbound route writes
+    // it since #502: system-owned, `userId: null`. It must not appear in this
+    // subject's export — nor in anyone's, since no account owns it. Planted
+    // against the same agent the subject owns, so a source that reached these
+    // messages through the agent relation rather than the user's own would
+    // surface here.
     const inboundConversation = await prisma.aiConversation.create({
       data: {
-        userId: subject.id,
+        userId: null,
         agentId: agent.id,
         title: `sms:${THIRD_PARTY_PHONE}`,
         channel: 'sms',
@@ -158,9 +160,10 @@ async function main(): Promise<void> {
       },
     });
 
-    // A first-party run and an inbound-triggered one, both stamped with this
-    // subject's id. Only the first is theirs; the second carries a third party's
-    // message as `inputData.trigger`, exactly as the inbound route writes it.
+    // A first-party run and an inbound-triggered one. Only the first is the
+    // subject's; the second carries a third party's message as
+    // `inputData.trigger` and is system-owned, exactly as the inbound route
+    // writes it.
     const workflow = await prisma.aiWorkflow.create({
       data: {
         name: `${PREFIX} workflow`,
@@ -187,7 +190,7 @@ async function main(): Promise<void> {
         inputData: { trigger: { from: THIRD_PARTY_PHONE, text: THIRD_PARTY_MESSAGE } },
         executionTrace: [],
         triggerSource: 'inbound:sms',
-        userId: subject.id,
+        userId: null,
       },
     });
 
@@ -261,10 +264,14 @@ async function main(): Promise<void> {
       check(!serialised.includes(secret), `${name} is absent from the bundle`);
     }
 
-    // A third party's identifiers must not reach the subject, even though the
-    // rows carrying them match the subject on `userId`. Same recursive sweep as
-    // the credentials above — it covers the whole bundle, including nested
-    // messages and `inputData` JSON.
+    // A third party's identifiers must not reach the subject. Same recursive
+    // sweep as the credentials above — it covers the whole bundle, including
+    // nested messages and `inputData` JSON.
+    //
+    // Before #502 these rows carried the operator's `userId` and two explicit
+    // filters kept them out. Now they carry none, so this pair asserts the
+    // upstream fix end-to-end against real Postgres: system-owned rows are
+    // unreachable from any subject's export because no subject owns them.
     check(
       !serialised.includes(THIRD_PARTY_PHONE),
       'a third party’s phone number is absent from the bundle'
@@ -279,12 +286,12 @@ async function main(): Promise<void> {
     check(serialised.includes('203.0.113.7'), 'the subject’s own IP address IS exported');
     check(serialised.includes('remember my postcode'), 'message content IS exported');
 
-    // And the narrowing is disclosed rather than silent.
-    const conversationSummary = bundle.meta.exported.find((e) => e.model === 'AiConversation');
+    // Nothing is withheld at row level any more, so nothing should claim to
+    // be. A `scopeNote` surviving here would tell the subject their export was
+    // narrowed when it wasn't — the silent-omission failure inverted.
     check(
-      typeof conversationSummary?.scopeNote === 'string' &&
-        /inbound/i.test(conversationSummary.scopeNote),
-      'meta discloses that inbound threads were withheld, and why'
+      bundle.meta.exported.every((entry) => entry.scopeNote === undefined),
+      'no exported source claims a narrowing'
     );
 
     check(

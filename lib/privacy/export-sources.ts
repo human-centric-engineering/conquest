@@ -136,24 +136,18 @@ export const SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
     section: 'conversations',
     disposition: 'export',
     description: 'Conversations with agents, including every message and any public share link.',
-    scopeNote:
-      'Covers conversations the subject held themselves. Inbound threads (SMS, WhatsApp, email, Slack) are excluded: those carry a third party’s messages and are attributed to the operator who configured the channel, not to the person who wrote them.',
-    // ⚠️ `channel: null` is load-bearing, not a tidy-up. An inbound message is
-    // written with `userId = trigger.createdBy` — the OPERATOR who set the
-    // channel up — while `fromAddress` and the message bodies belong to whoever
-    // sent them (lib/orchestration/inbound/conversation-resolver.ts). Matching
-    // on `userId` alone therefore hands one data subject other people's phone
-    // numbers and correspondence, labelled as their own. Normal chat never sets
-    // `channel` (lib/orchestration/chat/streaming-handler.ts), so this splits
-    // first-party from inbound cleanly.
-    //
-    // This is a containment filter over a mis-attribution upstream, not the fix.
-    // The rows should carry `userId = null`, as `.context/privacy/data-erasure.md`
-    // describes; until they do, the same mis-attribution also means erasing that
-    // one operator cascade-deletes every third party's inbound thread.
+    // Inbound threads (SMS, WhatsApp, email, Slack) do not match here and need
+    // no filter to keep them out: they are written system-owned, `userId =
+    // null`, because the messages are a third party's rather than any account
+    // holder's (#502). Between #467 and #502 this source carried an explicit
+    // `channel: null` filter and a `scopeNote` disclosing the narrowing, to
+    // contain a write path that stamped the operator who configured the
+    // channel onto those rows. The write path is fixed and the history
+    // backfilled, so the filter would now select nothing and the note would
+    // announce a narrowing that no longer happens.
     fetch: ({ userId }) =>
       prisma.aiConversation.findMany({
-        where: { userId, channel: null },
+        where: { userId },
         include: { messages: { orderBy: byCreatedAt }, share: true },
         orderBy: byCreatedAt,
       }),
@@ -202,21 +196,22 @@ export const SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
     section: 'workflowExecutions',
     disposition: 'export',
     description: 'Workflow runs the subject triggered, including their inputs and outputs.',
-    scopeNote:
-      'Covers runs the subject started themselves. Runs triggered by an inbound message (SMS, WhatsApp, email, Slack) are excluded: their input is a third party’s message, and the run is attributed to the operator who configured the channel.',
-    // ⚠️ Same mis-attribution as `AiConversation` above, and the more dangerous
-    // half: an inbound run's `inputData.trigger` is the adapter payload written
-    // verbatim (app/api/v1/inbound/[channel]/[slug]/route.ts) — sender phone
-    // number, email From/Subject/body, and base64 attachment bytes — under a
-    // `userId` naming the operator. `triggerSource` is set only by the inbound
-    // route, so `null` selects first-party runs.
+    // As with `AiConversation` above, the `triggerSource: null` filter this
+    // carried between #467 and #502 is gone: inbound and scheduled runs are
+    // system-owned now, so `userId` no longer selects them. That filter
+    // guarded the worse half of the same bug — an inbound run's
+    // `inputData.trigger` is the adapter payload written verbatim (sender
+    // phone number, email From/Subject/body, base64 attachment bytes) and it
+    // sat under a `userId` naming the operator who set the channel up.
     //
-    // Scheduled runs are NOT filtered: the scheduler leaves `triggerSource`
-    // unset, and their `inputData` is the operator's own `inputTemplate`, so
-    // they carry no third-party payload to leak.
+    // Pre-#502 rows were backfilled by migration
+    // `20260801090000_system_owned_inbound_runs`, with one documented
+    // exception: scheduled runs created before it are unidentifiable and keep
+    // their author. They still export, and correctly — their `inputData` is
+    // that operator's own `inputTemplate`, not anyone else's message.
     fetch: ({ userId }) =>
       prisma.aiWorkflowExecution.findMany({
-        where: { userId, triggerSource: null },
+        where: { userId },
         orderBy: byCreatedAt,
       }),
   },
