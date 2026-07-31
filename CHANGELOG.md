@@ -98,6 +98,50 @@ release process.
 
 ### Added
 
+- **Subject access (GDPR Art. 15) now has a seam, matching erasure** (#467) —
+  Sunrise implemented the *erasure* half of GDPR carefully — `eraseUser()`, a
+  documented per-table `onDelete` policy, an append-only receipt, a registration
+  seam for app-owned cleanup — and had nothing at all for the *access* half.
+  Every fork holding personal data wrote it themselves, each one independently
+  re-answering the same question: which tables count?
+
+  `exportUserData()` (`lib/privacy/export-user.ts`) assembles one subject's
+  record from `SUBJECT_DATA_SOURCES` (`lib/privacy/export-sources.ts`), a
+  manifest where every `User`-linked model carries an explicit disposition:
+  `export` for the subject's own data, `attribution` for org config they
+  authored (id + label + date — `createdBy` is attribution, not ownership, the
+  same reasoning erasure uses when it retains the row and nulls the link), or a
+  documented exclusion with a written reason. The export's own `meta` echoes all
+  three back with row counts, so a subject can see the boundary of what they
+  received rather than infer it.
+
+  **The coverage guard is the substance of the change.**
+  `tests/unit/lib/privacy/export-sources.test.ts` parses `prisma/schema/*.prisma`
+  and fails if a model relating to `User` is missing from the manifest — so
+  adding a table without deciding what a data subject receives breaks the build.
+  Erasure gets this free: a missing `onDelete` throws `P2003` and breaks loudly.
+  Access has no natural loud failure — an export that omits a table looks
+  exactly like a complete answer to the person reading it, and neither they nor
+  the operator who sent it can tell. Two consequences follow: sources use
+  Prisma's `omit` rather than `select`, so a column added tomorrow is exported
+  by default instead of silently dropped (what's omitted is credential material
+  only — session tokens, password hashes, OAuth tokens, key hashes, HMAC
+  secrets); and nothing is best-effort, so a source that throws fails the whole
+  export, the deliberate opposite of the erasure path where hook failures are
+  swallowed so app trouble can never block a deletion.
+
+  New public surface: `exportUserData()` and `SubjectNotFoundError`
+  (`lib/privacy/export-user.ts`), the `SUBJECT_DATA_SOURCES` / `EXCLUDED_SOURCES`
+  manifest (`lib/privacy/export-sources.ts`), the fork seam
+  `collectAppSubjectData()` (`lib/app/data-export.ts` — a static function rather
+  than a boot-time registry like `erasure-hooks.ts`, because an unregistered
+  export collector yields a bundle that looks complete and is not), and two
+  endpoints mirroring the erasure pair: `GET /api/v1/users/me/export` (refuses
+  API-key sessions — a `chat`-scoped key must not read out an entire account)
+  and `GET /api/v1/users/[id]/export` for admins answering a request that
+  arrives by email. Both take the `exportLimiter` sub-cap and send
+  `Cache-Control: no-store`. Documented in `.context/privacy/data-export.md`.
+
 - **`SIGNUP_MODE`, the seam to run a fork invite-only** (#463) — Sunrise ships a
   complete invitation system whose premise is that access is *granted*, beside an
   email/password signup endpoint that was unconditionally open with no config to

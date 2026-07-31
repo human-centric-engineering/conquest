@@ -76,6 +76,11 @@ explicit `onDelete` — Prisma's default is `Restrict`, which makes
    link, not the column.
 3. Add an assertion to `scripts/smoke/erasure.ts` proving the new row is erased
    or de-attributed against a real DB.
+4. Declare what a **data subject** receives from it in `SUBJECT_DATA_SOURCES`
+   (`lib/privacy/export-sources.ts`) — the same decision, seen from the access
+   side. This one is enforced: `tests/unit/lib/privacy/export-sources.test.ts`
+   fails until the model is listed. See
+   [Subject Access Export](./data-export.md).
 
 When bringing an erasure branch up to date with `main`, **re-scan for new `User`
 relations the merge introduced** — they reintroduce this bug unnoticed.
@@ -214,7 +219,8 @@ demoted or deleted). See
 | ------------------------------------- | ----------------------------------------------------------------------- |
 | **Art. 17 — Right to erasure**        | ✅ Personal data cascaded, residual PII scrubbed, avatar blobs removed. |
 | **Art. 5(2) — Accountability**        | ✅ Append-only `DataErasureReceipt`.                                    |
-| **Art. 20 — Portability/export**      | ⏳ Not implemented — no user-facing data-export endpoint yet.           |
+| **Art. 15 — Right of access**         | ✅ `exportUserData()` — see [Subject Access Export](./data-export.md).  |
+| **Art. 20 — Portability/export**      | ✅ Same path; the bundle is structured, machine-readable JSON.          |
 | **Art. 5(1)(e) — Storage limitation** | ⏳ Retention purge is a separate feature (see roadmap).                 |
 
 ## Related Documentation
