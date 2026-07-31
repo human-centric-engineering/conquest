@@ -195,6 +195,20 @@ under either tier**, so both merge cleanly on upgrade. A framework fork owns
   only sanitises the untrusted URL — so a non-relative value throws at module
   load instead of quietly becoming an off-site redirect.
 
+**Closing the front door — `SIGNUP_MODE`:**
+
+- If your product is invite-gated, closed-beta or B2B-provisioned, set
+  `SIGNUP_MODE=invite_only`. It closes `POST /api/auth/sign-up/email`, every
+  other un-invited account creation (OAuth included), and the `/signup` page —
+  the invitation system Sunrise already ships becomes the only way in. `open` is
+  the default.
+- **Hiding the signup link is not enough**, which is why this is config rather
+  than a copy edit: `POST /api/auth/sign-up/email` is reachable whatever your
+  nav renders, so a fork that only drops the link still accumulates accounts.
+- The first human on an empty database may still sign up and becomes ADMIN —
+  otherwise there is no operator to send invitations. Sign up first, then
+  invite. See [`.context/auth/signup-modes.md`](./.context/auth/signup-modes.md).
+
 **Auth email copy — the email resolver:**
 
 - Every auth email (`welcome`, `verifyEmail`, `resetPassword`, `invitation`, …)

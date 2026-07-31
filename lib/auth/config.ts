@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { getOAuthState, APIError } from 'better-auth/api';
+import { getOAuthState, APIError, createAuthMiddleware } from 'better-auth/api';
 import { prisma } from '@/lib/db/client';
 import { BRAND } from '@/lib/brand';
 import { SYSTEM_USER_EMAIL, AUTH_BOOTSTRAP_ID } from '@/lib/auth/constants';
@@ -18,6 +18,7 @@ import {
   getValidInvitation,
 } from '@/lib/utils/invitation-token';
 import { DEFAULT_USER_PREFERENCES } from '@/lib/validations/user';
+import { isInviteOnly, isInvitedSignup, isFirstHumanBootstrap } from '@/lib/auth/signup-mode';
 import { parseEmailChangeToken, getVerificationTokenFromRequest } from '@/lib/auth/change-email';
 import { revokeUserSessions, findMostRecentSessionToken } from '@/lib/auth/sessions';
 
@@ -87,6 +88,10 @@ export async function userCreateBeforeHook(
 
   const isOAuthSignup = ctx?.path?.includes('/callback/') ?? false;
 
+  // Set when a valid invitation token authorises this OAuth signup; read by the
+  // invite_only gate below.
+  let oauthInvitationAccepted = false;
+
   if (isOAuthSignup) {
     try {
       const oauthState = await getOAuthState();
@@ -113,6 +118,12 @@ export async function userCreateBeforeHook(
         const isValidToken = await validateInvitationToken(invitationEmail, invitationToken);
 
         if (isValidToken) {
+          // Record the authorisation itself, not just its side effects. A valid
+          // token with no parseable invitation record falls through to the
+          // bootstrap below, and the invite_only gate must still treat that
+          // account as invited.
+          oauthInvitationAccepted = true;
+
           const invitation = await getValidInvitation(invitationEmail);
 
           // Delete token NOW to prevent race: token must be consumed before user
@@ -144,6 +155,43 @@ export async function userCreateBeforeHook(
       }
       // Log but don't block for other errors (e.g., getOAuthState fails)
       logger.error('Error checking OAuth invitation in before hook', error);
+    }
+  }
+
+  // invite_only gate — the backstop for every account-creation path.
+  //
+  // `signupModeBeforeHook` closes `/sign-up/email`, but it cannot see the others:
+  // a Google signup arrives here via `/callback/:id`, and better-auth also
+  // creates accounts from `POST /sign-in/social` with an `idToken` (a distinct
+  // endpoint path, so a `/callback/` test misses it). Plugins a fork enables
+  // later — magic-link, email-OTP, passkey — would each add another.
+  //
+  // So this is deliberately **default-deny and path-independent**: every user
+  // insert funnels through this hook, and under invite_only anything that is
+  // not explicitly authorised is refused. Enumerating endpoint paths is what
+  // let `/sign-in/social` through, and the next one would slip past the same
+  // way — silently, which is the exact failure invite_only exists to prevent.
+  //
+  // The two authorised paths:
+  // - `isInvitedSignup()` — accept-invite, already holding a validated token.
+  // - `oauthInvitationAccepted` — an OAuth signup that presented a valid token.
+  //
+  // Only NEW account creation is refused. This hook does not run when an
+  // existing user signs in, so established accounts are unaffected.
+  if (isInviteOnly() && !isInvitedSignup() && !oauthInvitationAccepted) {
+    if (await isFirstHumanBootstrap()) {
+      logger.info('invite_only: admitting first-human signup on an empty database', {
+        email: user.email,
+      });
+    } else {
+      logger.warn('invite_only: refusing un-invited signup', {
+        email: user.email,
+        path: ctx?.path,
+      });
+
+      throw new APIError('FORBIDDEN', {
+        message: 'Sign-up is by invitation only.',
+      });
     }
   }
 
@@ -607,6 +655,40 @@ export async function sendChangeEmailConfirmationHook(params: {
 }
 
 /**
+ * Refuse public email/password signup when `SIGNUP_MODE=invite_only`.
+ *
+ * Runs as better-auth's `hooks.before`, which sees every endpoint — hence the
+ * path check. Gating the route rather than the `/signup` page is the part that
+ * matters: `POST /api/auth/sign-up/email` is reachable regardless of what the
+ * UI renders, so hiding the page alone leaves the door open.
+ *
+ * Two exemptions, both narrow:
+ * - `isInvitedSignup()` — `accept-invite` creating the invited user. better-auth
+ *   routes `auth.api.*` through this same hook, so without the exemption
+ *   invite_only would refuse its own invitation flow.
+ * - `isFirstHumanBootstrap()` — the first account on an empty database, so a
+ *   fresh deployment has an admin who can send invitations.
+ *
+ * Exported so unit tests can call the real implementation directly.
+ */
+export async function signupModeBeforeHook(ctx: { path?: string }): Promise<void> {
+  if (!isInviteOnly()) return;
+  if (ctx.path !== '/sign-up/email') return;
+  if (isInvitedSignup()) return;
+
+  if (await isFirstHumanBootstrap()) {
+    logger.info('invite_only: admitting first-human signup on an empty database');
+    return;
+  }
+
+  logger.warn('invite_only: refusing public email/password signup');
+
+  throw new APIError('FORBIDDEN', {
+    message: 'Sign-up is by invitation only.',
+  });
+}
+
+/**
  * Better Auth Configuration
  *
  * Provides authentication using email/password and social providers (Google).
@@ -733,6 +815,15 @@ export const auth = betterAuth({
        */
       generateId: () => false,
     },
+  },
+
+  // Endpoint hooks. `hooks.before` runs for every better-auth endpoint —
+  // including server-side `auth.api.*` calls — so the body checks the path
+  // itself. Defined above as `signupModeBeforeHook` for direct unit testing.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      await signupModeBeforeHook(ctx);
+    }),
   },
 
   // Database hooks for lifecycle events.

@@ -19,6 +19,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import LoginPage, { metadata } from '@/app/(auth)/login/page';
+import { isInviteOnly } from '@/lib/auth/signup-mode';
 
 /**
  * Mock the LoginForm component
@@ -31,6 +32,16 @@ vi.mock('@/components/forms/login-form', () => ({
 }));
 
 /**
+ * Mock the signup-mode seam (#463)
+ *
+ * Defaults to `open`, the template default, so every other test here sees the
+ * stock page. The invite_only test drives it true.
+ */
+vi.mock('@/lib/auth/signup-mode', () => ({
+  isInviteOnly: vi.fn(() => false),
+}));
+
+/**
  * Test Suite: Login Page
  *
  * Tests the server component that renders the login page layout.
@@ -38,6 +49,9 @@ vi.mock('@/components/forms/login-form', () => ({
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks wipes call history but not implementations, so restore the
+    // open-mode default explicitly.
+    vi.mocked(isInviteOnly).mockReturnValue(false);
   });
 
   /**
@@ -136,6 +150,32 @@ describe('LoginPage', () => {
       // Assert: Link has correct href
       const signUpLink = screen.getByRole('link', { name: /sign up/i });
       expect(signUpLink).toHaveAttribute('href', '/signup');
+    });
+
+    it('should omit the sign up link under SIGNUP_MODE=invite_only', () => {
+      // Arrange: a deployment that only creates accounts by invitation (#463).
+      // /signup redirects straight back to /login there, so the link would be a
+      // round trip to nowhere.
+      vi.mocked(isInviteOnly).mockReturnValue(true);
+
+      // Act
+      render(<LoginPage />);
+
+      // Assert: link and its prompt text are both gone
+      expect(screen.queryByRole('link', { name: /sign up/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/don't have an account\?/i)).not.toBeInTheDocument();
+    });
+
+    it('should keep the password reset link under SIGNUP_MODE=invite_only', () => {
+      // invite_only closes account creation, not account recovery.
+      vi.mocked(isInviteOnly).mockReturnValue(true);
+
+      render(<LoginPage />);
+
+      expect(screen.getByRole('link', { name: /forgot your password\?/i })).toHaveAttribute(
+        'href',
+        '/reset-password'
+      );
     });
 
     it('should render "Don\'t have an account?" text', () => {

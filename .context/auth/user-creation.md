@@ -28,6 +28,12 @@ Sunrise supports three user creation patterns: **self-signup** (email/password o
 
 **Use Case**: Public user registration, SaaS signups, open community access
 
+> **This pattern can be switched off.** With `SIGNUP_MODE=invite_only`,
+> `POST /api/auth/sign-up/email` and every other un-invited account creation are
+> refused, leaving the invitation pattern below as the only way in. Default is
+> `open`, which is what the flow here describes. See
+> [signup-modes.md](./signup-modes.md).
+
 ### Flow
 
 1. User visits signup page
@@ -92,6 +98,15 @@ the final human admin cannot delete themselves down to zero operators.
 **Fail-open:** the bootstrap is a convenience, not a gate — any DB error in the
 check (e.g. the `auth_bootstrap` table not yet migrated) is logged and the signup
 proceeds as `USER`, never a 500.
+
+> **The `invite_only` gate reuses this predicate but fails _closed_.**
+> `isFirstHumanBootstrap()` (`lib/auth/signup-mode.ts`) asks the same question —
+> marker absent **and** zero humans — so that under `SIGNUP_MODE=invite_only` the
+> one account it admits on an empty database is exactly the account this
+> bootstrap would promote to `ADMIN` (otherwise there would be no operator to
+> send invitations). The opposite failure posture is deliberate: promoting is a
+> convenience, but _authorising account creation_ is a gate, so a DB fault there
+> refuses the signup instead of admitting it.
 
 > **Concurrency:** two simultaneous first-signups could both read count 0 before
 > the marker is written and both be promoted. This window only exists on a
@@ -185,6 +200,12 @@ emailAndPassword: {
 ## OAuth Signup Pattern (Social Login)
 
 **Use Case**: Quick signups, users with existing social accounts, reduced friction
+
+> **Also closed by `invite_only`.** Step 5 below is refused for an un-invited
+> user when `SIGNUP_MODE=invite_only` — gating only the email/password endpoint
+> would leave this path as an open side door. Existing users signing in with
+> OAuth are unaffected, since the create hook only runs for new accounts. See
+> [signup-modes.md](./signup-modes.md).
 
 ### Flow
 
