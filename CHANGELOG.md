@@ -79,8 +79,8 @@ release process.
   active-state, so `adminOnly` works on a fork's own items.
 
 - **`lib/app/auth-landing.ts`, the post-authentication landing seam** (#473) —
-  `/dashboard` was hardcoded at eight decision sites across seven files, with no
-  config or scaffold, so an app whose product lives elsewhere edited all of them
+  `/dashboard` was hardcoded at a dozen decision sites across twelve files, with
+  no config or scaffold, so an app whose product lives elsewhere edited all of them
   and re-resolved them on every upgrade. `appAuthLandingRoute` /
   `appAuthLandingLabel` (both `null` = platform default) resolve once through the
   new `lib/auth-landing/route.ts` (`AUTH_LANDING_ROUTE`, `AUTH_LANDING_LABEL`),

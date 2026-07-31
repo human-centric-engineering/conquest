@@ -254,8 +254,22 @@ export function sanitizeRedirectUrl(
 export function safeCallbackUrl(url: string | null, fallback: string = '/'): string {
   if (!url || typeof url !== 'string') return fallback;
   const trimmed = url.trim();
-  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return trimmed;
+  if (isRootRelativePath(trimmed)) return trimmed;
   return fallback;
+}
+
+/**
+ * True if `path` is a root-relative path safe to redirect to same-origin.
+ *
+ * Rejects a leading `//` (protocol-relative) AND a leading `/\` — the WHATWG
+ * URL parser normalizes a backslash to a forward slash for "special" schemes
+ * (http/https/ws/wss/ftp/file) before reading the authority, so `/\evil.com`
+ * resolves to `//evil.com` — a different origin — even though it doesn't
+ * literally start with `//`. `new URL('/\\evil.com', 'https://good.example.com')`
+ * confirms this: its `.href` is `https://evil.com/`.
+ */
+export function isRootRelativePath(path: string): boolean {
+  return path.startsWith('/') && path[1] !== '/' && path[1] !== '\\';
 }
 
 import { isRecord } from '@/lib/utils';

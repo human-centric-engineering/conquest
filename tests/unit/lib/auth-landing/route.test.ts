@@ -58,9 +58,16 @@ describe('AUTH_LANDING_ROUTE', () => {
   it.each([
     ['an absolute URL', 'https://evil.example.com'],
     ['a protocol-relative URL', '//evil.example.com'],
+    ['a backslash-prefixed path', '/\\evil.example.com'],
     ['a bare path with no leading slash', 'programme'],
   ])('throws on %s rather than silently redirecting off-site', async (_case, value) => {
     await expect(loadWith(value)).rejects.toThrow(/appAuthLandingRoute/);
+  });
+
+  it('trims incidental whitespace around an otherwise-valid override', async () => {
+    const { AUTH_LANDING_ROUTE } = await loadWith('  /programme  ');
+
+    expect(AUTH_LANDING_ROUTE).toBe('/programme');
   });
 
   it('names the offending value in the error', async () => {
@@ -89,5 +96,15 @@ describe('AUTH_LANDING_LABEL', () => {
 
     expect(AUTH_LANDING_ROUTE).toBe('/dashboard');
     expect(AUTH_LANDING_LABEL).toBe('Home');
+  });
+
+  it('throws on an empty-string label rather than rendering blank copy', async () => {
+    await expect(loadWith('/programme', '')).rejects.toThrow(/appAuthLandingLabel/);
+  });
+
+  it('trims incidental whitespace around an otherwise-valid label', async () => {
+    const { AUTH_LANDING_LABEL } = await loadWith('/programme', '  Programme  ');
+
+    expect(AUTH_LANDING_LABEL).toBe('Programme');
   });
 });

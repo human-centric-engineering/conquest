@@ -9,22 +9,23 @@
  *
  * Safe in every realm it is imported into (edge proxy, server components,
  * client components): pure string work, no framework or Node APIs.
+ *
+ * `proxy.ts` imports `AUTH_LANDING_ROUTE` at module scope and matches nearly
+ * every request path, so a throw here doesn't just surface once — it fails
+ * the edge middleware for essentially every request, in every environment,
+ * until the seam value is fixed. That's the intended trade: broad and loud
+ * beats narrow and silent for a value this many redirects depend on, but it
+ * does mean a bad seam value is caught as a site-wide outage, not a scoped
+ * page error.
  */
 import { appAuthLandingRoute, appAuthLandingLabel } from '@/lib/app/auth-landing';
+import { isRootRelativePath } from '@/lib/security/sanitize';
 
 /** Sunrise's own landing route, used when the fork seam is `null`. */
 export const DEFAULT_AUTH_LANDING_ROUTE = '/dashboard';
 
 /** Sunrise's own name for that destination, used when the fork seam is `null`. */
 export const DEFAULT_AUTH_LANDING_LABEL = 'Dashboard';
-
-/**
- * Root-relative check. `//host` is rejected alongside absolute URLs: browsers
- * read a protocol-relative path as another origin, so it would leave the app.
- */
-function isRootRelative(route: string): boolean {
-  return route.startsWith('/') && !route.startsWith('//');
-}
 
 /**
  * Fail loudly on a bad seam value rather than falling back to `/dashboard`.
@@ -39,7 +40,8 @@ function isRootRelative(route: string): boolean {
 function resolveAuthLandingRoute(): string {
   if (appAuthLandingRoute === null) return DEFAULT_AUTH_LANDING_ROUTE;
 
-  if (!isRootRelative(appAuthLandingRoute)) {
+  const trimmed = appAuthLandingRoute.trim();
+  if (!isRootRelativePath(trimmed)) {
     throw new Error(
       `Invalid appAuthLandingRoute in lib/app/auth-landing.ts: ${JSON.stringify(appAuthLandingRoute)}. ` +
         'Must be a root-relative path such as "/app" — an absolute or protocol-relative URL ' +
@@ -47,7 +49,27 @@ function resolveAuthLandingRoute(): string {
     );
   }
 
-  return appAuthLandingRoute;
+  return trimmed;
+}
+
+/**
+ * Fail loudly on an empty (but non-null) label, same rationale as the route:
+ * an empty string is a valid non-null value, so `?? DEFAULT_AUTH_LANDING_LABEL`
+ * would never catch it, and it would render as blank copy ("Back to ",
+ * "Redirecting to ...") at every consuming site.
+ */
+function resolveAuthLandingLabel(): string {
+  if (appAuthLandingLabel === null) return DEFAULT_AUTH_LANDING_LABEL;
+
+  const trimmed = appAuthLandingLabel.trim();
+  if (trimmed === '') {
+    throw new Error(
+      'Invalid appAuthLandingLabel in lib/app/auth-landing.ts: empty string. ' +
+        'Leave it `null` to use the platform default, or set real display copy.'
+    );
+  }
+
+  return trimmed;
 }
 
 /**
@@ -60,4 +82,4 @@ export const AUTH_LANDING_ROUTE = resolveAuthLandingRoute();
  * What to call that destination in user-visible copy. Import this rather than
  * writing "Dashboard", so a fork's rename lands everywhere the route does.
  */
-export const AUTH_LANDING_LABEL = appAuthLandingLabel ?? DEFAULT_AUTH_LANDING_LABEL;
+export const AUTH_LANDING_LABEL = resolveAuthLandingLabel();
