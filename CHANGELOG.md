@@ -18,6 +18,35 @@ release process.
 
 ### Security
 
+- **Changing an account's email now requires approval at the old address, the
+  current password, and revokes other sessions.** ([#489]) `PATCH
+  /api/v1/users/me` wrote the new address straight in and mailed verification to
+  it, with no re-authentication and no signal to the address being replaced — so
+  a single compromised session converted into permanent account takeover: the
+  address moved, the link went to the attacker, and `autoSignInAfterVerification`
+  minted them an independent session. A session expires; control of the address
+  does not.
+
+  The endpoint now delegates to better-auth's `changeEmail` with
+  `sendChangeEmailConfirmation`, which writes nothing until the address
+  **currently** on the account approves — so a stolen session can request a
+  change but not finish one. On top of that, `currentPassword` is required
+  (OAuth-only accounts are exempt, having none), and the user's other sessions
+  are revoked when the change lands.
+
+  **Breaking for API callers:** an email change no longer takes effect in the
+  request. A success response carries the *old* `email` plus
+  `emailChangeRequested: true`, and the address moves only after approval at the
+  old address and verification at the new one. Sending `email` without
+  `currentPassword` is now a 400 on password accounts.
+
+  New public surface: `changeEmailApproval` in the email registry (overridable
+  in `lib/app/emails.ts`), `revokeUserSessions` (`lib/auth/sessions.ts`), and
+  `parseEmailChangeToken` (`lib/auth/change-email.ts`) — the last is required
+  reading before touching `sendVerificationEmail` or `afterEmailVerification`,
+  since better-auth routes email changes through both with no discriminator of
+  its own.
+
 - **The chat handler now refuses tool names outside the agent's advertised
   set.** Dispatch previously took the tool name straight off the model's emitted
   call, while the dispatcher synthesizes a default-ALLOW binding when no
@@ -628,6 +657,7 @@ release process.
 [#462]: https://github.com/human-centric-engineering/sunrise/issues/462
 [#466]: https://github.com/human-centric-engineering/sunrise/issues/466
 [#476]: https://github.com/human-centric-engineering/sunrise/issues/476
+[#489]: https://github.com/human-centric-engineering/sunrise/issues/489
 
 - **`LlmOptions.timeoutMs` and `signal` reach the provider SDKs.** Both were
   documented but dropped, so a call that needed longer than the client default

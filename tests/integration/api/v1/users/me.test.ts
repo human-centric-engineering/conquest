@@ -43,8 +43,15 @@ vi.mock('@/lib/auth/config', () => ({
   auth: {
     api: {
       getSession: vi.fn(),
+      // PATCH delegates an email change here rather than writing it (#489).
+      changeEmail: vi.fn().mockResolvedValue({ status: true }),
     },
   },
+}));
+
+// better-auth's password verifier — the email change re-authenticates first.
+vi.mock('better-auth/crypto', () => ({
+  verifyPassword: vi.fn().mockResolvedValue(true),
 }));
 
 // Mock Prisma client
@@ -54,6 +61,10 @@ vi.mock('@/lib/db/client', () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+    },
+    // Consulted to decide whether a current password is required.
+    account: {
+      findFirst: vi.fn(),
     },
   },
 }));
@@ -223,7 +234,12 @@ describe('GET /api/v1/users/me', () => {
 
 describe('PATCH /api/v1/users/me', () => {
   beforeEach(() => {
+    // `clearAllMocks` resets call history but not a `mockResolvedValue` set by
+    // an earlier test, so give `account.findFirst` an explicit default here —
+    // otherwise a later test silently inherits whichever "has a password?"
+    // answer the previous one configured.
     vi.clearAllMocks();
+    vi.mocked(prisma.account.findFirst).mockResolvedValue(null);
   });
 
   describe('Authentication', () => {
@@ -326,19 +342,28 @@ describe('PATCH /api/v1/users/me', () => {
   });
 
   describe('Email Updates', () => {
-    it('should update email when available', async () => {
+    it('should start a change flow rather than writing the new address', async () => {
+      // Since #489 the address does not move in this request. It is handed to
+      // better-auth, which requires approval at the CURRENT address first, so
+      // the response still carries the old address plus a flag saying the flow
+      // started. Writing it here is exactly what made a stolen session enough
+      // for permanent account takeover.
       // Arrange
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser());
       vi.mocked(prisma.user.findUnique).mockResolvedValue(null); // No existing user with this email
+      // Cast: the route `select`s only `password`, not a full Account row.
+      vi.mocked(prisma.account.findFirst).mockResolvedValue({ password: 'stored-hash' } as never);
       // updatedAt differs from mockUserData.updatedAt to prove the response comes from the DB,
       // not from echoing the request body
       const dbUpdatedAt = new Date('2025-06-01T12:00:00.000Z');
       vi.mocked(prisma.user.update).mockResolvedValue({
         ...mockUserData,
-        email: 'newemail@example.com',
         updatedAt: dbUpdatedAt,
       });
-      const request = createMockRequest({ email: 'newemail@example.com' });
+      const request = createMockRequest({
+        email: 'newemail@example.com',
+        currentPassword: 'correct-horse',
+      });
 
       // Act
       const response = await PATCH(request);
@@ -347,20 +372,30 @@ describe('PATCH /api/v1/users/me', () => {
       expect(response.status).toBe(200);
       const data = await parseResponse<{
         success: boolean;
-        data: typeof mockUserData & { updatedAt: string };
+        data: typeof mockUserData & { updatedAt: string; emailChangeRequested: boolean };
       }>(response);
       // test-review:accept tobe_true — structural assertion on the API response envelope's success field, paired with status and data shape checks
       // test-review:accept tobe_true — structural boolean assertion on API response field
       expect(data.success).toBe(true);
-      expect(data.data.email).toBe('newemail@example.com');
+      // Still the OLD address — nothing has moved yet.
+      expect(data.data.email).toBe(mockUserData.email);
+      // test-review:accept tobe_true — structural boolean assertion on API response field
+      expect(data.data.emailChangeRequested).toBe(true);
       // Verify the handler-derived updatedAt comes from the DB return, not the request body
       expect(new Date(data.data.updatedAt).toISOString()).toBe(dbUpdatedAt.toISOString());
-      // Verify prisma.user.update was called with the correct arguments (dsu fix)
+      // The address must NOT be part of the Prisma write.
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'cmjbv4i3x00003wsloputgwul' },
-          data: expect.objectContaining({ email: 'newemail@example.com' }),
         })
+      );
+      const updateArg = vi.mocked(prisma.user.update).mock.calls[0]?.[0] as {
+        data: Record<string, unknown>;
+      };
+      expect(updateArg.data.email).toBeUndefined();
+      // It went to better-auth instead.
+      expect(auth.api.changeEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ body: { newEmail: 'newemail@example.com' } })
       );
     });
 
