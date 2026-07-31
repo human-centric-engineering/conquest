@@ -96,6 +96,54 @@ release process.
   before caller headers, so a route serving genuinely public data can override
   it; routes returning a raw `Response` never pass through here.
 
+- **Schedule- and inbound-triggered runs are no longer attributed to the
+  operator who configured them.** ([#502]) The inbound route stamped
+  `trigger.createdBy`, and the scheduler `schedule.createdBy`, onto the
+  conversation and execution rows they created. The data on those rows belongs
+  to whoever sent the message — `inputData.trigger` is the adapter payload
+  written verbatim (sender phone number, email From/Subject/body, base64
+  attachments), and the conversation carries `fromAddress` and the full thread.
+
+  Both `userId` columns are `onDelete: Cascade`, so **erasing one operator
+  destroyed every third party's inbound conversation and run routed through any
+  trigger they had configured** — `eraseUser()` reported success and the
+  correspondence was gone. The same rows matched that operator on `userId`, so
+  a subject-access export would have disclosed a stranger's phone number and
+  email bodies to them as their own data.
+
+  Those rows are now written system-owned (`userId = null`), which is what
+  `.context/privacy/data-erasure.md` always described and what the engine was
+  already built for. Migration `20260801090000_system_owned_inbound_runs`
+  backfills inbound history; historical *scheduled* runs keep their author,
+  because the scheduler set no `triggerSource` before this release and they
+  cannot be distinguished from runs an admin started by hand.
+
+  Three behaviour changes follow. New public surface:
+  `lib/orchestration/access/execution-access.ts`
+  (`adminCanViewExecution`, `executionAccessBasis`, `executionVisibilityWhere`).
+
+  - **Admin visibility.** All 15 execution routes (including the sidebar
+    counts and the live-engine dashboard, the latter via
+    `getLiveEngineSnapshot`) and the conversation list, detail and search now
+    admit rows nobody owns — otherwise every scheduled and inbound run would
+    vanish from the UI and a run paused at an approval gate could never be
+    cleared.
+    `AccessBasis` in `conversation-access.ts` gains a third member, `'system'`,
+    which is audit-logged like `'shared'`. Conversation PATCH/DELETE accept
+    `'owner'` and `'system'` (still never `'shared'`), so an inbound thread can
+    be deleted when the person who sent the messages asks — they have no
+    account, so `eraseUser()` cannot reach them.
+  - **`judge_call` cannot run on a scheduled or inbound workflow.** It drives
+    `streamChat`, which files the judge transcript into a real account's chat
+    history; borrowing the schedule's author would re-create the
+    mis-attribution. The step throws `judge_call_requires_user_context`.
+  - **Rerun inherits the original's attribution** rather than claiming the run
+    for the admin who pressed the button, since `inputData` is copied verbatim.
+
+  `AiWorkflowExecution.triggerSource` is now written as `'schedule'` by the
+  scheduler — the value the schema documented and the scheduler never set — so
+  a run with no owner still has provenance.
+
 ### Added
 
 - **Subject access (GDPR Art. 15) now has a seam, matching erasure** (#467) —
@@ -130,13 +178,13 @@ release process.
   export, the deliberate opposite of the erasure path where hook failures are
   swallowed so app trouble can never block a deletion.
 
-  Two sources narrow rather than matching `userId` alone, and say so via a
-  `scopeNote` surfaced in `meta`: inbound conversations and inbound-triggered
-  workflow runs are written against the operator who configured the channel,
-  not the person who sent the message, so matching on `userId` would disclose a
-  third party's phone number and correspondence to the wrong subject. That is
-  containment over an upstream mis-attribution — the rows should carry
-  `userId = null`; see `.context/privacy/data-erasure.md#system-owned-runs`.
+  Two sources shipped narrowed, disclosing it via a `scopeNote` in `meta`:
+  inbound conversations and inbound-triggered workflow runs were written
+  against the operator who configured the channel, not the person who sent the
+  message, so matching on `userId` alone would have disclosed a third party's
+  phone number and correspondence to the wrong subject. **Both filters were
+  removed later in this same release** once [#502] fixed the mis-attribution
+  they contained; a source that narrows must still carry a `scopeNote`.
 
   A second guard,
   `npm run smoke:export`, runs in CI beside the erasure smoke and proves against
@@ -716,6 +764,7 @@ release process.
 [#466]: https://github.com/human-centric-engineering/sunrise/issues/466
 [#476]: https://github.com/human-centric-engineering/sunrise/issues/476
 [#489]: https://github.com/human-centric-engineering/sunrise/issues/489
+[#502]: https://github.com/human-centric-engineering/sunrise/issues/502
 
 - **`LlmOptions.timeoutMs` and `signal` reach the provider SDKs.** Both were
   documented but dropped, so a call that needed longer than the client default

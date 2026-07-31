@@ -60,35 +60,51 @@ from their parents, so only the root `User` relations carry the policy.
 `user-memory` capability returns a `no_user_context` error rather than assuming
 a user.
 
-> **⚠️ The write paths do not yet match that design.** Schedule- and
-> inbound-triggered runs are supposed to be system-owned (`userId = null`), but
-> today they are stamped with the **operator who configured the trigger or
-> schedule**:
->
-> | Where                                              | Writes                       |
-> | -------------------------------------------------- | ---------------------------- |
-> | `app/api/v1/inbound/[channel]/[slug]/route.ts:284` | `userId: trigger.createdBy`  |
-> | `app/api/v1/inbound/[channel]/[slug]/route.ts:361` | `userId: trigger.createdBy`  |
-> | `app/api/v1/inbound/[channel]/[slug]/route.ts:408` | `userId: trigger.createdBy`  |
-> | `lib/orchestration/scheduling/scheduler.ts:335`    | `userId: schedule.createdBy` |
->
-> Two consequences, both live:
->
-> 1. **Erasure over-deletes.** Because the FK is `Cascade`, erasing that one
->    operator destroys every third party's inbound conversation and every
->    inbound/scheduled execution record along with them — data that was never
->    the operator's to erase.
-> 2. **Access over-discloses.** The rows match the operator on `userId`, so a
->    subject-access export would hand them a third party's phone number, email
->    body and attachments. `lib/privacy/export-sources.ts` filters these out
->    explicitly (`channel: null`, `triggerSource: null`) — a containment filter
->    over the mis-attribution, not a fix for it.
->
-> Fixing the write paths to `userId: null` retires both, and lets the export
-> filters go. Tracked in
-> [#502](https://github.com/human-centric-engineering/sunrise/issues/502) —
-> delete this block when it lands. Until then, do not build new behaviour on the
-> assumption that `userId` on these rows identifies a data subject.
+Schedule- and inbound-triggered runs use that: they are written **system-owned**,
+`userId = null`. Nobody with an account caused them, and the data on them is
+frequently somebody else's — an inbound run's `inputData.trigger` is the adapter
+payload verbatim (sender phone number, email From/Subject/body, base64
+attachments), and the conversation row carries `fromAddress` and the whole
+thread.
+
+| Where                                          | Writes                                             |
+| ---------------------------------------------- | -------------------------------------------------- |
+| `app/api/v1/inbound/[channel]/[slug]/route.ts` | conversation, execution, audit row, engine context |
+| `lib/orchestration/scheduling/scheduler.ts`    | execution, engine context                          |
+
+Attribution lives on the config rows instead: `AiWorkflowTrigger.createdBy` and
+`AiWorkflowSchedule.createdBy` name the operator who set the thing up, and
+`AiWorkflowExecution.triggerSource` records what fired the run
+(`inbound:<channel>` or `schedule`).
+
+**Do not "fix" a null `userId` on these rows by filling it in.** Until #502 they
+carried the operator's id, and it cost twice:
+
+1. **Erasure over-deleted.** The FK is `Cascade`, so erasing that one operator
+   destroyed every third party's inbound conversation and run routed through any
+   trigger they had configured. `eraseUser()` reported success; the
+   correspondence was simply gone.
+2. **Access over-disclosed.** The rows matched the operator on `userId`, so a
+   subject-access export handed them a stranger's phone number, email body and
+   attachments, labelled as their own data.
+
+Two consequences follow for anything you build on these rows:
+
+- **Admin surfaces need the system basis, not an owner match.** A null owner
+  matches no admin, so `lib/orchestration/access/execution-access.ts` and
+  `conversation-access.ts` grant every admin access to unowned rows (basis
+  `'system'`, audit-logged like `'shared'`). Route a new surface through those
+  helpers; a hand-rolled `userId === session.user.id` check will silently hide
+  every scheduled and inbound run.
+- **Steps that require a real account must refuse, not borrow one.**
+  `judge_call` throws `judge_call_requires_user_context` on a system-owned run
+  because it files a transcript into an account's chat history. Borrowing the
+  schedule's author there would re-create the mis-attribution above.
+
+Erasure of an inbound thread is a different request from erasure of an account:
+the sender has no account, so `eraseUser()` cannot reach them. Delete the
+conversation through the admin conversation route, which allows it on the
+`'system'` basis and records who did it.
 
 ### Adding a new `User` relation (required step)
 

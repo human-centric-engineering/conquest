@@ -629,7 +629,7 @@ Schema: `dryRunWorkflowBodySchema` in `lib/validations/orchestration.ts`.
 
 Three admin routes drive the runtime engine. The engine implementation lives in `lib/orchestration/engine/` — see [`engine.md`](./engine.md) for the event model, executor registry, context lifecycle, and error strategies. This section is the **HTTP contract**.
 
-**Ownership scoping.** Every route is scoped to `session.user.id`. A cross-user lookup on `GET /executions/:id` or `POST /executions/:id/approve` returns **404**, not 403 — we do not confirm existence of rows outside the caller's own history. The same rule applies when resuming via `?resumeFromExecutionId=` on `/execute`.
+**Ownership scoping.** Every route gates on `adminCanViewExecution` (`lib/orchestration/access/execution-access.ts`): the caller's own runs, plus **system-owned** ones — schedule- and inbound-triggered runs carry `userId = null` because nobody with an account started them ([#502](https://github.com/human-centric-engineering/sunrise/issues/502)), and without that arm they would be invisible and un-actionable here. A lookup on another admin's own run via `GET /executions/:id` or `POST /executions/:id/approve` returns **404**, not 403 — we do not confirm existence of rows outside what the caller can see. The same rule applies when resuming via `?resumeFromExecutionId=` on `/execute`.
 
 ### Execute workflow (SSE)
 
@@ -1057,7 +1057,7 @@ Builds a hierarchical node/link graph: central KB node → document nodes → ch
 
 ## Conversations
 
-Four routes over `AiConversation` / `AiMessage`. **Every endpoint is scoped to `session.user.id`.**
+Four routes over `AiConversation` / `AiMessage`. **Every endpoint gates on `adminCanViewConversation`** — the caller's own, actively shared with them, or system-owned (an inbound thread nobody owns).
 
 ### Ownership model (read this)
 

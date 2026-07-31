@@ -159,33 +159,39 @@ So erasure degrades gracefully and access refuses to.
 ## When a Row Matches the Subject but Isn't Theirs
 
 `where: { userId }` encodes an assumption — that a row pointing at someone is a
-row _about_ them. Two sources break it, so both narrow, and both say so:
+row _about_ them. **No shipped source narrows today**, but two did until #502,
+and the reason is worth keeping in view because the next table like it will
+arrive the same way.
 
-| Source                | Filter                | Withheld                                      |
-| --------------------- | --------------------- | --------------------------------------------- |
-| `AiConversation`      | `channel: null`       | Inbound threads (SMS, WhatsApp, email, Slack) |
-| `AiWorkflowExecution` | `triggerSource: null` | Inbound-triggered runs                        |
+Inbound traffic used to be written with `userId = trigger.createdBy` — the
+operator who configured the channel — while `fromAddress`, the message bodies
+and the `inputData.trigger` payload belonged to whoever sent them. Matching on
+`userId` alone therefore handed one data subject another person's phone number
+and correspondence, labelled as their own: a disclosure, and an Art. 15 answer
+that is wrong about whose data it is. `AiConversation` filtered `channel: null`
+and `AiWorkflowExecution` filtered `triggerSource: null` to contain it.
 
-Inbound traffic is written with `userId = trigger.createdBy` — the operator who
-configured the channel — while `fromAddress`, the message bodies and the
-`inputData.trigger` payload belong to whoever sent them. Matching on `userId`
-alone would hand one data subject another person's phone number and
-correspondence, labelled as their own: a disclosure, and an Art. 15 answer that
-is wrong about whose data it is.
+Both filters are gone. Those rows are [system-owned
+now](./data-erasure.md#system-owned-runs) — `userId = null` — so no subject
+matches them and no filter is needed. `export-sources.test.ts` pins the two
+sources as unnarrowed, so reinstating a filter is a deliberate act rather than a
+drive-by.
 
-This is containment, not a fix. The rows should carry `userId = null`, as
-[the erasure doc describes](./data-erasure.md#system-owned-runs); the same
-mis-attribution also makes erasing that one operator cascade-delete every third
-party's inbound thread. Tracked in
-[#502](https://github.com/human-centric-engineering/sunrise/issues/502) — when
-the write paths are corrected, these filters and their `scopeNote`s can go.
+**If you ever do narrow a source, it must set `scopeNote`.** It is surfaced in
+`meta` beside the row count, because a source that quietly returns some of the
+rows is the silent-omission failure at row granularity — a count of 3 reads like
+a complete answer whether or not a fourth row was withheld. The disclosure path
+keeps its own test through a synthetic narrowed source in
+`export-user.test.ts`.
 
-**A narrowed source must set `scopeNote`.** It is surfaced in `meta` beside the
-row count, because a source that quietly returns some of the rows is the
-silent-omission failure at row granularity — a count of 3 reads like a complete
-answer whether or not a fourth row was withheld. `export-sources.test.ts` pins
-both notes; `smoke:export` plants a third party's phone number and message on
-rows attributed to the subject and asserts neither reaches the bundle.
+**The better fix is almost always upstream.** A filter here contains a
+disclosure; it does nothing about the erasure side of the same mistake, and
+`AiConversation.userId` / `AiWorkflowExecution.userId` are `Cascade`. #502 is the
+worked example: the same mis-attribution that would have leaked a stranger's
+messages into an export was, in the erasure direction, deleting them outright
+whenever that operator's account was erased. If you find yourself reaching for a
+row-level filter, check what the same rows do when their apparent owner is
+erased — `smoke:erasure` is where that assertion belongs.
 
 ## Tables With No `User` FK
 
