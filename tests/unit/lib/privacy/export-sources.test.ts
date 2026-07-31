@@ -168,6 +168,27 @@ describe('subject-data source manifest', () => {
       expect(undescribed).toEqual([]);
     });
 
+    it('gives a scope note to every source known to narrow', () => {
+      // These two return only SOME of the rows matching the subject, because
+      // inbound traffic is attributed to the operator who configured the
+      // channel rather than to the person who sent it. Dropping the note (or
+      // the filter it describes) silently changes what a data subject receives
+      // — in one direction it under-answers, in the other it discloses a third
+      // party's messages. Pin both.
+      for (const model of ['AiConversation', 'AiWorkflowExecution']) {
+        const source = SUBJECT_DATA_SOURCES.find((entry) => entry.model === model);
+        expect(source?.scopeNote, `${model} must disclose why it narrows`).toBeTruthy();
+      }
+    });
+
+    it('writes scope notes that actually explain the narrowing', () => {
+      const thin = SUBJECT_DATA_SOURCES.filter(
+        (source) => source.scopeNote !== undefined && source.scopeNote.trim().length < 40
+      ).map((source) => source.model);
+
+      expect(thin).toEqual([]);
+    });
+
     it('uses only the two known dispositions', () => {
       const dispositions = new Set(SUBJECT_DATA_SOURCES.map((source) => source.disposition));
       expect([...dispositions].sort()).toEqual(['attribution', 'export']);

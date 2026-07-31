@@ -56,11 +56,37 @@ from their parents, so only the root `User` relations carry the policy.
 ### System-owned runs
 
 `AiConversation.userId` and `AiWorkflowExecution.userId` are **nullable** (still
-`Cascade`). A real user's runs cascade-erase on deletion; schedule- and
-inbound-triggered runs are **system-owned** (`userId = null`) and unaffected.
-Consequently `userId` is `string | null` through the engine, and the
-`user-memory` capability returns a `no_user_context` error for system runs
-rather than assuming a user.
+`Cascade`), and the engine handles `string | null` throughout — the
+`user-memory` capability returns a `no_user_context` error rather than assuming
+a user.
+
+> **⚠️ The write paths do not yet match that design.** Schedule- and
+> inbound-triggered runs are supposed to be system-owned (`userId = null`), but
+> today they are stamped with the **operator who configured the trigger or
+> schedule**:
+>
+> | Where                                              | Writes                       |
+> | -------------------------------------------------- | ---------------------------- |
+> | `app/api/v1/inbound/[channel]/[slug]/route.ts:284` | `userId: trigger.createdBy`  |
+> | `app/api/v1/inbound/[channel]/[slug]/route.ts:361` | `userId: trigger.createdBy`  |
+> | `app/api/v1/inbound/[channel]/[slug]/route.ts:408` | `userId: trigger.createdBy`  |
+> | `lib/orchestration/scheduling/scheduler.ts:335`    | `userId: schedule.createdBy` |
+>
+> Two consequences, both live:
+>
+> 1. **Erasure over-deletes.** Because the FK is `Cascade`, erasing that one
+>    operator destroys every third party's inbound conversation and every
+>    inbound/scheduled execution record along with them — data that was never
+>    the operator's to erase.
+> 2. **Access over-discloses.** The rows match the operator on `userId`, so a
+>    subject-access export would hand them a third party's phone number, email
+>    body and attachments. `lib/privacy/export-sources.ts` filters these out
+>    explicitly (`channel: null`, `triggerSource: null`) — a containment filter
+>    over the mis-attribution, not a fix for it.
+>
+> Fixing the write paths to `userId: null` retires both, and lets the export
+> filters go. Tracked separately; do not build new behaviour on the assumption
+> that `userId` on these rows identifies a data subject.
 
 ### Adding a new `User` relation (required step)
 

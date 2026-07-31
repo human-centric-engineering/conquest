@@ -41,6 +41,13 @@ const PASSWORD_HASH = `${PREFIX}-password-hash-${stamp}`;
 const KEY_HASH = `${PREFIX}-key-hash-${stamp}`;
 const WEBHOOK_SECRET = `${PREFIX}-webhook-secret-${stamp}`;
 
+/**
+ * A third party's identifiers, planted on rows the inbound path attributes to
+ * the subject. Neither may appear in the subject's own export.
+ */
+const THIRD_PARTY_PHONE = `+1555${String(stamp).slice(-7)}`;
+const THIRD_PARTY_MESSAGE = `${PREFIX}-third-party-message-${stamp}`;
+
 async function dbReachable(): Promise<boolean> {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -64,6 +71,7 @@ async function main(): Promise<void> {
   let subjectUserId: string | null = null;
   let agentId: string | null = null;
   let contactId: string | null = null;
+  let workflowId: string | null = null;
 
   try {
     const email = `${PREFIX}-subject-${stamp}@example.com`;
@@ -91,6 +99,28 @@ async function main(): Promise<void> {
     });
     await prisma.aiMessage.create({
       data: { conversationId: conversation.id, role: 'user', content: 'remember my postcode' },
+    });
+
+    // A third party's inbound traffic, attributed to THIS subject exactly as the
+    // inbound route attributes it (`userId = trigger.createdBy`). It matches the
+    // subject on `userId` and must still not appear in their export: the phone
+    // number and the message body belong to whoever sent them.
+    const inboundConversation = await prisma.aiConversation.create({
+      data: {
+        userId: subject.id,
+        agentId: agent.id,
+        title: `sms:${THIRD_PARTY_PHONE}`,
+        channel: 'sms',
+        provider: 'twilio',
+        fromAddress: THIRD_PARTY_PHONE,
+      },
+    });
+    await prisma.aiMessage.create({
+      data: {
+        conversationId: inboundConversation.id,
+        role: 'user',
+        content: THIRD_PARTY_MESSAGE,
+      },
     });
 
     // Credential-bearing rows — each is a column the manifest must withhold.
@@ -125,6 +155,39 @@ async function main(): Promise<void> {
         url: 'https://example.com/hook',
         secret: WEBHOOK_SECRET,
         events: ['workflow_failed'],
+      },
+    });
+
+    // A first-party run and an inbound-triggered one, both stamped with this
+    // subject's id. Only the first is theirs; the second carries a third party's
+    // message as `inputData.trigger`, exactly as the inbound route writes it.
+    const workflow = await prisma.aiWorkflow.create({
+      data: {
+        name: `${PREFIX} workflow`,
+        slug: `${PREFIX}-workflow-${stamp}`,
+        description: 'smoke',
+        createdBy: subject.id,
+      },
+    });
+    workflowId = workflow.id;
+
+    await prisma.aiWorkflowExecution.create({
+      data: {
+        workflowId: workflow.id,
+        status: 'completed',
+        inputData: { note: 'first-party run' },
+        executionTrace: [],
+        userId: subject.id,
+      },
+    });
+    await prisma.aiWorkflowExecution.create({
+      data: {
+        workflowId: workflow.id,
+        status: 'completed',
+        inputData: { trigger: { from: THIRD_PARTY_PHONE, text: THIRD_PARTY_MESSAGE } },
+        executionTrace: [],
+        triggerSource: 'inbound:sms',
+        userId: subject.id,
       },
     });
 
@@ -165,6 +228,11 @@ async function main(): Promise<void> {
       'messages load nested under the conversation (omit + include together)'
     );
 
+    check(
+      bundle.personalData.workflowExecutions?.length === 1,
+      'first-party workflow run exported, inbound-triggered run excluded'
+    );
+
     check(bundle.personalData.sessions?.length === 1, 'session exported');
     check(bundle.personalData.authProviders?.length === 1, 'linked sign-in method exported');
     check(bundle.personalData.apiKeys?.length === 1, 'API key metadata exported');
@@ -193,10 +261,31 @@ async function main(): Promise<void> {
       check(!serialised.includes(secret), `${name} is absent from the bundle`);
     }
 
+    // A third party's identifiers must not reach the subject, even though the
+    // rows carrying them match the subject on `userId`. Same recursive sweep as
+    // the credentials above — it covers the whole bundle, including nested
+    // messages and `inputData` JSON.
+    check(
+      !serialised.includes(THIRD_PARTY_PHONE),
+      'a third party’s phone number is absent from the bundle'
+    );
+    check(
+      !serialised.includes(THIRD_PARTY_MESSAGE),
+      'a third party’s inbound message is absent from the bundle'
+    );
+
     // The subject's own IP is personal data and SHOULD be there — proves the
     // sweep above is withholding credentials, not just emptying the export.
     check(serialised.includes('203.0.113.7'), 'the subject’s own IP address IS exported');
     check(serialised.includes('remember my postcode'), 'message content IS exported');
+
+    // And the narrowing is disclosed rather than silent.
+    const conversationSummary = bundle.meta.exported.find((e) => e.model === 'AiConversation');
+    check(
+      typeof conversationSummary?.scopeNote === 'string' &&
+        /inbound/i.test(conversationSummary.scopeNote),
+      'meta discloses that inbound threads were withheld, and why'
+    );
 
     check(
       bundle.meta.exported.length + bundle.meta.attribution.length === sections.length,
@@ -221,14 +310,19 @@ async function main(): Promise<void> {
     console.log('\n✓ smoke:export passed');
   } finally {
     // Self-clean by tracked id. Sessions, accounts, conversations, API keys and
-    // webhook subscriptions all cascade from the user; the agent and the
-    // contact submission do not, so they are removed explicitly.
+    // webhook subscriptions all cascade from the user; the agent, the workflow
+    // (and its executions) and the contact submission do not — the workflow is
+    // SetNull-retained on the user, so it outlives the delete below.
     if (contactId)
       await prisma.contactSubmission
         .deleteMany({ where: { id: contactId } })
         .catch(() => undefined);
     if (subjectUserId)
       await prisma.user.deleteMany({ where: { id: subjectUserId } }).catch(() => undefined);
+    if (workflowId) {
+      await prisma.aiWorkflowExecution.deleteMany({ where: { workflowId } }).catch(() => undefined);
+      await prisma.aiWorkflow.deleteMany({ where: { id: workflowId } }).catch(() => undefined);
+    }
     if (agentId) await prisma.aiAgent.deleteMany({ where: { id: agentId } }).catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
   }

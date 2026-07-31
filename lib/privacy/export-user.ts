@@ -55,6 +55,8 @@ export interface ExportedSourceSummary {
   model: string;
   section: string;
   description: string;
+  /** Present when the source returns only some of the subject's matching rows, and why. */
+  scopeNote?: string;
   rows: number;
 }
 
@@ -131,6 +133,9 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
       model: source.model,
       section: source.section,
       description: source.description,
+      // Only present on narrowed sources — a row count with no note means the
+      // subject received every row that matched them.
+      ...(source.scopeNote ? { scopeNote: source.scopeNote } : {}),
       rows: rows.length,
     };
 

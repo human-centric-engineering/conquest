@@ -154,6 +154,35 @@ from which failure the subject can detect:
 
 So erasure degrades gracefully and access refuses to.
 
+## When a Row Matches the Subject but Isn't Theirs
+
+`where: { userId }` encodes an assumption — that a row pointing at someone is a
+row _about_ them. Two sources break it, so both narrow, and both say so:
+
+| Source                | Filter                | Withheld                                      |
+| --------------------- | --------------------- | --------------------------------------------- |
+| `AiConversation`      | `channel: null`       | Inbound threads (SMS, WhatsApp, email, Slack) |
+| `AiWorkflowExecution` | `triggerSource: null` | Inbound-triggered runs                        |
+
+Inbound traffic is written with `userId = trigger.createdBy` — the operator who
+configured the channel — while `fromAddress`, the message bodies and the
+`inputData.trigger` payload belong to whoever sent them. Matching on `userId`
+alone would hand one data subject another person's phone number and
+correspondence, labelled as their own: a disclosure, and an Art. 15 answer that
+is wrong about whose data it is.
+
+This is containment, not a fix. The rows should carry `userId = null`, as
+[the erasure doc describes](./data-erasure.md#system-owned-runs); the same
+mis-attribution also makes erasing that one operator cascade-delete every third
+party's inbound thread. When the write paths are corrected, these filters can go.
+
+**A narrowed source must set `scopeNote`.** It is surfaced in `meta` beside the
+row count, because a source that quietly returns some of the rows is the
+silent-omission failure at row granularity — a count of 3 reads like a complete
+answer whether or not a fourth row was withheld. `export-sources.test.ts` pins
+both notes; `smoke:export` plants a third party's phone number and message on
+rows attributed to the subject and asserts neither reaches the bundle.
+
 ## Tables With No `User` FK
 
 The coverage guard finds tables by their foreign key. A table that stores an

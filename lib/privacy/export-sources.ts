@@ -69,6 +69,16 @@ export interface SubjectDataSource {
   disposition: SourceDisposition;
   /** One line on why this is the subject's data — surfaced in the export's `meta`. */
   description: string;
+  /**
+   * Set when this source deliberately returns only SOME of the rows matching the
+   * subject, saying which rows it withholds and why. Surfaced in the export's
+   * `meta` alongside the row count.
+   *
+   * A source that narrows without one is the silent-omission failure this whole
+   * manifest exists to prevent, just at row granularity instead of table
+   * granularity — the count looks like an answer either way.
+   */
+  scopeNote?: string;
   fetch: (subject: SubjectQuery) => Promise<unknown[]>;
 }
 
@@ -126,9 +136,24 @@ export const SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
     section: 'conversations',
     disposition: 'export',
     description: 'Conversations with agents, including every message and any public share link.',
+    scopeNote:
+      'Covers conversations the subject held themselves. Inbound threads (SMS, WhatsApp, email, Slack) are excluded: those carry a third party’s messages and are attributed to the operator who configured the channel, not to the person who wrote them.',
+    // ⚠️ `channel: null` is load-bearing, not a tidy-up. An inbound message is
+    // written with `userId = trigger.createdBy` — the OPERATOR who set the
+    // channel up — while `fromAddress` and the message bodies belong to whoever
+    // sent them (lib/orchestration/inbound/conversation-resolver.ts). Matching
+    // on `userId` alone therefore hands one data subject other people's phone
+    // numbers and correspondence, labelled as their own. Normal chat never sets
+    // `channel` (lib/orchestration/chat/streaming-handler.ts), so this splits
+    // first-party from inbound cleanly.
+    //
+    // This is a containment filter over a mis-attribution upstream, not the fix.
+    // The rows should carry `userId = null`, as `.context/privacy/data-erasure.md`
+    // describes; until they do, the same mis-attribution also means erasing that
+    // one operator cascade-deletes every third party's inbound thread.
     fetch: ({ userId }) =>
       prisma.aiConversation.findMany({
-        where: { userId },
+        where: { userId, channel: null },
         include: { messages: { orderBy: byCreatedAt }, share: true },
         orderBy: byCreatedAt,
       }),
@@ -177,8 +202,23 @@ export const SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
     section: 'workflowExecutions',
     disposition: 'export',
     description: 'Workflow runs the subject triggered, including their inputs and outputs.',
+    scopeNote:
+      'Covers runs the subject started themselves. Runs triggered by an inbound message (SMS, WhatsApp, email, Slack) are excluded: their input is a third party’s message, and the run is attributed to the operator who configured the channel.',
+    // ⚠️ Same mis-attribution as `AiConversation` above, and the more dangerous
+    // half: an inbound run's `inputData.trigger` is the adapter payload written
+    // verbatim (app/api/v1/inbound/[channel]/[slug]/route.ts) — sender phone
+    // number, email From/Subject/body, and base64 attachment bytes — under a
+    // `userId` naming the operator. `triggerSource` is set only by the inbound
+    // route, so `null` selects first-party runs.
+    //
+    // Scheduled runs are NOT filtered: the scheduler leaves `triggerSource`
+    // unset, and their `inputData` is the operator's own `inputTemplate`, so
+    // they carry no third-party payload to leak.
     fetch: ({ userId }) =>
-      prisma.aiWorkflowExecution.findMany({ where: { userId }, orderBy: byCreatedAt }),
+      prisma.aiWorkflowExecution.findMany({
+        where: { userId, triggerSource: null },
+        orderBy: byCreatedAt,
+      }),
   },
   {
     model: 'AiWebhookSubscription',

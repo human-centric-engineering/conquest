@@ -222,6 +222,25 @@ describe('exportUserData', () => {
       expect(argsTo('aiKnowledgeDocument').where).toEqual({ uploadedBy: 'user-1' });
     });
 
+    it('excludes inbound conversations, which belong to a third party', async () => {
+      // An inbound thread is written with `userId = trigger.createdBy` — the
+      // operator who configured the channel — while the messages and
+      // `fromAddress` belong to whoever sent them. Matching on `userId` alone
+      // would hand one subject another person's correspondence.
+      await exportUserData(PARAMS);
+
+      expect(argsTo('aiConversation').where).toEqual({ userId: 'user-1', channel: null });
+    });
+
+    it('excludes inbound-triggered workflow runs, whose input is a third party’s message', async () => {
+      await exportUserData(PARAMS);
+
+      expect(argsTo('aiWorkflowExecution').where).toEqual({
+        userId: 'user-1',
+        triggerSource: null,
+      });
+    });
+
     it('matches contact submissions on the subject email, case-insensitively', async () => {
       // No FK to User — the public form takes an address. Case matters because
       // the stored address may differ in case from the account's.
@@ -346,6 +365,23 @@ describe('exportUserData', () => {
       );
 
       expect(summarised.sort()).toEqual(SUBJECT_DATA_SOURCES.map((s) => s.model).sort());
+    });
+
+    it('discloses a narrowed source’s scope to the subject', async () => {
+      // A narrowed source that reported only a row count would be the
+      // silent-omission failure at row granularity — the count reads like a
+      // complete answer either way.
+      const bundle = await exportUserData(PARAMS);
+      const conversations = bundle.meta.exported.find((e) => e.model === 'AiConversation');
+
+      expect(conversations?.scopeNote).toMatch(/inbound/i);
+    });
+
+    it('leaves scopeNote absent on sources that return every matching row', async () => {
+      const bundle = await exportUserData(PARAMS);
+      const memory = bundle.meta.exported.find((entry) => entry.model === 'AiUserMemory');
+
+      expect(memory).not.toHaveProperty('scopeNote');
     });
 
     it('discloses what was deliberately withheld', async () => {
