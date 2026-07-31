@@ -6,6 +6,7 @@ import { authClient } from '@/lib/auth/client';
 import { Button } from '@/components/ui/button';
 import { logger } from '@/lib/logging';
 import { safeCallbackUrl } from '@/lib/security';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 interface OAuthButtonProps {
   provider: 'google'; // Can add more providers later: 'github' | 'facebook' etc.
@@ -56,7 +57,10 @@ export function OAuthButton({
 }: OAuthButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const searchParams = useSearchParams();
-  const redirect = safeCallbackUrl(callbackUrl || searchParams.get('callbackUrl'), '/dashboard');
+  const redirect = safeCallbackUrl(
+    callbackUrl || searchParams.get('callbackUrl'),
+    AUTH_LANDING_ROUTE
+  );
 
   const handleOAuthSignIn = async () => {
     try {

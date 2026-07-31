@@ -16,6 +16,7 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { FormError } from '@/components/forms/form-error';
 import { OAuthButtons } from '@/components/forms/oauth-buttons';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 /**
  * Login Form Component
@@ -34,7 +35,7 @@ import { OAuthButtons } from '@/components/forms/oauth-buttons';
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'), '/dashboard');
+  const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'), AUTH_LANDING_ROUTE);
   const { track, identify } = useAnalytics();
 
   const [isLoading, setIsLoading] = useState(false);

@@ -166,6 +166,35 @@ under either tier**, so both merge cleanly on upgrade. A framework fork owns
   requirement in many jurisdictions). This principle recurs for any surface that
   mixes fork copy with required platform behavior.
 
+**Authenticated nav & where users land — the pair that makes an app reachable:**
+
+- The nav a signed-in user sees is **`lib/app/protected-nav.ts`**: set
+  `protectedNavItems` to a `ProtectedNavItem[]` and it **replaces**
+  `DEFAULT_PROTECTED_NAV` wholesale, same replace-with-fallback model as the
+  public nav. Items are `{ href, label, icon?, exact?, adminOnly? }`; the
+  `next/link`, active-state and admin-filtering glue stays in
+  `components/layouts/protected-nav.tsx`, so `adminOnly: true` works on your own
+  items too. To add a link while keeping the platform ones, spread
+  `DEFAULT_PROTECTED_NAV` — accepting that the spread pins that list as it stood
+  at upgrade time.
+- Where a user _lands_ is **`lib/app/auth-landing.ts`**: `appAuthLandingRoute`
+  (default `/dashboard`) and `appAuthLandingLabel` (default `Dashboard`). One
+  edit covers login, OAuth, signup, invite acceptance, email verification, the
+  header brand link, the admin "Back to …" links, the error-page escape hatches
+  and the proxy's redirect of a signed-in user off an auth page — all of which
+  hardcoded `/dashboard` before. The label follows the route so the copy on those
+  buttons doesn't keep saying "Dashboard" after you've moved.
+- **Set both, or you build a dead end.** A landing route with no nav link leaves
+  users somewhere the header never returns them to; a nav link with no landing
+  change drops them on the stock dashboard first. If your route is outside
+  `/dashboard`, `/settings` and `/profile`, also add its prefix to
+  `lib/app/protected-routes.ts` so the proxy bounces signed-out visitors to
+  login.
+- The landing route must be **root-relative** (`/app`, not `https://…` or
+  `//host`). It reaches `safeCallbackUrl()` as the _fallback_, and that helper
+  only sanitises the untrusted URL — so a non-relative value throws at module
+  load instead of quietly becoming an off-site redirect.
+
 **Auth email copy — the email resolver:**
 
 - Every auth email (`welcome`, `verifyEmail`, `resetPassword`, `invitation`, …)
@@ -249,27 +278,29 @@ the export name and signature; everything inside is free to change. (Detailed
 examples live here in this guide, not in the files, precisely so the files stay
 small and conflict-free.)
 
-| Edit this file                             | To register                                        | Auto-wired by (runtime)                                          |
-| ------------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------- |
-| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                   | `lib/env.ts` startup parse (server)                              |
-| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                           | rate-limit middleware (middleware runtime)                       |
-| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)               | `proxy.ts` edge redirect-to-login (proxy runtime)                |
-| `lib/app/capabilities.ts`                  | agent capabilities (tools)                         | the capability registry (server route-handler)                   |
-| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)      | the chat context builder (server route-handler)                  |
-| `lib/app/admin-nav.ts`                     | admin sidebar sections                             | `admin-sidebar.tsx` (client)                                     |
-| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                       | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                     |
-| `lib/app/public-nav.ts`                    | public nav / footer link lists                     | `public-nav.tsx`, `public-footer.tsx` (client)                   |
-| `lib/app/emails.ts`                        | auth email template overrides                      | `lib/email/registry.ts` (server)                                 |
-| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)              | `instrumentation.ts` `register()` (server, all envs)             |
-| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`) | better-auth `user.create.after` (server)                         |
-| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)          | the maintenance tick (server)                                    |
-| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)         | root `eslint.config.mjs` spread (lint)                           |
-| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                  | `resolveAgentDocumentAccess()` (server route-handler)            |
-| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards            | the chat handler's `collectGuardFloors()` (server route-handler) |
-| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                | the chat handler's `emitGuardEvent()` (server route-handler)     |
-| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                      | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)      |
-| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                   |
-| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)     |
+| Edit this file                             | To register                                        | Auto-wired by (runtime)                                               |
+| ------------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------- |
+| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                   | `lib/env.ts` startup parse (server)                                   |
+| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                           | rate-limit middleware (middleware runtime)                            |
+| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)               | `proxy.ts` edge redirect-to-login (proxy runtime)                     |
+| `lib/app/capabilities.ts`                  | agent capabilities (tools)                         | the capability registry (server route-handler)                        |
+| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)      | the chat context builder (server route-handler)                       |
+| `lib/app/admin-nav.ts`                     | admin sidebar sections                             | `admin-sidebar.tsx` (client)                                          |
+| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                       | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                          |
+| `lib/app/public-nav.ts`                    | public nav / footer link lists                     | `public-nav.tsx`, `public-footer.tsx` (client)                        |
+| `lib/app/protected-nav.ts`                 | authenticated nav link list                        | `protected-nav.tsx` (client)                                          |
+| `lib/app/auth-landing.ts`                  | where a signed-in user lands, and its label        | `lib/auth-landing/route.ts` → a dozen sites (proxy + server + client) |
+| `lib/app/emails.ts`                        | auth email template overrides                      | `lib/email/registry.ts` (server)                                      |
+| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)              | `instrumentation.ts` `register()` (server, all envs)                  |
+| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`) | better-auth `user.create.after` (server)                              |
+| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)          | the maintenance tick (server)                                         |
+| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)         | root `eslint.config.mjs` spread (lint)                                |
+| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                  | `resolveAgentDocumentAccess()` (server route-handler)                 |
+| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards            | the chat handler's `collectGuardFloors()` (server route-handler)      |
+| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                | the chat handler's `emitGuardEvent()` (server route-handler)          |
+| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                      | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)           |
+| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                        |
+| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that

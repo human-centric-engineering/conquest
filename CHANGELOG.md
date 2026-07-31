@@ -69,6 +69,28 @@ release process.
 
 ### Added
 
+- **`lib/app/protected-nav.ts`, the authenticated-nav seam** (#473) — the nav a
+  fork's *users* see was a hardcoded array in
+  `components/layouts/protected-nav.tsx`, while the nav its *visitors* see had
+  had a seam since #347. Set `protectedNavItems` to a `ProtectedNavItem[]` (from
+  the new `lib/protected-nav/types.ts`) and it replaces `DEFAULT_PROTECTED_NAV`
+  wholesale; `null` keeps the default. Items gain `exact?` (matching the public
+  nav) and an optional `icon`, and the platform keeps owning admin filtering and
+  active-state, so `adminOnly` works on a fork's own items.
+
+- **`lib/app/auth-landing.ts`, the post-authentication landing seam** (#473) —
+  `/dashboard` was hardcoded at a dozen decision sites across twelve files, with
+  no config or scaffold, so an app whose product lives elsewhere edited all of them
+  and re-resolved them on every upgrade. `appAuthLandingRoute` /
+  `appAuthLandingLabel` (both `null` = platform default) resolve once through the
+  new `lib/auth-landing/route.ts` (`AUTH_LANDING_ROUTE`, `AUTH_LANDING_LABEL`),
+  now consumed by login, OAuth, signup, invite acceptance, email verification,
+  the protected layout's brand link, the admin header and sidebar, both error
+  pages and `proxy.ts`. The label moves with the route, so the user-visible copy
+  on those controls stops saying "Dashboard" once a fork has moved. A route that
+  is not root-relative throws at module load rather than becoming an off-site
+  redirect via `safeCallbackUrl()`'s unvalidated fallback.
+
 - **`apiClient.put()`** (#495) — the client exposed `get`/`post`/`patch`/`delete`
   and no `put`, so a fork building a genuine whole-resource replacement (a
   sub-resource collection such as tags, members or assignees) had to choose

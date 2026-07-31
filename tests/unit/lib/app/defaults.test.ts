@@ -34,6 +34,8 @@ import { initAppCapabilities } from '@/lib/app/capabilities';
 import { initAppContextContributors } from '@/lib/app/context-contributors';
 import { initAppNav } from '@/lib/app/admin-nav';
 import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
+import { protectedNavItems } from '@/lib/app/protected-nav';
+import { appAuthLandingRoute, appAuthLandingLabel } from '@/lib/app/auth-landing';
 import { emailOverrides } from '@/lib/app/emails';
 import { initApp } from '@/lib/app/bootstrap';
 import { initAppKnowledgeAccessContributors } from '@/lib/app/knowledge-access-contributors';
@@ -114,6 +116,19 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(publicNavItems).toBeNull();
       expect(footerNavItems).toBeNull();
       expect(footerLegalItems).toBeNull();
+    },
+  },
+  {
+    seam: 'lib/app/protected-nav.ts',
+    risk: 'a stray non-null list would silently REPLACE the authenticated nav',
+    assert: () => expect(protectedNavItems).toBeNull(),
+  },
+  {
+    seam: 'lib/app/auth-landing.ts',
+    risk: 'a stray value would send every install somewhere else after login',
+    assert: () => {
+      expect(appAuthLandingRoute).toBeNull();
+      expect(appAuthLandingLabel).toBeNull();
     },
   },
   {

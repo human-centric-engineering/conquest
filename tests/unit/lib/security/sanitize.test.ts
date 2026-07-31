@@ -13,6 +13,7 @@ import {
   sanitizeUrl,
   sanitizeRedirectUrl,
   safeCallbackUrl,
+  isRootRelativePath,
   sanitizeObject,
   sanitizeFilename,
 } from '@/lib/security/sanitize';
@@ -267,6 +268,12 @@ describe('Input Sanitization', () => {
       expect(safeCallbackUrl('//evil.com/path')).toBe('/');
     });
 
+    it('should block backslash-prefixed paths the WHATWG URL parser treats as protocol-relative', () => {
+      // new URL('/\\evil.com', 'https://good.example.com').href === 'https://evil.com/'
+      expect(safeCallbackUrl('/\\evil.com')).toBe('/');
+      expect(safeCallbackUrl('/\\evil.com', '/dashboard')).toBe('/dashboard');
+    });
+
     it('should block dangerous protocols', () => {
       expect(safeCallbackUrl('javascript:alert(1)')).toBe('/');
       expect(safeCallbackUrl('data:text/html,<script>alert(1)</script>')).toBe('/');
@@ -281,6 +288,22 @@ describe('Input Sanitization', () => {
       expect(safeCallbackUrl(null)).toBe('/');
       expect(safeCallbackUrl('')).toBe('/');
       expect(safeCallbackUrl(undefined as unknown as string)).toBe('/');
+    });
+  });
+
+  describe('isRootRelativePath', () => {
+    it('should accept root-relative paths', () => {
+      expect(isRootRelativePath('/dashboard')).toBe(true);
+      expect(isRootRelativePath('/app/home')).toBe(true);
+    });
+
+    it('should reject protocol-relative and backslash-prefixed paths', () => {
+      expect(isRootRelativePath('//evil.com')).toBe(false);
+      expect(isRootRelativePath('/\\evil.com')).toBe(false);
+    });
+
+    it('should reject paths with no leading slash', () => {
+      expect(isRootRelativePath('dashboard')).toBe(false);
     });
   });
 
