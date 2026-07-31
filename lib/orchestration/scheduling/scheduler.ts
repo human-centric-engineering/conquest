@@ -324,7 +324,19 @@ export async function processDueSchedules(): Promise<ScheduleProcessResult> {
       // persisted column then flows through the resume-mode engine invocation.
       const scheduleScope = resolvePersistedScope(schedule.scope, { scheduleId: schedule.id });
 
-      // Create execution row, pinned to the resolved version
+      // Create execution row, pinned to the resolved version.
+      //
+      // System-owned: `userId = null`, not the operator who created the
+      // schedule (#502). A cron tick is not a person doing something — and
+      // because `AiWorkflowExecution.userId` is `onDelete: Cascade`, naming
+      // one made the organisation's entire scheduled-run history disappear
+      // the day that operator was erased.
+      //
+      // `triggerSource` fills the gap that leaves: without it a
+      // null-attributed row had nothing pointing back at what produced it.
+      // The value is the one the schema comment already documented; the
+      // scheduler simply never wrote it. `AiWorkflowSchedule.createdBy`
+      // still records who set the schedule up.
       const execution = await prisma.aiWorkflowExecution.create({
         data: {
           workflowId: schedule.workflow.id,
@@ -332,7 +344,8 @@ export async function processDueSchedules(): Promise<ScheduleProcessResult> {
           status: WorkflowStatus.PENDING,
           inputData: schedule.inputTemplate ?? {},
           executionTrace: [],
-          userId: schedule.createdBy,
+          userId: null,
+          triggerSource: 'schedule',
           ...(scheduleScope ? { scope: scheduleScope } : {}),
           ...(effectiveBudgetLimitUsd !== undefined
             ? { budgetLimitUsd: effectiveBudgetLimitUsd }
@@ -372,13 +385,15 @@ export async function processDueSchedules(): Promise<ScheduleProcessResult> {
         continue;
       }
 
-      // Fire-and-forget — drain the engine events without blocking the tick
+      // Fire-and-forget — drain the engine events without blocking the tick.
+      // User context matches the row: `null`, so the run's capabilities see a
+      // system context rather than impersonating the schedule's author.
       void drainEngine(
         execution.id,
         schedule.workflow,
         defParsed.data,
         (execution.inputData ?? {}) as Record<string, unknown>,
-        schedule.createdBy,
+        null,
         publishedVersion.id
       );
 

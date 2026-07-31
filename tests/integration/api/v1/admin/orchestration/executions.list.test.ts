@@ -194,16 +194,34 @@ describe('GET /api/v1/admin/orchestration/executions', () => {
 
       await GET(makeRequest());
 
+      // Visibility is `AND(OR(own, system), filters)`. The `userId: null` arm
+      // is what keeps schedule- and inbound-triggered runs listable now that
+      // they belong to nobody (#502); the caller-id arm is what stops one
+      // admin seeing another's runs.
+      const visibility = { OR: [{ userId: ADMIN_ID }, { userId: null }] };
       expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: ADMIN_ID }),
+          where: { AND: [visibility, {}] },
         })
       );
       expect(vi.mocked(prisma.aiWorkflowExecution.count)).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: ADMIN_ID }),
+          where: { AND: [visibility, {}] },
         })
       );
+    });
+
+    it('does not widen beyond the caller and system-owned rows', async () => {
+      vi.mocked(prisma.aiWorkflowExecution.findMany).mockResolvedValue([]);
+      vi.mocked(prisma.aiWorkflowExecution.count).mockResolvedValue(0);
+
+      await GET(makeRequest());
+
+      const callArg = vi.mocked(prisma.aiWorkflowExecution.findMany).mock.calls[0][0];
+      const [visibility] = (callArg as { where: { AND: { OR: { userId: string | null }[] }[] } })
+        .where.AND;
+      expect(visibility.OR).toHaveLength(2);
+      expect(visibility.OR.map((arm) => arm.userId)).toEqual([ADMIN_ID, null]);
     });
   });
 
@@ -217,7 +235,9 @@ describe('GET /api/v1/admin/orchestration/executions', () => {
 
       expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: ADMIN_ID, workflowId: WORKFLOW_ID }),
+          where: expect.objectContaining({
+            AND: [expect.anything(), expect.objectContaining({ workflowId: WORKFLOW_ID })],
+          }),
         })
       );
     });
@@ -227,7 +247,9 @@ describe('GET /api/v1/admin/orchestration/executions', () => {
 
       expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: ADMIN_ID, status: 'completed' }),
+          where: expect.objectContaining({
+            AND: [expect.anything(), expect.objectContaining({ status: 'completed' })],
+          }),
         })
       );
     });
@@ -238,16 +260,19 @@ describe('GET /api/v1/admin/orchestration/executions', () => {
       expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            userId: ADMIN_ID,
-            createdAt: expect.objectContaining({
-              gte: new Date('2025-01-01T00:00:00.000Z'),
-            }),
+            AND: [
+              expect.anything(),
+              expect.objectContaining({
+                createdAt: expect.objectContaining({ gte: new Date('2025-01-01T00:00:00.000Z') }),
+              }),
+            ],
           }),
         })
       );
 
       const callArg = vi.mocked(prisma.aiWorkflowExecution.findMany).mock.calls[0][0];
-      const createdAt = (callArg as { where: { createdAt: { lte?: Date } } }).where.createdAt;
+      const createdAt = (callArg as { where: { AND: [unknown, { createdAt: { lte?: Date } }] } })
+        .where.AND[1].createdAt;
       expect(createdAt).not.toHaveProperty('lte');
     });
 
@@ -257,16 +282,19 @@ describe('GET /api/v1/admin/orchestration/executions', () => {
       expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            userId: ADMIN_ID,
-            createdAt: expect.objectContaining({
-              lte: new Date('2025-01-31T23:59:59.000Z'),
-            }),
+            AND: [
+              expect.anything(),
+              expect.objectContaining({
+                createdAt: expect.objectContaining({ lte: new Date('2025-01-31T23:59:59.000Z') }),
+              }),
+            ],
           }),
         })
       );
 
       const callArg = vi.mocked(prisma.aiWorkflowExecution.findMany).mock.calls[0][0];
-      const createdAt = (callArg as { where: { createdAt: { gte?: Date } } }).where.createdAt;
+      const createdAt = (callArg as { where: { AND: [unknown, { createdAt: { gte?: Date } }] } })
+        .where.AND[1].createdAt;
       expect(createdAt).not.toHaveProperty('gte');
     });
 
@@ -278,11 +306,15 @@ describe('GET /api/v1/admin/orchestration/executions', () => {
       expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            userId: ADMIN_ID,
-            createdAt: {
-              gte: new Date('2025-01-01T00:00:00.000Z'),
-              lte: new Date('2025-01-31T23:59:59.000Z'),
-            },
+            AND: [
+              expect.anything(),
+              {
+                createdAt: {
+                  gte: new Date('2025-01-01T00:00:00.000Z'),
+                  lte: new Date('2025-01-31T23:59:59.000Z'),
+                },
+              },
+            ],
           }),
         })
       );

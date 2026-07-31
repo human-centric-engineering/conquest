@@ -30,7 +30,9 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiConversation: {
-      findFirst: vi.fn(),
+      // `findUnique` backs `adminCanViewConversation`, which replaced the
+      // inline ownership `findFirst` (#502).
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
   },
@@ -68,6 +70,7 @@ function makeConversation(overrides: Record<string, unknown> = {}) {
   return {
     id: CONV_ID,
     userId: ADMIN_ID,
+    share: null,
     agentId: AGENT_ID,
     title: 'Test Conversation',
     tags: [],
@@ -117,7 +120,7 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
 
   it('updates tags on a conversation', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as any);
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as any);
     vi.mocked(prisma.aiConversation.update).mockResolvedValue(
       makeConversation({ tags: ['escalate', 'bug-report'] }) as any
     );
@@ -136,7 +139,7 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
 
   it('updates title on a conversation', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as any);
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as any);
     vi.mocked(prisma.aiConversation.update).mockResolvedValue(
       makeConversation({ title: 'Updated title' }) as any
     );
@@ -153,7 +156,7 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
 
   it('returns 404 for non-existent conversation', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(null);
 
     const response = await PATCH(makeRequest(CONV_ID, { tags: ['test'] }), makeParams(CONV_ID));
 
