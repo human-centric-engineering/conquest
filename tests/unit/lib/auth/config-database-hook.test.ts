@@ -83,6 +83,9 @@ vi.mock('better-auth/adapters/prisma', () => ({
 
 vi.mock('better-auth/api', () => ({
   getOAuthState: vi.fn(),
+  // Identity passthrough — lib/auth/config.ts wraps its `hooks.before` body in
+  // this at module load, so an unmocked export throws on import (#463).
+  createAuthMiddleware: vi.fn((fn: unknown) => fn),
   APIError: class APIError extends Error {
     status: string;
     body: { code?: string; message?: string };
