@@ -174,7 +174,9 @@ is wrong about whose data it is.
 This is containment, not a fix. The rows should carry `userId = null`, as
 [the erasure doc describes](./data-erasure.md#system-owned-runs); the same
 mis-attribution also makes erasing that one operator cascade-delete every third
-party's inbound thread. When the write paths are corrected, these filters can go.
+party's inbound thread. Tracked in
+[#502](https://github.com/human-centric-engineering/sunrise/issues/502) — when
+the write paths are corrected, these filters and their `scopeNote`s can go.
 
 **A narrowed source must set `scopeNote`.** It is surfaced in `meta` beside the
 row count, because a source that quietly returns some of the rows is the

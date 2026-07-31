@@ -85,8 +85,10 @@ a user.
 >    over the mis-attribution, not a fix for it.
 >
 > Fixing the write paths to `userId: null` retires both, and lets the export
-> filters go. Tracked separately; do not build new behaviour on the assumption
-> that `userId` on these rows identifies a data subject.
+> filters go. Tracked in
+> [#502](https://github.com/human-centric-engineering/sunrise/issues/502) —
+> delete this block when it lands. Until then, do not build new behaviour on the
+> assumption that `userId` on these rows identifies a data subject.
 
 ### Adding a new `User` relation (required step)
 
