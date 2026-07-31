@@ -689,6 +689,7 @@ DATABASE_URL="postgresql://user:pass@host:5432/db?connection_limit=20"
 
 ## Related Documentation
 
+- [Signup Modes](./signup-modes.md) - `SIGNUP_MODE`, and how to run a fork invite-only
 - [Auth Integration](./integration.md) - Framework integration patterns for better-auth
 - [Auth Security](./security.md) - Security model and threat mitigation
 - [API Headers](../api/headers.md) - Authentication headers and middleware

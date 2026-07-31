@@ -157,7 +157,10 @@ describe('isFirstHumanBootstrap', () => {
   it('is false when the bootstrap marker is present, without counting users', async () => {
     // The marker is what makes the window close permanently — it must win even
     // if every human is later deleted and the count returns to zero (#278).
-    vi.mocked(prisma.authBootstrap.findUnique).mockResolvedValue({ id: AUTH_BOOTSTRAP_ID });
+    vi.mocked(prisma.authBootstrap.findUnique).mockResolvedValue({
+      id: AUTH_BOOTSTRAP_ID,
+      completedAt: new Date(),
+    });
     vi.mocked(prisma.user.count).mockResolvedValue(0);
 
     expect(await isFirstHumanBootstrap()).toBe(false);

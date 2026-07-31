@@ -69,6 +69,22 @@ release process.
 
 ### Added
 
+- **`SIGNUP_MODE`, the seam to run a fork invite-only** (#463) — Sunrise ships a
+  complete invitation system whose premise is that access is *granted*, beside an
+  email/password signup endpoint that was unconditionally open with no config to
+  close it. A fork whose product is invite-gated could only edit a core auth file
+  or leave the front door open, which is easy not to notice: the invite flow
+  works, the product *looks* gated, and accounts accumulate. `SIGNUP_MODE=invite_only`
+  closes `POST /api/auth/sign-up/email` (better-auth `hooks.before`), un-invited
+  OAuth account creation (`userCreateBeforeHook` — a Google signup never touches
+  the email path, so gating one door would leave the other open), and the
+  `/signup` page (proxy redirect). Only account *creation* is refused; sign-in,
+  password reset and invitation acceptance are unaffected. New
+  `lib/auth/signup-mode.ts` exports `isInviteOnly()`, `isFirstHumanBootstrap()`
+  and `runInvitedSignup()` — the last being how a server-side path that has
+  already validated an invitation exempts itself, since better-auth routes
+  `auth.api.*` through the same hook as HTTP requests. `open` remains the default.
+
 - **`lib/app/protected-nav.ts`, the authenticated-nav seam** (#473) — the nav a
   fork's *users* see was a hardcoded array in
   `components/layouts/protected-nav.tsx`, while the nav its *visitors* see had

@@ -107,6 +107,15 @@ import { isInviteOnly, isInvitedSignup, isFirstHumanBootstrap } from '@/lib/auth
 import { getOAuthState } from 'better-auth/api';
 import { validateInvitationToken, getValidInvitation } from '@/lib/utils/invitation-token';
 
+// Loosely-typed handles for the better-auth / invitation mocks, matching the
+// MockedFn pattern in config-database-hook.test.ts: the real signatures demand
+// full OAuthState and invitation-metadata objects whose extra fields play no
+// part in the branch under test.
+type MockedFn = ReturnType<typeof vi.fn>;
+const mockGetOAuthState = getOAuthState as unknown as MockedFn;
+const mockValidateInvitationToken = validateInvitationToken as unknown as MockedFn;
+const mockGetValidInvitation = getValidInvitation as unknown as MockedFn;
+
 const OAUTH_CTX = { path: '/callback/google' };
 
 function oauthUser(email = 'new@example.com') {
@@ -125,7 +134,7 @@ beforeEach(() => {
   vi.mocked(isInviteOnly).mockReturnValue(false);
   vi.mocked(isInvitedSignup).mockReturnValue(false);
   vi.mocked(isFirstHumanBootstrap).mockResolvedValue(false);
-  vi.mocked(getOAuthState).mockResolvedValue(undefined);
+  mockGetOAuthState.mockResolvedValue(null);
 });
 
 describe('signupModeBeforeHook', () => {
@@ -214,12 +223,12 @@ describe('userCreateBeforeHook — invite_only OAuth gate', () => {
 
   it('admits an invited OAuth signup and honours the invitation role', async () => {
     vi.mocked(isInviteOnly).mockReturnValue(true);
-    vi.mocked(getOAuthState).mockResolvedValue({
+    mockGetOAuthState.mockResolvedValue({
       invitationEmail: 'invited@example.com',
       invitationToken: 'token-abc',
     });
-    vi.mocked(validateInvitationToken).mockResolvedValue(true);
-    vi.mocked(getValidInvitation).mockResolvedValue({ metadata: { role: 'USER' } });
+    mockValidateInvitationToken.mockResolvedValue(true);
+    mockGetValidInvitation.mockResolvedValue({ metadata: { role: 'USER' } });
 
     const result = await userCreateBeforeHook(oauthUser('invited@example.com'), OAUTH_CTX);
 
@@ -231,12 +240,12 @@ describe('userCreateBeforeHook — invite_only OAuth gate', () => {
     // The gate keys off the authorisation itself, not the record, so this
     // genuinely-invited account is not refused on the way past.
     vi.mocked(isInviteOnly).mockReturnValue(true);
-    vi.mocked(getOAuthState).mockResolvedValue({
+    mockGetOAuthState.mockResolvedValue({
       invitationEmail: 'invited@example.com',
       invitationToken: 'token-abc',
     });
-    vi.mocked(validateInvitationToken).mockResolvedValue(true);
-    vi.mocked(getValidInvitation).mockResolvedValue(null);
+    mockValidateInvitationToken.mockResolvedValue(true);
+    mockGetValidInvitation.mockResolvedValue(null);
 
     const result = await userCreateBeforeHook(oauthUser('invited@example.com'), OAUTH_CTX);
 
@@ -245,11 +254,11 @@ describe('userCreateBeforeHook — invite_only OAuth gate', () => {
 
   it('refuses an OAuth signup whose invitation token is invalid', async () => {
     vi.mocked(isInviteOnly).mockReturnValue(true);
-    vi.mocked(getOAuthState).mockResolvedValue({
+    mockGetOAuthState.mockResolvedValue({
       invitationEmail: 'invited@example.com',
       invitationToken: 'stale-token',
     });
-    vi.mocked(validateInvitationToken).mockResolvedValue(false);
+    mockValidateInvitationToken.mockResolvedValue(false);
 
     await expect(userCreateBeforeHook(oauthUser('invited@example.com'), OAUTH_CTX)).rejects.toThrow(
       'Sign-up is by invitation only.'

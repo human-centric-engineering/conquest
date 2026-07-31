@@ -20,6 +20,7 @@ Complete reference for all environment variables used in Sunrise.
 | [`DATABASE_POOL_MAX`](./database-env.md)                  | ❌ No    | Integer      | `10`          | Max pg connections per process        |
 | [`BETTER_AUTH_URL`](./auth-env.md)                        | ✅ Yes   | URL          | -             | Application base URL                  |
 | [`BETTER_AUTH_SECRET`](./auth-env.md)                     | ✅ Yes   | String (32+) | -             | JWT signing secret                    |
+| [`SIGNUP_MODE`](./auth-env.md)                            | ❌ No    | Enum         | `open`        | Who may create an account             |
 | [`GOOGLE_CLIENT_ID`](./auth-env.md)                       | ❌ No    | String       | -             | Google OAuth client ID                |
 | [`GOOGLE_CLIENT_SECRET`](./auth-env.md)                   | ❌ No    | String       | -             | Google OAuth secret                   |
 | [`RESEND_API_KEY`](./email-env.md)                        | ❌ No    | String       | -             | Resend email API key                  |
