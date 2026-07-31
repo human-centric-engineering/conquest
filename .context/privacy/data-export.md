@@ -71,10 +71,12 @@ Erasure does not have this problem. Forget an `onDelete` and
 `prisma.user.delete()` throws `P2003`; erasure breaks loudly, in CI, for
 everyone. Access has no equivalent natural failure, so Sunrise manufactures one:
 
-`tests/unit/lib/privacy/export-sources.test.ts` parses `prisma/schema/*.prisma`,
-finds every model with an FK to `User`, and fails if any is missing from
-`SUBJECT_DATA_SOURCES`. Adding a `User` relation without deciding what the
-subject receives from it breaks the build.
+`tests/unit/lib/privacy/export-sources.test.ts` parses `prisma/schema/*.prisma`
+and fails if a model that identifies a person is missing from
+`SUBJECT_DATA_SOURCES`. It casts two nets — models declaring a `User` relation,
+and models holding a user-id column with no relation behind it (see
+[Tables With No `User` FK](#tables-with-no-user-fk)). Adding either without
+deciding what the subject receives from it breaks the build.
 
 **When that test fails, do not delete the row to make it pass.** That ships a
 short answer to a data subject. Add the model with a disposition.
@@ -85,8 +87,8 @@ The unit suite mocks Prisma, so it verifies the _arguments_ the manifest builds
 and never that the resulting queries run. `scripts/smoke/export.ts` closes that
 gap against real Postgres (and runs in CI beside the erasure smoke): it creates a
 throwaway subject carrying a session token, a password hash, an API-key hash and
-a webhook secret, exports it, and asserts all ~28 sources executed and that not
-one of those four values appears anywhere in the serialised bundle. The
+a webhook secret, exports it, and asserts every manifest source executed and that
+not one of those four values appears anywhere in the serialised bundle. The
 credential check is a recursive sweep over the whole JSON rather than a per-table
 assertion, so a source added later without an `omit` fails there even if nobody
 wrote a test for it. Two counter-assertions (the subject's own IP address and
@@ -187,14 +189,34 @@ rows attributed to the subject and asserts neither reaches the bundle.
 
 ## Tables With No `User` FK
 
-The coverage guard finds tables by their foreign key. A table that stores an
-email address without a user link is invisible to it — **and to the erasure
-cascade**.
+A table can identify a person without declaring a Prisma relation to `User` —
+and then it is invisible to a relation-based scan, **and to the erasure
+cascade**. Sunrise has two, both in the manifest by hand:
 
-Sunrise has one: `ContactSubmission`, written by the public contact form, which
-takes an address rather than a session. It is in the manifest by hand, matched
-on `email` case-insensitively, and pinned by its own test row so a tidy-up
-cannot drop it.
+| Table               | Identified by                    | How it is matched                     |
+| ------------------- | -------------------------------- | ------------------------------------- |
+| `ContactSubmission` | `email` — no user id at all      | `email`, case-insensitively           |
+| `FeatureFlag`       | `createdBy String?`, no relation | `createdBy`, as an attribution source |
+
+The guard casts **two nets**, because the first one missed both of these:
+
+1. **Relation scan** — models declaring `x User? @relation(...)`. Catches the 27
+   ordinary cases.
+2. **Scalar scan** — models holding a `userId` / `createdBy` / `uploadedBy` /
+   `ownerId` column with no relation behind it. Catches `FeatureFlag`, and
+   anything a fork adds in the same shape.
+
+`DataErasureReceipt` trips the second net and is allowlisted in the test, because
+`exportUserData()` fetches it directly into the bundle's `erasureReceipts`
+section rather than through a manifest source. That allowlist is an accounting
+note, not an escape hatch — anything added to it still owes a reader a reason.
+
+**Neither net can reach `ContactSubmission`.** It holds no user id in any
+column, only an email, so no mechanical scan finds it. That is the residual gap,
+and it is why the manifest still needs a human deciding what a new table holds
+rather than trusting the guard to ask. If your fork adds a table keyed by email,
+phone number, or an external identifier, **the guard will not find it for you** —
+add it by hand and write a test row that says why.
 
 If your fork adds a table like this — anything keyed by email, phone number, or
 an external identifier rather than `userId` — **the guard will not find it for

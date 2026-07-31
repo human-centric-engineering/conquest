@@ -140,7 +140,7 @@ release process.
 
   A second guard,
   `npm run smoke:export`, runs in CI beside the erasure smoke and proves against
-  real Postgres what a mocked suite cannot: that all ~28 queries execute, and
+  real Postgres what a mocked suite cannot: that every manifest query executes, and
   that a planted session token, password hash, key hash and webhook secret
   appear nowhere in the serialised bundle.
 

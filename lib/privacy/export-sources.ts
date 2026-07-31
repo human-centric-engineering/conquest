@@ -249,11 +249,13 @@ export const SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
     section: 'contactSubmissions',
     disposition: 'export',
     description: 'Messages sent through the public contact form from the subject’s email address.',
-    // ⚠️ No FK to `User` — the public contact form takes an address, not a
-    // session, so this table is matched by email and is invisible to both the
-    // erasure cascade and the FK-based coverage guard. It is listed here by
-    // hand. Any other table that stores an email without a user link needs the
-    // same treatment; the guard cannot find them for you.
+    // ⚠️ No FK to `User`, and no user id in any column — the public contact form
+    // takes an address, not a session. So this table is invisible to the erasure
+    // cascade AND to both of the guard's nets: the relation scan and the
+    // user-id-column scan. It is listed here purely by hand, and it is the
+    // reason the manifest still needs a human deciding what a new table holds.
+    // Any table keyed by email, phone number, or an external identifier needs
+    // the same treatment; nothing mechanical will find it for you.
     fetch: ({ email }) =>
       prisma.contactSubmission.findMany({
         where: { email: { equals: email, mode: 'insensitive' } },
@@ -493,6 +495,24 @@ export const SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
     fetch: async ({ userId }) =>
       toAttribution(
         await prisma.mcpApiKey.findMany({
+          where: { createdBy: userId },
+          select: namedSelect,
+          orderBy: byCreatedAt,
+        })
+      ),
+  },
+  {
+    model: 'FeatureFlag',
+    section: 'featureFlags',
+    disposition: 'attribution',
+    description: 'Feature flags the subject created.',
+    // ⚠️ Second table with no `@relation` to `User` (see `ContactSubmission`
+    // above). `createdBy` is a plain `String?` holding a user id, written by
+    // `POST /api/v1/admin/feature-flags`, so the FK-based coverage scan cannot
+    // see it. Listed by hand, and pinned by a test row.
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.featureFlag.findMany({
           where: { createdBy: userId },
           select: namedSelect,
           orderBy: byCreatedAt,

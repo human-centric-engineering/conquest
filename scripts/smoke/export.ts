@@ -1,7 +1,7 @@
 /**
  * Subject-access export smoke script.
  *
- * Proves what mocked unit tests cannot: that all ~28 manifest queries actually
+ * Proves what mocked unit tests cannot: that every manifest query actually
  * execute against real Postgres. The unit suite mocks Prisma, so it verifies
  * the *arguments* the manifest builds — the right `where`, the right `omit` —
  * but never that the resulting queries run. Type-checking catches a wrong

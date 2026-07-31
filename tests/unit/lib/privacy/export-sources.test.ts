@@ -46,15 +46,42 @@ const SCHEMA_DIR = path.join(process.cwd(), 'prisma', 'schema');
 const USER_RELATION_FIELD = /^\s*\w+\s+User\??\s+@relation\(/;
 const MODEL_OPEN = /^model\s+(\w+)\s*\{/;
 
+/**
+ * A plain `String` column holding a user id with no `@relation` behind it.
+ *
+ * These are the tables the relation scan cannot see, and they have been missed
+ * twice: `ContactSubmission` (the public contact form takes an address, not a
+ * session) and `FeatureFlag` (`createdBy` written by the admin route). Both are
+ * in the manifest by hand. Scanning for the column name as well as the relation
+ * is what stops a third.
+ */
+const USER_SCALAR_FIELD =
+  /^\s*(userId|createdBy|uploadedBy|ownerId|actorUserId|subjectUserId)\s+String/;
+
+/**
+ * Models carrying a user-id scalar that the export handles OUTSIDE the manifest,
+ * with the reason. Kept deliberately tiny — it is an accounting note, not an
+ * escape hatch, and anything added here still has to be justified to a reader.
+ */
+const HANDLED_OUTSIDE_MANIFEST = new Map([
+  [
+    'DataErasureReceipt',
+    'Fetched directly by exportUserData() and returned as the bundle’s `erasureReceipts` section, so it is exported — just not through a manifest source.',
+  ],
+]);
+
 interface SchemaScan {
   /** Models that declare at least one FK to `User`. */
   userLinked: Set<string>;
+  /** Models holding a user-id scalar with NO `@relation` — invisible to the FK scan. */
+  scalarLinked: Set<string>;
   /** Every model name in the schema, for typo/rename detection. */
   allModels: Set<string>;
 }
 
 function scanSchema(): SchemaScan {
   const userLinked = new Set<string>();
+  const scalarLinked = new Set<string>();
   const allModels = new Set<string>();
 
   const files = readdirSync(SCHEMA_DIR).filter((file) => file.endsWith('.prisma'));
@@ -62,32 +89,52 @@ function scanSchema(): SchemaScan {
   for (const file of files) {
     const contents = readFileSync(path.join(SCHEMA_DIR, file), 'utf8');
     let currentModel: string | null = null;
+    let modelHasRelation = false;
+    let modelScalars: string[] = [];
+
+    const closeModel = (): void => {
+      // A user-id column backed by a real `@relation` is already covered by the
+      // FK scan; only the relation-less ones need the second net.
+      if (currentModel && !modelHasRelation && modelScalars.length > 0) {
+        scalarLinked.add(currentModel);
+      }
+      currentModel = null;
+      modelHasRelation = false;
+      modelScalars = [];
+    };
 
     for (const line of contents.split('\n')) {
       const open = MODEL_OPEN.exec(line);
       if (open) {
+        closeModel();
         currentModel = open[1];
         allModels.add(currentModel);
         continue;
       }
       if (line.startsWith('}')) {
-        currentModel = null;
+        closeModel();
         continue;
       }
+      if (!currentModel) continue;
       // `model User` itself holds the back-relations (`AiAgent[]`), whose field
       // type is the other model — they never match the User-typed pattern, so
       // User is excluded naturally rather than by special case.
-      if (currentModel && USER_RELATION_FIELD.test(line)) {
+      if (USER_RELATION_FIELD.test(line)) {
         userLinked.add(currentModel);
+        modelHasRelation = true;
       }
+      const scalar = USER_SCALAR_FIELD.exec(line);
+      if (scalar) modelScalars.push(scalar[1]);
     }
+
+    closeModel();
   }
 
-  return { userLinked, allModels };
+  return { userLinked, scalarLinked, allModels };
 }
 
 describe('subject-data source manifest', () => {
-  const { userLinked, allModels } = scanSchema();
+  const { userLinked, scalarLinked, allModels } = scanSchema();
   const declared = new Set(SUBJECT_DATA_SOURCES.map((source) => source.model));
 
   describe('the scan itself', () => {
@@ -138,10 +185,45 @@ describe('subject-data source manifest', () => {
 
     it('covers ContactSubmission, which has no User FK', () => {
       // The public contact form takes an address, not a session, so this table
-      // is matched by email and is invisible to the scan above. It is in the
+      // is matched by email and is invisible to the relation scan. It is in the
       // manifest by hand — this row is what stops a tidy-up from dropping it.
       expect(declared.has('ContactSubmission')).toBe(true);
       expect(userLinked.has('ContactSubmission')).toBe(false);
+    });
+
+    it('declares every model holding a user id with no relation behind it', () => {
+      // The second net. A `createdBy String?` with no `@relation` is invisible
+      // to the FK scan above, and has been missed twice — ContactSubmission and
+      // FeatureFlag. Catching the column name as well as the relation is what
+      // makes the coverage rule hold for tables Prisma does not link.
+      const missing = [...scalarLinked]
+        .filter((model) => !declared.has(model))
+        .filter((model) => !EXCLUDED_SOURCES.some((source) => source.model === model))
+        .filter((model) => !HANDLED_OUTSIDE_MANIFEST.has(model))
+        .sort();
+
+      expect(
+        missing,
+        missing.length === 0
+          ? ''
+          : `These models store a user id in a plain column with no Prisma relation, ` +
+              `so the FK scan cannot see them and a data subject's export silently ` +
+              `omits them: ${missing.join(', ')}. Add each to SUBJECT_DATA_SOURCES by ` +
+              `hand (matching on its own column), or to EXCLUDED_SOURCES with a reason. ` +
+              `See .context/privacy/data-export.md.`
+      ).toEqual([]);
+    });
+
+    it('finds the relation-less tables it is meant to find', () => {
+      // Guard on the guard: if the scalar regex stops matching, the check above
+      // passes while protecting nothing.
+      //
+      // `ContactSubmission` is deliberately NOT expected here — it holds no user
+      // id at all, only an email, so no column scan can reach it. That is the
+      // residual gap this pair of nets does not close, and why the manifest
+      // still needs a human deciding what a new table holds.
+      expect(scalarLinked.has('FeatureFlag')).toBe(true);
+      expect(scalarLinked.has('DataErasureReceipt')).toBe(true);
     });
   });
 
