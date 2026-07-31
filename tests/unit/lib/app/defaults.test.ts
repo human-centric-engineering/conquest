@@ -47,6 +47,7 @@ import { appEnvSchema } from '@/lib/app/env';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
+import { collectAppSubjectData } from '@/lib/app/data-export';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
@@ -135,6 +136,14 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     seam: 'lib/app/emails.ts',
     risk: 'a stray override would swap an auth email for every install',
     assert: () => expect(emailOverrides).toEqual({}),
+  },
+  {
+    seam: 'lib/app/data-export.ts',
+    risk: 'a stray collector would leak app rows into every install’s subject-access export',
+    assert: async () =>
+      expect(await collectAppSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
+        {}
+      ),
   },
   {
     seam: 'lib/app/bootstrap.ts',
