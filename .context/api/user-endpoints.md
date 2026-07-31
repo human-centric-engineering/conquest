@@ -191,6 +191,60 @@ DELETE /api/v1/users/me
 
 **Note**: Deletion cascades to sessions and accounts. Session cookie is cleared automatically.
 
+## Export Current User's Data (Subject Access)
+
+✅ **Implemented in:** `app/api/v1/users/me/export/route.ts` (GET handler)
+
+**Purpose**: Give the user a copy of everything held about them (GDPR Art. 15)
+
+```
+GET /api/v1/users/me/export
+```
+
+**Authentication**: Required — **browser session only**. An API key of any scope
+is refused with 403, because an export is the whole account in one response and
+keys are self-service (same reasoning as the email-change refusal above).
+
+**Rate limit**: `exportLimiter` sub-cap, 10/min keyed on the calling user, on top
+of the section tier.
+
+**Response** (200 OK): the bundle from `exportUserData()` under the standard
+envelope. Sent with `Cache-Control: no-store` and a `Content-Disposition`
+attachment filename.
+
+```json
+{
+  "success": true,
+  "data": {
+    "meta": {
+      "formatVersion": 1,
+      "generatedAt": "2026-07-31T12:00:00.000Z",
+      "subjectUserId": "clxxxx",
+      "exported": [{ "model": "Session", "section": "sessions", "description": "...", "rows": 3 }],
+      "attribution": [{ "model": "AiAgent", "section": "agents", "description": "...", "rows": 1 }],
+      "excluded": [{ "model": "AiMessageEmbedding", "reason": "..." }]
+    },
+    "account": { "id": "clxxxx" },
+    "personalData": { "sessions": [], "conversations": [] },
+    "attributions": { "agents": [] },
+    "erasureReceipts": [],
+    "app": {}
+  }
+}
+```
+
+**Error Responses**:
+
+- **401 Unauthorized**: No valid session
+- **403 Forbidden**: Authenticated with an API key rather than a browser session
+- **429 Too Many Requests**: Export sub-cap exhausted
+
+**Note**: Credential material — session tokens, password hashes, OAuth tokens,
+API-key hashes, HMAC secrets — is omitted; `meta.excluded` states what else was
+withheld and why. Volume is unbounded by design. What the bundle contains is
+decided by the manifest, not this route — see
+[Subject Access Export](../privacy/data-export.md).
+
 ## Get User Preferences
 
 ✅ **Implemented in:** `app/api/v1/users/me/preferences/route.ts` (GET handler)
@@ -531,8 +585,45 @@ DELETE /api/v1/users/:id
 
 **Admin Protection**: Admins cannot delete other admin accounts. To delete an admin, first demote them to USER role using the PATCH endpoint, then delete.
 
+## Export a User's Data (Admin, Subject Access)
+
+✅ **Implemented in:** `app/api/v1/users/[id]/export/route.ts` (GET handler)
+
+**Purpose**: Answer a subject access request that arrives by email or post
+rather than through the account itself (GDPR Art. 15)
+
+```
+GET /api/v1/users/:id/export
+```
+
+**Authentication**: Required (ADMIN role)
+
+**Rate limit**: `exportLimiter` sub-cap, 10/min keyed on the **acting admin** —
+so one operator working through a backlog is not blocked by another, and a
+subject cannot exhaust their own export budget.
+
+**Response** (200 OK): the same bundle shape as
+[the self-service route](#export-current-users-data-subject-access), for the
+named subject. Admins deliberately have no filter over what it contains — an
+access response an operator can narrow is one they can narrow by mistake.
+
+**Error Responses**:
+
+- **401 Unauthorized**: No valid session
+- **403 Forbidden**: User does not have ADMIN role
+- **400 Validation Error**: Malformed user ID
+- **404 Not Found**: No such user
+- **429 Too Many Requests**: Export sub-cap exhausted
+
+**Note**: A missing subject is a 404, distinct from a 500 — collapsing the two
+would tell an operator the subject does not exist when the export merely broke.
+The request is logged with both the subject and the acting admin, since reading
+someone else's record is itself an event worth accounting for.
+
 ## Related Documentation
 
 - [API Overview](./endpoints.md) - API design principles and common patterns
 - [Auth Endpoints](./auth-endpoints.md) - Authentication API
 - [Admin Endpoints](./admin-endpoints.md) - Admin-only API
+- [Subject Access Export](../privacy/data-export.md) - the manifest that decides what an export contains
+- [Account Deletion & Right to Erasure](../privacy/data-erasure.md) - the Art. 17 counterpart
