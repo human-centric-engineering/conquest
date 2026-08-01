@@ -166,7 +166,7 @@ Tags are stored as `AiConversation.tags: String[]` (Postgres `text[]`, default `
 
 ### Semantic search
 
-- `GET /conversations/search?q=…` embeds `q` via `embedText(q, 'query')`, runs cosine-distance search against `ai_message_embedding` (`<=>` with pgvector), and returns conversations grouped by best-matching message. Scoped to `session.user.id` — admins only search their own conversations.
+- `GET /conversations/search?q=…` embeds `q` via `embedText(q, 'query')`, runs cosine-distance search against `ai_message_embedding` (`<=>` with pgvector), and returns conversations grouped by best-matching message. Same visibility as the list: the caller's own conversations, actively-shared ones, and system-owned inbound threads. Every match the caller doesn't own is audit-logged under the basis that admitted it.
 - Params: `q` (1–500 chars, required), `agentId`, `isActive`, `dateFrom`, `dateTo`, `limit` (1–50, default 10), `threshold` (0–1, default 0.8 — results with distance `< threshold`).
 - The list toolbar's "Search messages" checkbox calls this endpoint first, forwarding `agentId` and `isActive` filters. If the server signals `semanticAvailable: false` (no embedding provider configured or embedding returned non-finite values), the table falls back to lexical `?messageSearch=` on the list endpoint.
 - Similarity scores in the response are clamped to `[0, 1]` (pgvector cosine distance can exceed 1 for dissimilar vectors).
@@ -175,21 +175,24 @@ Tags are stored as `AiConversation.tags: String[]` (Postgres `text[]`, default `
 
 One row per admin endpoint backing this UI.
 
-| Path                                                     | Method | Purpose                                                                                                                        |
-| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `/api/v1/admin/orchestration/conversations`              | GET    | Paginated list scoped to `session.user.id`. Filters: `agentId`, `isActive`, `q`, `messageSearch`, `tag`, `dateFrom`, `dateTo`. |
-| `/api/v1/admin/orchestration/conversations/:id`          | GET    | Single conversation + agent + `_count.messages`. Scoped to `session.user.id` — other users return 404.                         |
-| `/api/v1/admin/orchestration/conversations/:id`          | PATCH  | Update `title`, `tags`, `isActive`. Rate-limited (`adminLimiter`). Used by `ConversationTags`.                                 |
-| `/api/v1/admin/orchestration/conversations/:id`          | DELETE | Hard delete; messages cascade via FK. 404 for cross-user. No UI caller.                                                        |
-| `/api/v1/admin/orchestration/conversations/:id/messages` | GET    | Full messages with **admin-visible metadata** (tokens, cost, latency) — consumer route strips these. Cross-user allowed.       |
-| `/api/v1/admin/orchestration/conversations/export`       | GET    | JSON / CSV export, capped at 500, 1/min per admin IP.                                                                          |
-| `/api/v1/admin/orchestration/conversations/clear`        | POST   | Bulk delete by filter; default scope = caller, opt-in `userId` or `allUsers: true` for cross-user. Empty body rejected.        |
-| `/api/v1/admin/orchestration/conversations/search`       | GET    | pgvector semantic search across message embeddings, scoped to `session.user.id`. Wired into the UI via "Search messages".      |
+| Path                                                     | Method | Purpose                                                                                                                                           |
+| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/v1/admin/orchestration/conversations`              | GET    | Paginated list: caller's own + actively-shared + system-owned. Filters: `agentId`, `isActive`, `q`, `messageSearch`, `tag`, `dateFrom`, `dateTo`. |
+| `/api/v1/admin/orchestration/conversations/:id`          | GET    | Single conversation + agent + `_count.messages`. Gated by `adminCanViewConversation` — another admin's own returns 404.                           |
+| `/api/v1/admin/orchestration/conversations/:id`          | PATCH  | Update `title`, `tags`, `isActive`. Owner or system-owned only. Rate-limited (`adminLimiter`). Used by `ConversationTags`.                        |
+| `/api/v1/admin/orchestration/conversations/:id`          | DELETE | Hard delete; messages cascade via FK. Owner or system-owned only; 404 otherwise. No UI caller.                                                    |
+| `/api/v1/admin/orchestration/conversations/:id/messages` | GET    | Full messages with **admin-visible metadata** (tokens, cost, latency) — consumer route strips these. Cross-user allowed.                          |
+| `/api/v1/admin/orchestration/conversations/export`       | GET    | JSON / CSV export, capped at 500, 1/min per admin IP.                                                                                             |
+| `/api/v1/admin/orchestration/conversations/clear`        | POST   | Bulk delete by filter; default scope = caller, opt-in `userId` or `allUsers: true` for cross-user. Empty body rejected.                           |
+| `/api/v1/admin/orchestration/conversations/search`       | GET    | pgvector semantic search across message embeddings, same visibility as the list. Wired into the UI via "Search messages".                         |
 
 Ownership / scope notes:
 
-- List (`GET /conversations`), detail, PATCH, DELETE, and export are all scoped to `session.user.id`. Admins only see their own conversations. Any `userId` query parameter is silently ignored.
-- Detail (`GET /conversations/:id`), PATCH, and DELETE return 404 (never 403) for another user's conversation.
+- Visibility has **three bases** (`lib/orchestration/access/conversation-access.ts`): `'owner'`, `'shared'` (the owner created an active `AiConversationShare`), and `'system'` — nobody owns the row. Inbound threads are system-owned since [#502](https://github.com/human-centric-engineering/sunrise/issues/502): the messages belong to a third party with no account here, so attributing them to the operator who configured the channel made them cascade-deletable by that operator's erasure and disclosable in their subject-access export.
+- List, detail and search apply all three. **Export applies only `'owner'`** — bulk-downloading hundreds of third parties' message bodies under one audit row is a different act from reading one thread, and the per-conversation routes cover the audit-export case with per-access logging.
+- PATCH and DELETE accept `'owner'` and `'system'`, never `'shared'` — a share grants view consent, not write-or-destroy consent. `'system'` is included because an inbound thread has no owner, and deleting it is the only erasure route open to the person who sent the messages (`eraseUser()` cannot reach someone with no account).
+- Anything other than `'owner'` writes an `AiAdminAuditLog` row carrying `metadata.accessBasis`; self-access is deliberately unlogged. Any `userId` query parameter is silently ignored. This covers **mutations as well as reads** — `conversation.metadata_viewed`, `conversation.updated` (with `metadata.fields` naming what changed, not the values, so a renamed `title` doesn't put message content in the log), and `conversation.deleted`. A compliance query for "which conversations that weren't theirs did admin X touch this month?" would silently miss every rename and archive if PATCH were exempt.
+- Detail (`GET /conversations/:id`), PATCH, and DELETE return 404 (never 403) when the basis doesn't permit the action.
 - Messages (`GET /conversations/:id/messages`) is **not** userId-scoped — any admin can fetch any conversation's messages via direct API call. This is intentional for admin audit use cases (e.g. scripts, dashboards). The detail page blocks cross-user viewing at the page level (the parent conversation fetch 404s first, calling `notFound()` before messages render). Keep this asymmetry in mind when changing either route.
 
 ## Related Docs

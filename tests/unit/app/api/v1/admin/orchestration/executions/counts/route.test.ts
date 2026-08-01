@@ -9,7 +9,7 @@
  *   - Max-statuses cap (see case note below)
  *   - Happy path: zero-fill when groupBy returns []
  *   - Happy path: partial groupBy result overlaid on zero-fill
- *   - Security: groupBy scoped to session.user.id (critical assertion)
+ *   - Security: groupBy scoped to the caller's own + system-owned runs
  *   - Dedup: duplicate statuses in CSV collapse before the DB call
  *   - Whitespace trim: URL-encoded spaces stripped from CSV tokens
  *
@@ -201,23 +201,37 @@ describe('GET /api/v1/admin/orchestration/executions/counts', () => {
     });
   });
 
-  // ── Security: scoped to session.user.id ───────────────────────────────────
+  // ── Security: visibility clause ───────────────────────────────────────────
 
-  describe('User-id scoping (security-critical)', () => {
-    it('passes the authenticated admin id in the groupBy where clause', async () => {
+  describe('Visibility scoping (security-critical)', () => {
+    it('counts only the admin\u2019s own runs and system-owned ones', async () => {
       const response = await GET(makeRequest('?statuses=pending,running'));
 
       expect(response.status).toBe(200);
 
-      // This is the key security assertion: if userId is missing or wrong,
-      // executions from other users would be returned.
+      // The key security assertion: the where clause must pin the caller's id
+      // on the owner arm. A missing or wrong id would count every admin's
+      // runs; a missing `userId: null` arm would drop scheduled and inbound
+      // runs from the sidebar badge while the list still shows them.
       const call = vi.mocked(prisma.aiWorkflowExecution.groupBy).mock.calls[0][0];
       expect(call.where).toEqual({
-        userId: ADMIN_ID,
-        status: { in: expect.arrayContaining(['pending', 'running']) },
+        AND: [
+          { OR: [{ userId: ADMIN_ID }, { userId: null }] },
+          { status: { in: expect.arrayContaining(['pending', 'running']) } },
+        ],
       });
-      // Confirm the where clause has exactly these two keys — no extra leakage
-      expect(Object.keys(call.where as object)).toEqual(['userId', 'status']);
+    });
+
+    it('does not admit another admin\u2019s runs through the visibility clause', async () => {
+      await GET(makeRequest('?statuses=pending'));
+
+      const call = vi.mocked(prisma.aiWorkflowExecution.groupBy).mock.calls[0][0];
+      const [visibility] = (call.where as { AND: { OR: { userId: string | null }[] }[] }).AND;
+
+      // Exactly two arms: the caller, and unowned rows. Anything else here
+      // would be a cross-admin read.
+      expect(visibility.OR).toHaveLength(2);
+      expect(visibility.OR.map((arm) => arm.userId)).toEqual([ADMIN_ID, null]);
     });
   });
 
@@ -230,7 +244,8 @@ describe('GET /api/v1/admin/orchestration/executions/counts', () => {
       expect(response.status).toBe(200);
 
       const call = vi.mocked(prisma.aiWorkflowExecution.groupBy).mock.calls[0][0];
-      const inArg = (call.where as { status: { in: string[] } }).status.in;
+      const inArg = (call.where as { AND: [unknown, { status: { in: string[] } }] }).AND[1].status
+        .in;
 
       // Must be exactly 2 unique entries — pending not duplicated
       expect(inArg).toHaveLength(2);
@@ -248,7 +263,8 @@ describe('GET /api/v1/admin/orchestration/executions/counts', () => {
       expect(response.status).toBe(200);
 
       const call = vi.mocked(prisma.aiWorkflowExecution.groupBy).mock.calls[0][0];
-      const inArg = (call.where as { status: { in: string[] } }).status.in;
+      const inArg = (call.where as { AND: [unknown, { status: { in: string[] } }] }).AND[1].status
+        .in;
 
       // ' running' (with a leading space) must NOT appear — the schema trims tokens
       expect(inArg).not.toContain(' running');

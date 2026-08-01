@@ -14,9 +14,9 @@
  * `metadata.stepId` are dropped — only step-attributed cost surfaces here
  * (chat/conversation cost has its own surfaces).
  *
- * Ownership: rows are scoped to `session.user.id`. Cross-user access
- * returns 404 (not 403) — we never confirm existence of another user's
- * row.
+ * Ownership: the caller's own runs, plus system-owned runs (`userId = null`
+ * — schedule- and inbound-triggered). Another admin's own run returns 404
+ * (not 403) — we never confirm existence of a row the caller cannot see.
  *
  * Authentication: Admin role required.
  */
@@ -26,6 +26,7 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { executionTraceSchema } from '@/lib/validations/orchestration';
 import { overlayStepDescriptions } from '@/lib/orchestration/trace/overlay-descriptions';
 import {
@@ -74,7 +75,7 @@ export const GET = withAdminAuth<{ id: string }>(async (_request, session, { par
       version: { select: { snapshot: true } },
     },
   });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
 

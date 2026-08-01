@@ -30,9 +30,13 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiConversation: {
-      findFirst: vi.fn(),
+      // `findUnique` backs `adminCanViewConversation`, which replaced the
+      // inline ownership `findFirst` (#502).
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
+    // Backs `logConversationAccess` — a non-owner PATCH leaves an audit row.
+    aiAdminAuditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
 
@@ -68,6 +72,7 @@ function makeConversation(overrides: Record<string, unknown> = {}) {
   return {
     id: CONV_ID,
     userId: ADMIN_ID,
+    share: null,
     agentId: AGENT_ID,
     title: 'Test Conversation',
     tags: [],
@@ -117,7 +122,7 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
 
   it('updates tags on a conversation', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as any);
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as any);
     vi.mocked(prisma.aiConversation.update).mockResolvedValue(
       makeConversation({ tags: ['escalate', 'bug-report'] }) as any
     );
@@ -136,7 +141,7 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
 
   it('updates title on a conversation', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as any);
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as any);
     vi.mocked(prisma.aiConversation.update).mockResolvedValue(
       makeConversation({ title: 'Updated title' }) as any
     );
@@ -153,7 +158,7 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
 
   it('returns 404 for non-existent conversation', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(null);
 
     const response = await PATCH(makeRequest(CONV_ID, { tags: ['test'] }), makeParams(CONV_ID));
 
@@ -169,5 +174,73 @@ describe('PATCH /api/v1/admin/orchestration/conversations/:id', () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  describe('audit logging', () => {
+    it('records a PATCH of a system-owned inbound thread', async () => {
+      // Renaming or archiving an inbound thread edits a third party's record.
+      // They have no account here and cannot check the log themselves, so the
+      // mutation leaves the same trail a delete does.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({ userId: null }) as any
+      );
+      vi.mocked(prisma.aiConversation.update).mockResolvedValue(
+        makeConversation({ userId: null, title: 'Renamed' }) as any
+      );
+
+      const response = await PATCH(makeRequest(CONV_ID, { title: 'Renamed' }), makeParams(CONV_ID));
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(prisma.aiAdminAuditLog.create)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: ADMIN_ID,
+            action: 'conversation.updated',
+            entityType: 'conversation',
+            entityId: CONV_ID,
+            metadata: expect.objectContaining({
+              accessBasis: 'system',
+              conversationOwnerId: null,
+              // Names what changed without copying the value — a `title` would
+              // otherwise put message content into the audit log.
+              fields: ['title'],
+            }),
+          }),
+        })
+      );
+    });
+
+    it('does not log a PATCH of the caller own conversation', async () => {
+      // Self-access is deliberately unlogged — routine edits would flood the
+      // audit log without adding signal.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as any);
+      vi.mocked(prisma.aiConversation.update).mockResolvedValue(
+        makeConversation({ title: 'Renamed' }) as any
+      );
+
+      await PATCH(makeRequest(CONV_ID, { title: 'Renamed' }), makeParams(CONV_ID));
+
+      expect(vi.mocked(prisma.aiAdminAuditLog.create)).not.toHaveBeenCalled();
+    });
+
+    it('refuses a PATCH on a merely-shared conversation', async () => {
+      // A share grants view consent, not write consent — so there is nothing
+      // to audit, because the mutation never happens.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({
+          userId: 'someone-else',
+          share: { revokedAt: null, expiresAt: null },
+        }) as any
+      );
+
+      const response = await PATCH(makeRequest(CONV_ID, { title: 'Renamed' }), makeParams(CONV_ID));
+
+      expect(response.status).toBe(404);
+      expect(vi.mocked(prisma.aiConversation.update)).not.toHaveBeenCalled();
+      expect(vi.mocked(prisma.aiAdminAuditLog.create)).not.toHaveBeenCalled();
+    });
   });
 });

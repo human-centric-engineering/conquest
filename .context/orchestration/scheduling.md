@@ -62,11 +62,37 @@ Called every ~60 seconds by an external cron job hitting `POST /api/v1/admin/orc
 1. Queries enabled schedules where `nextRunAt <= now` (max 50 per tick)
 2. Skips schedules whose workflow is inactive
 3. Claims the schedule via **optimistic lock**: `updateMany WHERE id = :id AND nextRunAt = :originalNextRunAt` — if `count === 0`, another tick already claimed it (prevents double-fire in multi-instance deployments)
-4. Creates `AiWorkflowExecution` with status `pending` and `inputTemplate` as `inputData`
+4. Creates `AiWorkflowExecution` with status `pending`, `inputTemplate` as `inputData`, `triggerSource: 'schedule'`, and **`userId: null`** — see [Attribution](#attribution) below
 5. Validates the workflow definition via `workflowDefinitionSchema.safeParse()` — marks execution as `failed` if invalid
 6. **Invokes the orchestration engine** via `drainEngine()` (fire-and-forget) with `resumeFromExecutionId` so the engine picks up the `pending` row and transitions it through `running` to `completed`/`failed`
 
 Returns `{ processed, succeeded, failed, errors }`.
+
+### Attribution
+
+A scheduled run is **system-owned**: the execution row and the engine context
+both carry `userId: null`. A cron tick is not a person doing something, and
+`AiWorkflowExecution.userId` is `onDelete: Cascade` — while the row named the
+schedule's author, erasing that one account took the organisation's whole
+scheduled-run history with it ([#502](https://github.com/human-centric-engineering/sunrise/issues/502)).
+
+`AiWorkflowSchedule.createdBy` still records who set the schedule up, and
+`triggerSource: 'schedule'` marks the runs it produced.
+
+Two things follow:
+
+- **Admin visibility comes from the system basis.** Every admin can see and act
+  on system-owned runs via `lib/orchestration/access/execution-access.ts`. A new
+  surface that compares `userId` to the session id directly will show no
+  scheduled runs at all.
+- **`judge_call` cannot run on a schedule.** It needs a real account to file the
+  judge transcript against and throws `judge_call_requires_user_context`
+  instead of borrowing the schedule author's. Grade through the evaluations
+  surface, or start the workflow from an admin session.
+
+Runs created before this change kept their author — the scheduler set no
+`triggerSource` back then, so they cannot be told apart from runs an admin
+started by hand. See the `20260801090000_system_owned_inbound_runs` migration.
 
 **Engine-crash handling.** If the engine throws an uncaught error inside `drainEngine`, `finalize()` never runs — so the engine's normal `workflow.failed` hook is not emitted. To prevent silent zombification, the catch block updates the execution row to `failed` (with `errorMessage`, `completedAt`, AND `leaseToken: null` + `leaseExpiresAt: null` to clear the lease so it doesn't pin a terminal row) and dispatches the crash to **both** notification subsystems: the `workflow.execution.failed` event hook (for code-configured filterable dispatch) and the `execution_crashed` webhook subscription event (for admin-UI-configured durable delivery). Both payloads carry the same sanitised error. Subscribers and `GET /executions/:id/status` see consistent state immediately rather than waiting for the next reaper sweep. The lease-clear is also enforced structurally by the SQL CHECK constraint `ai_workflow_execution_lease_pair_coherent` — see [`engine.md` — Recovery model](./engine.md#recovery-model). See [Hooks — Event Types](./hooks.md#event-types) for the distinction between `workflow.failed` and `workflow.execution.failed`, and the [Webhook UI](../admin/orchestration-webhooks.md) for admin-driven subscription management.
 

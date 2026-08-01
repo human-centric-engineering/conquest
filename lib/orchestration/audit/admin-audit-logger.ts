@@ -163,18 +163,23 @@ export function logAdminAction(entry: AdminAuditEntry): void {
  * Convenience wrapper for logging conversation accesses with the
  * consistent metadata shape that downstream queries depend on:
  *
- *   metadata.accessBasis           — 'owner' | 'shared'
- *   metadata.conversationOwnerId   — the end user who owns the row
+ *   metadata.accessBasis           — 'owner' | 'shared' | 'system'
+ *   metadata.conversationOwnerId   — the end user who owns the row, or
+ *                                    `null` for a system-owned inbound thread
  *
  * Together with `userId` (the calling admin) these two keys answer the
- * compliance-team question "which other users' conversations did admin
- * X view this month?" via a single query — `WHERE action LIKE
- * 'conversation.%' AND metadata->>'accessBasis' = 'shared'`.
+ * compliance-team question "which conversations that weren't theirs did
+ * admin X view this month?" via a single query — `WHERE action LIKE
+ * 'conversation.%' AND metadata->>'accessBasis' <> 'owner'`.
  *
  * **Owner accesses skip logging by convention.** This helper writes a
- * row only when `basis === 'shared'` — routine self-access would flood
- * the audit log without adding signal. The function silently no-ops on
- * `basis === 'owner'` so callers don't need a branch.
+ * row for `'shared'` and `'system'` accesses — routine self-access would
+ * flood the audit log without adding signal. The function silently no-ops
+ * on `basis === 'owner'` so callers don't need a branch.
+ *
+ * `'system'` is logged for the same reason as `'shared'`, and arguably a
+ * stronger one: an inbound thread carries the messages of someone with no
+ * account here, who cannot check the log themselves.
  *
  * The `extra` metadata object is merged into the persisted JSON
  * alongside the access-basis keys; callers use it to carry route-
@@ -187,7 +192,7 @@ export function logConversationAccess(params: {
   conversationTitle: string | null;
   conversationOwnerId: string | null;
   /** `'owner'` accesses are intentionally not logged — see fn docstring. */
-  accessBasis: 'owner' | 'shared';
+  accessBasis: 'owner' | 'shared' | 'system';
   /** Route-level action name, e.g. `'conversation.messages_viewed'`. */
   action: string;
   /** Optional additional metadata — merged into the persisted JSON. */

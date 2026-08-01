@@ -629,7 +629,7 @@ Schema: `dryRunWorkflowBodySchema` in `lib/validations/orchestration.ts`.
 
 Three admin routes drive the runtime engine. The engine implementation lives in `lib/orchestration/engine/` — see [`engine.md`](./engine.md) for the event model, executor registry, context lifecycle, and error strategies. This section is the **HTTP contract**.
 
-**Ownership scoping.** Every route is scoped to `session.user.id`. A cross-user lookup on `GET /executions/:id` or `POST /executions/:id/approve` returns **404**, not 403 — we do not confirm existence of rows outside the caller's own history. The same rule applies when resuming via `?resumeFromExecutionId=` on `/execute`.
+**Ownership scoping.** Every route gates on `adminCanViewExecution` (`lib/orchestration/access/execution-access.ts`): the caller's own runs, plus **system-owned** ones — schedule- and inbound-triggered runs carry `userId = null` because nobody with an account started them ([#502](https://github.com/human-centric-engineering/sunrise/issues/502)), and without that arm they would be invisible and un-actionable here. A lookup on another admin's own run via `GET /executions/:id` or `POST /executions/:id/approve` returns **404**, not 403 — we do not confirm existence of rows outside what the caller can see. The same rule applies when resuming via `?resumeFromExecutionId=` on `/execute`.
 
 ### Execute workflow (SSE)
 
@@ -647,7 +647,7 @@ Validated by `executeWorkflowBodySchema` (`inputData` required, optional `budget
 1. Runs admin auth + rate limit.
 2. Loads the workflow, rejects with **404** when missing, **400 VALIDATION_ERROR** when `isActive === false`.
 3. Runs `validateWorkflow()` pre-flight on the stored definition — structural errors surface as `400` with the full DAG error list on `error.details`.
-4. Optionally resolves `?resumeFromExecutionId=<cuid>` — if the target row exists but belongs to another user, **404** (never 403).
+4. Optionally resolves `?resumeFromExecutionId=<cuid>` — gated by `adminCanViewExecution`, so another admin's own run is **404** (never 403) while a system-owned one resumes for anybody. A resumed run **keeps the user context it was created with**, exactly as it keeps its pinned `versionId` and persisted `scope`: the route passes the row's `userId`, not the resuming admin's. Handing over the session id would give a system-owned run's second half a user context its first half never had — `judge_call` would start filing a stranger's transcript into that admin's history, and `user_memory` would read their remembered facts from inbound traffic. For an owner-resume the two are the same value.
 5. Instantiates `OrchestrationEngine`, hands the resulting `AsyncIterable<ExecutionEvent>` straight to [`sseResponse`](../api/sse.md), and returns the `text/event-stream` response.
 
 Each frame is a discriminated `ExecutionEvent` — `workflow_started`, `step_started`, `step_completed`, `step_failed`, `approval_required`, `budget_warning`, `workflow_completed`, `workflow_failed`. See [`engine.md`](./engine.md#executionevent-sse-payloads) for the full union and [`../api/sse.md`](../api/sse.md) for the framing contract and error sanitization guarantee (raw executor errors never reach the wire).
@@ -1057,7 +1057,7 @@ Builds a hierarchical node/link graph: central KB node → document nodes → ch
 
 ## Conversations
 
-Four routes over `AiConversation` / `AiMessage`. **Every endpoint is scoped to `session.user.id`.**
+Four routes over `AiConversation` / `AiMessage`. **Every endpoint gates on `adminCanViewConversation`** — the caller's own, actively shared with them, or system-owned (an inbound thread nobody owns).
 
 ### Ownership model (read this)
 

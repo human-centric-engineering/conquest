@@ -250,16 +250,21 @@ describe('subject-data source manifest', () => {
       expect(undescribed).toEqual([]);
     });
 
-    it('gives a scope note to every source known to narrow', () => {
-      // These two return only SOME of the rows matching the subject, because
-      // inbound traffic is attributed to the operator who configured the
-      // channel rather than to the person who sent it. Dropping the note (or
-      // the filter it describes) silently changes what a data subject receives
-      // — in one direction it under-answers, in the other it discloses a third
-      // party's messages. Pin both.
+    it('no longer narrows the two sources that inbound mis-attribution forced', () => {
+      // These two returned only SOME of the subject's matching rows between
+      // #467 and #502: inbound traffic was stamped with the operator who
+      // configured the channel, so matching on `userId` alone would have
+      // handed them a third party's phone number and message bodies. The
+      // filters contained that; #502 removed its cause by making those rows
+      // system-owned, so the subject now gets the whole set.
+      //
+      // Pinned in this direction so a reinstated filter has to be deliberate.
+      // If one ever is needed again, it must arrive with a `scopeNote` — an
+      // export that quietly returns a subset reads exactly like a complete
+      // answer, which is the failure this manifest exists to prevent.
       for (const model of ['AiConversation', 'AiWorkflowExecution']) {
         const source = SUBJECT_DATA_SOURCES.find((entry) => entry.model === model);
-        expect(source?.scopeNote, `${model} must disclose why it narrows`).toBeTruthy();
+        expect(source?.scopeNote, `${model} should return every row it matches`).toBeUndefined();
       }
     });
 

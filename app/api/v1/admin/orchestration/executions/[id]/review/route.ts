@@ -17,8 +17,9 @@
  * archives any prior verdict into `supervisorReport.previousVerdicts[]`
  * with `triggeredBy: 'in_workflow' | 'retroactive'`.
  *
- * Ownership: rows are scoped to `session.user.id`. Cross-user access
- * returns 404.
+ * Ownership: the caller's own runs, plus system-owned runs (`userId = null`
+ * — schedule- and inbound-triggered). Another admin's own run returns 404
+ * (not 403) — we never confirm existence of a row the caller cannot see.
  *
  * Authentication: Admin role required.
  */
@@ -33,6 +34,7 @@ import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors'
 import { getRouteLogger } from '@/lib/api/context';
 import { logger } from '@/lib/logging';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { executionTraceSchema, priorSupervisorReportSchema } from '@/lib/validations/orchestration';
 import {
   CostOperation,
@@ -113,7 +115,7 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   }
 
   const execution = await prisma.aiWorkflowExecution.findUnique({ where: { id } });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
 

@@ -91,7 +91,11 @@ import {
   SubjectNotFoundError,
   EXPORT_FORMAT_VERSION,
 } from '@/lib/privacy/export-user';
-import { SUBJECT_DATA_SOURCES, EXCLUDED_SOURCES } from '@/lib/privacy/export-sources';
+import {
+  SUBJECT_DATA_SOURCES,
+  EXCLUDED_SOURCES,
+  type SubjectDataSource,
+} from '@/lib/privacy/export-sources';
 
 const SUBJECT = {
   id: 'user-1',
@@ -222,23 +226,28 @@ describe('exportUserData', () => {
       expect(argsTo('aiKnowledgeDocument').where).toEqual({ uploadedBy: 'user-1' });
     });
 
-    it('excludes inbound conversations, which belong to a third party', async () => {
-      // An inbound thread is written with `userId = trigger.createdBy` — the
-      // operator who configured the channel — while the messages and
-      // `fromAddress` belong to whoever sent them. Matching on `userId` alone
-      // would hand one subject another person's correspondence.
+    it('matches conversations on the subject alone, with no inbound filter', async () => {
+      // Inbound threads used to be written with `userId = trigger.createdBy`
+      // — the operator who configured the channel — while the messages and
+      // `fromAddress` belonged to whoever sent them, so this source filtered
+      // `channel: null` to avoid handing one subject another person's
+      // correspondence. #502 made those rows system-owned (`userId: null`),
+      // which excludes them from this query by construction. The filter is
+      // gone, and the subject's own chat history is no longer narrowed by a
+      // predicate that was never about them.
       await exportUserData(PARAMS);
 
-      expect(argsTo('aiConversation').where).toEqual({ userId: 'user-1', channel: null });
+      expect(argsTo('aiConversation').where).toEqual({ userId: 'user-1' });
     });
 
-    it('excludes inbound-triggered workflow runs, whose input is a third party’s message', async () => {
+    it('matches workflow runs on the subject alone, with no trigger-source filter', async () => {
+      // Same retirement as conversations above. An inbound run's `inputData`
+      // is the adapter payload verbatim — sender number, email body,
+      // attachments — so while those rows carried an operator's id, this
+      // source had to filter `triggerSource: null` to stay honest.
       await exportUserData(PARAMS);
 
-      expect(argsTo('aiWorkflowExecution').where).toEqual({
-        userId: 'user-1',
-        triggerSource: null,
-      });
+      expect(argsTo('aiWorkflowExecution').where).toEqual({ userId: 'user-1' });
     });
 
     it('matches contact submissions on the subject email, case-insensitively', async () => {
@@ -371,10 +380,43 @@ describe('exportUserData', () => {
       // A narrowed source that reported only a row count would be the
       // silent-omission failure at row granularity — the count reads like a
       // complete answer either way.
-      const bundle = await exportUserData(PARAMS);
-      const conversations = bundle.meta.exported.find((e) => e.model === 'AiConversation');
+      //
+      // No shipped source narrows today (#502 removed the last two, which
+      // existed to contain inbound rows mis-attributed to an operator), so the
+      // mechanism is exercised through a source pushed on for this test.
+      // Without it, the next author to add a filtered `fetch` would find the
+      // disclosure path untested.
+      const narrowed: SubjectDataSource = {
+        model: 'SmokeNarrowed',
+        section: 'smokeNarrowed',
+        disposition: 'export',
+        description: 'Synthetic source used to exercise scope disclosure.',
+        scopeNote: 'Covers only the rows this test says it covers, and nothing else.',
+        fetch: () => Promise.resolve([]),
+      };
+      SUBJECT_DATA_SOURCES.push(narrowed);
+      try {
+        const bundle = await exportUserData(PARAMS);
+        const entry = bundle.meta.exported.find((e) => e.model === 'SmokeNarrowed');
 
-      expect(conversations?.scopeNote).toMatch(/inbound/i);
+        expect(entry?.scopeNote).toBe(narrowed.scopeNote);
+      } finally {
+        SUBJECT_DATA_SOURCES.pop();
+      }
+    });
+
+    it('leaves every shipped source unnarrowed', async () => {
+      // The inverse pin. `AiConversation` and `AiWorkflowExecution` carried
+      // filters and scope notes between #467 and #502, to keep a third party's
+      // inbound messages out of an export that matched them on the operator's
+      // `userId`. Those rows are system-owned now, so the export is whole
+      // again — and if a filter ever comes back it must arrive with a note.
+      const bundle = await exportUserData(PARAMS);
+      const narrowedModels = bundle.meta.exported
+        .filter((entry) => entry.scopeNote !== undefined)
+        .map((entry) => entry.model);
+
+      expect(narrowedModels).toEqual([]);
     });
 
     it('leaves scopeNote absent on sources that return every matching row', async () => {

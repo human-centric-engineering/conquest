@@ -54,16 +54,23 @@ export async function executeJudgeCall(
     );
   }
 
-  // Judge calls write `AiCostLog` rows attributed to the judge agent +
-  // user, so the workflow must be running on behalf of a real user.
-  // System-context executions (scheduler tick without a user) can't use
-  // judge_call — surface a typed error rather than silently writing to
-  // a null user.
+  // The judge runs through `streamChat`, whose `ChatRequest.userId` is
+  // required: it scopes the judge conversation, its history, and its memory
+  // to an account. There is no account behind a system-owned run, and
+  // borrowing the schedule's or trigger's author would file a judge
+  // transcript — which quotes the material under review, up to and including
+  // a third party's inbound message — into that person's own chat history.
+  // So this step is unavailable to system-owned runs rather than
+  // approximated; a typed error beats a plausible mis-attribution.
+  //
+  // Since #502 that means every scheduled and inbound run, not just the rare
+  // no-user invocation. Put `judge_call` in a workflow started by an admin,
+  // or grade after the fact through the evaluations surface.
   if (ctx.userId === null) {
     throw new ExecutorError(
       step.id,
       'judge_call_requires_user_context',
-      'judge_call needs a user-scoped execution context; this workflow is running without a userId.'
+      'judge_call needs a user-scoped execution context. Schedule- and inbound-triggered runs are system-owned (no userId), so they cannot use this step.'
     );
   }
 

@@ -8,8 +8,9 @@
  * an abort), reject is a deliberate review decision with a required
  * reason.
  *
- * Ownership: rows are scoped to `session.user.id`. Cross-user access
- * returns 404 (not 403).
+ * Ownership: the caller's own runs, plus system-owned runs (`userId = null`
+ * — schedule- and inbound-triggered). Another admin's own run returns 404
+ * (not 403) — we never confirm existence of a row the caller cannot see.
  *
  * Authentication: Admin role required.
  */
@@ -23,6 +24,7 @@ import { rejectExecutionBodySchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
 import { executeRejection } from '@/lib/orchestration/approval-actions';
 import { isApproverInTrace } from '@/lib/orchestration/approval-scoping';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const { id: rawId } = await params;
@@ -43,10 +45,15 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     throw new NotFoundError(`Execution ${id} not found`);
   }
 
-  // Allow if the user owns the execution or is in the approverUserIds list
-  const isOwner = execution.userId === session.user.id;
-  const isApprover = !isOwner && isApproverInTrace(execution.executionTrace, session.user.id);
-  if (!isOwner && !isApprover) {
+  // Allow if the caller may see the run — their own, or system-owned
+  // (schedule- / inbound-triggered, `userId = null`) — or is in the
+  // approverUserIds list. The system basis matters most here: a
+  // system-owned run has no owner to fall back on, so without it an
+  // approval gate reached by a scheduled or inbound run could never be
+  // cleared by anyone (#502).
+  const canAct = adminCanViewExecution(execution, session.user.id);
+  const isApprover = !canAct && isApproverInTrace(execution.executionTrace, session.user.id);
+  if (!canAct && !isApprover) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
 

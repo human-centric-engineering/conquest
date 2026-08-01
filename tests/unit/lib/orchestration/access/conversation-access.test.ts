@@ -41,6 +41,31 @@ describe('adminCanViewConversation', () => {
     expect(result).toEqual({ ok: true, basis: 'owner', ownerId: ADMIN_ID });
   });
 
+  it('returns ok=true with basis=system when nobody owns the conversation', async () => {
+    // Inbound threads (SMS / WhatsApp / email / Slack) carry `userId: null`
+    // since #502 — the messages are a third party's, not any account
+    // holder's. Without this basis an admin could not read, rename or
+    // delete one, including on the sender's own erasure request.
+    findUnique.mockResolvedValue({ userId: null, share: null });
+
+    const result = await adminCanViewConversation(CONV_ID, ADMIN_ID);
+
+    expect(result).toEqual({ ok: true, basis: 'system', ownerId: null });
+  });
+
+  it('reports basis=system, never owner, for an unowned conversation', async () => {
+    // Guards the ordering inside the helper: were the owner comparison to
+    // run first, a caller whose id was somehow nullish would be reported as
+    // the owner of every unowned row, and the access would skip its audit
+    // row (owner accesses are deliberately not logged).
+    findUnique.mockResolvedValue({ userId: null, share: null });
+
+    const result = await adminCanViewConversation(CONV_ID, '');
+
+    expect(result.basis).toBe('system');
+    expect(result.ownerId).toBeNull();
+  });
+
   it('returns ok=true with basis=shared when an active share exists', async () => {
     const futureExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
     findUnique.mockResolvedValue({
