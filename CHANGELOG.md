@@ -127,12 +127,28 @@ release process.
     `getLiveEngineSnapshot`) and the conversation list, detail and search now
     admit rows nobody owns — otherwise every scheduled and inbound run would
     vanish from the UI and a run paused at an approval gate could never be
-    cleared.
+    cleared. The same widening covers three surfaces that reach execution and
+    conversation rows by other routes: the resume path on `POST
+    /workflows/:id/execute?resumeFromExecutionId=` (without it an approved
+    system-owned run could not be continued and sat in `pending`),
+    `GET /observability/dashboard-stats` (which otherwise reported a healthy
+    deployment while the live-engine dashboard showed the same runs failing),
+    and `POST /evaluations/datasets/:id/capture` (which otherwise 404'd on
+    every attempt to capture a scheduled run's output into a dataset).
     `AccessBasis` in `conversation-access.ts` gains a third member, `'system'`,
     which is audit-logged like `'shared'`. Conversation PATCH/DELETE accept
     `'owner'` and `'system'` (still never `'shared'`), so an inbound thread can
     be deleted when the person who sent the messages asks — they have no
-    account, so `eraseUser()` cannot reach them.
+    account, so `eraseUser()` cannot reach them. Both mutations write an audit
+    row: PATCH logs `conversation.updated` with `metadata.fields` naming what
+    changed (not the values, so a renamed `title` doesn't put message content
+    in the log).
+  - **A resumed run keeps the user context it was created with**, alongside its
+    already-pinned `versionId` and persisted `scope` — the execute route passes
+    the execution row's `userId`, not the resuming admin's. Otherwise a
+    system-owned run's second half would gain a user context its first half
+    never had, and `judge_call` would file a stranger's transcript into the
+    approving admin's history. For an owner-resume the two are the same value.
   - **`judge_call` cannot run on a scheduled or inbound workflow.** It drives
     `streamChat`, which files the judge transcript into a real account's chat
     history; borrowing the schedule's author would re-create the

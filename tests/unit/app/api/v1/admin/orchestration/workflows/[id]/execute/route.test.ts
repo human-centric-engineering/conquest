@@ -353,6 +353,106 @@ describe('POST /api/v1/admin/orchestration/workflows/:id/execute', () => {
     });
   });
 
+  describe('resume of a system-owned run (#502)', () => {
+    /** A schedule- or inbound-triggered run: nobody started it, so `userId` is null. */
+    function arrangeSystemOwnedResume() {
+      const adminSession = mockAdminUser();
+      vi.mocked(auth.api.getSession).mockResolvedValue(adminSession);
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(makeWorkflow() as never);
+      vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+        id: EXECUTION_ID,
+        userId: null,
+        workflowId: WORKFLOW_ID,
+        versionId: 'wfv-1',
+      } as never);
+      vi.mocked(prisma.aiWorkflowVersion.findUnique).mockResolvedValue({
+        id: 'wfv-1',
+        workflowId: WORKFLOW_ID,
+        version: 1,
+        snapshot: VALID_DEFINITION,
+      } as never);
+      return adminSession;
+    }
+
+    it('should let any admin resume it rather than 404', async () => {
+      // A scheduled run that pauses at an approval gate is approved through
+      // `/executions/:id/approve` (which admits the system basis) and then
+      // resumed here. An owner match against a null userId always fails, so
+      // an owner-only guard would strand the run in `pending` forever.
+      arrangeSystemOwnedResume();
+
+      const response = await POST(
+        makeRequest(WORKFLOW_ID, { inputData: {} }, { resumeFromExecutionId: EXECUTION_ID }),
+        makeParams()
+      );
+
+      expect(response.status).not.toBe(404);
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ resumeFromExecutionId: EXECUTION_ID })
+      );
+    });
+
+    it('should keep the run system-owned instead of adopting the resuming admin', async () => {
+      // The run's second half must not gain a user context its first half
+      // lacked: `judge_call` would start filing a stranger's transcript into
+      // this admin's history, and `user_memory` would read their remembered
+      // facts from inbound traffic.
+      arrangeSystemOwnedResume();
+
+      await POST(
+        makeRequest(WORKFLOW_ID, { inputData: {} }, { resumeFromExecutionId: EXECUTION_ID }),
+        makeParams()
+      );
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ userId: null })
+      );
+    });
+
+    it('should still enforce the workflowId match on a system-owned run', async () => {
+      // The system basis widens *who* may resume, not *what* they may resume
+      // it as — a mismatched workflow id is still a 404.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(makeWorkflow() as never);
+      vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+        id: EXECUTION_ID,
+        userId: null,
+        workflowId: 'cmjbv4i3x00009wsloputgwuz',
+        versionId: 'wfv-1',
+      } as never);
+
+      const response = await POST(
+        makeRequest(WORKFLOW_ID, { inputData: {} }, { resumeFromExecutionId: EXECUTION_ID }),
+        makeParams()
+      );
+
+      expect(response.status).toBe(404);
+    });
+  });
+
+  describe('fresh run attribution', () => {
+    it('should attribute a non-resume run to the calling admin', async () => {
+      // The resume-path change must not leak into the fresh-run path: a run an
+      // admin starts by hand is theirs, and needs the user context that
+      // `judge_call` and `user_memory` depend on.
+      const adminSession = mockAdminUser();
+      vi.mocked(auth.api.getSession).mockResolvedValue(adminSession);
+      vi.mocked(prisma.aiWorkflow.findUnique).mockResolvedValue(makeWorkflow() as never);
+
+      await POST(makeRequest(WORKFLOW_ID, { inputData: {} }), makeParams());
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ userId: adminSession.user.id })
+      );
+    });
+  });
+
   describe('happy path — valid workflow execution', () => {
     it('should return an SSE response for a valid active workflow', async () => {
       // Arrange

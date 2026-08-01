@@ -20,7 +20,9 @@
  * un-deletable — including when the person who sent those messages asks for
  * them to be deleted, which is the one erasure request the platform has no
  * other route for (they have no account, so `eraseUser()` doesn't reach
- * them). Deletion is audit-logged with the `'system'` basis.
+ * them). Both mutations are audit-logged under the `'system'` basis, for the
+ * same reason reads are: the person whose record was edited or destroyed has
+ * no account here and cannot check for themselves.
  *
  * `AiMessage` rows cascade via the foreign key relation on DELETE.
  *
@@ -102,7 +104,26 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     },
   });
 
-  log.info('Conversation updated', { conversationId: id, fields: Object.keys(data) });
+  // Renaming or archiving an inbound thread edits a third party's record, so
+  // it leaves the same trail a delete does. Self-edits no-op inside the
+  // helper. `fields` names what changed without copying the values, which for
+  // a `title` would put message content into the audit log.
+  logConversationAccess({
+    adminUserId: session.user.id,
+    conversationId: id,
+    conversationTitle: updated.title,
+    conversationOwnerId: access.ownerId,
+    accessBasis: access.basis,
+    action: 'conversation.updated',
+    extra: { fields: Object.keys(data) },
+    clientIp: getClientIP(request),
+  });
+
+  log.info('Conversation updated', {
+    conversationId: id,
+    fields: Object.keys(data),
+    accessBasis: access.basis,
+  });
   return successResponse(updated);
 });
 

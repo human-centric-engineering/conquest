@@ -237,15 +237,31 @@ describe('GET /api/v1/admin/orchestration/observability/dashboard-stats', () => 
       expect(err.workflowId).toBe('wf-1');
     });
 
-    it('scopes conversation and execution queries to session.user.id', async () => {
+    it('scopes conversation and execution queries to the caller plus system-owned rows', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
       setupDefaultMocks();
 
       await GET(makeRequest());
 
+      // `userId: null` is the system arm (#502) — schedule- and
+      // inbound-triggered rows nobody owns. Dropping it would make this page
+      // report a healthy system while the live-engine dashboard, which shares
+      // the clause, shows the same runs failing.
+      const visibility = { OR: [{ userId: ADMIN_ID }, { userId: null }] };
+
       expect(vi.mocked(prisma.aiConversation.count)).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: ADMIN_ID }),
+          where: expect.objectContaining({ AND: expect.arrayContaining([visibility]) }),
+        })
+      );
+      expect(vi.mocked(prisma.aiWorkflowExecution.count)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ AND: expect.arrayContaining([visibility]) }),
+        })
+      );
+      expect(vi.mocked(prisma.aiWorkflowExecution.findMany)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [visibility, { status: 'failed' }] },
         })
       );
     });
