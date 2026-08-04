@@ -31,6 +31,7 @@
 import { prisma } from '@/lib/db/client';
 import { exportUserData, SubjectNotFoundError } from '@/lib/privacy/export-user';
 import { SUBJECT_DATA_SOURCES } from '@/lib/privacy/export-sources';
+import { APP_SUBJECT_DATA_SOURCES } from '@/lib/app/questionnaire/privacy/export-sources';
 
 const PREFIX = 'smoke-test-export';
 const stamp = Date.now();
@@ -40,6 +41,15 @@ const SESSION_TOKEN = `${PREFIX}-session-token-${stamp}`;
 const PASSWORD_HASH = `${PREFIX}-password-hash-${stamp}`;
 const KEY_HASH = `${PREFIX}-key-hash-${stamp}`;
 const WEBHOOK_SECRET = `${PREFIX}-webhook-secret-${stamp}`;
+/**
+ * ConQuest addition. `AppQuestionnaireInvitation.tokenHash` grants access to a
+ * questionnaire session, so the app manifest omits it — and this is the value
+ * that proves the omit runs. Without an invitation planted on the subject, that
+ * `omit` is never exercised against real Postgres and the script's promise
+ * ("a new source added without an `omit` is caught here") would not hold for
+ * the app tier.
+ */
+const INVITE_TOKEN_HASH = `${PREFIX}-invite-token-hash-${stamp}`;
 
 /**
  * A third party's identifiers, planted on rows the inbound path attributes to
@@ -72,6 +82,9 @@ async function main(): Promise<void> {
   let agentId: string | null = null;
   let contactId: string | null = null;
   let workflowId: string | null = null;
+  // ConQuest: the questionnaire the planted invitation hangs off. Deleting it
+  // cascades the version and the invitation.
+  let questionnaireId: string | null = null;
 
   try {
     const email = `${PREFIX}-subject-${stamp}@example.com`;
@@ -157,6 +170,31 @@ async function main(): Promise<void> {
         url: 'https://example.com/hook',
         secret: WEBHOOK_SECRET,
         events: ['workflow_failed'],
+      },
+    });
+
+    // ConQuest app tier: an invitation addressed to the subject. Exercises the
+    // app manifest's one credential omit (`tokenHash`) and its OR-match — the
+    // row is matched on `userId` here, and the `email` arm covers an invitation
+    // sent before the invitee ever registered.
+    const questionnaire = await prisma.appQuestionnaire.create({
+      data: { title: `${PREFIX} questionnaire` },
+    });
+    questionnaireId = questionnaire.id;
+
+    const version = await prisma.appQuestionnaireVersion.create({
+      data: { questionnaireId: questionnaire.id },
+    });
+
+    await prisma.appQuestionnaireInvitation.create({
+      data: {
+        versionId: version.id,
+        email,
+        name: `${PREFIX} invitee`,
+        tokenHash: INVITE_TOKEN_HASH,
+        userId: subject.id,
+        invitedByUserId: subject.id,
+        expiresAt: new Date(Date.now() + 7 * 86_400_000),
       },
     });
 
@@ -260,6 +298,10 @@ async function main(): Promise<void> {
       ['password hash', PASSWORD_HASH],
       ['API key hash', KEY_HASH],
       ['webhook secret', WEBHOOK_SECRET],
+      // ConQuest: the invitation token hash. A bearer credential for a
+      // questionnaire session — an export leaking it would let anyone holding
+      // the file redeem the invitation.
+      ['invitation token hash', INVITE_TOKEN_HASH],
     ] as const) {
       check(!serialised.includes(secret), `${name} is absent from the bundle`);
     }
@@ -299,7 +341,26 @@ async function main(): Promise<void> {
       'meta summarises every source'
     );
     check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
-    check(Object.keys(bundle.app).length === 0, 'app seam is empty in vanilla Sunrise');
+
+    // FORK EDIT (ConQuest) — upstream asserts the app seam is EMPTY, which is
+    // true only of vanilla Sunrise. This fork fills it, so the equivalent
+    // assertion is that the seam produced exactly one section per declared
+    // source: that is what catches a source silently dropped from the manifest,
+    // which is the failure the empty-check was standing in for.
+    check(
+      Object.keys(bundle.app).length === APP_SUBJECT_DATA_SOURCES.length,
+      'app seam yields a section per declared app source'
+    );
+    check(
+      APP_SUBJECT_DATA_SOURCES.every((source) => Array.isArray(bundle.app[source.section])),
+      'every app source returned rows (its query executed)'
+    );
+    // The planted invitation must come back — proof the OR-match reaches a row
+    // by `userId` and that the query runs at all.
+    check(
+      JSON.stringify(bundle.app.questionnaireInvitations ?? []).includes(`${PREFIX} invitee`),
+      'the subject’s own invitation IS exported'
+    );
 
     // A missing subject is a distinct, catchable failure — not a silent empty bundle.
     let notFound = false;
@@ -331,6 +392,13 @@ async function main(): Promise<void> {
       await prisma.aiWorkflow.deleteMany({ where: { id: workflowId } }).catch(() => undefined);
     }
     if (agentId) await prisma.aiAgent.deleteMany({ where: { id: agentId } }).catch(() => undefined);
+    // ConQuest: the version and its invitation cascade from the questionnaire,
+    // and neither is linked to the user, so deleting the subject above does not
+    // reach them.
+    if (questionnaireId)
+      await prisma.appQuestionnaire
+        .deleteMany({ where: { id: questionnaireId } })
+        .catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
   }
 }
