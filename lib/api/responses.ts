@@ -8,6 +8,30 @@
 import type { PaginationMeta } from '@/types/api';
 
 /**
+ * Default `Cache-Control` for every JSON envelope response.
+ *
+ * Nothing set a cache directive before this, and a response carrying a validator
+ * (an `ETag`, which several routes send — see `lib/api/etag.ts`) but no freshness
+ * information is *heuristically cacheable*: RFC 9111 §4.2.2 lets a shared cache
+ * store it and invent its own expiry. For a per-user payload that is the wrong
+ * default, and it fails silently — everything works until the day a CDN or
+ * caching proxy sits in front of the origin.
+ *
+ * `no-cache`, deliberately not `no-store`: `no-store` forbids the client keeping
+ * a copy at all, which makes conditional GET impossible and would defeat the
+ * ETags. `no-cache` lets the browser store and revalidate, so the 304 path keeps
+ * working. `private` keeps shared caches out of it entirely.
+ *
+ * This is a default, not a mandate — it is spread *before* `options.headers`, so
+ * a route that genuinely serves public, cacheable data can override it. Routes
+ * returning a raw `Response` (the embed widget, SSE streams, the Markdown
+ * exports) never pass through here and keep whatever they set.
+ *
+ * See #487.
+ */
+export const DEFAULT_CACHE_CONTROL = 'private, no-cache';
+
+/**
  * Create a successful API response
  *
  * Returns a properly formatted success response with data and optional metadata
@@ -52,6 +76,7 @@ export function successResponse<T>(
     status: options?.status || 200,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': DEFAULT_CACHE_CONTROL,
       ...options?.headers,
     },
   });
@@ -107,6 +132,7 @@ export function errorResponse(
     status: options?.status || 500,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': DEFAULT_CACHE_CONTROL,
       ...options?.headers,
     },
   });

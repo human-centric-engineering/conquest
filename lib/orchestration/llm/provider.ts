@@ -200,6 +200,38 @@ export function toProviderError(err: unknown, fallbackMessage: string): Provider
 }
 
 /**
+ * Per-request overrides accepted as the second argument by both
+ * `@anthropic-ai/sdk` and `openai` (`RequestOptions` in each).
+ */
+export interface ProviderRequestOptions {
+  timeout?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Translate the per-call `timeoutMs` / `signal` from `LlmOptions` into the
+ * request-options argument the SDKs take.
+ *
+ * Returns `undefined` when the caller supplied neither, so the client's
+ * construction-time timeout (`DEFAULT_TIMEOUT_MS` / `LOCAL_TIMEOUT_MS`, or the
+ * provider's configured override) still applies. Passing `{}` would be
+ * equivalent, but the explicit `undefined` keeps "caller said nothing" and
+ * "caller asked for the default" distinguishable at the call site.
+ *
+ * `timeoutMs` is a per-request cap on the whole HTTP exchange, so a caller that
+ * needs several minutes — live document extraction on a reasoning model is the
+ * case that surfaced this — gets what it asked for rather than the client
+ * default. Note that `withRetry` wraps the non-streaming paths: the timeout
+ * bounds each attempt, not the retry sequence as a whole.
+ */
+export function buildRequestOptions(options: LlmOptions): ProviderRequestOptions | undefined {
+  const requestOptions: ProviderRequestOptions = {};
+  if (options.timeoutMs !== undefined) requestOptions.timeout = options.timeoutMs;
+  if (options.signal !== undefined) requestOptions.signal = options.signal;
+  return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
+}
+
+/**
  * `fetch` wrapper that attaches an `AbortController` for a hard timeout
  * and transparently links any caller-supplied `AbortSignal`.
  */

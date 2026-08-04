@@ -58,6 +58,23 @@ describe('updateUserSchema', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should accept email alongside currentPassword (#489)', () => {
+      const result = updateUserSchema.safeParse({
+        email: 'newemail@example.com',
+        currentPassword: 'my-current-password',
+      });
+      // test-review:accept tobe_true — structural assertion on Zod safeParse success field; valid-input contract check
+      expect(result.success).toBe(true);
+    });
+
+    it('should NOT reject email without currentPassword at the schema level', () => {
+      // The schema only shapes the field; the route enforces the pairing (and
+      // exempts OAuth-only accounts), so a bare `email` must still parse.
+      const result = updateUserSchema.safeParse({ email: 'newemail@example.com' });
+      // test-review:accept tobe_true — structural assertion on Zod safeParse success field; valid-input contract check
+      expect(result.success).toBe(true);
+    });
+
     it('should trim name whitespace', () => {
       const result = updateUserSchema.safeParse({
         name: '  John Doe  ',
@@ -126,6 +143,17 @@ describe('updateUserSchema', () => {
       // The field is simply omitted
       // test-review:accept tobe_true — structural assertion on Zod safeParse success field; valid-input contract check
       expect(result.success).toBe(true);
+    });
+
+    it('should reject an empty currentPassword (#489)', () => {
+      // The field is optional, but once present it must be non-empty — an
+      // empty string would otherwise reach the route as "no password given"
+      // in a way that is easy to confuse with "field omitted".
+      const result = updateUserSchema.safeParse({
+        email: 'newemail@example.com',
+        currentPassword: '',
+      });
+      expect(result.success).toBe(false);
     });
   });
 

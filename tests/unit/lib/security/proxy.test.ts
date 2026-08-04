@@ -51,7 +51,14 @@ vi.mock('@/lib/app/protected-routes', () => ({
   appProtectedRoutes: ['/projects', '/reports/', ''],
 }));
 
+// Signup mode (#463). Default `open` so every other test in this file sees the
+// template's default behaviour; the invite_only block below drives it true.
+vi.mock('@/lib/auth/signup-mode', () => ({
+  isInviteOnly: vi.fn(() => false),
+}));
+
 import { applyRateLimit } from '@/lib/security/rate-limit-middleware';
+import { isInviteOnly } from '@/lib/auth/signup-mode';
 import { logger } from '@/lib/logging';
 import { signVisitorId, verifyVisitorId, VISITOR_COOKIE_NAME } from '@/lib/logging/visitor-id';
 import * as visitorIdModule from '@/lib/logging/visitor-id';
@@ -268,6 +275,14 @@ describe('proxy (project root)', () => {
       expect(response.headers.get('location')).toContain('/dashboard');
     });
 
+    it('leaves /signup reachable in the default open mode', async () => {
+      const request = createMockRequest('/signup');
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(200);
+    });
+
     it('redirects to /dashboard when accessing /reset-password with a session', async () => {
       const request = createMockRequest('/reset-password', {
         cookies: { '__Secure-better-auth.session_token': 'valid-token' },
@@ -277,6 +292,62 @@ describe('proxy (project root)', () => {
 
       expect(response.status).toBe(307);
       expect(response.headers.get('location')).toContain('/dashboard');
+    });
+  });
+
+  describe('Signup mode — invite_only (#463)', () => {
+    beforeEach(() => {
+      vi.mocked(isInviteOnly).mockReturnValue(true);
+    });
+
+    it('redirects /signup to /login', async () => {
+      const request = createMockRequest('/signup');
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get('location')).toContain('/login');
+      expect(response.headers.get('x-request-id')).toBe('test-request-id-123');
+    });
+
+    it('redirects nested signup paths too', async () => {
+      const request = createMockRequest('/signup/step-2');
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get('location')).toContain('/login');
+    });
+
+    it('still sends an authenticated visitor to the landing route, not /login', async () => {
+      // The authenticated-user redirect runs first, so a signed-in user hitting
+      // /signup lands where they belong rather than on a login page.
+      const request = createMockRequest('/signup', {
+        cookies: { 'better-auth.session_token': 'valid-token' },
+      });
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get('location')).toContain('/dashboard');
+    });
+
+    it('leaves /login reachable', async () => {
+      // invite_only closes account creation, not sign-in.
+      const request = createMockRequest('/login');
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(200);
+    });
+
+    it('leaves the accept-invite page reachable', async () => {
+      // The invitation flow is the whole point of invite_only.
+      const request = createMockRequest('/accept-invite');
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(200);
     });
   });
 

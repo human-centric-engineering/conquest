@@ -20,9 +20,11 @@ vi.mock('@/lib/storage/providers/vercel-blob', () => ({
   createVercelBlobProviderFromEnv: vi.fn(() => null),
 }));
 
-// Mock Local provider
+// Mock Local provider. The client builds it through the env-reading factory
+// so that STORAGE_LOCAL_* (notably the private root) is honoured — a plain
+// `createLocalProvider()` would ignore all of it.
 vi.mock('@/lib/storage/providers/local', () => ({
-  createLocalProvider: vi.fn(() => ({
+  createLocalProviderFromEnv: vi.fn(() => ({
     name: 'local',
     upload: vi.fn(),
     delete: vi.fn(),

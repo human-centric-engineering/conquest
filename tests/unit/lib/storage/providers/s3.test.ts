@@ -232,6 +232,100 @@ describe('lib/storage/providers/s3', () => {
       });
     });
 
+    describe('private object capability', () => {
+      const baseConfig = {
+        bucket: 'test-bucket',
+        region: 'us-east-1',
+        accessKeyId: 'test-key',
+        secretAccessKey: 'test-secret',
+      };
+
+      it('declares privateObjects when ACLs are enabled', () => {
+        const provider = new S3Provider({ ...baseConfig, useAcl: true });
+
+        expect(provider.capabilities.privateObjects).toBe(true);
+        expect(provider.capabilities.signedUrls).toBe(true);
+      });
+
+      it('declares privateObjects when the bucket is private by default', () => {
+        // Block Public Access + bucket policy: ACLs stay off, objects are
+        // still private. The operator asserts this; the SDK cannot see it.
+        const provider = new S3Provider({ ...baseConfig, privateByDefault: true });
+
+        expect(provider.capabilities.privateObjects).toBe(true);
+      });
+
+      it('denies privateObjects when ACLs are off and the bucket is not declared private', () => {
+        const provider = new S3Provider(baseConfig);
+
+        expect(provider.capabilities.privateObjects).toBe(false);
+        // Signed URLs still work — the object just may not be private.
+        expect(provider.capabilities.signedUrls).toBe(true);
+      });
+
+      it('warns but still uploads when public:false cannot be enforced', async () => {
+        // Deliberately not a throw: the safest AWS posture (Block Public
+        // Access, ACLs off) is indistinguishable here from a wide-open
+        // bucket, and refusing would reject the correct configuration.
+        const provider = new S3Provider(baseConfig);
+        mockSend.mockResolvedValueOnce({});
+
+        const result = await provider.upload(Buffer.from('test'), {
+          key: 'private.pdf',
+          contentType: 'application/pdf',
+          public: false,
+        });
+
+        expect(result.key).toBe('private.pdf');
+        expect(mockSend).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('cannot enforce it'),
+          expect.objectContaining({ bucket: 'test-bucket' })
+        );
+      });
+
+      it('warns only once per provider instance across repeated uploads', async () => {
+        const provider = new S3Provider(baseConfig);
+        mockSend.mockResolvedValue({});
+
+        for (let i = 0; i < 3; i++) {
+          await provider.upload(Buffer.from('test'), {
+            key: `private-${i}.pdf`,
+            contentType: 'application/pdf',
+            public: false,
+          });
+        }
+
+        expect(mockSend).toHaveBeenCalledTimes(3);
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not warn when the bucket is declared private by default', async () => {
+        const provider = new S3Provider({ ...baseConfig, privateByDefault: true });
+        mockSend.mockResolvedValueOnce({});
+
+        await provider.upload(Buffer.from('test'), {
+          key: 'private.pdf',
+          contentType: 'application/pdf',
+          public: false,
+        });
+
+        expect(logger.warn).not.toHaveBeenCalled();
+      });
+
+      it('does not warn for a public upload', async () => {
+        const provider = new S3Provider(baseConfig);
+        mockSend.mockResolvedValueOnce({});
+
+        await provider.upload(Buffer.from('test'), {
+          key: 'public.jpg',
+          contentType: 'image/jpeg',
+        });
+
+        expect(logger.warn).not.toHaveBeenCalled();
+      });
+    });
+
     describe('delete', () => {
       it('should delete file successfully', async () => {
         const provider = new S3Provider({
@@ -384,6 +478,60 @@ describe('lib/storage/providers/s3', () => {
       });
     });
 
+    describe('download', () => {
+      const baseConfig = {
+        bucket: 'test-bucket',
+        region: 'us-east-1',
+        accessKeyId: 'test-key',
+        secretAccessKey: 'test-secret',
+      };
+
+      it('returns the object bytes and content type', async () => {
+        const bytes = new Uint8Array(Buffer.from('report contents'));
+        mockSend.mockResolvedValueOnce({
+          Body: { transformToByteArray: vi.fn().mockResolvedValue(bytes) },
+          ContentType: 'application/pdf',
+        });
+
+        const provider = new S3Provider(baseConfig);
+        const object = await provider.download('documents/report.pdf');
+
+        expect(object.key).toBe('documents/report.pdf');
+        expect(object.body.toString()).toBe('report contents');
+        expect(object.size).toBe(bytes.length);
+        expect(object.contentType).toBe('application/pdf');
+      });
+
+      it('omits contentType when S3 does not report one', async () => {
+        mockSend.mockResolvedValueOnce({
+          Body: { transformToByteArray: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])) },
+        });
+
+        const provider = new S3Provider(baseConfig);
+        const object = await provider.download('documents/report.pdf');
+
+        expect(object.contentType).toBeUndefined();
+        expect(object.size).toBe(3);
+      });
+
+      it('throws when the response has no body', async () => {
+        mockSend.mockResolvedValueOnce({});
+
+        const provider = new S3Provider(baseConfig);
+
+        await expect(provider.download('missing.pdf')).rejects.toThrow(/not found/i);
+      });
+
+      it('rejects a traversal key before calling S3', async () => {
+        const provider = new S3Provider(baseConfig);
+
+        await expect(provider.download('../../etc/passwd')).rejects.toThrow(
+          'must not contain ".."'
+        );
+        expect(mockSend).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
+      });
+    });
+
     describe('key validation', () => {
       it('should throw for invalid key with path traversal in upload', async () => {
         const provider = new S3Provider({
@@ -486,6 +634,32 @@ describe('lib/storage/providers/s3', () => {
       const provider = createS3ProviderFromEnv();
 
       expect(provider).toBeNull();
+    });
+
+    it('reads privateObjects from S3_OBJECTS_PRIVATE_BY_DEFAULT', () => {
+      vi.stubEnv('S3_BUCKET', 'env-bucket');
+      vi.stubEnv('S3_ACCESS_KEY_ID', 'env-key-id');
+      vi.stubEnv('S3_SECRET_ACCESS_KEY', 'env-secret');
+      vi.stubEnv('S3_OBJECTS_PRIVATE_BY_DEFAULT', 'true');
+
+      expect(createS3ProviderFromEnv()?.capabilities.privateObjects).toBe(true);
+    });
+
+    it('denies privateObjects when neither ACL nor private-by-default env var is set', () => {
+      vi.stubEnv('S3_BUCKET', 'env-bucket');
+      vi.stubEnv('S3_ACCESS_KEY_ID', 'env-key-id');
+      vi.stubEnv('S3_SECRET_ACCESS_KEY', 'env-secret');
+
+      expect(createS3ProviderFromEnv()?.capabilities.privateObjects).toBe(false);
+    });
+
+    it('treats any non-"true" value of S3_OBJECTS_PRIVATE_BY_DEFAULT as false', () => {
+      vi.stubEnv('S3_BUCKET', 'env-bucket');
+      vi.stubEnv('S3_ACCESS_KEY_ID', 'env-key-id');
+      vi.stubEnv('S3_SECRET_ACCESS_KEY', 'env-secret');
+      vi.stubEnv('S3_OBJECTS_PRIVATE_BY_DEFAULT', 'yes');
+
+      expect(createS3ProviderFromEnv()?.capabilities.privateObjects).toBe(false);
     });
   });
 });

@@ -16,6 +16,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import { executionVisibilityWhere } from '@/lib/orchestration/access/execution-access';
 import { getInFlightCounts } from '@/lib/orchestration/llm/in-flight-counter';
 import { WorkflowStatus } from '@/types/orchestration';
 
@@ -49,14 +50,17 @@ const RUNNING_AGE_SAMPLE_CAP = 500;
  * Options for the live-engine snapshot.
  *
  * `userId`, when provided, restricts the running / queued / orphaned
- * counts and the age sample to executions owned by that user.
+ * counts and the age sample to executions that user may see: their own,
+ * plus system-owned runs (`userId = null` — schedule- and inbound-
+ * triggered; see `lib/orchestration/access/execution-access.ts`).
  *
- * The four executions-row counts MUST be user-scoped to match the
- * executions list, force-fail, lease inspector, and cancel routes —
- * all of which gate on `userId === session.user.id`. Without this
- * scoping, an admin would see card counts they couldn't drill into
- * or act on (their own list would only show a subset of "running",
- * and clicking the card would reveal an empty filter mismatch).
+ * The four executions-row counts MUST use the same visibility clause as
+ * the executions list, force-fail, lease inspector, and cancel routes.
+ * Without that agreement an admin would see card counts they couldn't
+ * drill into or act on (their own list would only show a subset of
+ * "running", and clicking the card would reveal an empty filter
+ * mismatch). Scheduled runs are exactly the rows this dashboard exists
+ * to catch stuck, so excluding them would gut it.
  *
  * Provider in-flight counts have no per-user attribution available
  * (the proxy wraps at the cached provider level; the in-flight set
@@ -72,16 +76,16 @@ export async function getLiveEngineSnapshot(
   options: LiveEngineSnapshotOptions = {}
 ): Promise<LiveEngineSnapshot> {
   const now = new Date();
-  const userScope = options.userId ? { userId: options.userId } : {};
+  const visibility = options.userId ? executionVisibilityWhere(options.userId) : {};
 
   // Four reads in parallel — each is small (count or capped page) and
   // hits an existing index. Provider counts come from in-memory state.
   const [runningCount, queuedAgg, orphanedCount, runningAges] = await Promise.all([
     prisma.aiWorkflowExecution.count({
-      where: { status: WorkflowStatus.RUNNING, ...userScope },
+      where: { status: WorkflowStatus.RUNNING, ...visibility },
     }),
     prisma.aiWorkflowExecution.aggregate({
-      where: { status: WorkflowStatus.PENDING, ...userScope },
+      where: { status: WorkflowStatus.PENDING, ...visibility },
       _count: { _all: true },
       _min: { createdAt: true },
     }),
@@ -89,7 +93,7 @@ export async function getLiveEngineSnapshot(
       where: {
         status: WorkflowStatus.RUNNING,
         leaseExpiresAt: { lt: now },
-        ...userScope,
+        ...visibility,
       },
     }),
     // Age of each running execution's current step. Joined off the
@@ -97,12 +101,12 @@ export async function getLiveEngineSnapshot(
     // execution we may have multiple branch rows (parallel fan-out);
     // we use MIN(startedAt) per execution so a long-running branch
     // dominates the age — that's the operator's "stuck" question.
-    // User scope is applied via the parent execution relation so a
+    // Visibility is applied via the parent execution relation so a
     // partner admin doesn't see step ages from other partners' rows.
     prisma.aiWorkflowRunningStep.findMany({
       where: {
         completedAt: null,
-        ...(options.userId ? { execution: { userId: options.userId } } : {}),
+        ...(options.userId ? { execution: executionVisibilityWhere(options.userId) } : {}),
       },
       select: { executionId: true, startedAt: true },
       orderBy: { startedAt: 'asc' },

@@ -151,10 +151,10 @@ POST /api/v1/inbound/:channel/:slug
   ↓ scope = { ...resolvePersistedScope(normalised.scope), ...resolvePersistedScope(trigger.scope) }
   ↓                                                (static trigger scope wins; both dropped-to-unscoped if malformed)
   ↓ workflowDefinitionSchema.safeParse(snapshot)  → 500 on operator error
-  ↓ prisma.aiWorkflowExecution.create({...dedupKey, ...scope})
+  ↓ prisma.aiWorkflowExecution.create({...dedupKey, ...scope, userId: null})
   ↓                                              → 200 {deduped: true} if P2002 on dedupKey
   ↓ trigger.lastFiredAt update (best-effort)
-  ↓ logAdminAction(workflow_trigger.fire)
+  ↓ logAdminAction(workflow_trigger.fire)         # userId: null — the upstream system fired it
   ↓ void drainEngine(...)                        # fire-and-forget; identical crash handling to schedule path
   ↓ 202 {executionId, channel, workflowSlug, status: 'pending'}
 ```
@@ -376,8 +376,56 @@ When `dedupKey` collision happens, the route returns `200 { success: true, data:
 
 Empty-string env vars are treated as unset (truthiness check). Bootstrap logs the registered channels at INFO; nothing alerts when an expected channel is missing — operators should verify the boot log when shipping a new channel.
 
+## Attribution — every inbound row is system-owned
+
+Every row a fire writes carries **`userId: null`**: the conversation, the
+execution, the `workflow_trigger.fire` audit entry, and the engine's user
+context. Nobody with an account here sent the message.
+
+Until [#502](https://github.com/human-centric-engineering/sunrise/issues/502)
+these rows were stamped with `trigger.createdBy` — the operator who configured
+the channel — and it cost twice, because `AiConversation.userId` and
+`AiWorkflowExecution.userId` are `onDelete: Cascade`:
+
+- Erasing that one operator **deleted every third party's inbound thread and run**
+  routed through any trigger they had created. `eraseUser()` returned success.
+- A subject-access export handed that operator **a stranger's phone number,
+  email body and base64 attachments** as their own data — `inputData.trigger` is
+  the adapter payload written verbatim.
+
+What you get instead:
+
+| Question                     | Answer                                                           |
+| ---------------------------- | ---------------------------------------------------------------- |
+| Who configured this channel? | `AiWorkflowTrigger.createdBy`                                    |
+| What fired this run?         | `AiWorkflowExecution.triggerSource` — `inbound:<channel>`        |
+| Who sent the message?        | `AiConversation.fromAddress` and the payload — no account exists |
+
+Consequences for anything you build on inbound runs:
+
+- **Admin surfaces gate on the system basis**, not an owner match — see
+  `lib/orchestration/access/execution-access.ts` and `conversation-access.ts`.
+  Any admin can read, act on, and delete these rows; the access is audit-logged
+  because the person on the other end has no account and cannot check for
+  themselves. A hand-rolled `userId === session.user.id` check will show nothing.
+- **The run has no user context.** `user_memory` returns `no_user_context`
+  rather than reading one person's remembered facts from another's traffic, and
+  `judge_call` refuses outright (`judge_call_requires_user_context`) rather than
+  filing a transcript of a stranger's message into an operator's chat history.
+- **Deleting an inbound thread is the only erasure route the sender has** —
+  they have no account, so `eraseUser()` cannot reach them. `DELETE
+/api/v1/admin/orchestration/conversations/:id` allows it on the `'system'`
+  basis and records who did it.
+
+See [Data erasure — system-owned runs](../privacy/data-erasure.md#system-owned-runs).
+
 ## Anti-patterns
 
+- **Don't attribute an inbound row to the trigger's author.** See
+  [Attribution](#attribution--every-inbound-row-is-system-owned) above — it
+  reads like helpful provenance and is in fact a cascade-delete of someone
+  else's correspondence plus a disclosure in the export. If a new inbound row
+  type needs an owner, the answer is `null` plus a `triggerSource`.
 - **Don't read dedup material from unsigned headers.** The earlier draft of `GenericHmacAdapter` read `X-Sunrise-Event-Id` directly from headers; an attacker could trivially mutate the header to bypass dedup on a captured request. The current adapter reads `eventId` from the signed body only. The same caution applies if you write a new adapter — anything you key dedup on must be inside the signed envelope.
 - **Don't bypass the registry.** The adapter registry is the single source of truth for which channels are active. Writing a one-off `if (channel === 'foo')` branch in the route would skip rate-limiting hooks, audit logs, and `lastFiredAt` updates that all converge in one place today.
 - **Don't include the request body in error responses.** `verify` failures log the structured `reason` (`bad_signature`, `stale_timestamp`, …) but the route returns a uniform 401 with no body content beyond the standard error envelope. Surfacing the reason would let attackers probe which check failed.

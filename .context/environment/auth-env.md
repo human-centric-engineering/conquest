@@ -70,6 +70,49 @@ BETTER_AUTH_SECRET="Ag8JfK3mN9pQr2StUv4WxY5zB7cD0eF1Gh2Ij3Kl4M="
 - ⚠️ **Minimum 32 characters** (44 characters recommended from base64 encoding)
 - ⚠️ **Store securely** in production secret management
 
+## Signup Model
+
+### `SIGNUP_MODE`
+
+- **Purpose:** Whether anyone may create an account, or only invited people
+- **Required:** ❌ No
+- **Type:** Enum — `open` | `invite_only`
+- **Default:** `open`
+- **Used By:**
+  - `lib/auth/config.ts` — the `hooks.before` signup gate, and the default-deny
+    backstop in `userCreateBeforeHook` that covers every other creation path
+  - `proxy.ts` — redirects `/signup` to `/login`
+  - `app/(auth)/login/page.tsx` — omits the "Sign up" link
+
+**Examples:**
+
+```bash
+# Default — anyone may sign up
+SIGNUP_MODE="open"
+
+# Invite-gated: closed beta, B2B-provisioned, internal tools
+SIGNUP_MODE="invite_only"
+```
+
+**Important Notes:**
+
+- `invite_only` closes `POST /api/auth/sign-up/email` **and** every other
+  un-invited account creation — OAuth callbacks, ID-token social sign-in, and any
+  auth plugin a fork adds later. The second gate is default-deny rather than a
+  list of endpoint paths. Gating only the page would be cosmetic — the API route
+  is reachable whatever the UI renders.
+- Existing users are unaffected; sign-in, password reset and the invitation flow
+  all keep working.
+- On an empty database the first human may still sign up, and becomes ADMIN —
+  otherwise there would be no operator to send invitations (`db:seed` creates
+  only the non-login SERVICE account). That window closes permanently once any
+  human exists.
+- Marketing CTAs pointing at `/signup` are fork-owned copy. Under `invite_only`
+  they redirect to `/login` rather than 404, but edit them to match what your
+  product offers.
+
+**Full guide:** [`.context/auth/signup-modes.md`](../auth/signup-modes.md)
+
 ## OAuth Providers
 
 ### `GOOGLE_CLIENT_ID`

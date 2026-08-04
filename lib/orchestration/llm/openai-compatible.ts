@@ -48,6 +48,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   LOCAL_TIMEOUT_MS,
   ProviderError,
+  buildRequestOptions,
   toProviderError,
   withRetry,
   type LlmProvider,
@@ -169,18 +170,12 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       isLocal: this.isLocal,
     });
 
+    const requestOptions = buildRequestOptions(options);
+
     let completion: ChatCompletion;
     try {
       completion = await withRetry<ChatCompletion>(
-        // Forward a per-request `timeout` when the caller supplied one, so a long
-        // job (e.g. document extraction on a reasoning model) can override the
-        // client's construction-time default rather than being silently capped by
-        // it. Undefined ⇒ the client default applies, so this is backward-compatible.
-        () =>
-          this.client.chat.completions.create(
-            params,
-            options.timeoutMs != null ? { timeout: options.timeoutMs } : undefined
-          ),
+        () => this.client.chat.completions.create(params, requestOptions),
         {
           maxRetries: this.maxRetries,
           isLocal: this.isLocal,
@@ -265,10 +260,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 
     let stream: AsyncIterable<ChatCompletionChunk>;
     try {
-      stream = await this.client.chat.completions.create(
-        params,
-        Object.keys(requestOptions).length > 0 ? requestOptions : undefined
-      );
+      stream = await this.client.chat.completions.create(params, buildRequestOptions(options));
     } catch (err) {
       throw toProviderError(err, 'OpenAI-compatible chat stream failed');
     }

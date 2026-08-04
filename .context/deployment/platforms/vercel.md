@@ -27,13 +27,20 @@ In Vercel dashboard > Project Settings > Environment Variables, add:
 
 ```
 DATABASE_URL=postgresql://user:password@host:5432/dbname
+DATABASE_POOL_MAX=1
 BETTER_AUTH_SECRET=<generate with: openssl rand -base64 32>
 BETTER_AUTH_URL=https://your-project.vercel.app
 NEXT_PUBLIC_APP_URL=https://your-project.vercel.app
 CRON_SECRET=<generate with: openssl rand -base64 32>   # drives the maintenance cron (see Background jobs)
 ```
 
-> **`DATABASE_URL` must be a POOLED endpoint on serverless** (Neon `-pooler` host, Supabase `:6543` transaction pooler, or Vercel's `POSTGRES_PRISMA_URL`). A direct `:5432` connection exhausts under serverless fan-out. See [Database Setup](#3-database-setup).
+`DATABASE_POOL_MAX=1` is not optional on Vercel in practice. It defaults to 10,
+which is right for one long-running server but wrong here: every warm function
+instance holds its own pool, so a few dozen instances exhaust the database's
+connection limit. Set it to 1 **and** point `DATABASE_URL` at a pooled endpoint
+(see Database Setup below) — the pooler multiplexes, so one connection per
+instance is plenty. See
+[database-env.md](../../environment/database-env.md#database_pool_max).
 
 **Optional (for email):**
 
@@ -68,13 +75,10 @@ STORAGE_PROVIDER=vercel-blob  # Options: s3, vercel-blob, local
 **Option B: External Database (Supabase, Neon, Railway)**
 
 1. Create database on your provider
-2. Copy the **pooled** connection string to `DATABASE_URL` (Neon `-pooler` host, Supabase transaction
-   pooler on `:6543` with `?pgbouncer=true`) — serverless fans out across many instances, so a direct
-   `:5432` connection exhausts the DB. `lib/db/client.ts` uses `max: 1` per instance in production
-   (override with `DATABASE_POOL_MAX`), which relies on a transaction pooler in front.
-3. Ensure SSL is enabled for production (`?sslmode=require`)
-
-See [`.context/environment/database-env.md`](../../environment/database-env.md#connection-pooling-serverless-vs-long-running) for the full pooling rationale.
+2. Copy the **pooled** connection string to `DATABASE_URL` — Neon's `-pooler`
+   host, Supabase's port `:6543`, or your own PgBouncer in transaction mode.
+   The direct endpoint will run out of connections under load.
+3. Ensure SSL is enabled for production
 
 ### 4. Configure Migrations
 

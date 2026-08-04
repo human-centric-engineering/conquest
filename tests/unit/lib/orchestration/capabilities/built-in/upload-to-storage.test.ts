@@ -26,7 +26,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { UploadOptions, UploadResult } from '@/lib/storage/providers/types';
+import type {
+  StorageCapabilities,
+  UploadOptions,
+  UploadResult,
+} from '@/lib/storage/providers/types';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared before any imports of the mocked modules
@@ -46,16 +50,27 @@ vi.mock('@/lib/logging', () => ({
 const mockUpload = vi.fn<(buffer: Buffer, options: UploadOptions) => Promise<UploadResult>>();
 const mockGetSignedUrl = vi.fn<(key: string, ttl: number) => Promise<string>>();
 
-// The default stub has getSignedUrl (S3-like). Tests that want a provider
-// without it override mockStorageClient directly.
-let mockStorageClient: {
+// The default stub is a fully-capable S3 (ACLs on, or a bucket that blocks
+// public access) with getSignedUrl. Tests that want a weaker provider
+// override mockStorageClient directly — note that omitting `capabilities`
+// means "supports nothing", which is what an undeclared provider gets.
+type MockStorageClient = {
   name: string;
   upload: typeof mockUpload;
   getSignedUrl?: typeof mockGetSignedUrl;
-} | null = {
+  capabilities?: Partial<StorageCapabilities>;
+};
+
+const FULLY_CAPABLE_S3: Partial<StorageCapabilities> = {
+  privateObjects: true,
+  signedUrls: true,
+};
+
+let mockStorageClient: MockStorageClient | null = {
   name: 's3',
   upload: mockUpload,
   getSignedUrl: mockGetSignedUrl,
+  capabilities: FULLY_CAPABLE_S3,
 };
 
 vi.mock('@/lib/storage/client', () => ({
@@ -111,7 +126,12 @@ function noBinding(): void {
 beforeEach(() => {
   vi.clearAllMocks();
   // Reset to default S3-like stub before each test
-  mockStorageClient = { name: 's3', upload: mockUpload, getSignedUrl: mockGetSignedUrl };
+  mockStorageClient = {
+    name: 's3',
+    upload: mockUpload,
+    getSignedUrl: mockGetSignedUrl,
+    capabilities: FULLY_CAPABLE_S3,
+  };
   // Default: upload succeeds
   mockUpload.mockResolvedValue(DEFAULT_UPLOAD_RESULT);
   // Default: getSignedUrl returns a signed URL
@@ -304,6 +324,93 @@ describe('UploadToStorageCapability.execute()', () => {
       expect(result.error?.code).toBe('signed_url_not_supported');
       // Upload must NOT have been called — fail-closed before any side effect
       expect(mockUpload).not.toHaveBeenCalled();
+    });
+
+    it('returns signed_url_not_supported when the provider declares signedUrls but omits the method', async () => {
+      // A miswritten fork provider. Falling through would return the public
+      // URL for an upload the binding asked to keep private.
+      bindCustomConfig({ signedUrlTtlSeconds: 300 });
+      mockStorageClient = {
+        name: 'broken-fork-provider',
+        upload: mockUpload,
+        capabilities: { privateObjects: true, signedUrls: true },
+      };
+
+      const cap = new UploadToStorageCapability();
+      const result = await cap.execute(BASE_ARGS, BASE_CONTEXT);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('signed_url_not_supported');
+    });
+  });
+
+  // Private-object capability gate — the contract added for sunrise#490.
+  describe('private object capability gate', () => {
+    it('refuses public:false BEFORE uploading when the provider cannot store private objects', async () => {
+      bindCustomConfig({ public: false });
+      // Local provider: writes into public/uploads/, declares privateObjects false
+      mockStorageClient = {
+        name: 'local',
+        upload: mockUpload,
+        capabilities: { privateObjects: false },
+      };
+
+      const cap = new UploadToStorageCapability();
+      const result = await cap.execute(BASE_ARGS, BASE_CONTEXT);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('private_objects_not_supported');
+      // The whole point: no world-readable object is created
+      expect(mockUpload).not.toHaveBeenCalled();
+    });
+
+    it('refuses a signed-URL binding on S3 that has ACLs off and is not private by default', async () => {
+      // Previously this uploaded a public object and handed back a signed URL
+      // to it — the silent failure sunrise#490 was filed about.
+      bindCustomConfig({ signedUrlTtlSeconds: 300 });
+      mockStorageClient = {
+        name: 's3',
+        upload: mockUpload,
+        getSignedUrl: mockGetSignedUrl,
+        capabilities: { privateObjects: false, signedUrls: true },
+      };
+
+      const cap = new UploadToStorageCapability();
+      const result = await cap.execute(BASE_ARGS, BASE_CONTEXT);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('private_objects_not_supported');
+      expect(result.error?.message).toContain('S3_OBJECTS_PRIVATE_BY_DEFAULT');
+      expect(mockUpload).not.toHaveBeenCalled();
+      expect(mockGetSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('treats a provider with no declared capabilities as unable to store private objects', async () => {
+      bindCustomConfig({ public: false });
+      mockStorageClient = { name: 'custom-fork-provider', upload: mockUpload };
+
+      const cap = new UploadToStorageCapability();
+      const result = await cap.execute(BASE_ARGS, BASE_CONTEXT);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('private_objects_not_supported');
+      expect(mockUpload).not.toHaveBeenCalled();
+    });
+
+    it('allows a public upload on a provider that cannot store private objects', async () => {
+      // The gate must only bite when privacy was actually asked for.
+      bindCustomConfig({ public: true });
+      mockStorageClient = {
+        name: 'local',
+        upload: mockUpload,
+        capabilities: { privateObjects: false },
+      };
+
+      const cap = new UploadToStorageCapability();
+      const result = await cap.execute(BASE_ARGS, BASE_CONTEXT);
+
+      expect(result.success).toBe(true);
+      expect(mockUpload).toHaveBeenCalledTimes(1);
     });
   });
 

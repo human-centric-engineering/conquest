@@ -296,7 +296,7 @@ describe('GET /api/v1/admin/orchestration/observability/dashboard-stats', () => 
   });
 
   describe('query scoping', () => {
-    it('should scope active conversations query to the authenticated user', async () => {
+    it('should scope active conversations to the caller plus system-owned rows', async () => {
       // Arrange
       const adminSession = mockAdminUser();
       vi.mocked(auth.api.getSession).mockResolvedValue(adminSession);
@@ -304,13 +304,38 @@ describe('GET /api/v1/admin/orchestration/observability/dashboard-stats', () => 
       // Act
       await GET(makeRequest());
 
-      // Assert — conversations query is user-scoped
-      expect(prisma.aiConversation.count).toHaveBeenCalledWith(
+      // Assert — own rows OR unowned ones, AND'd with the isActive filter so a
+      // filter can't flatten the visibility clause. `userId: null` is the
+      // system arm (#502): without it every inbound thread drops out of the
+      // count while the live-engine dashboard still shows it.
+      expect(prisma.aiConversation.count).toHaveBeenCalledWith({
+        where: {
+          AND: [{ OR: [{ userId: adminSession.user.id }, { userId: null }] }, { isActive: true }],
+        },
+      });
+    });
+
+    it('should scope execution queries to the caller plus system-owned runs', async () => {
+      const adminSession = mockAdminUser();
+      vi.mocked(auth.api.getSession).mockResolvedValue(adminSession);
+
+      await GET(makeRequest());
+
+      const visibility = { OR: [{ userId: adminSession.user.id }, { userId: null }] };
+
+      // The 24h totals and the recent-errors list all carry the same clause —
+      // a scheduled run that fails must appear here, not just on the
+      // live-engine dashboard.
+      expect(prisma.aiWorkflowExecution.count).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            userId: adminSession.user.id,
-            isActive: true,
+            AND: expect.arrayContaining([visibility]),
           }),
+        })
+      );
+      expect(prisma.aiWorkflowExecution.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [visibility, { status: 'failed' }] },
         })
       );
     });

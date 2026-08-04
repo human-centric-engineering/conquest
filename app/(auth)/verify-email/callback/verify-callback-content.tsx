@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 /**
  * Email Verification Callback Content
@@ -34,7 +35,7 @@ function VerifyEmailCallbackContent() {
   // If no error, verification succeeded - redirect to dashboard
   useEffect(() => {
     if (!error) {
-      router.replace('/dashboard');
+      router.replace(AUTH_LANDING_ROUTE);
     }
   }, [error, router]);
 
@@ -49,7 +50,7 @@ function VerifyEmailCallbackContent() {
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">Email Verified!</CardTitle>
-          <CardDescription>Redirecting to dashboard...</CardDescription>
+          <CardDescription>Redirecting to {AUTH_LANDING_LABEL}...</CardDescription>
         </CardHeader>
       </Card>
     );

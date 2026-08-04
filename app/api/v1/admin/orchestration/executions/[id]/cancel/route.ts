@@ -7,8 +7,9 @@
  * `cancelled` and records `completedAt`. The engine polls execution
  * status between steps and will stop when it sees `cancelled`.
  *
- * Ownership: rows are scoped to `session.user.id`. Cross-user access
- * returns 404 (not 403).
+ * Ownership: the caller's own runs, plus system-owned runs (`userId = null`
+ * — schedule- and inbound-triggered). Another admin's own run returns 404
+ * (not 403) — we never confirm existence of a row the caller cannot see.
  *
  * Authentication: Admin role required.
  */
@@ -20,6 +21,7 @@ import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors'
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
 import { isApproverInTrace } from '@/lib/orchestration/approval-scoping';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { WorkflowStatus } from '@/types/orchestration';
 
 const CANCELLABLE_STATUSES = new Set<string>([
@@ -41,13 +43,16 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     throw new NotFoundError(`Execution ${id} not found`);
   }
 
-  // Ownership + approver scoping: delegated approvers can cancel paused executions only
-  const isOwner = execution.userId === session.user.id;
+  // Ownership + approver scoping: delegated approvers can cancel paused
+  // executions only. `adminCanViewExecution` also admits system-owned runs
+  // (`userId = null`), so a runaway scheduled or inbound run stays
+  // cancellable by any admin (#502).
+  const canAct = adminCanViewExecution(execution, session.user.id);
   const isApprover =
-    !isOwner &&
+    !canAct &&
     execution.status === WorkflowStatus.PAUSED_FOR_APPROVAL &&
     isApproverInTrace(execution.executionTrace, session.user.id);
-  if (!isOwner && !isApprover) {
+  if (!canAct && !isApprover) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
   if (!CANCELLABLE_STATUSES.has(execution.status)) {

@@ -48,6 +48,7 @@ const POPULATED_DATA = {
       cronExpression: '0 9 * * *',
       isEnabled: true,
       nextRunAt: '2026-04-20T09:00:00Z',
+      lastRunAt: '2026-04-19T09:00:00Z',
       inputTemplate: null,
       createdAt: '2026-04-01T00:00:00Z',
     },
@@ -379,5 +380,33 @@ describe('WorkflowSchedulesTab', () => {
     // Fill cron — now enabled
     await user.type(document.getElementById('schedule-cron')!, '0 9 * * *');
     expect(createButton).not.toBeDisabled();
+  });
+});
+
+describe('WorkflowSchedulesTab — last run', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows when the schedule last fired', async () => {
+    // `lastRunAt` was already persisted and on the wire; the client interface
+    // just dropped it, so the tab could say when a schedule would next run but
+    // not whether it ever had.
+    vi.mocked(apiClient.get).mockResolvedValue(POPULATED_DATA);
+
+    render(<WorkflowSchedulesTab workflowId="wf-1" />);
+
+    expect(await screen.findByText(/Last run: /)).toBeInTheDocument();
+  });
+
+  it('says so explicitly when a schedule has never run', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      schedules: [{ ...POPULATED_DATA.schedules[0], lastRunAt: null }],
+    });
+
+    render(<WorkflowSchedulesTab workflowId="wf-1" />);
+
+    // A blank would read as "hasn't loaded" rather than "hasn't fired".
+    expect(await screen.findByText(/never run yet/i)).toBeInTheDocument();
   });
 });

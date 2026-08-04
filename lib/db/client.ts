@@ -47,26 +47,29 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /**
- * Per-instance pool size.
+ * Connection pool (reused across hot reloads in development).
  *
- * On serverless (Vercel) each warm instance holds its own pool, and many instances run
- * concurrently — an unbounded `max` (pg default 10) × N instances exhausts Postgres. The safe
- * serverless default is `max: 1` per instance **behind a transaction pooler** (PgBouncer / Neon
- * `-pooler` / Supabase `:6543` / Vercel `POSTGRES_PRISMA_URL`); the pooler multiplexes, so one
- * client connection per instance is plenty. A long-running server (Docker/Render/Railway) has a
- * single persistent process and wants a larger pool — raise it via `DATABASE_POOL_MAX`.
+ * `max` defaults to 10 — node-postgres's own default, and the right size for
+ * Sunrise's documented deploy target: a single long-running process
+ * (docker-compose, Render, Railway) that genuinely wants a warm pool.
  *
- * `DATABASE_POOL_MAX` (optional env) overrides in both environments; otherwise prod defaults to 1
- * (serverless-safe) and dev to 10 (the pg default, comfortable for local work).
+ * A function-per-request platform is the opposite case. Each warm instance
+ * holds its own pool, so 20 instances × 10 = 200 connections against a Postgres
+ * that may allow far fewer — surfacing as intermittent `too many connections`
+ * errors that correlate with traffic rather than with any one query. Those
+ * deploys set `DATABASE_POOL_MAX=1` and put a transaction pooler in front
+ * (PgBouncer, Neon `-pooler`, Supabase `:6543`, Vercel `POSTGRES_PRISMA_URL`);
+ * the pooler multiplexes, so one connection per instance is plenty.
+ *
+ * `connectionTimeoutMillis` matters independently of `max`: without it a request
+ * that cannot get a connection hangs until the platform kills it, instead of
+ * failing fast with a usable error.
  */
-const poolMax = env.DATABASE_POOL_MAX ?? (env.NODE_ENV === 'production' ? 1 : 10);
-
-// Create connection pool (reuse across hot reloads in development)
 const pool =
   globalForPrisma.pool ??
   new Pool({
     connectionString: env.DATABASE_URL,
-    max: poolMax,
+    max: env.DATABASE_POOL_MAX ?? 10,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,
   });

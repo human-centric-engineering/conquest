@@ -509,7 +509,36 @@ export class StreamingChatHandler {
       //
       // Each failure produces a discrete SSE error code so the UI can
       // map to a precise user-facing message.
+      // Resolve the turn shape once, up front (#474). Exactly one of `message`
+      // (the user typed) or `openingTurn` (the app composed an agent-first turn)
+      // drives everything downstream: whether a `role:'user'` row is persisted,
+      // what the injection scanner sees, and how the conversation is titled.
+      const openingContent = request.openingTurn?.content?.trim() ?? '';
+      const userText = request.message?.trim() ?? '';
       const attachments = request.attachments ?? [];
+      if (!userText && !openingContent && attachments.length === 0) {
+        // `message` became optional to allow an opening turn, so an empty turn is
+        // now expressible and has to be rejected explicitly rather than silently
+        // sending an empty user message to the provider.
+        //
+        // Attachments count as a turn. The embed surface deliberately allows an
+        // empty `message` when the person sent files — a vision turn is commonly
+        // a single photo with no text body — and its own boundary check
+        // (`app/api/v1/embed/chat/stream/route.ts`) already requires text OR an
+        // attachment. Rejecting on empty text alone would break that path.
+        throw new ChatError(
+          'invalid_request',
+          'A chat turn requires `message`, `openingTurn.content`, or an attachment.'
+        );
+      }
+      // A user message always wins: if the caller sent both, the person's own
+      // words are the turn, and the opener is ignored rather than prepended.
+      // An attachment-only turn is a *user* turn with empty text, not an opener —
+      // `openingContent` is empty there, so `turnText` stays '' and the
+      // `role:'user'` row is still persisted, carrying the attachments.
+      const isOpeningTurn = !userText && !!openingContent;
+      const turnText = isOpeningTurn ? openingContent : userText;
+
       const hasImageAttachments = attachments.some((a) => a.mediaType.startsWith('image/'));
       const hasPdfAttachments = attachments.some((a) => a.mediaType === 'application/pdf');
       if (hasImageAttachments || hasPdfAttachments) {
@@ -624,11 +653,21 @@ export class StreamingChatHandler {
 
       // Persist the user message up front so a mid-stream crash still
       // leaves an audit trail.
-      const userMessage = await this.persistMessage({
-        conversationId: conversation.id,
-        role: 'user',
-        content: request.message,
-      });
+      //
+      // An opening turn (#474) persists NOTHING here: the whole point is that no
+      // `role:'user'` row appears in the person's transcript carrying words they
+      // did not write. The opener reaches the model as a `system` message via the
+      // message-builder instead.
+      const userMessage = isOpeningTurn
+        ? null
+        : await this.persistMessage({
+            conversationId: conversation.id,
+            role: 'user',
+            content: turnText,
+            // Fork-owned marker (#475), stored under a namespaced key so it can
+            // never collide with a platform metadata field.
+            ...(request.messageMetadata ? { metadata: { app: request.messageMetadata } } : {}),
+          });
 
       // Log a single `vision` cost row when the turn carries
       // attachments. Fires once per turn, regardless of how the chat
@@ -653,27 +692,39 @@ export class StreamingChatHandler {
       }
 
       // Mirror to the evaluation log when this chat turn is running
-      // inside an evaluation session. No-op otherwise.
-      await this.writeEvaluationLog({
-        contextType: request.contextType,
-        contextId: request.contextId,
-        userId: request.userId,
-        eventType: 'user_input',
-        content: request.message,
-        messageId: userMessage.id,
-      });
+      // inside an evaluation session. No-op otherwise. Skipped for an opening
+      // turn — there was no user input to mirror.
+      if (userMessage) {
+        await this.writeEvaluationLog({
+          contextType: request.contextType,
+          contextId: request.contextId,
+          userId: request.userId,
+          eventType: 'user_input',
+          content: turnText,
+          messageId: userMessage.id,
+        });
+      }
 
-      yield { type: 'start', conversationId: conversation.id, messageId: userMessage.id };
-
-      // Emit hook event for message creation
-      emitHookEvent('message.created', {
+      yield {
+        type: 'start',
         conversationId: conversation.id,
-        messageId: userMessage.id,
-        agentSlug: request.agentSlug,
-        agentId: agent.id,
-        userId: request.userId,
-        role: 'user',
-      });
+        // Omitted on an opening turn: there is no user message to reference.
+        ...(userMessage ? { messageId: userMessage.id } : {}),
+      };
+
+      // Emit hook event for message creation. Not fired for an opening turn —
+      // no message.created event, because no message was created; a subscriber
+      // reacting to "the user said something" must not see a phantom.
+      if (userMessage) {
+        emitHookEvent('message.created', {
+          conversationId: conversation.id,
+          messageId: userMessage.id,
+          agentSlug: request.agentSlug,
+          agentId: agent.id,
+          userId: request.userId,
+          role: 'user',
+        });
+      }
 
       // Guard-floor seam: a fork can RAISE any of the three inline guards
       // (input / output / citation) to a minimum mode for this turn, keyed on
@@ -699,7 +750,12 @@ export class StreamingChatHandler {
       };
 
       // Input guard — mode-dependent behaviour
-      const scanResult = scanForInjection(request.message);
+      // Only user-supplied text is scanned. An opening turn is composed by the
+      // app's own server code, so scanning it would flag the app's instructions
+      // to its own agent as an injection attempt.
+      const scanResult = isOpeningTurn
+        ? { flagged: false as const, patterns: [] as string[] }
+        : scanForInjection(turnText);
       if (scanResult.flagged) {
         log.warn('Potential prompt injection detected', {
           agentSlug: request.agentSlug,
@@ -813,19 +869,24 @@ export class StreamingChatHandler {
         }
       }
 
-      // These three reads are mutually independent (context block, per-user memories, capability
-      // definitions) — run them concurrently rather than serially so their DB/network round-trips
-      // overlap. `capabilityDefinitions` is only consumed further down (tool loop) but depends on
-      // nothing between here and there, so hoisting it into this batch is safe. On serverless, where
-      // each query pays the app→Postgres RTT, collapsing three serial round-trips into one is the
-      // bulk of the pre-token latency win.
+      // Three independent reads, none of which depends on the others, and all
+      // of which sit between the request and the first token the user sees.
+      // Run serially they cost the sum of three app→Postgres round trips —
+      // which is most of the pre-token latency when the two aren't co-located,
+      // as on serverless. Batched, the cost is the slowest one.
+      //
+      // `capabilityDefinitions` isn't consumed until the tool loop below; it's
+      // hoisted here because nothing between the two points affects it. Keep it
+      // that way — moving a read that depends on the resolved prompt or the
+      // built messages into this batch would be a real reordering, not a
+      // scheduling change.
       const [contextBlock, memoryRows, capabilityDefinitions] = await Promise.all([
         request.contextType && request.contextId
           ? buildContext(request.contextType, request.contextId, {
               userId: request.userId,
             })
           : Promise.resolve(null),
-        // Load per-user-per-agent memories for context injection
+        // Per-user-per-agent memories for context injection
         prisma.aiUserMemory.findMany({
           where: { userId: request.userId, agentId: agent.id },
           orderBy: { updatedAt: 'desc' },
@@ -861,7 +922,8 @@ export class StreamingChatHandler {
         systemInstructions: resolvedPrompt.systemInstructions,
         contextBlock,
         history: historyRows,
-        newUserMessage: request.message,
+        newUserMessage: isOpeningTurn ? '' : turnText,
+        ...(isOpeningTurn ? { openingTurn: turnText } : {}),
         attachments: request.attachments,
         conversationSummary,
         userMemories: memoryRows.length > 0 ? memoryRows : undefined,
@@ -875,7 +937,6 @@ export class StreamingChatHandler {
       });
       let messages: LlmMessage[] = initialMessages;
 
-      // capabilityDefinitions was resolved above (hoisted into the parallel batch).
       const toolDefinitions: LlmToolDefinition[] = capabilityDefinitions.map((def) => ({
         name: def.name,
         description: def.description,
@@ -898,7 +959,7 @@ export class StreamingChatHandler {
           : agent.knowledgeRetrievalMode === 'first_turn' && isFirstUserTurn
             ? { name: SEARCH_KNOWLEDGE_SLUG }
             : agent.knowledgeRetrievalMode === 'keywords' &&
-                matchesKnowledgeTrigger(request.message, agent.knowledgeTriggerKeywords)
+                matchesKnowledgeTrigger(turnText, agent.knowledgeTriggerKeywords)
               ? { name: SEARCH_KNOWLEDGE_SLUG }
               : undefined;
 
@@ -960,6 +1021,27 @@ export class StreamingChatHandler {
       // skipped and the LLM receives a "temporarily unavailable" message.
       const toolFailureCounts = new Map<string, number>();
       const TOOL_FAILURE_THRESHOLD = 2;
+
+      /**
+       * The tools this agent is actually allowed to call this turn.
+       *
+       * `toolDefinitions` is the set advertised to the model, built by
+       * `getCapabilityDefinitions(agent.id)` from `AiAgentCapability` rows that
+       * are explicitly enabled AND whose capability is active AND which the
+       * dispatcher holds. Dispatch, however, took the tool name straight off
+       * the model's emitted call — so a name the agent was never granted still
+       * reached `capabilityDispatcher.dispatch`, where a MISSING pivot row
+       * synthesizes a default-ALLOW binding and executes it unrestricted.
+       *
+       * That makes advertise and dispatch disagree in the dangerous direction:
+       * a prompt-injected document (or a conversation resumed across a
+       * capability being revoked, where the model's own earlier calls sit in
+       * history and invite imitation) can name any globally-registered slug and
+       * have it run. Checking the emitted name against the advertised set
+       * closes it without changing the binding model — see the note on
+       * `getAgentBinding` in the dispatcher for the other half.
+       */
+      const advertisedToolNames = new Set(toolDefinitions.map((t) => t.name));
 
       // Citation accumulator. Populated by citation-producing tools
       // (currently `search_knowledge_base`); markers are monotonic
@@ -1673,18 +1755,62 @@ export class StreamingChatHandler {
           // backward compatibility with existing SSE consumers.
           const tc = toolCallArray[0];
 
-          // Skip tool if it has failed too many times consecutively
+          // Refuse a tool the agent never advertised, then skip one that has
+          // failed too many times consecutively. Both produce the same shape:
+          // a refusal result that is persisted, mirrored to the eval log, and
+          // pushed onto `messages` as an assistant+tool pair. That pairing is
+          // mandatory — an assistant toolCall with no matching tool result
+          // makes the NEXT provider call 400.
           const failCount = toolFailureCounts.get(tc.name) ?? 0;
-          if (failCount >= TOOL_FAILURE_THRESHOLD) {
-            log.warn('Skipping tool after repeated failures', {
+          const refusal = !advertisedToolNames.has(tc.name)
+            ? {
+                code: 'tool_not_advertised',
+                message: `Tool '${tc.name}' is not available to this agent`,
+                logMessage: 'Refusing tool not advertised to this agent',
+              }
+            : failCount >= TOOL_FAILURE_THRESHOLD
+              ? {
+                  code: 'tool_unavailable',
+                  message: `Tool '${tc.name}' is temporarily unavailable after ${failCount} consecutive failures`,
+                  logMessage: 'Skipping tool after repeated failures',
+                }
+              : null;
+
+          if (refusal) {
+            log.warn(refusal.logMessage, {
               tool: tc.name,
               failures: failCount,
             });
+            // Tell the caller. Without this the turn simply carries on with the
+            // tool silently not run — the UI shows an answer produced without
+            // the data the model asked for, and nothing says so. The parallel
+            // branch below reports refusals through its `capability_results`
+            // frame; this one had no frame at all.
+            yield {
+              type: 'warning',
+              code: refusal.code,
+              message: refusal.message,
+            };
+            // Audit only the not-advertised case. A name outside the advertised
+            // set is a hallucination or an injected tool call, which is a
+            // security signal worth a subscribable event. `tool_unavailable` is
+            // the failure-threshold breaker doing its job — operational, and
+            // already in the logs.
+            if (refusal.code === 'tool_not_advertised') {
+              emitHookEvent('capability.refused_not_advertised', {
+                conversationId: conversation.id,
+                agentId: agent.id,
+                agentSlug: agent.slug,
+                userId: request.userId,
+                toolName: tc.name,
+                advertised: [...advertisedToolNames],
+              });
+            }
             const unavailableResult = {
               success: false,
               error: {
-                code: 'tool_unavailable',
-                message: `Tool '${tc.name}' is temporarily unavailable after ${failCount} consecutive failures`,
+                code: refusal.code,
+                message: refusal.message,
               },
             };
             await this.persistMessage({
@@ -1871,7 +1997,33 @@ export class StreamingChatHandler {
 
           for (const tc of toolCallArray) {
             const failCount = toolFailureCounts.get(tc.name) ?? 0;
-            if (failCount >= TOOL_FAILURE_THRESHOLD) {
+
+            // Same two refusals as the single-call path above, in the same
+            // order: a tool the agent never advertised never reaches the
+            // dispatcher, then the repeated-failure circuit breaker.
+            if (!advertisedToolNames.has(tc.name)) {
+              log.warn('Refusing tool not advertised to this agent (parallel)', {
+                tool: tc.name,
+              });
+              emitHookEvent('capability.refused_not_advertised', {
+                conversationId: conversation.id,
+                agentId: agent.id,
+                agentSlug: agent.slug,
+                userId: request.userId,
+                toolName: tc.name,
+                advertised: [...advertisedToolNames],
+              });
+              skippedResults.push({
+                tc,
+                result: {
+                  success: false,
+                  error: {
+                    code: 'tool_not_advertised',
+                    message: `Tool '${tc.name}' is not available to this agent`,
+                  },
+                },
+              });
+            } else if (failCount >= TOOL_FAILURE_THRESHOLD) {
               log.warn('Skipping tool after repeated failures (parallel)', {
                 tool: tc.name,
                 failures: failCount,
@@ -1889,6 +2041,19 @@ export class StreamingChatHandler {
             } else {
               dispatchable.push(tc);
             }
+          }
+
+          // One warning per refusal, before the status frame. The refusals also
+          // ride the later `capability_results` frame, but that carries the raw
+          // result objects for the trace UI — `warning` is the channel a client
+          // is expected to surface to the person, and the single-call path emits
+          // the same codes, so the two paths stay symmetrical.
+          for (const skipped of skippedResults) {
+            yield {
+              type: 'warning',
+              code: skipped.result.error.code,
+              message: skipped.result.error.message,
+            };
           }
 
           const names = dispatchable.map((tc) => tc.name).join(', ');
@@ -2262,7 +2427,10 @@ export class StreamingChatHandler {
     const data: Prisma.AiConversationUncheckedCreateInput = {
       userId: request.userId,
       agentId: agent.id,
-      title: request.message.slice(0, 80),
+      // Title from whichever text this turn carries. An opening turn has no user
+      // message, so the opener stands in — a conversation titled from the agent's
+      // own prompt still reads sensibly in the list, and an empty title does not.
+      title: (request.message?.trim() || request.openingTurn?.content?.trim() || '').slice(0, 80),
     };
     if (request.contextType !== undefined) data.contextType = request.contextType;
     if (request.contextId !== undefined) data.contextId = request.contextId;

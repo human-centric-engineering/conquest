@@ -7,7 +7,11 @@
  * - 404 when the dataset isn't owned by the caller
  * - 404 when the source message is in someone else's conversation
  *   (privacy: never let a user capture another user's traffic)
+ * - 404 when the source conversation is only shared with the caller —
+ *   a view grant is not a copy-into-my-dataset grant
  * - 404 when the source workflow execution belongs to another user
+ * - 201 on system-owned sources (`userId = null`), which an owner-only
+ *   check would 404 — see #502
  * - 201 happy path returns the AppendCasesResult on conversation_turn
  * - 201 happy path returns the AppendCasesResult on workflow_execution
  *
@@ -34,6 +38,7 @@ vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiDataset: { findFirst: vi.fn() },
     aiMessage: { findUnique: vi.fn() },
+    aiConversation: { findUnique: vi.fn() },
     aiWorkflowExecution: { findUnique: vi.fn() },
   },
 }));
@@ -61,6 +66,26 @@ import { POST } from '@/app/api/v1/admin/orchestration/evaluations/datasets/[id]
 
 const ADMIN_ID = 'cmjbv4i3x00003wsloputgwul';
 const DATASET_ID = 'cmjbv4i3x00003wsloputgwu1';
+const CONVERSATION_ID = 'cmjbv4i3x00003wsloputgwu2';
+
+/**
+ * Stub the two queries behind a `conversation_turn` source check: the
+ * message → conversation hop, then `adminCanViewConversation`'s own lookup.
+ * `share` is part of that helper's select, so it has to be present or the
+ * active-share branch reads `undefined`.
+ */
+function mockConversationSource(options: {
+  ownerId: string | null;
+  share?: { revokedAt: Date | null; expiresAt: Date | null } | null;
+}): void {
+  vi.mocked(prisma.aiMessage.findUnique).mockResolvedValue({
+    conversationId: CONVERSATION_ID,
+  } as never);
+  vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue({
+    userId: options.ownerId,
+    share: options.share ?? null,
+  } as never);
+}
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return {
@@ -154,9 +179,30 @@ describe('POST /evaluations/datasets/:id/capture — source ownership', () => {
   });
 
   it('returns 404 when the source message belongs to another user', async () => {
-    vi.mocked(prisma.aiMessage.findUnique).mockResolvedValue({
-      conversation: { userId: 'someone-else' },
-    } as never);
+    mockConversationSource({ ownerId: 'someone-else' });
+
+    const res = await POST(makeRequest({ kind: 'conversation_turn', messageId: 'm-1' }), ctx());
+
+    expect(res.status).toBe(404);
+    expect(vi.mocked(captureConversationTurnAsCase)).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the source conversation is merely shared with the caller', async () => {
+    // A share grants view consent, not consent to copy the turn into someone
+    // else's dataset — where it outlives the share and a revoke can't reach it.
+    mockConversationSource({
+      ownerId: 'someone-else',
+      share: { revokedAt: null, expiresAt: null },
+    });
+
+    const res = await POST(makeRequest({ kind: 'conversation_turn', messageId: 'm-1' }), ctx());
+
+    expect(res.status).toBe(404);
+    expect(vi.mocked(captureConversationTurnAsCase)).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the source message does not exist', async () => {
+    vi.mocked(prisma.aiMessage.findUnique).mockResolvedValue(null);
 
     const res = await POST(makeRequest({ kind: 'conversation_turn', messageId: 'm-1' }), ctx());
 
@@ -183,6 +229,52 @@ describe('POST /evaluations/datasets/:id/capture — source ownership', () => {
   });
 });
 
+describe('POST /evaluations/datasets/:id/capture — system-owned sources (#502)', () => {
+  // Schedule- and inbound-triggered rows carry `userId = null`. An owner-only
+  // check compares `null !== <admin id>` and 404s every one of them, which
+  // would make a scheduled run's output impossible to capture into a dataset.
+  beforeEach(() => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.aiDataset.findFirst).mockResolvedValue({ id: DATASET_ID } as never);
+  });
+
+  it('captures a turn from a system-owned inbound conversation', async () => {
+    mockConversationSource({ ownerId: null });
+    vi.mocked(captureConversationTurnAsCase).mockResolvedValue(SAMPLE_RESULT);
+
+    const res = await POST(makeRequest({ kind: 'conversation_turn', messageId: 'm-1' }), ctx());
+
+    expect(res.status).toBe(201);
+    expect(vi.mocked(captureConversationTurnAsCase)).toHaveBeenCalledWith({
+      datasetId: DATASET_ID,
+      messageId: 'm-1',
+    });
+  });
+
+  it('captures the output of a system-owned (scheduled) execution', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+      userId: null,
+    } as never);
+    vi.mocked(captureWorkflowExecutionAsCase).mockResolvedValue(SAMPLE_RESULT);
+
+    const res = await POST(
+      makeRequest({
+        kind: 'workflow_execution',
+        executionId: 'e-1',
+        selector: { kind: 'last_step' },
+      }),
+      ctx()
+    );
+
+    expect(res.status).toBe(201);
+    expect(vi.mocked(captureWorkflowExecutionAsCase)).toHaveBeenCalledWith({
+      datasetId: DATASET_ID,
+      executionId: 'e-1',
+      selector: { kind: 'last_step' },
+    });
+  });
+});
+
 describe('POST /evaluations/datasets/:id/capture — happy path', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
@@ -190,9 +282,7 @@ describe('POST /evaluations/datasets/:id/capture — happy path', () => {
   });
 
   it('conversation_turn: returns 201 with the AppendCasesResult', async () => {
-    vi.mocked(prisma.aiMessage.findUnique).mockResolvedValue({
-      conversation: { userId: ADMIN_ID },
-    } as never);
+    mockConversationSource({ ownerId: ADMIN_ID });
     vi.mocked(captureConversationTurnAsCase).mockResolvedValue(SAMPLE_RESULT);
 
     const res = await POST(makeRequest({ kind: 'conversation_turn', messageId: 'm-1' }), ctx());

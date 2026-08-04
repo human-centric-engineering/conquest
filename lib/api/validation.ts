@@ -104,6 +104,62 @@ export function validateQueryParams<T>(searchParams: URLSearchParams, schema: z.
 }
 
 /**
+ * Validate a dynamic route path segment
+ *
+ * Validates a `[param]` segment against a Zod schema, throwing ValidationError
+ * on failure. Completes the family alongside `validateRequestBody` (body) and
+ * `validateQueryParams` (query string) — same throw-on-invalid contract and the
+ * same `ValidationError` shape the API error handler already maps to a 400, so
+ * it composes with everything downstream.
+ *
+ * Before this existed, every `[id]` route hand-rolled the identical helper
+ * under a slightly different name (`parseCapabilityId`, `parseTagId`,
+ * `parseId`, …).
+ *
+ * @param raw - The raw segment value, e.g. `(await params).id`
+ * @param schema - Zod schema to validate against (usually `cuidSchema`)
+ * @param options.label - Names the segment in the error MESSAGE. Defaults to
+ *   `'id'`, giving "Invalid id"; pass `'capability id'` for "Invalid capability
+ *   id".
+ * @param options.field - Key under which the failure is reported in the error
+ *   DETAILS. Defaults to `'id'`; pass `'capId'` for a differently-named segment.
+ * @returns The parsed, type-safe value
+ * @throws ValidationError if validation fails
+ *
+ * @example
+ * ```typescript
+ * export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
+ *   const id = validatePathParam((await params).id, cuidSchema, { label: 'capability id' });
+ *   // id is a validated string
+ * });
+ * ```
+ *
+ * @remarks
+ * For a route validating SEVERAL segments at once, keep a local helper that
+ * accumulates field errors and throws once — reporting only the first bad
+ * segment is worse for the caller. See
+ * `app/api/v1/admin/orchestration/agents/[id]/capabilities/[capId]/route.ts`.
+ */
+export function validatePathParam<T>(
+  raw: string,
+  schema: z.ZodType<T>,
+  options: { label?: string; field?: string } = {}
+): T {
+  const { label = 'id', field = 'id' } = options;
+  const parsed = schema.safeParse(raw);
+
+  if (!parsed.success) {
+    throw new ValidationError(`Invalid ${label}`, {
+      // The schema's own messages, so the detail text has one source of truth
+      // rather than each route restating what the schema already says.
+      [field]: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return parsed.data;
+}
+
+/**
  * Parse and validate pagination parameters
  *
  * Extracts page and limit from query params, validates them,

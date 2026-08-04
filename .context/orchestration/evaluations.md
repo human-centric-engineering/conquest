@@ -365,10 +365,20 @@ on the next worker tick.
 
 `POST /evaluations/datasets/:id/capture` is the wire route — Zod
 discriminated union on `kind`, ownership enforced at three layers:
-dataset (caller must own), source message's conversation (caller must
-own), and source execution (caller must own). Without the source-side
-check, a user could capture another user's prod traffic. UI entry
-points land in 2.6.
+the dataset (caller must own it), the source message's conversation,
+and the source execution. Without the source-side check, a user could
+capture another user's prod traffic. UI entry points land in 2.6.
+
+Both source checks route through the shared access helpers
+(`adminCanViewConversation` / `adminCanViewExecution`) rather than
+comparing `userId` to the session id, so **system-owned rows stay
+capturable**: schedule- and inbound-triggered rows carry `userId = null`
+since [#502](https://github.com/human-centric-engineering/sunrise/issues/502),
+and an owner-only comparison 404s every one of them — which would make a
+scheduled run's output impossible to turn into a dataset case. A
+`'shared'` basis is deliberately refused on the conversation side: a
+share grants view consent, not consent to copy the turn into someone
+else's dataset, where it outlives the share and a revoke cannot reach it.
 
 ## Phase 2 — synthetic case generation
 

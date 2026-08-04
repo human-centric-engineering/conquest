@@ -1,18 +1,18 @@
 import type { Metadata } from 'next';
+import { BRAND } from '@/lib/brand';
 
-const metaDescription =
-  'How ConQuest collects, uses, shares and protects your personal data, and the rights you have under UK data protection law.';
+const metaDescription = `How ${BRAND.name} collects, uses, shares and protects your personal data, and the rights you have under UK data protection law.`;
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
   description: metaDescription,
   openGraph: {
-    title: 'Privacy Policy - ConQuest',
+    title: `Privacy Policy - ${BRAND.name}`,
     description: metaDescription,
   },
   twitter: {
     card: 'summary',
-    title: 'Privacy Policy - ConQuest',
+    title: `Privacy Policy - ${BRAND.name}`,
     description: metaDescription,
   },
 };

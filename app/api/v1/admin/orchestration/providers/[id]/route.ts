@@ -20,7 +20,7 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import {
@@ -31,18 +31,10 @@ import { updateProviderConfigSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-function parseProviderId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid provider id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseProviderId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'provider id' });
 
   const provider = await prisma.aiProviderConfig.findUnique({ where: { id } });
   if (!provider) throw new NotFoundError(`Provider ${id} not found`);
@@ -59,7 +51,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseProviderId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'provider id' });
 
   const current = await prisma.aiProviderConfig.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Provider ${id} not found`);
@@ -123,7 +115,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseProviderId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'provider id' });
   const permanent = new URL(request.url).searchParams.get('permanent') === 'true';
 
   const current = await prisma.aiProviderConfig.findUnique({ where: { id } });

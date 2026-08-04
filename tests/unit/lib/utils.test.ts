@@ -4,10 +4,11 @@
  * Tests for utility functions in lib/utils.ts
  * - cn() - Tailwind CSS class merging utility
  * - isRecord() - Type guard for Record<string, unknown>
+ * - slugify() - filename/URL-safe slug
  */
 
 import { describe, it, expect } from 'vitest';
-import { cn, isRecord } from '@/lib/utils';
+import { cn, isRecord, slugify } from '@/lib/utils';
 
 describe('cn()', () => {
   describe('basic functionality', () => {
@@ -260,5 +261,41 @@ describe('isRecord()', () => {
 
   it('should return true for Date objects', () => {
     expect(isRecord(new Date())).toBe(true);
+  });
+});
+
+describe('slugify()', () => {
+  it('should lower-case and hyphenate a normal title', () => {
+    expect(slugify('Q3 Board Report')).toBe('q3-board-report');
+  });
+
+  it('should collapse runs of non-alphanumerics to a single hyphen', () => {
+    expect(slugify('a  --  b')).toBe('a-b');
+    expect(slugify('Costs & Budget: 2026')).toBe('costs-budget-2026');
+  });
+
+  it('should trim leading and trailing hyphens', () => {
+    expect(slugify('  spaced  ')).toBe('spaced');
+    expect(slugify('!!!bang!!!')).toBe('bang');
+  });
+
+  it('should return the bare slug rather than a baked-in fallback', () => {
+    // Deliberate: the right fallback is caller-specific, so an input with no
+    // slug-able characters yields '' and the caller applies its own default.
+    expect(slugify('!!!')).toBe('');
+    expect(slugify('日本語')).toBe('');
+    expect(slugify('')).toBe('');
+    expect(slugify('!!!') || 'report').toBe('report');
+  });
+
+  it('should drop accents rather than transliterate them', () => {
+    // Documents the known limitation: this is a filename-safety helper, not a
+    // transliterator. 'Crème Brûlée' loses the accented letters entirely.
+    expect(slugify('Crème Brûlée')).toBe('cr-me-br-l-e');
+  });
+
+  it('should be idempotent', () => {
+    const once = slugify('Some Report: Final (v2)');
+    expect(slugify(once)).toBe(once);
   });
 });

@@ -177,7 +177,9 @@ function makeExecutionRow(overrides: Record<string, unknown> = {}) {
     status: 'pending',
     inputData: {},
     executionTrace: [],
-    userId: USER_ID,
+    // System-owned — the route writes `userId: null` for every inbound run
+    // (#502); this factory mirrors what comes back from the DB.
+    userId: null,
     triggerSource: 'inbound:slack',
     triggerExternalId: null,
     createdAt: new Date(),
@@ -495,7 +497,7 @@ describe('Slack channel', () => {
           data: expect.objectContaining({
             triggerSource: 'inbound:slack',
             versionId: VERSION_ID,
-            userId: USER_ID,
+            userId: null,
             status: 'pending',
             dedupKey: `slack:${slackEventBody.event_id}`,
           }),
@@ -665,13 +667,14 @@ describe('Slack channel', () => {
       // Assert — status first
       expect(response.status).toBe(202);
 
-      // Assert — drainEngine was called fire-and-forget with the executionId.
+      // Assert — drainEngine was called fire-and-forget with the executionId
+      // and a null user context, matching the row it drives (#502).
       expect(drainEngine).toHaveBeenCalledWith(
         EXECUTION_ID,
         expect.objectContaining({ id: WORKFLOW_ID, slug: WORKFLOW_SLUG }),
         expect.objectContaining({ steps: expect.any(Array), entryStepId: 'step-1' }),
         expect.any(Object),
-        USER_ID,
+        null,
         VERSION_ID
       );
     });
@@ -691,13 +694,17 @@ describe('Slack channel', () => {
       // Assert — status first
       expect(response.status).toBe(202);
 
-      // Assert — logAdminAction must be called with the canonical audit action.
+      // Assert — logAdminAction must be called with the canonical audit
+      // action, attributed to nobody: the upstream system fired this, not the
+      // operator who configured the trigger, and `clientIp` on the row is the
+      // caller's address rather than theirs. `entityId` still points at their
+      // trigger, which is where authorship belongs (#502).
       expect(logAdminAction).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'workflow_trigger.fire',
           entityType: 'workflow_trigger',
           entityId: TRIGGER_ID_SLACK,
-          userId: USER_ID,
+          userId: null,
           metadata: expect.objectContaining({
             channel: 'slack',
             executionId: EXECUTION_ID,
@@ -979,7 +986,7 @@ describe('HMAC channel', () => {
           data: expect.objectContaining({
             triggerSource: 'inbound:hmac',
             versionId: VERSION_ID,
-            userId: USER_ID,
+            userId: null,
             triggerExternalId: null,
             dedupKey: null,
             inputData: expect.objectContaining({
@@ -1202,7 +1209,7 @@ describe('Postmark channel', () => {
             triggerExternalId: 'msg-postmark-001',
             dedupKey: 'postmark:msg-postmark-001',
             versionId: VERSION_ID,
-            userId: USER_ID,
+            userId: null,
           }),
         })
       );
@@ -1390,7 +1397,7 @@ describe('observability', () => {
       expect.objectContaining({
         action: 'workflow_trigger.fire',
         entityType: 'workflow_trigger',
-        userId: USER_ID,
+        userId: null,
         metadata: expect.objectContaining({
           channel: 'slack',
           executionId: EXECUTION_ID,
@@ -1576,7 +1583,13 @@ describe('Twilio channel + conversation enrichment', () => {
     const response = await POST(request, makeParams('twilio', WORKFLOW_SLUG));
 
     expect(response.status).toBe(202);
-    // Conversation row was created with the resolved channel + provider.
+    // Conversation row was created with the resolved channel + provider, and
+    // owned by nobody. `userId` is the one field here with teeth (#502):
+    // `AiConversation.userId` is `onDelete: Cascade`, so stamping the
+    // trigger's author would mean that when they are erased, this SMS thread
+    // — the sender's phone number and every message either side wrote —
+    // disappears with them, and it would surface in that operator's own
+    // subject-access export in the meantime.
     expect(prisma.aiConversation.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1584,9 +1597,14 @@ describe('Twilio channel + conversation enrichment', () => {
           provider: 'twilio',
           fromAddress: '+12133734253',
           agentId: 'agent-twilio-1',
+          userId: null,
         }),
       })
     );
+    const convData = vi.mocked(prisma.aiConversation.create).mock.calls[0][0].data as {
+      userId: unknown;
+    };
+    expect(convData.userId).toBeNull();
     // conversationId was threaded into the execution's triggerMeta.
     const createCalls = vi.mocked(prisma.aiWorkflowExecution.create).mock.calls;
     const lastCall = createCalls[createCalls.length - 1]?.[0]?.data as

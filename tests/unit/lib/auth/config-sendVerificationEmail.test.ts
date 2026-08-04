@@ -68,6 +68,9 @@ vi.mock('better-auth/adapters/prisma', () => ({
 
 vi.mock('better-auth/api', () => ({
   getOAuthState: vi.fn(),
+  // Identity passthrough — lib/auth/config.ts wraps its `hooks.before` body in
+  // this at module load, so an unmocked export throws on import (#463).
+  createAuthMiddleware: vi.fn((fn: unknown) => fn),
   APIError: class APIError extends Error {
     status: string;
     body: { code?: string; message?: string };
@@ -102,6 +105,22 @@ vi.mock('@/emails/welcome', () => ({
   default: vi.fn(() => React.createElement('div', {}, 'Welcome Email')),
 }));
 
+// Discriminator mocked so these cases exercise the hook's branching; the
+// decoding itself is pinned in tests/unit/lib/auth/change-email.test.ts.
+// Defaults to "signup" so every pre-existing case keeps its meaning.
+vi.mock('@/lib/auth/change-email', () => ({
+  parseEmailChangeToken: vi.fn().mockResolvedValue(null),
+  getVerificationTokenFromRequest: vi.fn(() => undefined),
+}));
+
+vi.mock('@/lib/auth/sessions', () => ({
+  revokeUserSessions: vi.fn().mockResolvedValue(0),
+}));
+
+vi.mock('@/emails/change-email-approval', () => ({
+  default: vi.fn(() => React.createElement('div', {}, 'Change Email Approval')),
+}));
+
 vi.mock('@/emails/reset-password', () => ({
   default: vi.fn(() => React.createElement('div', {}, 'Reset Password Email')),
 }));
@@ -121,6 +140,7 @@ describe('lib/auth/config - sendVerificationEmail callback', () => {
   };
   let getValidInvitation: ReturnType<typeof vi.fn>;
   let VerifyEmailEmail: ReturnType<typeof vi.fn>;
+  let parseEmailChangeToken: ReturnType<typeof vi.fn>;
   let sendVerificationEmailHook: (params: {
     user: { id: string; email: string; name: string | null };
     url: string;
@@ -135,7 +155,13 @@ describe('lib/auth/config - sendVerificationEmail callback', () => {
     const logging = await import('@/lib/logging');
     const invitationToken = await import('@/lib/utils/invitation-token');
     const verifyEmailTemplate = await import('@/emails/verify-email');
+    const changeEmail = await import('@/lib/auth/change-email');
     const authConfig = await import('@/lib/auth/config');
+
+    // `clearAllMocks` wipes declaration-time implementations, so restore the
+    // "this is a signup" default the rest of this file assumes.
+    parseEmailChangeToken = vi.mocked(changeEmail.parseEmailChangeToken);
+    parseEmailChangeToken.mockResolvedValue(null);
 
     sendEmail = vi.mocked(emailSend.sendEmail);
     logger = {
@@ -239,6 +265,52 @@ describe('lib/auth/config - sendVerificationEmail callback', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // better-auth routes the new-address leg of an email CHANGE through this same
+  // callback, with `user.email` already set to the NEW address. The invitation
+  // skip below is correct for a signup and wrong for a change (#489).
+  describe('email change (not a signup)', () => {
+    beforeEach(() => {
+      parseEmailChangeToken.mockResolvedValue({
+        previousEmail: 'old@example.com',
+        newEmail: 'new@example.com',
+      });
+    });
+
+    it('sends to the new address even when it holds a pending invitation', async () => {
+      // The strand bug. An existing user moving to an address that happens to
+      // have an open invitation would otherwise get no email, no error, and an
+      // account stuck mid-change forever — the invitation skip is about signup,
+      // and this is not that.
+      const user = createMockUser({ id: 'mover-1', email: 'new@example.com', name: 'Mover' });
+      getValidInvitation.mockResolvedValue({
+        id: 'inv-99',
+        email: 'new@example.com',
+        metadata: {},
+      });
+
+      await sendVerificationEmailHook({
+        user,
+        url: 'https://example.com/verify?token=abc&callbackURL=%2F',
+        token: 'abc',
+      });
+
+      expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'new@example.com' }));
+    });
+
+    it('does not consult the invitation table at all for a change', async () => {
+      const user = createMockUser({ id: 'mover-2', email: 'new@example.com', name: 'Mover' });
+
+      await sendVerificationEmailHook({
+        user,
+        url: 'https://example.com/verify?token=abc&callbackURL=%2F',
+        token: 'abc',
+      });
+
+      expect(getValidInvitation).not.toHaveBeenCalled();
+      expect(sendEmail).toHaveBeenCalled();
     });
   });
 

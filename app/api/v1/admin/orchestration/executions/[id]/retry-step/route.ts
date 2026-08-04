@@ -26,6 +26,7 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { retryStepBodySchema, executionTraceSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { WorkflowStatus } from '@/types/orchestration';
 
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
@@ -40,7 +41,7 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   const body = await validateRequestBody(request, retryStepBodySchema);
 
   const execution = await prisma.aiWorkflowExecution.findUnique({ where: { id } });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
   if (execution.status !== WorkflowStatus.FAILED) {

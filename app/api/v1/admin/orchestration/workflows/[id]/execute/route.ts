@@ -28,6 +28,7 @@ import {
   resumeExecutionQuerySchema,
 } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import {
   prepareWorkflowExecution,
   resolveEffectiveExecutionCap,
@@ -55,8 +56,13 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   // (stamped at original create time) is the source of truth — if a new
   // version has been published mid-pause, resume must NOT silently switch to
   // the new definition. That would defeat the publish/draft model's whole
-  // point. Cross-user resume returns 404 (not 403) so existence isn't leaked.
+  // point. Another admin's own run returns 404 (not 403) so existence isn't
+  // leaked; a system-owned run (schedule/inbound, `userId = null`) is
+  // resumable by any admin — otherwise a scheduled run that pauses at an
+  // approval gate could be approved but never continued, and would sit in
+  // `pending` forever. See `lib/orchestration/access/execution-access.ts`.
   let pinnedVersionId: string | null = null;
+  let resumeOwnerUserId: string | null = null;
   if (resumeFromExecutionId) {
     // Short-circuit on malformed workflow id BEFORE the DB lookup so we
     // don't waste a query on a request that can't possibly match.
@@ -70,12 +76,13 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     });
     if (
       !existing ||
-      existing.userId !== session.user.id ||
+      !adminCanViewExecution(existing, session.user.id) ||
       existing.workflowId !== parsedWorkflowId.data
     ) {
       throw new NotFoundError(`Execution ${resumeFromExecutionId} not found`);
     }
     pinnedVersionId = existing.versionId;
+    resumeOwnerUserId = existing.userId;
   }
 
   // Shared pre-flight: ID parse, DB lookup, isActive, definition + DAG + semantic validation.
@@ -105,12 +112,19 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     resumeFromExecutionId,
   });
 
+  // A resumed run keeps the user context it was created with, exactly as it
+  // keeps its pinned `versionId` and persisted `scope`. Handing the resuming
+  // admin's id to a system-owned run would give its second half a user
+  // context its first half never had — `judge_call` would start filing a
+  // stranger's transcript into that admin's history, and `user_memory` would
+  // read their remembered facts from inbound traffic. For an owner-resume
+  // this is the session id either way.
   const engine = new OrchestrationEngine();
   const events = engine.execute(
     { id: workflow.id, definition, versionId: version.id },
     body.inputData,
     {
-      userId: session.user.id,
+      userId: resumeFromExecutionId ? resumeOwnerUserId : session.user.id,
       ...(effectiveBudgetLimitUsd !== undefined ? { budgetLimitUsd: effectiveBudgetLimitUsd } : {}),
       ...(body.scope ? { scope: body.scope } : {}),
       signal: request.signal,

@@ -14,8 +14,8 @@
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { NotFoundError } from '@/lib/api/errors';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { deleteDocument } from '@/lib/orchestration/knowledge/document-manager';
@@ -25,18 +25,10 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { invalidateAllAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { notifyMcpKnowledgeChanged } from '@/lib/orchestration/mcp/resource-update-hooks';
 
-function parseDocumentId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid document id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseDocumentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'document id' });
 
   const document = await prisma.aiKnowledgeDocument.findUnique({
     where: { id },
@@ -60,7 +52,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseDocumentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'document id' });
 
   const existing = await prisma.aiKnowledgeDocument.findUnique({
     where: { id },
@@ -134,7 +126,7 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseDocumentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'document id' });
 
   // Explicit existence check — deleteDocument throws on missing rows;
   // we convert that into a proper 404 before calling it.

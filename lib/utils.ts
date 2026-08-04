@@ -21,10 +21,20 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Slugify a string for use in a filename or URL segment: lower-case, runs of non-alphanumerics
- * collapse to single hyphens, leading/trailing hyphens trimmed. Returns the bare slug (possibly
- * empty) — callers apply their own fallback (e.g. `slugify(title) || 'questionnaire'`). Pure and
- * client-safe; shared by the PDF/transcript download helpers and the completion-screen download.
+ * Slugify a string for use in a filename or URL segment: lower-case, runs of
+ * non-alphanumerics collapse to single hyphens, leading/trailing hyphens
+ * trimmed.
+ *
+ * Returns the BARE slug, including the empty string — an all-punctuation or
+ * all-CJK input legitimately slugifies to `''`, and the right fallback is
+ * caller-specific (`'report'`, `'questionnaire'`, a record id). Swallowing that
+ * inside the helper leads to surprising filenames, so callers apply their own:
+ *
+ *     const filename = `${slugify(title) || 'report'}.pdf`;
+ *
+ * Pure and client-safe (no Node imports), so the same helper works in a
+ * download button and in a server-side PDF/transcript filename — which is the
+ * main reason to share it at all.
  */
 export function slugify(value: string): string {
   return value

@@ -16,19 +16,11 @@
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { NotFoundError, ConflictError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { NotFoundError, ConflictError } from '@/lib/api/errors';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
 import { patchDatasetSchema } from '@/lib/validations/orchestration-evaluations';
-
-function parseId(rawId: string): string {
-  const parsed = cuidSchema.safeParse(rawId);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid dataset id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
 
 async function loadDataset(id: string, userId: string) {
   const dataset = await prisma.aiDataset.findFirst({
@@ -41,7 +33,7 @@ async function loadDataset(id: string, userId: string) {
 export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'dataset id' });
 
   const dataset = await loadDataset(id, session.user.id);
   const cases = await prisma.aiDatasetCase.findMany({
@@ -56,7 +48,7 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
 export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'dataset id' });
 
   await loadDataset(id, session.user.id);
   const body = await validateRequestBody(request, patchDatasetSchema);
@@ -75,7 +67,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'dataset id' });
 
   await loadDataset(id, session.user.id);
   // Block delete when a non-terminal run still references this dataset —

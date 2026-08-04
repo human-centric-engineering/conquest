@@ -41,6 +41,7 @@ import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
 import { bootstrapInboundAdapters } from '@/lib/orchestration/inbound/bootstrap';
 import { getInboundAdapter } from '@/lib/orchestration/inbound/registry';
 import { resolveConversation } from '@/lib/orchestration/inbound/conversation-resolver';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 
 // Module-level bootstrap. Idempotent — first call registers adapters from env.
 bootstrapInboundAdapters();
@@ -256,6 +257,21 @@ export async function POST(
     });
   }
 
+  // Every row this request writes is SYSTEM-OWNED: `userId = null`, not the
+  // operator who configured the trigger (#502).
+  //
+  // Nobody with an account here caused this run. The payload belongs to
+  // whoever sent the message — a phone number and message body from Twilio,
+  // From/Subject/body and base64 attachments from Postmark. Attributing that
+  // to the operator had two live consequences: `AiConversation.userId` and
+  // `AiWorkflowExecution.userId` are `onDelete: Cascade`, so erasing one
+  // operator destroyed every third party's correspondence routed through
+  // their triggers; and a subject-access export handed that same operator a
+  // stranger's phone number and email bodies labelled as their own data.
+  //
+  // Attribution is not lost — `triggerSource` records the channel, and
+  // `AiWorkflowTrigger.createdBy` still names the operator on the trigger
+  // row itself, which is where "who set this up" belongs.
   const triggerSource = `inbound:${channel}`;
 
   // Conversation enrichment — only for adapters that carry a real end-user
@@ -280,7 +296,11 @@ export async function POST(
           : undefined;
       const resolved = await resolveConversation({
         agentId: metadata.conversationAgentId,
-        userId: trigger.createdBy,
+        // System-owned: the thread carries a third party's messages and
+        // their phone number or email address. It is not the operator's
+        // personal data just because they configured the channel — see the
+        // block comment above `triggerSource` below (#502).
+        userId: null,
         channel: normalised.conversationChannel,
         provider: normalised.conversationProvider,
         fromAddress: normalised.fromAddress,
@@ -357,7 +377,10 @@ export async function POST(
         status: WorkflowStatus.PENDING,
         inputData,
         executionTrace: [],
-        userId: trigger.createdBy,
+        // System-owned — see the `triggerSource` block above. `inputData`
+        // holds the adapter payload verbatim, so this row is the one whose
+        // mis-attribution leaked hardest.
+        userId: null,
         triggerSource,
         triggerExternalId: externalId,
         dedupKey,
@@ -368,6 +391,9 @@ export async function POST(
       },
     });
     executionId = execution.id;
+    // A `pending` execution's recovery sweep is tick-owned, so the idle gate
+    // must not be allowed to skip past it (#442).
+    noteMaintenanceWork('inbound-trigger-execution');
   } catch (err) {
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -401,7 +427,10 @@ export async function POST(
     });
 
   logAdminAction({
-    userId: trigger.createdBy,
+    // The actor is the upstream system, not the operator who configured the
+    // trigger — they did not fire it, and `clientIp` below is the caller's,
+    // not theirs. `entityId` still points at their trigger row.
+    userId: null,
     action: 'workflow_trigger.fire',
     entityType: 'workflow_trigger',
     entityId: trigger.id,
@@ -419,12 +448,17 @@ export async function POST(
   // Drain the engine fire-and-forget so the workflow starts immediately
   // rather than waiting for the next maintenance tick. Mirrors the schedule
   // dispatch pattern; identical crash handling on failure.
+  // The run's user context moves in lockstep with the row above: passing
+  // the operator's id here would leave the memory and scope layers treating
+  // a stranger's message as that operator's session. With `null`, the
+  // `user_memory` capability returns its `no_user_context` error instead of
+  // reading or writing one person's remembered facts from another's traffic.
   void drainEngine(
     executionId,
     trigger.workflow,
     defParsed.data,
     inputData,
-    trigger.createdBy,
+    null,
     trigger.workflow.publishedVersion.id
   );
 

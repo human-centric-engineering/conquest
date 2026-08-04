@@ -48,6 +48,7 @@ import {
 } from '@/lib/admin-nav/registry';
 import { initAppNav } from '@/lib/app/admin-nav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Auto-wire the app's admin-nav registrations (fork-readiness — the `lib/app/`
 // bootstrap surface). Runs once when this client module loads (and during the
@@ -532,12 +533,20 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
         <nav className="flex-1 space-y-6 overflow-y-auto p-4">
           {sections.map((section) => (
             <div key={section.title}>
-              {!collapsed &&
-                (section.titleNode ?? (
-                  <h3 className="text-muted-foreground mb-2 px-2 text-xs font-semibold tracking-wider uppercase">
-                    {section.title}
-                  </h3>
-                ))}
+              {!collapsed && (
+                <h3
+                  // A custom node carries no text of its own (a wordmark image,
+                  // say), so `title` stays the accessible name for the heading.
+                  aria-label={section.titleNode ? section.title : undefined}
+                  className={cn(
+                    'mb-2 px-2',
+                    !section.titleNode &&
+                      'text-muted-foreground text-xs font-semibold tracking-wider uppercase'
+                  )}
+                >
+                  {section.titleNode ?? section.title}
+                </h3>
+              )}
               {section.items && (
                 <NavItemList items={section.items} pathname={pathname} collapsed={collapsed} />
               )}
@@ -586,14 +595,14 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
         {/* Footer */}
         <div className="border-t p-4">
           <Link
-            href="/dashboard"
+            href={AUTH_LANDING_ROUTE}
             className={cn(
               'text-muted-foreground hover:text-foreground flex items-center gap-2 text-sm transition-colors',
               collapsed && 'justify-center'
             )}
           >
             <ChevronLeft className="h-4 w-4" />
-            {!collapsed && <span>Back to Dashboard</span>}
+            {!collapsed && <span>Back to {AUTH_LANDING_LABEL}</span>}
           </Link>
         </div>
       </div>

@@ -117,7 +117,10 @@ export function SessionStats({ stats, loading }: SessionStatsProps) {
                   <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
                   <Tooltip
                     contentStyle={TOOLTIP_STYLE}
-                    labelFormatter={(l) => formatDay(String(l))}
+                    // Recharts types the label as ReactNode; the `date` dataKey is
+                    // an ISO string at runtime. Narrow rather than String() it —
+                    // stringifying a non-string would render "[object Object]".
+                    labelFormatter={(l) => (typeof l === 'string' ? formatDay(l) : '')}
                     formatter={(v) => [String(v), 'Sessions']}
                   />
                   <Area

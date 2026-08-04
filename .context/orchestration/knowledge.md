@@ -368,6 +368,58 @@ Both surfaces mirror the runtime resolver in `lib/orchestration/knowledge/resolv
 
 **Don't** run `npm run db:reset` to "fix" a dim mismatch — it wipes users, sessions, settings, providers, and every other table. `npm run embeddings:reset` is narrowly scoped to the three embedding/chunk/document tables.
 
+## Forks with their own vector table
+
+The platform knowledge base is a **global** asset, and per-user scoping inside it
+is an anti-pattern (above). A fork that needs user-scoped embeddings therefore
+adds its own `vector(...)` table — that is the intended path, not a workaround.
+
+It inherits the dimension trap with it. `pgvector` fixes dimension at the column
+level, so an operator changing the active embedding model without re-embedding
+breaks every query against that table with a cast error, after paying for the
+embedding round trip. The cause (a settings change, possibly weeks earlier) is
+far from the symptom, which is what makes it expensive rather than merely broken.
+
+Use `assertStoredVectorDimensions()` from
+`lib/orchestration/knowledge/embedding-dimensions.ts` — the same guard the
+knowledge corpus uses, with the storage passed in as two closures:
+
+```typescript
+import { assertStoredVectorDimensions } from '@/lib/orchestration/knowledge/embedding-dimensions';
+
+await assertStoredVectorDimensions({
+  label: 'note',
+  remediation: 'Run `npm run app:reindex` to re-embed.',
+  groupByDimension: async () => {
+    const rows = await prisma.appNote.groupBy({
+      by: ['embeddingDimension'],
+      where: { embeddingDimension: { not: null } },
+      _count: { _all: true },
+    });
+    return rows.map((r) => ({ dimension: r.embeddingDimension, count: r._count._all }));
+  },
+  exemplarModel: async (dimension) =>
+    (
+      await prisma.appNote.findFirst({
+        where: { embeddingDimension: dimension },
+        select: { embeddingModel: true },
+      })
+    )?.embeddingModel ?? null,
+});
+```
+
+Two things to get right:
+
+- **Call it before you embed the query**, not after. The point is to fail
+  without paying for the round trip — that is what the knowledge path does.
+- **Exclude rows with no recorded dimension** in `groupByDimension`. They
+  predate dimension tracking and cannot be proven to mismatch; counting them
+  raises a false alarm. Anything that does reach the guard with a null
+  dimension is treated as a mismatch, deliberately.
+
+The closures keep the guard free of Prisma-delegate typing and work for a table
+that is not a Prisma model at all.
+
 ## Related Documentation
 
 - [Document Ingestion Pipeline](./document-ingestion.md) — multi-format parser architecture, PDF preview flow

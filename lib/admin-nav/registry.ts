@@ -52,7 +52,8 @@ export interface NavSection {
    * Optional custom-rendered header for this section. When set, the sidebar
    * renders this node in place of the default uppercase `title` label (e.g. a
    * fork's brand wordmark). `title` is still required — it remains the React
-   * key and the collapsed/`aria` fallback.
+   * key, the registry's dedupe key, and the section heading's accessible name,
+   * so a custom node can never degrade a11y.
    */
   titleNode?: ReactNode;
   items?: NavItem[];

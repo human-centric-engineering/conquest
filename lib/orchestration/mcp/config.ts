@@ -1,8 +1,12 @@
 /**
  * MCP Server Config Loader
  *
- * Singleton settings loader for MCP server configuration,
- * following the AiOrchestrationSettings upsert-on-read pattern.
+ * Singleton settings loader for MCP server configuration.
+ *
+ * Still upsert-on-read behind the cache below. `AiOrchestrationSettings` was
+ * the same shape until #442 moved it to read-first, and this row should follow
+ * — but its miss path runs far less often, so the change is not urgent enough
+ * to make here without the tests to match.
  *
  * Platform-agnostic: no Next.js imports.
  */
@@ -11,14 +15,21 @@ import { prisma } from '@/lib/db/client';
 import type { McpServerState } from '@/lib/orchestration/mcp/types';
 import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 
-const CACHE_TTL_MS = 60_000; // 1 minute
+/**
+ * Five minutes, not the one minute this used to be. At 60s the TTL matched the
+ * maintenance tick's own interval exactly, so the retention sweep's call landed
+ * on a coin-flip — and the miss path below is an `upsert`, i.e. a write taking a
+ * row lock, roughly every other tick for a row that changes when an admin edits
+ * it (#442). Invalidation is explicit, so a longer TTL costs nothing.
+ */
+const CACHE_TTL_MS = 5 * 60_000;
 
 let cached: McpServerState | null = null;
 let cachedAt = 0;
 
 /**
  * Load the MCP server config singleton, upserting if it doesn't exist.
- * Caches for 1 minute to avoid hitting the DB on every MCP request.
+ * Cached for `CACHE_TTL_MS`; admin mutations call `invalidateMcpConfigCache()`.
  */
 export async function getMcpServerConfig(): Promise<McpServerState> {
   const now = Date.now();

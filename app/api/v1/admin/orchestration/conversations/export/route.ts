@@ -4,9 +4,16 @@
  * GET /api/v1/admin/orchestration/conversations/export
  *
  * Exports the calling admin's own conversations with messages in JSON or
- * CSV format. Results are scoped to `session.user.id`, matching the list
- * endpoint. Supports the same filters as the list endpoint (agentId,
+ * CSV format. Supports the same filters as the list endpoint (agentId,
  * isActive, title/message search, tag, dateFrom, dateTo).
+ *
+ * **Own conversations only** — deliberately narrower than the list endpoint,
+ * which also shows actively-shared and system-owned inbound threads. Bulk
+ * export is a different act from reading one thread: this route would
+ * otherwise hand an admin a single file containing hundreds of third
+ * parties' SMS and email bodies, with one audit row for the lot. Inbound
+ * transcripts remain reachable per-conversation through the messages and
+ * provenance routes, each of which logs the access individually.
  *
  * Rate limited to 1 request per minute per admin to prevent abuse.
  *
@@ -47,8 +54,8 @@ export const GET = withAdminAuth(async (request, session) => {
     dateTo: searchParams.get('dateTo') ?? undefined,
   });
 
-  // Always scope to the caller — matches the list endpoint. Any incoming
-  // `?userId=...` parameter is silently ignored.
+  // Always scope to the caller — see the "own conversations only" note in
+  // the header. Any incoming `?userId=...` parameter is silently ignored.
   const where: Prisma.AiConversationWhereInput = { userId: session.user.id };
   if (query.agentId) where.agentId = query.agentId;
   if (query.isActive !== undefined) where.isActive = query.isActive;

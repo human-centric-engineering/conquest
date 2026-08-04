@@ -30,8 +30,8 @@
 import { registerAppDriftProbes } from '@/lib/app/db-drift';
 import { prisma } from '@/lib/db/client';
 import {
-  columnExists,
   constraintExists,
+  generatedColumnExists,
   getAppDriftProbes,
   indexExists,
   mergeDriftProbes,
@@ -64,7 +64,11 @@ const DRIFT_OBJECTS: DriftObject[] = [
     name: 'A1 searchVector (GENERATED tsvector column)',
     kind: 'column',
     table: 'ai_knowledge_chunk',
-    probe: columnExists('ai_knowledge_chunk', 'searchVector'),
+    // `generatedColumnExists`, not `columnExists`: the failure this probe
+    // exists for is a migration recreating the column as a plain tsvector,
+    // which leaves a same-named column that is never populated. Existence
+    // alone cannot see that.
+    probe: generatedColumnExists('ai_knowledge_chunk', 'searchVector'),
   },
   {
     name: 'A2 idx_ai_knowledge_chunk_search_vector',

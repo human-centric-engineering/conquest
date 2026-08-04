@@ -6,6 +6,12 @@
  * retains org config with a nulled creator, residual `clientIp` is scrubbed,
  * and a `DataErasureReceipt` is written. Runs against the real dev/CI Postgres.
  *
+ * It also proves the other edge of the cascade: system-owned inbound data —
+ * a third party's SMS thread and the run it started — SURVIVES erasing the
+ * operator whose agent and workflow it hangs off. That is the half a mocked
+ * test cannot reach, because the deletion it guards against is performed by
+ * Postgres rather than by any line of application code (#502).
+ *
  * Skips cleanly (exit 0) when no database is reachable, so it is safe to invoke
  * anywhere — it only does real work where a DB exists (CI's `validate` job,
  * which provisions Postgres + migrations + seeds, and locally with a running
@@ -51,6 +57,9 @@ async function main(): Promise<void> {
   let receiptId: string | null = null;
   let datasetId: string | null = null;
   let runId: string | null = null;
+  let inboundConversationId: string | null = null;
+  let inboundExecutionId: string | null = null;
+  let workflowId: string | null = null;
 
   try {
     // Subject (ADMIN so we also prove a config-creator's createdBy is nulled).
@@ -82,6 +91,57 @@ async function main(): Promise<void> {
     const message = await prisma.aiMessage.create({
       data: { conversationId: conversation.id, role: 'user', content: 'hi' },
     });
+
+    // A third party's inbound thread and run, on an agent and workflow the
+    // subject created. System-owned (`userId: null`) since #502, and they must
+    // SURVIVE the subject's erasure: nothing here is the subject's to erase.
+    //
+    // This is the assertion the whole issue turns on. While these rows carried
+    // `userId = trigger.createdBy`, the `Cascade` FK meant erasing one operator
+    // silently destroyed every customer conversation routed through any trigger
+    // they had configured — `eraseUser()` returned success and the
+    // correspondence was gone. Planting them against the subject's own agent
+    // and workflow is deliberate: those relations are the remaining paths a
+    // cascade could still reach them by.
+    const inboundConversation = await prisma.aiConversation.create({
+      data: {
+        userId: null,
+        agentId: agent.id,
+        title: `${PREFIX} inbound thread`,
+        channel: 'sms',
+        provider: 'twilio',
+        fromAddress: `+1555${String(stamp).slice(-7)}`,
+      },
+    });
+    inboundConversationId = inboundConversation.id;
+    const inboundMessage = await prisma.aiMessage.create({
+      data: {
+        conversationId: inboundConversation.id,
+        role: 'user',
+        content: 'third party inbound text',
+      },
+    });
+
+    const workflow = await prisma.aiWorkflow.create({
+      data: {
+        name: `${PREFIX} workflow`,
+        slug: `${PREFIX}-workflow-${stamp}`,
+        description: 'smoke',
+        createdBy: subject.id,
+      },
+    });
+    workflowId = workflow.id;
+    const inboundExecution = await prisma.aiWorkflowExecution.create({
+      data: {
+        workflowId: workflow.id,
+        status: 'completed',
+        inputData: { trigger: { text: 'third party inbound text' } },
+        executionTrace: [],
+        triggerSource: 'inbound:sms',
+        userId: null,
+      },
+    });
+    inboundExecutionId = inboundExecution.id;
 
     // Retained audit row carrying the subject's IP (residual PII to scrub).
     const audit = await prisma.aiAdminAuditLog.create({
@@ -156,6 +216,23 @@ async function main(): Promise<void> {
       'eval run cascade-deleted'
     );
 
+    // System-owned inbound data survives — the erasure is bounded to the
+    // subject. A regression here means an operator leaving the company takes
+    // the customer correspondence with them.
+    const inboundConvAfter = await prisma.aiConversation.findUnique({
+      where: { id: inboundConversation.id },
+    });
+    check(inboundConvAfter !== null, 'third party’s inbound conversation survives the erasure');
+    check(
+      (await prisma.aiMessage.findUnique({ where: { id: inboundMessage.id } })) !== null,
+      'third party’s inbound message survives the erasure'
+    );
+    check(
+      (await prisma.aiWorkflowExecution.findUnique({ where: { id: inboundExecution.id } })) !==
+        null,
+      'inbound-triggered run survives the erasure'
+    );
+
     // Receipt written without re-introducing PII.
     const receipt = await prisma.dataErasureReceipt.findUnique({ where: { id: result.receiptId } });
     check(receipt !== null, 'erasure receipt written');
@@ -183,6 +260,19 @@ async function main(): Promise<void> {
       await prisma.aiEvaluationRun.deleteMany({ where: { id: runId } }).catch(() => undefined);
     if (datasetId)
       await prisma.aiDataset.deleteMany({ where: { id: datasetId } }).catch(() => undefined);
+    if (inboundExecutionId)
+      await prisma.aiWorkflowExecution
+        .deleteMany({ where: { id: inboundExecutionId } })
+        .catch(() => undefined);
+    if (workflowId)
+      await prisma.aiWorkflow.deleteMany({ where: { id: workflowId } }).catch(() => undefined);
+    // Deleted before the agent: the conversation is Cascade off `agentId`, so
+    // removing the agent first would take it (and its messages) with it — fine
+    // for cleanup, but explicit beats incidental.
+    if (inboundConversationId)
+      await prisma.aiConversation
+        .deleteMany({ where: { id: inboundConversationId } })
+        .catch(() => undefined);
     if (agentId) await prisma.aiAgent.deleteMany({ where: { id: agentId } }).catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
   }

@@ -1,9 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { nextFontStub } from './tests/mocks/next-font-plugin';
 
 export default defineConfig({
-  plugins: [react()],
+  // `nextFontStub` stands in for `next/font/*`, which the Next compiler strips
+  // at build time and Vitest therefore cannot execute. See the plugin's header.
+  plugins: [react(), nextFontStub()],
   test: {
     // Use happy-dom for fast DOM testing (alternative to jsdom). A component that renders a live
     // <iframe> (e.g. the intro video embed) should opt into jsdom per-file with a
@@ -17,8 +20,10 @@ export default defineConfig({
     // Include test files
     include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
 
-    // Exclude files. `tests/e2e` holds Playwright specs (`.spec.ts`) — they import
-    // `@playwright/test` and must NOT be picked up by Vitest's `.spec` glob.
+    // Exclude files. `tests/e2e` holds this fork's Playwright specs (`.spec.ts`) —
+    // they import `@playwright/test` and the include glob above would otherwise
+    // collect them, so Vitest would run them and fail in a way that doesn't
+    // obviously say "wrong runner".
     exclude: [
       'node_modules',
       'dist',
@@ -62,12 +67,13 @@ export default defineConfig({
       },
     },
 
-    // Test timeout. Heavy component/integration tests (async server-component
-    // renders, userEvent-driven form flows) do 1–3s of real work but can inflate
-    // to ~10s+ when CPU-starved during a full unsharded local run — enough to trip
-    // a 10s limit even though they pass in isolation. 20s gives contention headroom
-    // without masking a genuine hang.
-    testTimeout: 20000,
+    // Test timeout (useful for async tests). 10s is comfortable for the
+    // platform's own suite but tight once a fork adds heavier component and
+    // integration tests — async server-component renders and `userEvent`-driven
+    // form flows do 1-3s of real work and inflate well past that under CI
+    // contention. The resulting failures are flaky rather than deterministic,
+    // which makes them expensive to chase, so the default is generous.
+    testTimeout: 30000,
 
     // Mock CSS modules
     css: false,

@@ -57,6 +57,7 @@ vi.mock('@/lib/orchestration/mcp/config', () => ({
 // ─── Imports ────────────────────────────────────────────────────────────────
 
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
 import { getMcpServerConfig } from '@/lib/orchestration/mcp/config';
 import {
   enforceRetentionPolicies,
@@ -189,6 +190,61 @@ describe('enforceRetentionPolicies', () => {
     expect(result.evaluationSessionsDeleted).toBe(4);
     expect(result.evaluationRunsDeleted).toBe(7);
     expect(result.mcpAuditLogsDeleted).toBe(11);
+  });
+
+  it('reads the settings row exactly once for the whole sweep (#442)', async () => {
+    // Every prune used to resolve its own window from the same singleton row —
+    // eight round-trips to fetch six columns, 1,440 times a day.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      webhookRetentionDays: 30,
+      webhookDlqRetentionDays: 60,
+      costLogRetentionDays: 60,
+      auditLogRetentionDays: 365,
+      executionRetentionDays: 90,
+      evaluationRetentionDays: 90,
+    } as never);
+
+    await enforceRetentionPolicies();
+
+    expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledTimes(1);
+    // All six columns in that one read, so no prune has to go back for its own.
+    expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledWith({
+      where: { slug: 'global' },
+      select: {
+        webhookRetentionDays: true,
+        webhookDlqRetentionDays: true,
+        costLogRetentionDays: true,
+        auditLogRetentionDays: true,
+        executionRetentionDays: true,
+        evaluationRetentionDays: true,
+      },
+    });
+  });
+
+  it('skips every prune without re-reading settings when the row is missing', async () => {
+    // A fresh install has no settings row. The hoisted read must not degrade
+    // into each prune looking the row up again.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(null);
+
+    await enforceRetentionPolicies();
+
+    expect(prisma.aiOrchestrationSettings.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.aiWebhookDelivery.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.aiEventHookDelivery.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.aiCostLog.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('swallows a settings-read failure and still runs the always-on MCP prune', async () => {
+    // The pre-existing contract: a transient settings failure skips the
+    // configurable prunes rather than throwing out of the sweep.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockRejectedValue(
+      new Error('settings read failed')
+    );
+
+    const result = await enforceRetentionPolicies();
+
+    expect(result.webhookDeliveriesDeleted).toBe(0);
+    expect(prisma.mcpAuditLog.deleteMany).toHaveBeenCalledOnce();
   });
 });
 
@@ -833,5 +889,88 @@ describe('pruneMcpAuditLogs', () => {
     const expectedMs = 30 * 24 * 60 * 60 * 1000;
     expect(cutoff.getTime()).toBeGreaterThanOrEqual(beforeMs - expectedMs - 100);
     expect(cutoff.getTime()).toBeLessThanOrEqual(afterMs - expectedMs + 100);
+  });
+});
+
+// ─── Retention coherence warning (#456) ─────────────────────────────────────
+
+describe('retention coherence warning', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.aiAgent.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.aiWebhookDelivery.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiEventHookDelivery.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiCostLog.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiAdminAuditLog.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiWorkflowExecution.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiEvaluationSession.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiEvaluationRun.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.mcpAuditLog.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(getMcpServerConfig).mockResolvedValue({
+      isEnabled: false,
+      serverName: 'Test MCP Server',
+      serverVersion: '1.0.0',
+      maxSessionsPerKey: 5,
+      globalRateLimit: 60,
+      auditRetentionDays: 90,
+    });
+  });
+
+  it('warns when cost logs are pruned before the executions that reference them', async () => {
+    // The settings route rejects this pair at write time, but installs
+    // configured before that check stay in it silently — nobody re-saves
+    // settings to find out. The sweep is the only place that notices.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      costLogRetentionDays: 30,
+      executionRetentionDays: 90,
+    } as never);
+
+    await enforceRetentionPolicies();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Retention windows are incoherent'),
+      { costLogRetentionDays: 30, executionRetentionDays: 90 }
+    );
+  });
+
+  it('stays quiet when cost logs outlive executions', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      costLogRetentionDays: 365,
+      executionRetentionDays: 90,
+    } as never);
+
+    await enforceRetentionPolicies();
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when the two windows are equal', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      costLogRetentionDays: 90,
+      executionRetentionDays: 90,
+    } as never);
+
+    await enforceRetentionPolicies();
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when execution retention is unset (executions are never pruned)', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      costLogRetentionDays: 7,
+      executionRetentionDays: null,
+    } as never);
+
+    await enforceRetentionPolicies();
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the sweep when the settings read throws', async () => {
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockRejectedValue(
+      new Error('db unavailable')
+    );
+
+    await expect(enforceRetentionPolicies()).resolves.toBeDefined();
   });
 });

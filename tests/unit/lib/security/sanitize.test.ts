@@ -13,6 +13,7 @@ import {
   sanitizeUrl,
   sanitizeRedirectUrl,
   safeCallbackUrl,
+  isRootRelativePath,
   sanitizeObject,
   sanitizeFilename,
 } from '@/lib/security/sanitize';
@@ -124,6 +125,89 @@ describe('Input Sanitization', () => {
       expect(sanitizeUrl('')).toBe('');
       expect(sanitizeUrl(null as unknown as string)).toBe('');
     });
+
+    // Regression: the scheme check used to run on `url.trim().toLowerCase()`,
+    // but `trim()` removes only LEADING/TRAILING whitespace. The WHATWG URL
+    // parser strips tab/newline/CR from anywhere in a URL and drops leading C0
+    // controls BEFORE reading the scheme, so each vector below was returned
+    // unchanged by the sanitizer and then executed by the browser as
+    // `javascript:`.
+    describe('control-character scheme bypass', () => {
+      const TAB = String.fromCharCode(0x09);
+      const NEWLINE = String.fromCharCode(0x0a);
+      const CR = String.fromCharCode(0x0d);
+      const C0_CONTROL = String.fromCharCode(0x01);
+
+      it('should block a tab inside the scheme', () => {
+        expect(sanitizeUrl(`java${TAB}script:alert(1)`)).toBe('');
+      });
+
+      it('should block a newline inside the scheme', () => {
+        expect(sanitizeUrl(`java${NEWLINE}script:alert(1)`)).toBe('');
+      });
+
+      it('should block a carriage return inside the scheme', () => {
+        expect(sanitizeUrl(`java${CR}script:alert(1)`)).toBe('');
+      });
+
+      it('should block a tab before the colon', () => {
+        expect(sanitizeUrl(`javascript${TAB}:alert(1)`)).toBe('');
+      });
+
+      it('should block a leading C0 control character', () => {
+        // `trim()` removes whitespace but NOT \x01-\x08 / \x0e-\x1f.
+        expect(sanitizeUrl(`${C0_CONTROL}javascript:alert(1)`)).toBe('');
+      });
+
+      it('should block control-character obfuscation of every dangerous scheme', () => {
+        expect(sanitizeUrl(`da${TAB}ta:text/html,<script>alert(1)</script>`)).toBe('');
+        expect(sanitizeUrl(`vb${NEWLINE}script:msgbox("xss")`)).toBe('');
+        expect(sanitizeUrl(`fi${TAB}le:///etc/passwd`)).toBe('');
+      });
+
+      // The switch from `trim()` to an explicit character class fixed the
+      // control-char bypass but dropped the non-ASCII whitespace `trim()` had
+      // been removing. None of these is browser-executable — scheme parsing
+      // fails on a non-ALPHA first character, so they are treated as relative
+      // URLs — but the class strips them so the guard is never narrower than
+      // the `trim()` it replaced.
+      it('should block unicode whitespace before the scheme', () => {
+        const NBSP = String.fromCharCode(0x00a0);
+        const BOM = String.fromCharCode(0xfeff);
+        const LINE_SEP = String.fromCharCode(0x2028);
+        const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
+
+        expect(sanitizeUrl(`${NBSP}javascript:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`${BOM}javascript:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`${LINE_SEP}javascript:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`${IDEOGRAPHIC_SPACE}javascript:alert(1)`)).toBe('');
+      });
+
+      it('should block unicode whitespace inside the scheme', () => {
+        const EN_QUAD = String.fromCharCode(0x2000);
+        const NARROW_NBSP = String.fromCharCode(0x202f);
+
+        expect(sanitizeUrl(`java${EN_QUAD}script:alert(1)`)).toBe('');
+        expect(sanitizeUrl(`javascript${NARROW_NBSP}:alert(1)`)).toBe('');
+      });
+
+      it('should still return a URL whose PATH contains unicode whitespace', () => {
+        // The widened class must not start rewriting legitimate URLs — it only
+        // ever touches the inspected copy.
+        const NBSP = String.fromCharCode(0x00a0);
+        const url = `https://example.com/a${NBSP}b`;
+        expect(sanitizeUrl(url)).toBe(url);
+      });
+
+      it('should return safe URLs VERBATIM, not the stripped copy', () => {
+        // Only the inspected copy is normalised. Rewriting the returned value
+        // would corrupt legitimate URLs — a space in a path is valid, and
+        // callers rely on getting back exactly what they passed in.
+        expect(sanitizeUrl('https://example.com/a b')).toBe('https://example.com/a b');
+        expect(sanitizeUrl('https://example.com/a?b=c#d')).toBe('https://example.com/a?b=c#d');
+        expect(sanitizeUrl('mailto:someone@example.com')).toBe('mailto:someone@example.com');
+      });
+    });
   });
 
   describe('sanitizeRedirectUrl', () => {
@@ -184,6 +268,12 @@ describe('Input Sanitization', () => {
       expect(safeCallbackUrl('//evil.com/path')).toBe('/');
     });
 
+    it('should block backslash-prefixed paths the WHATWG URL parser treats as protocol-relative', () => {
+      // new URL('/\\evil.com', 'https://good.example.com').href === 'https://evil.com/'
+      expect(safeCallbackUrl('/\\evil.com')).toBe('/');
+      expect(safeCallbackUrl('/\\evil.com', '/dashboard')).toBe('/dashboard');
+    });
+
     it('should block dangerous protocols', () => {
       expect(safeCallbackUrl('javascript:alert(1)')).toBe('/');
       expect(safeCallbackUrl('data:text/html,<script>alert(1)</script>')).toBe('/');
@@ -198,6 +288,22 @@ describe('Input Sanitization', () => {
       expect(safeCallbackUrl(null)).toBe('/');
       expect(safeCallbackUrl('')).toBe('/');
       expect(safeCallbackUrl(undefined as unknown as string)).toBe('/');
+    });
+  });
+
+  describe('isRootRelativePath', () => {
+    it('should accept root-relative paths', () => {
+      expect(isRootRelativePath('/dashboard')).toBe(true);
+      expect(isRootRelativePath('/app/home')).toBe(true);
+    });
+
+    it('should reject protocol-relative and backslash-prefixed paths', () => {
+      expect(isRootRelativePath('//evil.com')).toBe(false);
+      expect(isRootRelativePath('/\\evil.com')).toBe(false);
+    });
+
+    it('should reject paths with no leading slash', () => {
+      expect(isRootRelativePath('dashboard')).toBe(false);
     });
   });
 

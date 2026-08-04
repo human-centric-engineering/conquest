@@ -182,12 +182,15 @@ Rate limited via `apiLimiter`. See [Event Hooks — External Approval Endpoints]
 
 ## Ownership scoping
 
-These resource families are scoped to `session.user.id`. Cross-user access returns **`404` (never `403`)** to avoid confirming existence:
+These resource families are scoped to the caller. Another admin's own rows return **`404` (never `403`)** to avoid confirming existence:
 
 - `/conversations/*`
+- `/executions/*`
 - `/evaluations/*`
 
 The rest are admin-global: every admin sees the same data.
+
+**Rows nobody owns are visible to every admin.** Schedule- and inbound-triggered runs, and the conversations inbound messages create, carry `userId = null` — the data on them belongs to a third party with no account here, not to the operator who configured the schedule or channel ([#502](https://github.com/human-centric-engineering/sunrise/issues/502)). Access to them is granted on a `'system'` basis by [`lib/orchestration/access/execution-access.ts`](../../lib/orchestration/access/execution-access.ts) and [`conversation-access.ts`](../../lib/orchestration/access/conversation-access.ts). Without it a scheduled run would be invisible in the executions list and a run paused at an approval gate could never be cleared. Conversation accesses on this basis are audit-logged.
 
 ---
 
@@ -538,7 +541,7 @@ Prepares a failed execution for retry from a specific step. Truncates the trace 
 
 After this call, the client reconnects via `POST /workflows/:workflowId/execute?resumeFromExecutionId=<executionId>` to resume streaming from the failed step.
 
-Guards: execution must be `failed`, `stepId` must reference a failed step in the trace, ownership is scoped to `session.user.id`.
+Guards: execution must be `failed`, `stepId` must reference a failed step in the trace, and the caller must be able to see the run (`adminCanViewExecution` — their own, or system-owned).
 
 ### `POST /executions/:id/rerun`
 
@@ -905,17 +908,17 @@ Used by the "Compare embedding providers" modal on the Knowledge Base page.
 
 ## Conversations
 
-**Conversation endpoints are consent-gated.** Read access (list / detail / messages / provenance / provenance.md) is granted iff the caller owns the conversation OR the owner has created an active `AiConversationShare` (see the [consumer share endpoints](#consumer-chat-share-routes) below). Cross-user without an active share → 404 (never 403 — we don't confirm existence). Mutations (PATCH / DELETE) stay strictly owner-only: a share grants view consent, not write-or-destroy consent. The bulk export endpoint is also caller-only by design; bulk-sharing is a privacy footgun, the per-conversation provenance route covers the cross-user audit-export case.
+**Conversation endpoints are consent-gated.** Read access (list / detail / messages / provenance / provenance.md) is granted on one of three bases: the caller owns the conversation (`'owner'`), the owner has created an active `AiConversationShare` (`'shared'` — see the [consumer share endpoints](#consumer-chat-share-routes) below), or nobody owns it (`'system'` — an inbound thread). Anything else → 404 (never 403 — we don't confirm existence). Mutations (PATCH / DELETE) accept `'owner'` and `'system'` but never `'shared'`: a share grants view consent, not write-or-destroy consent, while a system-owned thread has no owner whose consent could be violated — and deleting it is the only erasure path open to the person who sent the messages. The bulk export endpoint remains `'owner'`-only; bulk-sharing is a privacy footgun, and the per-conversation provenance route covers the cross-user audit-export case with per-access logging.
 
-The shared authorization helper is `adminCanViewConversation` at [`lib/orchestration/access/conversation-access.ts`](../../lib/orchestration/access/conversation-access.ts). Every cross-user read writes an `AiAdminAuditLog` row via `logConversationAccess` with `accessBasis: 'shared'` + `conversationOwnerId` so compliance can query "which other users' conversations did admin X view this month?".
+The shared authorization helper is `adminCanViewConversation` at [`lib/orchestration/access/conversation-access.ts`](../../lib/orchestration/access/conversation-access.ts). Every access that isn't `'owner'` writes an `AiAdminAuditLog` row via `logConversationAccess` with `accessBasis` + `conversationOwnerId` so compliance can query "which conversations that weren't theirs did admin X view this month?".
 
 ### `GET /conversations`
 
-Paginated list of the caller's conversations **plus conversations actively shared with admins**. Query: `page`, `limit`, `agentId`, `isActive`, `q`, `messageSearch` (`listConversationsQuerySchema`). The visibility clause is `OR: [{userId: caller}, {share: active}]`; filters are AND'd alongside.
+Paginated list of the caller's conversations **plus conversations actively shared with admins and system-owned inbound threads**. Query: `page`, `limit`, `agentId`, `isActive`, `q`, `messageSearch` (`listConversationsQuerySchema`). The visibility clause is `OR: [{userId: caller}, {userId: null}, {share: active}]`; filters are AND'd alongside.
 
 ### `DELETE /conversations/:id`
 
-Owner-only. `findFirst({ where: { id, userId: session.user.id } })` — missing OR non-owner → `404`. Messages cascade. PATCH follows the same posture.
+Owner or system-owned. Gated by `adminCanViewConversation`; a `'shared'` basis is refused, so missing, another admin's, or merely-shared → `404`. Messages cascade. PATCH follows the same posture. Deleting a system-owned thread writes a `conversation.deleted` audit row.
 
 ### `GET /conversations/:id/messages`
 
@@ -1054,7 +1057,7 @@ Response: `{ groupBy, rows: [{ key, label?, totalCostUsd, inputTokens, outputTok
 
 ### `GET /costs/summary`
 
-Dashboard summary. Returns `{ totals: { today, week, month }, byAgent: [...], byModel: [...], trend: [...30 UTC days], localSavings }`. Per-agent rows include `utilisation = monthSpend / monthlyBudgetUsd` (null when no budget is set).
+Dashboard summary. Returns `{ totals: { today, week, month }, byAgent: [...], byModel: [...], trend: [...30 UTC days], localSavings }`. `byModel` rows are `{ model, provider, monthSpend }` — the provider is required to resolve a model id that exists under more than one provider. Per-agent rows include `utilisation = monthSpend / monthlyBudgetUsd` (null when no budget is set).
 
 `localSavings` is `{ usd, methodology, sampleSize, dateFrom, dateTo } | null`. `methodology` is currently always `tier_fallback` (the only reachable mode — local rows have local model ids, so there is never a direct hosted equivalent). The field is kept as a union to allow additional modes without a response-shape break. The whole value is `null` when `calculateLocalSavings()` errored — the rest of the summary still renders. See [`../admin/orchestration-costs.md` § Local savings methodology](../admin/orchestration-costs.md#local-savings-methodology) for the algorithm.
 

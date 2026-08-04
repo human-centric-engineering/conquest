@@ -26,9 +26,11 @@
  * in the same scope it originally ran under (alongside inputData / budget /
  * version). A malformed stored scope is dropped and the rerun runs unscoped.
  *
- * Authorization: admin role required. The original execution must
- * belong to the same user (`session.user.id`) — cross-user reruns
- * return 404 (not 403) so existence isn't leaked.
+ * Authorization: admin role required. The original must be one the caller
+ * can see — their own run or a system-owned one (`userId = null`); anything
+ * else returns 404 (not 403) so existence isn't leaked. The rerun inherits
+ * the original's attribution, so rerunning a system-owned run produces
+ * another system-owned run.
  */
 
 import { z } from 'zod';
@@ -42,6 +44,7 @@ import { sseResponse } from '@/lib/api/sse';
 import { OrchestrationEngine } from '@/lib/orchestration/engine/orchestration-engine';
 import { rerunExecutionBodySchema, workflowScopeSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
+import { executionVisibilityWhere } from '@/lib/orchestration/access/execution-access';
 import {
   prepareWorkflowExecution,
   resolveEffectiveExecutionCap,
@@ -62,10 +65,11 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
   const body = await validateRequestBody(request, rerunExecutionBodySchema);
 
-  // Load the original execution. Scope ownership at the query — a
-  // cross-user id resolves to null and surfaces as 404, not 403.
+  // Load the original execution. Scope visibility at the query — an id the
+  // caller can't see resolves to null and surfaces as 404, not 403. The
+  // spread yields `AND(id, OR(own, system))`.
   const original = await prisma.aiWorkflowExecution.findFirst({
-    where: { id: originalId, userId: session.user.id },
+    where: { id: originalId, ...executionVisibilityWhere(session.user.id) },
     select: {
       id: true,
       workflowId: true,
@@ -73,6 +77,7 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
       budgetLimitUsd: true,
       versionId: true,
       scope: true,
+      userId: true,
     },
   });
   if (!original) {
@@ -152,7 +157,14 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
   const engine = new OrchestrationEngine();
   const events = engine.execute({ id: workflow.id, definition, versionId: version.id }, inputData, {
-    userId: session.user.id,
+    // Inherit the original's attribution rather than claiming the rerun for
+    // the admin who clicked. Visibility above allows exactly two cases, so
+    // this is either `session.user.id` (their own run) or `null` (system-
+    // owned). Stamping a system-owned rerun with the admin's id would copy a
+    // third party's inbound payload — `inputData` is reused verbatim — onto a
+    // row attributed to that admin, which is the mis-attribution #502 fixed.
+    // The audit trail for "who pressed rerun" is the route log below.
+    userId: original.userId,
     ...(effectiveBudgetLimitUsd !== undefined ? { budgetLimitUsd: effectiveBudgetLimitUsd } : {}),
     ...(rerunScope ? { scope: rerunScope } : {}),
     signal: request.signal,

@@ -72,13 +72,14 @@ export const GET = withAdminAuth(async (request, session) => {
 
   // Build dynamic WHERE conditions.
   //
-  // Visibility: caller can see conversations they own AND conversations
-  // the owner has actively shared. "Active" mirrors `isShareActive` in
-  // conversation-access.ts: revokedAt IS NULL AND (expiresAt IS NULL OR
-  // expiresAt > now()). The OR is fixed (no params); the active-share
-  // sub-query reuses the same caller id ($4) only for the owner branch.
+  // Visibility: caller can see conversations they own, system-owned inbound
+  // threads (`"userId" IS NULL`), and conversations the owner has actively
+  // shared. The three arms mirror the three bases in
+  // `adminCanViewConversation`; "active" mirrors `isShareActive` there:
+  // revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > now()). The OR is
+  // fixed (no params); the caller id ($4) binds only to the owner branch.
   const conditions: string[] = [
-    `(c."userId" = $4 OR EXISTS (
+    `(c."userId" = $4 OR c."userId" IS NULL OR EXISTS (
        SELECT 1 FROM "ai_conversation_share" s
        WHERE s."conversationId" = c.id
          AND s."revokedAt" IS NULL
@@ -193,11 +194,12 @@ export const GET = withAdminAuth(async (request, session) => {
       },
     }));
 
-  // Audit-of-audits for cross-user matches. The OR-subquery in the SQL
-  // above pulls in actively-shared conversations alongside the caller's
-  // own; for any returned row whose owner is not the caller, write one
-  // shared-basis row. Owner-basis matches no-op via `logConversationAccess`.
-  // One log per unique conversation (grouped is already deduped).
+  // Audit-of-audits for matches that aren't the caller's own. The
+  // OR-subquery in the SQL above pulls in actively-shared conversations and
+  // system-owned inbound threads alongside the caller's own; for any
+  // returned row the caller doesn't own, write one row under the basis that
+  // admitted it. Owner-basis matches no-op via `logConversationAccess`. One
+  // log per unique conversation (grouped is already deduped).
   const clientIp = getClientIP(request);
   for (const row of grouped) {
     if (row.userId === session.user.id) continue;
@@ -206,7 +208,7 @@ export const GET = withAdminAuth(async (request, session) => {
       conversationId: row.conversationId,
       conversationTitle: row.title,
       conversationOwnerId: row.userId,
-      accessBasis: 'shared',
+      accessBasis: row.userId === null ? 'system' : 'shared',
       action: 'conversation.search_matched',
       extra: {
         query: q,

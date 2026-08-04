@@ -9,12 +9,9 @@
  * @see https://nextjs.org/docs/app/api-reference/file-conventions/error
  */
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { LayoutDashboard } from 'lucide-react';
-import { ErrorCard } from '@/components/ui/error-card';
-import { logger } from '@/lib/logging';
-import { trackError, ErrorSeverity } from '@/lib/errors/sentry';
+import { RouteErrorBoundary } from '@/components/errors/route-error-boundary';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 export default function AdminError({
   error,
@@ -22,42 +19,20 @@ export default function AdminError({
 }: {
   error: Error & { digest?: string };
   reset: () => void;
-}) {
-  const router = useRouter();
-
-  useEffect(() => {
-    logger.error('Admin route error boundary triggered', error, {
-      boundaryName: 'AdminError',
-      errorType: 'boundary',
-      digest: error.digest,
-    });
-
-    trackError(error, {
-      tags: {
-        boundary: 'admin',
-        errorType: 'boundary',
-      },
-      extra: {
-        digest: error.digest,
-      },
-      level: ErrorSeverity.Error,
-    });
-  }, [error]);
-
+}): React.ReactElement {
   return (
-    <ErrorCard
+    <RouteErrorBoundary
+      error={error}
+      reset={reset}
+      boundaryName="AdminError"
+      tag="admin"
       title="Admin Error"
       description="An error occurred in the admin panel. This has been logged."
-      error={error}
-      actions={[
-        { label: 'Try again', onClick: reset },
-        {
-          label: 'Dashboard',
-          onClick: () => router.push('/dashboard'),
-          variant: 'outline',
-          icon: <LayoutDashboard className="mr-2 h-4 w-4" />,
-        },
-      ]}
+      fallback={{
+        label: AUTH_LANDING_LABEL,
+        href: AUTH_LANDING_ROUTE,
+        icon: <LayoutDashboard className="mr-2 h-4 w-4" />,
+      }}
     />
   );
 }

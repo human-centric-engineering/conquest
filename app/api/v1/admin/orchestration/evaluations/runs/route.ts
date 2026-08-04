@@ -23,6 +23,7 @@ import { validateQueryParams, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { createRunSchema, listRunsQuerySchema } from '@/lib/validations/orchestration-evaluations';
 import { hasGrader, getGrader, listGraders } from '@/lib/orchestration/evaluations/graders';
+import { noteMaintenanceWork } from '@/lib/orchestration/maintenance/idle-gate';
 // Side-effect import — register every grader at module load so the
 // preflight has a populated registry.
 import '@/lib/orchestration/evaluations/graders';
@@ -249,6 +250,10 @@ export const POST = withAdminAuth(async (request, session) => {
       progress: { casesTotal: dataset.caseCount, casesDone: 0, casesFailed: 0 },
     },
   });
+
+  // The run worker only advances on a maintenance tick, so an armed idle gate
+  // would leave this queued for up to its cap (#442).
+  noteMaintenanceWork('evaluation-run-queued');
 
   log.info('Run queued', { runId: created.id, datasetId: dataset.id });
   return successResponse(created, undefined, { status: 201 });
