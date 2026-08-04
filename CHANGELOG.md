@@ -162,6 +162,95 @@ release process.
 
 ### Added
 
+- **`PORT` and `EMAIL_PORT` are now read from the project's env files, so an app
+  can declare the port it binds** — Next's CLI binds `--port` to `PORT` at
+  argument-parse time, which happens before it loads any `.env` file. A `PORT=`
+  line in `.env.local` was therefore visible to the app and invisible to the
+  server hosting it, leaving `-p` on the command line as the only way to move a
+  dev server. For anyone running several Sunrise-derived apps side by side —
+  reverse-proxying `*.test` hostnames to loopback ports, say — that meant
+  remembering which app owned which port, every time.
+
+  `npm run dev`, `npm run start` and `npm run email:dev` now go through
+  `scripts/dev-server.mjs`, which reads *only* the port variable out of the env
+  files, in Next's own precedence order, and passes it to the child process.
+  Resolution runs explicit `-p` flag → real environment variable →
+  `.env.<NODE_ENV>.local` → `.env.local` → `.env.<NODE_ENV>` → `.env` → `3000`,
+  so every existing way of setting the port keeps working and keeps outranking
+  the files. Nothing else about env loading changes, and the port stays
+  independent of `NEXT_PUBLIC_APP_URL` / `BETTER_AUTH_URL` — bind loopback,
+  advertise the proxied hostname.
+
+  `EMAIL_PORT` does the same for the React Email preview server, which also
+  defaults to 3000 and would otherwise collide with an app; it has no env
+  binding of its own, so the launcher passes `-p`.
+
+  The launcher is plain `.mjs` with no runtime dependency: `npm start` must
+  survive a production install (`npm ci --omit=dev`), which prunes both tsx and
+  dotenv. Without dotenv it still starts the server and says it could not read
+  the files. Deployed containers are untouched — the Docker image runs the
+  standalone server, which reads `process.env.PORT` directly.
+
+  **For forks:** Sunrise now ships a committed `.env.development` setting
+  `PORT=3010` — the one env file `.gitignore` deliberately permits, for
+  non-secret settings that should travel with the repo. `npm run dev` needs no
+  arguments in any clone. **Change the value in your fork:** two Sunrise-derived
+  apps that both keep 3010 collide the moment they run together. See
+  [`CUSTOMIZATION.md`](./CUSTOMIZATION.md#claiming-your-own-dev-port).
+
+  Deployment is untouched. The production image copies only the standalone
+  build, so neither `.env.development` nor `scripts/` reaches it; `ENV PORT=3000`
+  is a real environment variable, which outranks any file; Vercel runs
+  `next build` and never `npm start`; and `npm start` resolves against
+  `.env.production*` / `.env`, never `.env.development`.
+
+- **Server components now call their own API at an address the server can
+  actually reach** — `getBaseUrl()` returned `BETTER_AUTH_URL`, so a server
+  component rendering a page went *out* to the public hostname and back in.
+  Point that hostname at a local reverse proxy terminating TLS with a
+  certificate Node does not trust (Herd, Valet, mkcert) and every self-call
+  fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` — while the browser works
+  perfectly, because it trusts the same CA the server doesn't. Pages that catch
+  fetch errors then render empty: an admin user list reporting "No users found"
+  against a populated database.
+
+  `getBaseUrl()` (`lib/api/server-fetch.ts`) now resolves
+  `INTERNAL_API_URL` → `http://127.0.0.1:$PORT` in development when the port is
+  known → `BETTER_AUTH_URL`. Production behaviour is unchanged unless
+  `INTERNAL_API_URL` is set explicitly, which is there for the same split in
+  other environments — a private network where the public hostname resolves
+  elsewhere. Beyond correctness, a self-call over loopback skips a round trip
+  through the proxy.
+
+  `INTERNAL_API_URL` is validated as a URL in `lib/env.ts`. It must be **this**
+  app's own address; anything else would receive cookie-bearing internal
+  requests.
+
+  **New `getPublicUrl()`, and a rule for choosing between the two.**
+  `getBaseUrl()` had been doing two jobs: addressing the app's own API, and
+  building URLs for *other* systems to call — the inbound-webhook endpoint an
+  operator pastes into Slack (`app/admin/orchestration/triggers/**`). Those
+  answers are no longer the same, so a loopback internal address would have been
+  rendered as a webhook URL reachable from nowhere but the developer's machine.
+  `getPublicUrl()` returns the public address for anything that leaves the
+  server; `getBaseUrl()` stays internal-only. The two trigger pages now use it,
+  restoring exactly their previous output.
+
+- **Hot reload now works when the app is served on a hostname rather than
+  `localhost`** — Next allows only `localhost` to reach its dev endpoints and
+  blocks the rest, so an app behind a local reverse proxy rendered fine but
+  never hot-reloaded, logging _"Blocked cross-origin request to Next.js dev
+  resource"_. Rather than have every fork hardcode its own hostname,
+  `next.config.js` now derives `allowedDevOrigins` from the hostnames already in
+  `NEXT_PUBLIC_APP_URL` and `BETTER_AUTH_URL`. Setting those to the proxied
+  hostname is enough; the config never needs editing.
+
+  New optional `ALLOWED_DEV_ORIGINS` adds hosts those URLs don't cover (a LAN IP
+  for device testing, or a `*.myapp.test` wildcard for subdomain-per-tenant
+  development). It is distinct from `ALLOWED_ORIGINS` — that is API CORS in
+  every environment, this is hot reload in `next dev`, and Next ignores it in
+  production builds.
+
 - **Subject access (GDPR Art. 15) now has a seam, matching erasure** (#467) —
   Sunrise implemented the *erasure* half of GDPR carefully — `eraseUser()`, a
   documented per-table `onDelete` policy, an append-only receipt, a registration
