@@ -15,7 +15,7 @@
  */
 
 import { useState } from 'react';
-import { ArrowDownToLine, Loader2, Sparkles, Send } from 'lucide-react';
+import { ArrowDownToLine, ChevronDown, Loader2, Sparkles, Send } from 'lucide-react';
 
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -88,18 +88,20 @@ export function ReportConfigAssistant({
   };
 
   // Collapsed: an accent CTA whose label states what it does — drafts the three fields below.
+  // The chevron is the expand affordance: without it the block reads as a static callout, not a control.
   if (!open) {
     return (
       <button
         type="button"
         disabled={disabled}
+        aria-expanded={false}
         onClick={() => setOpen(true)}
         className="group flex w-full items-center gap-3 rounded-xl border border-[var(--cq-accent)]/40 bg-[var(--cq-accent-muted)] p-3 text-left transition hover:border-[var(--cq-accent)]/60 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--cq-accent)] text-[var(--cq-accent-foreground)]">
           <Sparkles className="h-4 w-4" />
         </span>
-        <span className="min-w-0">
+        <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold tracking-tight">
             Draft these fields with AI
           </span>
@@ -108,6 +110,10 @@ export function ReportConfigAssistant({
             and Background context fields below — you review and apply each.
           </span>
         </span>
+        <ChevronDown
+          className="text-muted-foreground group-hover:text-foreground h-4 w-4 shrink-0 transition"
+          aria-hidden="true"
+        />
       </button>
     );
   }

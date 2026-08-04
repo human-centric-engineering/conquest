@@ -47,9 +47,30 @@ Admin toggle lives on the **Settings** tab of the config editor ("Resume in-prog
 
 `POST /api/v1/app/questionnaire-sessions/resume-by-ref` — public, no `withAuth`. Body `{ ref }`. On a match, re-mints a fresh `accessToken` for the existing session;
 returns `{ session: { id, versionId }, accessToken, expiresAt, ref }`. Reached from the welcome-back
-gate ("Started on another device?") and a subtle footer entry on the public page
+gate ("Continue a session from another device") and a footer entry on the public page
 (`resume-by-ref-entry.tsx`); on success the form writes the durable creds, sets the tab marker, and
 reloads straight into the conversation.
+
+**Entering the code** (`session-ref-input.tsx` → `resume-by-ref-form.tsx`):
+
+- The code is entered in a **segmented field** — eight cells in the code's own 4+4 shape — over ONE
+  real `<input>` held invisibly on top. One labelled field for assistive tech and for the browser
+  (paste anywhere in the group, one mobile keyboard); the cells are presentation driven by `value`.
+- Every keystroke is folded through `normalizeSessionRef` **in the field**, so a respondent cannot
+  type a code the lookup would reject on formatting (case, grouping dash, `O`→`0`, `I`/`L`→`1`).
+- The field carries **no `maxLength`**: the browser clamps before the dash is stripped, which eats
+  the last character of a pasted `7F3K-9M2P`. The ceiling is applied after normalisation instead.
+- It **submits itself on the eighth character** (guarded by an in-flight ref, and fired only on the
+  transition into a complete code) — someone copying a code off a second screen is looking at that
+  screen, not this one. The button stays for keyboard and retry. Success latches a "found it" state
+  before the reload, so the navigation does not read as a hang.
+- The public-page entry opens a **dialog**, not an inline expansion: the footer strip sits against
+  the bottom of the viewport, and the panel is where "where do I find my code?" gets answered. It
+  portals to `document.body`, outside `BrandThemeProvider`, so `/q/[versionId]` hands it the
+  client's CSS variables explicitly (`brandStyle={themeToCssVariables(theme)}`) — without that a
+  white-labelled questionnaire opens a platform-coloured panel. The welcome-back gate expands the
+  same form in place instead: it is already the focused surface, and a modal there would be a gate
+  on a gate.
 
 **Security** (a new unauthenticated mutation surface using a low-entropy 8-char code as a bearer
 credential — `resolve-by-ref.ts`):

@@ -283,8 +283,36 @@
     }
   }
 
+  /* Insertion caret drawn INSIDE a segmented code cell (SessionRefInput). The real input under the
+     cells is transparent, so its native caret is invisible — this stands in for it. */
+  .cq-code-caret {
+    animation: terminal-blink 1.06s steps(2, start) infinite;
+  }
+
+  /* One-shot "that code didn't match" nudge for a code group / field. Small amplitude: it should
+     read as a correction prompt, not an alarm. */
+  @keyframes cq-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20%,
+    60% {
+      transform: translateX(-4px);
+    }
+    40%,
+    80% {
+      transform: translateX(4px);
+    }
+  }
+  .cq-shake {
+    animation: cq-shake 0.32s ease-in-out 1;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .terminal-caret {
+    .terminal-caret,
+    .cq-code-caret,
+    .cq-shake {
       animation: none;
     }
   }

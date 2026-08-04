@@ -61,7 +61,9 @@ describe('SessionResumeGate', () => {
     const user = userEvent.setup();
     renderGate();
     expect(screen.queryByLabelText(/session reference code/i)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /started on another device/i }));
+    await user.click(
+      screen.getByRole('button', { name: /continue a session from another device/i })
+    );
     expect(screen.getByLabelText(/session reference code/i)).toBeInTheDocument();
   });
 
