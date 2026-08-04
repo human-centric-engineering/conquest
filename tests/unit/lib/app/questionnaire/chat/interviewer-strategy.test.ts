@@ -189,6 +189,31 @@ describe('buildInterviewerStrategyInstructions', () => {
     expect(out).toMatch(/REFLECT AND CONFIRM/);
     expect(out).toMatch(/play back the gist/);
   });
+
+  it('reflect clause instructs a statement and carries no question of its own', () => {
+    // Regression: the clause used to supply "So it sounds like… — is that right?" as its example.
+    // Combined with the rules section ("ALWAYS end your message with a clear question"), the
+    // interviewer emitted the confirming tag AND the real question — two questions in one turn.
+    const out = buildInterviewerStrategyInstructions(
+      {
+        enabled: true,
+        approach: 'open',
+        probeDepth: false,
+        reflect: true,
+        batchRelated: false,
+      },
+      ctx
+    );
+    const clause = out.slice(out.indexOf('REFLECT AND CONFIRM'));
+    expect(clause).toMatch(/as a STATEMENT/);
+    expect(clause).toMatch(/must NOT be a question/);
+    // Everything before the prohibition is the modelled behaviour — its quoted exemplars must be
+    // declarative. (After it, question-shaped strings are the banned tags being named.)
+    const modelled = clause.slice(0, clause.indexOf('must NOT be a question'));
+    const exemplars = modelled.match(/"[^"]+"/g) ?? [];
+    expect(exemplars.length).toBeGreaterThan(0);
+    for (const example of exemplars) expect(example).not.toMatch(/\?/);
+  });
 });
 
 describe('buildInterviewerStrategyInstructions — open opening', () => {

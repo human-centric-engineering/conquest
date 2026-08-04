@@ -1814,10 +1814,11 @@ export function ConfigEditor({
                       Reflect &amp; confirm{' '}
                       <FieldHelp title="Reflect & confirm">
                         Adds a <strong>REFLECT AND CONFIRM</strong> clause: before the next
-                        question, briefly play back the gist of the last answer in one short clause
-                        (“So it sounds like… — is that right?”) so they can confirm or correct it —
-                        not a verbatim repeat. Builds trust and strengthens answer confidence
-                        through corroboration.
+                        question, briefly play back the gist of the last answer in one short{' '}
+                        <em>statement</em> (“So the backdrop most of the time is sadness.”) — not a
+                        verbatim repeat, and never a confirming question like “is that right?”, so
+                        the turn still asks only one thing. Builds trust and strengthens answer
+                        confidence through corroboration.
                       </FieldHelp>
                     </Label>
                   </div>

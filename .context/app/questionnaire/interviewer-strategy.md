@@ -30,7 +30,10 @@ approach. Stored as `AppQuestionnaireConfig.interviewerStrategy` (Json), shape
 
 - **probeDepth** — dig into a shallow/low-confidence answer with one follow-up before moving on.
 - **reflect** — briefly play back the captured point before the next question (also corroborates,
-  feeding the confidence loop).
+  feeding the confidence loop). The playback is a **statement**, never a confirming question — the
+  clause explicitly bans "is that right?"-style tags and question marks, because `rules` already
+  requires every turn to end with the real question, and a confirming tag makes it two questions in
+  one turn.
 - **batchRelated** — invite a few closely-related gaps together rather than strictly one at a time.
 
 ## Where each piece lives
