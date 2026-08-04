@@ -34,7 +34,7 @@ beforeEach(() => {
   (listProvidersWithStatus as Mock).mockResolvedValue([{ apiKeyPresent: true }]);
   // Healthy defaults; individual tests unset what they exercise.
   vi.stubEnv('CRON_SECRET', 'x'.repeat(40));
-  vi.stubEnv('DATABASE_URL', 'postgresql://u:p@ep-x-pooler.aws.neon.tech:5432/db');
+  vi.stubEnv('DATABASE_URL', 'postgresql://user:pass@ep-x-pooler.aws.neon.tech:5432/db');
   vi.stubEnv('VERCEL', '');
 });
 
@@ -90,7 +90,7 @@ describe('runConfigHealthChecks', () => {
 
   it('db_pooler is not applicable off Vercel', async () => {
     vi.stubEnv('VERCEL', '');
-    vi.stubEnv('DATABASE_URL', 'postgresql://u:p@localhost:5432/db'); // direct, but irrelevant off-serverless
+    vi.stubEnv('DATABASE_URL', 'postgresql://user:pass@localhost:5432/db'); // direct, but irrelevant off-serverless
     const report = await runConfigHealthChecks();
     expect(check(report.checks, 'db_pooler').applicable).toBe(false);
     expect(report.platform).toBe('other');
@@ -98,12 +98,15 @@ describe('runConfigHealthChecks', () => {
 
   it('db_pooler flags a direct connection on Vercel and passes a pooled one', async () => {
     vi.stubEnv('VERCEL', '1');
-    vi.stubEnv('DATABASE_URL', 'postgresql://u:p@db.example.com:5432/db');
+    vi.stubEnv('DATABASE_URL', 'postgresql://user:pass@db.example.com:5432/db');
     let report = await runConfigHealthChecks();
     expect(report.platform).toBe('vercel');
     expect(check(report.checks, 'db_pooler').present).toBe(false);
 
-    vi.stubEnv('DATABASE_URL', 'postgresql://u:p@host.pooler.supabase.com:6543/db?pgbouncer=true');
+    vi.stubEnv(
+      'DATABASE_URL',
+      'postgresql://user:pass@host.pooler.supabase.com:6543/db?pgbouncer=true'
+    );
     report = await runConfigHealthChecks();
     expect(check(report.checks, 'db_pooler').present).toBe(true);
   });
