@@ -55,6 +55,10 @@ const argsSchema = z.object({
   versionId: z.string().optional(),
   // Optional: omitted → the prompt builder applies the default (balanced) level.
   granularity: dataSlotGranularitySchema.optional(),
+  // Mean nearest-sibling similarity among the version's TYPED questions (0–1), measured by the
+  // route via pgvector. Shifts the target slot band broader (siblings) or finer (all distinct).
+  // Omitted → the free-text share carries the adjustment alone. See `granularity.ts`.
+  cohesion: z.number().min(0).max(1).nullish(),
 });
 
 export type GenerateDataSlotsArgs = z.infer<typeof argsSchema>;
@@ -122,7 +126,11 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
       return this.error(errorMessage(err), 'provider_unavailable');
     }
 
-    const messages = buildDataSlotGenerationPrompt(args.structure, args.granularity);
+    const messages = buildDataSlotGenerationPrompt(
+      args.structure,
+      args.granularity,
+      args.cohesion ?? null
+    );
 
     let lastIssuePaths: string[] = [];
     let completion: StructuredCompletionResult<DataSlotGenerationOutput>;

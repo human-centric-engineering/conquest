@@ -35,6 +35,10 @@ import {
   upsertDataSlotDraft,
 } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { dataSlotsGenerationLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
+import {
+  ensureVersionSlotsEmbedded,
+  typedQuestionCohesion,
+} from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 
 const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
@@ -65,6 +69,20 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
       throw new NotFoundError('Questionnaire version not found or has no questions');
     }
 
+    // Content-derived granularity — see the streaming sibling. Best-effort: generation must not
+    // depend on a configured embedder, so a failure leaves `cohesion` null and the free-text share
+    // carries the adjustment alone.
+    let cohesion: number | null = null;
+    try {
+      await ensureVersionSlotsEmbedded(vid);
+      cohesion = await typedQuestionCohesion(vid);
+    } catch (err) {
+      log.warn('Data-slot cohesion unavailable; using the type mix alone', {
+        versionId: vid,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     const agent = await prisma.aiAgent.findUnique({
       where: { slug: QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG },
       select: { id: true, provider: true, model: true, fallbackProviders: true },
@@ -85,7 +103,7 @@ const handleGenerate = withAdminAuth<{ id: string; vid: string }>(
 
     const dispatch = await capabilityDispatcher.dispatch(
       GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
-      { structure, versionId: vid, granularity },
+      { structure, versionId: vid, granularity, cohesion },
       {
         userId: adminId,
         agentId: agent.id,

@@ -84,6 +84,36 @@ describe('buildAnswerExtractionPrompt', () => {
     expect(sys).toMatch(/FOCUSED RESOLUTION/i);
     // Commit to the closest genuine fit rather than omit.
     expect(sys).toMatch(/Prefer committing to the closest genuine fit/i);
+    // A typed-only pass must NOT carry the free-text block — its tailor-or-omit framing is the
+    // inverse of the commit-to-a-fit rules and would pull the resolver toward omitting scale points.
+    expect(sys).not.toMatch(/Expect to OMIT most free_text candidates/i);
+  });
+
+  it('adds the tailor-or-omit free-text framing to a fit pass carrying free-text candidates', () => {
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({
+        candidateSlots: [
+          slot({ key: 'ego_meaning', type: 'free_text' }),
+          slot({ key: 'ego_expression', type: 'free_text' }),
+        ],
+      }),
+      forceFit: true,
+    });
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    // Scoped so it does not contradict the option/scale rules it sits beside.
+    expect(system).toMatch(/govern choice and likert candidates ONLY/i);
+    // The core of the JP29 fix: answer THIS question in its own terms, or omit it.
+    expect(system).toMatch(/answers THIS question, as asked/i);
+    expect(system).toMatch(/NEVER emit the same, or near-same, text for two candidates/i);
+    expect(system).toMatch(/Omitting is the CORRECT result/i);
+  });
+
+  it('omits the free-text fit framing entirely outside a fit pass', () => {
+    const messages = buildAnswerExtractionPrompt(
+      ctx({ candidateSlots: [slot({ key: 'q1', type: 'free_text' })] })
+    );
+    const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
+    expect(system).not.toMatch(/Expect to OMIT most free_text candidates/i);
   });
 
   it('omits the sensitivity block by default (zero added prompt when the feature is off)', () => {
@@ -372,6 +402,43 @@ describe('buildAnswerExtractionPrompt — data slots', () => {
     });
     // Paraphrase null → the line falls back to the JSON-serialised value, not `undefined`.
     expect(userContent(messages)).toContain('current: {"raw":"Marketing"} (confidence 0.50)');
+  });
+
+  it('gates slot choice on genuine subject fit, not the nearest slot on offer', () => {
+    // The `JP29` root cause: an answer about sadness and rumination was filed under a slot naming
+    // the ego and the Higher Self, because that was the closest slot available.
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        { key: 'ego_higher_self', name: 'Ego and Higher Self', description: 'd', theme: 'Self' },
+      ],
+    });
+    const system = systemContent(messages);
+    expect(system).toMatch(/FIT, NOT NEAREST-AVAILABLE/i);
+    // Prefer the broadest containing slot over a specific one the message merely resembles.
+    expect(system).toMatch(/BROADEST slot that genuinely CONTAINS/i);
+    // Misfiling is worse than leaving the slot empty — the reason omitting is safe here.
+    expect(system).toMatch(/WORSE outcome than leaving that slot/i);
+  });
+
+  it('binds fill provenance, rationale and confidence to the slot’s own subject', () => {
+    // The panel showed "Confident · 85%" with a rationale evidencing "their inner world" under a
+    // slot about the ego — a strong reading of an ADJACENT subject arriving as certainty.
+    const messages = buildAnswerExtractionPrompt({
+      ...ctx({ candidateSlots: [slot({ key: 'q1' })], activeQuestionKey: null }),
+      dataSlotCandidates: [
+        { key: 'ego_higher_self', name: 'Ego and Higher Self', description: 'd', theme: 'Self' },
+      ],
+    });
+    const system = systemContent(messages);
+    // Reading across to a slot caps provenance at inferred.
+    expect(system).toMatch(/PROVENANCE FOLLOWS THE SUBJECT/i);
+    // The rationale must reach the slot's subject, and is the self-check for having picked wrong.
+    expect(system).toMatch(/THE RATIONALE MUST BRIDGE TO THIS SLOT/i);
+    expect(system).toMatch(/you have picked the wrong slot/i);
+    // Confidence tracks relevance to this subject, not the vividness of the sentence.
+    expect(system).toMatch(/CONFIDENCE IS THE WEAKEST LINK/i);
+    expect(system).toMatch(/how much of this detail is about THIS subject/i);
   });
 
   it('instructs the model to re-scan every slot and keep the paraphrase a superset', () => {

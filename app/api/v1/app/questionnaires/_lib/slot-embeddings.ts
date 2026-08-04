@@ -204,6 +204,39 @@ export async function ensureVersionSlotsEmbedded(
 }
 
 /**
+ * Mean nearest-sibling cosine similarity among a version's TYPED question slots (0–1), or
+ * `null` when it can't be measured (fewer than two embedded typed slots).
+ *
+ * Backs the content-derived data-slot granularity adjustment (`granularity.ts`): a set whose
+ * questions each sit close to a sibling justifies broad slots, one where every question stands
+ * alone does not. NEAREST-neighbour rather than mean-pairwise on purpose — mean-pairwise measures
+ * how narrow the questionnaire's overall topic is and decays as the set grows, whereas "does this
+ * question have a twin it could share a slot with?" is the thing consolidation actually depends on.
+ *
+ * **Free text is excluded, and that is the point.** A fill records one position, so three
+ * near-identical free-text questions still need three slots even though they embed almost
+ * identically; including them would read that similarity as licence to consolidate and produce
+ * exactly the defect this measurement exists to avoid. Free text's (opposite) pull is applied
+ * separately from the type mix.
+ */
+export async function typedQuestionCohesion(versionId: string): Promise<number | null> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ cohesion: number | null }>>(
+    `WITH typed AS (
+       SELECT "id", "embedding" FROM "app_question_slot"
+        WHERE "versionId" = $1 AND "embedding" IS NOT NULL AND "type" <> 'free_text'
+     ), nearest AS (
+       SELECT a."id", max(1 - (a."embedding" <=> b."embedding")) AS similarity
+         FROM typed a JOIN typed b ON a."id" <> b."id"
+        GROUP BY a."id"
+     )
+     SELECT avg(similarity)::float8 AS cohesion FROM nearest`,
+    versionId
+  );
+  const cohesion = rows[0]?.cohesion;
+  return typeof cohesion === 'number' && Number.isFinite(cohesion) ? cohesion : null;
+}
+
+/**
  * Rank `candidateIds` by cosine similarity to `embedding`, returning at most `k`
  * slot ids best-first. Only slots that actually have an embedding participate —
  * an un-embedded version yields `[]`, which the adaptive strategy reads as its

@@ -70,8 +70,11 @@ import {
 import { normalizeAnswerIntents } from '@/lib/app/questionnaire/extraction/answer-intents';
 import {
   selectOpportunisticTargets,
+  freeTextFitCandidates,
+  soleMappedFreeTextTargets,
   buildFreeTextOpportunisticIntents,
   capOpportunisticConfidence,
+  dedupeIdenticalFreeText,
   selectRefreshTargets,
   buildRefreshIntents,
   ANSWER_CONFIRM_FLOOR,
@@ -465,7 +468,13 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     context: CapabilityContext;
     extractionContext: ExtractionContext;
     fitCandidates: ExtractionSlotView[];
-  }): Promise<{ intents: AnswerSlotIntent[]; costUsd: number; call?: AnswerFitCallTrace }> {
+  }): Promise<{
+    /** False only when the pass could not run (provider/schema failure) — NOT when it omitted. */
+    ok: boolean;
+    intents: AnswerSlotIntent[];
+    costUsd: number;
+    call?: AnswerFitCallTrace;
+  }> {
     const { dataSlotCandidates: _omitDataSlots, ...rest } = opts.extractionContext;
     const fitContext: ExtractionContext = {
       ...rest,
@@ -503,7 +512,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         issuePaths: lastIssuePaths,
         error: errorMessage(err),
       });
-      return { intents: [], costUsd: 0 };
+      return { ok: false, intents: [], costUsd: 0 };
     }
 
     void logCost({
@@ -527,6 +536,7 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
 
     const { intents } = normalizeAnswerIntents(completion.value.answers, fitContext);
     return {
+      ok: true,
       intents,
       costUsd: completion.costUsd,
       call: {
@@ -743,11 +753,14 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
     }
 
     // 5c. Opportunistic down-propagation (Data Slots feature). A confident data-slot fill means we
-    //     understood the respondent's position on that theme — so seed its STILL-unanswered mapped
+    //     understood the respondent's position on that theme — so answer its STILL-unanswered mapped
     //     questions, capped at a Tentative confidence, instead of leaving the underlying form blank
-    //     (the `53ZF` gap). Free-text seeds deterministically from the paraphrase; choice/likert go
-    //     through the same answer-fit resolver. Each seeded answer is a guess the agent will confirm
-    //     (Phase 4) before it counts — and confirmation strengthens it via the accrual guard.
+    //     (the `53ZF` gap). BOTH types go through the answer-fit resolver, which judges each mapped
+    //     question on its own wording: choice/likert map onto their option/scale point, free text is
+    //     answered in that question's own terms or omitted when the theme was covered but that
+    //     question wasn't (the `JP29` defect — one paraphrase pasted under three ego/Higher-Self
+    //     questions). Each answer is a guess the agent will confirm (Phase 4) before it counts — and
+    //     confirmation strengthens it via the accrual guard.
     let opportunisticIntents: AnswerSlotIntent[] = [];
     let opportunisticCostUsd = 0;
     if ((args.dataSlotCandidates?.length ?? 0) > 0 && dataSlotFills.length > 0) {
@@ -764,18 +777,35 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         candidateSlots: extractionContext.candidateSlots,
         answeredKeys: new Set<string>([...answeredThisTurn, ...priorAnswered]),
       });
-      opportunisticIntents = buildFreeTextOpportunisticIntents(targets.freeText);
-      if (targets.typed.length > 0) {
+      // One resolver call covers both types: the free-text candidates ride along with the typed ones
+      // rather than paying for a second round trip. On most turns this call already fired for the
+      // typed targets; the added cost is one call on turns whose fills map free text only.
+      const freeTextCandidates = freeTextFitCandidates(targets.freeText);
+      const fitCandidates = [...targets.typed, ...freeTextCandidates];
+      if (fitCandidates.length > 0) {
         const fit = await this.resolveAnswerFit({
           provider,
           model,
           providerSlug,
           context,
           extractionContext,
-          fitCandidates: targets.typed,
+          fitCandidates,
         });
         opportunisticCostUsd += fit.costUsd;
         opportunisticIntents.push(...capOpportunisticConfidence(fit.intents));
+
+        // Degraded path: the pass could not RUN (provider/schema failure), so nothing was judged.
+        // Fall back to the deterministic paraphrase seed for the fills where duplication is
+        // impossible — a fill mapping several free-text questions is dropped rather than guessed at.
+        if (!fit.ok && freeTextCandidates.length > 0) {
+          const safe = soleMappedFreeTextTargets(targets.freeText);
+          opportunisticIntents.push(...buildFreeTextOpportunisticIntents(safe));
+          logger.warn('extract_answer_slots: fit pass failed, seeded sole-mapped free text only', {
+            agentId: context.agentId,
+            freeTextTargets: freeTextCandidates.length,
+            seeded: safe.length,
+          });
+        }
       }
 
       // REFRESH (Phase 3): strengthen still-tentative mapped answers whose theme was corroborated
@@ -795,6 +825,19 @@ export class AppExtractAnswerSlotsCapability extends BaseCapability<
         })
       );
       opportunisticIntents.push(...refreshIntents);
+
+      // LAST-LINE INVARIANT: one turn never writes the same free-text prose under two questions,
+      // whatever the resolver returned. Deterministic, so the `JP29` defect cannot recur on a model
+      // that ignores the tailor-or-omit instruction.
+      const deduped = dedupeIdenticalFreeText(opportunisticIntents);
+      opportunisticIntents = deduped.intents;
+      if (deduped.dropped.length > 0) {
+        logger.warn('extract_answer_slots: dropped duplicate free-text down-propagation', {
+          agentId: context.agentId,
+          sessionId: extractionContext.sessionId,
+          droppedCount: deduped.dropped.length,
+        });
+      }
 
       if (opportunisticIntents.length > 0) {
         logger.info('extract_answer_slots: opportunistic down-propagation', {

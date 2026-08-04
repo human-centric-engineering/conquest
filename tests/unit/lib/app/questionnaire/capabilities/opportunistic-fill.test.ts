@@ -1,10 +1,13 @@
 /**
- * Opportunistic down-propagation — seeding a data slot's mapped questions from a confident fill.
+ * Opportunistic down-propagation — answering a data slot's mapped questions from a confident fill.
  *
  * Anti-green-bar: drives the actual target-selection rules (confidence floor, already-answered
  * exclusion, type routing free-text vs choice/likert, numeric/date skipped) and asserts the built
- * free-text intents + the typed-confidence cap carry the right values, not just that arrays are
- * non-empty.
+ * intents + both confidence ceilings carry the right values, not just that arrays are non-empty.
+ *
+ * The `JP29` guards get their own coverage: `dedupeIdenticalFreeText` (one paraphrase must never
+ * land under three questions again, whatever the resolver returns) and `soleMappedFreeTextTargets`
+ * (the failure fallback seeds only where duplication is impossible).
  *
  * @see lib/app/questionnaire/capabilities/opportunistic-fill.ts
  */
@@ -13,8 +16,11 @@ import { describe, it, expect } from 'vitest';
 
 import {
   selectOpportunisticTargets,
+  freeTextFitCandidates,
+  soleMappedFreeTextTargets,
   buildFreeTextOpportunisticIntents,
   capOpportunisticConfidence,
+  dedupeIdenticalFreeText,
   selectRefreshTargets,
   buildRefreshIntents,
   OPPORTUNISTIC_CONFIDENCE_CAP,
@@ -243,6 +249,169 @@ describe('capOpportunisticConfidence', () => {
       },
     ]);
     expect(capped[0].confidence).toBe(0.3);
+  });
+
+  it('holds a resolver-confident FREE-TEXT answer to the flat Tentative ceiling', () => {
+    // Free text now rides the same resolver pass as typed answers, but keeps the lower ceiling:
+    // a scale point can be PINNED by a clear sentiment, whereas prose the respondent never offered
+    // for this question stays a guess to confirm however well the resolver wrote it.
+    const capped = capOpportunisticConfidence([
+      {
+        slotKey: 'ego_expression',
+        questionType: 'free_text',
+        value: 'They say their ego shows up as self-criticism.',
+        confidence: 0.9,
+        provenance: 'direct',
+        rationale: 'they described self-criticism',
+        isActiveQuestion: false,
+      },
+    ]);
+    expect(capped[0].confidence).toBe(OPPORTUNISTIC_CONFIDENCE_CAP);
+    expect(capped[0].provenance).toBe('inferred');
+  });
+});
+
+describe('freeTextFitCandidates', () => {
+  it('hands the resolver one candidate per mapped question, so each is judged on its own wording', () => {
+    const targets = selectOpportunisticTargets({
+      dataSlotFills: [fill('ego_higher_self')],
+      dataSlotCandidates: [
+        dataSlot('ego_higher_self', ['ego_meaning', 'ego_expression', 'higher_self_expression']),
+      ],
+      candidateSlots: [
+        slot('ego_meaning', 'free_text'),
+        slot('ego_expression', 'free_text'),
+        slot('higher_self_expression', 'free_text'),
+      ],
+      answeredKeys: new Set(),
+    });
+    expect(freeTextFitCandidates(targets.freeText).map((s) => s.key)).toEqual([
+      'ego_meaning',
+      'ego_expression',
+      'higher_self_expression',
+    ]);
+  });
+});
+
+describe('soleMappedFreeTextTargets', () => {
+  const targetsFor = (mapped: string[]) =>
+    selectOpportunisticTargets({
+      dataSlotFills: [fill('ego_higher_self')],
+      dataSlotCandidates: [dataSlot('ego_higher_self', mapped)],
+      candidateSlots: mapped.map((k) => slot(k, 'free_text')),
+      answeredKeys: new Set(),
+    }).freeText;
+
+  it('keeps a fill that maps exactly one free-text question (duplication impossible)', () => {
+    expect(soleMappedFreeTextTargets(targetsFor(['ego_meaning'])).map((t) => t.slot.key)).toEqual([
+      'ego_meaning',
+    ]);
+  });
+
+  it('drops a fill mapping several free-text questions rather than seeding an arbitrary one', () => {
+    // The `JP29` case. With no per-question judgment available, picking a winner among three
+    // unjudged questions would be a coin toss shown to the respondent as their answer.
+    const many = targetsFor(['ego_meaning', 'ego_expression', 'higher_self_expression']);
+    expect(many).toHaveLength(3);
+    expect(soleMappedFreeTextTargets(many)).toEqual([]);
+  });
+
+  it('keeps the sole-mapped fill while dropping a multi-mapped one in the same turn', () => {
+    const mixed = selectOpportunisticTargets({
+      dataSlotFills: [fill('ego_higher_self'), fill('human_experience')],
+      dataSlotCandidates: [
+        dataSlot('ego_higher_self', ['ego_meaning', 'ego_expression']),
+        dataSlot('human_experience', ['lived_experience']),
+      ],
+      candidateSlots: [
+        slot('ego_meaning', 'free_text'),
+        slot('ego_expression', 'free_text'),
+        slot('lived_experience', 'free_text'),
+      ],
+      answeredKeys: new Set(),
+    }).freeText;
+    expect(soleMappedFreeTextTargets(mixed).map((t) => t.slot.key)).toEqual(['lived_experience']);
+  });
+});
+
+describe('dedupeIdenticalFreeText', () => {
+  const freeTextIntent = (slotKey: string, value: string, confidence = 0.45): AnswerSlotIntent => ({
+    slotKey,
+    questionType: 'free_text',
+    value,
+    confidence,
+    provenance: 'inferred',
+    rationale: 'r',
+    isActiveQuestion: false,
+  });
+
+  const PARAPHRASE =
+    'They describe their inner world as one of sadness and depression, feeling like there is a ' +
+    'weight attached to their stomach pulling them down.';
+
+  it('writes one theme paraphrase under a single question, never three (the JP29 screenshot)', () => {
+    const result = dedupeIdenticalFreeText([
+      freeTextIntent('ego_meaning', PARAPHRASE),
+      freeTextIntent('ego_expression', PARAPHRASE),
+      freeTextIntent('higher_self_expression', PARAPHRASE),
+    ]);
+    expect(result.intents.map((i) => i.slotKey)).toEqual(['ego_meaning']);
+    expect(result.dropped.map((d) => d.slotKey)).toEqual([
+      'ego_expression',
+      'higher_self_expression',
+    ]);
+  });
+
+  it('keeps the highest-confidence duplicate, not merely the first seen', () => {
+    const result = dedupeIdenticalFreeText([
+      freeTextIntent('ego_meaning', PARAPHRASE, 0.4),
+      freeTextIntent('ego_expression', PARAPHRASE, 0.45),
+    ]);
+    expect(result.intents).toHaveLength(1);
+    expect(result.intents[0].slotKey).toBe('ego_expression');
+    expect(result.dropped[0].slotKey).toBe('ego_meaning');
+  });
+
+  it('catches near-identical prose differing only in case, spacing or punctuation', () => {
+    // A model asked not to repeat itself often reproduces the same answer with a comma moved —
+    // an exact-string guard would let that straight through.
+    const result = dedupeIdenticalFreeText([
+      freeTextIntent('a', 'They spend a lot of time ruminating and regretting.'),
+      freeTextIntent('b', 'They spend a lot of time  ruminating, and regretting'),
+    ]);
+    expect(result.intents.map((i) => i.slotKey)).toEqual(['a']);
+  });
+
+  it('leaves genuinely tailored answers on one theme alone', () => {
+    const result = dedupeIdenticalFreeText([
+      freeTextIntent('ego_meaning', 'They say the ego is the part of them that judges.'),
+      freeTextIntent('higher_self_expression', 'They describe the Higher Self as a calmer voice.'),
+    ]);
+    expect(result.intents).toHaveLength(2);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('never collapses typed answers that legitimately share a value', () => {
+    // Two likert questions on one theme genuinely both land on 3; identical typed values carry no
+    // misfiled prose, so the free-text guard must not touch them.
+    const typed = (slotKey: string): AnswerSlotIntent => ({
+      slotKey,
+      questionType: 'likert',
+      value: 3,
+      confidence: 0.7,
+      provenance: 'inferred',
+      rationale: 'r',
+      isActiveQuestion: false,
+    });
+    const result = dedupeIdenticalFreeText([typed('q1'), typed('q2')]);
+    expect(result.intents).toHaveLength(2);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('passes through a free-text intent with a non-string value untouched', () => {
+    const odd = { ...freeTextIntent('q', ''), value: null };
+    const result = dedupeIdenticalFreeText([odd]);
+    expect(result.intents).toEqual([odd]);
   });
 });
 

@@ -26,6 +26,7 @@ import {
   rankSlotsByText,
   rankSlotsByVector,
   slotEmbeddingCoverage,
+  typedQuestionCohesion,
 } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { embedBatch } from '@/lib/orchestration/knowledge/embedder';
 import { QUESTIONNAIRE_EMBEDDING_DIMENSION } from '@/lib/app/questionnaire/constants';
@@ -341,5 +342,43 @@ describe('findDuplicateSlotIds', () => {
     // kept IN ($2), candidates IN ($3, $4)
     expect(sql).toContain('IN ($2)');
     expect(sql).toContain('IN ($3, $4)');
+  });
+});
+
+describe('typedQuestionCohesion', () => {
+  it('returns the mean nearest-sibling similarity the query yields', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ cohesion: 0.72 }]);
+    expect(await typedQuestionCohesion('v1')).toBe(0.72);
+    expect(prismaMock.$queryRawUnsafe).toHaveBeenCalledWith(expect.any(String), 'v1');
+  });
+
+  it('measures NEAREST-sibling similarity, excluding free text and self-pairs', async () => {
+    // The three load-bearing clauses. Free text is excluded because a slot records one position,
+    // so similar free-text questions still need separate slots — counting them would read that
+    // similarity as licence to consolidate. Self-pairs would score a flat 1.0 for every question.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ cohesion: 0.6 }]);
+    await typedQuestionCohesion('v1');
+    const sql = (prismaMock.$queryRawUnsafe as Mock).mock.calls[0][0] as string;
+    expect(sql).toContain('"type" <> \'free_text\'');
+    expect(sql).toContain('a."id" <> b."id"');
+    expect(sql).toMatch(/max\(1 - \(a\."embedding" <=> b\."embedding"\)\)/);
+    expect(sql).toContain('"embedding" IS NOT NULL');
+  });
+
+  it('returns null when there is nothing to measure (avg over no rows)', async () => {
+    // Fewer than two embedded typed questions — the join yields nothing and avg() is SQL NULL.
+    // Null must NOT collapse to 0, which would read as "maximally distinct" and shift the band.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ cohesion: null }]);
+    expect(await typedQuestionCohesion('v1')).toBeNull();
+  });
+
+  it('returns null for an empty result set', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([]);
+    expect(await typedQuestionCohesion('v1')).toBeNull();
+  });
+
+  it('rejects a non-finite value rather than passing NaN into the band maths', async () => {
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ cohesion: Number.NaN }]);
+    expect(await typedQuestionCohesion('v1')).toBeNull();
   });
 });

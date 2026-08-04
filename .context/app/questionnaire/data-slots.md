@@ -55,6 +55,69 @@ the version) so it survives navigation without ever being mistaken for live — 
 respondent panel, and the launch gate never read it. See the generate → review → launch-gate flow
 below for the draft lifecycle (generate persists it, save promotes + clears it, discard drops it).
 
+## Slot design: what makes a valid consolidation
+
+A slot may map many questions, but a fill records **one position** — one value, one paraphrase, one
+confidence. So a consolidation is only valid when the mapped questions share a single answer. The
+test: _would a respondent answer all of these with one position, in one breath?_ If answering them
+well needs distinct accounts, they are distinct slots however neatly they group by topic.
+
+**The asymmetry that matters: typed questions consolidate, free-text questions mostly don't.** Ten
+likert satisfaction items collapse cleanly into one "Role satisfaction" slot, because each maps onto
+its **own** scale point at down-propagation time — one position genuinely determines ten values. Three
+free-text questions cannot, because there is only one paraphrase to give them; the best case is that
+two get omitted. A slot mapping several free-text questions is the authoring-time predictor of the
+`JP29` defect (see `opportunistic-fill.md`).
+
+Two smells worth catching at review:
+
+- **A conjunctive name joining constructs the questionnaire asks about separately.** "Ego and Higher
+  Self", mapping "what do ego and Higher Self mean to you?", "how does your ego express itself?" and
+  "how does your Higher Self express itself?", is at least two slots and probably three. A fill can
+  satisfy such a slot by addressing neither construct properly — and did.
+- **A description that enumerates several intents rather than naming one target.** The generator is
+  told a merged description must still cover every intent it absorbs, which makes bundling feel safe;
+  covering three intents in prose does not give the runtime three places to put them.
+
+Both are addressed at generation time — the one-position test is in the prompt (`ONE_POSITION_RULE`,
+injected into the per-section AND merge prompts, naming the ego/Higher-Self case concretely), and the
+target count now moves with the content. Neither is a guarantee, so **still review the fan-out on the
+data-slots page before launching** and split any slot mapping more than one free-text question.
+
+### Content-derived granularity
+
+The admin's granularity level sets a _starting_ band, not a fixed ratio. `balanced` used to demand
+~half as many slots as questions whatever the material, so thirty distinct qualitative questions were
+squeezed as hard as a thirty-item likert battery — and over-consolidation is what produces the slots
+above. `targetSlotRange(level, count, profile)` now interpolates that band toward an **adjacent**
+level using a `ConsolidationProfile`. Two signals, combined in `consolidationIndex()` → `[-1, +1]`:
+
+| Signal            | Source                                                                | Effect                                                                       |
+| ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Semantic cohesion | `typedQuestionCohesion()` — pgvector, mean nearest-sibling similarity | Siblings → broader; all standing alone → finer. Weighted by the typed share. |
+| Free-text share   | Derived from the questions in scope (pure, always available)          | Always pulls finer, proportional to the share                                |
+
+**Cohesion is measured over TYPED questions only, and that is the crux.** Free-text similarity must
+never license consolidation: the three ego/Higher-Self questions embed almost identically and still
+need three slots, so a similarity-only signal would broaden the band and make the defect worse. Typed
+questions are the opposite — ten similar likert items genuinely share one position because each still
+maps onto its own scale point. So the semantic term is scaled by the typed share, and free text
+carries its own independent pull toward finer.
+
+Practical shape (30 questions at `balanced`): all-free-text lands on `granular`'s band (~19–24 slots
+instead of 14–17); a cohesive likert battery lands on `broad`'s (~9–12). The shift is capped at **one
+adjacent level** so the admin's choice stays the primary control, and `broadest`/`finest` hold
+because they have no neighbour to move toward.
+
+- Measurement is **best-effort**: both generate routes call `ensureVersionSlotsEmbedded()` then
+  `typedQuestionCohesion()` inside a try/catch. No embedder configured → `cohesion: null`, the
+  semantic term drops out, and the free-text share carries the adjustment alone. Generation never
+  depends on the embedder.
+- `null` cohesion is **not** `0` — zero is a real measurement meaning "maximally distinct". Collapsing
+  them would shove every un-embedded version fully finer.
+- The prompt states _why_ the band moved (`consolidationNote()`, silent below |index| 0.15), so the
+  model cuts along the measured seam instead of hitting an unusual count by splitting arbitrarily.
+
 ## Admin: generate → review → launch gate
 
 1. After questions are extracted + approved, the version detail page shows **Data slots** (draft +
