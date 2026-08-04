@@ -27,6 +27,7 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
+import { runWithConcurrency } from '@/lib/app/questionnaire/llm/run-with-concurrency';
 
 import {
   GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
@@ -139,33 +140,6 @@ export function dedupeSlots(slots: GeneratedDataSlot[]): GeneratedDataSlot[] {
     }
   }
   return Array.from(byName.values());
-}
-
-/** Run `fn` over items with bounded concurrency, yielding each result as it completes. */
-async function* runWithConcurrency<I, O>(
-  items: I[],
-  limit: number,
-  fn: (item: I) => Promise<O>
-): AsyncGenerator<O> {
-  const executing = new Map<number, Promise<{ key: number; value: O }>>();
-  let next = 0;
-  const launch = () => {
-    const key = next;
-    const item = items[next];
-    next += 1;
-    executing.set(
-      key,
-      fn(item).then((value) => ({ key, value }))
-    );
-  };
-  const cap = Math.max(1, Math.min(limit, items.length));
-  for (let i = 0; i < cap; i += 1) launch();
-  while (executing.size > 0) {
-    const { key, value } = await Promise.race(executing.values());
-    executing.delete(key);
-    yield value;
-    if (next < items.length) launch();
-  }
 }
 
 /**

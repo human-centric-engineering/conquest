@@ -151,7 +151,46 @@ describe('POST …/report/preview', () => {
 
   it('502s when generation throws', async () => {
     (generateReportFromInputs as unknown as Mock).mockRejectedValue(new Error('no provider'));
-    expect((await POST(req(validBody), ctx)).status).toBe(502);
+    const res = await POST(req(validBody), ctx);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error.code).toBe('REPORT_PREVIEW_FAILED');
+  });
+
+  // A timeout is transient and worth retrying; a broken config is not. Collapsing both into one
+  // "please try again" 502 is what made the original production failure unactionable.
+  it.each([
+    [
+      'the OpenAI SDK connection timeout',
+      Object.assign(new Error('Request timed out.'), {
+        name: 'APIConnectionTimeoutError',
+      }),
+    ],
+    [
+      'an AbortSignal.timeout DOMException',
+      Object.assign(new Error('The operation was aborted'), {
+        name: 'TimeoutError',
+      }),
+    ],
+    [
+      'a platform ProviderError',
+      Object.assign(new Error('request timed out after 45000ms'), {
+        code: 'timeout',
+      }),
+    ],
+  ])('504s (not 502) on %s', async (_label, err) => {
+    (generateReportFromInputs as unknown as Mock).mockRejectedValue(err);
+    const res = await POST(req(validBody), ctx);
+    expect(res.status).toBe(504);
+    expect((await res.json()).error.code).toBe('REPORT_PREVIEW_TIMEOUT');
+  });
+
+  it('504s when the sample synthesis stage times out, not just generation', async () => {
+    (synthesiseSampleReportInputs as unknown as Mock).mockRejectedValue(
+      Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' })
+    );
+    const res = await POST(req(validBody), ctx);
+    expect(res.status).toBe(504);
+    expect(generateReportFromInputs).not.toHaveBeenCalled();
   });
 
   it('429s when the per-admin preview rate limit is exceeded', async () => {
