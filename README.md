@@ -90,13 +90,13 @@ npm run db:seed
 npm run dev
 ```
 
-Open http://localhost:3010 to see the app — the port is set by `PORT` in the
+Open http://localhost:3020 to see the app — the port is set by `PORT` in the
 committed `.env.development`, which `npm run dev` reads.
 
-Running more than one Sunrise app on the same machine? Give each one its own
-`PORT` in its `.env.development` and `npm run dev` binds it, with no `-p` flag
-to remember. Forks should change the value rather than inherit 3010. See
-[`PORT`](./.context/environment/services-env.md#port).
+Running more than one Sunrise-derived app on the same machine? Give each one its
+own `PORT` in its `.env.development` and `npm run dev` binds it, with no `-p`
+flag to remember. ConQuest claims **3020** so it does not collide with Sunrise's
+own 3010. See [`PORT`](./.context/environment/services-env.md#port).
 
 ### Using Docker
 
@@ -108,7 +108,7 @@ docker-compose exec web npx prisma migrate dev       # Run migrations (first tim
 ### First admin account
 
 Sunrise ships **no default login credentials**. On a fresh database, the first
-account you create — sign up at [`/signup`](http://localhost:3010/signup) — is
+account you create — sign up at [`/signup`](http://localhost:3020/signup) — is
 automatically promoted to `ADMIN`. Every account created after that is a regular
 `USER`.
 
