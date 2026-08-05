@@ -181,6 +181,58 @@ describe('buildDataSlotGenerationPrompt — target count', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildDataSlotGenerationPrompt — content-derived granularity
+// ---------------------------------------------------------------------------
+
+describe('buildDataSlotGenerationPrompt — content-derived granularity', () => {
+  const questions = (count: number, type: string): DataSlotStructureInput => ({
+    questions: Array.from({ length: count }, (_, i) => ({ key: `q${i}`, prompt: 'p', type })),
+  });
+  const freeTextSet = questions(20, 'free_text');
+  const typedSet = questions(20, 'likert');
+
+  it('asks for MORE slots on a distinct free-text set than the flat balanced ratio', () => {
+    // Balanced over 20 questions is 9–11 flat; a free-text set should be pulled toward granular.
+    const flat = systemContent(buildDataSlotGenerationPrompt(typedSet, 'balanced'));
+    const pulled = systemContent(buildDataSlotGenerationPrompt(freeTextSet, 'balanced'));
+    expect(flat).toMatch(/roughly 9.{1,3}11 slots/);
+    expect(pulled).toMatch(/roughly 12.{1,3}16 slots/);
+  });
+
+  it('asks for FEWER slots on a cohesive typed set', () => {
+    const pulled = systemContent(buildDataSlotGenerationPrompt(typedSet, 'balanced', 0.85));
+    expect(pulled).toMatch(/roughly 6.{1,3}8 slots/);
+  });
+
+  it('tells the model WHY the band moved, so it cuts along the right seam', () => {
+    const fine = systemContent(buildDataSlotGenerationPrompt(freeTextSet, 'balanced'));
+    expect(fine).toMatch(/UNUSUALLY DISTINCT/);
+    expect(fine).toMatch(/do not pad the count by splitting one concern in half/i);
+
+    const broad = systemContent(buildDataSlotGenerationPrompt(typedSet, 'balanced', 0.85));
+    expect(broad).toMatch(/UNUSUALLY CONSOLIDATABLE/);
+    expect(broad).toMatch(/do not manufacture breadth/i);
+  });
+
+  it('stays silent about the adjustment when the band barely moved', () => {
+    const system = systemContent(buildDataSlotGenerationPrompt(typedSet, 'balanced'));
+    expect(system).not.toMatch(/UNUSUALLY/);
+  });
+
+  it('carries the one-slot-one-position rule in both the section and merge prompts', () => {
+    const section = systemContent(buildDataSlotGenerationPrompt(freeTextSet, 'balanced'));
+    const merge = systemContent(buildDataSlotMergePrompt(freeTextSet, [], 'balanced'));
+    for (const system of [section, merge]) {
+      expect(system).toMatch(/ONE SLOT, ONE POSITION/);
+      // The concrete failure it exists to prevent — similar free-text questions are still
+      // separate positions, and bundling two constructs into one slot is never right.
+      expect(system).toMatch(/are near-identical in wording and are still THREE positions/i);
+      expect(system).toMatch(/Never bundle two constructs into one slot/i);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildDataSlotMergePrompt — reconcile step
 // ---------------------------------------------------------------------------
 

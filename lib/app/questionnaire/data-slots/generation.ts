@@ -22,20 +22,68 @@ import {
 } from '@/lib/app/questionnaire/data-slots/schemas';
 import {
   DEFAULT_DATA_SLOT_GRANULARITY,
+  buildConsolidationProfile,
+  consolidationIndex,
   granularityGuidance,
   targetSlotRange,
+  type ConsolidationProfile,
   type DataSlotGranularity,
 } from '@/lib/app/questionnaire/data-slots/granularity';
 
 /**
+ * One line telling the model WHY its target band sits where it does. The band already encodes the
+ * content signal; naming it stops the model reading an unusually fine target as an instruction to
+ * split arbitrarily (or an unusually broad one as licence to bundle) instead of cutting along the
+ * seam the signal actually measured. Silent below a threshold — a band that barely moved needs no
+ * explanation, and a note on every generation would just be noise the model learns to skim.
+ */
+function consolidationNote(profile: ConsolidationProfile): string {
+  const index = consolidationIndex(profile);
+  if (Math.abs(index) < 0.15) return '';
+  return index > 0
+    ? 'This set has been measured as UNUSUALLY CONSOLIDATABLE — many questions have close ' +
+        'siblings, so the target above is broader than this granularity level would normally ' +
+        'give. Group the siblings; do not manufacture breadth by bundling unrelated questions.\n'
+    : 'This set has been measured as UNUSUALLY DISTINCT — its questions largely stand alone (and ' +
+        'free-text questions rarely share a position), so the target above is finer than this ' +
+        'granularity level would normally give. Let genuinely separate concerns have their own ' +
+        'slot; do not pad the count by splitting one concern in half.\n';
+}
+
+/**
+ * The constraint the target count alone can't express: a slot records ONE position, so a
+ * consolidation is only valid when its questions share one answer. Injected into both the
+ * per-section and merge prompts so the model's reasoning moves with the content-derived band
+ * rather than just the number — a band that shifted finer without saying why invites the model
+ * to hit the count by splitting arbitrarily instead of along the seam that matters.
+ */
+const ONE_POSITION_RULE =
+  '- ONE SLOT, ONE POSITION — a slot records a single position: one value, one paraphrase, one ' +
+  'confidence. So only group questions a respondent would answer with ONE position, in one ' +
+  'breath. Ask it directly: could a single answer fill all of these? Typed questions (likert, ' +
+  'choice, numeric) group readily even when there are many — ten satisfaction items share one ' +
+  'position, because each still maps onto its own scale point. FREE-TEXT questions mostly do ' +
+  'NOT, however similar they look: "what do ego and Higher Self mean to you?", "how does your ' +
+  'ego express itself?" and "how does your Higher Self express itself?" are near-identical in ' +
+  'wording and are still THREE positions, so three slots. There is only one paraphrase to give ' +
+  'them, and grouping them means two of the three go unanswered. Never bundle two constructs ' +
+  'into one slot ("Ego and Higher Self") when the questionnaire asks about each separately; and ' +
+  'if you cannot say what a slot captures in ONE sentence naming ONE target, it should not have ' +
+  'been consolidated.\n';
+
+/**
  * Build the structured-generation prompt. Output is JSON (parsed by the capability).
- * `granularity` tunes how many slots the model aims for and how broad/fine each is.
+ * `granularity` tunes how many slots the model aims for and how broad/fine each is;
+ * `cohesion` (see `granularity.ts`) lets the CONTENT shift that band — distinct questions
+ * pull the target finer, sibling questions pull it broader.
  */
 export function buildDataSlotGenerationPrompt(
   structure: DataSlotStructureInput,
-  granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY
+  granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY,
+  cohesion: number | null = null
 ): LlmMessage[] {
-  const { min, max } = targetSlotRange(granularity, structure.questions.length);
+  const profile = buildConsolidationProfile(structure.questions, cohesion);
+  const { min, max } = targetSlotRange(granularity, structure.questions.length, profile);
   const system =
     'You design the DATA SLOTS for a conversational questionnaire. A data slot is a short ' +
     '(1–4 word) semantic target — a single meaningful thing we want to learn — paired with a ' +
@@ -45,9 +93,12 @@ export function buildDataSlotGenerationPrompt(
     `GRANULARITY for this set: ${granularityGuidance(granularity)}\n` +
     `TARGET COUNT: aim for roughly ${min}–${max} slots across these ` +
     `${structure.questions.length} question(s) — consolidate related questions to hit that range. ` +
-    'Treat it as a strong target, not a hard cap: only deviate when the content genuinely demands it.\n\n' +
+    'Treat it as a strong target, not a hard cap: only deviate when the content genuinely demands it.\n' +
+    consolidationNote(profile) +
+    '\n' +
     'Rules:\n' +
     '- Each slot maps to one OR MORE questions (by their key) that it meaningfully captures.\n' +
+    ONE_POSITION_RULE +
     '- Cover every question: each question key must be referenced by at least one slot.\n' +
     '- Give each slot a short `theme` (a grouping label shared by related slots) so the ' +
     'respondent panel can group them.\n' +
@@ -88,9 +139,11 @@ export function buildDataSlotGenerationPrompt(
 export function buildDataSlotMergePrompt(
   structure: DataSlotStructureInput,
   candidates: { name: string; description: string; theme: string; questionKeys: string[] }[],
-  granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY
+  granularity: DataSlotGranularity = DEFAULT_DATA_SLOT_GRANULARITY,
+  cohesion: number | null = null
 ): LlmMessage[] {
-  const { min, max } = targetSlotRange(granularity, structure.questions.length);
+  const profile = buildConsolidationProfile(structure.questions, cohesion);
+  const { min, max } = targetSlotRange(granularity, structure.questions.length, profile);
   const system =
     'You are RECONCILING data slots for a conversational questionnaire. Independent passes over ' +
     'each section proposed the candidate slots below; your job is to merge them into ONE coherent ' +
@@ -99,10 +152,13 @@ export function buildDataSlotMergePrompt(
     `TARGET COUNT: the final set should contain roughly ${min}–${max} slots for the ` +
     `${structure.questions.length} questions. The per-section candidates below are almost ` +
     'certainly too many — merge related ones across sections to reach that range. Treat it as a ' +
-    'strong target, not a hard cap.\n\n' +
+    'strong target, not a hard cap.\n' +
+    consolidationNote(profile) +
+    '\n' +
     'Rules:\n' +
     '- Merge duplicates AND related slots across sections into a single slot, unioning their ' +
     'question keys, to reach the target count. Keep genuinely distinct slots separate.\n' +
+    ONE_POSITION_RULE +
     '- Cover every question: each question key listed below must be referenced by at least one ' +
     'final slot. Add a slot if the candidates missed one.\n' +
     '- Harmonize `theme` labels so related slots share one grouping label.\n' +

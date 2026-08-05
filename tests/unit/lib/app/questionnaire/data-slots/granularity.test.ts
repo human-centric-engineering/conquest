@@ -12,6 +12,10 @@ import { describe, it, expect } from 'vitest';
 import {
   DATA_SLOT_GRANULARITY_LEVELS,
   DEFAULT_DATA_SLOT_GRANULARITY,
+  HIGH_COHESION_ANCHOR,
+  LOW_COHESION_ANCHOR,
+  buildConsolidationProfile,
+  consolidationIndex,
   dataSlotGranularitySchema,
   granularityGuidance,
   targetSlotRange,
@@ -77,6 +81,148 @@ describe('targetSlotRange', () => {
     expect(targetSlotRange('broadest', 2).min).toBe(1);
     const finest = targetSlotRange('finest', 5);
     expect(finest.max).toBeLessThanOrEqual(5);
+  });
+});
+
+const typed = (n: number) => Array.from({ length: n }, () => ({ type: 'likert' }));
+const freeText = (n: number) => Array.from({ length: n }, () => ({ type: 'free_text' }));
+
+describe('buildConsolidationProfile', () => {
+  it('derives the free-text share from the questions in scope', () => {
+    const profile = buildConsolidationProfile([...typed(3), ...freeText(1)], 0.7);
+    expect(profile).toEqual({ questionCount: 4, freeTextShare: 0.25, cohesion: 0.7 });
+  });
+
+  it('defaults cohesion to null (unmeasured), not 0', () => {
+    // 0 would be a real measurement meaning "maximally distinct"; null means "no signal", and the
+    // two must not collapse — an un-embedded version would otherwise be shoved fully finer.
+    expect(buildConsolidationProfile(typed(4)).cohesion).toBeNull();
+  });
+
+  it('reports a zero share for an empty scope without dividing by zero', () => {
+    expect(buildConsolidationProfile([]).freeTextShare).toBe(0);
+  });
+});
+
+describe('consolidationIndex', () => {
+  it('pulls fully broader for typed siblings', () => {
+    // A likert battery: every question sits next to a near-twin, and each still maps onto its own
+    // scale point at down-propagation — the one case where heavy consolidation is genuinely right.
+    const index = consolidationIndex(buildConsolidationProfile(typed(10), HIGH_COHESION_ANCHOR));
+    expect(index).toBe(1);
+  });
+
+  it('pulls fully finer for typed questions that all stand alone', () => {
+    const index = consolidationIndex(buildConsolidationProfile(typed(10), LOW_COHESION_ANCHOR));
+    expect(index).toBe(-1);
+  });
+
+  it('pulls finer for an all-free-text set EVEN when its questions are near-identical', () => {
+    // The load-bearing case. The three ego/Higher-Self questions embed almost identically, so a
+    // similarity-only signal would broaden — straight back into the defect. Free text records one
+    // position per slot, so similarity must not license grouping it.
+    const index = consolidationIndex(buildConsolidationProfile(freeText(10), 0.95));
+    expect(index).toBe(-1);
+  });
+
+  it('leaves the band alone when a cohesive typed half offsets a free-text half', () => {
+    const index = consolidationIndex(
+      buildConsolidationProfile([...typed(5), ...freeText(5)], HIGH_COHESION_ANCHOR)
+    );
+    expect(index).toBe(0);
+  });
+
+  it('drops the semantic term entirely when cohesion is unmeasured', () => {
+    // No embeddings → the type mix alone decides. All-typed with no signal means no shift.
+    expect(consolidationIndex(buildConsolidationProfile(typed(10)))).toBe(0);
+    expect(consolidationIndex(buildConsolidationProfile(freeText(10)))).toBe(-1);
+  });
+
+  it('scales smoothly between the anchors rather than switching at a threshold', () => {
+    const midpoint = (LOW_COHESION_ANCHOR + HIGH_COHESION_ANCHOR) / 2;
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), midpoint))).toBeCloseTo(0, 5);
+    const upper = consolidationIndex(buildConsolidationProfile(typed(10), midpoint + 0.05));
+    expect(upper).toBeGreaterThan(0);
+    expect(upper).toBeLessThan(1);
+  });
+
+  it('clamps cohesion beyond either anchor instead of overshooting', () => {
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), 1))).toBe(1);
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), 0))).toBe(-1);
+  });
+
+  it('reads an anti-correlated cohesion as fully finer, not as an overshoot', () => {
+    // Cosine runs to −1, so the measurement's domain reaches below 0 even though real embeddings
+    // don't get there. Such a value means "every question stands alone", which is already what the
+    // finer extreme says — so it clamps to −1 rather than driving the index past it. This is why
+    // the capability's `cohesion` bound is −1…1: a below-band value is handled here, and a 0 floor
+    // would only fail the generation instead.
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), -1))).toBe(-1);
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), -0.4))).toBe(-1);
+  });
+});
+
+describe('targetSlotRange with a consolidation profile', () => {
+  const QUESTIONS = 30;
+
+  it('leaves the band untouched without a profile (back-compat)', () => {
+    expect(targetSlotRange('balanced', QUESTIONS)).toEqual({ min: 14, max: 17 });
+  });
+
+  it('moves a distinct free-text set from balanced onto granular ground', () => {
+    // The Lelañea case: 30 largely free-text questions. Balanced used to demand ~14–17 slots,
+    // forcing exactly the over-consolidation that bundled three ego questions into one slot.
+    const fine = targetSlotRange('balanced', QUESTIONS, buildConsolidationProfile(freeText(30)));
+    const flat = targetSlotRange('balanced', QUESTIONS);
+    expect(fine.min).toBeGreaterThan(flat.min);
+    expect(fine.max).toBeGreaterThan(flat.max);
+    // A full pull lands on the adjacent level's band exactly — granular, not finest.
+    expect(fine).toEqual(targetSlotRange('granular', QUESTIONS));
+  });
+
+  it('moves a cohesive typed set from balanced onto broad ground', () => {
+    const broad = targetSlotRange(
+      'balanced',
+      QUESTIONS,
+      buildConsolidationProfile(typed(30), HIGH_COHESION_ANCHOR)
+    );
+    expect(broad).toEqual(targetSlotRange('broad', QUESTIONS));
+  });
+
+  it('never shifts further than one adjacent level', () => {
+    // The admin's choice stays the primary control — content nudges it, it does not override it.
+    const pulled = targetSlotRange('balanced', QUESTIONS, buildConsolidationProfile(freeText(30)));
+    expect(pulled.max).toBeLessThan(targetSlotRange('finest', QUESTIONS).min);
+  });
+
+  it('holds at the ends, where there is no neighbour to move toward', () => {
+    // `finest` is already ~1:1 and `broadest` already maximally consolidated; a further pull in
+    // the same direction has nowhere to go and must not silently invert to the other neighbour.
+    expect(targetSlotRange('finest', QUESTIONS, buildConsolidationProfile(freeText(30)))).toEqual(
+      targetSlotRange('finest', QUESTIONS)
+    );
+    expect(
+      targetSlotRange(
+        'broadest',
+        QUESTIONS,
+        buildConsolidationProfile(typed(30), HIGH_COHESION_ANCHOR)
+      )
+    ).toEqual(targetSlotRange('broadest', QUESTIONS));
+  });
+
+  it('interpolates partway for a partial pull', () => {
+    const half = buildConsolidationProfile([...typed(15), ...freeText(15)]);
+    const partial = targetSlotRange('balanced', QUESTIONS, half);
+    const flat = targetSlotRange('balanced', QUESTIONS);
+    const full = targetSlotRange('granular', QUESTIONS);
+    expect(partial.max).toBeGreaterThan(flat.max);
+    expect(partial.max).toBeLessThan(full.max);
+  });
+
+  it('still floors min at 1 and caps max at the question count under a pull', () => {
+    const tiny = targetSlotRange('broadest', 2, buildConsolidationProfile(freeText(2)));
+    expect(tiny.min).toBeGreaterThanOrEqual(1);
+    expect(tiny.max).toBeLessThanOrEqual(2);
   });
 });
 

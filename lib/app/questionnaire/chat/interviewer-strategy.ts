@@ -216,8 +216,12 @@ export function buildInterviewerStrategyInstructions(
   if (settings.reflect) {
     clauses.push(
       'REFLECT AND CONFIRM — before the next question, briefly play back the gist of what you just ' +
-        'heard in your own words so they can confirm or correct it ("So it sounds like… — is that ' +
-        'right?"). Keep it to one short clause; do not parrot them verbatim.'
+        'heard in your own words, as a STATEMENT ("So the backdrop most of the time is sadness.", ' +
+        '"It sounds like that decision still sits with you."). Keep it to one short clause and do ' +
+        'not parrot them verbatim. CRUCIAL: the playback must NOT be a question — no "is that ' +
+        'right?", "does that sound fair?", "have I got that?" or any other confirming tag, and no ' +
+        'question mark. Stating it back is enough; they will correct you if it is off. The ONLY ' +
+        'question in your message is the next question you go on to ask.'
     );
   }
   if (settings.batchRelated) {

@@ -6,6 +6,7 @@ import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonym
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
+import { themeToCssVariables } from '@/lib/app/questionnaire/theming';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   resolveAnonymousForVersion,
@@ -156,7 +157,10 @@ export default async function PublicQuestionnairePage({
           />
           {showResumeByRef && (
             <div className="mt-3 flex shrink-0 justify-center">
-              <ResumeByRefEntry versionId={versionId} />
+              {/* The brand vars are handed over explicitly: this control opens a portalled dialog,
+                  which lands outside the provider's wrapper and would otherwise lose the client's
+                  colours. */}
+              <ResumeByRefEntry versionId={versionId} brandStyle={themeToCssVariables(theme)} />
             </div>
           )}
         </BrandThemeProvider>

@@ -629,7 +629,11 @@ export type InterviewerStrategySettings = {
   approach: InterviewerApproach;
   /** Tactic: dig into a shallow / low-confidence answer with one follow-up before moving on. */
   probeDepth: boolean;
-  /** Tactic: briefly reflect the captured point back before the next question (also corroborates). */
+  /**
+   * Tactic: briefly reflect the captured point back before the next question, as a statement rather
+   * than a confirming question (also corroborates). The playback must never carry its own question
+   * mark — the turn already ends with the real ask, and two questions in one turn is confusing.
+   */
   reflect: boolean;
   /** Tactic: invite a few closely-related gaps together rather than strictly one at a time. */
   batchRelated: boolean;

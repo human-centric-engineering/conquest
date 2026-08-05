@@ -27,6 +27,7 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
+import { runWithConcurrency } from '@/lib/app/questionnaire/llm/run-with-concurrency';
 
 import {
   GENERATE_DATA_SLOTS_CAPABILITY_SLUG,
@@ -78,6 +79,13 @@ export interface StreamDataSlotGenerationParams {
   /** Provider binding for the generator agent (provider, model, fallbacks). */
   agent: ResolvableAgent;
   granularity?: DataSlotGranularity;
+  /**
+   * Mean nearest-sibling similarity among the version's TYPED questions (`typedQuestionCohesion`),
+   * or `null`/omitted when unmeasurable. Shifts the target slot band toward broader (siblings) or
+   * finer (all distinct) — see `granularity.ts`. The free-text share is derived per group from the
+   * questions themselves, so a likert section inside a qualitative questionnaire still consolidates.
+   */
+  cohesion?: number | null;
   /** For cost-log attribution. */
   agentId?: string;
   versionId?: string;
@@ -141,33 +149,6 @@ export function dedupeSlots(slots: GeneratedDataSlot[]): GeneratedDataSlot[] {
   return Array.from(byName.values());
 }
 
-/** Run `fn` over items with bounded concurrency, yielding each result as it completes. */
-async function* runWithConcurrency<I, O>(
-  items: I[],
-  limit: number,
-  fn: (item: I) => Promise<O>
-): AsyncGenerator<O> {
-  const executing = new Map<number, Promise<{ key: number; value: O }>>();
-  let next = 0;
-  const launch = () => {
-    const key = next;
-    const item = items[next];
-    next += 1;
-    executing.set(
-      key,
-      fn(item).then((value) => ({ key, value }))
-    );
-  };
-  const cap = Math.max(1, Math.min(limit, items.length));
-  for (let i = 0; i < cap; i += 1) launch();
-  while (executing.size > 0) {
-    const { key, value } = await Promise.race(executing.values());
-    executing.delete(key);
-    yield value;
-    if (next < items.length) launch();
-  }
-}
-
 /**
  * Generate data slots as a stream of progress events, returning the final reconciled set.
  * Never throws — pre-flight failures surface as an `error` event + an empty return.
@@ -177,6 +158,7 @@ export async function* streamDataSlotGeneration(
 ): AsyncGenerator<DataSlotGenEvent, GeneratedDataSlot[]> {
   const { structure, agent, agentId, versionId } = params;
   const granularity = params.granularity ?? DEFAULT_DATA_SLOT_GRANULARITY;
+  const cohesion = params.cohesion ?? null;
 
   // Pre-flight: resolve the provider once. A failure here is fatal — emit it and stop.
   let providerSlug: string;
@@ -231,7 +213,8 @@ export async function* streamDataSlotGeneration(
         model,
         messages: buildDataSlotGenerationPrompt(
           { goal: structure.goal, audience: structure.audience, questions: group.questions },
-          granularity
+          granularity,
+          cohesion
         ),
         maxTokens: GROUP_MAX_TOKENS,
         timeoutMs: GROUP_TIMEOUT_MS,
@@ -320,7 +303,8 @@ export async function* streamDataSlotGeneration(
             theme: c.theme,
             questionKeys: c.questionKeys,
           })),
-          granularity
+          granularity,
+          cohesion
         ),
         maxTokens: MERGE_MAX_TOKENS,
         timeoutMs: MERGE_TIMEOUT_MS,

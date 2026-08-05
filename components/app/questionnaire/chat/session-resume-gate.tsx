@@ -18,7 +18,7 @@
  */
 
 import { useState } from 'react';
-import { Loader2, RotateCcw } from 'lucide-react';
+import { Loader2, MonitorSmartphone, RotateCcw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
@@ -108,21 +108,23 @@ export function SessionResumeGate({
           </Button>
         </div>
 
-        <div className="mt-6 border-t pt-4">
+        <div className="mt-6 border-t pt-5">
           {showRefForm ? (
-            <div className="flex flex-col gap-2">
-              <ResumeByRefForm
-                versionId={versionId}
-                label="Continue a session you started on another device — enter its reference code:"
-              />
-            </div>
+            // Expanded in place rather than in a dialog: this card is already the focused surface,
+            // and stacking a modal on top of it would be a gate on a gate.
+            <ResumeByRefForm
+              versionId={versionId}
+              label="Enter the reference code from your other device:"
+              focusOnMount
+            />
           ) : (
             <button
               type="button"
               onClick={() => setShowRefForm(true)}
-              className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2"
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs transition-colors"
             >
-              Started on another device?
+              <MonitorSmartphone className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
+              Continue a session from another device
             </button>
           )}
         </div>

@@ -34,6 +34,9 @@ vi.mock('@/lib/logging', () => ({
 const { resolveAgentProviderAndModel } = await import('@/lib/orchestration/llm/agent-resolver');
 const { getProvider } = await import('@/lib/orchestration/llm/provider-manager');
 const { runStructuredCompletion } = await import('@/lib/orchestration/llm/structured-completion');
+const { tryParseJson } = await import('@/lib/orchestration/evaluations/parse-structured');
+const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
+const { logger } = await import('@/lib/logging');
 const { streamDataSlotGeneration, groupQuestionsForGeneration, dedupeSlots } =
   await import('@/lib/app/questionnaire/data-slots/generate-stream');
 import type { DataSlotGenEvent } from '@/lib/app/questionnaire/data-slots';
@@ -331,5 +334,105 @@ describe('streamDataSlotGeneration — failures', () => {
       expect.objectContaining({ type: 'error', code: 'provider_unavailable' }),
     ]);
     expect(value).toEqual([]);
+  });
+});
+
+/**
+ * `runStructuredCompletion` is mocked at the module boundary, so the `parse` / `onFinalFailure`
+ * callbacks the generator hands it never run under the tests above — yet those callbacks are what
+ * decide whether a model response is accepted, and what an unusable one reports. Pull them off the
+ * recorded call and drive them directly.
+ */
+describe('response-validation callbacks handed to runStructuredCompletion', () => {
+  const VALID_SLOT = {
+    name: 'Onboarding ease',
+    description: 'How smoothly the respondent got started.',
+    theme: 'Friction',
+    questionKeys: ['q1'],
+    confidence: 0.8,
+  };
+
+  /** Make the parse seam behave like the real one: hand the decoded JSON to the inner validator. */
+  function wirePassthroughJson() {
+    (tryParseJson as Mock).mockImplementation((raw: string, cb: (parsed: unknown) => unknown) =>
+      cb(JSON.parse(raw))
+    );
+  }
+
+  /** Run a generation and return the completion options recorded for the group / merge call. */
+  async function captureOpts(): Promise<{
+    group: Parameters<typeof runStructuredCompletion>[0];
+    merge: Parameters<typeof runStructuredCompletion>[0];
+  }> {
+    await drain(streamDataSlotGeneration({ structure: MULTI_SECTION, agent: AGENT }));
+    const calls = mockRSC.mock.calls.map((c) => c[0]);
+    const merge = calls.find((o) => (o.messages[0].content as string).includes('RECONCILING'))!;
+    const group = calls.find((o) => !(o.messages[0].content as string).includes('RECONCILING'))!;
+    return { group, merge };
+  }
+
+  it('accepts a schema-valid group response', async () => {
+    const { group } = await captureOpts();
+    wirePassthroughJson();
+
+    expect(group.parse(JSON.stringify({ slots: [VALID_SLOT] }))).toEqual({
+      slots: [expect.objectContaining({ name: 'Onboarding ease' })],
+    });
+  });
+
+  it('rejects a schema-invalid group response and names the invalid paths in the failure', async () => {
+    const { group } = await captureOpts();
+    wirePassthroughJson();
+
+    // `name` must be a string; the response is otherwise well-formed JSON, which is exactly the
+    // case a bare JSON.parse would wave through.
+    expect(group.parse(JSON.stringify({ slots: [{ ...VALID_SLOT, name: 42 }] }))).toBeNull();
+
+    // The path recorded during the failed parse is carried into the error the caller surfaces —
+    // without it the admin-facing message can't say WHAT the model got wrong.
+    const err = group.onFinalFailure!();
+    expect(err.message).toMatch(/not valid against the schema/i);
+    expect(err.message).toContain('slots.0.name');
+  });
+
+  it('omits the path list from the failure when nothing was ever parsed', async () => {
+    const { group } = await captureOpts();
+
+    // No parse attempt recorded issues (e.g. the provider threw before returning a body).
+    expect(group.onFinalFailure!().message).not.toMatch(/invalid at:/i);
+  });
+
+  it('accepts a valid merge response and rejects an invalid one', async () => {
+    const { merge } = await captureOpts();
+    wirePassthroughJson();
+
+    expect(merge.parse(JSON.stringify({ slots: [VALID_SLOT] }))).toEqual({
+      slots: [expect.objectContaining({ theme: 'Friction' })],
+    });
+    // A five-word name breaks the 1–4 word contract — the merge must not pass it through.
+    expect(
+      merge.parse(JSON.stringify({ slots: [{ ...VALID_SLOT, name: 'one two three four five' }] }))
+    ).toBeNull();
+    expect(merge.onFinalFailure!().message).toMatch(/merge response was not valid/i);
+  });
+});
+
+describe('cost logging', () => {
+  it('logs an error instead of rejecting when the fire-and-forget cost write fails', async () => {
+    (logCost as Mock).mockRejectedValue(new Error('cost sink down'));
+
+    // The generation itself must still complete — cost logging is not on the critical path.
+    const { value } = await drain(
+      streamDataSlotGeneration({ structure: SINGLE_SECTION, agent: AGENT, agentId: 'agent-1' })
+    );
+    expect((value as unknown[]).length).toBeGreaterThan(0);
+
+    // The rejection is handled a microtask later, after the generator has already returned.
+    await vi.waitFor(() =>
+      expect(logger.error).toHaveBeenCalledWith(
+        'data-slot stream: logCost rejected',
+        expect.objectContaining({ agentId: 'agent-1' })
+      )
+    );
   });
 });

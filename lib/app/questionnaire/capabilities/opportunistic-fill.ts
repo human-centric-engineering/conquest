@@ -11,21 +11,29 @@
  * deterministic safety net for when it doesn't — the down-propagation analogue of the existing
  * question→data-slot gap-filler (`reconcileChatDataSlotFills`).
  *
- * Two paths, by question type:
- *  - **free-text** mapped questions are seeded HERE, deterministically, from the fill's paraphrase
- *    (no LLM);
- *  - **choice / likert** mapped questions are handed back to the capability to run through the
- *    answer-fit resolver (the same machinery that maps a free-form answer onto an option/scale).
+ * BOTH question types go through the answer-fit resolver, which judges each mapped question on its
+ * own wording:
+ *  - **choice / likert** mapped questions are mapped onto their option / scale point;
+ *  - **free-text** mapped questions are answered in THEIR OWN terms from what the respondent said,
+ *    or omitted when the conversation covered the theme without speaking to that specific question.
+ *
+ * Free text used to be seeded HERE instead, deterministically, by copying the fill's paraphrase onto
+ * every mapped question. That is the `JP29` defect: a data slot mapping three ego/Higher-Self
+ * questions produced three byte-identical answers, none of which addressed the question above it. One
+ * paraphrase cannot answer three different questions, and no confidence cap makes a misfiled answer
+ * right — so the per-question judgment the typed path always had is now applied to free text too.
+ * The deterministic seed survives only as a failure fallback, and only where duplication is
+ * impossible (see {@link soleMappedFreeTextTargets}).
  *
  * The opportunistic answer is written at a capped confidence, provenance `inferred`, but the two
- * paths cap differently. A free-text seed is a raw paraphrase copy with no per-question fit
- * judgment, so it stays at the Tentative {@link OPPORTUNISTIC_CONFIDENCE_CAP} — a guess below the
- * completion floor that pulls the agent back to confirm it. A choice/likert fill carries the
- * answer-fit resolver's own mapping-clarity judgment, so it keeps that (up to
- * {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP}): a clearly-pinned answer reads "Fairly sure" and can
- * cross the completion floor without a naggy re-ask, while a loose fit still lands low and is
- * confirmed later. Numeric/boolean/date are out of scope: there's no honest free-form→value mapping
- * for them here, so they wait for the extractor (or a direct statement).
+ * types cap differently. A free-text answer is prose the respondent never offered for THIS question,
+ * so it stays at the Tentative {@link OPPORTUNISTIC_CONFIDENCE_CAP} — a guess below the completion
+ * floor that pulls the agent back to confirm it. A choice/likert fill carries the resolver's own
+ * mapping-clarity judgment, so it keeps that (up to {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP}): a
+ * clearly-pinned answer reads "Fairly sure" and can cross the completion floor without a naggy
+ * re-ask, while a loose fit still lands low and is confirmed later. Numeric/boolean/date are out of
+ * scope: there's no honest free-form→value mapping for them here, so they wait for the extractor (or
+ * a direct statement).
  *
  * Pure + dependency-light — no Prisma/LLM imports — so it's unit-testable in isolation; the
  * capability owns the LLM fit call and the persistence flows through the normal turn-run upsert
@@ -48,12 +56,13 @@ import type {
 export const OPPORTUNISTIC_FILL_FLOOR = 0.5;
 
 /**
- * Confidence ceiling for a FREE-TEXT opportunistic seed. 0.45 is the floor of the "Tentative" band
- * (`panel/confidence.ts`), so a seeded answer reads as a guess and sits below the completion floor
- * until confirmed. Confirmation then strengthens it via the accrual guard. A free-text seed is a raw
- * copy of the fill's paraphrase down onto the mapped question — there is no per-question judgment of
- * how well it fits, so the flat "to be confirmed" ceiling is right here (the typed path below is not
- * flattened this way — see {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP}).
+ * Confidence ceiling for a FREE-TEXT opportunistic answer. 0.45 is the floor of the "Tentative" band
+ * (`panel/confidence.ts`), so it reads as a guess and sits below the completion floor until
+ * confirmed. Confirmation then strengthens it via the accrual guard. The ceiling stays flat even now
+ * that the resolver tailors the prose per question: unlike a scale point — which a clear sentiment
+ * can genuinely PIN — free-text prose is the respondent's account in their own words, and an account
+ * they never actually gave for THIS question is a guess however well it reads. The typed path is not
+ * flattened this way — see {@link OPPORTUNISTIC_TYPED_CONFIDENCE_CAP}.
  */
 export const OPPORTUNISTIC_CONFIDENCE_CAP = 0.45;
 
@@ -144,9 +153,44 @@ export function selectOpportunisticTargets(opts: {
 }
 
 /**
+ * The free-text targets to hand the answer-fit resolver — one candidate view per mapped question, so
+ * the model judges each question on its own wording rather than receiving one blanket paraphrase.
+ */
+export function freeTextFitCandidates(
+  freeText: OpportunisticTargets['freeText']
+): ExtractionSlotView[] {
+  return freeText.map((target) => target.slot);
+}
+
+/**
+ * FAILURE FALLBACK ONLY — the free-text targets it is still safe to seed deterministically when the
+ * resolver pass could not run (provider error, schema failure after retry). A fill is safe exactly
+ * when it maps to ONE free-text question: there is a single place for its paraphrase to land, so
+ * copying it there cannot produce the duplication this module exists to prevent, and the `53ZF` gap
+ * (a confident fill stranded beside an empty form) still gets closed on the degraded path.
+ *
+ * A fill mapping several free-text questions is dropped entirely rather than seeded into an
+ * arbitrary one of them — picking a winner among questions we could not judge would be a coin toss
+ * presented to the respondent as an answer.
+ */
+export function soleMappedFreeTextTargets(
+  freeText: OpportunisticTargets['freeText']
+): OpportunisticTargets['freeText'] {
+  const countByFill = new Map<string, number>();
+  for (const { fill } of freeText) {
+    countByFill.set(fill.dataSlotKey, (countByFill.get(fill.dataSlotKey) ?? 0) + 1);
+  }
+  return freeText.filter(({ fill }) => countByFill.get(fill.dataSlotKey) === 1);
+}
+
+/**
  * Build the deterministic free-text intents from the selected targets — the fill's paraphrase
  * (falling back to a formatted value) at the capped Tentative confidence, provenance `inferred`.
  * A target whose fill yields no usable text is skipped (never write an empty answer).
+ *
+ * Reachable only via {@link soleMappedFreeTextTargets} on the resolver-failure path. Do NOT call it
+ * on the normal path: it has no per-question judgment, so a many-mapped fill would paste one
+ * paraphrase under every question again.
  */
 export function buildFreeTextOpportunisticIntents(
   freeText: OpportunisticTargets['freeText']
@@ -182,9 +226,70 @@ export function buildFreeTextOpportunisticIntents(
 export function capOpportunisticConfidence(intents: AnswerSlotIntent[]): AnswerSlotIntent[] {
   return intents.map((intent) => ({
     ...intent,
-    confidence: Math.min(intent.confidence, OPPORTUNISTIC_TYPED_CONFIDENCE_CAP),
+    confidence: Math.min(
+      intent.confidence,
+      // Free text rides the same pass but keeps the flat Tentative ceiling — the resolver judged
+      // that their words answer this question, not that they gave this account of it.
+      intent.questionType === 'free_text'
+        ? OPPORTUNISTIC_CONFIDENCE_CAP
+        : OPPORTUNISTIC_TYPED_CONFIDENCE_CAP
+    ),
     provenance: 'inferred' as const,
   }));
+}
+
+/** Collapse whitespace/case/punctuation so near-identical prose compares equal. */
+function normaliseText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const key = value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return key.length > 0 ? key : null;
+}
+
+/**
+ * LAST-LINE INVARIANT — never let one turn write the same free-text answer under two questions.
+ *
+ * The prompt tells the resolver to tailor each answer and omit rather than repeat, but a prompt is a
+ * request, not a guarantee: a model that ignores it would reproduce the `JP29` screenshot exactly.
+ * This is the deterministic backstop, so the defect cannot recur regardless of model behaviour.
+ *
+ * On a collision the HIGHEST-confidence intent survives (ties keep the first seen, so the order the
+ * resolver returned is stable); the rest are dropped and returned for logging. Typed answers are
+ * untouched — two questions legitimately share the scale point `3`, and identical typed values carry
+ * no misfiled prose.
+ */
+export function dedupeIdenticalFreeText(intents: AnswerSlotIntent[]): {
+  intents: AnswerSlotIntent[];
+  dropped: { slotKey: string; reason: string }[];
+} {
+  const winnerByText = new Map<string, AnswerSlotIntent>();
+  const dropped: { slotKey: string; reason: string }[] = [];
+  const kept: AnswerSlotIntent[] = [];
+
+  for (const intent of intents) {
+    const key = intent.questionType === 'free_text' ? normaliseText(intent.value) : null;
+    if (key === null) {
+      kept.push(intent);
+      continue;
+    }
+    const incumbent = winnerByText.get(key);
+    if (!incumbent) {
+      winnerByText.set(key, intent);
+      kept.push(intent);
+      continue;
+    }
+    if (intent.confidence > incumbent.confidence) {
+      winnerByText.set(key, intent);
+      kept.splice(kept.indexOf(incumbent), 1, intent);
+      dropped.push({ slotKey: incumbent.slotKey, reason: 'duplicate free-text answer' });
+    } else {
+      dropped.push({ slotKey: intent.slotKey, reason: 'duplicate free-text answer' });
+    }
+  }
+
+  return { intents: kept, dropped };
 }
 
 /** A still-tentative mapped answer to strengthen because its theme was corroborated this turn. */

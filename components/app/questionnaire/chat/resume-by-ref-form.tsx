@@ -9,21 +9,28 @@
  * anonymous credential, mark the tab entered (so the reload drops straight back into the
  * conversation rather than re-prompting), and reload — the boot then replays the transcript.
  *
- * Deliberately understated and self-contained: it POSTs a public endpoint, so it needs no session
- * context and can sit on the public page footer AND inside the welcome-back gate. Every non-match
- * collapses to one friendly message (the endpoint never says which guard failed).
+ * The code is entered in a {@link SessionRefInput} — eight cells in the code's own 4+4 shape — and
+ * submits ITSELF on the eighth character: someone copying a code off another screen looks at that
+ * screen, not at this one, so making them find a button afterwards is the step that gets missed.
+ * The button stays for keyboard/retry, and the panel holds a "found it" beat before the reload so
+ * the screen going blank reads as success rather than a fault.
+ *
+ * Deliberately self-contained: it POSTs a public endpoint, so it needs no session context and can
+ * sit on the public page footer AND inside the welcome-back gate. Every non-match collapses to one
+ * friendly message (the endpoint never says which guard failed).
  *
  * @see app/api/v1/app/questionnaire-sessions/resume-by-ref/route.ts
  */
 
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { z } from 'zod';
-import { Loader2 } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 
 import { API } from '@/lib/api/endpoints';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { SessionRefInput } from '@/components/app/questionnaire/chat/session-ref-input';
+import { SESSION_REF_LENGTH } from '@/lib/app/questionnaire/session-ref';
 import {
   anonCredsKey,
   setTabMarker,
@@ -45,20 +52,41 @@ const resumeResponseSchema = z.object({
 
 export interface ResumeByRefFormProps {
   versionId: string;
-  /** Optional label above the input (the page footer sets its own context). */
+  /** Optional line of copy above the field (each host sets its own context). */
   label?: string;
+  /** Focus the field on mount — for hosts that exist (or open) only to take this code. */
+  focusOnMount?: boolean;
   className?: string;
 }
 
-export function ResumeByRefForm({ versionId, label, className }: ResumeByRefFormProps) {
+export function ResumeByRefForm({
+  versionId,
+  label,
+  focusOnMount = false,
+  className,
+}: ResumeByRefFormProps) {
+  const errorId = useId();
   const [ref, setRef] = useState('');
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Drives the one-shot nudge on the cells. Cleared on `animationend` rather than by a timer, so a
+  // second failure re-adds the class and the animation replays — a bumped key would work too, but
+  // remounting the field would steal focus from the code the respondent is about to correct.
+  const [shaking, setShaking] = useState(false);
+  const inFlight = useRef(false);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = ref.trim();
-    if (!trimmed || busy) return;
+  function fail(message: string) {
+    setError(message);
+    setShaking(true);
+  }
+
+  async function submit(code: string) {
+    const trimmed = code.trim();
+    // `inFlight` (not `busy`) guards the double-fire: auto-submit and a button press can land in the
+    // same tick, before a state update has been committed.
+    if (trimmed.length !== SESSION_REF_LENGTH || inFlight.current || done) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -68,12 +96,12 @@ export function ResumeByRefForm({ versionId, label, className }: ResumeByRefForm
         body: JSON.stringify({ ref: trimmed }),
       });
       if (res.status === 429) {
-        setError('Too many attempts. Please wait a moment and try again.');
+        fail('Too many attempts. Please wait a moment and try again.');
         return;
       }
       const parsed = resumeResponseSchema.safeParse(await res.json());
       if (!res.ok || !parsed.success) {
-        setError("We couldn't find an in-progress session for that code. Check it and try again.");
+        fail("We couldn't find an in-progress session for that code. Check it and try again.");
         return;
       }
       // Persist under the RESOLVED session's version, not this page's — `publicRef` is globally
@@ -89,46 +117,79 @@ export function ResumeByRefForm({ versionId, label, className }: ResumeByRefForm
         expiresAt: parsed.data.data.expiresAt,
       });
       setTabMarker(resolvedVersionId);
+      // Latch the success state BEFORE navigating: the reload is not instant, and a panel that
+      // simply freezes mid-spinner reads as a hang.
+      setDone(true);
       if (resolvedVersionId === versionId) window.location.reload();
       else window.location.assign(`/q/${resolvedVersionId}`);
     } catch {
-      setError('Something went wrong. Please check your connection and try again.');
+      fail('Something went wrong. Please check your connection and try again.');
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
 
-  return (
-    <form onSubmit={(e) => void submit(e)} className={cn('flex flex-col gap-2', className)}>
-      {label && (
-        <label htmlFor={`resume-ref-${versionId}`} className="text-muted-foreground text-sm">
-          {label}
-        </label>
-      )}
-      <div className="flex items-center gap-2">
-        <Input
-          id={`resume-ref-${versionId}`}
-          value={ref}
-          onChange={(e) => setRef(e.target.value)}
-          placeholder="e.g. 7F3K-9M2P"
-          autoComplete="off"
-          spellCheck={false}
-          disabled={busy}
-          aria-label="Session reference code"
-          className="max-w-[12rem] font-mono tracking-wide uppercase"
-        />
-        <Button
-          type="submit"
-          size="sm"
-          disabled={busy || ref.trim().length === 0}
-          style={{ background: CTA_FILL }}
-          className="text-[var(--app-on-cta,#fff)]"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : 'Continue'}
-        </Button>
+  if (done) {
+    return (
+      <div
+        role="status"
+        className={cn(
+          'text-muted-foreground flex flex-col items-center gap-2 py-2 text-sm',
+          className
+        )}
+      >
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/12 text-emerald-500">
+          <Check className="h-5 w-5" aria-hidden="true" />
+        </span>
+        Found it — bringing your conversation across…
       </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit(ref);
+      }}
+      className={cn('flex flex-col items-center gap-4', className)}
+    >
+      {label && <p className="text-muted-foreground text-center text-sm">{label}</p>}
+
+      <div onAnimationEnd={() => setShaking(false)} className={cn(shaking && 'cq-shake')}>
+        <SessionRefInput
+          value={ref}
+          onChange={(next) => {
+            setRef(next);
+            if (error) setError(null);
+          }}
+          onComplete={(code) => void submit(code)}
+          disabled={busy}
+          invalid={Boolean(error)}
+          focusOnMount={focusOnMount}
+          describedBy={error ? errorId : undefined}
+        />
+      </div>
+
+      <Button
+        type="submit"
+        disabled={busy || ref.length !== SESSION_REF_LENGTH}
+        style={{ background: CTA_FILL }}
+        className="h-11 w-full max-w-[20rem] text-base text-[var(--app-on-cta,#fff)]"
+      >
+        {busy ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Looking it up…
+          </>
+        ) : (
+          'Continue'
+        )}
+      </Button>
+
       {error && (
-        <p role="alert" className="text-destructive text-xs">
+        <p id={errorId} role="alert" className="text-destructive text-center text-xs">
           {error}
         </p>
       )}

@@ -55,6 +55,17 @@ const argsSchema = z.object({
   versionId: z.string().optional(),
   // Optional: omitted → the prompt builder applies the default (balanced) level.
   granularity: dataSlotGranularitySchema.optional(),
+  // Mean nearest-sibling similarity among the version's TYPED questions, measured by the route
+  // via pgvector. Shifts the target slot band broader (siblings) or finer (all distinct).
+  // Omitted → the free-text share carries the adjustment alone. See `granularity.ts`.
+  //
+  // Bounded to cosine's full −1…1, not the 0…1 the realistic band (~0.4–0.9) sits in. A negative
+  // mean would need every typed question's NEAREST sibling to be anti-correlated, which text
+  // embeddings don't produce — but `consolidationIndex` already reads anything below
+  // LOW_COHESION_ANCHOR as "pull fully finer", so such a value is handled, not dangerous. A 0
+  // floor here wouldn't protect that math; it would just fail the whole generation on a value the
+  // stream route (which skips this schema) would have used correctly.
+  cohesion: z.number().min(-1).max(1).nullish(),
 });
 
 export type GenerateDataSlotsArgs = z.infer<typeof argsSchema>;
@@ -122,7 +133,11 @@ export class AppGenerateDataSlotsCapability extends BaseCapability<
       return this.error(errorMessage(err), 'provider_unavailable');
     }
 
-    const messages = buildDataSlotGenerationPrompt(args.structure, args.granularity);
+    const messages = buildDataSlotGenerationPrompt(
+      args.structure,
+      args.granularity,
+      args.cohesion ?? null
+    );
 
     let lastIssuePaths: string[] = [];
     let completion: StructuredCompletionResult<DataSlotGenerationOutput>;

@@ -199,6 +199,38 @@ imply a gender.
 ONLY emit a fill for a slot the latest message actually bears on — a position the respondent stated, \
 or one that genuinely follows from something they said. If the message says nothing about a slot, \
 OMIT it entirely (do not record its absence) — the panel shows "Not covered yet" on its own.
+FIT, NOT NEAREST-AVAILABLE — a slot is chosen by what the message is genuinely ABOUT, never by which \
+listed slot happens to be the closest one on offer. Before emitting a fill, name that slot's own \
+subject and check the message actually speaks to THAT subject. A slot naming a specific construct, \
+framework term, or named entity ("ego and Higher Self", "attachment style", "our onboarding flow") is \
+informed only when the respondent ADDRESSED that construct: describing sadness, heaviness, or \
+rumination does NOT address a slot about the ego; describing a hard week does NOT address a slot about \
+onboarding. When a message is substantive but every listed slot is merely adjacent to it, prefer the \
+BROADEST slot that genuinely CONTAINS what they said (a lived-experience or general slot) over a \
+specific one it only resembles — and if no slot contains it, emit none rather than forcing the \
+nearest. Misfiling a rich answer under a specific slot is a WORSE outcome than leaving that slot "Not \
+covered yet": it misrepresents the respondent to the reader, and the wrong fill then propagates down \
+to that slot's mapped questions.
+PROVENANCE FOLLOWS THE SUBJECT — "direct" requires that they addressed THIS slot's subject outright. A \
+vivid, plainly-stated message about a DIFFERENT subject does not earn "direct" here: if you reached \
+this slot by a step of reading-across, it is "inferred" at best, and its confidence belongs in the \
+0.3–0.45 band reserved for a tangential single-step inference, however plainly the underlying \
+sentence was expressed.
+THE RATIONALE MUST BRIDGE TO THIS SLOT — it is not enough to record WHAT they said; the rationale has \
+to make plain why what they said bears on THIS slot's subject, naming that subject. "When asked about \
+their inner world, they described sadness and a weight in their stomach" is a complete account of the \
+message and still NO evidence for a slot about the ego and the Higher Self — it never reaches the \
+slot's subject at all. Use this as your self-check: write the rationale, then re-read it against the \
+slot's name and description. If it never names or genuinely touches that subject — if it would read \
+as evidence for some OTHER slot just as well — you have picked the wrong slot: drop the fill and put \
+the material where it belongs.
+CONFIDENCE IS THE WEAKEST LINK — score how strongly the message bears on THIS SLOT'S SUBJECT, never \
+how vividly, fully, or plainly the underlying sentence was expressed. Depth in the message earns the \
+high band only when that depth is ABOUT this slot's subject: a detailed, moving, specific account of a \
+DIFFERENT subject is a WEAK fill for this one (0.3–0.45), not a confident one. Ask "how much of this \
+detail is about THIS subject?" — not "how much detail is there?". Never let a strong reading of an \
+adjacent topic arrive as "Confident": the respondent sees that badge next to a claim about \
+themselves, and a confident misreading is worse than an admitted guess.
 Some slots show a "current" line — what's already recorded from earlier in the conversation. When \
 the new message ADDS to or CORRECTS that (e.g. they first said "male" then "actually, female"), \
 output an UPDATED fill for that slot that MERGES the still-true details with the correction (here: \
@@ -311,6 +343,43 @@ listed choices don't include it; "10 years" → the option whose range contains 
 conversation truly says nothing that bears on it. A low-but-honest "confidence" is fine.
 - Use provenance "inferred" (or "synthesised" if it draws on several turns); a "direct" value still \
 needs a "sourceQuote".`;
+
+/**
+ * Appended to {@link FORCE_FIT_RULES} when the resolution pass carries free-text candidates — i.e.
+ * the opportunistic down-propagation pass, where a confident data-slot fill's mapped FREE-TEXT
+ * questions are tested one by one instead of being seeded with a verbatim copy of the fill's
+ * paraphrase (the `JP29` defect: one theme paraphrase pasted, byte-identical, under three different
+ * ego/Higher-Self questions).
+ *
+ * The framing is deliberately the INVERSE of the typed rules above. A typed candidate was already
+ * addressed and just needs pinning to a scale point, so committing beats omitting. A free-text
+ * candidate has only had its THEME covered, so the honest default is to omit — the interviewer will
+ * ask it properly later. Hence the explicit permission (and expectation) to return nothing.
+ */
+const FREE_TEXT_FIT_RULES = `
+
+The option/scale rules above govern choice and likert candidates ONLY. Candidates whose "type" is \
+free_text are governed by THIS block instead — read it before answering any of them.
+A free_text candidate here was NOT necessarily addressed by the respondent. It reached this pass \
+because the conversation covered its broader THEME, and your job is to test whether what they said \
+also answers each question SPECIFICALLY. For every free_text candidate:
+- Re-read that question's OWN wording and ask: did the respondent say something that answers THIS \
+question, as asked? Not the theme around it — this question.
+- If YES: write a "value" (and a matching "paraphrase") that answers THAT question in ITS OWN terms, \
+built from what they actually said. TAILOR it — two questions on one theme ask different things and \
+must get different answers, each addressing what its own question asked.
+- NEVER emit the same, or near-same, text for two candidates. If you find yourself about to repeat an \
+answer, that is the signal that at most ONE of them is genuinely answered — keep that one and omit \
+the rest.
+- If NO — the conversation covers the theme but never speaks to this particular question — OMIT it \
+entirely. Omitting is the CORRECT result here and costs nothing: the interviewer will simply ask the \
+question later. A theme-level summary pasted under a question it does not answer is a WRONG answer, \
+not a partial one.
+- Set "confidence" by how squarely their words answer THIS question, and use provenance "inferred" or \
+"synthesised" — they were speaking to something else when they said it. The "rationale" must name what \
+they said that answers THIS question, never merely that the topic came up.
+Expect to OMIT most free_text candidates in this pass. One well-founded answer with the rest omitted \
+is a good result; all of them answered with near-identical text is a failure.`;
 
 /** Render one data-slot candidate as a compact, model-readable line. */
 function describeDataSlot(slot: DataSlotCandidateView): string {
@@ -436,7 +505,13 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
     // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
     ctx.sensitivityAware ? section('sensitivity_rules', SENSITIVITY_RULES) : '',
     // Answer-fit resolver pass: append the commit-to-a-fit framing (only on the focused 2nd call).
-    ctx.forceFit ? section('resolution_pass_rules', FORCE_FIT_RULES) : ''
+    ctx.forceFit ? section('resolution_pass_rules', FORCE_FIT_RULES) : '',
+    // Opportunistic down-propagation carries free-text candidates through the same pass, under the
+    // inverse (tailor-or-omit) framing. Rendered only when such a candidate is actually present, so
+    // the typed-only recovery pass is byte-identical to before.
+    ctx.forceFit && ctx.candidateSlots.some((slot) => slot.type === 'free_text')
+      ? section('free_text_resolution_rules', FREE_TEXT_FIT_RULES)
+      : ''
   );
   const dataSlotSection = hasDataSlots
     ? `\n\nData slots (capture these — a primary deliverable, fill every one the message informs):\n${ctx.dataSlotCandidates!.map(describeDataSlot).join('\n')}`

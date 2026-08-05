@@ -40,9 +40,35 @@ const previewRequestSchema = z.object({
   config: z.record(z.string(), z.unknown()),
 });
 
+/**
+ * Wall-clock ceiling for the whole preview. It runs a persona pass, a fan-out of sample-answer
+ * batches, the report writer, and the formatter back to back — a large version measures at ~2
+ * minutes end to end, well past the platform's 60s default. Without this the function is killed
+ * mid-flight and the admin gets a blank failure with nothing in the logs to explain it.
+ */
+export const maxDuration = 300;
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * Did this fail because something ran out of time, rather than breaking?
+ *
+ * Worth separating because the two need opposite advice: a timeout is transient and worth retrying,
+ * anything else is not. The shapes come from three layers that don't share an error type — the
+ * OpenAI SDK (`APIConnectionTimeoutError`, message "Request timed out."), `AbortSignal.timeout`
+ * (a `TimeoutError` DOMException), and the platform's own `ProviderError` (`code: 'timeout'`).
+ */
+function isTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === 'TimeoutError' || err.name === 'APIConnectionTimeoutError') return true;
+  if ('code' in err && err.code === 'timeout') return true;
+  return /timed out/i.test(err.message);
+}
+
+/** The preview stage an error came from — recorded so a failure names the pass that produced it. */
+type PreviewStage = 'sample' | 'generate';
 
 const handlePreview = withAdminAuth<{ id: string; vid: string }>(
   async (request, session, { params }) => {
@@ -131,10 +157,15 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
       research: { ...settings.research, enabled: false },
     };
 
+    // Which pass we're in, so a failure below names it. The previous handler logged only the raw
+    // message ("Request timed out.") with no indication of which of the four LLM passes produced it,
+    // which made a production timeout undiagnosable from the logs alone.
+    let stage: PreviewStage = 'sample';
     try {
       const sample = await synthesiseSampleReportInputs(structure, {
         includeConfidence: previewSettings.generation.discountLowConfidence,
       });
+      stage = 'generate';
       const report = await generateReportFromInputs({
         settings: previewSettings,
         goal: structure.goal,
@@ -163,12 +194,23 @@ const handlePreview = withAdminAuth<{ id: string; vid: string }>(
         completionPct: report.completionPct,
       });
     } catch (err) {
+      const timedOut = isTimeoutError(err);
       logger.error('Report preview failed', {
         adminId,
         questionnaireId: id,
         versionId: vid,
+        stage,
+        timedOut,
         error: errorMessage(err),
       });
+      // A timeout is transient and retrying is genuinely the right advice; anything else is not, and
+      // telling an admin to "try again" on a broken config just makes them do it twice.
+      if (timedOut) {
+        return errorResponse(
+          'The preview took too long to generate. Larger questionnaires take longer — please try again.',
+          { code: 'REPORT_PREVIEW_TIMEOUT', status: 504 }
+        );
+      }
       return errorResponse('Could not generate a preview. Please try again.', {
         code: 'REPORT_PREVIEW_FAILED',
         status: 502,
