@@ -1,2 +1,21 @@
+# Raise the V8 heap for the type-check below.
+#
+# `tsc --noEmit` over this repo needs more than Node's default old-space and
+# dies with **exit 134** (SIGABRT — "Ineffective mark-compacts near heap limit"),
+# which reads as a crashed hook rather than "out of memory" and blocks the push
+# with no actionable message.
+#
+# It is the size of this app, not a leak or a misconfiguration. ConQuest checks
+# ~980k lines of its own TypeScript (of which ~578k is the test suite — tsconfig
+# includes tests, so they are type-checked too) plus ~225k lines of generated
+# Prisma client types from 110 models. Vanilla Sunrise is ~642k and 61 models,
+# which fits the default comfortably; this fork does not. Node's default here is
+# ~4.2GB, so we are just the wrong side of it.
+#
+# Ours goes FIRST so an explicit value in the developer's own environment wins —
+# V8 takes the last occurrence of a repeated flag. Raise `CI_NODE_HEAP_MB` in
+# the repo's Actions variables to match if CI starts failing the same way.
+export NODE_OPTIONS="--max-old-space-size=8192 ${NODE_OPTIONS:-}"
+
 echo "Running pre-push validation..."
 npm run type-check
