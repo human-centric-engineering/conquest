@@ -59,8 +59,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # small dev/build boxes) `next build` hits Node's default ~2GB heap cap and OOMs
 # (FATAL ERROR: Reached heap limit). This ENV lives in the `builder` stage only
 # — the `runner` stage below is a fresh `FROM base` and does not inherit it, so
-# production runtime memory is unchanged. Mirrors the ci.yml heap cap.
-ENV NODE_OPTIONS=--max-old-space-size=4096
+# production runtime memory is unchanged.
+#
+# Overridable so a fork whose build needs more than 4GB can raise it without
+# editing this file: ci.yml passes NODE_HEAP_MB from the CI_NODE_HEAP_MB repo
+# variable, the same knob that sizes the heap for the non-Docker jobs. The
+# default stays 4096 so small build boxes are not pushed past their RAM.
+ARG NODE_HEAP_MB=4096
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_HEAP_MB}
 
 # Build the application
 # Next.js 16 standalone output creates a minimal production server at .next/standalone/

@@ -45,6 +45,11 @@ concurrency:
 # (SIGABRT / OOM) — an opaque failure with no message pointing at memory. Raise
 # it in repo settings (Settings → Secrets and variables → Actions → Variables)
 # rather than editing this file, so the change survives every upstream sync.
+#
+# This `env` reaches the runner's own steps only — it does NOT cross into the
+# Docker build, which runs `next build` inside the image with its own heap cap.
+# The docker job forwards the same value as the `NODE_HEAP_MB` build arg; keep
+# the two in step or the image build OOMs while every other job passes.
 env:
   NODE_OPTIONS: '--max-old-space-size=${{ vars.CI_NODE_HEAP_MB || 5120 }}'
 
@@ -389,6 +394,7 @@ jobs:
             BETTER_AUTH_URL=http://localhost:3000
             BETTER_AUTH_SECRET=ci-build-secret-not-for-production-use
             NEXT_PUBLIC_APP_URL=http://localhost:3000
+            NODE_HEAP_MB=${{ vars.CI_NODE_HEAP_MB || 5120 }}
 
   # Gate job for branch protection — always runs and reports a single status.
   # Skipped jobs (docs-only, the inactive test mode, non-docker PRs) are not
