@@ -427,6 +427,27 @@ describe('AppGenerateDataSlotsCapability — schema validation (argsSchema)', ()
     const cap = new AppGenerateDataSlotsCapability();
     expect(() => cap.validate({ structure: VALID_STRUCTURE })).not.toThrow();
   });
+
+  // `cohesion` carries a cosine mean measured by the route (`typedQuestionCohesion`). The schema
+  // bound must match cosine's real domain, not the 0–1 band the values realistically land in:
+  // a below-band value is meaningful input that `consolidationIndex` reads as "pull fully finer",
+  // and rejecting it here would fail the whole generation on something the stream route — which
+  // never runs this schema — would have used correctly.
+  it.each([-1, -0.2, 0, 0.62, 1])('accepts cohesion %p, inside cosine range', (cohesion) => {
+    const cap = new AppGenerateDataSlotsCapability();
+    expect(() => cap.validate({ structure: VALID_STRUCTURE, cohesion })).not.toThrow();
+  });
+
+  it.each([-1.01, 1.01])('rejects cohesion %p, outside cosine range', (cohesion) => {
+    const cap = new AppGenerateDataSlotsCapability();
+    expect(() => cap.validate({ structure: VALID_STRUCTURE, cohesion })).toThrow();
+  });
+
+  it('accepts a null or omitted cohesion — the measurement is best-effort', () => {
+    const cap = new AppGenerateDataSlotsCapability();
+    expect(() => cap.validate({ structure: VALID_STRUCTURE, cohesion: null })).not.toThrow();
+    expect(cap.validate({ structure: VALID_STRUCTURE }).cohesion).toBeUndefined();
+  });
 });
 
 describe('AppGenerateDataSlotsCapability — parse callback wiring', () => {

@@ -150,6 +150,16 @@ describe('consolidationIndex', () => {
     expect(consolidationIndex(buildConsolidationProfile(typed(10), 1))).toBe(1);
     expect(consolidationIndex(buildConsolidationProfile(typed(10), 0))).toBe(-1);
   });
+
+  it('reads an anti-correlated cohesion as fully finer, not as an overshoot', () => {
+    // Cosine runs to −1, so the measurement's domain reaches below 0 even though real embeddings
+    // don't get there. Such a value means "every question stands alone", which is already what the
+    // finer extreme says — so it clamps to −1 rather than driving the index past it. This is why
+    // the capability's `cohesion` bound is −1…1: a below-band value is handled here, and a 0 floor
+    // would only fail the generation instead.
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), -1))).toBe(-1);
+    expect(consolidationIndex(buildConsolidationProfile(typed(10), -0.4))).toBe(-1);
+  });
 });
 
 describe('targetSlotRange with a consolidation profile', () => {

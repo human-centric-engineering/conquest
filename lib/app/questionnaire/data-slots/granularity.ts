@@ -137,9 +137,13 @@ export interface ConsolidationProfile {
   /** Fraction of those questions that are `free_text` (0–1). */
   freeTextShare: number;
   /**
-   * Mean cosine similarity of each TYPED question to its nearest typed sibling (0–1), or
-   * `null` when it could not be measured (no embeddings, or fewer than two typed
-   * questions). Null simply drops the semantic term — the free-text signal still applies.
+   * Mean cosine similarity of each TYPED question to its nearest typed sibling, or `null` when
+   * it could not be measured (no embeddings, or fewer than two typed questions). Null simply
+   * drops the semantic term — the free-text signal still applies.
+   *
+   * Realistically lands in ~0.4–0.9; the domain is cosine's full −1…1 and anything outside the
+   * anchors clamps, so out-of-band input degrades to the nearest extreme rather than needing a
+   * guard at the call site.
    */
   cohesion: number | null;
 }
