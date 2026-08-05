@@ -57,7 +57,10 @@ const versionRow = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  reportPreviewLimiter.reset?.('admin-user-id');
+  // Reset the key the ROUTE actually uses (`session.user.id`), not a literal — a mismatch here is
+  // silent: the real limiter keeps counting across every `it()` in the file and only surfaces as a
+  // spurious 429 once the file grows past the cap.
+  reportPreviewLimiter.reset?.(mockAdminUser().user.id);
   (auth.api.getSession as unknown as Mock).mockResolvedValue(mockAdminUser());
   (prisma.appQuestionnaireVersion.findFirst as unknown as Mock).mockResolvedValue(versionRow);
   (synthesiseSampleReportInputs as unknown as Mock).mockResolvedValue({

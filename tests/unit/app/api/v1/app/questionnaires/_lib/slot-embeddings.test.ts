@@ -233,14 +233,33 @@ describe('ensureVersionSlotsEmbedded — null-row guard', () => {
   });
 });
 
-describe('embedVersionSlots — null embedding guard', () => {
-  it('treats a zero-element embeddings array as dim=0 and throws a dimension error', async () => {
-    // When embeddings[0] is undefined the `?? 0` branch fires and dim becomes 0,
-    // which never equals QUESTIONNAIRE_EMBEDDING_DIMENSION (1536), so the function
-    // must throw — verifying the fail-fast guard works for the degenerate case.
+describe('embedVersionSlots — pre-write guards', () => {
+  it('throws when the embedder returns fewer vectors than slots, before any UPDATE', async () => {
+    // Count mismatch is checked FIRST, so this never reaches the dimension guard below.
     prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }]);
     (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [] });
     await expect(embedVersionSlots('v1')).rejects.toThrow(/does not match slot count/);
+    expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('throws a dimension error when the model emits the wrong vector width', async () => {
+    // The column is vector(QUESTIONNAIRE_EMBEDDING_DIMENSION), so a provider swap that changes the
+    // width must fail fast with an actionable message rather than an opaque pgvector error mid-loop.
+    // Counts MUST match here, otherwise the count guard throws first and this branch stays dark.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }]);
+    (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] });
+    await expect(embedVersionSlots('v1')).rejects.toThrow(
+      new RegExp(`3-dim vectors.*vector\\(${QUESTIONNAIRE_EMBEDDING_DIMENSION}\\)`)
+    );
+    expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('treats an empty first vector as 0-dim and refuses to write', async () => {
+    // The `embeddings[0]?.length ?? 0` fallback: a degenerate empty vector must be rejected by the
+    // dimension guard, not silently written as a zero-width value.
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 'b' }]);
+    (embedBatch as unknown as Mock).mockResolvedValue({ embeddings: [[]] });
+    await expect(embedVersionSlots('v1')).rejects.toThrow(/0-dim vectors/);
     expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
   });
 });

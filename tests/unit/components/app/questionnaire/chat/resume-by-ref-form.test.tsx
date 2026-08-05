@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ResumeByRefForm } from '@/components/app/questionnaire/chat/resume-by-ref-form';
@@ -163,5 +163,51 @@ describe('ResumeByRefForm', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/too many attempts/i);
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('retries through the Continue button after a failed lookup', async () => {
+    // Auto-submit only fires on the eighth character, so once a full code has failed the button is
+    // the only way back in — the respondent corrects nothing and simply tries again.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ success: false, error: { code: 'NO_RESUMABLE_SESSION' } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(MATCH_BODY),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ResumeByRefForm versionId="v-1" />);
+    await enterCode();
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // The retry sent the same normalised code and completed the resume.
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ ref: '7F3K9M2P' });
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('clears the shake class on animationend so a second failure can replay it', async () => {
+    mockFetch(404, { success: false, error: { code: 'NO_RESUMABLE_SESSION' } });
+    const { container } = render(<ResumeByRefForm versionId="v-1" />);
+    await enterCode();
+    await screen.findByRole('alert');
+
+    const shaken = container.querySelector('.cq-shake');
+    expect(shaken).not.toBeNull();
+
+    // Cleared on the animation ending rather than a timer — that is what lets the next failure
+    // re-add the class and replay the nudge instead of it firing only once per mount.
+    fireEvent.animationEnd(shaken!);
+    await waitFor(() => expect(container.querySelector('.cq-shake')).toBeNull());
   });
 });
