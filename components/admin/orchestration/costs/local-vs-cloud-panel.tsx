@@ -17,6 +17,7 @@ import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recha
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
 import { Usd } from '@/components/admin/orchestration/costs/usd';
+import { buildModelIndex, lookupModel } from '@/components/admin/orchestration/costs/model-index';
 import type { CostSummary } from '@/lib/orchestration/llm/cost-reports';
 import type { ModelInfo } from '@/lib/orchestration/llm/types';
 import type { SavingsMethodology } from '@/types/orchestration';
@@ -37,18 +38,16 @@ function methodologyLabel(method: SavingsMethodology): string {
 }
 
 export function LocalVsCloudPanel({ summary, models }: LocalVsCloudPanelProps) {
-  const tierByModel = React.useMemo(() => {
-    const map = new Map<string, string>();
-    for (const m of models ?? []) map.set(m.id, m.tier);
-    return map;
-  }, [models]);
+  const modelIndex = React.useMemo(() => buildModelIndex(models), [models]);
 
   const { localSpend, cloudSpend } = React.useMemo(() => {
     const rows = summary?.byModel ?? [];
     let local = 0;
     let cloud = 0;
     for (const row of rows) {
-      const tier = tierByModel.get(row.model);
+      // Provider-keyed: a shared model id under two providers can carry two
+      // different tiers, and only the cost log knows which one served it (#436).
+      const tier = lookupModel(modelIndex, row.provider, row.model)?.tier;
       if (tier === 'local') {
         // Savings value tracked elsewhere; actual local spend is $0.
         local += 0;
@@ -57,7 +56,7 @@ export function LocalVsCloudPanel({ summary, models }: LocalVsCloudPanelProps) {
       }
     }
     return { localSpend: local, cloudSpend: cloud };
-  }, [summary, tierByModel]);
+  }, [summary, modelIndex]);
 
   // We can't infer request counts from byModel (it's only spend), so we
   // instead use presence of any local/cloud rows as a boolean indicator

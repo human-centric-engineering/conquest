@@ -88,7 +88,9 @@ export function ProfileForm({ user }: ProfileFormProps) {
       setSuccess(false);
 
       // Clean up empty strings to null for optional fields.
-      // Exclude email — it's read-only in the form and cannot be changed yet.
+      // Exclude email — it's read-only here. The API does support changing it,
+      // but as a two-step flow needing the current password and an approval
+      // click at the old address (#489), which this form does not yet drive.
       const { email: _email, ...rest } = data;
       const cleanData = {
         ...rest,

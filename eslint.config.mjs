@@ -23,6 +23,11 @@ export default tseslint.config(
       'dist/**',
       '.vercel/**',
       '.swc/**',
+      // Istanbul's HTML report. Third-party bundled assets, not project source,
+      // and regenerated wholesale by every coverage run — leaving it linted
+      // fills the `--cache` with paths that no longer exist, so the next
+      // `npm run lint` dies with ENOENT before it reaches any source file.
+      'coverage/**',
       'public/**',
       'next-env.d.ts',
       // Agent scratch checkouts — each worktree carries its own tsconfig.json,
@@ -106,6 +111,9 @@ export default tseslint.config(
         console: 'readonly',
         __dirname: 'readonly',
         __filename: 'readonly',
+        // WHATWG globals Node exposes; next.config.js parses app URLs with URL.
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
       },
     },
   },
@@ -260,6 +268,20 @@ export default tseslint.config(
     files: ['scripts/**/*.{ts,tsx}'],
     rules: {
       'no-console': 'off',
+    },
+  },
+
+  // ── Root tooling configs: relative imports are the only option ───────────
+  // The @/ alias is DEFINED by these files (vitest.config.ts declares it in
+  // resolve.alias; next.config/tailwind read tsconfig paths). Each is loaded
+  // and bundled by its tool before any alias exists, so a @/ specifier here
+  // fails to resolve at config-load time. This is the one place the rule in
+  // CLAUDE.md cannot apply — it is scoped to root-level config files only, so
+  // it cannot leak into application or library code.
+  {
+    files: ['*.config.{ts,mts,js,mjs,cjs}'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 

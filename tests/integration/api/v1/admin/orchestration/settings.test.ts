@@ -116,6 +116,7 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { invalidateSettingsCache } from '@/lib/orchestration/llm/settings-resolver';
+import { invalidateOrchestrationSettingsCache } from '@/lib/orchestration/settings';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,7 @@ function makeSettingsRow(
     webhookRetentionDays: number | null;
     costLogRetentionDays: number | null;
     auditLogRetentionDays: number | null;
+    executionRetentionDays: number | null;
     maxConversationsPerUser: number | null;
     maxMessagesPerConversation: number | null;
     embedAllowedOrigins: unknown;
@@ -162,6 +164,7 @@ function makeSettingsRow(
     webhookRetentionDays: null as number | null,
     costLogRetentionDays: null as number | null,
     auditLogRetentionDays: null as number | null,
+    executionRetentionDays: null as number | null,
     maxConversationsPerUser: null as number | null,
     maxMessagesPerConversation: null as number | null,
     voiceInputGloballyEnabled: true as boolean,
@@ -193,6 +196,10 @@ async function parseJson<T>(res: Response): Promise<T> {
 describe('Admin Orchestration — /settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The settings singleton is cached for 30s (#442) — module state that
+    // outlives a test, so without this each GET would serve the row the
+    // previous test mocked.
+    invalidateOrchestrationSettingsCache();
   });
 
   describe('GET — Authentication & Authorization', () => {
@@ -634,6 +641,65 @@ describe('Admin Orchestration — /settings', () => {
     it('rejects unknown model id (400)', async () => {
       const res = await PATCH(makePatch({ defaultModels: { chat: 'not-a-real-model' } }));
       expect(res.status).toBe(400);
+    });
+
+    // Retention coupling (#456). `AiWorkflowExecution.totalCostUsd` is a scalar
+    // on the execution row, so pruning cost logs first leaves an execution
+    // reporting real spend over an empty breakdown — indistinguishable from a
+    // cost-capture bug.
+    it('rejects a save where cost-log retention is shorter than execution retention (400)', async () => {
+      const res = await PATCH(makePatch({ costLogRetentionDays: 30, executionRetentionDays: 90 }));
+
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects lowering cost-log retention below the PERSISTED execution window (400)', async () => {
+      // The patch carries one field only — the schema can't see the other side,
+      // so this is the route's merged check doing the work.
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
+        makeSettingsRow({ costLogRetentionDays: 180, executionRetentionDays: 90 }) as never
+      );
+
+      const res = await PATCH(makePatch({ costLogRetentionDays: 30 }));
+
+      expect(res.status).toBe(400);
+      expect(prisma.aiOrchestrationSettings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects raising execution retention above the PERSISTED cost-log window (400)', async () => {
+      // Same incoherence approached from the other side.
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
+        makeSettingsRow({ costLogRetentionDays: 30, executionRetentionDays: 30 }) as never
+      );
+
+      const res = await PATCH(makePatch({ executionRetentionDays: 90 }));
+
+      expect(res.status).toBe(400);
+    });
+
+    it('accepts equal retention windows (boundary)', async () => {
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(
+        makeSettingsRow({ costLogRetentionDays: 90, executionRetentionDays: 90 }) as never
+      );
+
+      const res = await PATCH(makePatch({ costLogRetentionDays: 90, executionRetentionDays: 90 }));
+
+      expect(res.status).toBe(200);
+    });
+
+    it('accepts execution retention when cost-log retention is unset', async () => {
+      // Null means that class is never pruned, so there is no coupling to break.
+      vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
+        makeSettingsRow({ costLogRetentionDays: null }) as never
+      );
+      vi.mocked(prisma.aiOrchestrationSettings.upsert).mockResolvedValue(
+        makeSettingsRow({ executionRetentionDays: 3650 }) as never
+      );
+
+      const res = await PATCH(makePatch({ executionRetentionDays: 3650 }));
+
+      expect(res.status).toBe(200);
     });
 
     it('rejects negative budget (400)', async () => {

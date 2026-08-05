@@ -45,6 +45,8 @@ vi.mock('@/lib/orchestration/scheduling', () => ({
   processDueSchedules: vi.fn(),
   processPendingExecutions: vi.fn(),
   processOrphanedExecutions: vi.fn(),
+  // The idle gate's horizon probe (#442).
+  getNextScheduleRunAt: vi.fn(),
 }));
 
 vi.mock('@/lib/orchestration/webhooks/dispatcher', () => ({
@@ -71,13 +73,14 @@ vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
   processPendingEvaluationRuns: vi.fn(),
 }));
 
-vi.mock('@/lib/app/questionnaire/report/worker', () => ({
-  processQueuedRespondentReports: vi.fn(),
-  processQueuedReportRevisions: vi.fn(),
-}));
-
-vi.mock('@/lib/app/questionnaire/retention', () => ({
-  enforceAppRetentionPolicies: vi.fn(),
+// The fork seam (#469). Left unmocked, the real empty registry always resolves
+// `undefined`, so neither the "a fork registered jobs" nor the rejection arm of
+// the summary ever ran. Mocked with the same default so existing tests see no
+// change.
+vi.mock('@/lib/orchestration/maintenance/app-jobs', () => ({
+  runDueAppJobs: vi.fn(),
+  // Vanilla Sunrise registers none, so nothing bounds the idle gate's horizon.
+  getAppJobsMinIntervalMs: vi.fn(() => null),
 }));
 
 // ─── Imports ────────────────────────────────────────────────────────────────
@@ -88,6 +91,7 @@ import {
   processDueSchedules,
   processPendingExecutions,
   processOrphanedExecutions,
+  getNextScheduleRunAt,
 } from '@/lib/orchestration/scheduling';
 import { processPendingRetries } from '@/lib/orchestration/webhooks/dispatcher';
 import { processPendingHookRetries } from '@/lib/orchestration/hooks/registry';
@@ -95,6 +99,9 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+import { runDueAppJobs } from '@/lib/orchestration/maintenance/app-jobs';
+import { __resetPlatformJobsForTests } from '@/lib/orchestration/maintenance/platform-jobs';
+import { __resetIdleGateForTests } from '@/lib/orchestration/maintenance/idle-gate';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 import {
   POST,
@@ -103,10 +110,11 @@ import {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeRequest(): NextRequest {
-  return new NextRequest('http://localhost:3000/api/v1/admin/orchestration/maintenance/tick', {
-    method: 'POST',
-  });
+function makeRequest(query = ''): NextRequest {
+  return new NextRequest(
+    `http://localhost:3000/api/v1/admin/orchestration/maintenance/tick${query}`,
+    { method: 'POST' }
+  );
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
@@ -161,6 +169,11 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Per-task intervals and the idle gate (#442) are module-level state that
+    // outlives a single test. Without this, the second test in the file sees
+    // `retention` and friends still inside their interval and they never run.
+    __resetPlatformJobsForTests();
+    __resetIdleGateForTests();
 
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 
@@ -173,7 +186,54 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     vi.mocked(processPendingExecutions).mockResolvedValue(DEFAULT_PENDING_RECOVERY_RESULT);
     vi.mocked(processOrphanedExecutions).mockResolvedValue(DEFAULT_ORPHAN_RESULT);
     vi.mocked(processPendingEvaluationRuns).mockResolvedValue(DEFAULT_EVAL_RUN_RESULT);
+    // Vanilla default: no fork jobs registered.
+    vi.mocked(runDueAppJobs).mockResolvedValue(undefined);
+    // No schedule on the horizon unless a test says otherwise.
+    vi.mocked(getNextScheduleRunAt).mockResolvedValue(null);
   });
+
+  /**
+   * Make every task report "nothing found", which is what lets the idle gate arm.
+   * The suite's defaults deliberately report work, so most tests never arm it.
+   */
+  function mockIdleSweep(): void {
+    vi.mocked(processDueSchedules).mockResolvedValue({
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      errors: [],
+    });
+    vi.mocked(processPendingRetries).mockResolvedValue(0);
+    vi.mocked(processPendingHookRetries).mockResolvedValue(0);
+    vi.mocked(processOrphanedExecutions).mockResolvedValue({
+      recovered: 0,
+      exhausted: 0,
+      errors: [],
+    });
+    vi.mocked(reapZombieExecutions).mockResolvedValue({
+      reaped: 0,
+      stalePending: 0,
+      abandonedApprovals: 0,
+    });
+    vi.mocked(backfillMissingEmbeddings).mockResolvedValue({ processed: 0, failed: 0 });
+    vi.mocked(enforceRetentionPolicies).mockResolvedValue({
+      ...DEFAULT_RETENTION_RESULT,
+      deleted: 0,
+    });
+    vi.mocked(processPendingExecutions).mockResolvedValue({
+      recovered: 0,
+      failed: 0,
+      errors: [],
+    });
+    vi.mocked(processPendingEvaluationRuns).mockResolvedValue(DEFAULT_EVAL_RUN_RESULT);
+  }
+
+  /** Run one tick and let its background chain settle. */
+  async function tick(query = ''): Promise<Response> {
+    const response = await POST(makeRequest(query));
+    await new Promise((resolve) => setImmediate(resolve));
+    return response;
+  }
 
   // ── Authentication ───────────────────────────────────────────────────────
 
@@ -222,9 +282,6 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'retention',
       'pendingExecutionRecovery',
       'evaluationRuns',
-      'respondentReports',
-      'respondentReportRevisions',
-      'appRetention',
     ]);
     expect(typeof body.data.durationMs).toBe('number');
     expect(body.data.durationMs).toBeGreaterThanOrEqual(0);
@@ -281,6 +338,37 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
     );
   });
 
+  it('a back-to-back tick re-runs only the responsive tasks (#442)', async () => {
+    // Two ticks a few ms apart stand in for two cron fires a minute apart: the
+    // retry drains must still run, and the sweeps whose own thresholds are
+    // minutes must not touch the database at all.
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+    vi.mocked(logger.info).mockClear();
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(processPendingRetries).toHaveBeenCalledTimes(2);
+    expect(processPendingHookRetries).toHaveBeenCalledTimes(2);
+    expect(processPendingEvaluationRuns).toHaveBeenCalledTimes(2);
+    expect(enforceRetentionPolicies).toHaveBeenCalledTimes(1);
+    expect(backfillMissingEmbeddings).toHaveBeenCalledTimes(1);
+    expect(reapZombieExecutions).toHaveBeenCalledTimes(1);
+    expect(processOrphanedExecutions).toHaveBeenCalledTimes(1);
+    expect(processPendingExecutions).toHaveBeenCalledTimes(1);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({
+        webhookRetries: DEFAULT_RETRY_RESULT,
+        retention: 'skipped',
+        embeddingBackfill: 'skipped',
+        zombieReaper: 'skipped',
+      })
+    );
+  });
+
   // ── Non-blocking behaviour ───────────────────────────────────────────────
 
   it('returns the HTTP response before slow background tasks complete', async () => {
@@ -308,9 +396,64 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
     expect(response.status).toBe(202);
     expect(body.data.schedules).toEqual({ error: 'schedules DB down' });
-    // Background tasks still kick off even when schedules fail
-    // (11 tasks since the F14.15 app-layer retention prune was added).
-    expect(body.data.backgroundTasks).toHaveLength(11);
+    // Background tasks still kick off even when schedules fail. Eight since the
+    // Sunrise 0.8.0 sync: `backgroundTasks` now publishes PLATFORM_JOB_NAMES
+    // only, and ConQuest's three app tasks moved to the `lib/app/jobs.ts` seam.
+    expect(body.data.backgroundTasks).toHaveLength(8);
+  });
+
+  it('returns a readable schedules.error when processDueSchedules rejects a non-Error', async () => {
+    // A thrown string has no `.message`; without the String() fallback the
+    // payload would report `{ error: undefined }` and the operator would see a
+    // failed sweep with no reason.
+    vi.mocked(processDueSchedules).mockRejectedValue('PG connection reset');
+
+    const response = await POST(makeRequest());
+    const body = await parseJson<{ data: { schedules: { error: string } } }>(response);
+
+    expect(body.data.schedules).toEqual({ error: 'PG connection reset' });
+  });
+
+  it('omits appJobs from the summary when no fork job is registered', async () => {
+    // Vanilla Sunrise: the seam must not add a key to the tick's log line.
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const [, payload] = vi
+      .mocked(logger.info)
+      .mock.calls.find(([msg]) => msg === 'Maintenance tick background tasks completed')!;
+    expect(payload).not.toHaveProperty('appJobs');
+  });
+
+  it('folds a fork job summary into the tick log line', async () => {
+    vi.mocked(runDueAppJobs).mockResolvedValue({ 'app:sweep': { pruned: 4 }, skipped: 1 });
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({ appJobs: { 'app:sweep': { pruned: 4 }, skipped: 1 } })
+    );
+  });
+
+  it('surfaces an app-jobs rejection as { error } without losing the platform summary', async () => {
+    // `runDueAppJobs` contains its own failures, so this arm is defensive — but
+    // it is the arm that decides whether a seam bug takes the whole log line
+    // down with it, so it is worth pinning.
+    vi.mocked(runDueAppJobs).mockRejectedValue(new Error('registry exploded'));
+
+    await POST(makeRequest());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Maintenance tick background tasks completed',
+      expect.objectContaining({
+        appJobs: { error: expect.stringContaining('registry exploded') },
+        // The platform tasks are still reported.
+        webhookRetries: DEFAULT_RETRY_RESULT,
+      })
+    );
   });
 
   it('still kicks off background tasks when schedules reject', async () => {
@@ -353,6 +496,149 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
     // Assert: guard fires before the background chain is ever constructed
     expect(processOrphanedExecutions).not.toHaveBeenCalled();
+  });
+
+  // ── Idle gate (#442) ─────────────────────────────────────────────────────
+
+  describe('idle gate', () => {
+    const ALL_TASKS = [
+      processDueSchedules,
+      processPendingRetries,
+      processPendingHookRetries,
+      processOrphanedExecutions,
+      reapZombieExecutions,
+      backfillMissingEmbeddings,
+      enforceRetentionPolicies,
+      processPendingExecutions,
+      processPendingEvaluationRuns,
+    ];
+
+    it('after a sweep that found nothing, the next tick does zero database work', async () => {
+      // The whole point of #442: not "fewer queries" but *none*, so a
+      // scale-to-zero Postgres can actually autosuspend.
+      mockIdleSweep();
+      await tick();
+      vi.clearAllMocks();
+
+      const response = await tick();
+      const body = await parseJson<{ data: { skipped: boolean; reason: string } }>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.data.reason).toBe('idle');
+      for (const task of ALL_TASKS) expect(task).not.toHaveBeenCalled();
+      expect(getNextScheduleRunAt).not.toHaveBeenCalled();
+    });
+
+    it('reports when it will next sweep', async () => {
+      mockIdleSweep();
+      await tick();
+
+      const response = await tick();
+      const body = await parseJson<{ data: { resumesAt: string } }>(response);
+
+      expect(Date.parse(body.data.resumesAt)).toBeGreaterThan(Date.now());
+    });
+
+    it('does not arm when a task found work', async () => {
+      // Default mocks report work (3 retries, a reaped zombie, 2 schedules), so
+      // this is the active-deployment path: every tick keeps sweeping.
+      await tick();
+      vi.clearAllMocks();
+
+      const response = await tick();
+
+      expect(response.status).toBe(202);
+      expect(processDueSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not arm when the schedules sweep errored', async () => {
+      // A sweep that failed knows nothing about the state of the queue, so it
+      // must not license a skip.
+      mockIdleSweep();
+      vi.mocked(processDueSchedules).mockRejectedValue(new Error('DB down'));
+      await tick();
+      vi.clearAllMocks();
+      vi.mocked(processDueSchedules).mockResolvedValue(DEFAULT_SCHEDULE_RESULT);
+
+      const response = await tick();
+
+      expect(response.status).toBe(202);
+      expect(processDueSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not arm when the horizon probe fails', async () => {
+      mockIdleSweep();
+      vi.mocked(getNextScheduleRunAt).mockRejectedValue(new Error('probe failed'));
+
+      await tick();
+      const response = await tick();
+
+      expect(response.status).toBe(202);
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Maintenance tick: schedule horizon unavailable; leaving the idle gate disarmed',
+        expect.objectContaining({ error: 'probe failed' })
+      );
+    });
+
+    it('never skips past a due schedule', async () => {
+      // A schedule due in 40s must still fire on time — the gate takes the
+      // horizon from the probe instead of its own cap.
+      mockIdleSweep();
+      const dueAt = new Date(Date.now() + 40_000);
+      vi.mocked(getNextScheduleRunAt).mockResolvedValue(dueAt);
+
+      await tick();
+      const response = await tick();
+      const body = await parseJson<{ data: { resumesAt: string } }>(response);
+
+      expect(body.data.resumesAt).toBe(dueAt.toISOString());
+    });
+
+    it('?force=1 sweeps even while armed', async () => {
+      mockIdleSweep();
+      await tick();
+      vi.clearAllMocks();
+
+      const response = await tick('?force=1');
+
+      expect(response.status).toBe(202);
+      expect(processDueSchedules).toHaveBeenCalledTimes(1);
+    });
+
+    it('a normal tick right after a forced one is still skipped', async () => {
+      // `force` is a one-off override, not a reset: the forced sweep found
+      // nothing, so the gate re-arms.
+      mockIdleSweep();
+      await tick();
+      await tick('?force=1');
+      vi.clearAllMocks();
+
+      const response = await tick();
+      const body = await parseJson<{ data: { reason: string } }>(response);
+
+      expect(body.data.reason).toBe('idle');
+      expect(processDueSchedules).not.toHaveBeenCalled();
+    });
+
+    it('logs the armed horizon in the completion line', async () => {
+      mockIdleSweep();
+
+      await tick();
+
+      expect(logger.info).toHaveBeenCalledWith(
+        'Maintenance tick background tasks completed',
+        expect.objectContaining({ idleUntilMs: expect.any(Number) })
+      );
+    });
+
+    it('omits the horizon from the completion line when it did not arm', async () => {
+      await tick();
+
+      const [, payload] = vi
+        .mocked(logger.info)
+        .mock.calls.find(([msg]) => msg === 'Maintenance tick background tasks completed')!;
+      expect(payload).not.toHaveProperty('idleUntilMs');
+    });
   });
 
   // ── Overlap guard ────────────────────────────────────────────────────────
@@ -489,6 +775,64 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       expect(secondBody.data.skipped).toBeUndefined();
     });
 
+    it('a fired watchdog returns early when the guard was already released', async () => {
+      // The `!tickRunning` arm. The existing "settles immediately" test asserts
+      // no warning, but gets that from `.finally` clearing the timer — the
+      // watchdog body never runs there. This arms the watchdog, drops the guard
+      // without settling the chain, and lets it actually fire.
+      const hung = createDeferred<typeof DEFAULT_REAPER_RESULT>();
+      vi.mocked(reapZombieExecutions).mockReturnValue(hung.promise);
+
+      await POST(makeRequest()); // token 1, watchdog 1 armed, chain pending
+      __test_setTickRunning(false); // guard down, timer still armed
+
+      await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
+
+      // Token still matches, so the guard check is what short-circuits: no
+      // warning about a chain that is no longer holding anything.
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        'Maintenance tick: background chain exceeded max duration; releasing guard',
+        expect.objectContaining({ maxDurationMs: BACKGROUND_TASK_MAX_MS })
+      );
+
+      hung.resolve(DEFAULT_REAPER_RESULT);
+    });
+
+    it('an old watchdog firing after a newer tick started leaves the new guard alone', async () => {
+      // The `currentTickToken !== myTickToken` arm. Reaching it needs tick 1's
+      // watchdog pending while a later tick owns the token — which the normal
+      // paths never produce, because tick 1's `.finally` clears its own watchdog
+      // and its watchdog firing is what releases the guard. Forcing the guard
+      // down is what `__test_setTickRunning` is exported for.
+      const hung = createDeferred<typeof DEFAULT_REAPER_RESULT>();
+      vi.mocked(reapZombieExecutions).mockReturnValue(hung.promise);
+
+      await POST(makeRequest()); // token 1, watchdog 1 armed, chain pending
+      __test_setTickRunning(false);
+
+      // Tick 2 completes normally, so ITS watchdog is cleared and only the stale
+      // one is left armed — otherwise both fire on the same advance and tick 2's
+      // legitimate warning masks what tick 1's did.
+      vi.mocked(reapZombieExecutions).mockResolvedValue(DEFAULT_REAPER_RESULT);
+      const second = await POST(makeRequest()); // token 2
+      expect(second.status).toBe(202);
+      await vi.advanceTimersByTimeAsync(0); // tick 2 settles, clears watchdog 2
+
+      await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
+
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        'Maintenance tick: background chain exceeded max duration; releasing guard',
+        expect.objectContaining({ maxDurationMs: BACKGROUND_TASK_MAX_MS })
+      );
+
+      // And a fresh tick is still accepted — the stale watchdog touched nothing.
+      const third = await POST(makeRequest());
+      const thirdBody = await parseJson<{ data: { skipped?: boolean } }>(third);
+      expect(thirdBody.data.skipped).toBeUndefined();
+
+      hung.resolve(DEFAULT_REAPER_RESULT);
+    });
+
     it('a late-settling old chain does not release a newer tick guard (token ownership)', async () => {
       // Tick 1 hangs.
       const deferred1 = createDeferred<typeof DEFAULT_REAPER_RESULT>();
@@ -499,9 +843,12 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       // Watchdog fires for tick 1, releasing the guard.
       await vi.advanceTimersByTimeAsync(BACKGROUND_TASK_MAX_MS);
 
-      // Tick 2 starts; hangs again. New token claims the guard.
-      const deferred2 = createDeferred<typeof DEFAULT_REAPER_RESULT>();
-      vi.mocked(reapZombieExecutions).mockReturnValue(deferred2.promise);
+      // Tick 2 starts; hangs again. New token claims the guard. It has to hang
+      // on a *different* task: the per-job in-flight latch (#442) means tick 1's
+      // still-pending reaper is skipped rather than started a second time, so
+      // re-deferring the reaper here would let tick 2's chain settle at once.
+      const deferred2 = createDeferred<number>();
+      vi.mocked(processPendingRetries).mockReturnValue(deferred2.promise);
 
       const second = await POST(makeRequest());
       expect(second.status).toBe(202);
@@ -517,7 +864,7 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       expect(stillSkippedBody.data.skipped).toBe(true);
 
       // Cleanup.
-      deferred2.resolve(DEFAULT_REAPER_RESULT);
+      deferred2.resolve(DEFAULT_RETRY_RESULT);
     });
   });
 });

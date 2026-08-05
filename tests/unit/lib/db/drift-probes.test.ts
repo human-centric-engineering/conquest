@@ -5,6 +5,8 @@
  * - each factory queries the correct Postgres catalog and maps a row count /
  *   constraint definition to the right ProbeResult (including the
  *   `predicateContains` definition assertion);
+ * - `generatedColumnExists` separates "missing" from "present but not
+ *   GENERATED" — the second is the case `columnExists` cannot see;
  * - the app registry adds in order, returns a defensive copy, rejects duplicate
  *   names, and resets;
  * - `mergeDriftProbes` concatenates platform + app and refuses an app probe that
@@ -28,6 +30,7 @@ import { prisma } from '@/lib/db/client';
 import {
   columnExists,
   constraintExists,
+  generatedColumnExists,
   getAppDriftProbes,
   indexExists,
   mergeDriftProbes,
@@ -99,6 +102,51 @@ describe('columnExists', () => {
   it('treats an empty result set as absent rather than crashing', async () => {
     queryRaw.mockResolvedValue([]);
     expect(await columnExists('t', 'c')()).toEqual({ ok: false });
+  });
+});
+
+describe('generatedColumnExists', () => {
+  it('reports ok when the column is GENERATED ALWAYS', async () => {
+    queryRaw.mockResolvedValue([{ is_generated: 'ALWAYS' }]);
+
+    const result = await generatedColumnExists('ai_knowledge_chunk', 'searchVector')();
+
+    expect(result).toEqual({ ok: true });
+    expect(lastSql()).toContain('is_generated');
+    expect(lastValues()).toEqual(['ai_knowledge_chunk', 'searchVector']);
+  });
+
+  it('reports not-ok, and says so, when the column exists but is NOT generated', async () => {
+    // The whole reason this factory exists. `columnExists` passes here: a
+    // migration that recreated the column as a plain tsvector leaves a row in
+    // information_schema.columns, so existence is satisfied while the column is
+    // never populated again.
+    queryRaw.mockResolvedValue([{ is_generated: 'NEVER' }]);
+
+    const result = await generatedColumnExists('ai_knowledge_chunk', 'searchVector')();
+
+    expect(result.ok).toBe(false);
+    expect(result.note).toContain('not GENERATED');
+    expect(result.note).toContain('NEVER');
+  });
+
+  it('distinguishes a missing column from a non-generated one', async () => {
+    // Both are failures, but they need different remediation — recreate the
+    // column vs re-add the GENERATED expression — so the note must say which.
+    queryRaw.mockResolvedValue([]);
+
+    const result = await generatedColumnExists('t', 'c')();
+
+    expect(result.ok).toBe(false);
+    expect(result.note).toBe('column missing entirely');
+  });
+
+  it('treats a null is_generated as missing rather than crashing', async () => {
+    queryRaw.mockResolvedValue([{ is_generated: null }]);
+    expect(await generatedColumnExists('t', 'c')()).toEqual({
+      ok: false,
+      note: 'column missing entirely',
+    });
   });
 });
 

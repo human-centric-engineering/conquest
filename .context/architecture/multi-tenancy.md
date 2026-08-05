@@ -258,6 +258,13 @@ declaration.
 
 ## Related
 
+- [`multi-tenancy-research.md`](./multi-tenancy-research.md) — **the gap
+  analysis around this playbook.** This document covers row isolation (the data
+  plane) and covers it in build-ready detail. The research document maps the
+  other four isolation planes — namespace, process, temporal, external — plus
+  the control plane (#366/#367) and the commercial plane, and assigns each gap
+  to platform-tier or fork-tier. Read it before scoping a retrofit; read this
+  one when you are building it.
 - [`.context/privacy/data-erasure.md`](../privacy/data-erasure.md) — the
   cascade/`SetNull` `onDelete` graph built for GDPR erasure **is** the
   org-delete dependency graph a fork needs for tearing down a tenant.

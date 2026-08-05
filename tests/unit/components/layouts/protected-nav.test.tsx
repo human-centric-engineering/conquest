@@ -1,73 +1,205 @@
 /**
- * ProtectedNav tests
+ * ProtectedNav default-vs-override (issue #473)
  *
- * Authenticated-route navigation. Renders Dashboard / Profile / Settings for all
- * users and the Admin link only for `role === 'ADMIN'`. Split into desktop inline
- * links (`ProtectedNav`) and a mobile kebab (`ProtectedNavMenu`) sharing the same
- * resolved items. `usePathname` is globally mocked to '/' (tests/setup.ts).
+ * The authenticated header renders `protectedNavItems` from the fork-owned
+ * `lib/app/protected-nav.ts` when non-null, else `DEFAULT_PROTECTED_NAV`. The
+ * override list *replaces* the default wholesale. `navItems` is resolved at
+ * module load, so the override case stubs the scaffold via `vi.doMock` and
+ * re-imports fresh.
  *
- * @see components/layouts/protected-nav.tsx
+ * The component previously had no test at all, which is part of why an app could
+ * ship a header that never linked to its own product — there was nothing to
+ * notice. These cases pin both halves: the platform default a fork inherits, and
+ * that a fork's own items keep the platform's admin filtering and active-state
+ * behaviour rather than having to reimplement them.
+ *
+ * ConQuest renders the resolved items through `HeaderNavLinks` (desktop inline)
+ * and `HeaderNavMenu` (mobile kebab) rather than upstream's single inline `<nav>`,
+ * so the `ProtectedNavMenu` block at the bottom covers the half Sunrise has no
+ * counterpart for. Both share the same resolved items, so everything above
+ * applies to the kebab too.
+ *
+ * `usePathname` is globally mocked to '/' (tests/setup.ts).
+ *
+ * @see components/layouts/protected-nav.tsx · lib/app/protected-nav.ts · lib/protected-nav/types.ts
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { usePathname } from 'next/navigation';
+import * as React from 'react';
 
 const mockUseSession = vi.hoisted(() => vi.fn());
+
 vi.mock('@/lib/auth/client', () => ({
   useSession: () => mockUseSession(),
 }));
 
-import { ProtectedNav, ProtectedNavMenu } from '@/components/layouts/protected-nav';
+/** Signed in as a plain user (the default for most cases below). */
+function asUser() {
+  mockUseSession.mockReturnValue({ data: { user: { role: 'USER' } } });
+}
+
+/** Signed in as an admin. */
+function asAdmin() {
+  mockUseSession.mockReturnValue({ data: { user: { role: 'ADMIN' } } });
+}
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetModules();
+  vi.doUnmock('@/lib/app/protected-nav');
+  vi.mocked(usePathname).mockReturnValue('/'); // restore the global mock default
+  mockUseSession.mockReset();
 });
 
-describe('components/layouts/protected-nav', () => {
-  describe('ProtectedNav (desktop)', () => {
-    it('renders the core links and hides Admin for a non-admin user', () => {
-      mockUseSession.mockReturnValue({ data: { user: { role: 'USER' } } });
-      render(<ProtectedNav />);
+describe('ProtectedNav', () => {
+  it('renders the platform default links when no override is set', async () => {
+    asUser();
+    vi.resetModules();
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
 
-      expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute(
-        'href',
-        '/dashboard'
-      );
-      expect(screen.getByRole('link', { name: /profile/i })).toHaveAttribute('href', '/profile');
-      expect(screen.getByRole('link', { name: /settings/i })).toHaveAttribute('href', '/settings');
-      expect(screen.queryByRole('link', { name: /admin/i })).toBeNull();
-    });
-
-    it('shows the Admin link for an admin user', () => {
-      mockUseSession.mockReturnValue({ data: { user: { role: 'ADMIN' } } });
-      render(<ProtectedNav />);
-
-      expect(screen.getByRole('link', { name: /admin/i })).toHaveAttribute('href', '/admin');
-    });
-
-    it('treats a missing session as non-admin', () => {
-      mockUseSession.mockReturnValue({ data: null });
-      render(<ProtectedNav />);
-
-      expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: /admin/i })).toBeNull();
-    });
+    expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '/dashboard');
+    expect(screen.getByRole('link', { name: /profile/i })).toHaveAttribute('href', '/profile');
+    expect(screen.getByRole('link', { name: /settings/i })).toHaveAttribute('href', '/settings');
   });
 
-  describe('ProtectedNavMenu (mobile kebab)', () => {
-    it('reveals the items when opened, including Admin for an admin', async () => {
-      mockUseSession.mockReturnValue({ data: { user: { role: 'ADMIN' } } });
-      const user = userEvent.setup();
-      render(<ProtectedNavMenu />);
+  it('hides an adminOnly item from a non-admin and shows it to an admin', async () => {
+    asUser();
+    vi.resetModules();
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    const { unmount } = render(React.createElement(ProtectedNav));
 
-      await user.click(screen.getByRole('button', { name: /open navigation menu/i }));
+    expect(screen.queryByRole('link', { name: /admin/i })).toBeNull();
+    unmount();
 
-      expect(await screen.findByRole('menuitem', { name: /dashboard/i })).toHaveAttribute(
-        'href',
-        '/dashboard'
-      );
-      expect(screen.getByRole('menuitem', { name: /admin/i })).toHaveAttribute('href', '/admin');
-    });
+    asAdmin();
+    render(React.createElement(ProtectedNav));
+    expect(screen.getByRole('link', { name: /admin/i })).toHaveAttribute('href', '/admin');
+  });
+
+  it('replaces the default wholesale with a non-null override list', async () => {
+    asUser();
+    vi.resetModules();
+    vi.doMock('@/lib/app/protected-nav', () => ({
+      protectedNavItems: [
+        { href: '/programme', label: 'Programme' },
+        { href: '/reports', label: 'Reports' },
+      ],
+    }));
+
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
+
+    expect(screen.getByRole('link', { name: /programme/i })).toHaveAttribute('href', '/programme');
+    expect(screen.getByRole('link', { name: /reports/i })).toHaveAttribute('href', '/reports');
+    // Default links are gone — replacement, not append.
+    expect(screen.queryByRole('link', { name: /profile/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /settings/i })).toBeNull();
+  });
+
+  it("applies adminOnly to a fork's own items", async () => {
+    asUser();
+    vi.resetModules();
+    vi.doMock('@/lib/app/protected-nav', () => ({
+      protectedNavItems: [
+        { href: '/programme', label: 'Programme' },
+        { href: '/billing', label: 'Billing', adminOnly: true },
+      ],
+    }));
+
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
+
+    expect(screen.getByRole('link', { name: /programme/i })).toBeInTheDocument();
+    // The platform's admin filtering covers fork items — no reimplementation.
+    expect(screen.queryByRole('link', { name: /billing/i })).toBeNull();
+  });
+
+  it('renders an item with no icon', async () => {
+    asUser();
+    vi.resetModules();
+    vi.doMock('@/lib/app/protected-nav', () => ({
+      protectedNavItems: [{ href: '/programme', label: 'Programme' }],
+    }));
+
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
+
+    // `icon` is optional on ProtectedNavItem; omitting it must not throw.
+    expect(screen.getByRole('link', { name: /programme/i })).toHaveAttribute('href', '/programme');
+  });
+
+  it('an `exact` item is NOT active on child routes', async () => {
+    asUser();
+    vi.resetModules();
+    vi.mocked(usePathname).mockReturnValue('/projects/123');
+    vi.doMock('@/lib/app/protected-nav', () => ({
+      protectedNavItems: [{ href: '/projects', label: 'Projects', exact: true }],
+    }));
+
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
+
+    expect(screen.getByRole('link', { name: /projects/i })).not.toHaveAttribute(
+      'aria-current',
+      'page'
+    );
+  });
+
+  it('a non-exact item prefix-matches child routes (default)', async () => {
+    asUser();
+    vi.resetModules();
+    vi.mocked(usePathname).mockReturnValue('/projects/123');
+    vi.doMock('@/lib/app/protected-nav', () => ({
+      protectedNavItems: [{ href: '/projects', label: 'Projects' }],
+    }));
+
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
+
+    expect(screen.getByRole('link', { name: /projects/i })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('treats a missing session as non-admin', async () => {
+    mockUseSession.mockReturnValue({ data: null });
+    vi.resetModules();
+    const { ProtectedNav } = await import('@/components/layouts/protected-nav');
+    render(React.createElement(ProtectedNav));
+
+    expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /admin/i })).toBeNull();
+  });
+});
+
+describe('ProtectedNavMenu (mobile kebab)', () => {
+  it('reveals the items when opened, including Admin for an admin', async () => {
+    asAdmin();
+    vi.resetModules();
+    const { ProtectedNavMenu } = await import('@/components/layouts/protected-nav');
+    const user = userEvent.setup();
+    render(React.createElement(ProtectedNavMenu));
+
+    await user.click(screen.getByRole('button', { name: /open navigation menu/i }));
+
+    expect(await screen.findByRole('menuitem', { name: /dashboard/i })).toHaveAttribute(
+      'href',
+      '/dashboard'
+    );
+    expect(screen.getByRole('menuitem', { name: /admin/i })).toHaveAttribute('href', '/admin');
+  });
+
+  it('hides Admin from a non-admin', async () => {
+    asUser();
+    vi.resetModules();
+    const { ProtectedNavMenu } = await import('@/components/layouts/protected-nav');
+    const user = userEvent.setup();
+    render(React.createElement(ProtectedNavMenu));
+
+    await user.click(screen.getByRole('button', { name: /open navigation menu/i }));
+
+    expect(await screen.findByRole('menuitem', { name: /dashboard/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /admin/i })).toBeNull();
   });
 });

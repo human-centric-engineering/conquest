@@ -24,7 +24,7 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { logger } from '@/lib/logging';
@@ -36,20 +36,12 @@ import {
 import { cuidSchema } from '@/lib/validations/common';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
-function parseAgentId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid agent id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const POST = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
 
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseAgentId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'agent id' });
 
   const body = await validateRequestBody(request, instructionsRevertSchema);
 

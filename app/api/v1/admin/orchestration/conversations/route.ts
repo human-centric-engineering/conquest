@@ -3,11 +3,11 @@
  *
  * GET /api/v1/admin/orchestration/conversations
  *
- * Returns the calling admin's own conversations, scoped to
- * `session.user.id`. Matches the scoping used by the detail,
- * PATCH, and DELETE endpoints. Supports filtering by agent,
- * date range, and text search. Any `userId` query parameter
- * is ignored — callers only ever see their own conversations.
+ * Returns the calling admin's own conversations, plus actively-shared ones
+ * and system-owned inbound threads (`userId IS NULL`). Matches the scoping
+ * used by the detail, PATCH, and DELETE endpoints. Supports filtering by
+ * agent, date range, and text search. Any `userId` query parameter is
+ * ignored — callers never see another admin's own conversations.
  *
  * Authentication: Admin role required.
  */
@@ -27,14 +27,17 @@ export const GET = withAdminAuth(async (request, session) => {
     validateQueryParams(searchParams, listConversationsQuerySchema);
   const skip = (page - 1) * limit;
 
-  // Caller can see conversations they own AND conversations the owner
-  // has actively shared with admins. The "active share" predicate
-  // mirrors `isShareActive` in conversation-access.ts — repeated inline
-  // here because Prisma's where-clause query builder doesn't accept a
-  // function predicate.
+  // Caller can see conversations they own, conversations the owner has
+  // actively shared with admins, and system-owned inbound threads
+  // (`userId IS NULL` — nobody's personal data, the deployment's record of
+  // an SMS / WhatsApp / email exchange). The three arms mirror the three
+  // bases in `adminCanViewConversation`; the "active share" predicate
+  // repeats `isShareActive` inline because Prisma's where-clause query
+  // builder doesn't accept a function predicate.
   const visibilityClause: Prisma.AiConversationWhereInput = {
     OR: [
       { userId: session.user.id },
+      { userId: null },
       {
         share: {
           revokedAt: null,

@@ -7,8 +7,9 @@
  * polling — no executionTrace, no inputData, no outputData, no workflow join.
  * Callers needing the full row + parsed trace use `/executions/:id`.
  *
- * Ownership: rows are scoped to `session.user.id`. Cross-user access returns
- * 404 (not 403) — we never confirm existence of another user's row.
+ * Ownership: the caller's own runs, plus system-owned runs (`userId = null`
+ * — schedule- and inbound-triggered). Another admin's own run returns 404
+ * (not 403) — we never confirm existence of a row the caller cannot see.
  *
  * Authentication: Admin role required.
  */
@@ -18,6 +19,7 @@ import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 
 export const GET = withAdminAuth<{ id: string }>(async (_request, session, { params }) => {
   const { id: rawId } = await params;
@@ -41,7 +43,7 @@ export const GET = withAdminAuth<{ id: string }>(async (_request, session, { par
       userId: true,
     },
   });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Execution ${parsed.data} not found`);
   }
 

@@ -15,6 +15,8 @@ import { setSecurityHeaders } from '@/lib/security/headers';
 import { applyRateLimit } from '@/lib/security/rate-limit-middleware';
 import { classifySurface } from '@/lib/app/surface';
 import { appProtectedRoutes } from '@/lib/app/protected-routes';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
+import { isInviteOnly } from '@/lib/auth/signup-mode';
 
 /**
  * Next.js Proxy
@@ -248,7 +250,18 @@ export async function proxy(request: NextRequest): Promise<NextResponse | Respon
 
   // Redirect authenticated users away from auth pages
   if (isAuthRoute && authenticated) {
-    const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url));
+    const redirectResponse = NextResponse.redirect(new URL(AUTH_LANDING_ROUTE, request.url));
+    redirectResponse.headers.set('x-request-id', requestId);
+    return setVisitorCookie(redirectResponse);
+  }
+
+  // Hide the signup page when the deployment only creates accounts by invitation,
+  // so the UI matches the API. This is presentation only — the door itself is shut
+  // in lib/auth/config.ts, because POST /api/auth/sign-up/email is reachable
+  // whatever the UI renders. Marketing CTAs that still point at /signup land on
+  // /login rather than a form that cannot succeed.
+  if (pathname.startsWith('/signup') && isInviteOnly()) {
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
     redirectResponse.headers.set('x-request-id', requestId);
     return setVisitorCookie(redirectResponse);
   }

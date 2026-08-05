@@ -19,10 +19,12 @@
  *   - `maxFileSizeBytes?` — optional per-binding cap. Defaults to the
  *     deployment's `MAX_FILE_SIZE_MB` (5 MB if unset).
  *   - `signedUrlTtlSeconds?` — when set, the result returns a signed
- *     URL instead of a public one. Only S3 supports this — fail-closed
- *     on Vercel Blob / local. Implies `public: false` at upload time.
+ *     URL instead of a public one. Requires a provider that declares
+ *     `signedUrls` and `privateObjects`; fail-closed otherwise.
+ *     Implies `public: false` at upload time.
  *   - `public?` — defaults true. Ignored when `signedUrlTtlSeconds` is
- *     set (signed implies private).
+ *     set (signed implies private). Setting it false requires a provider
+ *     that declares `privateObjects` — see `getStorageCapabilities()`.
  *
  * Security posture:
  * - The LLM cannot influence the storage path: prefix is admin-set,
@@ -49,6 +51,7 @@ import type {
   CapabilityResult,
 } from '@/lib/orchestration/capabilities/types';
 import { getStorageClient } from '@/lib/storage/client';
+import { getStorageCapabilities } from '@/lib/storage/providers/types';
 import { validateStorageKey } from '@/lib/storage/providers/validate-key';
 import { getMaxFileSizeBytes } from '@/lib/validations/storage';
 import { redactedString } from '@/lib/security/redact';
@@ -110,7 +113,14 @@ interface Data {
   url: string;
   size: number;
   contentType: string;
-  /** True when `url` is a time-limited signed URL; false for public URLs. */
+  /**
+   * True when `url` is a time-limited signed URL.
+   *
+   * False means the URL is unsigned — usually a public one, but a binding with
+   * `public: false` and no `signedUrlTtlSeconds` also lands here, and that URL
+   * is deliberately not openable (401 on the local read route, 403 on S3). Ask
+   * for `signedUrlTtlSeconds` if the caller needs to actually fetch it.
+   */
   signed: boolean;
   /** Set when the URL is signed — RFC3339 expiry timestamp. */
   expiresAt?: string;
@@ -216,10 +226,26 @@ export class UploadToStorageCapability extends BaseCapability<Args, Data> {
       );
     }
 
-    if (customConfig?.signedUrlTtlSeconds && typeof storage.getSignedUrl !== 'function') {
+    const signedRequested = customConfig?.signedUrlTtlSeconds !== undefined;
+    const isPublic = signedRequested ? false : (customConfig?.public ?? true);
+    const caps = getStorageCapabilities(storage);
+
+    if (signedRequested && !caps.signedUrls) {
       return this.error(
-        `Signed URLs are not supported by the configured storage provider (${storage.name}) — only S3 supports getSignedUrl`,
+        `Signed URLs are not supported by the configured storage provider (${storage.name})`,
         'signed_url_not_supported'
+      );
+    }
+
+    // Both a `public: false` binding and a signed-URL binding require the
+    // provider to actually store the object privately. Refusing here is the
+    // whole point of the capability contract: the alternative is an upload
+    // that succeeds and hands the user a world-readable URL.
+    if (!isPublic && !caps.privateObjects) {
+      return this.error(
+        `The configured storage provider (${storage.name}) cannot store private objects, ` +
+          `so this binding would publish the file. ${privateObjectsRemedy(storage.name)}`,
+        'private_objects_not_supported'
       );
     }
 
@@ -287,9 +313,6 @@ export class UploadToStorageCapability extends BaseCapability<Args, Data> {
       );
     }
 
-    const signedRequested = customConfig?.signedUrlTtlSeconds !== undefined;
-    const isPublic = signedRequested ? false : (customConfig?.public ?? true);
-
     let upload;
     try {
       upload = await storage.upload(buffer, {
@@ -311,8 +334,22 @@ export class UploadToStorageCapability extends BaseCapability<Args, Data> {
       );
     }
 
-    if (signedRequested && customConfig?.signedUrlTtlSeconds && storage.getSignedUrl) {
+    if (signedRequested && customConfig?.signedUrlTtlSeconds) {
       const expiresIn = customConfig.signedUrlTtlSeconds;
+      // The capability check above already passed, so a missing method means
+      // the provider declares `signedUrls` without implementing it. Fail
+      // rather than fall through to the public-URL return below, which would
+      // hand out an unsigned URL for an upload the binding wanted private.
+      if (typeof storage.getSignedUrl !== 'function') {
+        logger.error('upload_to_storage: provider declares signedUrls but has no getSignedUrl', {
+          agentId: context.agentId,
+          provider: storage.name,
+        });
+        return this.error(
+          `Storage provider ${storage.name} declares signed-URL support but does not implement it`,
+          'signed_url_not_supported'
+        );
+      }
       try {
         const signedUrl = await storage.getSignedUrl(upload.key, expiresIn);
         const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
@@ -365,6 +402,21 @@ export class UploadToStorageCapability extends BaseCapability<Args, Data> {
 type LoadCustomConfigResult =
   | { kind: 'ok'; config: CustomConfig | undefined }
   | { kind: 'malformed'; issues: ReadonlyArray<unknown> };
+
+/**
+ * Tell the admin what to change, per provider — the refusal is otherwise
+ * indistinguishable from a bug, and the fix is different on each backend.
+ */
+function privateObjectsRemedy(providerName: string): string {
+  switch (providerName) {
+    case 's3':
+      return 'Set S3_OBJECTS_PRIVATE_BY_DEFAULT=true if the bucket blocks public access, or S3_USE_ACL=true on a legacy ACL bucket.';
+    case 'vercel-blob':
+      return 'Vercel Blob has no private storage — switch STORAGE_PROVIDER to s3, or drop signedUrlTtlSeconds and public:false from the binding.';
+    default:
+      return 'Remove signedUrlTtlSeconds and public:false from the binding, or configure a provider that supports private objects.';
+  }
+}
 
 /**
  * Pull an extension from the supplied filename if present and safe;

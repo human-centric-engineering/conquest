@@ -13,8 +13,9 @@
  * format `redactLeaseToken` uses for the event rows). The full token
  * is a write-capability secret and must never reach the browser.
  *
- * Authentication: Admin role required. Ownership scoped to
- * `session.user.id` — cross-user access returns 404.
+ * Authentication: Admin role required. Ownership: the caller's own runs,
+ * plus system-owned runs (`userId = null`) — any other admin's own run
+ * returns 404.
  */
 
 import { withAdminAuth } from '@/lib/auth/guards';
@@ -23,6 +24,7 @@ import { successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import { redactLeaseToken } from '@/lib/orchestration/engine/lease';
 
 const HISTORY_LIMIT = 50;
@@ -47,7 +49,7 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
       recoveryAttempts: true,
     },
   });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Execution ${id} not found`);
   }
 

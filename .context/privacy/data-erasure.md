@@ -56,11 +56,55 @@ from their parents, so only the root `User` relations carry the policy.
 ### System-owned runs
 
 `AiConversation.userId` and `AiWorkflowExecution.userId` are **nullable** (still
-`Cascade`). A real user's runs cascade-erase on deletion; schedule- and
-inbound-triggered runs are **system-owned** (`userId = null`) and unaffected.
-Consequently `userId` is `string | null` through the engine, and the
-`user-memory` capability returns a `no_user_context` error for system runs
-rather than assuming a user.
+`Cascade`), and the engine handles `string | null` throughout — the
+`user-memory` capability returns a `no_user_context` error rather than assuming
+a user.
+
+Schedule- and inbound-triggered runs use that: they are written **system-owned**,
+`userId = null`. Nobody with an account caused them, and the data on them is
+frequently somebody else's — an inbound run's `inputData.trigger` is the adapter
+payload verbatim (sender phone number, email From/Subject/body, base64
+attachments), and the conversation row carries `fromAddress` and the whole
+thread.
+
+| Where                                          | Writes                                             |
+| ---------------------------------------------- | -------------------------------------------------- |
+| `app/api/v1/inbound/[channel]/[slug]/route.ts` | conversation, execution, audit row, engine context |
+| `lib/orchestration/scheduling/scheduler.ts`    | execution, engine context                          |
+
+Attribution lives on the config rows instead: `AiWorkflowTrigger.createdBy` and
+`AiWorkflowSchedule.createdBy` name the operator who set the thing up, and
+`AiWorkflowExecution.triggerSource` records what fired the run
+(`inbound:<channel>` or `schedule`).
+
+**Do not "fix" a null `userId` on these rows by filling it in.** Until #502 they
+carried the operator's id, and it cost twice:
+
+1. **Erasure over-deleted.** The FK is `Cascade`, so erasing that one operator
+   destroyed every third party's inbound conversation and run routed through any
+   trigger they had configured. `eraseUser()` reported success; the
+   correspondence was simply gone.
+2. **Access over-disclosed.** The rows matched the operator on `userId`, so a
+   subject-access export handed them a stranger's phone number, email body and
+   attachments, labelled as their own data.
+
+Two consequences follow for anything you build on these rows:
+
+- **Admin surfaces need the system basis, not an owner match.** A null owner
+  matches no admin, so `lib/orchestration/access/execution-access.ts` and
+  `conversation-access.ts` grant every admin access to unowned rows (basis
+  `'system'`, audit-logged like `'shared'`). Route a new surface through those
+  helpers; a hand-rolled `userId === session.user.id` check will silently hide
+  every scheduled and inbound run.
+- **Steps that require a real account must refuse, not borrow one.**
+  `judge_call` throws `judge_call_requires_user_context` on a system-owned run
+  because it files a transcript into an account's chat history. Borrowing the
+  schedule's author there would re-create the mis-attribution above.
+
+Erasure of an inbound thread is a different request from erasure of an account:
+the sender has no account, so `eraseUser()` cannot reach them. Delete the
+conversation through the admin conversation route, which allows it on the
+`'system'` basis and records who did it.
 
 ### Adding a new `User` relation (required step)
 
@@ -76,6 +120,11 @@ explicit `onDelete` — Prisma's default is `Restrict`, which makes
    link, not the column.
 3. Add an assertion to `scripts/smoke/erasure.ts` proving the new row is erased
    or de-attributed against a real DB.
+4. Declare what a **data subject** receives from it in `SUBJECT_DATA_SOURCES`
+   (`lib/privacy/export-sources.ts`) — the same decision, seen from the access
+   side. This one is enforced: `tests/unit/lib/privacy/export-sources.test.ts`
+   fails until the model is listed. See
+   [Subject Access Export](./data-export.md).
 
 When bringing an erasure branch up to date with `main`, **re-scan for new `User`
 relations the merge introduced** — they reintroduce this bug unnoticed.
@@ -90,7 +139,12 @@ side effect first, since object storage can't enlist in a DB transaction):
    `AiAdminAuditLog` rows but leaves `clientIp` (an IP address = PII). The
    service nulls it before the link is gone.
 2. **Write an erasure receipt** — see below.
-3. **Remove avatar blobs** — `deleteByPrefix('avatars/{userId}/')`.
+3. **Remove avatar blobs** — `deleteByPrefix('avatars/{userId}/')`. On the local
+   provider this sweeps both storage roots (`public/uploads/` and the private
+   `.storage/private/`), so a file uploaded with `public: false` is erased too.
+   A provider that stored objects in more than one place and swept only one
+   would make this step a partial delete that still reported success — see
+   [`.context/storage/overview.md`](../storage/overview.md#local-provider).
 
 Apps and forks extend these same two reach-limits (residual-PII scrub, external
 resource cleanup) via registered hooks — see
@@ -216,7 +270,8 @@ demoted or deleted). See
 | ------------------------------------- | ----------------------------------------------------------------------- |
 | **Art. 17 — Right to erasure**        | ✅ Personal data cascaded, residual PII scrubbed, avatar blobs removed. |
 | **Art. 5(2) — Accountability**        | ✅ Append-only `DataErasureReceipt`.                                    |
-| **Art. 20 — Portability/export**      | ⏳ Not implemented — no user-facing data-export endpoint yet.           |
+| **Art. 15 — Right of access**         | ✅ `exportUserData()` — see [Subject Access Export](./data-export.md).  |
+| **Art. 20 — Portability/export**      | ✅ Same path; the bundle is structured, machine-readable JSON.          |
 | **Art. 5(1)(e) — Storage limitation** | ⏳ Retention purge is a separate feature (see roadmap).                 |
 
 ## Related Documentation

@@ -10,8 +10,9 @@ lib/storage/
 ├── upload.ts              # uploadAvatar(), deleteFile(), deleteAvatar(), deleteByPrefix()
 ├── image.ts               # validateImageMagicBytes(), processImage(), getExtensionForMimeType(), isSupportedImageType()
 ├── constants.ts           # Client-safe constants (SUPPORTED_IMAGE_TYPES, IMAGE_EXTENSIONS)
+├── access-tokens.ts       # HMAC read tokens for the signed storage route
 └── providers/
-    ├── types.ts           # StorageProvider interface, provider config types
+    ├── types.ts           # StorageProvider interface, StorageCapabilities, getStorageCapabilities()
     ├── validate-key.ts    # validateStorageKey() - path traversal prevention
     ├── s3.ts              # AWS S3 / S3-compatible (S3ProviderConfig)
     ├── vercel-blob.ts     # Vercel Blob Storage (VercelBlobProviderConfig)
@@ -42,6 +43,43 @@ S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
 ```
 
+## Object Visibility
+
+`upload()` takes a `public` option that defaults to `true`. Whether `public: false` can be honoured depends entirely on the backend, so **ask before you write**:
+
+```typescript
+import { getStorageCapabilities } from '@/lib/storage/providers/types';
+
+const storage = getStorageClient();
+if (!storage) return;
+
+const caps = getStorageCapabilities(storage);
+if (!caps.privateObjects) {
+  // Refuse up front. Uploading anyway publishes the file.
+  throw new Error(`${storage.name} cannot store private objects`);
+}
+
+await storage.upload(buffer, { key, contentType, public: false });
+```
+
+### Capabilities matrix
+
+| Capability       | S3                                              | Vercel Blob | Local |
+| ---------------- | ----------------------------------------------- | ----------- | ----- |
+| `privateObjects` | `S3_USE_ACL` or `S3_OBJECTS_PRIVATE_BY_DEFAULT` | ✗           | ✓     |
+| `signedUrls`     | ✓                                               | ✗           | ✓     |
+| `download`       | ✓                                               | ✗           | ✓     |
+
+**Read capabilities through `getStorageCapabilities(provider)` — never `provider.capabilities` directly.** The field is an optional `Partial<StorageCapabilities>` so that a fork's custom provider (see [Adding a New Provider](#adding-a-new-provider)) keeps compiling when a capability is added upstream. An undeclared capability means _cannot_, and the helper is what fills that in.
+
+### What each provider does with `public: false`
+
+- **S3** — sends `ACL: private` when `S3_USE_ACL=true`. Without ACLs it cannot verify object visibility from the SDK, so it logs a warning (once per process) and uploads anyway. This is deliberate: the AWS-recommended posture is Block Public Access plus a bucket policy, where every object is _already_ private and throwing would reject the safest configuration. Declare that posture with `S3_OBJECTS_PRIVATE_BY_DEFAULT=true`.
+- **Vercel Blob** — **throws**. Every blob is served from a public CDN URL; there is no configuration that makes this work, so an ambiguous warning would be dishonest.
+- **Local** — writes to a separate private root (`.storage/private/`, gitignored) that Next does not serve. Public uploads still go to `public/uploads/`. Read a private object back with `download()`.
+
+The `upload_to_storage` agent capability enforces this automatically: a binding with `public: false` or `signedUrlTtlSeconds` on a provider that lacks `privateObjects` fails with `private_objects_not_supported` rather than handing the user a world-readable URL.
+
 ## Providers
 
 ### S3 Provider
@@ -59,6 +97,7 @@ S3_REGION=us-east-1                          # Default: us-east-1
 S3_ENDPOINT=https://s3.custom.com            # For S3-compatible services
 S3_PUBLIC_URL_BASE=https://cdn.example.com   # Custom CDN/domain
 S3_USE_ACL=true                              # Enable ACL (only for legacy buckets, off by default)
+S3_OBJECTS_PRIVATE_BY_DEFAULT=true           # Bucket blocks public access — declares privateObjects
 ```
 
 > **Note:** Modern S3 buckets (since April 2023) have ACLs disabled by default. Only set `S3_USE_ACL=true` for legacy buckets that use ACL-based access control.
@@ -69,9 +108,11 @@ S3Provider supports generating time-limited signed URLs for private file access:
 
 ```typescript
 const storage = getStorageClient();
-if (storage && storage.name === 's3') {
+// Check the capability, not the provider name — a fork may add another
+// backend that signs URLs, and `name === 's3'` would lock it out.
+if (storage && getStorageCapabilities(storage).signedUrls) {
   // Generate a signed URL valid for 1 hour (3600 seconds)
-  const signedUrl = await storage.getSignedUrl('documents/private-report.pdf', 3600);
+  const signedUrl = await storage.getSignedUrl!('documents/private-report.pdf', 3600);
 }
 ```
 
@@ -89,17 +130,70 @@ Get token from: Vercel Dashboard → Storage → Blob
 
 ### Local Provider
 
-Development fallback. Files stored in `public/uploads/`. Uses `LocalProviderConfig` interface for typed configuration.
+Development fallback. Uses `LocalProviderConfig` for typed configuration, built by `createLocalProviderFromEnv()`.
+
+Two roots:
+
+| Upload                   | Directory           | Served at                 | Read back via                  |
+| ------------------------ | ------------------- | ------------------------- | ------------------------------ |
+| default (`public: true`) | `public/uploads/`   | `/uploads/<key>` (static) | direct URL                     |
+| `public: false`          | `.storage/private/` | signed route only         | `download()`, `getSignedUrl()` |
+
+```bash
+# All optional — these are the defaults
+STORAGE_LOCAL_BASE_DIR=public/uploads
+STORAGE_LOCAL_BASE_URL=/uploads
+STORAGE_LOCAL_PRIVATE_DIR=.storage/private
+```
 
 - No configuration required
 - Automatically enabled in development when no cloud provider configured
 - **Not for production** - files don't persist across deploys
+- `.storage/` is gitignored
+
+> **Keep the private root outside `public/`.** Pointing `STORAGE_LOCAL_PRIVATE_DIR` at anything Next serves statically re-creates the exact bug this split exists to fix.
+
+**Deletes span both roots.** Nothing records which root holds a given key, so `delete()` and `deletePrefix()` sweep both and `download()` checks private first. This matters for erasure: `eraseUser()` clears a user's blobs with `deleteByPrefix('avatars/<userId>/')`, and sweeping only the public root would leave their private files on disk.
 
 ## API Endpoints
 
 ### Rate Limiting
 
 The avatar upload endpoint (`/api/v1/users/me/avatar`) is protected by `uploadLimiter` from `lib/security/rate-limit.ts`. When the rate limit is exceeded, the endpoint returns HTTP 429 (Too Many Requests).
+
+### Signed Object Read
+
+```http
+GET /api/v1/storage/<key...>?token=<signed>
+```
+
+Serves a privately stored object. Mint the URL with `getSignedUrl()`:
+
+```typescript
+const storage = getStorageClient();
+const url = await storage!.getSignedUrl('documents/user-1/contract.pdf', 300); // 5 min
+// → /api/v1/storage/documents/user-1/contract.pdf?token=eyJrZXk...
+```
+
+Provider-agnostic — it works with anything declaring the `download` capability — but in practice it exists for the local provider, since S3 signs its own URLs directly against the bucket.
+
+**The token is the only credential, and it grants exactly one key.** There is deliberately no session fallback. Storage keys carry no ownership (`agent-uploads/{agentId}/{uuid}` names no user), so `withAuth()` here would let any authenticated user read any private object — worse than having no read path. The route compares the key inside the token against the key requested and 403s on a mismatch.
+
+Tokens are stateless HMAC-SHA256 over `BETTER_AUTH_SECRET` (`lib/storage/access-tokens.ts`, same shape as `lib/orchestration/approval-tokens.ts`) — no table, no migration. **Rotating `BETTER_AUTH_SECRET` invalidates every outstanding URL**, which is the intended lever if one leaks. Lifetime is capped at 7 days.
+
+`generateStorageAccessToken()` signs whatever key it is given — only `getSignedUrl()` validates first. The route therefore re-runs `validateStorageKey()` after the token checks, so a token minted directly for a traversal key is rejected with `INVALID_KEY` rather than reaching the filesystem.
+
+| Status | Code                     | Meaning                                     |
+| ------ | ------------------------ | ------------------------------------------- |
+| 400    | `INVALID_KEY`            | Token authentically names an unsafe key     |
+| 401    | `TOKEN_REQUIRED`         | No `token` query parameter                  |
+| 401    | `INVALID_TOKEN`          | Expired, tampered, or malformed             |
+| 403    | `TOKEN_KEY_MISMATCH`     | Valid token, but minted for a different key |
+| 404    | `NOT_FOUND`              | No such object                              |
+| 501    | `DOWNLOAD_NOT_SUPPORTED` | Provider has no `download` capability       |
+| 503    | `STORAGE_NOT_CONFIGURED` | No provider configured                      |
+
+Responses are always `application/octet-stream` with `Content-Disposition: attachment`, `nosniff`, and a `default-src 'none'` CSP — never the object's real content type. These are user-supplied bytes on the app's own origin, so rendering an uploaded `.html` or `.svg` inline would be stored XSS against a live session. To display an object, fetch it and build an object URL client-side.
 
 ### Upload Avatar
 
@@ -155,6 +249,29 @@ Images are automatically processed before upload:
 4. **Format**: Avatars always output JPEG regardless of input format. When using `processImage` directly without specifying a format, the original format is preserved.
 
 Supported formats: JPEG, PNG, WebP, GIF
+
+### Fit: square crop vs. bounding box
+
+`processImage` takes a `fit` option. Both modes only ever shrink — neither
+upscales a small source into a blurry large one.
+
+| `fit`               | Result                                                                            | Use for        |
+| ------------------- | --------------------------------------------------------------------------------- | -------------- |
+| `'cover'` (default) | Centre-cropped **square**, sized to the smaller of `maxWidth`/`maxHeight`         | Avatars        |
+| `'inside'`          | Scaled to fit **inside** the `maxWidth` × `maxHeight` box, aspect ratio preserved | Logos, banners |
+
+```typescript
+// Avatar — square, centre-cropped (what uploadAvatar() does)
+await processImage(buffer, { maxWidth: 500, maxHeight: 500 });
+
+// Logo — the caps are a real bounding box; nothing is cropped
+await processImage(buffer, { maxWidth: 800, maxHeight: 200, fit: 'inside' });
+```
+
+`'cover'` collapses the two caps to a single square dimension, so a
+`800 × 200` request under the default fit yields a `200 × 200` square. Pass
+`fit: 'inside'` whenever the image is not square by nature — a centre-cropped
+wordmark or banner is unusable.
 
 ### Client-Side Crop
 
@@ -298,6 +415,7 @@ validateStorageKey(key); // Throws if invalid
 - Only authenticated users can upload
 - Users can only modify their own avatar
 - Storage keys are scoped per user to prevent enumeration
+- Private objects are read only through a signed, single-key, time-limited token — never a session. See [Signed Object Read](#signed-object-read) for why a session check would be strictly worse here.
 
 ### Avatar Cleanup on User Deletion
 
@@ -364,10 +482,24 @@ isSupportedImageType('image/svg+xml'); // false
 
 ```typescript
 // lib/storage/providers/cloudinary.ts
-import type { StorageProvider, UploadOptions, UploadResult, DeleteResult } from './types';
+import type {
+  StorageProvider,
+  StorageCapabilities,
+  UploadOptions,
+  UploadResult,
+  DeleteResult,
+} from '@/lib/storage/providers/types';
 
 export class CloudinaryProvider implements StorageProvider {
   readonly name = 'cloudinary';
+
+  // Optional. Anything you leave out is assumed unsupported, so a provider
+  // that omits this entirely is treated as public-only with no read path —
+  // safe, but it means callers will refuse private uploads.
+  readonly capabilities: Partial<StorageCapabilities> = {
+    privateObjects: true,
+    signedUrls: true,
+  };
 
   async upload(file: Buffer, options: UploadOptions): Promise<UploadResult> {
     // Implementation

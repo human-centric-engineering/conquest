@@ -8,8 +8,11 @@
  * Key security assertions:
  * - Admin auth required (401/403 otherwise)
  * - Rate limiting enforced by proxy.ts (orchestration tier)
- * - Ownership enforced via findFirst({ where: { id, userId } })
- * - Cross-user access returns 404 (NOT 403)
+ * - Access enforced via `adminCanViewConversation`: the owner may delete, and
+ *   so may any admin when nobody owns the row (an inbound thread — see #502);
+ *   a merely-shared conversation may not, because a share grants view consent
+ *   only.
+ * - Another admin's conversation returns 404 (NOT 403)
  * - AiMessage rows cascade via Prisma FK — aiMessage.deleteMany is NOT
  *   explicitly called by the route; the DB cascade handles it.
  * - Bad CUID returns 400
@@ -37,9 +40,14 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiConversation: {
-      findFirst: vi.fn(),
+      // `findUnique` serves both the access check and the title lookup the
+      // audit row needs; the fixture below satisfies both shapes.
+      findUnique: vi.fn(),
       delete: vi.fn(),
     },
+    // Deleting someone else's inbound thread is audit-logged, so the logger's
+    // table has to exist on the mock.
+    aiAdminAuditLog: { create: vi.fn().mockResolvedValue({}) },
     // aiMessage is NOT mocked here — route does not call it directly;
     // message deletion happens via DB cascade.
   },
@@ -63,6 +71,7 @@ function makeConversation(overrides: Record<string, unknown> = {}) {
   return {
     id: CONV_ID,
     userId: ADMIN_ID,
+    share: null,
     agentId: AGENT_ID,
     title: 'Test Conversation',
     isActive: true,
@@ -119,7 +128,7 @@ describe('DELETE /api/v1/admin/orchestration/conversations/:id', () => {
   describe('Successful deletion', () => {
     it('deletes conversation and returns 200 with deleted: true', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as never);
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as never);
       vi.mocked(prisma.aiConversation.delete).mockResolvedValue(makeConversation() as never);
 
       const response = await DELETE(makeRequest(), makeParams(CONV_ID));
@@ -134,7 +143,7 @@ describe('DELETE /api/v1/admin/orchestration/conversations/:id', () => {
 
     it('calls aiConversation.delete with the correct id', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as never);
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as never);
       vi.mocked(prisma.aiConversation.delete).mockResolvedValue(makeConversation() as never);
 
       await DELETE(makeRequest(), makeParams(CONV_ID));
@@ -149,7 +158,7 @@ describe('DELETE /api/v1/admin/orchestration/conversations/:id', () => {
       // If this test were to call aiMessage.deleteMany, it would indicate the
       // route is doing manual cleanup that should be handled by the DB schema.
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(makeConversation() as never);
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as never);
       vi.mocked(prisma.aiConversation.delete).mockResolvedValue(makeConversation() as never);
 
       await DELETE(makeRequest(), makeParams(CONV_ID));
@@ -161,16 +170,86 @@ describe('DELETE /api/v1/admin/orchestration/conversations/:id', () => {
   });
 
   describe('Cross-user access (CRITICAL — must be 404, not 403)', () => {
-    it('returns 404 when conversation is not found or belongs to another user', async () => {
-      // findFirst returns null because { id, userId } does not match.
+    it('returns 404 when the conversation does not exist', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(null);
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(null);
 
       const response = await DELETE(makeRequest(), makeParams(CONV_ID));
 
       expect(response.status).toBe(404);
       // Explicitly NOT 403
       expect(response.status).not.toBe(403);
+    });
+
+    it('returns 404 when the conversation belongs to another admin', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({ userId: 'cmjbv4i3x00003wsloputgwu9' }) as never
+      );
+
+      const response = await DELETE(makeRequest(), makeParams(CONV_ID));
+
+      expect(response.status).toBe(404);
+      expect(vi.mocked(prisma.aiConversation.delete)).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 for a conversation shared with the caller — a view grant is not a destroy grant', async () => {
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({
+          userId: 'cmjbv4i3x00003wsloputgwu9',
+          share: { revokedAt: null, expiresAt: null },
+        }) as never
+      );
+
+      const response = await DELETE(makeRequest(), makeParams(CONV_ID));
+
+      expect(response.status).toBe(404);
+      expect(vi.mocked(prisma.aiConversation.delete)).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('System-owned inbound threads (#502)', () => {
+    it('lets any admin delete a conversation nobody owns, and records who did', async () => {
+      // An inbound SMS/WhatsApp/email thread carries `userId: null`. Nobody
+      // can be its owner, so an owner-only rule would make it permanently
+      // undeletable — including when the person who sent the messages asks
+      // for them to go. They have no account, so `eraseUser()` cannot reach
+      // this row; this route is the only path there is.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(
+        makeConversation({ userId: null, title: 'sms:+12133734253' }) as never
+      );
+      vi.mocked(prisma.aiConversation.delete).mockResolvedValue(makeConversation() as never);
+
+      const response = await DELETE(makeRequest(), makeParams(CONV_ID));
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(prisma.aiConversation.delete)).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: CONV_ID } })
+      );
+      // Destroying a third party's correspondence is never routine
+      // self-service: it leaves an audit row naming the admin and the basis.
+      expect(vi.mocked(prisma.aiAdminAuditLog.create)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'conversation.deleted',
+            userId: ADMIN_ID,
+            metadata: expect.objectContaining({ accessBasis: 'system' }),
+          }),
+        })
+      );
+    });
+
+    it('writes no audit row when an admin deletes their own conversation', async () => {
+      // Self-access is deliberately unlogged — see `logConversationAccess`.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiConversation.findUnique).mockResolvedValue(makeConversation() as never);
+      vi.mocked(prisma.aiConversation.delete).mockResolvedValue(makeConversation() as never);
+
+      await DELETE(makeRequest(), makeParams(CONV_ID));
+
+      expect(vi.mocked(prisma.aiAdminAuditLog.create)).not.toHaveBeenCalled();
     });
   });
 

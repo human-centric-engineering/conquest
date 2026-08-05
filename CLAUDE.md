@@ -48,7 +48,7 @@ Read [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) for the app/platform model and the
 - **Server components by default** — add `'use client'` only when needed
 - **No N+1 client-side fetches** — list/table pages get all data from a single enriched list endpoint; never fire per-row API calls in `useEffect`
 - **Contextual help on form fields** — every non-trivial form field gets a `<FieldHelp>` ⓘ popover; see `.context/ui/contextual-help.md`
-- **New `User` relations need an `onDelete` policy** — any new model with a `userId`/`createdBy` FK must declare `onDelete: Cascade` (personal data) or `onDelete: SetNull` (retained config/audit, FK nullable). Omitting it defaults to `Restrict` and silently breaks GDPR erasure. Never call `prisma.user.delete()` directly — route account deletion through `eraseUser()`. See `.context/privacy/data-erasure.md`.
+- **New `User` relations need an `onDelete` policy _and_ an export disposition** — any new model with a `userId`/`createdBy` FK must (1) declare `onDelete: Cascade` (personal data) or `onDelete: SetNull` (retained config/audit, FK nullable) — omitting it defaults to `Restrict` and silently breaks GDPR erasure; and (2) be added to `SUBJECT_DATA_SOURCES` in `lib/privacy/export-sources.ts`, which decides what a data subject receives from it. The second is enforced — `tests/unit/lib/privacy/export-sources.test.ts` parses the schema and fails until the model is listed. **Never delete a row from that manifest to make the test pass**; that ships a silently short answer to a data subject. Never call `prisma.user.delete()` directly — route account deletion through `eraseUser()`, and subject access through `exportUserData()`. See `.context/privacy/data-erasure.md` and `.context/privacy/data-export.md`.
 - **`CHANGELOG.md` follows the public surface** — when a PR adds, removes, or changes a named seam, a documented public API, or a published Prisma model interface (see [`VERSIONING.md`](./VERSIONING.md#public-surface-contract-tight-definition)), append a bullet to `CHANGELOG.md`'s `## [Unreleased]` section as part of the same PR using [Keep-a-Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security). PRs that don't touch the public surface (internal refactors, tests, docs, chores) deliberately do **not** belong in the CHANGELOG — adding noise dilutes the signal forks rely on. `/pre-pr` step 5d flags public-surface diffs that omit a CHANGELOG entry.
 
 ## MCP Integration
@@ -143,6 +143,7 @@ import { FormError } from './form-error'; // ❌ no exception for siblings
 | Client IP             | `getClientIP()`                                                      | `lib/security/ip.ts`                    |
 | Sanitization          | `escapeHtml()`, `sanitizeUrl()`                                      | `lib/security/sanitize.ts`              |
 | User erasure (GDPR)   | `eraseUser()`                                                        | `lib/privacy/erase-user.ts`             |
+| Subject access (GDPR) | `exportUserData()`                                                   | `lib/privacy/export-user.ts`            |
 | Server fetch          | `serverFetch()`                                                      | `lib/api/server-fetch.ts`               |
 | Logging               | `logger.info()`, `logger.error()`                                    | `lib/logging/index.ts`                  |
 | Local storage         | `useLocalStorage()`                                                  | `lib/hooks/use-local-storage.ts`        |
@@ -273,7 +274,9 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 
 > **Two namespace tiers are reserved for downstream forks — Sunrise core must
 > never create files or tables under either.** `/app` is the **leaf-fork** tier
-> (`.context/app/`, `lib/app/**` fork-owned scaffold). `/framework` is the
+> (`.context/app/`, `lib/app/**` fork-owned scaffold, and
+> `prisma/schema/app.prisma` — which ships empty; the platform's own app-domain
+> models live in `prisma/schema/platform.prisma`). `/framework` is the
 > **framework-layer** tier for forks that sit _between_ Sunrise and their own
 > leaf forks (e.g. Daybreak): `lib/framework/`, `.context/framework/`,
 > `prisma/schema/framework-*.prisma`, and the `framework_` table prefix. Keeping
@@ -287,11 +290,13 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Architecture             | `.context/architecture/`                                  | System design, deployment                                                                                                                                           |
 | CI Pipeline              | `.context/architecture/ci.md`                             | GitHub Actions pipeline; public/private-fork adaptation, `CI_TEST_SCOPE` knob, GHAS-skip, sharding, the two forker gotchas                                          |
 | Multi-Tenancy            | `.context/architecture/multi-tenancy.md`                  | Opt-in RLS retrofit playbook; single-tenant by default, `TENANCY_MODE` seam                                                                                         |
+| Multi-Tenancy Research   | `.context/architecture/multi-tenancy-research.md`         | Gap analysis: five isolation planes, control/commercial planes, platform-vs-fork ownership matrix, fork merge surface                                               |
 | Authentication           | `.context/auth/`                                          | better-auth, sessions, guards                                                                                                                                       |
 | API                      | `.context/api/`                                           | Endpoints, responses, client                                                                                                                                        |
 | Database                 | `.context/database/`                                      | Prisma schema, migrations, seeding                                                                                                                                  |
 | Security                 | `.context/security/`                                      | Rate limiting, headers, CORS                                                                                                                                        |
 | Logging                  | `.context/logging/`                                       | Structured logging, request ctx                                                                                                                                     |
+| Privacy                  | `.context/privacy/`                                       | Consent, erasure (Art. 17), subject access (Art. 15) and its source manifest                                                                                        |
 | Testing                  | `.context/testing/`                                       | Patterns, mocking, async                                                                                                                                            |
 | Email                    | `.context/email/`                                         | Templates, sending                                                                                                                                                  |
 | Workflow                 | `.context/workflow.md`                                    | Git, commits, PR process                                                                                                                                            |

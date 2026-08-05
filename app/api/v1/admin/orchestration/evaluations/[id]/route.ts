@@ -18,8 +18,8 @@ import type { Prisma } from '@prisma/client';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { NotFoundError } from '@/lib/api/errors';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
 import { updateEvaluationSchema } from '@/lib/validations/orchestration';
@@ -36,18 +36,10 @@ async function loadSession(id: string, userId: string) {
   return session;
 }
 
-function parseId(rawId: string): string {
-  const parsed = cuidSchema.safeParse(rawId);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid evaluation id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'evaluation id' });
 
   const row = await loadSession(id, session.user.id);
   log.info('Evaluation fetched', { sessionId: id });
@@ -57,7 +49,7 @@ export const GET = withAdminAuth<{ id: string }>(async (request, session, { para
 export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'evaluation id' });
 
   const body = await validateRequestBody(request, updateEvaluationSchema);
 

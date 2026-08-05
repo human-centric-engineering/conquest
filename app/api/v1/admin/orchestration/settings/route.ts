@@ -26,6 +26,7 @@ import { computeETag, checkConditional } from '@/lib/api/etag';
 import { computeDefaultModelMap } from '@/lib/orchestration/llm/model-registry';
 import { hydrateFromDb as hydrateModelRegistryFromDb } from '@/lib/orchestration/llm/model-registry-db-hydrate';
 import { invalidateSettingsCache } from '@/lib/orchestration/llm/settings-resolver';
+import { invalidateOrchestrationSettingsCache } from '@/lib/orchestration/settings';
 import { getEmbeddingModels } from '@/lib/orchestration/llm/embedding-models';
 import { parseAudioDefault } from '@/lib/orchestration/llm/audio-default';
 import { updateOrchestrationSettingsSchema } from '@/lib/validations/orchestration';
@@ -176,6 +177,38 @@ export const PATCH = withAdminAuth(async (request, session) => {
   // defaults (so missing keys always resolve), overlay the current row, then
   // overlay the patch.
   const existing = await prisma.aiOrchestrationSettings.findUnique({ where: { slug: 'global' } });
+
+  // Retention coupling: cost logs must outlive the executions that reference
+  // them, or the cost breakdown empties out under executions still on file
+  // (see the refine on `updateOrchestrationSettingsSchema`). The schema catches
+  // a whole-form save; this catches a patch that moves one side only, which is
+  // what the API surface allows and the UI does not do.
+  const effectiveCostLogDays =
+    body.costLogRetentionDays !== undefined
+      ? body.costLogRetentionDays
+      : (existing?.costLogRetentionDays ?? null);
+  const effectiveExecutionDays =
+    body.executionRetentionDays !== undefined
+      ? body.executionRetentionDays
+      : (existing?.executionRetentionDays ?? null);
+  if (
+    effectiveCostLogDays !== null &&
+    effectiveExecutionDays !== null &&
+    effectiveCostLogDays < effectiveExecutionDays
+  ) {
+    return errorResponse(
+      `Cost log retention (${effectiveCostLogDays} days) must be at least as long as execution retention (${effectiveExecutionDays} days), or the cost breakdown empties out for executions you are still keeping`,
+      {
+        code: 'VALIDATION_ERROR',
+        status: 400,
+        details: {
+          costLogRetentionDays: effectiveCostLogDays,
+          executionRetentionDays: effectiveExecutionDays,
+        },
+      }
+    );
+  }
+
   const computed = computeDefaultModelMap();
   const currentDefaults: Record<string, string> = {
     ...computed,
@@ -281,6 +314,9 @@ export const PATCH = withAdminAuth(async (request, session) => {
   });
 
   invalidateSettingsCache();
+  // The singleton itself is cached for 30s now (#442) — clear it here so a save
+  // is visible on the next read instead of up to 30s later.
+  invalidateOrchestrationSettingsCache();
 
   logAdminAction({
     userId: session.user.id,

@@ -21,6 +21,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { env } from '@/lib/env';
 import { logger } from '@/lib/logging';
 import { createRateLimiter, type RateLimiter } from '@/lib/security/rate-limit';
 import { CostOperation } from '@/types/orchestration';
@@ -292,11 +293,17 @@ class CapabilityDispatcher {
     // 4. Per-agent binding. Missing pivot rows fall through to the
     //    defaults from the base capability — the admin UI uses opt-out
     //    semantics.
+    //    `null` is only reachable under CAPABILITY_BINDING_MODE=strict, where a
+    //    missing row denies rather than defaulting to allow. Testing `!binding`
+    //    rather than `binding &&` matters: the latter would let a strict-mode
+    //    denial fall through to a successful dispatch, silently making the
+    //    setting a no-op.
     const binding = await this.getAgentBinding(context.agentId, slug, entry);
-    if (binding && binding.isEnabled === false) {
+    if (!binding || binding.isEnabled === false) {
       logger.warn('Capability dispatch: disabled for agent', {
         slug,
         agentId: context.agentId,
+        reason: binding ? 'binding_disabled' : 'no_binding_row_strict_mode',
       });
       return {
         success: false,
@@ -525,6 +532,31 @@ class CapabilityDispatcher {
    * Lazy-load and cache per-agent bindings. A missing pivot row is
    * treated as "use the capability defaults", so backend/CLI callers
    * can dispatch without any explicit admin wiring.
+   *
+   * ## Deleting a grant does NOT revoke a capability
+   *
+   * Read that twice, because absence reads like the safe state and is not.
+   * When no `AiAgentCapability` row exists this synthesizes a default-ALLOW
+   * binding, so the intuitive way to withdraw a capability — delete the pivot
+   * row — leaves it **dispatchable and unrestricted**, where before it was
+   * dispatchable and restricted. An operator action that reads as "remove this
+   * permission" is the one that widens it: a binding pinned via `customConfig`
+   * to a narrow scope becomes an unpinned binding with no restriction at all.
+   *
+   * To actually revoke, set `isEnabled: false` and KEEP the row —
+   * {@link dispatch} checks that before any exposure logic and refuses
+   * outright. Keeping the row also matters because the state needing repair is
+   * an absent one, and absence carries no record of what used to be there.
+   *
+   * Setting `CAPABILITY_BINDING_MODE=strict` inverts the default so a missing
+   * row denies instead. It is opt-in because flipping it retroactively revokes
+   * every capability any agent was relying on implicitly — including the
+   * `mcp-system` agent, which dispatches built-ins with no pivot rows in a
+   * default install. Audit your `AiAgentCapability` table before enabling it.
+   *
+   * Independently of this setting, the chat handler refuses any tool name
+   * outside the agent's advertised set before dispatch, which closes the
+   * reachable path (see `advertisedToolNames` in `streaming-handler.ts`).
    */
   private async getAgentBinding(
     agentId: string,
@@ -577,8 +609,17 @@ class CapabilityDispatcher {
     const binding = agentMap?.get(slug);
     if (binding) return binding;
 
-    // No explicit row → synthesize a default-allow binding from the
-    // base capability entry. No pivot row means no per-binding config.
+    // No explicit row. In strict mode that denies; by default it synthesizes a
+    // default-allow binding from the base capability entry (no pivot row means
+    // no per-binding config). See the revocation note on this method.
+    if (env.CAPABILITY_BINDING_MODE === 'strict') {
+      logger.warn('Capability dispatch denied: no binding row and CAPABILITY_BINDING_MODE=strict', {
+        agentId,
+        slug,
+      });
+      return null;
+    }
+
     return {
       slug,
       isEnabled: true,
@@ -692,8 +733,28 @@ function formatValidationIssues(issues: unknown[]): string {
   return parts.join('; ');
 }
 
-/** Module-level singleton, matching `providerManager` style. */
-export const capabilityDispatcher = new CapabilityDispatcher();
+/**
+ * Process-wide singleton, backed by `globalThis`.
+ *
+ * Next 16 + Turbopack loads `instrumentation.ts` in a SEPARATE module graph
+ * from route handlers and RSC, so a plain module-scoped instance is a different
+ * object in each graph. A tier that registers handlers only at boot (via
+ * `instrumentation.ts` -> `initApp()`) would then be invisible on the request
+ * path — and because `getCapabilityDefinitions()` filters out any slug the
+ * in-process dispatcher does not hold, those tools are dropped from the agent's
+ * toolset entirely rather than failing loudly at dispatch.
+ *
+ * Backing it with `globalThis` gives every graph the same instance, exactly as
+ * `lib/db/client.ts` already does for the Prisma client. It also means the six
+ * in-memory maps (handlers, guards, registry, rate limiters, agent bindings)
+ * survive a dev hot-reload instead of silently resetting mid-session.
+ */
+const globalForDispatcher = globalThis as unknown as {
+  sunriseCapabilityDispatcher?: CapabilityDispatcher;
+};
+
+export const capabilityDispatcher: CapabilityDispatcher =
+  (globalForDispatcher.sunriseCapabilityDispatcher ??= new CapabilityDispatcher());
 
 export type { CapabilityDispatcher };
 

@@ -34,7 +34,10 @@
  *   }
  *
  * Available probe factories from `@/lib/db/drift-probes`: `indexExists`,
- * `constraintExists` (optional definition-substring assertion), `columnExists`.
+ * `constraintExists` (optional definition-substring assertion), `columnExists`,
+ * and `generatedColumnExists`. For a `GENERATED ALWAYS` column use the latter —
+ * `columnExists` passes on a plain column of the same name, which is never
+ * populated, so the check goes green while the feature is silently broken.
  *
  * Full guide: CUSTOMIZATION.md §5 · .context/database/prisma-unmodelled-objects.md
  */

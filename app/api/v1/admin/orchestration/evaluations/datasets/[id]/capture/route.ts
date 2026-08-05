@@ -11,10 +11,17 @@
  *
  * Ownership chain enforced here:
  *   1. Dataset belongs to the caller.
- *   2. (conversation_turn) The source message's conversation also
- *      belongs to the caller.
- *   3. (workflow_execution) The source execution's workflow also
- *      belongs to the caller.
+ *   2. (conversation_turn) The caller owns the source message's
+ *      conversation, or nobody does (a system-owned inbound thread).
+ *      A `'shared'` basis is refused — see below.
+ *   3. (workflow_execution) The caller owns the source execution, or
+ *      nobody does (a schedule- or inbound-triggered run).
+ *
+ * Both source checks go through the shared access helpers so that
+ * system-owned rows stay capturable; a hand-rolled `userId ===
+ * session.user.id` comparison 404s every scheduled and inbound row now
+ * that they carry `userId = null` (#502).
+ *
  * The capture helpers themselves are ownership-agnostic — they only
  * verify the cross-reference between message/execution and dataset.
  *
@@ -30,6 +37,8 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { cuidSchema } from '@/lib/validations/common';
 import { captureDatasetCaseSchema } from '@/lib/validations/orchestration-evaluations';
+import { adminCanViewConversation } from '@/lib/orchestration/access/conversation-access';
+import { adminCanViewExecution } from '@/lib/orchestration/access/execution-access';
 import {
   captureConversationTurnAsCase,
   captureWorkflowExecutionAsCase,
@@ -54,14 +63,21 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
   if (!dataset) throw new NotFoundError(`Dataset ${datasetId} not found`);
 
   if (body.kind === 'conversation_turn') {
-    // Source-side ownership: the conversation the message lives in must
-    // belong to the same user. Without this check, a user could capture
-    // another user's prod traffic into their own dataset.
+    // Source-side ownership: the caller must own the conversation the message
+    // lives in, or nobody must own it. Without this check, a user could
+    // capture another user's prod traffic into their own dataset.
+    //
+    // A `'shared'` basis is deliberately refused: a share grants view consent,
+    // not consent to copy the turn into someone else's dataset, where it
+    // outlives the share and is no longer reachable by a revoke.
     const message = await prisma.aiMessage.findUnique({
       where: { id: body.messageId },
-      select: { conversation: { select: { userId: true } } },
+      select: { conversationId: true },
     });
-    if (!message || message.conversation.userId !== session.user.id) {
+    if (!message) throw new NotFoundError(`Message ${body.messageId} not found`);
+
+    const access = await adminCanViewConversation(message.conversationId, session.user.id);
+    if (access.basis !== 'owner' && access.basis !== 'system') {
       throw new NotFoundError(`Message ${body.messageId} not found`);
     }
 
@@ -78,12 +94,15 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
     return successResponse(result, undefined, { status: 201 });
   }
 
-  // workflow_execution
+  // workflow_execution — the caller's own run, or a system-owned one
+  // (schedule/inbound). Capturing a scheduled run's output into a dataset is
+  // a core evaluation workflow; an owner-only check would 404 every one of
+  // them now that they carry `userId = null`.
   const execution = await prisma.aiWorkflowExecution.findUnique({
     where: { id: body.executionId },
     select: { userId: true },
   });
-  if (!execution || execution.userId !== session.user.id) {
+  if (!execution || !adminCanViewExecution(execution, session.user.id)) {
     throw new NotFoundError(`Workflow execution ${body.executionId} not found`);
   }
 

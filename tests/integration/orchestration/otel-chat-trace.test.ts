@@ -187,6 +187,7 @@ import { getProviderWithFallbacks, getProvider } from '@/lib/orchestration/llm/p
 import { checkBudget, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { scanOutput } from '@/lib/orchestration/chat/output-guard';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { getCapabilityDefinitions } from '@/lib/orchestration/capabilities/registry';
 import { StreamingChatHandler } from '@/lib/orchestration/chat/streaming-handler';
 import type { ChatEvent } from '@/types/orchestration';
 import type { ChatRequest } from '@/lib/orchestration/chat/types';
@@ -435,6 +436,19 @@ describe('StreamingChatHandler — OTEL span tree (integration)', () => {
       provider: mockProvider,
       usedSlug: 'openai',
     });
+
+    // The agent must actually advertise the tool it is about to call. The
+    // default mock returns [], and since #476 the handler refuses any tool name
+    // outside the set advertised for the turn — so without this the dispatch
+    // never happens and there is no span tree to assert on. Mirrors a real
+    // agent that has been granted the capability.
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'test_tool',
+        description: 'A test tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
 
     // Tool dispatch returns a deterministic result
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({

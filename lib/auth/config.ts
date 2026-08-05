@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { getOAuthState, APIError } from 'better-auth/api';
+import { getOAuthState, APIError, createAuthMiddleware } from 'better-auth/api';
 import { prisma } from '@/lib/db/client';
 import { BRAND } from '@/lib/brand';
 import { SYSTEM_USER_EMAIL, AUTH_BOOTSTRAP_ID } from '@/lib/auth/constants';
@@ -11,12 +11,25 @@ import { sendEmail } from '@/lib/email/send';
 import { validateEmailConfig } from '@/lib/email/client';
 import { resolveEmailTemplate } from '@/lib/email/registry';
 import { logger } from '@/lib/logging';
+import { dispatchUserCreated } from '@/lib/auth/user-created-hooks';
 import {
   validateInvitationToken,
   deleteInvitationToken,
   getValidInvitation,
 } from '@/lib/utils/invitation-token';
 import { DEFAULT_USER_PREFERENCES } from '@/lib/validations/user';
+import { isInviteOnly, isInvitedSignup, isFirstHumanBootstrap } from '@/lib/auth/signup-mode';
+import { parseEmailChangeToken, getVerificationTokenFromRequest } from '@/lib/auth/change-email';
+import { revokeUserSessions, findMostRecentSessionToken } from '@/lib/auth/sessions';
+
+/**
+ * How long an email-verification token (signup, or either leg of an email
+ * change) is valid. Drives `emailVerification.expiresIn` below AND the
+ * "expires at" copy in the verification/approval emails — one constant so the
+ * two can't drift into telling the user a different expiry than better-auth
+ * actually enforces.
+ */
+const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Zod schema for OAuth invitation state passed via `additionalData`.
@@ -75,6 +88,10 @@ export async function userCreateBeforeHook(
 
   const isOAuthSignup = ctx?.path?.includes('/callback/') ?? false;
 
+  // Set when a valid invitation token authorises this OAuth signup; read by the
+  // invite_only gate below.
+  let oauthInvitationAccepted = false;
+
   if (isOAuthSignup) {
     try {
       const oauthState = await getOAuthState();
@@ -101,6 +118,12 @@ export async function userCreateBeforeHook(
         const isValidToken = await validateInvitationToken(invitationEmail, invitationToken);
 
         if (isValidToken) {
+          // Record the authorisation itself, not just its side effects. A valid
+          // token with no parseable invitation record falls through to the
+          // bootstrap below, and the invite_only gate must still treat that
+          // account as invited.
+          oauthInvitationAccepted = true;
+
           const invitation = await getValidInvitation(invitationEmail);
 
           // Delete token NOW to prevent race: token must be consumed before user
@@ -132,6 +155,43 @@ export async function userCreateBeforeHook(
       }
       // Log but don't block for other errors (e.g., getOAuthState fails)
       logger.error('Error checking OAuth invitation in before hook', error);
+    }
+  }
+
+  // invite_only gate — the backstop for every account-creation path.
+  //
+  // `signupModeBeforeHook` closes `/sign-up/email`, but it cannot see the others:
+  // a Google signup arrives here via `/callback/:id`, and better-auth also
+  // creates accounts from `POST /sign-in/social` with an `idToken` (a distinct
+  // endpoint path, so a `/callback/` test misses it). Plugins a fork enables
+  // later — magic-link, email-OTP, passkey — would each add another.
+  //
+  // So this is deliberately **default-deny and path-independent**: every user
+  // insert funnels through this hook, and under invite_only anything that is
+  // not explicitly authorised is refused. Enumerating endpoint paths is what
+  // let `/sign-in/social` through, and the next one would slip past the same
+  // way — silently, which is the exact failure invite_only exists to prevent.
+  //
+  // The two authorised paths:
+  // - `isInvitedSignup()` — accept-invite, already holding a validated token.
+  // - `oauthInvitationAccepted` — an OAuth signup that presented a valid token.
+  //
+  // Only NEW account creation is refused. This hook does not run when an
+  // existing user signs in, so established accounts are unaffected.
+  if (isInviteOnly() && !isInvitedSignup() && !oauthInvitationAccepted) {
+    if (await isFirstHumanBootstrap()) {
+      logger.info('invite_only: admitting first-human signup on an empty database', {
+        email: user.email,
+      });
+    } else {
+      logger.warn('invite_only: refusing un-invited signup', {
+        email: user.email,
+        path: ctx?.path,
+      });
+
+      throw new APIError('FORBIDDEN', {
+        message: 'Sign-up is by invitation only.',
+      });
     }
   }
 
@@ -329,6 +389,19 @@ export async function userCreateAfterHook(
       signupMethod,
     });
   }
+
+  // Fork-owned seam (#464). Dispatched last, so an app hook sees the account in
+  // its fully initialised state — preferences set, invitation redeemed, welcome
+  // email decided. Never throws: `dispatchUserCreated` logs and swallows a
+  // failing hook, because the user row already exists by this point and failing
+  // here would report a successful signup to the caller as an error.
+  await dispatchUserCreated({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    signupMethod: isOAuthSignup ? 'oauth' : 'email',
+    viaInvitation: isPasswordInvitation,
+  });
 }
 
 /**
@@ -380,15 +453,68 @@ export async function sendResetPasswordHook(params: {
  *
  * Exported so unit tests can call the real implementation directly.
  */
-export async function afterEmailVerificationHook(user: {
-  id: string;
-  email: string;
-  name: string | null;
-}): Promise<void> {
+export async function afterEmailVerificationHook(
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+  },
+  request?: Request
+): Promise<void> {
   logger.info('Email verification completed', {
     userId: user.id,
     email: user.email,
   });
+
+  // better-auth fires this callback at the end of an email CHANGE too, not just
+  // a signup verification, and the `user` it passes is already updated — so
+  // nothing in it distinguishes the two. The token on the request does; see
+  // lib/auth/change-email.ts.
+  const emailChange = await parseEmailChangeToken(getVerificationTokenFromRequest(request));
+
+  if (emailChange) {
+    // The address has just changed. Two things follow, neither of which applies
+    // to a signup.
+    //
+    // 1. Revoke other sessions. This is the point the change actually commits,
+    //    and the whole reason #489 is a security issue: without this, a session
+    //    stolen before the change survives it. Anything holding a cookie from
+    //    before this moment loses it.
+    //
+    //    Best-effort by design. better-auth does NOT wrap this callback in its
+    //    error handling (unlike the send-email callbacks), so a throw here
+    //    surfaces as a failed verification click *after* the address has already
+    //    been written — the user would see an error for a change that did in
+    //    fact succeed. Log and continue instead.
+    try {
+      const current = await auth.api.getSession({ headers: request?.headers ?? new Headers() });
+      // If this request carries no visible session, better-auth may have just
+      // minted one (the new-address click from a cookie-less browser/device is
+      // the ordinary case, not an edge one) — see
+      // findMostRecentSessionToken's doc for why the newest row is safe to
+      // spare here without weakening the revocation.
+      const exceptSessionToken =
+        current?.session?.token ?? (await findMostRecentSessionToken(user.id));
+      await revokeUserSessions({
+        userId: user.id,
+        exceptSessionToken,
+        reason: 'email_changed',
+      });
+    } catch (error) {
+      logger.error('Failed to revoke sessions after email change', error, {
+        userId: user.id,
+      });
+    }
+
+    // 2. Do not send the welcome email. This is an established user who moved
+    //    address, not a new signup; the guard below only asks whether
+    //    verification was required at signup, which is true in production and
+    //    would therefore greet them all over again.
+    logger.info('Skipping welcome email after an email change', {
+      userId: user.id,
+    });
+    return;
+  }
 
   // Only send welcome email here if verification was required at signup.
   // When verification is not required, the welcome email is sent immediately
@@ -433,21 +559,42 @@ export async function afterEmailVerificationHook(user: {
 export async function sendVerificationEmailHook({
   user,
   url,
+  token,
 }: {
   user: { id: string; email: string; name: string | null };
   url: string;
   token: string;
 }): Promise<void> {
-  // Check if this is an invitation acceptance - if so, skip verification email
-  // The invitation acceptance flow marks email as verified immediately
-  const invitation = await getValidInvitation(user.email);
+  // Is this the new-address leg of an email CHANGE rather than a signup?
+  //
+  // better-auth drives both through this one callback, and during a change it
+  // hands us `user.email` already set to the NEW address — so every check below
+  // that assumes "this address is being verified for the first time by its
+  // owner-to-be" is reading a different situation than it thinks.
+  //
+  // Concretely, the invitation skip immediately below would strand the change:
+  // an existing user moving to an address that happens to hold a pending
+  // invitation would get no verification email, no error, and an account stuck
+  // mid-change. The invitation skip exists for signup (where the accept-invite
+  // route marks the address verified itself), and a change is not that.
+  const emailChange = await parseEmailChangeToken(token);
 
-  if (invitation) {
-    logger.info('Skipping verification email for invitation acceptance', {
+  if (!emailChange) {
+    // Check if this is an invitation acceptance - if so, skip verification email
+    // The invitation acceptance flow marks email as verified immediately
+    const invitation = await getValidInvitation(user.email);
+
+    if (invitation) {
+      logger.info('Skipping verification email for invitation acceptance', {
+        userId: user.id,
+        email: user.email,
+      });
+      return; // Don't send verification email for invitation acceptance
+    }
+  } else {
+    logger.info('Sending verification email for an email change', {
       userId: user.id,
-      email: user.email,
     });
-    return; // Don't send verification email for invitation acceptance
   }
 
   // Replace the default callbackURL (/) with our verification callback page
@@ -460,8 +607,84 @@ export async function sendVerificationEmailHook({
     react: resolveEmailTemplate('verifyEmail', {
       userName: user.name || 'User',
       verificationUrl,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+      expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS),
     }),
+  });
+}
+
+/**
+ * Send the approval request to the address currently on the account when a
+ * change to a new one is requested (#489).
+ *
+ * This is the control that makes a stolen session insufficient for account
+ * takeover. Nothing is written to the database when `/change-email` is called —
+ * better-auth only mints a token — so whoever holds the session can *ask* for
+ * the change, but only someone who can read the original inbox can approve it.
+ * Approving then triggers a second, separate verification at the new address.
+ *
+ * Note the asymmetry better-auth imposes: it only calls this hook when the
+ * current address is already verified. An account whose address was never
+ * verified has no inbox worth asking, so it goes straight to verifying the new
+ * one — no approval gate, by design.
+ *
+ * Exported so unit tests can call the real implementation directly.
+ */
+export async function sendChangeEmailConfirmationHook(params: {
+  user: { id: string; email: string; name: string | null };
+  newEmail: string;
+  url: string;
+  token: string;
+}): Promise<void> {
+  const { user, newEmail, url } = params;
+
+  logger.info('Sending email-change approval to the current address', {
+    userId: user.id,
+  });
+
+  await sendEmail({
+    to: user.email, // The CURRENT address — never `newEmail`.
+    subject: 'Approve the email change on your account',
+    react: resolveEmailTemplate('changeEmailApproval', {
+      userName: user.name || 'User',
+      currentEmail: user.email,
+      newEmail,
+      approvalUrl: url,
+      expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS),
+    }),
+  });
+}
+
+/**
+ * Refuse public email/password signup when `SIGNUP_MODE=invite_only`.
+ *
+ * Runs as better-auth's `hooks.before`, which sees every endpoint — hence the
+ * path check. Gating the route rather than the `/signup` page is the part that
+ * matters: `POST /api/auth/sign-up/email` is reachable regardless of what the
+ * UI renders, so hiding the page alone leaves the door open.
+ *
+ * Two exemptions, both narrow:
+ * - `isInvitedSignup()` — `accept-invite` creating the invited user. better-auth
+ *   routes `auth.api.*` through this same hook, so without the exemption
+ *   invite_only would refuse its own invitation flow.
+ * - `isFirstHumanBootstrap()` — the first account on an empty database, so a
+ *   fresh deployment has an admin who can send invitations.
+ *
+ * Exported so unit tests can call the real implementation directly.
+ */
+export async function signupModeBeforeHook(ctx: { path?: string }): Promise<void> {
+  if (!isInviteOnly()) return;
+  if (ctx.path !== '/sign-up/email') return;
+  if (isInvitedSignup()) return;
+
+  if (await isFirstHumanBootstrap()) {
+    logger.info('invite_only: admitting first-human signup on an empty database');
+    return;
+  }
+
+  logger.warn('invite_only: refusing public email/password signup');
+
+  throw new APIError('FORBIDDEN', {
+    message: 'Sign-up is by invitation only.',
   });
 }
 
@@ -516,8 +739,9 @@ export const auth = betterAuth({
     // Automatically sign in user after successful email verification
     autoSignInAfterVerification: true,
 
-    // Token expiration time in seconds (24 hours to match email messaging)
-    expiresIn: 86400, // 24 hours
+    // Token expiration time in seconds, kept equal to EMAIL_VERIFICATION_TOKEN_TTL_MS
+    // so the emails' "expires at" copy matches what better-auth actually enforces.
+    expiresIn: EMAIL_VERIFICATION_TOKEN_TTL_MS / 1000,
 
     // Send verification email callback (better-auth calls this).
     // Hook body is defined above as `sendVerificationEmailHook` so unit tests
@@ -556,6 +780,25 @@ export const auth = betterAuth({
         required: false,
       },
     },
+
+    // Email changes go through approval at the OLD address (#489).
+    //
+    // Without this, changing the address that owns the account needed nothing
+    // but a session — so one stolen cookie converted into permanent control,
+    // because a session expires and an email address does not. With it, the
+    // change is a two-step the attacker cannot finish: approve from the current
+    // inbox, then verify at the new one. The database is untouched until the
+    // second step, and `afterEmailVerificationHook` revokes other sessions when
+    // it lands.
+    //
+    // `updateEmailWithoutVerification` is deliberately left off. It would let an
+    // unverified account skip straight to a direct write, and the token it mints
+    // is indistinguishable from a signup token — which would blind the
+    // change-vs-signup discrimination the shared hooks depend on.
+    changeEmail: {
+      enabled: true,
+      sendChangeEmailConfirmation: sendChangeEmailConfirmationHook,
+    },
   },
 
   // Advanced database configuration
@@ -572,6 +815,15 @@ export const auth = betterAuth({
        */
       generateId: () => false,
     },
+  },
+
+  // Endpoint hooks. `hooks.before` runs for every better-auth endpoint —
+  // including server-side `auth.api.*` calls — so the body checks the path
+  // itself. Defined above as `signupModeBeforeHook` for direct unit testing.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      await signupModeBeforeHook(ctx);
+    }),
   },
 
   // Database hooks for lifecycle events.

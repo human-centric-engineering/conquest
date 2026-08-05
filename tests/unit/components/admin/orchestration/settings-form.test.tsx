@@ -54,9 +54,12 @@ const FULL_SETTINGS: OrchestrationSettings = {
   approvalDefaultAction: 'deny',
   searchConfig: { keywordBoostWeight: -0.05, vectorWeight: 1.2 },
   webhookRetentionDays: 30,
+  // Cost-log retention must be >= execution retention (#456) or the form
+  // refuses to submit — an execution outliving its cost logs shows a total
+  // with an empty breakdown.
   costLogRetentionDays: 90,
   auditLogRetentionDays: 365,
-  executionRetentionDays: 180,
+  executionRetentionDays: 90,
   evaluationRetentionDays: 90,
   maxConversationsPerUser: 50,
   maxMessagesPerConversation: 200,
@@ -318,6 +321,58 @@ describe('SettingsForm', () => {
             body: expect.objectContaining({ voiceInputGloballyEnabled: false }),
           })
         );
+      });
+    });
+
+    it('blocks submit when cost-log retention is shorter than execution retention', async () => {
+      // #456: pruning cost logs first leaves an execution reporting a total
+      // over an empty breakdown. Caught here so the operator sees it beside
+      // the field; the API rejects the same pair.
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.patch).mockResolvedValue({ success: true });
+
+      render(
+        <SettingsForm
+          initialSettings={{
+            ...FULL_SETTINGS,
+            costLogRetentionDays: 30,
+            executionRetentionDays: 90,
+          }}
+        />
+      );
+
+      const form = screen.getByRole('button', { name: /save settings/i }).closest('form');
+      await act(async () => {
+        fireEvent.submit(form!);
+      });
+
+      expect(
+        await screen.findByText(/at least as long as execution retention/i)
+      ).toBeInTheDocument();
+      expect(apiClient.patch).not.toHaveBeenCalled();
+    });
+
+    it('allows submit when the two retention windows are equal', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.patch).mockResolvedValue({ success: true });
+
+      render(
+        <SettingsForm
+          initialSettings={{
+            ...FULL_SETTINGS,
+            costLogRetentionDays: 90,
+            executionRetentionDays: 90,
+          }}
+        />
+      );
+
+      const form = screen.getByRole('button', { name: /save settings/i }).closest('form');
+      await act(async () => {
+        fireEvent.submit(form!);
+      });
+
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
       });
     });
   });

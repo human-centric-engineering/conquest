@@ -18,12 +18,42 @@ import WelcomeEmail from '@/emails/welcome';
 import VerifyEmail from '@/emails/verify-email';
 import ResetPasswordEmail from '@/emails/reset-password';
 import InvitationEmail from '@/emails/invitation';
+import ChangeEmailApprovalEmail from '@/emails/change-email-approval';
 import { emailOverrides } from '@/lib/app/emails';
 
 /**
  * The typed props contract per email kind. Keys are the {@link EmailKind}
  * union; each value is exactly what the platform passes to that template and
  * what an override must accept.
+ *
+ * ## Adding your own email kind (forks)
+ *
+ * This is an `interface`, so a fork **adds** kinds by declaration merging — no
+ * edit to this file, nothing to conflict on upgrade. Declare the merge and the
+ * template in your own module:
+ *
+ * ```ts
+ * // lib/app/emails.ts (or any module your app loads)
+ * declare module '@/lib/email/registry' {
+ *   interface EmailPropsMap {
+ *     'app.invoiceReceipt': { userName: string; invoiceUrl: string; total: string };
+ *   }
+ * }
+ *
+ * export const emailOverrides: EmailOverrides = {
+ *   'app.invoiceReceipt': InvoiceReceiptEmail,
+ * };
+ * ```
+ *
+ * `EmailKind`, `EmailOverrides` and `resolveEmailTemplate` all widen with it, so
+ * `resolveEmailTemplate('app.invoiceReceipt', props)` is type-checked against
+ * your declared props. Namespace your keys `app.` / `framework.` to match the
+ * reserved tiers in CUSTOMIZATION.md and guarantee no collision with a kind a
+ * future Sunrise release adds.
+ *
+ * A fork-added kind has no platform default — it exists only in
+ * `emailOverrides` — which is why `defaultTemplates` below is `Partial` and
+ * `resolveEmailTemplate` throws for a kind with neither. See #468.
  */
 export interface EmailPropsMap {
   welcome: { userName: string; userEmail: string; baseUrl: string };
@@ -34,6 +64,20 @@ export interface EmailPropsMap {
     inviteeName: string;
     inviteeEmail: string;
     invitationUrl: string;
+    expiresAt: Date;
+  };
+  /**
+   * Sent to the address currently on the account when a change to a new one is
+   * requested. Nothing changes until the recipient approves, so a fork that
+   * overrides this must keep both the approval link and the "you didn't request
+   * this" path — it is the control that stops a stolen session from taking the
+   * account (#489).
+   */
+  changeEmailApproval: {
+    userName: string;
+    currentEmail: string;
+    newEmail: string;
+    approvalUrl: string;
     expiresAt: Date;
   };
 }
@@ -51,15 +95,21 @@ export type EmailTemplate<K extends EmailKind> = (props: EmailPropsMap[K]) => Re
 export type EmailOverrides = { [K in EmailKind]?: EmailTemplate<K> };
 
 /**
- * Platform default templates. The explicit `EmailTemplate<K>` mapped type makes
- * this assignment the enforcement point: if a template's props drift from
+ * Platform default templates. The explicit `EmailTemplate<K>` mapped type keeps
+ * this the enforcement point: if a template's props drift from
  * {@link EmailPropsMap}, this fails to type-check.
+ *
+ * `Partial` because a fork can add kinds by declaration merging (#468) and those
+ * have no platform default — they live only in `emailOverrides`. A total mapped
+ * type would make every fork-added kind a compile error here, in a platform file
+ * the fork cannot edit without a conflict.
  */
-const defaultTemplates: { [K in EmailKind]: EmailTemplate<K> } = {
+const defaultTemplates: { [K in EmailKind]?: EmailTemplate<K> } = {
   welcome: WelcomeEmail,
   verifyEmail: VerifyEmail,
   resetPassword: ResetPasswordEmail,
   invitation: InvitationEmail,
+  changeEmailApproval: ChangeEmailApprovalEmail,
 };
 
 /**
@@ -72,5 +122,15 @@ export function resolveEmailTemplate<K extends EmailKind>(
 ): ReactElement {
   const override = emailOverrides[kind];
   const template = override ?? defaultTemplates[kind];
+  if (!template) {
+    // Reachable only for a fork-declared kind (#468) with no override supplied —
+    // the type system cannot catch that, because declaration merging widens
+    // `EmailKind` without requiring an entry anywhere. Throw naming the kind
+    // rather than returning nothing: a caller that renders `undefined` sends a
+    // blank email, which is far harder to diagnose than a failed send.
+    throw new Error(
+      `No email template for kind "${String(kind)}". Register it in emailOverrides (lib/app/emails.ts).`
+    );
+  }
   return template(props);
 }

@@ -523,6 +523,53 @@ export const signInSchema = z.object({
 });
 ```
 
+## Reacting to a new account — the user-created seam
+
+better-auth's `user.create.after` hook dispatches through
+`lib/auth/user-created-hooks.ts`, so a fork can provision a profile row, seed a
+workspace, start onboarding or push to a CRM without editing
+`lib/auth/config.ts`. The fork-owned scaffold is `lib/app/user-created.ts`
+(ships empty; `dispatchUserCreated()` short-circuits on an empty registry).
+
+```typescript
+// lib/app/user-created.ts
+import { registerUserCreatedHook } from '@/lib/auth/user-created-hooks';
+
+export function initAppUserCreatedHooks(): void {
+  registerUserCreatedHook('app:seed-workspace', async ({ userId, email }) => {
+    await prisma.appWorkspace.create({ data: { ownerId: userId, name: email } });
+  });
+}
+```
+
+The context is `UserCreatedContext`:
+
+| Field           | Meaning                                                       |
+| --------------- | ------------------------------------------------------------- |
+| `userId`        | The new `User.id`.                                            |
+| `email`         | The address on the account.                                   |
+| `name`          | Display name, if the signup supplied one.                     |
+| `signupMethod`  | OAuth (address already verified) vs email/password (not yet). |
+| `viaInvitation` | True when the address was already proven by the invitation.   |
+
+**A hook cannot reject a signup.** It runs _after_ the user row exists, so a
+throw is logged and swallowed rather than failing account creation — the account
+is already there, and turning a successful signup into a caller-visible error
+would be worse than a missing side effect. Pre-creation rejection happens in `userCreateBeforeHook`
+(`lib/auth/config.ts`, better-auth's `databaseHooks.user.create.before`), which
+throws an `APIError` — that is where the reserved-address and
+OAuth-invitation-mismatch refusals live. There is no fork seam for it today; a
+fork that needs one edits that hook.
+
+Other semantics: hooks are keyed, and re-registering a key replaces it (safe
+under HMR). They run in parallel, and one rejecting does not prevent the others
+— but the dispatch is awaited, so a slow hook delays the rest; hand long work to
+a queue. `initAppUserCreatedHooks()` runs once, lazily, latched before it runs,
+so a throwing init degrades to "no app hooks" instead of retrying on every
+signup.
+
+See [`CUSTOMIZATION.md` §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface).
+
 ## Route Protection
 
 ### Middleware-Based Protection
@@ -642,6 +689,7 @@ DATABASE_URL="postgresql://user:pass@host:5432/db?connection_limit=20"
 
 ## Related Documentation
 
+- [Signup Modes](./signup-modes.md) - `SIGNUP_MODE`, and how to run a fork invite-only
 - [Auth Integration](./integration.md) - Framework integration patterns for better-auth
 - [Auth Security](./security.md) - Security model and threat mitigation
 - [API Headers](../api/headers.md) - Authentication headers and middleware

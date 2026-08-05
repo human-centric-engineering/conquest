@@ -71,6 +71,7 @@ function setEnv(vars: Record<string, string | undefined>) {
     'REQUIRE_EMAIL_VERIFICATION',
     'EMAIL_FROM',
     'TENANCY_MODE',
+    'DATABASE_POOL_MAX',
   ];
   for (const key of keysToManage) {
     delete process.env[key];
@@ -133,6 +134,37 @@ describe('server path (typeof window === undefined)', () => {
   it('should throw when BETTER_AUTH_URL has an invalid format', async () => {
     // Arrange
     setEnv({ ...validServerEnv, BETTER_AUTH_URL: 'not-a-url' });
+
+    // Act & Assert
+    await expect(importEnv()).rejects.toThrow();
+  });
+
+  it('should accept an absent INTERNAL_API_URL — it is optional', async () => {
+    // Arrange — the common case: no explicit internal address configured
+    setEnv(validServerEnv);
+
+    // Act
+    const env = await importEnv();
+
+    // Assert
+    expect(env.INTERNAL_API_URL).toBeUndefined();
+  });
+
+  it('should expose INTERNAL_API_URL when set to a valid URL', async () => {
+    // Arrange
+    setEnv({ ...validServerEnv, INTERNAL_API_URL: 'http://127.0.0.1:3000' });
+
+    // Act
+    const env = await importEnv();
+
+    // Assert
+    expect(env.INTERNAL_API_URL).toBe('http://127.0.0.1:3000');
+  });
+
+  it('should throw when INTERNAL_API_URL is not a valid URL', async () => {
+    // Arrange — a bare host is the likely typo, and it would send every
+    // server-side self-call somewhere unresolvable
+    setEnv({ ...validServerEnv, INTERNAL_API_URL: '127.0.0.1:3000' });
 
     // Act & Assert
     await expect(importEnv()).rejects.toThrow();
@@ -267,6 +299,46 @@ describe('server path (typeof window === undefined)', () => {
 
       // Assert
       expect(env.REQUIRE_EMAIL_VERIFICATION).toBeUndefined();
+    });
+  });
+
+  describe('DATABASE_POOL_MAX', () => {
+    it('should stay undefined when absent so lib/db/client.ts applies its own default', async () => {
+      // Arrange
+      setEnv(validServerEnv);
+
+      // Act
+      const env = await importEnv();
+
+      // Assert — the default lives in client.ts, not here; absent must not coerce to NaN
+      expect(env.DATABASE_POOL_MAX).toBeUndefined();
+    });
+
+    it('should coerce the string form to a number (env vars are always strings)', async () => {
+      // Arrange — the serverless setting
+      setEnv({ ...validServerEnv, DATABASE_POOL_MAX: '1' });
+
+      // Act
+      const env = await importEnv();
+
+      // Assert
+      expect(env.DATABASE_POOL_MAX).toBe(1);
+    });
+
+    it('should throw when set to 0 (a pool of zero can never serve a query)', async () => {
+      // Arrange
+      setEnv({ ...validServerEnv, DATABASE_POOL_MAX: '0' });
+
+      // Act & Assert
+      await expect(importEnv()).rejects.toThrow();
+    });
+
+    it('should throw when set to a non-numeric value', async () => {
+      // Arrange
+      setEnv({ ...validServerEnv, DATABASE_POOL_MAX: 'lots' });
+
+      // Act & Assert
+      await expect(importEnv()).rejects.toThrow();
     });
   });
 

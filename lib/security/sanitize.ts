@@ -43,6 +43,26 @@ const HTML_ENTITIES: Record<string, string> = {
 const DANGEROUS_PROTOCOLS = ['javascript:', 'data:', 'vbscript:', 'file:'];
 
 /**
+ * Characters removed from a URL before its scheme is inspected.
+ *
+ * Two groups, added for different reasons:
+ *
+ * - `\u0000-\u0020` and `\u007f` — the real bypass class. The WHATWG URL parser
+ *   removes tab/newline/CR from anywhere in a URL and strips leading C0 controls
+ *   before reading the scheme, so `java<TAB>script:` reaches the browser as
+ *   `javascript:`. This is what @braintree/sanitize-url and DOMPurify strip for.
+ * - The non-ASCII whitespace — NOT browser-executable. Scheme parsing fails on a
+ *   non-ALPHA first character, so a BOM-prefixed `javascript:` is treated as a
+ *   relative URL. It is here because `trim()`, which this replaced, removed it,
+ *   and a guard that gets wider in one direction and narrower in another — with
+ *   only the widening written down — is how a gap survives the next review.
+ */
+/* eslint-disable no-control-regex -- matching control chars is the point */
+const URL_NORMALIZE_STRIP =
+  /[\u0000-\u0020\u007f\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]/g;
+/* eslint-enable no-control-regex */
+
+/**
  * Escape HTML entities to prevent XSS
  *
  * Use this for user-generated content that will be rendered as text.
@@ -120,7 +140,27 @@ export function stripHtml(input: string): string {
 export function sanitizeUrl(url: string): string {
   if (!url || typeof url !== 'string') return '';
 
-  const normalized = url.trim().toLowerCase();
+  // Strip ASCII control characters, space, DEL and unicode whitespace BEFORE
+  // the scheme check, so the guard inspects what the browser will actually parse.
+  //
+  // The WHATWG URL parser removes tab (U+0009), newline (U+000A) and carriage
+  // return (U+000D) from ANYWHERE in a URL, and strips leading C0 controls,
+  // before it reads the scheme. `String.prototype.trim()` only removes
+  // leading/trailing whitespace, so an exact `startsWith` on the trimmed string
+  // missed every one of these while the browser still executed them:
+  //
+  //   'java\tscript:alert(1)'   — tab inside the scheme
+  //   'java\nscript:alert(1)'   — newline inside the scheme
+  //   'javascript\t:alert(1)'   — tab before the colon
+  //   '\x01javascript:alert(1)' — leading C0 control (trim removes whitespace,
+  //                               not \x01-\x08 / \x0e-\x1f)
+  //
+  // This is the known sanitizer-bypass class that @braintree/sanitize-url and
+  // DOMPurify strip for. Only the inspected COPY is stripped; the original is
+  // what gets returned, so a legitimate URL is never rewritten.
+  //
+  // See `URL_NORMALIZE_STRIP` for why the class also covers non-ASCII whitespace.
+  const normalized = url.replace(URL_NORMALIZE_STRIP, '').toLowerCase();
 
   // Check for dangerous protocols
   for (const protocol of DANGEROUS_PROTOCOLS) {
@@ -214,8 +254,22 @@ export function sanitizeRedirectUrl(
 export function safeCallbackUrl(url: string | null, fallback: string = '/'): string {
   if (!url || typeof url !== 'string') return fallback;
   const trimmed = url.trim();
-  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return trimmed;
+  if (isRootRelativePath(trimmed)) return trimmed;
   return fallback;
+}
+
+/**
+ * True if `path` is a root-relative path safe to redirect to same-origin.
+ *
+ * Rejects a leading `//` (protocol-relative) AND a leading `/\` — the WHATWG
+ * URL parser normalizes a backslash to a forward slash for "special" schemes
+ * (http/https/ws/wss/ftp/file) before reading the authority, so `/\evil.com`
+ * resolves to `//evil.com` — a different origin — even though it doesn't
+ * literally start with `//`. `new URL('/\\evil.com', 'https://good.example.com')`
+ * confirms this: its `.href` is `https://evil.com/`.
+ */
+export function isRootRelativePath(path: string): boolean {
+  return path.startsWith('/') && path[1] !== '/' && path[1] !== '\\';
 }
 
 import { isRecord } from '@/lib/utils';

@@ -39,11 +39,13 @@ New dashboard sections below existing content:
 
 Returns aggregated observability metrics. All queries run in a single `Promise.all`.
 
+**Scoping.** Every query except the cost-log count is scoped to what the caller can see: their own rows **plus system-owned ones** (`userId = null` — schedule- and inbound-triggered, [#502](https://github.com/human-centric-engineering/sunrise/issues/502)). Executions share the `executionVisibilityWhere` clause with the executions list and the [live-engine dashboard](./orchestration-executions-live-engine.md); conversations use the owner-or-system arm only, since a conversation merely _shared_ with this admin is still someone else's and would overstate their active count. Dropping the system arm makes this page report a healthy deployment while the live-engine dashboard shows the same scheduled runs failing — two admin surfaces disagreeing about the same rows.
+
 Response shape:
 
 ```typescript
 {
-  activeConversations: number,     // AiConversation where isActive=true, scoped to userId
+  activeConversations: number,     // AiConversation isActive=true, caller's own + system-owned
   todayRequests: number,           // AiCostLog count since midnight UTC
   errorRate: number,               // failed/total executions (24h), 0 if no executions
   recentErrors: Array<{
@@ -65,11 +67,11 @@ Paginated list of workflow executions. Follows conversations list pattern.
 
 Query params: `page`, `limit`, `workflowId`, `status`, `startDate`, `endDate` (via `listExecutionsQuerySchema`).
 
-Includes `workflow: { select: { id, name } }`. Scoped to `session.user.id`.
+Includes `workflow: { select: { id, name } }`. Scoped via `executionVisibilityWhere` — the caller's own runs plus system-owned ones (`userId = null`).
 
 ### GET /conversations/:id (detail)
 
-Returns a single conversation with agent info and message count. Scoped to `session.user.id` (404 for cross-user, not 403).
+Returns a single conversation with agent info and message count. Gated by `adminCanViewConversation` — another admin's own returns 404, not 403.
 
 Includes `agent: { select: { id, name, slug } }`, `_count: { select: { messages } }`.
 

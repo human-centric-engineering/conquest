@@ -66,6 +66,9 @@ import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { __test_setTickRunning } from '@/lib/orchestration/maintenance/run-tick';
+import { __resetPlatformJobsForTests } from '@/lib/orchestration/maintenance/platform-jobs';
+import { __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
+import { __resetIdleGateForTests } from '@/lib/orchestration/maintenance/idle-gate';
 import { GET } from '@/app/api/v1/cron/maintenance/route';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -97,6 +100,14 @@ describe('GET /api/v1/cron/maintenance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __test_setTickRunning(false);
+    // Since the Sunrise 0.8.0 sync the tick's work is gated by three pieces of
+    // module-level state: the platform-job clock, the app-job clock (ConQuest's
+    // report workers and prune live there now) and the idle gate. Tests in this
+    // file run ticks milliseconds apart, so without these resets the second and
+    // later ticks find nothing due and the awaited chain no longer blocks.
+    __resetPlatformJobsForTests();
+    __resetAppJobsForTests();
+    __resetIdleGateForTests();
     env.CRON_SECRET = 'test-secret';
 
     vi.mocked(processDueSchedules).mockResolvedValue(SCHEDULE_RESULT);

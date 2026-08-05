@@ -35,7 +35,10 @@ import {
   validateScopes,
   hasScope,
   resolveApiKey,
+  isApiKeySession,
+  API_KEY_SESSION_ID_PREFIX,
 } from '@/lib/auth/api-keys';
+import type { AuthSession } from '@/lib/auth/guards';
 import { NextRequest } from 'next/server';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -265,6 +268,40 @@ describe('resolveApiKey', () => {
         where: expect.objectContaining({ keyHash: expectedHash }),
       })
     );
+  });
+
+  // isApiKeySession is what identity-mutating routes use to refuse a key-authed
+  // caller — withAuth accepts a key of ANY scope, so without it a self-service
+  // `chat` key could change the account's email address.
+  describe('isApiKeySession', () => {
+    const sessionWithId = (id: string) =>
+      ({ session: { id }, user: { id: 'u1' } }) as unknown as AuthSession;
+
+    it('is true for a session minted by resolveApiKey', async () => {
+      // Arrange — go through the real minting path rather than hand-building an
+      // id, so a change to the prefix convention is caught here.
+      const apiKey = makeApiKey({});
+      vi.mocked(prisma.aiApiKey.findFirst).mockResolvedValue(apiKey as never);
+      const result = await resolveApiKey(makeRequest('Bearer sk_' + 'e'.repeat(64)));
+
+      // Assert
+      expect(isApiKeySession(result!.session)).toBe(true);
+    });
+
+    it('is false for a real cookie session id', () => {
+      expect(isApiKeySession(sessionWithId('cmjbv4i3x00003wsloputgwul'))).toBe(false);
+    });
+
+    it('does not match a session id that merely contains the prefix', () => {
+      // Anchored at the start — a cuid happening to contain "apikey_" mid-string
+      // must not be mistaken for a key principal.
+      expect(isApiKeySession(sessionWithId('c_not_apikey_middle'))).toBe(false);
+    });
+
+    it('exposes the prefix it matches on', () => {
+      expect(API_KEY_SESSION_ID_PREFIX).toBe('apikey_');
+      expect(isApiKeySession(sessionWithId(`${API_KEY_SESSION_ID_PREFIX}abc`))).toBe(true);
+    });
   });
 
   it('uses expiresAt as the session expiry when present', async () => {

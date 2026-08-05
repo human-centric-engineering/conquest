@@ -59,6 +59,40 @@ describe('lib/storage/providers/vercel-blob', () => {
       });
     });
 
+    describe('object visibility', () => {
+      it('throws on public: false instead of storing the object publicly', async () => {
+        const { put } = await import('@vercel/blob');
+        const { VercelBlobProvider } = await import('@/lib/storage/providers/vercel-blob');
+
+        const provider = new VercelBlobProvider({ token: 'test-token' });
+
+        await expect(
+          provider.upload(Buffer.from('secret'), {
+            key: 'documents/user-123/contract.pdf',
+            contentType: 'application/pdf',
+            public: false,
+          })
+        ).rejects.toThrow(/cannot store private objects/i);
+
+        // No blob written — a thrown error the caller can catch is the point;
+        // uploading anyway would publish the file to a public CDN URL.
+        expect(put).not.toHaveBeenCalled();
+      });
+
+      it('declares that it supports neither private objects, signed URLs, nor download', async () => {
+        const { VercelBlobProvider } = await import('@/lib/storage/providers/vercel-blob');
+        const { getStorageCapabilities } = await import('@/lib/storage/providers/types');
+
+        const provider = new VercelBlobProvider({ token: 'test-token' });
+
+        expect(getStorageCapabilities(provider)).toEqual({
+          privateObjects: false,
+          signedUrls: false,
+          download: false,
+        });
+      });
+    });
+
     describe('delete', () => {
       it('should delete file by key', async () => {
         const { del } = await import('@vercel/blob');

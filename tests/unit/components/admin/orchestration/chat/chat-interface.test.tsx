@@ -792,9 +792,16 @@ describe('ChatInterface', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }));
 
-    const createObjectURL = vi.fn().mockReturnValue('blob:mock-url');
-    const revokeObjectURL = vi.fn();
-    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    // Spy on the two blob statics rather than replacing the `URL` global — a
+    // plain-object stub drops the constructor, and `vi.stubGlobal` is not undone
+    // by the `restoreAllMocks()` in afterEach (that needs `unstubAllGlobals`, and
+    // `unstubGlobals` is not set in vitest.config.ts), so the broken global would
+    // outlive this test. Harmless here only because `click` is stubbed below; the
+    // same pattern made happy-dom throw `URL is not a constructor` from an anchor
+    // navigation in agents-table.test.tsx. Matches the `Object.defineProperty`
+    // approach used further down this file.
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
 
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 

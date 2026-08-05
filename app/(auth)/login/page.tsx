@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoginForm } from '@/components/forms/login-form';
 import { BRAND } from '@/lib/brand';
+import { isInviteOnly } from '@/lib/auth/signup-mode';
 
 export const metadata: Metadata = {
   title: 'Sign In',
@@ -28,13 +29,16 @@ export default function LoginPage() {
           <LoginForm />
         </Suspense>
 
-        {/* Sign Up Link */}
-        <div className="text-center text-sm">
-          <span className="text-muted-foreground">Don&apos;t have an account? </span>
-          <Link href="/signup" className="text-primary font-medium hover:underline">
-            Sign up
-          </Link>
-        </div>
+        {/* Sign Up Link — omitted under SIGNUP_MODE=invite_only, where /signup
+            redirects straight back here and self-signup cannot succeed. */}
+        {!isInviteOnly() && (
+          <div className="text-center text-sm">
+            <span className="text-muted-foreground">Don&apos;t have an account? </span>
+            <Link href="/signup" className="text-primary font-medium hover:underline">
+              Sign up
+            </Link>
+          </div>
+        )}
 
         {/* Password Reset Link */}
         <div className="text-center text-sm">

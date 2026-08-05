@@ -131,9 +131,98 @@ await authClient.changePassword({
   revokeOtherSessions: true,
 });
 
-// Database revocation
-// DELETE FROM session WHERE userId = 'user-id';
+// Revoke on any other identity change — used by the email-change flow
+import { revokeUserSessions } from '@/lib/auth/sessions';
+
+await revokeUserSessions({
+  userId: user.id,
+  exceptSessionToken: currentSession?.token, // omit to revoke everything
+  reason: 'email_changed',
+});
 ```
+
+`revokeUserSessions` (`lib/auth/sessions.ts`) is the only application-code
+session delete (test/smoke scripts do their own cleanup separately).
+better-auth's own revocation is endpoint-scoped — it wants a request context
+that a verification callback does not have — so this goes at the `session`
+table directly. Omitting `exceptSessionToken` revokes everything, which is the
+correct degradation when the current session cannot be identified: one extra
+login beats leaving an attacker's session alive.
+
+**Deleting the row is not instant everywhere.** `session.cookieCache` (above)
+is enabled with a 5-minute `maxAge`, and `withAuth()` (`lib/auth/guards.ts`)
+calls `auth.api.getSession()` without `disableCookieCache` — the same as every
+other guard in the app, not something specific to this revocation path. A
+session's signed cache cookie can therefore still authenticate for up to 5
+minutes after its row is deleted, for revocation via `revokeUserSessions` here
+exactly as much as for `changePassword`'s built-in `revokeOtherSessions`. This
+is a pre-existing, app-wide trade-off — bypassing the cache on every guarded
+request would mean a DB round-trip per request — not something the email-change
+flow introduces or can fix locally.
+
+## Email Change Security
+
+Changing the address that owns an account is an identity mutation, not a profile
+edit, and it is treated as one (#489). Three controls apply:
+
+1. **Approval at the OLD address.** `user.changeEmail.sendChangeEmailConfirmation`
+   mails an approval link to the address currently on the account. **Nothing is
+   written to the database until it is clicked** — better-auth only mints a
+   token — so a stolen session can _request_ a change but cannot complete one.
+   This is the control that matters; the other two are depth.
+2. **Re-authentication.** `PATCH /api/v1/users/me` requires `currentPassword`
+   alongside `email`. OAuth-only accounts (no credential row) are exempt, since
+   they have no password to confirm.
+3. **Session revocation.** When the change finally lands,
+   `afterEmailVerificationHook` revokes the user's other sessions — subject to
+   the up-to-5-minute cookie-cache staleness window every revocation in this
+   app has; see [Session Revocation](#session-revocation) above.
+
+The flow is therefore **two clicks**: approve at the old address, then verify at
+the new one. `PATCH /api/v1/users/me` delegates to `auth.api.changeEmail` rather
+than writing the address, so a success response still carries the _old_ email
+plus `emailChangeRequested: true`.
+
+**Why it matters:** before this, one compromised session was enough for
+permanent takeover — the address moved immediately, the verification link went
+to the attacker, and `autoSignInAfterVerification` turned it into an independent
+session. A session expires; control of the account's address does not.
+
+**Two sharp edges when modifying this flow:**
+
+- better-auth drives the change through the _same_ callbacks as signup
+  verification (`sendVerificationEmail`, `afterEmailVerification`) with no
+  discriminator in their arguments — and during a change, `user.email` is already
+  the NEW address. Use `parseEmailChangeToken` (`lib/auth/change-email.ts`),
+  which reads the `updateTo` claim off the token. Skipping it re-breaks two
+  things: the invitation check strands changes to an invited address, and the
+  welcome email greets established users all over again.
+- `sendChangeEmailConfirmation` only fires when the current address is already
+  verified. An unverified account has no inbox worth asking, so it goes straight
+  to verifying the new address, with no approval gate.
+- Revocation identifies "the current session" via `auth.api.getSession` on the
+  hook's request, which only sees a cookie the browser actually sent. Clicking
+  the new-address verification link from a device or browser with no app
+  cookie — routine, since mail links often open elsewhere — is a case
+  better-auth handles by minting a session server-side _before_ calling this
+  hook and setting its cookie _after_. `getSession` can't see that session, and
+  revoking "everything" when it returns null would delete the very session the
+  response is about to hand back. `findMostRecentSessionToken` covers this: the
+  newest session row is that just-minted one, since a stolen session (which
+  predates the change) can never be newer.
+- **Known limitation: no collision guard on the target address across the token
+  lifetime.** `email` has `@@unique` (`prisma/schema/auth.prisma`), but nothing
+  re-checks it between the approval click and the final verification — a window
+  that's now the full 24-hour token life, not one request. If two users start a
+  change to the same address and both complete verification inside that window,
+  the second one hits `internalAdapter.updateUserByEmail` inside better-auth's
+  own route with no surrounding `try/catch`
+  (`node_modules/better-auth/dist/api/routes/email-verification.mjs`), so the
+  unique-constraint violation surfaces as an unhandled error rather than a clean
+  "email taken" message. Not patchable from `afterEmailVerificationHook` — it
+  only runs after that write already succeeded (or not at all if it throws).
+  Fixing this properly means better-auth re-validating uniqueness at the second
+  step, which is out of this app's control.
 
 **Protection Against**:
 

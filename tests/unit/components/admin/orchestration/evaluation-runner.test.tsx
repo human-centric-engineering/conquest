@@ -641,6 +641,81 @@ describe('EvaluationRunner', () => {
       });
     });
 
+    it('budget_exceeded_per_turn: surfaces the handler message and stops the run', async () => {
+      // Terminal on the tool-loop-abort path: the handler returns straight after
+      // this frame, so no `done`/`error` follows. Without the branch the run ends
+      // silently on a partial turn and the reviewer has no idea why.
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('{}', { status: 200 })) // auto-PATCH
+        .mockResolvedValueOnce(logsResponse([])) // log loading
+        .mockResolvedValueOnce(
+          sseResponse([
+            { type: 'content', data: { delta: 'Working on it' } },
+            {
+              type: 'budget_exceeded_per_turn',
+              data: {
+                type: 'budget_exceeded_per_turn',
+                code: 'budget_exceeded_per_turn',
+                message: 'Per-turn cost limit of $0.50 reached.',
+                usedUsd: 0.52,
+                limitUsd: 0.5,
+              },
+            },
+          ])
+        );
+
+      render(<EvaluationRunner evaluation={DRAFT_EVAL} />);
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByPlaceholderText(/type a message/i), 'Hi');
+      clickSend();
+
+      await waitFor(() => {
+        expect(screen.getByText('Per-turn cost limit of $0.50 reached.')).toBeInTheDocument();
+      });
+    });
+
+    it('budget_exceeded_per_turn: falls back to generic copy when the frame is malformed', async () => {
+      // The outer `parsed.type` check passes on the SSE event name while the
+      // typed parser rejects the payload, so the frame is recognised but its
+      // message is not trustworthy. Showing `undefined` would be worse than a
+      // generic sentence.
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('{}', { status: 200 })) // auto-PATCH
+        .mockResolvedValueOnce(logsResponse([])) // log loading
+        .mockResolvedValueOnce(
+          sseResponse([
+            {
+              type: 'budget_exceeded_per_turn',
+              // Missing `code`, `usedUsd` and `limitUsd` — fails the schema.
+              data: { type: 'budget_exceeded_per_turn', message: 'ignored' },
+            },
+          ])
+        );
+
+      render(<EvaluationRunner evaluation={DRAFT_EVAL} />);
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByPlaceholderText(/type a message/i), 'Hi');
+      clickSend();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("The agent's per-turn cost limit was reached before it finished.")
+        ).toBeInTheDocument();
+      });
+    });
+
     it('!res.ok: sets "Chat stream failed to start"', async () => {
       const user = userEvent.setup();
 

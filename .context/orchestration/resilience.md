@@ -178,7 +178,11 @@ The guard's lifetime extends past the HTTP response. The tick awaits `processDue
 
 **Token-based ownership.** Each accepted tick claims a fresh monotonic `currentTickToken` and tags its background chain + watchdog with it. Both the watchdog and the `.finally()` only release `tickRunning` if the current token still equals the tick's own token. This prevents a late-settling old chain (whose watchdog already force-released the guard, allowing a new tick to take over) from accidentally releasing the new tick's guard.
 
-This is sufficient for single-server deployments. Multi-instance deployments would need a distributed lock (e.g. Postgres advisory lock or Redis).
+This is sufficient for single-server deployments. Multi-instance deployments would need a distributed lock (e.g. Postgres advisory lock or Redis) — on serverless in particular, `tickRunning` is **per-instance**, so two invocations landing on different instances do not see each other's flag and the "previous tick still running → skip" guarantee does not hold there. Every task the guard protects is idempotent, so the consequence is duplicated work, not corruption.
+
+**Per-task in-flight latch.** Independently of the guard, each background task also has its own latch (`lib/orchestration/maintenance/job-clock.ts`): a task still running from an earlier tick is never started a second time in the same process. This matters most right after the watchdog fires — it releases the overlap guard while the hung chain is still running, and without the latch the next tick would start a second copy of the very task that hung.
+
+**The idle gate is a separate mechanism.** `tickRunning` prevents _concurrency_; the idle gate (#442) prevents _repetition_ when there is nothing to do. They are checked in that order — gate first, so a skipped tick costs no database round-trips at all. `?force=1` overrides the gate and **not** the guard: forcing a sweep is a statement about work being due, never a licence to run two sweeps at once. See [Scheduling — The idle gate](./scheduling.md#the-idle-gate--a-tick-that-does-no-database-work-at-all).
 
 ## SSE Resilience
 

@@ -11,6 +11,7 @@ import { usePathname } from 'next/navigation';
 import { ChevronRight, Home } from 'lucide-react';
 import { HeaderActions } from '@/components/layouts/header-actions';
 import { useBreadcrumbLabels } from '@/components/admin/breadcrumb-context';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 interface AdminHeaderProps {
   title?: string;
@@ -71,9 +72,9 @@ export function AdminHeader({ title, description }: AdminHeaderProps) {
           {/* Breadcrumbs */}
           <nav className="text-muted-foreground flex items-center gap-1 text-sm">
             <Link
-              href="/dashboard"
+              href={AUTH_LANDING_ROUTE}
               className="hover:text-foreground transition-colors"
-              aria-label="Dashboard"
+              aria-label={AUTH_LANDING_LABEL}
             >
               <Home className="h-4 w-4" />
             </Link>

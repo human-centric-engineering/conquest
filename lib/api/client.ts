@@ -62,7 +62,7 @@ export class APIClientError extends Error {
 interface RequestOptions {
   /** Query parameters for GET requests (e.g., { page: 1, limit: 10 }) */
   params?: Record<string, string | number | boolean | undefined>;
-  /** Request body for POST/PATCH/DELETE (will be JSON stringified) */
+  /** Request body for POST/PUT/PATCH/DELETE (will be JSON stringified) */
   body?: unknown;
   /** Additional fetch options (headers, credentials, signal, etc.) */
   options?: RequestInit;
@@ -152,7 +152,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
  * Internal helper that performs the actual fetch request with proper headers,
  * body serialization, and error handling.
  *
- * @param method - HTTP method (GET, POST, PATCH, DELETE)
+ * @param method - HTTP method (GET, POST, PUT, PATCH, DELETE)
  * @param path - API endpoint path
  * @param options - Request options (params, body, fetch options)
  * @returns Parsed response data
@@ -214,9 +214,14 @@ async function request<T>(method: string, path: string, options?: RequestOptions
  *   body: { name: 'John', email: 'john@example.com' }
  * });
  *
- * // PATCH update
+ * // PATCH update (partial)
  * const updated = await apiClient.patch<User>('/api/v1/users/me', {
  *   body: { name: 'Jane' }
+ * });
+ *
+ * // PUT replace (the body is the complete new state)
+ * await apiClient.put<Tag[]>('/api/v1/tasks/123/tags', {
+ *   body: { tags: ['urgent', 'design'] }
  * });
  *
  * // DELETE
@@ -262,6 +267,27 @@ export const apiClient = {
    */
   post: <T>(path: string, options?: RequestOptions): Promise<T> =>
     request<T>('POST', path, options),
+
+  /**
+   * PUT request
+   *
+   * Replaces a resource on the API — the body carries the complete new state,
+   * not a delta. Reach for this over `patch` when the endpoint's contract is
+   * "this is the whole thing now" (a sub-resource collection such as tags,
+   * members or assignees), so the verb matches the semantics.
+   *
+   * @param path - API endpoint path
+   * @param options - Request options (body, params, fetch options)
+   * @returns Promise resolving to typed response data
+   *
+   * @example
+   * ```typescript
+   * const tags = await apiClient.put<Tag[]>('/api/v1/tasks/123/tags', {
+   *   body: { tags: ['urgent', 'design'] }
+   * });
+   * ```
+   */
+  put: <T>(path: string, options?: RequestOptions): Promise<T> => request<T>('PUT', path, options),
 
   /**
    * PATCH request

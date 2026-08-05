@@ -4,22 +4,28 @@
  * GET /api/v1/admin/orchestration/observability/dashboard-stats
  *
  * Returns aggregated stats for the observability dashboard:
- *   - Active conversations (caller-scoped)
- *   - Today's request count (from AiCostLog)
+ *   - Active conversations (caller's own + system-owned)
+ *   - Today's request count (from AiCostLog — deployment-wide)
  *   - 24h error rate (failed / total executions)
  *   - Last 5 failed executions
  *   - Top 10 capabilities by invocation count
+ *
+ * Everything except the cost-log count is scoped to what the caller can
+ * see: their own rows plus system-owned ones. See `executionVisibilityWhere`
+ * in `lib/orchestration/access/execution-access.ts`.
  *
  * All queries run in a single Promise.all batch.
  *
  * Authentication: Admin role required.
  */
 
+import type { Prisma } from '@prisma/client';
 import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
 import { computeETag, checkConditional } from '@/lib/api/etag';
+import { executionVisibilityWhere } from '@/lib/orchestration/access/execution-access';
 
 export const GET = withAdminAuth(async (request, session) => {
   const log = await getRouteLogger(request);
@@ -30,6 +36,22 @@ export const GET = withAdminAuth(async (request, session) => {
 
   const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
+  // Same visibility as the executions list and the live-engine dashboard:
+  // the caller's own runs plus system-owned ones (`userId = null` —
+  // schedule- and inbound-triggered, #502). Scoping these counts to a bare
+  // `userId` match would hide exactly the runs an operator most needs this
+  // page to surface, and would put this dashboard and the live-engine one
+  // into open disagreement about the same rows.
+  const executionVisibility = executionVisibilityWhere(session.user.id);
+
+  // Conversations use the owner-or-system arm only. A conversation shared
+  // with this admin is still someone else's, so counting it as one of *their*
+  // active conversations would overstate the number; an inbound thread has no
+  // owner and belongs to the deployment, so it counts.
+  const conversationVisibility: Prisma.AiConversationWhereInput = {
+    OR: [{ userId: session.user.id }, { userId: null }],
+  };
+
   const [
     activeConversations,
     todayRequests,
@@ -38,9 +60,9 @@ export const GET = withAdminAuth(async (request, session) => {
     recentErrors,
     topCapabilities,
   ] = await Promise.all([
-    // Active conversations for this user
+    // Active conversations visible to this admin
     prisma.aiConversation.count({
-      where: { userId: session.user.id, isActive: true },
+      where: { AND: [conversationVisibility, { isActive: true }] },
     }),
 
     // Today's request count (cost log entries)
@@ -50,21 +72,19 @@ export const GET = withAdminAuth(async (request, session) => {
 
     // Total executions in last 24h
     prisma.aiWorkflowExecution.count({
-      where: { userId: session.user.id, createdAt: { gte: twentyFourHoursAgo } },
+      where: { AND: [executionVisibility, { createdAt: { gte: twentyFourHoursAgo } }] },
     }),
 
     // Failed executions in last 24h
     prisma.aiWorkflowExecution.count({
       where: {
-        userId: session.user.id,
-        status: 'failed',
-        createdAt: { gte: twentyFourHoursAgo },
+        AND: [executionVisibility, { status: 'failed', createdAt: { gte: twentyFourHoursAgo } }],
       },
     }),
 
     // Last 5 failed executions
     prisma.aiWorkflowExecution.findMany({
-      where: { userId: session.user.id, status: 'failed' },
+      where: { AND: [executionVisibility, { status: 'failed' }] },
       orderBy: { createdAt: 'desc' },
       take: 5,
       select: {
@@ -80,7 +100,7 @@ export const GET = withAdminAuth(async (request, session) => {
       by: ['capabilitySlug'],
       where: {
         capabilitySlug: { not: null },
-        conversation: { userId: session.user.id },
+        conversation: conversationVisibility,
       },
       _count: { id: true },
       orderBy: { _count: { id: 'desc' } },

@@ -4,6 +4,7 @@ export {
   processOrphanedExecutions,
   resumeApprovedExecution,
   getNextRunAt,
+  getNextScheduleRunAt,
   isValidCron,
   MAX_RECOVERY_ATTEMPTS,
   type ScheduleProcessResult,

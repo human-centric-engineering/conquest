@@ -8,25 +8,25 @@
  * Encapsulates the overlap guard, watchdog, schedule sweep, background
  * task chain, and per-task logging. Callers receive the schedules
  * result and a `skipped` flag so the HTTP route can shape its response.
+ *
+ * The background tasks themselves live in `platform-jobs.ts`, each with a
+ * minimum interval — a task held back by its interval reports `'skipped'` in
+ * the completion log line rather than being omitted (#442).
  */
 
 import { logger } from '@/lib/logging';
+import { processDueSchedules, getNextScheduleRunAt } from '@/lib/orchestration/scheduling';
+import { runDueAppJobs, getAppJobsMinIntervalMs } from '@/lib/orchestration/maintenance/app-jobs';
 import {
-  processDueSchedules,
-  processOrphanedExecutions,
-  processPendingExecutions,
-} from '@/lib/orchestration/scheduling';
-import { processPendingRetries } from '@/lib/orchestration/webhooks/dispatcher';
-import { processPendingHookRetries } from '@/lib/orchestration/hooks/registry';
-import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reaper';
-import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
-import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
-import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
+  PLATFORM_JOB_NAMES,
+  runDuePlatformJobs,
+} from '@/lib/orchestration/maintenance/platform-jobs';
 import {
-  processQueuedRespondentReports,
-  processQueuedReportRevisions,
-} from '@/lib/app/questionnaire/report/worker';
-import { enforceAppRetentionPolicies } from '@/lib/app/questionnaire/retention';
+  armIdleGate,
+  idleGateResumesAt,
+  noteMaintenanceWork,
+  shouldSkipIdleTick,
+} from '@/lib/orchestration/maintenance/idle-gate';
 
 /** Module-level guard against overlapping tick executions. */
 let tickRunning = false;
@@ -45,19 +45,12 @@ export function __test_setTickRunning(value: boolean): void {
   tickRunning = value;
 }
 
-export const BACKGROUND_TASK_NAMES = [
-  'webhookRetries',
-  'hookRetries',
-  'orphanSweep',
-  'zombieReaper',
-  'embeddingBackfill',
-  'retention',
-  'pendingExecutionRecovery',
-  'evaluationRuns',
-  'respondentReports',
-  'respondentReportRevisions',
-  'appRetention',
-] as const;
+/**
+ * Background task names, in run order — published by the tick route as
+ * `backgroundTasks`. Derived from `PLATFORM_JOBS` so the list and the tasks
+ * that actually run cannot drift apart.
+ */
+export const BACKGROUND_TASK_NAMES = PLATFORM_JOB_NAMES;
 
 /**
  * Watchdog timeout for the background chain. Five minutes is a generous
@@ -69,44 +62,122 @@ const BACKGROUND_TASK_MAX_MS = 5 * 60 * 1000;
 export type ScheduleResult = Awaited<ReturnType<typeof processDueSchedules>> | { error: string };
 
 export interface TickResult {
-  /** Skipped because a previous tick was still running. */
+  /** Skipped — either a previous tick is still running, or the gate is armed. */
   skipped: boolean;
+  /** Why it was skipped. Present only when `skipped`. */
+  reason?: 'previous tick still running' | 'idle';
+  /** When an idle skip will next sweep (epoch ms). Present only for `reason: 'idle'`. */
+  resumesAtMs?: number;
   /** Result of the awaited schedules sweep — undefined when `skipped`. */
   schedules?: ScheduleResult;
   /** Tick start time (epoch ms). */
   startMs: number;
 }
 
-/** Options for {@link runMaintenanceTick}. */
 export interface RunMaintenanceTickOptions {
   /**
-   * Await the background task chain (embeddings, retention, evaluation runs, respondent reports,
-   * …) before returning, instead of detaching it as fire-and-forget.
+   * Sweep even when the idle gate is armed. For the operator-facing `?force=1`
+   * on the admin route and for anything that needs a guaranteed sweep; does not
+   * bypass the overlap guard, which protects against concurrency rather than
+   * repetition.
+   */
+  force?: boolean;
+  /**
+   * Await the background job chain before returning, instead of detaching it as
+   * fire-and-forget.
    *
-   * REQUIRED on serverless (Vercel), where the function is frozen/killed once the HTTP response
-   * is sent — a detached `void Promise.allSettled(...)` chain is not guaranteed to run to
-   * completion, so queued reports / eval runs / retries never drain. The scheduled-cron endpoint
-   * passes `true`; the dev in-process ticker and the manual admin tick keep the default
-   * fire-and-forget behaviour (they run on a persistent process / return 202 fast).
+   * REQUIRED on serverless (Vercel), where the function is frozen or killed once
+   * the HTTP response is sent — a detached `void Promise.allSettled(...)` chain
+   * is not guaranteed to run to completion, so queued reports, eval runs and
+   * retries never drain. `app/api/v1/cron/maintenance/route.ts` passes `true`;
+   * the dev in-process ticker and the manual admin tick keep the default
+   * fire-and-forget behaviour (persistent process / return 202 fast).
+   *
+   * ConQuest addition on top of the platform tick — keep it across upstream
+   * syncs until Sunrise grows a serverless-aware equivalent.
    *
    * @default false
    */
   awaitBackground?: boolean;
 }
 
+interface MaybeArmIdleGateInput {
+  startMs: number;
+  schedules: ScheduleResult;
+  platformFoundWork: boolean;
+}
+
 /**
- * Run one maintenance tick. The schedules sweep is always awaited. The rest of the chain either
- * settles in the background under the overlap guard (default) or is awaited before returning when
- * {@link RunMaintenanceTickOptions.awaitBackground} is set (serverless cron).
+ * Decide whether this sweep earned the right to skip the next few ticks.
+ *
+ * Refuses to arm unless the sweep proved there is nothing to do: any task that
+ * found something, any task that failed, a fired schedule, or a schedules sweep
+ * that errored all leave the gate disarmed, because a tick that does not know
+ * the state must not license skipping. Returns the skip-until time, or `0` when
+ * the gate was left disarmed.
+ *
+ * Arming costs **one** indexed lookup (`getNextScheduleRunAt`), and only on the
+ * sweep that arms — against the ~20 queries every skipped tick avoids.
+ */
+async function maybeArmIdleGate({
+  startMs,
+  schedules,
+  platformFoundWork,
+}: MaybeArmIdleGateInput): Promise<number> {
+  const scheduleWork = 'error' in schedules || schedules.processed > 0;
+  if (platformFoundWork || scheduleWork) {
+    // Clears any horizon left over from an earlier arming, so the logs and the
+    // gate agree.
+    noteMaintenanceWork('maintenance-tick');
+    return 0;
+  }
+
+  try {
+    // A fork's own cadence bounds the gate — see `getAppJobsMinIntervalMs`.
+    const appJobsMinIntervalMs = getAppJobsMinIntervalMs();
+    let nextWorkAtMs = appJobsMinIntervalMs === null ? null : startMs + appJobsMinIntervalMs;
+
+    const nextRunAt = await getNextScheduleRunAt(new Date(startMs));
+    if (nextRunAt) {
+      nextWorkAtMs = Math.min(nextWorkAtMs ?? Number.POSITIVE_INFINITY, nextRunAt.getTime());
+    }
+
+    return armIdleGate({ now: Date.now(), nextWorkAtMs });
+  } catch (err) {
+    // Not knowing the horizon is exactly the case where skipping is unsafe. The
+    // catch also covers the gate itself: a bug in here must cost an extra sweep,
+    // never the tick's completion log line.
+    logger.warn('Maintenance tick: schedule horizon unavailable; leaving the idle gate disarmed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    noteMaintenanceWork('horizon-unavailable');
+    return 0;
+  }
+}
+
+/**
+ * Run one maintenance tick. The schedules sweep is awaited; the rest of
+ * the chain settles in the background under the overlap guard.
  */
 export async function runMaintenanceTick(
-  opts: RunMaintenanceTickOptions = {}
+  options: RunMaintenanceTickOptions = {}
 ): Promise<TickResult> {
-  const { awaitBackground = false } = opts;
   const startMs = Date.now();
+
+  // First statement, before the overlap guard and before any Prisma call: the
+  // whole point is that an idle tick costs zero database round-trips (#442).
+  if (!options.force && shouldSkipIdleTick(startMs)) {
+    const resumesAtMs = idleGateResumesAt();
+    logger.info('Maintenance tick skipped — nothing due', {
+      resumesAtMs,
+      resumesInMs: resumesAtMs - startMs,
+    });
+    return { skipped: true, reason: 'idle', resumesAtMs, startMs };
+  }
+
   if (tickRunning) {
     logger.info('Maintenance tick skipped — previous tick still running');
-    return { skipped: true, startMs };
+    return { skipped: true, reason: 'previous tick still running', startMs };
   }
 
   tickRunning = true;
@@ -129,32 +200,39 @@ export async function runMaintenanceTick(
   }, BACKGROUND_TASK_MAX_MS);
 
   const chain = Promise.allSettled([
-    processPendingRetries(),
-    processPendingHookRetries(),
-    processOrphanedExecutions(),
-    reapZombieExecutions(),
-    backfillMissingEmbeddings(),
-    enforceRetentionPolicies(),
-    processPendingExecutions(),
-    processPendingEvaluationRuns(),
-    processQueuedRespondentReports(),
-    processQueuedReportRevisions(),
-    // App-owned prune (F14.15): turn evaluations, design-eval runs, AI run provenance. Kept in
-    // `lib/app/**` so it survives upstream syncs of the platform retention module.
-    enforceAppRetentionPolicies(),
+    // Sunrise's own tasks, each gated by its own minimum interval (#442). The
+    // helper contains per-task failures itself, so a rejection here would mean
+    // the registry rather than a sweep.
+    runDuePlatformJobs(startMs),
+    // Fork-owned seam (#469). Second so app work never delays Sunrise's own
+    // maintenance. `runDueAppJobs` never throws and returns undefined when no
+    // jobs are registered, so vanilla Sunrise is unaffected.
+    runDueAppJobs(),
   ])
-    .then((settled) => {
-      const summary = Object.fromEntries(
-        BACKGROUND_TASK_NAMES.map((name, i) => {
-          const result = settled[i];
-          return [
-            name,
-            result.status === 'fulfilled' ? result.value : { error: String(result.reason) },
-          ];
-        })
-      );
+    .then(async ([platformResult, appJobsResult]) => {
+      const platform =
+        platformResult.status === 'fulfilled'
+          ? platformResult.value
+          : // A rejection here is the registry, not a sweep. Treat it as work so
+            // the gate stays disarmed and the next tick looks again.
+            { summary: { error: String(platformResult.reason) }, foundWork: true };
+      // Only logged when the fork actually registered something, so the line
+      // stays unchanged upstream.
+      const appJobs =
+        appJobsResult.status === 'fulfilled'
+          ? appJobsResult.value
+          : { error: String(appJobsResult.reason) };
+
+      const idleUntilMs = await maybeArmIdleGate({
+        startMs,
+        schedules,
+        platformFoundWork: platform.foundWork,
+      });
+
       logger.info('Maintenance tick background tasks completed', {
-        ...summary,
+        ...platform.summary,
+        ...(appJobs ? { appJobs } : {}),
+        ...(idleUntilMs > 0 ? { idleUntilMs } : {}),
         totalDurationMs: Date.now() - startMs,
       });
     })
@@ -165,9 +243,9 @@ export async function runMaintenanceTick(
       }
     });
 
-  // Serverless (Vercel): await the chain so it actually completes within the function invocation.
-  // Persistent-process callers (dev ticker, admin tick) detach it and return fast.
-  if (awaitBackground) {
+  // Serverless (Vercel): await the chain so it actually completes within the
+  // function invocation. Persistent-process callers detach it and return fast.
+  if (options.awaitBackground) {
     await chain;
   } else {
     void chain;

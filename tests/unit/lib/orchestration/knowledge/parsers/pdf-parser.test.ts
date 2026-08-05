@@ -22,7 +22,7 @@
  * @see lib/orchestration/knowledge/parsers/pdf-parser.ts
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
  * Mock pdf-parse so tests don't require real PDF files or the pdf.js engine.
@@ -46,6 +46,12 @@ MockPDFParse.prototype.getTable = mockGetTable;
 
 vi.mock('pdf-parse', () => ({
   PDFParse: MockPDFParse,
+}));
+
+// The real worker entry point is ~5MB of pdfjs; the parser only ever stores it
+// on globalThis, so a stand-in with the one export pdfjs looks for is enough.
+vi.mock('pdfjs-dist/build/pdf.worker.mjs', () => ({
+  WorkerMessageHandler: { __stub: 'WorkerMessageHandler' },
 }));
 
 import { parsePdf } from '@/lib/orchestration/knowledge/parsers/pdf-parser';
@@ -88,6 +94,95 @@ function fakeBuffer(): Buffer {
 // =============================================================================
 // Test Suite
 // =============================================================================
+
+/**
+ * pdfjs worker registration.
+ *
+ * Regression cover for the Vercel failure: with no worker on `globalThis`,
+ * pdfjs resolves one at runtime from a variable specifier the file tracer can't
+ * follow, so `pdf.worker.mjs` never ships and every upload dies with "Setting up
+ * fake worker failed". These tests pin the registration, its timing (pdfjs
+ * memoises the lookup on first use), and that a failed registration degrades to
+ * pdfjs's own fallback rather than breaking the parse.
+ *
+ * Each test re-imports the module because the loader promise is cached at module
+ * scope — registration runs exactly once per module instance.
+ */
+describe('pdfjs worker registration', () => {
+  const globalScope = globalThis as Record<string, unknown>;
+
+  beforeEach(() => {
+    delete globalScope.pdfjsWorker;
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockGetText.mockResolvedValue(textResult(''));
+    mockGetInfo.mockResolvedValue(infoResult());
+    mockGetTable.mockResolvedValue({ pages: [] });
+  });
+
+  afterEach(() => {
+    delete globalScope.pdfjsWorker;
+    vi.doUnmock('pdfjs-dist/build/pdf.worker.mjs');
+    vi.resetModules();
+  });
+
+  async function freshParsePdf(): Promise<typeof parsePdf> {
+    const mod = await import('@/lib/orchestration/knowledge/parsers/pdf-parser');
+    return mod.parsePdf;
+  }
+
+  it('registers the worker on globalThis before pdfjs is driven', async () => {
+    // Arrange — capture what the worker slot held at the moment parsing began.
+    // pdfjs shadows its worker lookup on first use, so registering afterwards
+    // would be indistinguishable from not registering at all.
+    let workerAtParseTime: unknown = 'not-called';
+    mockGetInfo.mockImplementationOnce(async () => {
+      workerAtParseTime = globalScope.pdfjsWorker;
+      return infoResult();
+    });
+    const parse = await freshParsePdf();
+    expect(globalScope.pdfjsWorker).toBeUndefined();
+
+    // Act
+    await parse(fakeBuffer(), 'doc.pdf');
+
+    // Assert — present, and present in time
+    expect(workerAtParseTime).toMatchObject({
+      WorkerMessageHandler: { __stub: 'WorkerMessageHandler' },
+    });
+  });
+
+  it('leaves an already-registered worker in place', async () => {
+    // Arrange — something else (a fork's bootstrap, an earlier parse) got there first
+    const existing = { WorkerMessageHandler: { __stub: 'preexisting' } };
+    globalScope.pdfjsWorker = existing;
+    const parse = await freshParsePdf();
+
+    // Act
+    await parse(fakeBuffer(), 'doc.pdf');
+
+    // Assert — same object, not re-imported over the top
+    expect(globalScope.pdfjsWorker).toBe(existing);
+  });
+
+  it('still parses when the worker module cannot be loaded', async () => {
+    // Arrange — the worker file is genuinely absent from the bundle
+    vi.doMock('pdfjs-dist/build/pdf.worker.mjs', () => {
+      throw new Error('Cannot find module pdf.worker.mjs');
+    });
+    mockGetText.mockResolvedValue(textResult(longPageText()));
+    mockGetInfo.mockResolvedValue(infoResult(1, { Title: 'Fallback Doc' }));
+    const parse = await freshParsePdf();
+
+    // Act
+    const result = await parse(fakeBuffer(), 'doc.pdf');
+
+    // Assert — the parse completes; the slot stays empty so pdfjs takes its own
+    // fallback path (which works anywhere the file happens to resolve).
+    expect(result.title).toBe('Fallback Doc');
+    expect(globalScope.pdfjsWorker).toBeUndefined();
+  });
+});
 
 describe('parsePdf', () => {
   beforeEach(() => {

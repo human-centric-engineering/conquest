@@ -660,23 +660,33 @@ describe('happy path', () => {
     expect(body.data.status).toBe('pending');
   });
 
-  it('calls prisma.aiWorkflowExecution.create with correct triggerSource, versionId, and userId', async () => {
-    // Arrange — defaults set in beforeEach
+  it('writes the execution system-owned, never attributed to the trigger author', async () => {
+    // Arrange — the trigger in beforeEach was created by 'user-abc'
 
     // Act
     await POST(makeRequest(), makeParams());
 
-    // Assert — source is 'inbound:<channel>'
+    // Assert — source is 'inbound:<channel>', owner is nobody.
+    //
+    // `userId` is the security assertion here, not a detail (#502).
+    // `AiWorkflowExecution.userId` is `onDelete: Cascade` and `inputData`
+    // holds the sender's payload verbatim, so stamping 'user-abc' would mean
+    // erasing that operator deletes every third party's inbound run, and a
+    // subject-access export hands them a stranger's message.
     expect(mockExecutionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           triggerSource: 'inbound:slack',
           versionId: 'version-id-1',
-          userId: 'user-abc',
+          userId: null,
           status: 'pending',
         }),
       })
     );
+    const { data } = mockExecutionCreate.mock.calls[0][0] as { data: { userId: unknown } };
+    // Explicit null, not merely absent — an omitted key would also satisfy
+    // `objectContaining` on some shapes while leaving the column defaulted.
+    expect(data.userId).toBeNull();
   });
 
   it('sets triggerExternalId from verify result (verify externalId takes priority over normalised)', async () => {
@@ -846,13 +856,18 @@ describe('happy path', () => {
     // Act
     await POST(makeRequest(), makeParams());
 
-    // Assert — drainEngine called with executionId + workflow object + definition
+    // Assert — drainEngine called with executionId + workflow object +
+    // definition, and a null user context. The context must move in lockstep
+    // with the row's `userId`: passing the trigger's author would leave the
+    // memory and scope layers treating a stranger's message as that
+    // operator's session, so `user_memory` would read and write their
+    // remembered facts from someone else's traffic.
     expect(mockDrainEngine).toHaveBeenCalledWith(
       'exec-id-1',
       expect.objectContaining({ id: 'workflow-id-1', slug: 'my-workflow' }),
       expect.objectContaining({ steps: expect.any(Array) }),
       expect.any(Object),
-      'user-abc',
+      null,
       'version-id-1'
     );
   });

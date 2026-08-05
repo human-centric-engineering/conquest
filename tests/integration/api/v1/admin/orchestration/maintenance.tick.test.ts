@@ -81,15 +81,6 @@ vi.mock('@/lib/orchestration/retention', () => ({
 vi.mock('@/lib/orchestration/evaluations/run-worker', () => ({
   processPendingEvaluationRuns: vi.fn(),
 }));
-vi.mock('@/lib/app/questionnaire/report/worker', () => ({
-  processQueuedRespondentReports: vi.fn(),
-  processQueuedReportRevisions: vi.fn(),
-}));
-
-vi.mock('@/lib/app/questionnaire/retention', () => ({
-  enforceAppRetentionPolicies: vi.fn(),
-}));
-
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
@@ -105,7 +96,7 @@ import { reapZombieExecutions } from '@/lib/orchestration/engine/execution-reape
 import { backfillMissingEmbeddings } from '@/lib/orchestration/chat/message-embedder';
 import { enforceRetentionPolicies } from '@/lib/orchestration/retention';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
-import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
+import { __resetPlatformJobsForTests } from '@/lib/orchestration/maintenance/platform-jobs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -144,6 +135,9 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Per-task intervals (#442) are module state that outlives a single test —
+    // clear them so every task is due again.
+    __resetPlatformJobsForTests();
     vi.mocked(processDueSchedules).mockResolvedValue(SCHEDULE_RESULT);
     vi.mocked(processPendingRetries).mockResolvedValue(3);
     vi.mocked(processPendingHookRetries).mockResolvedValue(2);
@@ -165,11 +159,6 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       released: 0,
       failed: 0,
       cancelled: 0,
-    });
-    vi.mocked(processQueuedRespondentReports).mockResolvedValue({
-      claimed: 0,
-      succeeded: 0,
-      failed: 0,
     });
     vi.mocked(processOrphanedExecutions).mockResolvedValue({
       recovered: 0,
@@ -216,9 +205,6 @@ describe('POST /api/v1/admin/orchestration/maintenance/tick', () => {
       'retention',
       'pendingExecutionRecovery',
       'evaluationRuns',
-      'respondentReports',
-      'respondentReportRevisions',
-      'appRetention',
     ]);
     expect(body.data.durationMs).toEqual(expect.any(Number));
   });

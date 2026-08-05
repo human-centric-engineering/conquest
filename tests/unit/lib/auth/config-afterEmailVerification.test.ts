@@ -56,6 +56,9 @@ vi.mock('better-auth/adapters/prisma', () => ({
 
 vi.mock('better-auth/api', () => ({
   getOAuthState: vi.fn(),
+  // Identity passthrough — lib/auth/config.ts wraps its `hooks.before` body in
+  // this at module load, so an unmocked export throws on import (#463).
+  createAuthMiddleware: vi.fn((fn: unknown) => fn),
   APIError: class APIError extends Error {
     status: string;
     body: { code?: string; message?: string };
@@ -122,6 +125,24 @@ vi.mock('@/emails/reset-password', () => ({
   default: vi.fn(() => React.createElement('div', {}, 'Reset Password Email')),
 }));
 
+vi.mock('@/emails/change-email-approval', () => ({
+  default: vi.fn(() => React.createElement('div', {}, 'Change Email Approval')),
+}));
+
+// The discriminator is mocked here so these cases exercise the hook's BRANCHING
+// rather than JWT decoding — the decoding itself is pinned in
+// tests/unit/lib/auth/change-email.test.ts. Defaults to "signup" so every
+// pre-existing case in this file keeps its original meaning.
+vi.mock('@/lib/auth/change-email', () => ({
+  parseEmailChangeToken: vi.fn().mockResolvedValue(null),
+  getVerificationTokenFromRequest: vi.fn(() => undefined),
+}));
+
+vi.mock('@/lib/auth/sessions', () => ({
+  revokeUserSessions: vi.fn().mockResolvedValue(0),
+  findMostRecentSessionToken: vi.fn().mockResolvedValue(null),
+}));
+
 /**
  * Test Suite: Auth Config afterEmailVerification Callback
  *
@@ -136,11 +157,18 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
     debug: ReturnType<typeof vi.fn>;
     error: ReturnType<typeof vi.fn>;
   };
-  let afterEmailVerificationHook: (user: {
-    id: string;
-    email: string;
-    name: string | null;
-  }) => Promise<void>;
+  let afterEmailVerificationHook: (
+    user: {
+      id: string;
+      email: string;
+      name: string | null;
+    },
+    request?: Request
+  ) => Promise<void>;
+  let parseEmailChangeToken: ReturnType<typeof vi.fn>;
+  let revokeUserSessions: ReturnType<typeof vi.fn>;
+  let findMostRecentSessionToken: ReturnType<typeof vi.fn>;
+  let getSessionMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -153,6 +181,8 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
     // Import mocked modules and real hook
     const emailSend = await import('@/lib/email/send');
     const logging = await import('@/lib/logging');
+    const changeEmail = await import('@/lib/auth/change-email');
+    const sessions = await import('@/lib/auth/sessions');
     const authConfig = await import('@/lib/auth/config');
 
     sendEmail = vi.mocked(emailSend.sendEmail);
@@ -163,6 +193,22 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
       error: vi.mocked(logging.logger.error),
     };
     afterEmailVerificationHook = authConfig.afterEmailVerificationHook;
+
+    // `clearAllMocks` wipes implementations set at declaration, so restore the
+    // "this is a signup" default every case below (except the change block)
+    // depends on.
+    parseEmailChangeToken = vi.mocked(changeEmail.parseEmailChangeToken);
+    parseEmailChangeToken.mockResolvedValue(null);
+    revokeUserSessions = vi.mocked(sessions.revokeUserSessions);
+    revokeUserSessions.mockResolvedValue(0);
+    findMostRecentSessionToken = vi.mocked(sessions.findMostRecentSessionToken);
+    findMostRecentSessionToken.mockResolvedValue(null);
+
+    // `auth` is a real module-level export of `betterAuth(...)`'s mocked
+    // return value — grab this call's `getSession` to control what "the
+    // current session" looks like per case.
+    getSessionMock = vi.mocked(authConfig.auth.api.getSession);
+    getSessionMock.mockResolvedValue(null);
 
     // Default: email sending succeeds
     sendEmail.mockResolvedValue({ success: true, status: 'sent', id: 'email-123' });
@@ -309,6 +355,112 @@ describe('lib/auth/config - afterEmailVerification callback', () => {
         'Skipping welcome email after verification (already sent at signup)',
         expect.any(Object)
       );
+    });
+  });
+
+  // better-auth fires this same callback at the end of an email CHANGE, not
+  // just a signup verification, and hands it an already-updated user — so
+  // nothing in the arguments distinguishes the two. Getting it wrong greets an
+  // established user with "Welcome!" and, worse, leaves the sessions that
+  // predate the change alive (#489).
+  describe('when the verification completed an email CHANGE', () => {
+    const changeRequest = new Request(
+      'https://app.example.com/api/auth/verify-email?token=change-token'
+    );
+
+    beforeEach(() => {
+      parseEmailChangeToken.mockResolvedValue({
+        previousEmail: 'old@example.com',
+        newEmail: 'new@example.com',
+      });
+    });
+
+    it('revokes the user other sessions', async () => {
+      // The point of the whole issue: this is the moment the address actually
+      // moves, so a session stolen beforehand must not survive it.
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-20', email: 'new@example.com', name: 'Mover' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(revokeUserSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-20', reason: 'email_changed' })
+      );
+    });
+
+    it('spares the session getSession can identify on the request', async () => {
+      getSessionMock.mockResolvedValue({ session: { token: 'visible-session-token' } });
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-24', email: 'new@example.com', name: 'Mover' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(revokeUserSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ exceptSessionToken: 'visible-session-token' })
+      );
+      // The database fallback must not be consulted when getSession already answered.
+      expect(findMostRecentSessionToken).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the newest session when the request carries no visible one', async () => {
+      // The bug this test guards against: clicking the new-address link from a
+      // device/browser with no app cookie is the ORDINARY case for a mail
+      // link, not an edge one. better-auth mints a session for it and calls
+      // this hook before that session's cookie is on the response, so
+      // getSession sees nothing. Treating "nothing visible" as "nothing to
+      // spare" would revoke the very session the click was completing.
+      getSessionMock.mockResolvedValue(null);
+      findMostRecentSessionToken.mockResolvedValue('just-minted-token');
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-25', email: 'new@example.com', name: 'Mover' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(findMostRecentSessionToken).toHaveBeenCalledWith('user-25');
+      expect(revokeUserSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ exceptSessionToken: 'just-minted-token' })
+      );
+    });
+
+    it('does NOT send the welcome email, even in production', async () => {
+      // The signup guard below only asks whether verification was required,
+      // which is true in production — so without an explicit change check an
+      // existing user gets welcomed to the product all over again.
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-21', email: 'new@example.com', name: 'Mover' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('still completes when session revocation fails', async () => {
+      // better-auth does NOT wrap this callback in its error handling, so a
+      // throw here surfaces as a failed verification click for a change that
+      // already committed to the database.
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      revokeUserSessions.mockRejectedValue(new Error('database unreachable'));
+      const user = createMockUser({ id: 'user-22', email: 'new@example.com', name: 'Mover' });
+
+      await expect(afterEmailVerificationHook(user, changeRequest)).resolves.toBeUndefined();
+      expect(logger.error).toHaveBeenCalledWith(
+        'Failed to revoke sessions after email change',
+        expect.anything(),
+        expect.objectContaining({ userId: 'user-22' })
+      );
+    });
+
+    it('leaves the ordinary signup path alone when it is not a change', async () => {
+      // Guards the other direction: a signup must still get its welcome email
+      // and must NOT have its sessions revoked.
+      parseEmailChangeToken.mockResolvedValue(null);
+      mockEnv.REQUIRE_EMAIL_VERIFICATION = true;
+      const user = createMockUser({ id: 'user-23', email: 'new@example.com', name: 'Newbie' });
+
+      await afterEmailVerificationHook(user, changeRequest);
+
+      expect(revokeUserSessions).not.toHaveBeenCalled();
+      expect(sendEmail).toHaveBeenCalledTimes(1);
     });
   });
 

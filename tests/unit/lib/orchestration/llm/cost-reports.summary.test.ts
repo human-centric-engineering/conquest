@@ -111,3 +111,45 @@ describe('getCostSummary — localSavings passthrough', () => {
     expect(summary?.trend).toBeDefined();
   });
 });
+
+describe('getCostSummary — byModel provider attribution (#436)', () => {
+  it('groups by provider as well as model', async () => {
+    // Arrange
+    setupDefaultMocks();
+    mockedCalcLocalSavings.mockResolvedValueOnce(null);
+
+    // Act
+    await getCostSummary();
+
+    // Assert — without `provider` in the grouping the UI can only guess which
+    // catalogue entry a spend row belongs to, and picks the wrong one for any
+    // model id that exists under two providers.
+    const byModelCall = mockedGroupBy.mock.calls[1]?.[0] as { by?: string[] } | undefined;
+    expect(byModelCall?.by).toEqual(['model', 'provider']);
+  });
+
+  it('keeps the same model id under two providers as separate rows', async () => {
+    // Arrange — the exact shape behind the bug: gpt-4o served by OpenAI, and a
+    // second catalogue provider carrying the same id.
+    mockedAggregate
+      .mockResolvedValueOnce({ _sum: { totalCostUsd: 1 } })
+      .mockResolvedValueOnce({ _sum: { totalCostUsd: 5 } })
+      .mockResolvedValueOnce({ _sum: { totalCostUsd: 20 } });
+    mockedGroupBy.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { model: 'gpt-4o', provider: 'openai', _sum: { totalCostUsd: 1.9 } },
+      { model: 'gpt-4o', provider: 'microsoft', _sum: { totalCostUsd: 0.4 } },
+    ]);
+    mockedRaw.mockResolvedValueOnce([]);
+    mockedAgentFind.mockResolvedValueOnce([]);
+    mockedCalcLocalSavings.mockResolvedValueOnce(null);
+
+    // Act
+    const summary = await getCostSummary();
+
+    // Assert — two rows, each carrying the provider that served it, sorted by spend
+    expect(summary.byModel).toEqual([
+      { model: 'gpt-4o', provider: 'openai', monthSpend: 1.9 },
+      { model: 'gpt-4o', provider: 'microsoft', monthSpend: 0.4 },
+    ]);
+  });
+});

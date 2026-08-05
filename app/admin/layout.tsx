@@ -8,6 +8,7 @@ import { BreadcrumbProvider } from '@/components/admin/breadcrumb-context';
 import { InFlightExecutionBanner } from '@/components/admin/orchestration/in-flight-execution-banner';
 import { ConfigHealthGlobalBanner } from '@/components/admin/config-health-global-banner';
 import { BRAND } from '@/lib/brand';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Display serif for the ConQuest wordmark (Questionnaires surface). Exposed as
 // a CSS variable only — nothing else reads it, so the admin body font is
@@ -47,7 +48,7 @@ export default async function AdminLayout({
 
   // Redirect to dashboard if not an admin
   if (session.user.role !== 'ADMIN') {
-    redirect('/dashboard');
+    redirect(AUTH_LANDING_ROUTE);
   }
 
   return (

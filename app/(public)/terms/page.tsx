@@ -1,18 +1,18 @@
 import type { Metadata } from 'next';
+import { BRAND } from '@/lib/brand';
 
-const metaDescription =
-  'The terms and conditions for using ConQuest — eligibility, accounts, acceptable use, your content, and our liability.';
+const metaDescription = `The terms and conditions for using ${BRAND.name} — eligibility, accounts, acceptable use, your content, and our liability.`;
 
 export const metadata: Metadata = {
   title: 'Terms of Service',
   description: metaDescription,
   openGraph: {
-    title: 'Terms of Service - ConQuest',
+    title: `Terms of Service - ${BRAND.name}`,
     description: metaDescription,
   },
   twitter: {
     card: 'summary',
-    title: 'Terms of Service - ConQuest',
+    title: `Terms of Service - ${BRAND.name}`,
     description: metaDescription,
   },
 };

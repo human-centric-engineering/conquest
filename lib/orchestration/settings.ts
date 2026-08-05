@@ -284,16 +284,57 @@ function parseEmbedAllowedOrigins(raw: Prisma.JsonValue | null | undefined): str
 }
 
 /**
- * Load the orchestration settings singleton, upserting if it doesn't exist yet.
- * Returns the hydrated `OrchestrationSettings` shape.
+ * In-memory TTL cache for the settings singleton, modelled on the shipped
+ * precedent in `lib/orchestration/llm/settings-resolver.ts`. Invalidated by
+ * `invalidateOrchestrationSettingsCache()` from the PATCH route, so a saved
+ * change is visible immediately rather than up to 30s later.
+ */
+const SETTINGS_CACHE_TTL_MS = 30_000;
+let settingsCache: { settings: OrchestrationSettings; fetchedAt: number } | null = null;
+
+/** Clear the cached singleton so the next read goes to the database. */
+export function invalidateOrchestrationSettingsCache(): void {
+  settingsCache = null;
+}
+
+/**
+ * Load the orchestration settings singleton, creating it if it doesn't exist
+ * yet. Returns the hydrated `OrchestrationSettings` shape.
+ *
+ * **Read first, write only on absence.** This used to be an unconditional
+ * `upsert`, i.e. a write — and one that takes a row lock — on every call,
+ * including the several per maintenance tick (#442). The row is created once in
+ * the lifetime of an install; paying for a write on every read after that buys
+ * nothing.
+ *
+ * Cached for 30s. The cache is per-process and read-only state, so the worst a
+ * stale entry can do is serve a setting saved on another instance up to 30s
+ * late.
  */
 export async function getOrchestrationSettings(): Promise<OrchestrationSettings> {
-  const defaults = computeDefaultModelMap();
-  const row = await prisma.aiOrchestrationSettings.upsert({
+  const now = Date.now();
+  if (settingsCache && now - settingsCache.fetchedAt < SETTINGS_CACHE_TTL_MS) {
+    return settingsCache.settings;
+  }
+
+  const existing = await prisma.aiOrchestrationSettings.findUnique({ where: { slug: 'global' } });
+  const row = existing ?? (await createDefaultSettingsRow());
+
+  const settings = hydrateSettings(row);
+  settingsCache = { settings, fetchedAt: now };
+  return settings;
+}
+
+/**
+ * Create the singleton. Still an `upsert` rather than a `create`: two instances
+ * booting at once would otherwise race to the unique constraint on `slug`.
+ */
+async function createDefaultSettingsRow() {
+  return prisma.aiOrchestrationSettings.upsert({
     where: { slug: 'global' },
     create: {
       slug: 'global',
-      defaultModels: defaults,
+      defaultModels: computeDefaultModelMap(),
       globalMonthlyBudgetUsd: null,
       searchConfig: Prisma.JsonNull,
       lastSeededAt: null,
@@ -305,5 +346,4 @@ export async function getOrchestrationSettings(): Promise<OrchestrationSettings>
     },
     update: {},
   });
-  return hydrateSettings(row);
 }

@@ -1049,7 +1049,7 @@ model AppRespondentReport {
   /// `onDelete: Cascade`, matching how AppExperienceRunLeg attaches to its run: a run is respondent
   /// data, not config, so deleting one must take its report with it. This is not a UG-1 violation —
   /// UG-1 forbids CONFIG→answer edges, and the run is the answer side.
-  runId               String?   @unique
+  runId     String?                       @unique
   session   AppQuestionnaireSession?      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   run       AppExperienceRun?             @relation(fields: [runId], references: [id], onDelete: Cascade)
   revisions AppRespondentReportRevision[]

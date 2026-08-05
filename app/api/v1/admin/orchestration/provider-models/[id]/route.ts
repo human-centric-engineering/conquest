@@ -15,24 +15,16 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db/client';
 import { errorResponse, successResponse } from '@/lib/api/responses';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
-import { validateRequestBody } from '@/lib/api/validation';
+import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { invalidateModelCache } from '@/lib/orchestration/llm/provider-selector';
 import { updateProviderModelSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
 
-function parseModelId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid provider model id', { id: ['Must be a valid CUID'] });
-  }
-  return parsed.data;
-}
-
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseModelId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'provider model id' });
 
   const model = await prisma.aiProviderModel.findUnique({ where: { id } });
   if (!model) throw new NotFoundError(`Provider model ${id} not found`);
@@ -54,7 +46,7 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
 export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseModelId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'provider model id' });
 
   const current = await prisma.aiProviderModel.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Provider model ${id} not found`);
@@ -125,7 +117,7 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
 export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const log = await getRouteLogger(request);
   const { id: rawId } = await params;
-  const id = parseModelId(rawId);
+  const id = validatePathParam(rawId, cuidSchema, { label: 'provider model id' });
 
   const current = await prisma.aiProviderModel.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Provider model ${id} not found`);

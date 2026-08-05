@@ -18,6 +18,7 @@ vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiWorkflowSchedule: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       updateMany: vi.fn(),
     },
     aiWorkflowExecution: {
@@ -103,6 +104,7 @@ import {
   resumeApprovedExecution,
   sanitiseHookErrorMessage,
   MAX_RECOVERY_ATTEMPTS,
+  getNextScheduleRunAt,
 } from '@/lib/orchestration/scheduling/scheduler';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
@@ -190,6 +192,43 @@ describe('getNextRunAt', () => {
     const next = getNextRunAt('30 14 * * *', base); // 14:30 daily
     expect(next).toBeInstanceOf(Date);
     expect(next!.getTime()).toBeGreaterThan(base.getTime());
+  });
+});
+
+describe('getNextScheduleRunAt', () => {
+  // The maintenance tick's idle gate refuses to skip past what this returns, so
+  // a wrong filter here is the difference between "schedules fire on time" and
+  // "schedules fire up to the gate's cap late".
+  it('returns the earliest enabled schedule strictly after the given time', async () => {
+    const from = new Date('2026-07-30T12:00:00Z');
+    const due = new Date('2026-07-30T12:00:40Z');
+    vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue({
+      nextRunAt: due,
+    } as never);
+
+    await expect(getNextScheduleRunAt(from)).resolves.toEqual(due);
+    expect(prisma.aiWorkflowSchedule.findFirst).toHaveBeenCalledWith({
+      // `gt` not `gte`, `isEnabled` not all rows, and ordered — anything else
+      // either returns a schedule that is already due or skips past one.
+      where: { isEnabled: true, nextRunAt: { gt: from } },
+      orderBy: { nextRunAt: 'asc' },
+      select: { nextRunAt: true },
+    });
+  });
+
+  it('returns null when no enabled schedule is upcoming', async () => {
+    vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue(null);
+
+    await expect(getNextScheduleRunAt(new Date())).resolves.toBeNull();
+  });
+
+  it('returns null when the row has no nextRunAt', async () => {
+    // `nextRunAt` is nullable; a null must read as "no horizon", not crash.
+    vi.mocked(prisma.aiWorkflowSchedule.findFirst).mockResolvedValue({
+      nextRunAt: null,
+    } as never);
+
+    await expect(getNextScheduleRunAt(new Date())).resolves.toBeNull();
   });
 });
 
@@ -291,9 +330,34 @@ describe('processDueSchedules', () => {
         status: 'pending',
         inputData: { topic: 'test' },
         executionTrace: [],
-        userId: 'user_1',
+        // System-owned: a cron tick is not a person acting (#502). The
+        // schedule's author ('user_1' here) stays on the schedule row.
+        // Stamping them here made `onDelete: Cascade` take the whole
+        // organisation's scheduled-run history with them on erasure.
+        userId: null,
+        // Provenance for a row that now has no owner to trace it back
+        // through. The schema documented this value; the scheduler never
+        // wrote it until #502.
+        triggerSource: 'schedule',
       }),
     });
+  });
+
+  it('never attributes a scheduled run to the schedule author', async () => {
+    // Belt-and-braces against a re-regression: `objectContaining` above
+    // would still pass if `userId` were dropped from the payload entirely
+    // and the column defaulted, so read the actual value.
+    const schedule = makeSchedule({ createdBy: 'operator-who-leaves' });
+    vi.mocked(prisma.aiWorkflowSchedule.findMany).mockResolvedValue([schedule] as never);
+    vi.mocked(prisma.aiWorkflowExecution.create).mockResolvedValue({ id: 'exec_1' } as never);
+
+    await processDueSchedules();
+
+    const call = vi.mocked(prisma.aiWorkflowExecution.create).mock.calls[0][0] as {
+      data: { userId: unknown };
+    };
+    expect(call.data).toHaveProperty('userId');
+    expect(call.data.userId).toBeNull();
   });
 
   it('stamps the schedule scope onto the created execution', async () => {
@@ -736,11 +800,14 @@ describe('drainEngine: engine crash path', () => {
           leaseExpiresAt: null,
         },
       });
+      // `userId: null` — the crash payload carries the run's own
+      // attribution, and a scheduled run is system-owned (#502). Hook
+      // subscribers that route by user see a system run as a system run.
       expect(emitHookEvent).toHaveBeenCalledWith('workflow.execution.failed', {
         executionId: 'exec_1',
         workflowId: 'wf_1',
         workflowSlug: 'test-workflow',
-        userId: 'user_1',
+        userId: null,
         error: 'engine boom',
       });
     });
@@ -758,8 +825,8 @@ describe('drainEngine: engine crash path', () => {
           executionId: 'exec_1',
           workflowId: 'wf_1',
           workflowSlug: 'test-workflow',
-          userId: 'user_1',
-          actorUserId: 'user_1',
+          userId: null,
+          actorUserId: null,
           error: 'engine boom',
         })
       );

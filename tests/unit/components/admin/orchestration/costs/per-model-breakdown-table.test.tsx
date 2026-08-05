@@ -47,7 +47,7 @@ describe('PerModelBreakdownTable', () => {
     it('renders $0.00 for a local-tier model', () => {
       // Arrange: a local model in the registry with some spend (cost-tracker logs $0 anyway)
       const rows: CostSummaryModelRow[] = [
-        { model: 'local:generic', monthSpend: 5.5 }, // displaySpend overridden to 0
+        { model: 'local:generic', provider: 'local', monthSpend: 5.5 }, // displaySpend overridden to 0
       ];
       const models: ModelInfo[] = [
         makeModel({
@@ -69,7 +69,9 @@ describe('PerModelBreakdownTable', () => {
     });
 
     it('renders the Local badge text for local-tier models', () => {
-      const rows: CostSummaryModelRow[] = [{ model: 'local:generic', monthSpend: 0 }];
+      const rows: CostSummaryModelRow[] = [
+        { model: 'local:generic', provider: 'local', monthSpend: 0 },
+      ];
       const models: ModelInfo[] = [
         makeModel({
           id: 'local:generic',
@@ -88,7 +90,7 @@ describe('PerModelBreakdownTable', () => {
     it('renders the row with fallback — display for provider and tier when model is unknown', () => {
       // Arrange: row exists but model not in registry
       const rows: CostSummaryModelRow[] = [
-        { model: 'unknown-provider/custom-model', monthSpend: 3.5 },
+        { model: 'unknown-provider/custom-model', provider: 'mystery', monthSpend: 3.5 },
       ];
 
       // Act: pass empty models array so nothing is in the registry
@@ -104,7 +106,9 @@ describe('PerModelBreakdownTable', () => {
 
   describe('non-local model with spend', () => {
     it('renders the model name, provider, and tier for a normal model', () => {
-      const rows: CostSummaryModelRow[] = [{ model: 'claude-sonnet-4-6', monthSpend: 12.5 }];
+      const rows: CostSummaryModelRow[] = [
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', monthSpend: 12.5 },
+      ];
       const models: ModelInfo[] = [
         makeModel({ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic' }),
       ];
@@ -117,6 +121,68 @@ describe('PerModelBreakdownTable', () => {
       expect(screen.getByText('mid')).toBeInTheDocument();
       // Cost displayed
       expect(screen.getByText('$12.50')).toBeInTheDocument();
+    });
+  });
+
+  describe('shared model ids across providers (#436)', () => {
+    it('labels spend with the provider that served it, not a colliding catalogue row', () => {
+      // Arrange — the reported failure: the default matrix seeds `gpt-4o` under
+      // both `openai` and `microsoft`, and the merge appends DB-only rows last,
+      // so a bare-id lookup resolved genuine OpenAI spend to the Azure entry.
+      const rows: CostSummaryModelRow[] = [
+        { model: 'gpt-4o', provider: 'openai', monthSpend: 1.9 },
+      ];
+      const models: ModelInfo[] = [
+        makeModel({ id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', tier: 'mid' }),
+        makeModel({
+          id: 'gpt-4o',
+          name: 'GPT-4o (Azure)',
+          provider: 'microsoft',
+          tier: 'frontier',
+        }),
+      ];
+
+      // Act
+      render(<PerModelBreakdownTable rows={rows} models={models} />);
+
+      // Assert — OpenAI's name and provider, not Microsoft's
+      expect(screen.getByText('GPT-4o')).toBeInTheDocument();
+      expect(screen.queryByText('GPT-4o (Azure)')).not.toBeInTheDocument();
+      expect(screen.getByText('openai')).toBeInTheDocument();
+      expect(screen.queryByText('microsoft')).not.toBeInTheDocument();
+    });
+
+    it('renders one row per provider when both served the same model', () => {
+      const rows: CostSummaryModelRow[] = [
+        { model: 'gpt-4o', provider: 'openai', monthSpend: 1.9 },
+        { model: 'gpt-4o', provider: 'microsoft', monthSpend: 0.4 },
+      ];
+      const models: ModelInfo[] = [
+        makeModel({ id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' }),
+        makeModel({ id: 'gpt-4o', name: 'GPT-4o (Azure)', provider: 'microsoft' }),
+      ];
+
+      render(<PerModelBreakdownTable rows={rows} models={models} />);
+
+      expect(screen.getByText('openai')).toBeInTheDocument();
+      expect(screen.getByText('microsoft')).toBeInTheDocument();
+      expect(screen.getByText('$1.90')).toBeInTheDocument();
+      // `Usd` widens precision under a dollar.
+      expect(screen.getByText('$0.4000')).toBeInTheDocument();
+    });
+
+    it('falls back to the bare id when the cost log provider is not in the catalogue', () => {
+      // A renamed or custom provider: a plausible label beats no label.
+      const rows: CostSummaryModelRow[] = [
+        { model: 'gpt-4o', provider: 'my-proxy', monthSpend: 2 },
+      ];
+      const models: ModelInfo[] = [makeModel({ id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' })];
+
+      render(<PerModelBreakdownTable rows={rows} models={models} />);
+
+      expect(screen.getByText('GPT-4o')).toBeInTheDocument();
+      // The provider column still reports the truth from the cost log.
+      expect(screen.getByText('my-proxy')).toBeInTheDocument();
     });
   });
 

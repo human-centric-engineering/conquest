@@ -1,3 +1,49 @@
+// Contact Form Submissions (Phase 3.5)
+// Stores contact form submissions from the public website
+model ContactSubmission {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  message   String   @db.Text
+  createdAt DateTime @default(now())
+  read      Boolean  @default(false)
+
+  @@index([read, createdAt])
+  @@map("contact_submission")
+}
+
+// Feature Flags (Phase 4.4)
+// Runtime feature toggle system for admin-controlled features
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g., "ENABLE_BETA_FEATURES"
+  enabled     Boolean  @default(false)
+  description String?  @db.Text
+  metadata    Json?    @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String?
+
+  @@index([name])
+  @@map("feature_flag")
+}
+
+// Auth bootstrap marker (issue #278)
+// Singleton row recording that the one-time first-user-is-admin bootstrap has
+// completed. `userCreateBeforeHook` promotes the first human signup on a fresh
+// database to ADMIN; this row makes that promotion fire at most once over the
+// instance's lifetime. Once present, the bootstrap never fires again — even if
+// every human account is later deleted and the live user count returns to zero
+// — closing a re-bootstrap privilege-escalation window. Keyed by a fixed id
+// (AUTH_BOOTSTRAP_ID = "singleton") so at most one row can exist.
+model AuthBootstrap {
+  id          String   @id // always AUTH_BOOTSTRAP_ID ("singleton")
+  completedAt DateTime @default(now())
+
+  @@map("auth_bootstrap")
+}
+
 /// Tracks which seed units have been applied, keyed by unit name.
 ///
 /// Each entry in `prisma/seeds/` is hashed by source content; the runner

@@ -10,7 +10,7 @@
  * - buildURL() with query parameters and filtering
  * - handleResponse() for success and error responses
  * - request() method with different HTTP verbs
- * - apiClient convenience methods (get, post, patch, delete)
+ * - apiClient convenience methods (get, post, put, patch, delete)
  *
  * @see /Users/simonholmes/Documents/Dev/studio/sunrise/lib/api/client.ts
  */
@@ -818,6 +818,70 @@ describe('apiClient.post', () => {
 
     // Assert
     expect(result).toEqual(newUser);
+  });
+});
+
+describe('apiClient.put', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { tags: ['urgent'] } }),
+    });
+    global.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should make PUT request to correct path', async () => {
+    // Arrange & Act
+    await apiClient.put('/api/v1/tasks/123/tags', {
+      body: { tags: ['urgent'] },
+    });
+
+    // Assert
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/v1\/tasks\/123\/tags/),
+      expect.objectContaining({ method: 'PUT' })
+    );
+  });
+
+  it('should serialize the complete replacement body as JSON', async () => {
+    // Arrange — a PUT carries the whole new state, not a delta
+    const body = { tags: ['urgent', 'design'] };
+
+    // Act
+    await apiClient.put('/api/v1/tasks/123/tags', { body });
+
+    // Assert
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: JSON.stringify(body),
+      })
+    );
+  });
+
+  it('should return typed response data', async () => {
+    // Arrange
+    const replaced = { id: '123', tags: ['urgent', 'design'] };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: replaced }),
+    });
+
+    // Act
+    const result = await apiClient.put<{ id: string; tags: string[] }>('/api/v1/tasks/123/tags', {
+      body: { tags: ['urgent', 'design'] },
+    });
+
+    // Assert
+    expect(result).toEqual(replaced);
   });
 });
 

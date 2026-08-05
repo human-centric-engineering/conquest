@@ -95,7 +95,10 @@ const SCHEDULE_ID = 'sched_e2e_1';
 const WORKFLOW_ID = 'wf_e2e_1';
 const WORKFLOW_SLUG = 'crash-flow-wf';
 const EXECUTION_ID = 'cmjbv4i3x00003wsloputgwul'; // valid CUID for status route
-const ADMIN_ID = 'cmjbv4i3x00003wsloputgwul'; // matches execution.userId for ownership check
+// The admin who created the schedule. Since #502 they are NOT the execution's
+// owner — a scheduled run is system-owned (`userId: null`) — so the /status
+// read below exercises the `'system'` access basis rather than `'owner'`.
+const ADMIN_ID = 'cmjbv4i3x00003wsloputgwul';
 
 const VALID_DEFINITION = {
   steps: [{ id: 'step1', type: 'llm_call', config: {} }],
@@ -106,7 +109,7 @@ const VALID_DEFINITION = {
 interface StoredRow {
   id: string;
   workflowId: string;
-  userId: string;
+  userId: string | null;
   status: string;
   inputData: unknown;
   executionTrace: unknown[];
@@ -134,7 +137,7 @@ describe('background workflow crash flow (e2e)', () => {
     storedRow = {
       id: EXECUTION_ID,
       workflowId: WORKFLOW_ID,
-      userId: ADMIN_ID,
+      userId: null,
       status: 'pending',
       inputData: { topic: 'test' },
       executionTrace: [],
@@ -227,7 +230,9 @@ describe('background workflow crash flow (e2e)', () => {
       executionId: EXECUTION_ID,
       workflowId: WORKFLOW_ID,
       workflowSlug: WORKFLOW_SLUG,
-      userId: ADMIN_ID,
+      // The crash payload carries the run's own attribution, so a subscriber
+      // routing alerts by user sees a system run as a system run.
+      userId: null,
       error: 'engine internal failure',
     });
 
@@ -243,8 +248,8 @@ describe('background workflow crash flow (e2e)', () => {
         executionId: EXECUTION_ID,
         workflowId: WORKFLOW_ID,
         workflowSlug: WORKFLOW_SLUG,
-        userId: ADMIN_ID,
-        actorUserId: ADMIN_ID,
+        userId: null,
+        actorUserId: null,
         error: 'engine internal failure',
       })
     );

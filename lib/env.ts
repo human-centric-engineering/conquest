@@ -34,10 +34,17 @@ const serverEnvSchema = z.object({
     message:
       'DATABASE_URL must be a valid PostgreSQL connection string (e.g., postgresql://user:password@localhost:5432/dbname)',
   }),
-  // Per-instance pg pool size (lib/db/client.ts). Optional. On serverless, leave unset — it
-  // defaults to 1 (each warm instance holds one connection behind a transaction pooler; many
-  // instances × a larger pool would exhaust Postgres). On a long-running server raise it (e.g. 10).
-  DATABASE_POOL_MAX: z.coerce.number().int().positive().optional(),
+  DATABASE_POOL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'Maximum pg connections held by this process. Defaults to 10, which suits one ' +
+        'long-running server (docker-compose, Render, Railway). On a function-per-request ' +
+        'platform every warm instance holds its own pool, so set 1 and put a transaction ' +
+        'pooler in front. See .context/environment/database-env.md.'
+    ),
 
   // Authentication (better-auth)
   BETTER_AUTH_URL: z.string().url({
@@ -48,6 +55,19 @@ const serverEnvSchema = z.object({
     message:
       'BETTER_AUTH_SECRET must be at least 32 characters. Generate with: openssl rand -base64 32',
   }),
+
+  // Signup model (see .context/auth/signup-modes.md)
+  SIGNUP_MODE: z
+    .enum(['open', 'invite_only'])
+    .default('open')
+    .describe(
+      'Who may create an account. "open" (default) = anyone may sign up, the right default ' +
+        'for a starter template. "invite_only" = accounts are only created by accepting an ' +
+        'admin invitation; both the email/password endpoint and un-invited OAuth signup are ' +
+        'refused. The first human on an empty database may still sign up (and becomes ADMIN) ' +
+        'so a fresh deployment has an operator to send invitations — that window closes ' +
+        'permanently once any human exists. See lib/auth/signup-mode.ts.'
+    ),
 
   // OAuth Providers (optional)
   GOOGLE_CLIENT_ID: z.string().optional(),
@@ -88,6 +108,20 @@ const serverEnvSchema = z.object({
         'silently run unscoped queries.'
     ),
 
+  // Capability authorization model (see lib/orchestration/capabilities/dispatcher.ts)
+  CAPABILITY_BINDING_MODE: z
+    .enum(['permissive', 'strict'])
+    .default('permissive')
+    .describe(
+      'How the capability dispatcher treats a MISSING `AiAgentCapability` row. ' +
+        '"permissive" (default) synthesizes a default-allow binding, so deleting a grant does ' +
+        'NOT revoke a capability — it widens it, by dropping any customConfig pin. Revoke by ' +
+        'setting isEnabled:false and keeping the row. "strict" makes a missing row deny instead. ' +
+        'Strict is opt-in because it retroactively revokes every capability an agent relied on ' +
+        'implicitly, including the mcp-system agent, which dispatches built-ins with no pivot ' +
+        'rows in a default install — audit AiAgentCapability before enabling it.'
+    ),
+
   // Logging Configuration (optional)
   LOG_LEVEL: z
     .enum(['debug', 'info', 'warn', 'error'])
@@ -111,6 +145,19 @@ const serverEnvSchema = z.object({
     .describe(
       'Emit one structured access-log line per request from the proxy (requestId, visitorId, ' +
         'method, path). Default OFF — opt in with "true" to make navigation visible server-side.'
+    ),
+
+  // Internal self-calls (optional)
+  INTERNAL_API_URL: z
+    .string()
+    .url({ message: 'INTERNAL_API_URL must be a valid URL (e.g., http://127.0.0.1:3000)' })
+    .optional()
+    .describe(
+      "Base URL server components use to call this app's own API (lib/api/server-fetch.ts). " +
+        'Defaults to loopback in development and BETTER_AUTH_URL otherwise. Set it when the ' +
+        'public URL is not reachable from inside the server — e.g. a local reverse proxy whose ' +
+        'TLS certificate Node does not trust, or a private network where the public hostname ' +
+        'resolves elsewhere.'
     ),
 
   // Security Configuration (optional)

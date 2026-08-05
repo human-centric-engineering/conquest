@@ -75,8 +75,11 @@ export function constraintExists(constraintName: string, predicateContains?: str
 }
 
 /**
- * Existence probe by column name in information_schema.columns. Used for
- * GENERATED columns (e.g. the tsvector column on ai_knowledge_chunk).
+ * Existence probe by column name in information_schema.columns.
+ *
+ * For a column that must be `GENERATED ALWAYS`, use `generatedColumnExists`
+ * instead — this probe only asks whether a column of that name is present, and
+ * a plain column of the same name satisfies it while never being populated.
  */
 export function columnExists(tableName: string, columnName: string): Probe {
   return async () => {
@@ -87,6 +90,44 @@ export function columnExists(tableName: string, columnName: string): Probe {
         AND column_name = ${columnName}
     `;
     return { ok: Number(rows[0]?.count ?? 0n) === 1 };
+  };
+}
+
+/**
+ * Existence probe for a column that MUST be `GENERATED ALWAYS AS (...) STORED`.
+ *
+ * Prefer this over `columnExists` for generated columns. A migration that
+ * dropped the column and recreated it as a plain column of the same type leaves
+ * a row in `information_schema.columns`, so `columnExists` passes and the drift
+ * check reports green — while the column is never populated again.
+ *
+ * That failure is worse than a dropped index. A missing index degrades a query
+ * to a sequential scan: slow, but correct. A generated column that stopped
+ * being generated means every row written after the migration holds NULL, so
+ * the feature reading it silently returns nothing for new data while continuing
+ * to return correct results for old data. It reads as "the system doesn't know
+ * about recent content" — easy to misdiagnose as an ingestion bug.
+ *
+ * `information_schema.columns.is_generated` is standard SQL and returns
+ * `'ALWAYS'` or `'NEVER'`, so there is no version sensitivity here.
+ */
+export function generatedColumnExists(tableName: string, columnName: string): Probe {
+  return async () => {
+    const rows = await prisma.$queryRaw<Array<{ is_generated: string | null }>>`
+      SELECT is_generated
+      FROM information_schema.columns
+      WHERE table_name = ${tableName}
+        AND column_name = ${columnName}
+    `;
+    const isGenerated = rows[0]?.is_generated;
+    if (!isGenerated) return { ok: false, note: 'column missing entirely' };
+    if (isGenerated !== 'ALWAYS') {
+      return {
+        ok: false,
+        note: `column exists but is not GENERATED — saw is_generated="${isGenerated}". It will never be populated.`,
+      };
+    }
+    return { ok: true };
   };
 }
 

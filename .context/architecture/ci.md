@@ -1,7 +1,7 @@
 # Continuous Integration
 
 How Sunrise's GitHub Actions pipeline works, how it adapts to public vs private
-repos, and the one knob a fork may want to flip. The pipeline is designed to be
+repos, and the two knobs a fork may want to flip. The pipeline is designed to be
 **correct and fast on both** the public Sunrise repo (free Actions minutes,
 4-core/16GB runners) and private forks (capped minutes, 2-core/7GB runners).
 
@@ -73,10 +73,10 @@ These help both repo types and cost nothing, so they're always on:
   files change (`Dockerfile`, `package.json`, `next.config.*`, …); on push to
   `main` it always runs as the production-image gate.
 
-### The one knob: `CI_TEST_SCOPE`
+### Knob 1: `CI_TEST_SCOPE`
 
-The only choice that genuinely differs by repo economics is **how much test work
-runs on a PR**. Controlled by the repository variable `CI_TEST_SCOPE`
+The choice that most differs by repo economics is **how much test work runs on a
+PR**. Controlled by the repository variable `CI_TEST_SCOPE`
 (Settings → Secrets and variables → Actions → Variables):
 
 | Value                    | PR branches                                      | push to `main`                | For                                     |
@@ -103,6 +103,34 @@ gh variable set CI_TEST_SCOPE --body changed
 # Going to production — restore the strong PR gate:
 gh variable set CI_TEST_SCOPE --body full   # (or just delete the variable)
 ```
+
+### Knob 2: `CI_NODE_HEAP_MB`
+
+The workflow raises Node's heap **cap** globally (a ceiling, not a reservation —
+harmless on a 16GB public runner, necessary on a 7GB private-fork runner where
+Node's default caps near ~2GB):
+
+```yaml
+NODE_OPTIONS: '--max-old-space-size=${{ vars.CI_NODE_HEAP_MB || 5120 }}'
+```
+
+**The symptom is the hard part.** 5120 is sized for base Sunrise. A fork with a
+meaningful amount of added code can push type-aware ESLint (or `tsc` /
+`next build`) past it, and the job dies with **exit 134** — SIGABRT, i.e. the
+allocator aborting. There is no "out of memory" message and no stack pointing at
+memory; it reads like a crashed toolchain. If a job fails with exit 134 and no
+diagnostic, raise this variable before investigating anything else.
+
+```bash
+# Fork whose lint job OOMs at the default:
+gh variable set CI_NODE_HEAP_MB --body 8192
+```
+
+Setting it as a repo variable rather than editing `ci.yml` matters: an edit to
+the workflow file is reverted by every upstream sync, so the fork rediscovers the
+same opaque failure each time. Keep the value at or below the runner's physical
+memory — a cap above available RAM just moves the failure from a clean abort to
+the OOM killer.
 
 ## Private-fork correctness (GHAS-dependent jobs)
 
