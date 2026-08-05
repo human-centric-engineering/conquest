@@ -58,13 +58,20 @@ These help both repo types and cost nothing, so they're always on:
   strategy keys on mtime, which a fresh CI checkout resets — so the restored
   cache never hit and lint re-ran fully every time (~220s). Content hashing fixes
   that (lint ~220s→~2s, format ~62s→~8s warm).
-- **Raised Node heap** — `NODE_OPTIONS=--max-old-space-size=5120` (workflow-level)
-  and `--max-old-space-size=4096` in the Dockerfile `builder` stage. It's a
-  **cap, not an allocation**: never approached on a 16GB runner, but it stops
-  `tsc`/`next build` OOMing (exit 134) on a 7GB runner where Node's default heap
-  caps near ~2GB. The Dockerfile cap lives in the `builder` stage only — the
+- **Raised Node heap** — `NODE_OPTIONS=--max-old-space-size=${{ vars.CI_NODE_HEAP_MB || 5120 }}`
+  (workflow-level), and the same value forwarded to the Dockerfile `builder`
+  stage as the `NODE_HEAP_MB` build arg (default `4096` when built outside CI).
+  It's a **cap, not an allocation**: never approached on a 16GB runner, but it
+  stops `tsc`/`next build` OOMing (exit 134) on a 7GB runner where Node's default
+  heap caps near ~2GB. The Dockerfile cap lives in the `builder` stage only — the
   `runner` stage is a fresh `FROM base` and doesn't inherit it, so production
   runtime memory is unchanged.
+  **The workflow-level `env` does not reach the image build** — `next build` runs
+  inside the container with its own heap cap, so the build arg is the only way
+  the knob crosses that boundary. A fork that raises `CI_NODE_HEAP_MB` because
+  lint OOMs, but leaves the Docker build at 4096, gets a green board except for
+  `Docker Build` failing on `Ineffective mark-compacts near heap limit` during
+  the `Running TypeScript` phase — the two must move together.
 - **Sharded tests** — the full suite runs as a 4-way `vitest --shard` matrix
   (~3.3× faster wall-clock). N=4 was the sweet spot in benchmarking; N=8 hit
   per-shard overhead (each shard re-pays checkout + `npm ci` + DB setup).
