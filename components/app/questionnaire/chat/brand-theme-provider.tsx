@@ -89,6 +89,9 @@ export function BrandThemeProvider({
   const isConquest = !theme.hasBrandIdentity;
   // Either mark anchors the left of the band, so the title anchors opposite it.
   const hasMark = hasLogo || isConquest;
+  // The band paints a background of its own (the client's surface, or the ConQuest band tone)
+  // rather than sitting transparent on the canvas — which is what makes rounding it visible.
+  const paintsSurface = hasSurface || isConquest;
 
   const title = header?.title?.trim() ?? '';
   const round = header?.round ?? null;
@@ -123,7 +126,13 @@ export function BrandThemeProvider({
           <div
             role="img"
             aria-label={title ? `${title} banner` : 'Questionnaire banner'}
-            className="aspect-[4/1] w-full shrink-0 bg-cover bg-center bg-no-repeat"
+            className={cn(
+              'aspect-[4/1] w-full shrink-0 bg-cover bg-center bg-no-repeat',
+              // Same radius as the conversation card below. Rounds the bottom too only when the
+              // banner is the whole header — the title strip under it is transparent and closes
+              // on a hairline, so a curve at that seam would read as two stacked cards.
+              title ? 'rounded-t-xl' : 'rounded-xl'
+            )}
             style={{ backgroundImage: 'var(--app-banner-url)' }}
           />
           {title && (
@@ -164,6 +173,11 @@ export function BrandThemeProvider({
           <header
             className={cn(
               'flex shrink-0 items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6',
+              // Matches the conversation card's own `rounded-xl` below it, so the band reads as
+              // part of the same composition rather than a full-bleed strip laid over it. Only
+              // when the band actually paints something — rounding a transparent box with a
+              // hairline rule under it would just bend the ends of the rule.
+              paintsSurface && 'rounded-xl',
               // No surface → a hairline rule separates the band from the canvas below.
               !hasSurface && 'border-b',
               // Client surface absent and no ConQuest band tone → the neutral canvas.
