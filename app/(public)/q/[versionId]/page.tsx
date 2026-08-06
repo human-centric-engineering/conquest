@@ -19,6 +19,7 @@ import {
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { ResumeByRefEntry } from '@/components/app/questionnaire/chat/resume-by-ref-entry';
+import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
 
 // Display serif for the ConQuest wordmark, shown only in the admin "Preview as
@@ -111,7 +112,7 @@ export default async function PublicQuestionnairePage({
 
   return (
     <div
-      className={`${display.variable} container mx-auto flex h-[calc(100dvh-9rem)] max-w-6xl flex-col px-4 py-6`}
+      className={`${display.variable} ${RESPONDENT_SHELL} flex h-[calc(100dvh-9rem)] flex-col px-4 py-6`}
     >
       {/* Admin "Preview as respondent" chrome — the ConQuest signature (mirroring the admin
           surface) plus a slim meta strip above the brand surface. It's admin meta, not the
@@ -154,15 +155,16 @@ export default async function PublicQuestionnairePage({
             inlineCorrectionEnabled={inlineCorrectionEnabled}
             welcomeCopy={theme.welcomeCopy}
             resumeEnabled={resumeEnabled}
+            // Handed down as a NODE rather than a flag: it needs the resolved theme (the dialog
+            // portals to `document.body`, outside this provider's wrapper, so it would otherwise
+            // open platform-coloured on a white-labelled questionnaire), and the workspace — not
+            // the page — knows which existing row can carry it without costing a line of its own.
+            resumeByRef={
+              showResumeByRef ? (
+                <ResumeByRefEntry versionId={versionId} brandStyle={themeToCssVariables(theme)} />
+              ) : undefined
+            }
           />
-          {showResumeByRef && (
-            <div className="mt-3 flex shrink-0 justify-center">
-              {/* The brand vars are handed over explicitly: this control opens a portalled dialog,
-                  which lands outside the provider's wrapper and would otherwise lose the client's
-                  colours. */}
-              <ResumeByRefEntry versionId={versionId} brandStyle={themeToCssVariables(theme)} />
-            </div>
-          )}
         </BrandThemeProvider>
       </div>
     </div>

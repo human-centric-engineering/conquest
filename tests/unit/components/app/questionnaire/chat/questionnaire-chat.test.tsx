@@ -132,6 +132,41 @@ describe('QuestionnaireChat', () => {
     expect(bubble.className).not.toMatch(/\btext-(xs|sm|base|lg|xl)\b/);
   });
 
+  /**
+   * The reading measure is deliberately NOT a fixed `max-w-*`: it is `.cq-chat-measure`, sized as a
+   * multiple of the respondent's text scale and the viewport scale, so a wider display grows the
+   * conversation rather than running its lines longer.
+   *
+   * Two failure modes this pins, both of which look fine in isolation:
+   *  - the transcript regains a fixed `max-w-2xl`, which re-pins the measure and reintroduces
+   *    100+ character lines the moment either scale factor rises;
+   *  - the composer and the transcript stop sharing one measure and drift out of alignment, which
+   *    only shows up at a text size or viewport nobody happened to open.
+   *
+   * @see .context/app/questionnaire/respondent-layout.md
+   */
+  it('measures the transcript and the composer with one scale-aware width, not a fixed max-w', () => {
+    hookReturn = makeReturn({ turns: [{ role: 'assistant', content: 'What is your name?' }] });
+    const { container } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    const measured = container.querySelectorAll('.cq-chat-measure');
+    // Exactly two: the transcript column and the composer beneath it. They must be the SAME class
+    // so no future edit can widen one without the other.
+    expect(measured).toHaveLength(2);
+
+    const transcript = container.querySelector('.cq-chat-scale');
+    expect(transcript).not.toBeNull();
+    expect(transcript?.classList.contains('cq-chat-measure')).toBe(true);
+
+    // The composer is the measured element that holds the input, not the transcript.
+    const composer = Array.from(measured).find((el) => el.querySelector('textarea'));
+    expect(composer).toBeDefined();
+
+    for (const el of measured) {
+      expect(el.className).not.toMatch(/\bmax-w-/);
+    }
+  });
+
   it('shows a thinking indicator while streaming with no text yet', () => {
     hookReturn = makeReturn({ streaming: true, streamingText: '', canSend: false });
     render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);

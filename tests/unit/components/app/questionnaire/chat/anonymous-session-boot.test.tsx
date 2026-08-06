@@ -603,6 +603,57 @@ describe('AnonymousSessionBoot', () => {
         expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
       });
     });
+
+    it('still offers cross-device resume on the error screen', async () => {
+      // A failed create is exactly when a returning respondent needs the code entry most: the page
+      // auto-creates before anything else, so a second-device return lands here first. Several
+      // failures that reach this screen (per-IP session-start 429, version no longer launched,
+      // accessMode flipped to invitation_only) leave resume-by-ref working — so dropping the
+      // control here would strand a respondent whose session is alive and whose code resolves,
+      // with nothing but a "Try again" that reloads into the same failing create.
+      fakeFetch.mockResolvedValue(
+        jsonResponse({ success: false, error: { message: 'Too many requests.' } }, false)
+      );
+
+      render(
+        <AnonymousSessionBoot
+          versionId={VERSION_ID}
+          resumeByRef={<button type="button">Continue on this device</button>}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/couldn.*t start the questionnaire/i)).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: /continue on this device/i })).toBeInTheDocument();
+    });
+
+    it('omits cross-device resume on the archived screen, where no code can resolve', async () => {
+      // `archived` is only reached when the version's `archivedAt` is set, which
+      // `resolveAnonymousResumeByRef` rejects outright — so the control would resolve nothing here
+      // however valid the code. Offering it would only invite a dead end.
+      fakeFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            success: false,
+            error: { code: 'VERSION_ARCHIVED', message: 'This questionnaire has been archived.' },
+          },
+          false
+        )
+      );
+
+      render(
+        <AnonymousSessionBoot
+          versionId={VERSION_ID}
+          resumeByRef={<button type="button">Continue on this device</button>}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('This questionnaire has been archived')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /continue on this device/i })).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------

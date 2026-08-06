@@ -130,4 +130,14 @@ describe('SessionLifecycleBar', () => {
     renderBar({ download: <button type="button">Download transcript</button> });
     expect(screen.getByRole('button', { name: /download transcript/i })).toBeInTheDocument();
   });
+
+  it('renders the leading slot, and opens the strip for it even with nothing else to say', () => {
+    // This is the fallback home for cross-device resume when the version has no intro splash to
+    // carry it — so a leading slot has to be enough on its own to bring the strip into existence.
+    renderBar({
+      view: null,
+      leading: <button type="button">Enter your code</button>,
+    });
+    expect(screen.getByRole('button', { name: /enter your code/i })).toBeInTheDocument();
+  });
 });

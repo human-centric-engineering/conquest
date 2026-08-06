@@ -15,13 +15,22 @@
  * themed confirmation, not the chat. The completion *offer* (a Submit affordance) appears
  * above the chat the moment `GET …/status` reports the session is ready.
  *
- * Layout: a single readable chat column with a fixed-width panel beside it on `lg`+;
+ * Layout: a single readable chat column with the answer panel beside it on `lg`+, both tracks
+ * widening with the viewport (`RESPONDENT_SPLIT`);
  * below `lg` the panel is hidden and the chat is full-width (the F7.1 experience). Both
  * sit under the page's `BrandThemeProvider`, so they inherit the brand CSS vars with no
  * prop-drilling.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, ClipboardList, Drama, ListChecks, MessageSquare } from 'lucide-react';
 
@@ -84,6 +93,7 @@ import { StitchedContinuation } from '@/components/app/questionnaire/experiences
 import { useStitchedHistory } from '@/lib/hooks/use-stitched-history';
 import type { RunPollState } from '@/lib/app/questionnaire/experiences/run/types';
 import { API } from '@/lib/api/endpoints';
+import { RESPONDENT_SPLIT } from '@/lib/app/questionnaire/layout';
 
 /**
  * Which surface the carousel is showing. `intro`, `capture`, and `persona` are pre-chat "gates" that
@@ -182,6 +192,14 @@ export interface SessionWorkspaceProps {
    * PII-free and never gates. The read-only admin viewer omits it.
    */
   capture?: ResolvedSessionCapture | null;
+  /**
+   * Cross-device resume affordance ("already started on another device? enter your code"), supplied
+   * by the public page. It has no row of its own on purpose: it rides the intro splash's existing
+   * footer, and — when the version disables the intro, so there is no such footer — the lifecycle
+   * strip instead. Either way it costs zero vertical space and stays inside the surface, unlike a
+   * strip below it (which overflows the page's fixed height budget onto the site footer).
+   */
+  resumeByRef?: ReactNode;
 }
 
 // Static label/icon lookup for the carousel toggle — module-scoped so it isn't
@@ -215,6 +233,7 @@ export function SessionWorkspace({
   intro = null,
   personas = null,
   capture = null,
+  resumeByRef,
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
@@ -883,7 +902,10 @@ export function SessionWorkspace({
   ) : null;
 
   const chatSurface = (
-    <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[1fr_22rem] xl:grid-cols-[1fr_26rem]">
+    // The conversation ⇄ panel split. Track widths ladder up with the viewport (see
+    // RESPONDENT_SPLIT) so a large display gives the panel real room instead of pouring every
+    // extra pixel into the transcript's line length.
+    <div className={cn('grid h-full min-h-0', RESPONDENT_SPLIT)}>
       <div className="flex min-h-0 flex-col gap-3">
         {completionAffordance}
         <QuestionnaireChat
@@ -953,6 +975,7 @@ export function SessionWorkspace({
           showCapture ? 'Continue' : showPersona ? 'Select your interviewer' : undefined
         }
         onProceed={() => goToView(views.find((v) => v !== 'intro') ?? 'chat')}
+        footerAside={resumeByRef}
       />
     ) : null;
 
@@ -1051,6 +1074,9 @@ export function SessionWorkspace({
           ) : undefined
         }
         trailing={trailingControls}
+        // Fallback home for the cross-device entry: with the intro disabled there is no splash
+        // footer to carry it, and the strip is the only other row that costs it nothing.
+        leading={showIntro ? undefined : resumeByRef}
       />
 
       <AnswerReviewDrawer

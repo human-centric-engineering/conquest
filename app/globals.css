@@ -265,9 +265,54 @@
      stored preference; 1 reproduces the historical `text-sm`, so an untouched session is unchanged.
      Applied to the transcript wrapper and INHERITED by the bubbles, which is why they carry no
      font-size class of their own — one property drives the whole conversation. Chrome/UI text on the
-     strip keeps its explicit `text-xs`, so the control never resizes itself. */
+     strip keeps its explicit `text-xs`, so the control never resizes itself.
+
+     `--cq-chat-viewport-scale` is the SECOND, orthogonal factor (below): how much the conversation
+     grows because the display is large, as opposed to because the respondent asked for bigger text.
+     The two multiply, so a respondent who bumped the size up on a laptop keeps that same relative
+     bump on a 27" monitor rather than having one setting override the other. */
   .cq-chat-scale {
-    font-size: calc(0.875rem * var(--cq-chat-scale, 1));
+    font-size: calc(0.875rem * var(--cq-chat-scale, 1) * var(--cq-chat-viewport-scale, 1));
+  }
+
+  /* The transcript's reading measure. A conversation on a wide display should get BIGGER, not
+     LONGER-LINED: line length is what makes prose hard to read, and 42rem at the base size is
+     already ~95 characters — the top of the comfortable range. So the measure is expressed as a
+     multiple of the same two scale factors that drive the font size, which holds the characters-
+     per-line constant while the whole surface grows to suit the screen. At both factors = 1 this
+     resolves to 42rem, i.e. exactly the `max-w-2xl` it replaced.
+
+     `width: 100%` keeps it fluid inside anything narrower (the mobile card, the admin session
+     drawer) — the max-width only ever caps, never forces. */
+  .cq-chat-measure {
+    width: 100%;
+    max-width: calc(
+      var(--cq-chat-measure, 42rem) * var(--cq-chat-scale, 1) * var(--cq-chat-viewport-scale, 1)
+    );
+    margin-inline: auto;
+  }
+
+  /* The viewport half of the scale, set on the respondent shell so both the transcript and the
+     composer inherit it. Deliberately gentle — the aim is a conversation that reads comfortably at
+     the greater viewing distance a large monitor implies, not a blown-up demo screen. Below 1536px
+     nothing changes at all, so every existing laptop layout is untouched. */
+  .cq-respondent-shell {
+    --cq-chat-viewport-scale: 1;
+  }
+  @media (min-width: 1536px) {
+    .cq-respondent-shell {
+      --cq-chat-viewport-scale: 1.08;
+    }
+  }
+  @media (min-width: 1920px) {
+    .cq-respondent-shell {
+      --cq-chat-viewport-scale: 1.16;
+    }
+  }
+  @media (min-width: 2400px) {
+    .cq-respondent-shell {
+      --cq-chat-viewport-scale: 1.22;
+    }
   }
   /* `prose-sm` pins its own root font-size, which would otherwise ignore the scale. Re-inherit it:
      Tailwind Typography sizes children in `em`, so the whole Markdown block — headings, lists, code

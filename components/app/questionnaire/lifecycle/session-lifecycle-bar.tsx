@@ -40,6 +40,12 @@ export interface SessionLifecycleBarProps {
    */
   trailing?: ReactNode;
   /**
+   * Left-cluster slot, beside the anonymity indicator — for session-level affordances that belong to
+   * the surface rather than the conversation (today: cross-device resume, only when the version
+   * disables the intro splash and so has no footer to carry it). Present → the strip always renders.
+   */
+  leading?: ReactNode;
+  /**
    * The transcript-download control (F7.6), rendered in the right cluster beside the ref chip.
    * When present the strip always renders so the respondent can take their conversation away
    * at any point in the session.
@@ -58,6 +64,7 @@ export function SessionLifecycleBar({
   onPause,
   onResume,
   trailing,
+  leading,
   download,
   className,
 }: SessionLifecycleBarProps) {
@@ -75,7 +82,7 @@ export function SessionLifecycleBar({
   // The right cluster splits into two wrap-units: an info chip and the action controls.
   const hasInfo = ref !== null || download != null;
   const hasActions = actionError !== null || showResume || showPause || trailing != null;
-  const hasStrip = anonymous || showCostHint || hasInfo || hasActions;
+  const hasStrip = anonymous || showCostHint || hasInfo || hasActions || leading != null;
   if (!showProgress && !hasStrip) return null;
 
   return (
@@ -96,6 +103,8 @@ export function SessionLifecycleBar({
               Responses are anonymous
             </span>
           )}
+
+          {leading}
 
           {showCostHint && (
             <span role="status" className="inline-flex items-center gap-1.5">

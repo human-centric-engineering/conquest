@@ -64,8 +64,36 @@ reloads straight into the conversation.
   transition into a complete code) — someone copying a code off a second screen is looking at that
   screen, not this one. The button stays for keyboard and retry. Success latches a "found it" state
   before the reload, so the navigation does not read as a hang.
-- The public-page entry opens a **dialog**, not an inline expansion: the footer strip sits against
-  the bottom of the viewport, and the panel is where "where do I find my code?" gets answered. It
+- The public-page entry **owns no row**. `/q/[versionId]` builds the node and passes it down
+  (`AnonymousSessionBoot` → `SessionEntry` → `SessionWorkspace`) as `resumeByRef`; the _workspace_
+  picks the host, because only it knows which surfaces exist:
+  - intro enabled → `QuestionnaireSplash`'s `footerAside`, in the footer's left cluster beside "you
+    can return to this overview anytime";
+  - intro disabled → `SessionLifecycleBar`'s `leading` slot, beside the anonymity indicator.
+    Both are rows that already exist, so the affordance costs zero height either way.
+- **The `error` boot phase renders it too**, below "Try again". The page auto-creates before anything
+  else, so a second-device return hits a failed create _first_ — and several failures that land there
+  leave resume-by-ref working: the session-start 429 is per-IP on a **separate** limiter window, and
+  `resolveAnonymousResumeByRef` checks neither launch status nor `accessMode`. Without it, a
+  respondent whose session is alive and whose code resolves gets only a reload button that re-runs
+  the same failing create. The other phases omit it deliberately: `creating` is a transient spinner,
+  `welcome-back` carries its own in-place form, and `archived` implies `archivedAt` is set — which
+  the resolver rejects outright, so no code could resolve there anyway.
+- **Do not put it back below the conversation.** As a sibling under `BrandThemeProvider` it escaped
+  the page's `h-[calc(100dvh-9rem)]` budget and painted over the site footer; bounded inside the
+  provider it merely traded that for a whole line of the conversation's height, spent on a control
+  almost no one needs. The same reasoning applies to anything else added under the surface here.
+- The trigger is **typographic, not a button**, and **two stacked centred lines**: a muted question
+  above, one underlined accent action word below. An outlined pill in that footer reads as a rival
+  call-to-action to "Begin your conversation" sitting right beside it; set on ONE line it runs to a
+  ~330px sentence competing with the other footnote and the CTA for the same row. Stacked, the block
+  is half as wide, needs nothing hidden at `sm` (so the accessible name is never abridged on the
+  phones most likely to _be_ the second device), and the action word lands on its own line.
+- The splash footer is a **three-slot row**: note (`flex-1`, left), aside (`shrink-0`, centre), CTA
+  (`flex-1`, right). The flanking `flex-1`s are what put the aside on the row's true centre — hung
+  off the end of the note instead, it reads as an afterthought bolted to the footnote.
+- The public-page entry opens a **dialog**, not an inline expansion: it sits in a dense footer row,
+  and the panel is where "where do I find my code?" gets answered. It
   portals to `document.body`, outside `BrandThemeProvider`, so `/q/[versionId]` hands it the
   client's CSS variables explicitly (`brandStyle={themeToCssVariables(theme)}`) — without that a
   white-labelled questionnaire opens a platform-coloured panel. The welcome-back gate expands the

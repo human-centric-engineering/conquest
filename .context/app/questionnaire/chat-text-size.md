@@ -19,6 +19,7 @@ can switch off is not an accessibility affordance.
 | Control             | `components/app/questionnaire/chat/chat-text-size.tsx`                                               |
 | State + persistence | `components/app/questionnaire/session-workspace.tsx` (`useLocalStorage`, sets `--cq-chat-scale`)     |
 | Rendering           | `app/globals.css` → `.cq-chat-scale` utility                                                         |
+| Viewport factor     | `app/globals.css` → `.cq-respondent-shell` media queries (`--cq-chat-viewport-scale`)                |
 | Transcript wrapper  | `components/app/questionnaire/chat/questionnaire-chat.tsx` (the `cq-chat-scale` div)                 |
 | Ladder tests        | `tests/unit/lib/app/questionnaire/chat/text-scale.test.ts`                                           |
 | Control tests       | `tests/unit/components/app/questionnaire/chat/chat-text-size.test.tsx`                               |
@@ -53,12 +54,22 @@ control emits a `'up' | 'down'` direction rather than an index for exactly this 
 One inherited CSS custom property, not a class swap per element:
 
 ```
-SessionWorkspace root   style={{ '--cq-chat-scale': 1.15 }}
-  └─ transcript wrapper .cq-chat-scale  →  font-size: calc(0.875rem * var(--cq-chat-scale, 1))
-       ├─ UserBubble          (no font-size class — inherits)
-       ├─ typewriter <p>      (no font-size class — inherits)
-       └─ .prose .prose-sm    (font-size: inherit, see below)
+respondent shell        .cq-respondent-shell  →  --cq-chat-viewport-scale: 1 | 1.08 | 1.16 | 1.22
+  └─ SessionWorkspace root   style={{ '--cq-chat-scale': 1.15 }}
+       └─ transcript wrapper .cq-chat-scale
+              font-size: calc(0.875rem * var(--cq-chat-scale) * var(--cq-chat-viewport-scale))
+            ├─ UserBubble          (no font-size class — inherits)
+            ├─ typewriter <p>      (no font-size class — inherits)
+            └─ .prose .prose-sm    (font-size: inherit, see below)
 ```
+
+**Two factors, deliberately multiplied rather than merged.** `--cq-chat-scale` is what
+the respondent asked for; `--cq-chat-viewport-scale` is what the display calls for (see
+[`respondent-layout.md`](./respondent-layout.md)). Multiplying them means someone who
+bumped the size up on a laptop keeps that same _relative_ bump when they open the same
+journey on a 27" monitor — neither setting silently overrides the other. Below 1536px
+the viewport factor is `1`, so on every laptop and tablet this formula is byte-identical
+to the original single-factor one.
 
 The var is set on the `SessionWorkspace` root because that is the common ancestor of the
 strip control and the chat. Only the transcript opts in, so the strip's own `text-xs`

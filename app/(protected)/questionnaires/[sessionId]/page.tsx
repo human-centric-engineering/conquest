@@ -25,6 +25,7 @@ import {
 } from '@/lib/app/questionnaire/types';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
+import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
 
 /**
  * Map the SSR-loaded session status to the surface's initial chat status. A budget-paused
@@ -164,7 +165,7 @@ export default async function QuestionnaireSessionPage({
       });
 
   return (
-    <div className="mx-auto h-[calc(100vh-12rem)] max-w-6xl">
+    <div className={`${RESPONDENT_SHELL} h-[calc(100vh-12rem)]`}>
       <BrandThemeProvider theme={theme} header={bandHeader}>
         <SessionEntry
           intro={intro}
