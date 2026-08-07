@@ -63,7 +63,7 @@ without any app-layer filter.
 
 ## Model inventory
 
-The schema has **60 models**. Before adding `orgId` anywhere, classify them —
+The schema has **61 models**. Before adding `orgId` anywhere, classify them —
 **a `createdBy` FK does NOT make a model tenant-owned.** Three categories:
 
 ### Tenant-owned — needs isolation
@@ -110,8 +110,8 @@ Two of them are not columns you can add an `orgId` to at all:
 cache — is written on "there is exactly one row". And `AiProviderConfig` keys
 its credential off `apiKeyEnvVar`, the _name_ of a process environment
 variable, which has no per-tenant form. Before scoping either, read
-[`multi-tenancy-research.md` §5B](./multi-tenancy-research.md#5b-provider-credentials-and-per-tenant-ai-configuration)
-— it compares the four credential models and names the platform-tier seams
+[`multi-tenancy-research.md` §5C](./multi-tenancy-research.md#5c-provider-credentials-and-per-tenant-ai-configuration)
+— it compares six credential models and names the platform-tier seams
 (credential resolver, cache/breaker re-keying) that keep them reachable.
 
 ### System / cross-tenant — no tenant owner
@@ -278,18 +278,24 @@ declaration.
 - [`.context/privacy/data-erasure.md`](../privacy/data-erasure.md) — the
   cascade/`SetNull` `onDelete` graph built for GDPR erasure **is** the
   org-delete dependency graph a fork needs for tearing down a tenant.
-- [`multi-tenancy-research.md` §5C](./multi-tenancy-research.md#5c-the-prerequisite-5a-and-5b-assume-and-the-architecture-they-dont-consider)
-  — **read before starting any retrofit.** Two things this playbook assumes: a
-  tenant context to scope by (there is no `AsyncLocalStorage` anywhere, so
-  `withOrg(orgId, …)` has nowhere to get its `orgId` outside a route handler),
-  and that pooled-with-RLS is the right topology. The second is a real choice —
-  Sunrise's single-tenant install is already a well-formed cell, and for few
-  large tenants the cell model gives away most of what this retrofit builds.
-- [`multi-tenancy-research.md` §5A](./multi-tenancy-research.md#5a-data-handling-residency-and-per-tenant-storage-flexibility)
+- [`multi-tenancy-research.md` §14](./multi-tenancy-research.md#14-the-recommendation)
+  — **the position, rather than the analysis.** Start here if you want the
+  short answer before the survey.
+- [`multi-tenancy-research.md` §5A](./multi-tenancy-research.md#5a-topology-and-the-prerequisite-nobody-costed)
+  — **read before starting this retrofit.** Two things this playbook assumes.
+  First, a tenant context to scope by: there is no `AsyncLocalStorage` anywhere,
+  so `withOrg(orgId, …)` has nowhere to get its `orgId` outside a route handler,
+  and background jobs cannot get one at all. Second, that pooled-with-RLS is the
+  right topology — a real three-way choice, not a default. **Schema-per-tenant
+  reuses this playbook's per-transaction `set_config` discipline unchanged while
+  removing plane 2, the `orgId` migration and the policy-coverage burden**; and
+  a cell is what Sunrise already ships.
+- [`multi-tenancy-research.md` §5B](./multi-tenancy-research.md#5b-data-handling-residency-and-storage-flexibility)
   — **read this before promising a tenant their own storage arrangement.** RLS
   covers rows in _this_ database; it says nothing about buckets, regions,
-  customer-managed keys, or a second database. The section grades those as a
-  six-rung ladder with an honest verdict on each.
+  customer-managed keys, a second database, or where inference happens. The
+  section grades those as a six-rung ladder with an honest verdict on each, and
+  points out that most such requests are really portability requests.
 - [`.context/orchestration/retention.md`](../orchestration/retention.md) —
   retention/pruning is per-data-class today; a fork would scope it per-org.
 - [`architecture/overview.md`](./overview.md) — the single-tenant baseline.
