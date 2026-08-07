@@ -12,7 +12,9 @@
  *   - FOOTER — the proceed CTA, pinned outside both scroll regions so it is ALWAYS visible: a long
  *     brief can never push it below the fold. Reads "Continue" once the respondent has actually made
  *     progress (≥1 answer captured) — e.g. someone who slid back to re-read it mid-run — else the
- *     admin/derived begin label. A merely-opened session at 0% still reads "Begin".
+ *     admin/derived begin label. A merely-opened session at 0% still reads "Begin". Its left cluster
+ *     is the surface's footnote line: the "return here anytime" note plus an optional `footerAside`
+ *     (cross-device resume), so those affordances cost no row of their own anywhere else.
  *
  * Inherits the client's brand via the page's `BrandThemeProvider` CSS vars (`--app-accent-color`,
  * `--app-cta-color`, `--app-cta-gradient`), so it reads as the client's own surface. Pressing the
@@ -69,6 +71,13 @@ export interface QuestionnaireSplashProps {
   proceedLabel?: string;
   /** Slide to the conversation and begin (the parent {@link SessionWorkspace} owns the swap). */
   onProceed: () => void;
+  /**
+   * Quiet secondary affordance for the footer's left cluster, beside the "return to this overview"
+   * note (today: cross-device resume). Deliberately a slot in an EXISTING row rather than a strip
+   * of its own — a returning respondent needs it before they begin, and the intro footer is the one
+   * place that costs no vertical space and can't collide with the site footer below the surface.
+   */
+  footerAside?: React.ReactNode;
   className?: string;
 }
 
@@ -77,6 +86,7 @@ export function QuestionnaireSplash({
   inProgress = false,
   proceedLabel,
   onProceed,
+  footerAside,
   className,
 }: QuestionnaireSplashProps) {
   const { copy, background, questionnaireTitle, videoUrl } = intro;
@@ -117,7 +127,11 @@ export function QuestionnaireSplash({
           {/* LEFT — the brief. */}
           <section
             className={cn(
-              'flex flex-col gap-5 px-7 py-8 sm:px-10 lg:min-h-0 lg:overflow-y-auto',
+              // On a very wide shell the two tracks grow past a readable measure, so each block
+              // inside them is capped and left-aligned — the extra width becomes margin rather
+              // than 120-character lines. The section itself stays full-track so the right
+              // panel's tint and the divider still span it.
+              'flex flex-col gap-5 px-7 py-8 sm:px-10 lg:min-h-0 lg:overflow-y-auto 2xl:px-12 2xl:*:max-w-[46rem]',
               reveal
             )}
             style={{ animationFillMode: 'both' }}
@@ -175,7 +189,7 @@ export function QuestionnaireSplash({
           {/* RIGHT — what to expect. A subtly tinted sidebar so it reads as the practical panel. */}
           <section
             className={cn(
-              'flex flex-col gap-6 border-t px-7 py-8 sm:px-10 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l',
+              'flex flex-col gap-6 border-t px-7 py-8 sm:px-10 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l 2xl:px-12 2xl:*:max-w-[34rem]',
               reveal
             )}
             style={{
@@ -251,27 +265,35 @@ export function QuestionnaireSplash({
             aria-hidden
             className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-black/[0.04] to-transparent dark:from-black/20"
           />
-          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-muted-foreground hidden items-center gap-1.5 text-xs sm:flex">
-              <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-              You can return to this overview anytime.
+          {/* Three slots, not two. The note and the CTA each take `flex-1` and anchor opposite
+              edges, so the aside between them sits on the TRUE centre of the row rather than
+              trailing the note — which is what makes it read as its own thing and not an
+              afterthought stuck onto the footnote. Below `sm` the row stacks and the note (already
+              hidden there) drops out, leaving the aside above a full-width CTA. */}
+          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
+            <p className="text-muted-foreground hidden min-w-0 items-center gap-1.5 text-xs sm:flex sm:flex-1">
+              <Undo2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">You can return to this overview anytime.</span>
             </p>
-            <button
-              type="button"
-              onClick={onProceed}
-              className="group focus-visible:ring-ring relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-5 py-2.5 text-sm font-semibold text-[var(--app-on-cta,#fff)] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_-14px_rgba(0,0,0,0.55)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-0 active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none sm:w-auto"
-              style={{ background: CTA_FILL }}
-            >
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent"
-              />
-              <span className="relative">{ctaLabel}</span>
-              <ArrowRight
-                className="relative h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none"
-                aria-hidden="true"
-              />
-            </button>
+            {footerAside && <div className="flex shrink-0 justify-center">{footerAside}</div>}
+            <div className="sm:flex sm:flex-1 sm:justify-end">
+              <button
+                type="button"
+                onClick={onProceed}
+                className="group focus-visible:ring-ring relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl px-5 py-2.5 text-sm font-semibold text-[var(--app-on-cta,#fff)] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_-14px_rgba(0,0,0,0.55)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none active:translate-y-0 active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none sm:w-auto"
+                style={{ background: CTA_FILL }}
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent"
+                />
+                <span className="relative">{ctaLabel}</span>
+                <ArrowRight
+                  className="relative h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
           </div>
         </footer>
       </article>

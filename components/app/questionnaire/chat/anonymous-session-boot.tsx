@@ -20,7 +20,7 @@
  * @see app/api/v1/app/questionnaire-sessions/preview/route.ts
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 
@@ -108,6 +108,18 @@ interface AnonymousSessionBootProps {
    * (sessionStorage only; a return mints a fresh session).
    */
   resumeEnabled?: boolean;
+  /**
+   * Cross-device resume affordance, built by the page (it needs the resolved theme for the dialog's
+   * brand vars) and forwarded to the workspace, which slots it into the intro splash's footer — or
+   * the lifecycle strip when the intro is off. Also rendered on the `error` phase, where a failed
+   * create would otherwise strand a returning respondent with nothing but a reload button.
+   *
+   * The other three phases deliberately omit it: `creating` is a transient spinner; `welcome-back`
+   * carries its own "from another device" path; and on `archived` the version's `archivedAt` is set,
+   * which `resolveAnonymousResumeByRef` rejects outright — so the control would resolve nothing
+   * there however valid the code.
+   */
+  resumeByRef?: ReactNode;
 }
 
 /** Session-create response shape — validated at the fetch boundary (no `as` on the wire). */
@@ -216,6 +228,7 @@ export function AnonymousSessionBoot({
   reasoningPerItemMs,
   inlineCorrectionEnabled = false,
   resumeEnabled = false,
+  resumeByRef,
 }: AnonymousSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'creating' });
   // A gate action (Continue / Start new) is mid-flight — keeps the welcome-back buttons disabled
@@ -440,6 +453,15 @@ export function AnonymousSessionBoot({
         <Button type="button" variant="outline" size="sm" onClick={() => window.location.reload()}>
           Try again
         </Button>
+        {/*
+         * A failed create is exactly when a returning respondent most needs the code entry: the
+         * page auto-creates before anything else, so a second-device return hits this screen first,
+         * and several of the failures that land here (per-IP session-start 429, version no longer
+         * launched, accessMode flipped to invitation_only) leave resume-by-ref working — its
+         * limiter is a separate window and its resolver checks neither launch status nor access
+         * mode. Without this, "Try again" just reloads into the same failing create.
+         */}
+        {resumeByRef && <div className="flex shrink-0 justify-center">{resumeByRef}</div>}
       </div>
     );
   }
@@ -464,6 +486,7 @@ export function AnonymousSessionBoot({
       reasoningDwellMs={reasoningDwellMs}
       reasoningPerItemMs={reasoningPerItemMs}
       inlineCorrectionEnabled={inlineCorrectionEnabled}
+      resumeByRef={resumeByRef}
     />
   );
 }

@@ -16,6 +16,7 @@ import {
   resolveReasoningPlacementForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
+import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
 
 export const metadata: Metadata = {
   title: 'Your conversation',
@@ -103,8 +104,10 @@ export default async function ExperienceRunPage({
     resolveInlineCorrectionForVersion(versionId),
   ]);
 
+  // `px-4` matches the site header's own container padding, so the conversation's left and right
+  // edges line up with the header content rather than sitting inside it.
   return (
-    <div className="mx-auto h-[calc(100vh-8rem)] max-w-6xl">
+    <div className={`${RESPONDENT_SHELL} h-[calc(100vh-8rem)] px-4`}>
       <BrandThemeProvider theme={theme} header={bandHeader}>
         <RunSessionBoot
           sessionId={sessionId}

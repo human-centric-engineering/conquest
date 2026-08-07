@@ -147,6 +147,31 @@ describe('BrandThemeProvider', () => {
       expect(band.style.backgroundColor).toBe('var(--app-surface-color)');
       expect(band.style.color).toBe('var(--app-on-surface)');
     });
+
+    it('rounds the band only when it paints a surface of its own', () => {
+      // A painted band is a block sitting above the conversation card, so it carries the card's
+      // radius. A band that is only a hairline rule is not a block — rounding it would bend the
+      // ends of the rule and nothing else.
+      const painted = render(
+        <BrandThemeProvider theme={{ ...BASE, surfaceColor: '#16243f' }} header={openHeader()}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(painted.container.querySelector('header')?.className).toContain('rounded-xl');
+      painted.unmount();
+
+      const hairline = render(
+        <BrandThemeProvider
+          theme={{ ...BASE, logoUrl: 'https://acme.example/logo.png' }}
+          header={openHeader()}
+        >
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const band = hairline.container.querySelector('header') as HTMLElement;
+      expect(band.className).toContain('border-b');
+      expect(band.className).not.toContain('rounded-xl');
+    });
   });
 
   describe('custom banner (full-bleed band replacement)', () => {
@@ -188,6 +213,27 @@ describe('BrandThemeProvider', () => {
       expect(banner).toBeInTheDocument();
       expect(banner.className).toContain('aspect-[4/1]');
       expect(container.querySelector('[style*="--app-banner-url"]')).toBeTruthy();
+    });
+
+    it('rounds the banner block: top-only when a title strip closes it, all four when alone', () => {
+      const titled = render(
+        <BrandThemeProvider theme={BANNERED} header={openHeader()}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const withTitle = screen.getByRole('img', { name: /banner$/ });
+      expect(withTitle.className).toContain('rounded-t-xl');
+      expect(withTitle.className).not.toContain('rounded-xl');
+      titled.unmount();
+
+      render(
+        <BrandThemeProvider theme={BANNERED}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.getByRole('img', { name: 'Questionnaire banner' }).className).toContain(
+        'rounded-xl'
+      );
     });
 
     it('moves the title below the banner rather than overlaying it', () => {

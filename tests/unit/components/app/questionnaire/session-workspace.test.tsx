@@ -12,10 +12,11 @@
  */
 
 import type { ReactNode } from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { useRouter } from 'next/navigation';
 
-import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import type { PanelSlotView, DataSlotPanelSlot } from '@/lib/app/questionnaire/panel/types';
 import { CHAT_TEXT_SCALE_STORAGE_KEY } from '@/lib/app/questionnaire/chat/text-scale';
 
 const sendMessage = vi.fn();
@@ -68,6 +69,25 @@ vi.mock('@/components/app/questionnaire/persona/persona-picker', () => ({
       </button>
     </div>
   ),
+}));
+// In-chat interviewer switcher (indicator/both modes) — the chip surfaces the workspace's
+// `onChangeInterviewer` handler, and the modal surfaces `choosePersona` directly (the same
+// PATCH-sending callback the carousel picker uses) so both can be driven without the real
+// PersonaPicker grid.
+vi.mock('@/components/app/questionnaire/persona/interviewer-switcher', () => ({
+  CurrentInterviewerChip: ({ label, onChange }: { label: string; onChange: () => void }) => (
+    <button type="button" onClick={onChange} data-testid="interviewer-chip">
+      {label}
+    </button>
+  ),
+  PersonaSwitcherModal: ({ open, onChoose }: { open: boolean; onChoose: (key: string) => void }) =>
+    open ? (
+      <div data-testid="persona-switcher-modal">
+        <button type="button" onClick={() => onChoose('b')}>
+          switcher-choose-b
+        </button>
+      </div>
+    ) : null,
 }));
 
 // Chat + lifecycle children are irrelevant here — marker stubs keep the render cheap. The chat
@@ -124,18 +144,80 @@ vi.mock('@/components/app/questionnaire/lifecycle/early-finish-control', () => (
 vi.mock('@/components/app/questionnaire/lifecycle/session-complete', () => ({
   SessionComplete: () => <div data-testid="session-complete" />,
 }));
+// Final-check modal stub surfaces `onClarify` / `onFinishAnyway` as buttons so the held-probe
+// escape-hatch wiring can be driven without the real Dialog.
+vi.mock('@/components/app/questionnaire/lifecycle/final-check-modal', () => ({
+  FinalCheckModal: ({
+    open,
+    probeText,
+    onClarify,
+    onFinishAnyway,
+  }: {
+    open: boolean;
+    probeText: string;
+    onClarify: () => void;
+    onFinishAnyway: () => void;
+  }) =>
+    open ? (
+      <div data-testid="final-check-modal" data-probe-text={probeText}>
+        <button type="button" onClick={onClarify}>
+          final-check-clarify
+        </button>
+        <button type="button" onClick={onFinishAnyway}>
+          final-check-finish-anyway
+        </button>
+      </div>
+    ) : null,
+}));
+// Experiences continuity (P15.3): stubbed so `onContinue` / `onConclude` — the workspace's OWN
+// navigate-vs-refresh decision, not the handoff polling machinery (covered by
+// handoff-card.test.tsx / stitched-continuation.test.tsx) — are directly drivable as buttons.
+vi.mock('@/components/app/questionnaire/experiences/handoff-card', () => ({
+  HandoffCard: ({
+    onContinue,
+    onConclude,
+  }: {
+    onContinue: (sessionId: string) => void;
+    onConclude: () => void;
+  }) => (
+    <div data-testid="handoff-card">
+      <button type="button" onClick={() => onContinue('s2')}>
+        handoff-continue
+      </button>
+      <button type="button" onClick={onConclude}>
+        handoff-conclude
+      </button>
+    </div>
+  ),
+}));
+vi.mock('@/components/app/questionnaire/experiences/stitched-continuation', () => ({
+  StitchedContinuation: ({ onContinue }: { onContinue: (sessionId: string) => void }) => (
+    <div data-testid="stitched-continuation">
+      <button type="button" onClick={() => onContinue('s2')}>
+        stitched-continue
+      </button>
+    </div>
+  ),
+}));
+// The stitched-history fetch is irrelevant to onContinue/onConclude wiring; null keeps the
+// stitched surface (when exercised) from making a real, unmocked fetch call.
+vi.mock('@/lib/hooks/use-stitched-history', () => ({
+  useStitchedHistory: vi.fn(() => null),
+}));
 
-// Panel stub exposes the props the workspace controls + a button that fires onRevisit.
+// Panel stub exposes the props the workspace controls + buttons that fire onRevisit/onRefine.
 vi.mock('@/components/app/questionnaire/panel/answer-slot-panel', () => ({
   AnswerSlotPanel: ({
     loading,
     canRevisit,
     onRevisit,
+    onRefine,
     newlyFilledKeys,
   }: {
     loading: boolean;
     canRevisit: boolean;
     onRevisit: (slot: PanelSlotView) => void;
+    onRefine?: (slot: DataSlotPanelSlot) => void;
     newlyFilledKeys?: readonly string[];
   }) => (
     <div
@@ -147,8 +229,40 @@ vi.mock('@/components/app/questionnaire/panel/answer-slot-panel', () => ({
       <button type="button" onClick={() => onRevisit(SLOT)}>
         revisit
       </button>
+      <button type="button" onClick={() => onRefine?.(DATA_SLOT)}>
+        refine
+      </button>
+      <button type="button" onClick={() => onRefine?.(DATA_SLOT_UNFILLED)}>
+        refine-unfilled
+      </button>
     </div>
   ),
+}));
+// Drawer stub surfaces `onRevisit` / `onRefine` directly as buttons — the workspace's OWN
+// wiring (which callback it hands the drawer, and whether it closes the sheet after) is what's
+// under test here; the real Radix Dialog behaviour is covered by answer-review-drawer.test.tsx.
+vi.mock('@/components/app/questionnaire/panel/answer-review-drawer', () => ({
+  AnswerReviewDrawer: ({
+    open,
+    onRevisit,
+    onRefine,
+  }: {
+    open: boolean;
+    onRevisit: (slot: PanelSlotView) => void;
+    onRefine?: (slot: DataSlotPanelSlot) => void;
+  }) =>
+    open ? (
+      <div role="dialog">
+        <div data-testid="panel">
+          <button type="button" onClick={() => onRevisit(SLOT)}>
+            revisit
+          </button>
+          <button type="button" onClick={() => onRefine?.(DATA_SLOT)}>
+            drawer-refine
+          </button>
+        </div>
+      </div>
+    ) : null,
 }));
 
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
@@ -167,6 +281,30 @@ const SLOT: PanelSlotView = {
   answeredAtTurnIndex: 2,
   respondentEdited: false,
   refinementHistory: [],
+};
+
+const DATA_SLOT: DataSlotPanelSlot = {
+  key: 'goal',
+  name: 'Goal',
+  description: 'What they want to achieve',
+  paraphrase: 'Grow revenue 20% this year',
+  provenance: 'direct',
+  confidence: 0.8,
+  rationale: null,
+  filled: true,
+  provisional: false,
+  answeredAtTurnIndex: 2,
+  history: [],
+  coverage: { total: 1, answered: 1, questions: [] },
+};
+
+// No captured reading yet — pins the ternary branch in `handleRefine` that omits the
+// "Right now you have it as" clause when there's nothing to quote.
+const DATA_SLOT_UNFILLED: DataSlotPanelSlot = {
+  ...DATA_SLOT,
+  paraphrase: null,
+  filled: false,
+  confidence: null,
 };
 
 function lifecycleReturn(over: Record<string, unknown> = {}) {
@@ -237,6 +375,18 @@ beforeEach(() => {
   panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
   lifecycleHook.mockReturnValue(lifecycleReturn());
   formHook.mockReturnValue(formReturn());
+  // `vi.clearAllMocks()` clears call history but NOT a previously-set `mockReturnValue`, so without
+  // resetting this here, a router assertion set by one test (the onContinue suite) would silently
+  // leak into every later test. Fresh spies every test; the onContinue tests override with their
+  // own push/refresh so they can assert on them.
+  vi.mocked(useRouter).mockReturnValue({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  });
 });
 
 describe('SessionWorkspace', () => {
@@ -1087,6 +1237,466 @@ describe('SessionWorkspace', () => {
       fireEvent.touchMove(carousel, t(180));
       fireEvent.touchEnd(carousel, t(180));
       expect(selected('Form')).toBe('true');
+    });
+  });
+
+  // ── Experiences continuity (P15.3): onContinue / onConclude ──────────────────
+  // The docblock above `onContinue` in the source calls this "easy to get silently wrong": the
+  // no-login `/x/<publicRef>` surface is already sitting on the address the next leg needs, so
+  // continuing must REFRESH; the authenticated surface addresses each session by id, so
+  // continuing must NAVIGATE. Getting the arms backwards either strands the anonymous respondent
+  // on a completed leg (a no-op push) or leaves the authenticated one on the wrong session.
+  describe('Experiences continuity (onContinue / onConclude)', () => {
+    const baseExperience = {
+      runId: 'run-1',
+      ordinal: 0,
+      continuityMode: 'linked' as const,
+      seamMarker: 'divider' as const,
+      stepTitle: 'Step 1',
+    };
+
+    // `linked` (not `stitched`) so the completed-leg branch renders HandoffCard — onContinue is
+    // the exact same callback handed to StitchedContinuation, so one route is enough to pin it.
+    function renderCompletedLeg(experienceOver: Record<string, unknown>, accessToken?: string) {
+      streamHook.mockReturnValue({
+        canSend: false,
+        status: 'completed',
+        sendMessage,
+        applyStatus,
+      });
+      panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+      lifecycleHook.mockReturnValue(
+        lifecycleReturn({
+          view: {
+            status: 'completed',
+            completion: {
+              kind: 'offer',
+              coverage: 1,
+              displayCoverage: 1,
+              answeredCount: 4,
+              requiredUnansweredKeys: [],
+              capReached: false,
+              earlyFinishAvailable: false,
+            },
+            cost: null,
+            anonymous: Boolean(accessToken),
+            ref: null,
+            experience: { ...baseExperience, ...experienceOver },
+          },
+        })
+      );
+      render(<SessionWorkspace sessionId="s1" accessToken={accessToken} />);
+    }
+
+    it('on the no-login stable address (publicRef + accessToken), continuing REFRESHES rather than navigates', () => {
+      const push = vi.fn();
+      const refresh = vi.fn();
+      vi.mocked(useRouter).mockReturnValue({
+        push,
+        refresh,
+        replace: vi.fn(),
+        back: vi.fn(),
+        forward: vi.fn(),
+        prefetch: vi.fn(),
+      });
+
+      renderCompletedLeg({ publicRef: 'ABC123' }, 'tok-9');
+      expect(screen.getByTestId('handoff-card')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('handoff-continue'));
+
+      // The URL for the next leg is already the one in the address bar — a push here would be a
+      // no-op and strand the respondent on the completed leg.
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it('on the authenticated surface (no accessToken), continuing NAVIGATES to the next session', () => {
+      const push = vi.fn();
+      const refresh = vi.fn();
+      vi.mocked(useRouter).mockReturnValue({
+        push,
+        refresh,
+        replace: vi.fn(),
+        back: vi.fn(),
+        forward: vi.fn(),
+        prefetch: vi.fn(),
+      });
+
+      // No accessToken — the authenticated surface — regardless of publicRef.
+      renderCompletedLeg({ publicRef: null });
+      expect(screen.getByTestId('handoff-card')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('handoff-continue'));
+
+      expect(push).toHaveBeenCalledWith('/questionnaires/s2');
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('onConclude falls the surface all the way through to the ordinary SessionComplete screen', () => {
+      // The run-level report doesn't exist yet, so the leg's own completion screen — not a run
+      // summary — is the honest destination once the respondent chooses to see it.
+      renderCompletedLeg({ publicRef: null });
+      expect(screen.getByTestId('handoff-card')).toBeInTheDocument();
+      expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('handoff-conclude'));
+
+      expect(screen.queryByTestId('handoff-card')).not.toBeInTheDocument();
+      expect(screen.getByTestId('session-complete')).toBeInTheDocument();
+    });
+  });
+
+  // ── Interviewer persona selection (choosePersona / onChangeInterviewer) ──────
+  describe('interviewer persona selection', () => {
+    const personasBase = {
+      enabled: true,
+      personas: [
+        { key: 'a', label: 'Ana', description: 'da' },
+        { key: 'b', label: 'Bo', description: 'db' },
+      ],
+      selectedPersonaKey: null,
+    };
+
+    function renderWithChip(switcher: 'indicator' | 'both' = 'indicator', accessToken?: string) {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+      lifecycleHook.mockReturnValue(lifecycleReturn());
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          personas={{ ...personasBase, defaultPersonaKey: 'a', switcher }}
+          accessToken={accessToken}
+        />
+      );
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('PATCHes the session with the chosen persona key and the session-token header on the no-login surface', () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      renderWithChip('indicator', 'tok-5');
+
+      fireEvent.click(screen.getByTestId('interviewer-chip'));
+      fireEvent.click(screen.getByText('switcher-choose-b'));
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('/api/v1/app/questionnaire-sessions/s1/persona');
+      expect(init.method).toBe('PATCH');
+      expect(init.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        'X-Session-Token': 'tok-5',
+      });
+      expect(init.body).toBe(JSON.stringify({ personaKey: 'b' }));
+    });
+
+    it('omits the session-token header on the authenticated surface (no accessToken)', () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+      renderWithChip();
+
+      fireEvent.click(screen.getByTestId('interviewer-chip'));
+      fireEvent.click(screen.getByText('switcher-choose-b'));
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(init.headers).not.toHaveProperty('X-Session-Token');
+    });
+
+    it('fails soft: a rejected PATCH does not throw, and the local highlight stays on the choice', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new Error('network down'));
+      vi.stubGlobal('fetch', fetchMock);
+      renderWithChip('indicator', 'tok-5');
+
+      fireEvent.click(screen.getByTestId('interviewer-chip'));
+      // Must not throw synchronously, and must not leave an unhandled rejection.
+      expect(() => fireEvent.click(screen.getByText('switcher-choose-b'))).not.toThrow();
+      // Let the rejected promise's `.catch()` settle before asserting.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // choosePersona sets the local highlight BEFORE the fetch settles — the failed write never
+      // rolls it back, so the chip keeps reading the respondent's choice either way.
+      expect(screen.getByTestId('interviewer-chip')).toHaveTextContent('Bo');
+    });
+
+    it('switcher "both": pressing the chip slides the carousel to the persona page, not a modal', () => {
+      renderWithChip('both');
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+
+      fireEvent.click(screen.getByTestId('interviewer-chip'));
+
+      expect(screen.getByRole('tab', { name: 'Interviewer' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+      expect(screen.queryByTestId('persona-switcher-modal')).not.toBeInTheDocument();
+    });
+
+    it('switcher "indicator" (no carousel page): pressing the chip opens the switcher MODAL instead', () => {
+      renderWithChip();
+      expect(screen.queryByRole('tab', { name: 'Interviewer' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('persona-switcher-modal')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('interviewer-chip'));
+
+      expect(screen.getByTestId('persona-switcher-modal')).toBeInTheDocument();
+    });
+  });
+
+  // ── Data-slot "Incorrect?" refine (handleRefine) ──────────────────────────────
+  describe('data-slot refine (handleRefine)', () => {
+    it('sends a steering turn naming the slot and quoting its current reading', () => {
+      setup({ canSend: true });
+      fireEvent.click(screen.getByText('refine'));
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      const [message] = sendMessage.mock.calls[0] as [string];
+      expect(message).toContain(DATA_SLOT.name);
+      // The current paraphrase is embedded so the agent knows exactly what to re-open, not just
+      // that the respondent is unhappy with SOMETHING.
+      expect(message).toContain(DATA_SLOT.paraphrase as string);
+    });
+
+    it('omits the "current reading" clause when the slot has no paraphrase yet', () => {
+      setup({ canSend: true });
+      fireEvent.click(screen.getByText('refine-unfilled'));
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      const [message] = sendMessage.mock.calls[0] as [string];
+      // Still names the slot...
+      expect(message).toContain(DATA_SLOT_UNFILLED.name);
+      // ...but there is nothing to quote, so the "Right now you have it as" clause must be absent
+      // rather than rendering as "Right now you have it as: null".
+      expect(message).not.toContain('Right now you have it as');
+    });
+
+    it('ignores refine while the stream cannot send', () => {
+      setup({ canSend: false });
+      fireEvent.click(screen.getByText('refine'));
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('drawer variant: refining a slot sends the same steering turn AND closes the review sheet', () => {
+      setup({ canSend: true });
+      fireEvent.click(screen.getByRole('button', { name: /review answers/i }));
+      const dialog = screen.getByRole('dialog');
+
+      fireEvent.click(within(dialog).getByText('drawer-refine'));
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect((sendMessage.mock.calls[0] as [string])[0]).toContain(DATA_SLOT.name);
+      // Unlike the desktop panel's onRefine, the drawer's variant must ALSO dismiss the sheet —
+      // the respondent is about to see the agent's probe in the chat behind it.
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Held reconciliation probe (onHeld) ────────────────────────────────────────
+  describe('a held reconciliation probe (onHeld)', () => {
+    function renderWithOnHeld(appendAgentTurn = vi.fn()) {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+        appendAgentTurn,
+      });
+      panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+      lifecycleHook.mockReturnValue(lifecycleReturn());
+      render(<SessionWorkspace sessionId="s1" />);
+      return lifecycleHook.mock.calls[0][0] as {
+        onHeld: (
+          probe: { text: string; slotKeys: string[]; notice?: string },
+          opts: { early: boolean }
+        ) => void;
+      };
+    }
+
+    it('appends the probe to the live transcript with the SAME contradiction notice the server persisted', () => {
+      const appendAgentTurn = vi.fn();
+      const { onHeld } = renderWithOnHeld(appendAgentTurn);
+
+      act(() => {
+        onHeld(
+          {
+            text: 'Did you mean full-time or part-time?',
+            slotKeys: ['employment'],
+            notice: 'That seems to contradict an earlier answer.',
+          },
+          { early: false }
+        );
+      });
+
+      // Matching the server's persisted shape is what makes a post-reload replay of the
+      // transcript show the same "I noticed something" box rather than bare probe text.
+      expect(appendAgentTurn).toHaveBeenCalledWith('Did you mean full-time or part-time?', [
+        { code: 'contradiction', message: 'That seems to contradict an earlier answer.' },
+      ]);
+    });
+
+    it('opens the final-check modal when the held submit was an EARLY finish', () => {
+      const { onHeld } = renderWithOnHeld();
+      expect(screen.queryByTestId('final-check-modal')).not.toBeInTheDocument();
+
+      act(() => {
+        onHeld({ text: 'probe', slotKeys: [] }, { early: true });
+      });
+
+      expect(screen.getByTestId('final-check-modal')).toBeInTheDocument();
+    });
+
+    it('does NOT open the modal for a held probe mid-conversation (non-early)', () => {
+      // The normal (mid-conversation) path surfaces the probe in the chat only — the modal is
+      // reserved for the early-finish exit action, which the probe would otherwise interrupt.
+      const { onHeld } = renderWithOnHeld();
+
+      act(() => {
+        onHeld({ text: 'probe', slotKeys: [] }, { early: false });
+      });
+
+      expect(screen.queryByTestId('final-check-modal')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Final-check modal actions (onClarify / onFinishAnyway) ───────────────────
+  describe('final-check modal actions', () => {
+    function renderHeldEarly(lifecycleOver: Record<string, unknown> = {}) {
+      const appendAgentTurn = vi.fn();
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+        appendAgentTurn,
+      });
+      panelHook.mockReturnValue({ view: null, loading: false, error: false, refetch });
+      lifecycleHook.mockReturnValue(lifecycleReturn(lifecycleOver));
+      // Single-surface mode: `both` would mount the completion affordance twice (once per
+      // surface), making `offer-submit` ambiguous below.
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+      const { onHeld } = lifecycleHook.mock.calls[0][0] as {
+        onHeld: (probe: { text: string; slotKeys: string[] }, opts: { early: boolean }) => void;
+      };
+      act(() => {
+        onHeld({ text: 'Did you mean X or Y?', slotKeys: [] }, { early: true });
+      });
+    }
+
+    it('onClarify closes the modal but leaves the held state intact — finishing again "finishes anyway"', () => {
+      const finishAnyway = vi.fn();
+      const submit = vi.fn();
+      renderHeldEarly({ canSubmit: true, finishAnyway, submit });
+      expect(screen.getByTestId('final-check-modal')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('final-check-clarify'));
+      expect(screen.queryByTestId('final-check-modal')).not.toBeInTheDocument();
+
+      // `heldProbe.early` must survive the dismissal, or re-clicking here would re-run the full
+      // submit sweep and hold again on the same still-unresolved conflict instead of finishing.
+      fireEvent.click(screen.getByText('offer-submit'));
+      expect(finishAnyway).toHaveBeenCalledWith(true);
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it('onFinishAnyway calls lifecycle.finishAnyway with the preserved early flag', () => {
+      const finishAnyway = vi.fn();
+      renderHeldEarly({ finishAnyway });
+
+      fireEvent.click(screen.getByText('final-check-finish-anyway'));
+
+      expect(finishAnyway).toHaveBeenCalledWith(true);
+    });
+  });
+
+  // ── Intro splash Proceed (onProceed / proceedLabel) ───────────────────────────
+  describe('intro splash Proceed', () => {
+    const intro = {
+      enabled: true,
+      questionnaireTitle: 'Team Health Check',
+      background: '',
+      videoUrl: '',
+      copy: {
+        howItWorks: { heading: 'How it works', body: 'This is a conversation, not a form.' },
+        whatYouGet: null,
+        goodToKnow: [],
+        buttonLabel: 'Begin your conversation',
+      },
+    };
+
+    it('advances off the intro to the first real surface and releases the deferred kickoff', () => {
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" autoStart intro={intro} />);
+      expect(screen.getByRole('tab', { name: 'Intro' })).toHaveAttribute('aria-selected', 'true');
+      expect(kickoff).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: intro.copy.buttonLabel }));
+
+      expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+      expect(kickoff).toHaveBeenCalledTimes(1);
+    });
+
+    it('proceedLabel reads "Continue" (not the begin label) when a capture gate follows the intro', () => {
+      const captureForm = {
+        captureMode: 'form' as const,
+        formFields: [
+          {
+            key: 'name',
+            label: 'Name',
+            type: 'text' as const,
+            required: true,
+            validation: 'deterministic' as const,
+          },
+        ],
+        satisfied: false,
+      };
+      streamHook.mockReturnValue({
+        canSend: true,
+        status: 'idle',
+        sendMessage,
+        kickoff,
+        applyStatus,
+      });
+      render(
+        <SessionWorkspace
+          sessionId="s1"
+          presentationMode="chat"
+          autoStart
+          intro={intro}
+          capture={captureForm}
+        />
+      );
+
+      // "Continue" here, NOT "Begin your conversation" — the next surface is the details gate,
+      // not the conversation itself.
+      const proceed = screen.getByRole('button', { name: 'Continue' });
+      expect(
+        screen.queryByRole('button', { name: intro.copy.buttonLabel })
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(proceed);
+
+      expect(screen.getByRole('tabpanel', { name: 'Details' })).not.toHaveAttribute('inert');
+      expect(kickoff).not.toHaveBeenCalled();
     });
   });
 });

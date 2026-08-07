@@ -9,6 +9,11 @@
  * conversation rather than a tool-trace console. The layout is a single readable column
  * so the answer-slot panel (F7.2) sits beside it in {@link SessionWorkspace}.
  *
+ * That column's width is the `.cq-chat-measure` utility, not a fixed `max-w-*`: it is sized as a
+ * multiple of the respondent's text-size preference AND the viewport scale, so the line length
+ * stays constant in characters while the conversation grows to suit a larger display. The
+ * composer carries the same measure so the two stay aligned at every size.
+ *
  * The stream state is owned by {@link SessionWorkspace} (which also drives the answer
  * panel from the same session) and passed in via `stream`, so the chat and the panel
  * share one {@link useQuestionnaireSessionStream} instance — that's what lets the
@@ -560,8 +565,8 @@ export function QuestionnaireChat({
       {/* Transcript. `cq-chat-scale` resolves the respondent's text-size preference from the
           `--cq-chat-scale` custom property SessionWorkspace sets; the bubbles below inherit it
           rather than pinning their own size. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        <div className="cq-chat-scale mx-auto flex max-w-2xl flex-col gap-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 2xl:px-10">
+        <div className="cq-chat-scale cq-chat-measure flex flex-col gap-6">
           {/* Experiences, `stitched` continuity (P15.3): the earlier legs of this run, replayed
               above the live conversation so the journey reads as one. Rendered as its own block
               rather than concatenated into `turns` — the reveal cursor, the typewriter and the
@@ -693,8 +698,10 @@ export function QuestionnaireChat({
 
       {/* Composer — hidden entirely in read-only replay (admin viewer) as well as terminal states. */}
       {!isTerminal && !readOnly && (
-        <div className="border-t px-4 py-3 sm:px-6">
-          <div className="mx-auto max-w-2xl">
+        <div className="border-t px-4 py-3 sm:px-6 2xl:px-10">
+          {/* Same measure as the transcript above (not a fixed 2xl) so the composer stays exactly
+              aligned with the conversation at every text size and viewport step. */}
+          <div className="cq-chat-measure">
             {/* Pending attachments — strip above the input row, driven by the picker hook. */}
             {attachmentInputEnabled && (
               <AttachmentThumbnailStrip

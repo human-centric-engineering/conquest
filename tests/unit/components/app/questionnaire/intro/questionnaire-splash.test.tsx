@@ -117,4 +117,33 @@ describe('QuestionnaireSplash', () => {
       screen.queryByRole('button', { name: /start the conversation/i })
     ).not.toBeInTheDocument();
   });
+
+  describe('footerAside', () => {
+    it('renders nothing extra when no aside is supplied', () => {
+      render(<QuestionnaireSplash intro={intro()} onProceed={vi.fn()} />);
+      expect(screen.queryByTestId('aside')).not.toBeInTheDocument();
+    });
+
+    it('seats the aside in the footer beside the "return anytime" note, not in the body', () => {
+      // The placement IS the contract: the aside exists so cross-device resume costs no row of
+      // its own. Landing anywhere but this existing footer row defeats the point.
+      render(
+        <QuestionnaireSplash
+          intro={intro()}
+          onProceed={vi.fn()}
+          footerAside={<span data-testid="aside">Enter your code</span>}
+        />
+      );
+      const aside = screen.getByTestId('aside');
+      const footer = screen.getByText(/return to this overview anytime/i).closest('footer');
+
+      expect(footer).not.toBeNull();
+      expect(footer!.contains(aside)).toBe(true);
+      // Beside the CTA, never inside it — a second button in the CTA's own control would read
+      // as part of the primary action.
+      expect(screen.getByRole('button', { name: /start the conversation/i }).contains(aside)).toBe(
+        false
+      );
+    });
+  });
 });
