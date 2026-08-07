@@ -33,6 +33,37 @@ release process.
   input, so the value that was judged safe is the value the caller navigates
   to. `resolveAuthLandingRoute()` in `lib/auth-landing/route.ts` was corrected
   the same way (#506).
+- **Redirects are no longer an unvalidated second SSRF target.**
+  `checkSafeProviderUrl()` validates one URL, so a caller that followed
+  redirects presented it with only the first hop.
+  `POST …/knowledge/documents/fetch-url` now re-runs the guard on **every**
+  redirect target (`redirect: 'manual'`, capped at 5 hops, relative `Location`
+  resolved against the redirecting URL) — previously
+  `https://attacker.example/doc` → `302` → `http://169.254.169.254/…` reached
+  cloud metadata and had the response body ingested as a knowledge document.
+  The event-hook dispatcher takes the opposite and stricter route,
+  `redirect: 'error'`: its URL is validated at create/update time and never at
+  dispatch, and following a redirect would POST the event payload *and its HMAC
+  signature headers* to the new target. Both paths are `withAdminAuth`, so this
+  is hardening rather than a privilege boundary (#534).
+- **SSRF guard: IPv4-in-IPv6 literals are no longer a bypass.**
+  `http://[::ffff:169.254.169.254]/` reaches the same host as
+  `http://169.254.169.254/` — verified against a live listener — but the mapped
+  form matched nothing in the denylist and made `parseIpv4()` return `null`, so
+  every range check was false and `checkSafeProviderUrl()` returned `ok`. Cloud
+  metadata, loopback and RFC1918 were all reachable through a guard reporting
+  success. Mapped (`::ffff:`) and the deprecated IPv4-compatible (`::`) forms
+  are now unwrapped to their dotted quad **before** any comparison, so they obey
+  exactly the same policy as the plain form — including `allowLoopback`, which
+  still works for a local provider addressed that way. Found by `/code-review`
+  on the redirect work below, which had claimed to close the metadata attack
+  while this made it reachable in one line (#534).
+- **`safe-url.ts`'s header no longer claims a compensating control it does not
+  have.** It cited the re-check in `provider-manager.buildProviderFromConfig`
+  as covering DNS rebinding; that call re-parses the same string and resolves
+  nothing, so against a hostname pointing at a private address it adds nothing.
+  The absent DNS resolution is now stated as an accepted risk, and the
+  per-URL-not-per-hop limitation is documented alongside it (#534).
 
 ### Added
 

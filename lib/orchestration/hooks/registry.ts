@@ -240,6 +240,14 @@ async function attemptDelivery(
       },
       body,
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
+      // Refuse redirects rather than follow them (#534). `fetch` defaults to
+      // 'follow', and the hook URL is validated once at create/update time and
+      // never again at dispatch — so a redirect is an unvalidated second target
+      // that this request would POST the event payload AND its HMAC signature
+      // headers to. Erroring is also what GitHub and Stripe do for outbound
+      // webhooks: an endpoint that moved should be re-pointed, not chased.
+      // The failure surfaces as a normal delivery error and is retried.
+      redirect: 'error',
     });
 
     statusCode = res.status;
@@ -261,7 +269,22 @@ async function attemptDelivery(
 
     error = `HTTP ${res.status}`;
   } catch (err: unknown) {
-    error = err instanceof Error ? err.message : String(err);
+    // undici reports the interesting part on `cause`, not `message`: a refused
+    // redirect, a DNS failure and a connection reset are all a bare
+    // "fetch failed" without it. That matters most for the `redirect: 'error'`
+    // above — an endpoint that started 301-ing would otherwise burn every retry
+    // and land in `exhausted` with nothing telling the operator that
+    // "re-point the URL" is the fix.
+    if (err instanceof Error) {
+      // Only unwrap shapes that stringify usefully — an arbitrary object would
+      // land in the operator-visible delivery log as "[object Object]".
+      const { cause } = err;
+      const detail =
+        cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : null;
+      error = detail ? `${err.message}: ${detail}` : err.message;
+    } else {
+      error = String(err);
+    }
   }
 
   // Delivery failed — update record and maybe schedule retry
