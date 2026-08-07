@@ -104,6 +104,16 @@ Leaving these global is the right default. A fork **may** decide some should be
 tenant-scoped (e.g. per-org provider API keys) — that is a deliberate product
 decision, not a mechanical `orgId` sweep. Treat each as opt-in.
 
+Two of them are not columns you can add an `orgId` to at all:
+`AiOrchestrationSettings` and `McpServerConfig` are singletons
+(`slug @unique @default("global")`) whose every reader — and every process
+cache — is written on "there is exactly one row". And `AiProviderConfig` keys
+its credential off `apiKeyEnvVar`, the _name_ of a process environment
+variable, which has no per-tenant form. Before scoping either, read
+[`multi-tenancy-research.md` §5B](./multi-tenancy-research.md#5b-provider-credentials-and-per-tenant-ai-configuration)
+— it compares the four credential models and names the platform-tier seams
+(credential resolver, cache/breaker re-keying) that keep them reachable.
+
 ### System / cross-tenant — no tenant owner
 
 `User` (gets tenancy via the additive `Org` + `OrgMembership` join, not an
@@ -268,6 +278,18 @@ declaration.
 - [`.context/privacy/data-erasure.md`](../privacy/data-erasure.md) — the
   cascade/`SetNull` `onDelete` graph built for GDPR erasure **is** the
   org-delete dependency graph a fork needs for tearing down a tenant.
+- [`multi-tenancy-research.md` §5C](./multi-tenancy-research.md#5c-the-prerequisite-5a-and-5b-assume-and-the-architecture-they-dont-consider)
+  — **read before starting any retrofit.** Two things this playbook assumes: a
+  tenant context to scope by (there is no `AsyncLocalStorage` anywhere, so
+  `withOrg(orgId, …)` has nowhere to get its `orgId` outside a route handler),
+  and that pooled-with-RLS is the right topology. The second is a real choice —
+  Sunrise's single-tenant install is already a well-formed cell, and for few
+  large tenants the cell model gives away most of what this retrofit builds.
+- [`multi-tenancy-research.md` §5A](./multi-tenancy-research.md#5a-data-handling-residency-and-per-tenant-storage-flexibility)
+  — **read this before promising a tenant their own storage arrangement.** RLS
+  covers rows in _this_ database; it says nothing about buckets, regions,
+  customer-managed keys, or a second database. The section grades those as a
+  six-rung ladder with an honest verdict on each.
 - [`.context/orchestration/retention.md`](../orchestration/retention.md) —
   retention/pruning is per-data-class today; a fork would scope it per-org.
 - [`architecture/overview.md`](./overview.md) — the single-tenant baseline.
