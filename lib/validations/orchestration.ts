@@ -2698,8 +2698,52 @@ export const escalationConfigSchema = z.object({
     .array(z.string().email('Each entry must be a valid email address'))
     .min(1, 'At least one email address is required')
     .max(20, 'At most 20 email addresses'),
+  // Syntax only — deliberately NOT the SSRF refine. This schema is what READS
+  // the stored config, and a value that fails here is a value the settings API
+  // cannot return, the form cannot display, and the operator therefore cannot
+  // see or correct. Worse, the form rebuilds the whole config blob on save, so
+  // an absent webhookUrl is written back as absent — silently destroying a URL
+  // the operator never chose to remove. See `escalationConfigWriteSchema` for
+  // the guard, and `notifyEscalation` for the dispatch-time re-check (#553).
   webhookUrl: z.string().url('Must be a valid URL').max(2000).optional(),
   notifyOnPriority: z.enum(['all', 'high', 'medium_and_above']).default('all'),
+});
+
+/**
+ * Escalation config as accepted from an API caller.
+ *
+ * The SSRF refine lives here rather than on the read schema, mirroring how
+ * provider `baseUrl` is handled: reject at the boundary, and re-check at the
+ * point of use (`notifyEscalation`) so a direct DB write or a restored backup
+ * bundle is still guarded. Splitting them is what lets a rejected value remain
+ * visible and correctable in the UI instead of vanishing.
+ *
+ * `ESCALATION_WEBHOOK_ALLOW_PRIVATE=true` opts a deployment into private
+ * targets for the case where the relay really is inside its own network.
+ * Cloud-metadata hosts stay blocked regardless.
+ */
+export const escalationConfigWriteSchema = escalationConfigSchema.extend({
+  webhookUrl: z
+    .string()
+    .url('Must be a valid URL')
+    .max(2000)
+    .refine(
+      // Read straight off `process.env` rather than importing `@/lib/env`:
+      // twelve `'use client'` components import real values from this module
+      // (admin-sidebar among them), and `lib/env.ts` documents itself as never
+      // safe to pull into a client bundle. Non-`NEXT_PUBLIC_` vars resolve to
+      // undefined in the browser, so a client-side parse fails closed.
+      (url) =>
+        isSafeProviderUrl(url, {
+          // Both, and for the same reason the dispatch-time check passes both:
+          // the flag expresses "internal relay", which covers a loopback
+          // sidecar as well as a VPC address.
+          allowPrivateNetwork: process.env.ESCALATION_WEBHOOK_ALLOW_PRIVATE === 'true',
+          allowLoopback: process.env.ESCALATION_WEBHOOK_ALLOW_PRIVATE === 'true',
+        }),
+      'URL is not allowed (private or internal address)'
+    )
+    .optional(),
 });
 
 export const updateOrchestrationSettingsSchema = z
@@ -2814,7 +2858,9 @@ export const updateOrchestrationSettingsSchema = z
       .min(1, 'Stuck threshold must be at least 1 minute')
       .max(1440, 'Stuck threshold must be at most 1440 minutes (24h)')
       .optional(),
-    escalationConfig: escalationConfigSchema.nullable().optional(),
+    // Write path: the refined variant, so an unsafe target is rejected at the
+    // API boundary rather than only when the stored value is next used (#553).
+    escalationConfig: escalationConfigWriteSchema.nullable().optional(),
     /**
      * Allowlist of origins permitted to call the embed-channel approval
      * routes. Each entry is validated as a URL and persisted as the

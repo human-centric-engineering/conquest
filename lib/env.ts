@@ -147,6 +147,23 @@ const serverEnvSchema = z.object({
         'method, path). Default OFF — opt in with "true" to make navigation visible server-side.'
     ),
 
+  // Escalation webhook target policy (optional)
+  ESCALATION_WEBHOOK_ALLOW_PRIVATE: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((val) => val === 'true')
+    .describe(
+      'Permit the escalation webhook to POST to a private RFC1918 or IPv6 unique-local ' +
+        'address. Off by default. Set it only when the escalation relay genuinely runs on ' +
+        "the deployment's own private network (a VPC endpoint, say) — it widens the SSRF " +
+        'guard for that one target. Link-local (169.254.0.0/16, fe80::/10) stays blocked ' +
+        'either way: it hosts credential-vending metadata services beyond the well-known ' +
+        '169.254.169.254 — AWS ECS task metadata at 169.254.170.2, EKS Pod Identity at ' +
+        '169.254.170.23. CGNAT (100.64.0.0/10) stays blocked too — shared address space, ' +
+        "the default Tailscale range, and Alibaba's metadata host. Loopback IS permitted by " +
+        'this flag, so a same-pod relay sidecar on 127.0.0.1 works.'
+    ),
+
   // Internal self-calls (optional)
   INTERNAL_API_URL: z
     .string()

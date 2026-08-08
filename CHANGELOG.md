@@ -77,8 +77,64 @@ release process.
   as normal. Both dispatchers now also record the underlying `cause` of a fetch
   failure rather than a bare `fetch failed`, so that case is diagnosable from
   the delivery log (#534).
+- **Escalation webhooks are validated against SSRF at last.**
+  `escalationConfig.webhookUrl` was `z.string().url()` with **no**
+  `isSafeProviderUrl` refine, while every comparable outbound target has one —
+  provider `baseUrl` and the webhook subscription `url` alongside it in
+  `lib/validations/orchestration.ts`, and event-hook `action.url` in
+  `lib/orchestration/hooks/types.ts`. An escalation therefore POSTed its payload — conversation
+  reason, priority and metadata — to whatever host was configured, cloud
+  metadata and RFC1918 included. Guarded now in the two places that matter,
+  mirroring how provider `baseUrl` is handled: `escalationConfigWriteSchema`
+  rejects an unsafe target at the API boundary, and `notifyEscalation` re-checks
+  at dispatch so a direct DB write, a restored backup bundle or a value stored
+  before this release is still refused. The POST also refuses redirects (#553).
+- **A rejected escalation webhook is preserved, not destroyed.** The guard is
+  deliberately *not* on the read path. Rejecting there would make the stored
+  value invisible to the settings API — and because the settings form rebuilds
+  the whole config blob on save, the next save of any unrelated field would have
+  written it back as absent, silently deleting a URL nobody chose to remove.
+  Instead the value is read, shown in the form, and skipped at dispatch with a
+  warning naming the target, so an operator can see the problem and correct it
+  (#553).
+- **Escalation webhooks refuse redirects — note this failure is quieter than the
+  dispatchers'.** Same reasoning as the two webhook dispatchers above, but
+  `notifyEscalation` is fire-and-forget: there is no retry and no delivery row,
+  so an escalation endpoint that starts redirecting (an `http`→`https` upgrade,
+  say) fails **once per escalation** with a single `logger.warn` as the entire
+  signal. That warning now names the underlying cause rather than reporting a
+  bare `fetch failed` — without it the condition is effectively undiagnosable.
+  If you route escalations through a redirecting endpoint, re-point it (#553).
 
 ### Added
+
+- **`ESCALATION_WEBHOOK_ALLOW_PRIVATE`** — opt a deployment into escalation
+  webhooks targeting its own private network (an in-VPC relay), for the case
+  where the alternative is no validation at all. Off by default; accepts exactly
+  `"true"` or `"false"` so a typo fails startup rather than silently leaving it
+  off. Backed by a new `allowPrivateNetwork` option on `checkSafeProviderUrl` /
+  `isSafeProviderUrl`.
+  **It relaxes RFC1918, IPv6 unique-local and loopback** — the last so a
+  same-pod relay sidecar on `127.0.0.1` works, matching what `isLocal` already
+  allows for LLM providers. It does **not** relax link-local
+  (`169.254.0.0/16`, `fe80::/10`) or CGNAT (`100.64.0.0/10`), and the reason is
+  the same for both: a denylist of metadata *literals* is not enough.
+  `169.254.169.254` is only the best-known one — AWS ECS task metadata vends IAM
+  role credentials from `169.254.170.2`, EKS Pod Identity from
+  `169.254.170.23` — and `100.64/10` is shared address space (the default
+  Tailscale range) containing Alibaba Cloud metadata at `100.100.100.200`.
+  Cloud-metadata hostnames, the unspecified address and the scheme allowlist are
+  untouched (#553).
+- **`describeFetchFailure(err)`** in `lib/errors/fetch-error.ts` — renders a
+  thrown value for an operator, unwrapping undici's `cause`. Node's `fetch`
+  reports nearly every network-layer failure as a bare
+  `TypeError: fetch failed` and puts the real reason on `error.cause`, so a
+  refused redirect, a DNS miss and a connection reset are indistinguishable
+  from the message alone. Extracted once three outbound callers needed it
+  (`hooks/registry.ts`, `webhooks/dispatcher.ts`, `escalation-notifier.ts`),
+  all of which gained `redirect: 'error'` and have to explain that refusal to a
+  human. Only `Error` and `string` causes are unwrapped — an arbitrary object
+  would reach the log as `[object Object]` (#553).
 
 - **`normalizeRootRelativePath(path)`** in `lib/security/sanitize.ts`, exported
   via `@/lib/security` — returns the parser-normalized path when it is genuinely

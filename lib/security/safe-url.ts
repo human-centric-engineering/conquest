@@ -116,6 +116,37 @@ export interface SafeUrlCheckOptions {
    * flag — local model servers run on loopback, not on the LAN.
    */
   allowLoopback?: boolean;
+
+  /**
+   * When true, permit private **RFC1918** (10/8, 172.16/12, 192.168/16) and
+   * **IPv6 unique-local** (`fc00::/7`) targets.
+   * For a service the deployment genuinely runs on its own private network —
+   * an escalation relay inside a VPC, say — where the alternative is no
+   * validation at all.
+   *
+   * **Link-local (`169.254.0.0/16`, `fe80::/10`) is NOT relaxed**, and that is
+   * the whole reason this flag is narrower than "private". A denylist of
+   * metadata *literals* is not enough: `169.254.169.254` is only the
+   * best-known one. AWS ECS task metadata vends IAM role credentials from
+   * `169.254.170.2` and EKS Pod Identity from `169.254.170.23`, and the range
+   * is reserved for exactly this class of link-local service. Nothing an
+   * operator would legitimately POST an escalation to lives there, so the
+   * range stays refused however the flag is set.
+   *
+   * **CGNAT (`100.64.0.0/10`) is not relaxed either**, for the same reason: it
+   * is shared address space rather than a network the deployment owns, it is
+   * the default range for overlay VPNs such as Tailscale, and Alibaba Cloud's
+   * metadata service sits at `100.100.100.200`. Relaxing it would reduce
+   * protection in that range to a single denylisted literal.
+   *
+   * Cloud-metadata hostnames and the unspecified address also stay blocked —
+   * `BLOCKED_HOSTNAMES` is checked before this flag is consulted.
+   *
+   * Loopback is governed separately by `allowLoopback`: a VPC address is not a
+   * loopback address, and conflating them would widen two things when a caller
+   * asked for one. Set both if you need both.
+   */
+  allowPrivateNetwork?: boolean;
 }
 
 export interface SafeUrlCheckResult {
@@ -182,11 +213,32 @@ export function checkSafeProviderUrl(
     return { ok: true };
   }
 
-  if (isPrivateIp(host) || isLinkLocalIp(host) || isUniqueLocalIpv6(host)) {
+  // Link-local is checked unconditionally: `allowPrivateNetwork` relaxes RFC1918
+  // and IPv6 unique-local only. 169.254.0.0/16 hosts credential-vending
+  // metadata services beyond the single literal in BLOCKED_HOSTNAMES — AWS ECS
+  // task metadata at 169.254.170.2, EKS Pod Identity at 169.254.170.23 — and no
+  // legitimate outbound target lives in that range.
+  if (isLinkLocalIp(host)) {
     return {
       ok: false,
       reason: 'private_ip',
-      message: `Base URL host "${host}" resolves to a private or link-local address`,
+      message: `Base URL host "${host}" resolves to a link-local address`,
+    };
+  }
+
+  // The opt-in relaxes RFC1918 + IPv6 unique-local ONLY — deliberately not
+  // everything `isPrivateIp` matches. That predicate also covers CGNAT
+  // (100.64.0.0/10), which is shared address space rather than a network the
+  // deployment owns, is the default range for overlay VPNs like Tailscale, and
+  // contains Alibaba Cloud's metadata service at 100.100.100.200. Relaxing it
+  // would reduce protection there to the single denylisted literal — precisely
+  // the reasoning used above to keep link-local sealed.
+  const relaxable = options.allowPrivateNetwork && (isRfc1918(host) || isUniqueLocalIpv6(host));
+  if (!relaxable && (isPrivateIp(host) || isUniqueLocalIpv6(host))) {
+    return {
+      ok: false,
+      reason: 'private_ip',
+      message: `Base URL host "${host}" resolves to a private address`,
     };
   }
 
@@ -223,6 +275,22 @@ function isLoopbackIp(host: string): boolean {
   if (octets) return octets[0] === 127;
   // Unbracketed IPv6 loopback.
   return host === '::1';
+}
+
+/**
+ * RFC1918 only — the three ranges an organisation is actually allocated for its
+ * own network. Narrower than {@link isPrivateIp}, which additionally covers
+ * CGNAT shared address space; see the `allowPrivateNetwork` comment in
+ * `checkSafeProviderUrl` for why the opt-in uses this one.
+ */
+function isRfc1918(host: string): boolean {
+  const octets = parseIpv4(host);
+  if (!octets) return false;
+  const [a, b] = octets;
+  if (a === 10) return true;
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
 }
 
 function isPrivateIp(host: string): boolean {
