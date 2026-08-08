@@ -29,6 +29,9 @@ import type {
   PanelSectionInput,
 } from '@/lib/app/questionnaire/panel/answer-panel';
 import type { PanelRefinementEntry } from '@/lib/app/questionnaire/panel/types';
+import { buildGlossaryAppendix } from '@/lib/app/questionnaire/glossary/report-appendix';
+import { loadAcceptedGlossaryEntries } from '@/lib/app/questionnaire/glossary/resolve';
+import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import {
   buildSessionExportModel,
   type SessionExportInput,
@@ -76,6 +79,10 @@ export interface LoadedSessionExport {
    * the report config includes data slots; loaded unconditionally so the pure builder stays simple.
    */
   dataSlotGroups: ExportDataSlotGroup[];
+  /** The version this session ran on — the seam resolves the version-scoped glossary from it. */
+  versionId: string;
+  /** The version's `glossaryReportAppendix` switch: does the RESPONDENT's copy carry the glossary? */
+  glossaryReportAppendix: boolean;
 }
 
 /** Cast a stored `refinementHistory` Json column back to our entry array. */
@@ -101,13 +108,14 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
       respondentUserId: true,
       publicRef: true,
       updatedAt: true,
+      versionId: true,
       version: {
         select: {
           versionNumber: true,
           goal: true,
           audience: true,
           questionnaireId: true,
-          config: { select: { anonymousMode: true } },
+          config: { select: { anonymousMode: true, glossaryReportAppendix: true } },
           questionnaire: {
             select: {
               title: true,
@@ -262,6 +270,10 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     sections,
     answers,
     dataSlotGroups,
+    versionId: row.versionId,
+    glossaryReportAppendix:
+      row.version.config?.glossaryReportAppendix ??
+      DEFAULT_QUESTIONNAIRE_CONFIG.glossaryReportAppendix,
   };
 }
 
@@ -319,6 +331,15 @@ export async function buildSessionExportPdfModel(
     sections: loaded.sections,
     answers: loaded.answers,
     dataSlotGroups: loaded.dataSlotGroups,
+    // Definitions / glossary (P16): the respondent's copy carries it only when the admin opted in
+    // — it changes a delivered document, so the switch, not the mere existence of terms, decides.
+    glossary: buildGlossaryAppendix(
+      // Ungated read: the ONLY switch for the respondent's copy is `glossaryReportAppendix`,
+      // applied on the next line. Reading through the prompt-injection gate would make the PDF
+      // disagree with the on-screen appendix whenever prompt injection was off.
+      await loadAcceptedGlossaryEntries(loaded.versionId),
+      loaded.glossaryReportAppendix
+    ),
     insights: report.insights ?? null,
     insightsFormatted: report.formatted ?? false,
     insightsCompletionPct: report.completionPct ?? null,

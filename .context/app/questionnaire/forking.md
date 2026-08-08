@@ -304,3 +304,21 @@ ConQuest has already run this loop twice — see
 - [`../planning/upstream-gaps.md`](../planning/upstream-gaps.md) ·
   [`contributions-upstream.md`](../planning/contributions-upstream.md) — the
   fix-in-place / promote-upstream ledgers.
+
+## Definitions / glossary (P16)
+
+Glossary terms, their candidate definitions **and** the attached definitions document all fork with
+the version, via `copyVersionGraph` — the questions were written against that vocabulary, so a fork
+that dropped it would silently change what the questionnaire means.
+
+Terms are copied at **every** status, including `rejected`: that adjudication is what stops a later
+analysis run on the new draft re-proposing a term the admin already turned down.
+
+The copy is one `createMany` + one `findMany` keyed on `normalizedTerm` (unique by construction in
+a fresh version), never a per-term loop — the same collapse the data slots needed after a per-slot
+loop overran the interactive-transaction budget in prod (P2028). No id map is returned: nothing
+addresses a glossary row by URL, so there is nothing to retarget.
+
+Glossary rows are version-scoped by design; see the "deliberate non-decisions" section of
+[`definitions-glossary.md`](./definitions-glossary.md) on why a shared per-client library was not
+built now, and how it could be layered on without a migration.

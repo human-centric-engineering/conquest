@@ -20,6 +20,7 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
+import { resolveGlossaryForHints } from '@/lib/app/questionnaire/glossary/resolve';
 import { SessionDownloads } from '@/components/admin/questionnaires/sessions/session-downloads';
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { Badge } from '@/components/ui/badge';
@@ -48,6 +49,10 @@ export default async function SessionViewerPage({ params }: PageProps) {
   if (!view || view.questionnaireId !== id || view.versionId !== vid) notFound();
 
   const turns = await loadTranscript(sessionId);
+
+  // Definitions / glossary (P16): the same underline + popover the respondent saw, so an admin
+  // reading a transcript back sees the conversation exactly as it was presented.
+  const glossary = await resolveGlossaryForHints(vid);
 
   // Continue only a preview session that is still active; mint its token here. A real respondent
   // session never reaches this branch, so it can never be continued by an admin.
@@ -103,6 +108,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
       <div className="min-h-0 flex-1">
         <SessionWorkspace
           sessionId={sessionId}
+          glossary={glossary}
           initialTurns={turns}
           {...(continuable ? { accessToken } : { readOnly: true })}
         />

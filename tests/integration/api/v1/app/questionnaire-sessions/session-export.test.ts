@@ -26,6 +26,11 @@ const mocks = vi.hoisted(() => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
+// The glossary read is an independent concern from the logo-embedding behaviour under test here,
+// and it is fail-soft (a miss logs a warning), which would otherwise pollute the logger assertions.
+vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
+  loadAcceptedGlossaryEntries: vi.fn(async () => []),
+}));
 vi.mock('@/lib/logging', () => ({ logger: mocks.logger }));
 
 import {
@@ -392,6 +397,10 @@ describe('buildSessionExportPdfModel', () => {
     return {
       session: { id: 'sess-1', respondentUserId: 'user-1' },
       questionnaireId: 'q-1',
+      // Definitions / glossary (P16): the version the seam resolves the glossary from, and the
+      // switch that decides whether the RESPONDENT's copy carries it.
+      versionId: 'ver-1',
+      glossaryReportAppendix: false,
       questionnaireTitle: 'Onboarding survey',
       versionNumber: 3,
       ref: 'GSP289HB',

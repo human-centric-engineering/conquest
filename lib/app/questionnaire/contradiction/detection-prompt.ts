@@ -15,6 +15,7 @@
  */
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
+import { formatGlossarySection } from '@/lib/app/questionnaire/glossary/injection';
 import {
   CONTRADICTION_SEVERITIES,
   type AnsweredSlotView,
@@ -26,7 +27,11 @@ import {
  *  question; under `flag`/`off` it is not (those modes surface passively).
  *  When `withCurrentStatement` is set, the model is also told to weigh the
  *  respondent's latest message against the captured answers (reversal detection). */
-function systemRules(mode: ContradictionContext['mode'], withCurrentStatement: boolean): string {
+function systemRules(
+  mode: ContradictionContext['mode'],
+  withCurrentStatement: boolean,
+  hasGlossary: boolean
+): string {
   const probeLine =
     mode === 'probe'
       ? `\n- "suggestedProbe": ONE follow-up question that lets the respondent reconcile the \
@@ -50,6 +55,15 @@ is a contradiction. If you're not sure it's a real conflict, do NOT report it at
 conflict is between the LATEST MESSAGE and a single recorded answer, list that ONE key; when it is \
 between two recorded answers, list two or more.`
     : `- "slotKeys": the keys of the conflicting questions (two or more). Use ONLY keys from the list.`;
+
+  // Definitions / glossary: the single most valuable guard against a false positive here. Only
+  // stated when definitions were actually supplied, so a version without a glossary is byte-identical.
+  const glossaryRule = hasGlossary
+    ? `\n- Some terms in this questionnaire have DEFINED meanings, listed below. Read every answer \
+against those definitions. Where a term lists more than one numbered sense, two answers that each use \
+a DIFFERENT listed sense are NOT a contradiction — the questionnaire accepts both readings. Only \
+report a conflict that survives once the terms are pinned down.`
+    : '';
 
   const latestMessageRule = withCurrentStatement
     ? `\n- ALSO compare the respondent's LATEST MESSAGE (given below) against each recorded answer. \
@@ -79,7 +93,7 @@ conflict with each other.
 can only say the answers MIGHT differ, they do not contradict — return nothing for them.
 - Never invent a conflict to have something to say. If the answers are consistent, return an empty \
 "contradictions" array.
-- Only reference questions in the provided list, and only ones that have an answer.${latestMessageRule}
+- Only reference questions in the provided list, and only ones that have an answer.${glossaryRule}${latestMessageRule}
 
 Output: respond with ONLY a single JSON object: { "contradictions": [ ... ] }. Do not wrap the \
 JSON in prose or code fences.`;
@@ -160,7 +174,11 @@ export function buildContradictionDetectionPrompt(ctx: ContradictionContext): Ll
   const latestMessage = typeof ctx.currentStatement === 'string' ? ctx.currentStatement.trim() : '';
   const hasLatest = latestMessage.length > 0;
 
+  const glossaryBlock = formatGlossarySection(ctx.glossary ?? []);
+
   const userContent =
+    // Definitions first: an answer can only be judged for conflict once its words are pinned down.
+    (glossaryBlock.length > 0 ? `${glossaryBlock}\n\n` : '') +
     `Answered questions to check for contradictions:\n${answeredLines.join('\n')}\n\n` +
     (hasLatest
       ? `The respondent's LATEST MESSAGE:\n"${latestMessage}"\n\n` +
@@ -169,7 +187,7 @@ export function buildContradictionDetectionPrompt(ctx: ContradictionContext): Ll
       : `Report only genuine logical contradictions between these answers.`);
 
   return [
-    { role: 'system', content: systemRules(ctx.mode, hasLatest) },
+    { role: 'system', content: systemRules(ctx.mode, hasLatest, glossaryBlock.length > 0) },
     { role: 'user', content: userContent },
   ];
 }

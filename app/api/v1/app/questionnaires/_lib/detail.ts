@@ -117,6 +117,9 @@ export const CONFIG_SELECT = {
   sensitivityAwareness: true,
   supportMessage: true,
   supportResourceUrl: true,
+  glossaryPromptInjection: true,
+  glossaryRespondentHints: true,
+  glossaryReportAppendix: true,
   profileFields: true,
   captureMode: true,
   answerSlotPanelScope: true,
@@ -163,6 +166,9 @@ type ConfigRow = {
   sensitivityAwareness: boolean;
   supportMessage: string;
   supportResourceUrl: string;
+  glossaryPromptInjection: boolean;
+  glossaryRespondentHints: boolean;
+  glossaryReportAppendix: boolean;
   profileFields: Prisma.JsonValue;
   captureMode: string;
   answerSlotPanelScope: string;
@@ -283,6 +289,9 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     sensitivityAwareness: row.sensitivityAwareness,
     supportMessage: row.supportMessage,
     supportResourceUrl: row.supportResourceUrl,
+    glossaryPromptInjection: row.glossaryPromptInjection,
+    glossaryRespondentHints: row.glossaryRespondentHints,
+    glossaryReportAppendix: row.glossaryReportAppendix,
     profileFields: asProfileFields(row.profileFields),
     captureMode: asCaptureMode(row.captureMode),
     answerSlotPanelScope: asAnswerSlotPanelScope(row.answerSlotPanelScope),

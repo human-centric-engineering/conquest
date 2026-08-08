@@ -51,6 +51,7 @@ import {
   diffNewlyFilledQuestions,
 } from '@/lib/app/questionnaire/panel/newly-filled';
 import { buildCorrectionTargets } from '@/lib/app/questionnaire/panel/correction-targets';
+import type { GlossaryAppendixView, GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import { ModeToggle, type ToggleItem } from '@/components/app/questionnaire/mode-toggle';
 import { ChatTextSize } from '@/components/app/questionnaire/chat/chat-text-size';
 import {
@@ -104,6 +105,20 @@ import { RESPONDENT_SPLIT } from '@/lib/app/questionnaire/layout';
 type WorkspaceView = 'intro' | 'capture' | 'persona' | 'chat' | 'form';
 
 export interface SessionWorkspaceProps {
+  /**
+   * Definitions / glossary (P16): the version's live terms, resolved server-side by the page and
+   * already gated on `glossaryRespondentHints` (the page passes `[]` when it is off, so nothing
+   * downstream carries a flag). Forwarded to the chat, where a matched term in the interviewer's
+   * messages is underlined with its definition in a popover, and to the form's question labels.
+   */
+  glossary?: readonly GlossaryEntry[];
+  /**
+   * Definitions / glossary (P16): the appendix for the completion screen, gated by the SEPARATE
+   * `glossaryReportAppendix` switch (an admin may want definitions live in the conversation but
+   * not appended to the delivered report, or the reverse). Built server-side so the screen and
+   * the downloadable PDF can never disagree about what the report contains.
+   */
+  glossaryAppendix?: GlossaryAppendixView | null;
   sessionId: string;
   /** Anonymous no-login token; omit for authenticated sessions. */
   accessToken?: string;
@@ -213,6 +228,8 @@ const VIEW_META: Record<WorkspaceView, { label: string; Icon: typeof BookOpen }>
 };
 
 export function SessionWorkspace({
+  glossary,
+  glossaryAppendix,
   sessionId,
   accessToken,
   initialTurns,
@@ -720,6 +737,7 @@ export function SessionWorkspace({
       <div className="flex h-full min-h-0 flex-col">
         <QuestionnaireChat
           sessionId={sessionId}
+          glossary={glossary}
           stream={stream}
           readOnly
           reasoningPlacement={reasoningPlacement}
@@ -784,6 +802,7 @@ export function SessionWorkspace({
         // The last-settled answer panel feeds the "while your report is being prepared" cycler — the
         // respondent sees their own captured positions echoed back instead of a bare spinner.
         captured={panel.view ?? null}
+        glossaryAppendix={glossaryAppendix ?? null}
       />
     );
   }
@@ -910,6 +929,7 @@ export function SessionWorkspace({
         {completionAffordance}
         <QuestionnaireChat
           sessionId={sessionId}
+          glossary={glossary}
           accessToken={accessToken}
           stream={stream}
           voiceInputEnabled={voiceInputEnabled}
@@ -944,6 +964,7 @@ export function SessionWorkspace({
     <div className="flex h-full min-h-0 flex-col gap-3">
       {completionAffordance}
       <QuestionnaireForm
+        glossary={glossary}
         view={form.view}
         loading={form.loading}
         values={form.values}

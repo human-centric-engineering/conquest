@@ -17,6 +17,7 @@ import { prisma } from '@/lib/db/client';
 import { exportLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { buildDefinitionExport } from '@/lib/app/questionnaire/authoring';
+import { loadGlossaryForExport } from '@/app/api/v1/app/questionnaires/_lib/glossary-routes';
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
@@ -57,12 +58,19 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       ? { name: schemaRow.name, content: narrowScoringSchemaContent(schemaRow.content) }
       : null;
 
+    // Definitions / glossary (P16): the CURATED set travels with the definition, so importing it
+    // elsewhere preserves the admin's adjudication rather than making them re-decide every term.
+    // Read directly (not via the gated resolver) — an export is the authored artifact, and it
+    // carries proposals and rejections too, which no runtime surface ever sees.
+    const glossary = await loadGlossaryForExport(vid);
+
     const envelope = buildDefinitionExport(
       questionnaire.title,
       graph,
       dataSlots,
       scoring,
-      new Date().toISOString()
+      new Date().toISOString(),
+      glossary
     );
 
     log.info('Questionnaire definition export', {

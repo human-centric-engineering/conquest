@@ -48,6 +48,7 @@ function makeDbRow(
   return {
     status: over.status ?? 'active',
     respondentUserId: over.respondentUserId !== undefined ? over.respondentUserId : 'user-1',
+    versionId: 'ver-1',
     version: {
       config:
         over.config !== undefined
@@ -97,6 +98,8 @@ describe('loadSessionSurfaceConfig', () => {
           select: {
             status: true,
             respondentUserId: true,
+            // The page resolves version-scoped extras (the P16 glossary) from this id.
+            versionId: true,
             version: {
               select: {
                 config: {

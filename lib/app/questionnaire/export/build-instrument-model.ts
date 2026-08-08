@@ -13,6 +13,7 @@
  */
 
 import { QUESTION_TYPE_LABELS, type QuestionType } from '@/lib/app/questionnaire/types';
+import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import { summariseAudience } from '@/lib/app/questionnaire/export/build-session-export-model';
 
@@ -46,6 +47,13 @@ export interface InstrumentSection {
 /** The full blank-instrument model the serialisers render. */
 export interface InstrumentModel {
   title: string;
+  /**
+   * Definitions / glossary (P16). Always rendered on the blank instrument, regardless of the
+   * version's `glossaryReportAppendix` switch — that switch governs what the RESPONDENT receives,
+   * whereas the instrument is an admin/reviewer artifact where the definitions are the most useful
+   * thing on the page. `null` when the version has none.
+   */
+  glossary: GlossaryAppendixView | null;
   versionNumber: number;
   goal: string | null;
   audienceSummary: string | null;
@@ -160,7 +168,8 @@ function readConstraint(type: QuestionType, config: unknown): string | null {
 export function buildInstrumentModel(
   title: string,
   graph: VersionGraphView,
-  generatedAt: string
+  generatedAt: string,
+  glossary: GlossaryAppendixView | null = null
 ): InstrumentModel {
   let questionCount = 0;
 
@@ -188,6 +197,7 @@ export function buildInstrumentModel(
 
   return {
     title,
+    glossary,
     versionNumber: graph.versionNumber,
     goal: graph.goal,
     audienceSummary: summariseAudience(graph.audience),

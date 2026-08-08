@@ -319,3 +319,24 @@ Json` (keyed by field `key`), `respondentUserId String?` denormalised from the s
   [`anonymous-mode.md`](./anonymous-mode.md).
 
 _Later phases extend this file. Each documents its models here as it lands._
+
+## Definitions / glossary (P16)
+
+Three version-scoped models, all cascading from `AppQuestionnaireVersion`.
+
+| Model                   | Purpose                                                                                                                                                                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AppGlossaryTerm`       | One curated term. `status` (`proposed`/`accepted`/`rejected`) is the curation gate; `normalizedTerm` is the per-version uniqueness key, produced by `normalizeGlossarySurface` — the _same_ function the matcher and the save schema use, so the three can never disagree about what counts as the same term. |
+| `AppGlossaryDefinition` | One candidate reading. A term carries 1–4; `selected` is the admin's tick. Several selected definitions are deliberate and are never merged. `edited` records that the AI's wording was changed, so a re-run leaves a hand-tuned definition alone.                                                            |
+| `AppGlossaryDocument`   | The optional authoritative definitions document, stored as extracted **text** only (no `bytes` — there is no re-parse path). One per version. Never embedded or chunked.                                                                                                                                      |
+
+House conventions honoured: no enums (plain `String` validated at the seam), user FKs as plain
+`String` with no `@relation` (UG-1). `AppGlossaryTerm.createdBy` and `AppGlossaryDocument.uploadedBy`
+are both declared as `attribution` in `lib/app/questionnaire/privacy/export-sources.ts`;
+`AppGlossaryDefinition` carries no user column by design.
+
+Three scalar columns on `AppQuestionnaireConfig` — `glossaryPromptInjection`,
+`glossaryRespondentHints`, `glossaryReportAppendix`. Scalars rather than one Json blob so
+`copyVersionGraph`'s `...source.config` spread carries them for free.
+
+See [`definitions-glossary.md`](./definitions-glossary.md).

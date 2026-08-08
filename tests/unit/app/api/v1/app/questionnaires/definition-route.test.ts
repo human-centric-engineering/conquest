@@ -52,6 +52,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/detail', () => ({
   getVersionGraph: vi.fn(),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/glossary-routes', () => ({
+  loadGlossaryForExport: vi.fn(async () => []),
+}));
+
 vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-routes', () => ({
   loadDataSlots: vi.fn(),
 }));
@@ -248,7 +252,8 @@ describe('GET definition — happy path', () => {
       dataSlots,
       // scoring arg — the route narrows the schema content and wraps it
       expect.objectContaining({ name: 'Standard', content: schemaContent }),
-      expect.any(String) // ISO timestamp
+      expect.any(String), // ISO timestamp
+      [] // the version's curated glossary (P16)
     );
   });
 

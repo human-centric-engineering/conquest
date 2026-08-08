@@ -334,6 +334,11 @@ export const updateConfigSchema = z
     sensitivityAwareness: z.boolean().optional(),
     supportMessage: z.string().trim().max(500).optional(),
     supportResourceUrl: z.string().trim().max(500).optional(),
+
+    // Definitions / glossary (P16): how the version's curated terms are put to work.
+    glossaryPromptInjection: z.boolean().optional(),
+    glossaryRespondentHints: z.boolean().optional(),
+    glossaryReportAppendix: z.boolean().optional(),
     profileFields: z.array(profileFieldSchema).optional(),
     // How the profile fields are collected: `form` (a blocking form gate after the intro) or
     // `conversational` (the interviewer gathers them in-chat). Defaults to `form`.

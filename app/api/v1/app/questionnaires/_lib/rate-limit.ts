@@ -336,3 +336,20 @@ export const settingsAdvisorLimiter = createRateLimiter({
   interval: SETTINGS_ADVISOR_RATE_LIMIT_INTERVAL_MS,
   maxRequests: SETTINGS_ADVISOR_RATE_LIMIT_MAX,
 });
+
+/**
+ * Glossary-analysis sub-cap (definitions / glossary, P16). One reasoning-model call over the whole
+ * question set — plus the definitions document when attached, which can be a long upload — so this
+ * is the same paid class as data-slot generation and takes the same 20/min band. Ample for the
+ * real loop (analyse → curate → re-run after a structure edit) while bounding a hammered
+ * "Analyse" button. Keyed on the admin user id, who owns the spend.
+ */
+export const GLOSSARY_ANALYSIS_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link glossaryAnalysisLimiter}, in milliseconds. */
+export const GLOSSARY_ANALYSIS_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const glossaryAnalysisLimiter = createRateLimiter({
+  interval: GLOSSARY_ANALYSIS_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: GLOSSARY_ANALYSIS_RATE_LIMIT_MAX,
+});

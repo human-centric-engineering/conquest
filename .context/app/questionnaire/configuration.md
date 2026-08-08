@@ -286,3 +286,20 @@ Cost _estimation_ (F3.3) and any consumer of the stored settings (F4 selection,
 F4.3 contradiction, F6 turn engine, P4 session start). A separate relational
 profile-field model (JSON by decision). Invitations (F3.2) and demo-client
 invitation branding (F3.4).
+
+## Definitions / glossary (P16)
+
+Three switches govern how the version's curated terms are used. All three are **inert** when the
+version has no accepted terms, which is why the first two default on: an admin who never opens the
+Definitions tab sees no change at all.
+
+| Key                       | Default     | Effect                                                                                                                                                                 |
+| ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `glossaryPromptInjection` | `true`      | Folds the terms relevant to the current turn into the interviewer, extraction, refinement and contradiction prompts, and the whole accepted set into report generation |
+| `glossaryRespondentHints` | `true`      | Underlines a matched term in the interviewer's messages and on form labels, with the definition in a popover                                                           |
+| `glossaryReportAppendix`  | **`false`** | Appends the glossary to the respondent's report and PDF. Off by default because it changes a delivered document                                                        |
+
+The blank **instrument** export always carries the glossary regardless of `glossaryReportAppendix`
+— that switch governs what the _respondent_ receives, and the instrument is the reviewer's copy.
+
+See [`definitions-glossary.md`](./definitions-glossary.md).

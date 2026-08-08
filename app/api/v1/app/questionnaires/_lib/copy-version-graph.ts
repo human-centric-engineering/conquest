@@ -11,7 +11,9 @@
  *   - the question-slot and data-slot pgvector `embedding`s (F4.1 adaptive selection),
  *     copied via raw SQL keyed on `key` — the typed `createMany` can't carry an
  *     `Unsupported(...)` column, so without this the copy would land adaptive-blind,
- *   - the tag vocabulary (F2.2) with each assignment re-linked to the copied slot.
+ *   - the tag vocabulary (F2.2) with each assignment re-linked to the copied slot,
+ *   - the definitions / glossary (P16): curated terms with their candidate definitions, and the
+ *     authoritative definitions document they were drawn from.
  *
  * Returns the old→new id maps so a caller can retarget anything that references the
  * originals (the fork's child-mutation retarget; not needed by clone).
@@ -65,6 +67,44 @@ export async function copyVersionGraph(
           normalizedLabel: true,
           color: true,
           slots: { select: { questionSlotId: true } },
+        },
+      },
+      // Definitions / glossary (P16): the curated terms + their candidate definitions fork with
+      // the version, and so does the authoritative definitions document they were drawn from —
+      // otherwise a fork would silently lose the vocabulary the questions were written against.
+      glossaryTerms: {
+        orderBy: { ordinal: 'asc' },
+        select: {
+          term: true,
+          normalizedTerm: true,
+          aliases: true,
+          status: true,
+          source: true,
+          rationale: true,
+          contextQuote: true,
+          ordinal: true,
+          createdBy: true,
+          definitions: {
+            orderBy: { ordinal: 'asc' },
+            select: {
+              text: true,
+              selected: true,
+              source: true,
+              sourceQuote: true,
+              edited: true,
+              ordinal: true,
+            },
+          },
+        },
+      },
+      glossaryDocument: {
+        select: {
+          fileName: true,
+          fileHash: true,
+          byteSize: true,
+          mimeType: true,
+          extractedText: true,
+          uploadedBy: true,
         },
       },
       // Data Slots feature: the abstraction layer forks with the version (like tags).
@@ -295,6 +335,73 @@ export async function copyVersionGraph(
   // Carry the data-slot embeddings over too (same rationale as the question slots:
   // verbatim text → still-valid vectors, on a Prisma-Unsupported column).
   await copyDataSlotEmbeddings(tx, sourceVersionId, targetVersionId);
+
+  // Definitions / glossary (P16): terms + their definitions, copied normalizedTerm-for-
+  // normalizedTerm (unique by construction in a fresh version). One createMany + one findMany
+  // re-links the definitions, rather than a per-term create round-trip — the same collapse the
+  // data slots above needed after a per-slot loop overran the interactive-transaction budget on a
+  // large version in prod (P2028). No id map is returned: nothing addresses a glossary row by
+  // URL, so there is nothing for a caller to retarget.
+  if (source.glossaryTerms.length > 0) {
+    await tx.appGlossaryTerm.createMany({
+      data: source.glossaryTerms.map((term) => ({
+        versionId: targetVersionId,
+        term: term.term,
+        normalizedTerm: term.normalizedTerm,
+        aliases: jsonInput(term.aliases),
+        status: term.status,
+        source: term.source,
+        ordinal: term.ordinal,
+        ...(term.rationale !== null ? { rationale: term.rationale } : {}),
+        ...(term.contextQuote !== null ? { contextQuote: term.contextQuote } : {}),
+        ...(term.createdBy !== null ? { createdBy: term.createdBy } : {}),
+      })),
+    });
+
+    const newTermIdByNormalized = new Map(
+      (
+        await tx.appGlossaryTerm.findMany({
+          where: { versionId: targetVersionId },
+          select: { id: true, normalizedTerm: true },
+        })
+      ).map((term) => [term.normalizedTerm, term.id])
+    );
+    const newDefinitions = source.glossaryTerms.flatMap((term) => {
+      const termId = newTermIdByNormalized.get(term.normalizedTerm);
+      if (!termId) return [];
+      return term.definitions.map((definition) => ({
+        termId,
+        text: definition.text,
+        selected: definition.selected,
+        source: definition.source,
+        edited: definition.edited,
+        ordinal: definition.ordinal,
+        ...(definition.sourceQuote !== null ? { sourceQuote: definition.sourceQuote } : {}),
+      }));
+    });
+    if (newDefinitions.length > 0) {
+      await tx.appGlossaryDefinition.createMany({ data: newDefinitions });
+    }
+  }
+
+  // The definitions document the terms were drawn from (1:1 with the version, when one exists).
+  if (source.glossaryDocument) {
+    await tx.appGlossaryDocument.create({
+      data: {
+        versionId: targetVersionId,
+        fileName: source.glossaryDocument.fileName,
+        fileHash: source.glossaryDocument.fileHash,
+        byteSize: source.glossaryDocument.byteSize,
+        extractedText: source.glossaryDocument.extractedText,
+        ...(source.glossaryDocument.mimeType !== null
+          ? { mimeType: source.glossaryDocument.mimeType }
+          : {}),
+        ...(source.glossaryDocument.uploadedBy !== null
+          ? { uploadedBy: source.glossaryDocument.uploadedBy }
+          : {}),
+      },
+    });
+  }
 
   return { sectionIdMap, questionIdMap, tagIdMap, dataSlotIdMap };
 }

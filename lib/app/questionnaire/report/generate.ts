@@ -18,6 +18,11 @@ import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-reso
 import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manager';
 import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
+import {
+  allGlossaryLines,
+  formatGlossarySection,
+} from '@/lib/app/questionnaire/glossary/injection';
+import { resolveGlossaryForPrompts } from '@/lib/app/questionnaire/glossary/resolve';
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
@@ -245,6 +250,13 @@ function buildReportMessages(opts: {
    * block is emitted and the prompt is exactly as it was before.
    */
   coverage?: { answered: number; total: number; unansweredBlock: string };
+  /**
+   * Definitions / glossary (P16): the version's whole accepted set, as `"- <term>: <definition>"`
+   * lines. Unlike the per-turn seams this is NOT relevance-filtered — generation runs once per
+   * session, so filtering would only risk withholding a term the writer needs, for no per-turn
+   * saving. Absent/empty → no block is emitted.
+   */
+  glossary?: string[];
 }): LlmMessage[] {
   const {
     agentInstructions,
@@ -255,6 +267,7 @@ function buildReportMessages(opts: {
     research,
     includesAppendedData,
     coverage,
+    glossary,
   } = opts;
   const gen = settings.generation;
   const narrative = settings.mode === 'narrative';
@@ -312,6 +325,13 @@ function buildReportMessages(opts: {
   if (gen.structure.trim()) system.push(`Desired structure:\n${gen.structure.trim()}`);
   if (gen.backgroundContext.trim())
     system.push(`Background context about this questionnaire:\n${gen.backgroundContext.trim()}`);
+  // Definitions / glossary: what the questionnaire means by its contested terms. Placed before the
+  // reference material so the writer reads the transcript against these meanings — and, because a
+  // report is read months later by someone who was not there, so it uses the terms consistently.
+  {
+    const glossaryBlock = formatGlossarySection(glossary ?? []);
+    if (glossaryBlock.length > 0) system.push(glossaryBlock);
+  }
   if (knowledge.trim())
     system.push(
       `Reference material (use it to inform and substantiate the insights; cite naturally, do not quote verbatim):\n${knowledge.trim()}`
@@ -383,6 +403,12 @@ export interface ReportGenerationInputs {
    * explainer agent or the deterministic template — as if it had read a real person's answers.
    */
   preview?: boolean;
+  /**
+   * Definitions / glossary (P16): the version's accepted terms, pre-formatted by
+   * `glossary/injection.ts`. Threaded into the writer's prompt so the report interprets — and
+   * uses — the questionnaire's vocabulary the way the admin defined it.
+   */
+  glossary?: string[];
 }
 
 /**
@@ -419,9 +445,17 @@ export async function generateRespondentReportWithSettings(
   // 1. Client attribution for this session's version (the KB grounding scope).
   const meta = await prisma.appQuestionnaireSession.findUnique({
     where: { id: sessionId },
-    select: { version: { select: { questionnaire: { select: { demoClientId: true } } } } },
+    select: {
+      versionId: true,
+      version: { select: { questionnaire: { select: { demoClientId: true } } } },
+    },
   });
   if (!meta?.version) throw new Error(`Session ${sessionId} not found for report generation`);
+
+  // Definitions / glossary (P16): the version's accepted terms, so the report interprets — and
+  // uses — the questionnaire's vocabulary the way the admin defined it. Unfiltered: generation is
+  // one call per session, so withholding a term the writer needs would cost more than it saves.
+  const glossary = allGlossaryLines(await resolveGlossaryForPrompts(meta.versionId));
 
   // 2. Captured answers → Q&A transcript + the contextual data-slot block.
   const loaded = await loadSessionExport(sessionId);
@@ -466,6 +500,7 @@ export async function generateRespondentReportWithSettings(
     },
     demoClientId: meta.version.questionnaire?.demoClientId ?? null,
     sessionId,
+    ...(glossary.length > 0 ? { glossary } : {}),
   });
 }
 
@@ -637,6 +672,7 @@ export async function generateReportFromInputs(
       return includes.questions || includes.dataSlots;
     })(),
     ...(coverage ? { coverage } : {}),
+    ...(inputs.glossary && inputs.glossary.length > 0 ? { glossary: inputs.glossary } : {}),
   });
   const result = await runStructuredCompletion<RespondentReportContent>({
     provider,

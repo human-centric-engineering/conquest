@@ -1122,6 +1122,19 @@ export type QuestionnaireConfigShape = {
   supportMessage: string;
   /** Optional support resource URL appended to {@link supportMessage} when set. */
   supportResourceUrl: string;
+
+  /**
+   * Definitions / glossary (P16). Inert when the version has no accepted terms.
+   *
+   * `glossaryPromptInjection` folds the terms relevant to the current turn into the interviewer,
+   * answer-extraction, refinement and contradiction-detection prompts, and the whole accepted set
+   * into report generation. `glossaryRespondentHints` underlines matched terms in the chat and on
+   * form labels, with the definition in a popover. `glossaryReportAppendix` appends the glossary
+   * to the respondent's report and PDF — off by default, since it changes a delivered artifact.
+   */
+  glossaryPromptInjection: boolean;
+  glossaryRespondentHints: boolean;
+  glossaryReportAppendix: boolean;
   profileFields: ProfileFieldConfig[];
   /**
    * The DEFAULT placement for the {@link profileFields} (F-capture). See {@link CAPTURE_MODES}. Defaults
@@ -1275,6 +1288,9 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   sensitivityAwareness: false,
   supportMessage: '',
   supportResourceUrl: '',
+  glossaryPromptInjection: true,
+  glossaryRespondentHints: true,
+  glossaryReportAppendix: false,
   profileFields: [],
   captureMode: 'form',
   answerSlotPanelScope: 'full_progress',

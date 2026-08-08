@@ -29,6 +29,8 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { resolveSessionTone } from '@/lib/app/questionnaire/persona/settings';
 import { selectBriefingLines } from '@/lib/app/questionnaire/rounds/briefing';
+import { selectGlossaryLines } from '@/lib/app/questionnaire/glossary/injection';
+import { resolveGlossaryForPrompts } from '@/lib/app/questionnaire/glossary/resolve';
 import { loadRoundPeerDigest } from '@/lib/app/questionnaire/learning/digest';
 import { recordLearningApplied } from '@/lib/app/questionnaire/learning/events';
 import {
@@ -294,6 +296,13 @@ async function handleMessage(
       ? await loadRoundBriefing(loaded.session.roundId, loaded.session.versionId)
       : null;
 
+    // Definitions / glossary (P16): the version's accepted terms, loaded once per turn and threaded
+    // into every agent that asks, interprets or reconciles an answer. `[]` when the version has no
+    // accepted terms or `glossaryPromptInjection` is off — in both cases nothing is injected. Each
+    // seam relevance-filters this set to the terms actually in play, using the same matcher the
+    // respondent hints use, so the agents are briefed on exactly what the respondent can see.
+    const glossaryEntries = await resolveGlossaryForPrompts(loaded.session.versionId);
+
     // Learning Mode: load this round's peer-theme digest once per turn (null when the session isn't
     // round-scoped or the round's learningEnabled toggle is off). Indexed by `${kind}:${key}` for the
     // phraser, plus a question-key → divergence map for adaptive probing.
@@ -545,6 +554,7 @@ async function handleMessage(
     }
 
     const invokers = await buildTurnInvokers({
+      glossaryEntries,
       userId,
       slots: loaded.slots,
       // Extraction pre-filter: the extractor sees the narrowed question slots (when active); the
@@ -780,6 +790,12 @@ async function handleMessage(
         const dsBriefing = briefingEntries
           ? selectBriefingLines(briefingEntries, dsRelevantIds)
           : [];
+        // Glossary terms in play for this data slot: its name/description plus the recent turns.
+        const dsGlossary = selectGlossaryLines(glossaryEntries, [
+          r.name,
+          r.description,
+          ...state.recentMessages,
+        ]);
         // Learning Mode: peer theme for this data slot (if any), threaded as peer context + audited.
         const dsSlotKey = dataSlots.find((s) => s.id === r.dataSlotId)?.key;
         const dsPeer = dsSlotKey ? peerInsightByKey.get(`data_slot:${dsSlotKey}`) : undefined;
@@ -800,6 +816,7 @@ async function handleMessage(
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(dsBriefing.length > 0 ? { briefing: dsBriefing } : {}),
+            ...(dsGlossary.length > 0 ? { glossary: dsGlossary } : {}),
             ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
             ...(isFinalAttempt ? { isFinalAttempt: true } : {}),
@@ -844,6 +861,13 @@ async function handleMessage(
               new Set(result.targetedQuestionId ? [result.targetedQuestionId] : [])
             )
           : [];
+        // Glossary terms in play for this question: the text being asked, its guidance, and the
+        // recent turns (a term the respondent themselves raised is as worth defining as one we did).
+        const qGlossary = selectGlossaryLines(glossaryEntries, [
+          result.response.text,
+          slot?.guidelines ?? '',
+          ...state.recentMessages,
+        ]);
         // Learning Mode: peer theme for the asked question (if any), threaded as peer context + audited.
         const qPeer = targetedKey ? peerInsightByKey.get(`question:${targetedKey}`) : undefined;
         if (qPeer) void recordLearningApplied(sessionId);
@@ -864,6 +888,7 @@ async function handleMessage(
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(qBriefing.length > 0 ? { briefing: qBriefing } : {}),
+            ...(qGlossary.length > 0 ? { glossary: qGlossary } : {}),
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
             ...sensitivityPhraserInput,
             ...tonePhraserInput,

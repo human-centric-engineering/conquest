@@ -46,6 +46,7 @@ import {
   QUESTIONNAIRE_ADVISOR_AGENT_SLUG,
   QUESTIONNAIRE_EDIT_AGENT_SLUG,
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
+  QUESTIONNAIRE_GLOSSARY_ANALYST_AGENT_SLUG,
   RESPONDENT_REPORT_AGENT_SLUG,
   RESPONDENT_REPORT_ASSISTANT_AGENT_SLUG,
   REPORT_RESEARCHER_AGENT_SLUG,
@@ -204,6 +205,23 @@ export const AGENT_RECOMMENDATIONS: readonly AgentRecommendation[] = [
     recommendedReasoningEffort: 'medium',
     overrideModel: null,
     rationale: 'Structured generation of moderate difficulty — medium effort is sufficient.',
+  },
+  {
+    slug: QUESTIONNAIRE_GLOSSARY_ANALYST_AGENT_SLUG,
+    label: 'Glossary Analyst',
+    role: 'Proposes ambiguous terms and their candidate definitions',
+    taskTier: 'reasoning',
+    // Warmer than the critics: deciding which words are genuinely contested, and phrasing a
+    // definition a respondent will read, are both partly editorial judgements.
+    recommendedTemperature: 0.3,
+    // Up to 40 terms x 4 definitions plus a rationale each. A truncated response fails schema
+    // validation outright rather than degrading, so the cap is generous relative to real output.
+    recommendedMaxTokens: 8192,
+    recommendedReasoningEffort: 'medium',
+    overrideModel: null,
+    rationale:
+      'Judging which terms are genuinely contested in context needs real reasoning, but it is a ' +
+      'one-off authoring pass rather than a per-turn cost — medium effort on the reasoning tier.',
   },
   {
     slug: TURN_EVALUATOR_AGENT_SLUG,

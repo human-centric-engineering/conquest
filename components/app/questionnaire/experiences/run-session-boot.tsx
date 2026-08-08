@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
+import type { GlossaryAppendixView, GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import {
   fetchCapture,
@@ -34,6 +35,15 @@ import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnai
 
 export interface RunSessionBootProps {
   sessionId: string;
+  /**
+   * Definitions / glossary (P16): the leg's live terms, resolved server-side and already gated on
+   * `glossaryRespondentHints`. Forwarded to the workspace so a defined term is underlined in the
+   * interviewer's messages. Per LEG, not per run — each questionnaire in an Experience owns its
+   * own vocabulary, and a term can legitimately mean different things in different legs.
+   */
+  glossary?: readonly GlossaryEntry[];
+  /** Definitions / glossary (P16): the completion-screen appendix (its own config switch). */
+  glossaryAppendix?: GlossaryAppendixView | null;
   /** Minted server-side for this render; absent for an authenticated respondent (cookie suffices). */
   accessToken?: string;
   welcomeCopy?: string;
@@ -60,6 +70,8 @@ type BootState =
     };
 
 export function RunSessionBoot({
+  glossary,
+  glossaryAppendix,
   sessionId,
   accessToken,
   welcomeCopy,
@@ -121,6 +133,8 @@ export function RunSessionBoot({
   return (
     <SessionEntry
       sessionId={sessionId}
+      glossary={glossary}
+      glossaryAppendix={glossaryAppendix}
       accessToken={accessToken}
       intro={state.intro}
       personas={state.personas}

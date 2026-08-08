@@ -102,6 +102,10 @@ function state(over: Partial<TurnState> = {}): TurnState {
     sessionId: 'sess-1',
     userMessage: 'I do marketing',
     config: {
+      // Definitions / glossary (P16) — inert here; present so the fixture matches the shape.
+      glossaryPromptInjection: true,
+      glossaryRespondentHints: true,
+      glossaryReportAppendix: false,
       selectionStrategy: 'sequential',
       minQuestionsAnswered: 0,
       coverageThreshold: 1,

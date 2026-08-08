@@ -52,6 +52,8 @@ function setAuth(s: ReturnType<typeof mockAdminUser> | null): void {
 function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
   return {
     questionnaireTitle: 'Onboarding survey',
+    // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+    glossary: null,
     versionNumber: 1,
     ref: null,
     goal: null,

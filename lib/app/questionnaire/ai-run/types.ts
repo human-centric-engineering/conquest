@@ -60,6 +60,15 @@ export const APP_AI_RUN_KINDS = [
   'experience_handoff',
   /** Experience report (P15) — the run-level synthesis across every leg. */
   'experience_report',
+  /**
+   * Glossary analysis (P16) — the terms the analyst proposed for a version, and why.
+   *
+   * Recorded because a human acts on the verdict (the admin adjudicates every proposal) and
+   * because the accepted result changes durable config: an accepted definition is injected into
+   * the interviewer and extraction prompts, so "where did this definition come from" is a
+   * question worth being able to answer months later.
+   */
+  'glossary_analysis',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

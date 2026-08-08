@@ -11,6 +11,7 @@
 
 import type { ContentPart, LlmMessage } from '@/lib/orchestration/llm/types';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
+import { formatGlossarySection } from '@/lib/app/questionnaire/glossary/injection';
 import {
   EXTRACTOR_EMITTED_PROVENANCES,
   readCommentAggregation,
@@ -502,6 +503,10 @@ export function buildAnswerExtractionPrompt(ctx: ExtractionContext): LlmMessage[
   const systemContent = joinSections(
     section('extraction_rules', SYSTEM_RULES),
     hasDataSlots ? section('data_slot_rules', DATA_SLOT_RULES) : '',
+    // Definitions / glossary: what the questionnaire means by the contested terms in play. Placed
+    // before the situational blocks because it changes how every later rule reads a reply — an
+    // answer can only be judged for fit once the words in it are pinned down. Collapses to ''.
+    section('glossary_rules', formatGlossarySection(ctx.glossary ?? [])),
     // Sensitivity block only when the feature is on — zero added prompt/tokens otherwise.
     ctx.sensitivityAware ? section('sensitivity_rules', SENSITIVITY_RULES) : '',
     // Answer-fit resolver pass: append the commit-to-a-fit framing (only on the focused 2nd call).

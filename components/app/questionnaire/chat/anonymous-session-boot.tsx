@@ -27,6 +27,7 @@ import { Loader2 } from 'lucide-react';
 import { API } from '@/lib/api/endpoints';
 import { Button } from '@/components/ui/button';
 import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
+import type { GlossaryAppendixView, GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import { SessionResumeGate } from '@/components/app/questionnaire/chat/session-resume-gate';
 import {
   anonCredsKey,
@@ -58,6 +59,14 @@ import {
 
 interface AnonymousSessionBootProps {
   versionId: string;
+  /**
+   * Definitions / glossary (P16): the version's live terms, resolved server-side by the page and
+   * already gated on `glossaryRespondentHints`. Forwarded to the workspace so a defined term is
+   * underlined in the interviewer's messages and on form labels.
+   */
+  glossary?: readonly GlossaryEntry[];
+  /** Definitions / glossary (P16): the completion-screen appendix (its own config switch). */
+  glossaryAppendix?: GlossaryAppendixView | null;
   /** Branded intro line (F7.1-PR4); falls back to the platform default. */
   welcomeCopy?: string;
   /** Show the voice-input affordance (gated server-side on the voice flag). */
@@ -215,6 +224,8 @@ async function fetchStatus(
 }
 
 export function AnonymousSessionBoot({
+  glossary,
+  glossaryAppendix,
   versionId,
   welcomeCopy,
   voiceInputEnabled = false,
@@ -468,6 +479,8 @@ export function AnonymousSessionBoot({
 
   return (
     <SessionEntry
+      glossary={glossary}
+      glossaryAppendix={glossaryAppendix}
       intro={state.intro}
       personas={state.personas}
       capture={state.capture}

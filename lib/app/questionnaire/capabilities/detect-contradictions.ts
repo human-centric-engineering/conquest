@@ -71,6 +71,7 @@ import type {
   ContradictionFinding,
   ContradictionSlotView,
 } from '@/lib/app/questionnaire/contradiction/types';
+import { GLOSSARY_MAX_TERMS } from '@/lib/app/questionnaire/glossary/injection';
 
 const SLUG = DETECT_CONTRADICTIONS_CAPABILITY_SLUG;
 
@@ -139,6 +140,16 @@ const argsSchema = z.object({
    */
   currentStatement: z.string().optional(),
   /** Stable session identity, threaded into cost-log metadata. */
+  /**
+   * Definitions / glossary (P16): pre-formatted definition lines for the terms in play this turn,
+   * already relevance-filtered and capped by `glossary/injection.ts`. Bounded here too, so a
+   * caller cannot widen the prompt past what the injection module intends.
+   *
+   * Without this key the whole seam is INERT: `BaseCapability.validate` safe-parses against a
+   * non-strict object, so an unknown `glossary` is silently stripped and the detector never sees
+   * the definitions — nor the same-term-two-senses rule that depends on them.
+   */
+  glossary: z.array(z.string().min(1)).max(GLOSSARY_MAX_TERMS).optional(),
   sessionId: z.string().optional(),
 });
 
@@ -217,6 +228,7 @@ function toContradictionContext(args: DetectContradictionsArgs): ContradictionCo
     ...(args.currentStatement !== undefined ? { currentStatement: args.currentStatement } : {}),
     // The route always supplies a real session id (`preview-<versionId>`); this
     // constant only labels direct/CLI dispatches in cost-log metadata.
+    ...(args.glossary && args.glossary.length > 0 ? { glossary: args.glossary } : {}),
     sessionId: args.sessionId ?? 'dispatch-detect',
   };
 }

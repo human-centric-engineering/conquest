@@ -3,6 +3,10 @@ import { Fraunces } from 'next/font/google';
 import Link from 'next/link';
 
 import { AnonymousSessionBoot } from '@/components/app/questionnaire/chat/anonymous-session-boot';
+import {
+  resolveGlossaryAppendixForVersion,
+  resolveGlossaryForHints,
+} from '@/lib/app/questionnaire/glossary/resolve';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
@@ -88,6 +92,8 @@ export default async function PublicQuestionnairePage({
     inlineCorrectionEnabled,
     previewMeta,
     resumeEnabled,
+    glossary,
+    glossaryAppendix,
   ] = await Promise.all([
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
@@ -100,6 +106,8 @@ export default async function PublicQuestionnairePage({
     resolveInlineCorrectionForVersion(versionId),
     preview ? resolveAdminPreviewMeta(versionId) : Promise.resolve(null),
     resolveSessionResumeEnabledForVersion(versionId),
+    resolveGlossaryForHints(versionId),
+    resolveGlossaryAppendixForVersion(versionId),
   ]);
   // The cross-device "continue with your code" footer is for the public anonymous path only — admin
   // preview and frictionless-invite links resume by other means, so it would only confuse there.
@@ -142,6 +150,8 @@ export default async function PublicQuestionnairePage({
       <div className="min-h-0 flex-1">
         <BrandThemeProvider theme={theme} header={bandHeader}>
           <AnonymousSessionBoot
+            glossary={glossary}
+            glossaryAppendix={glossaryAppendix}
             versionId={versionId}
             preview={preview}
             inviteToken={inviteToken}

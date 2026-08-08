@@ -16,6 +16,8 @@ import type { InstrumentModel } from '@/lib/app/questionnaire/export/build-instr
 
 const MODEL: InstrumentModel = {
   title: 'Staff Morale',
+  // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+  glossary: null,
   versionNumber: 2,
   goal: 'Understand morale',
   audienceSummary: 'Staff',

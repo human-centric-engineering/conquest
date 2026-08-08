@@ -53,6 +53,8 @@ function section(over: Partial<InstrumentSection> = {}): InstrumentSection {
 function model(over: Partial<InstrumentModel> = {}): InstrumentModel {
   return {
     title: 'Test Questionnaire',
+    // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+    glossary: null,
     versionNumber: 1,
     goal: null,
     audienceSummary: null,

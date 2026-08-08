@@ -18,6 +18,7 @@
  */
 
 import type { AudienceShape, SessionStatus } from '@/lib/app/questionnaire/types';
+import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
 import {
   buildAnswerPanelView,
   type PanelAnswerInput,
@@ -64,6 +65,8 @@ export interface SessionExportInput {
   includeQuestions?: boolean;
   /** Include the captured data-slot appendix (config `rawIncludes.dataSlots`). */
   includeDataSlots?: boolean;
+  /** Definitions / glossary (P16) — already gated on `glossaryReportAppendix` by the caller. */
+  glossary?: GlossaryAppendixView | null;
   /** Captured data-slot values grouped by theme (rendered when `includeDataSlots`). */
   dataSlotGroups?: ExportDataSlotGroup[];
 }
@@ -121,5 +124,6 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     includeQuestions: input.includeQuestions ?? true,
     includeDataSlots: input.includeDataSlots ?? false,
     dataSlots: input.dataSlotGroups ?? [],
+    glossary: input.glossary ?? null,
   };
 }

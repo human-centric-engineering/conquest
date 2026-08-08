@@ -336,6 +336,36 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
       ),
   },
   {
+    model: 'AppGlossaryTerm',
+    section: 'glossaryTermsCreated',
+    disposition: 'attribution',
+    description: 'Glossary terms you added to a questionnaire.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appGlossaryTerm.findMany({
+          where: { createdBy: userId },
+          select: { id: true, term: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        }),
+        (row) => row.term
+      ),
+  },
+  {
+    model: 'AppGlossaryDocument',
+    section: 'glossaryDocumentsUploaded',
+    disposition: 'attribution',
+    description: 'Definitions documents you uploaded to a questionnaire.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appGlossaryDocument.findMany({
+          where: { uploadedBy: userId },
+          select: { id: true, fileName: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        }),
+        (row) => row.fileName
+      ),
+  },
+  {
     model: 'AppScoringSchema',
     section: 'scoringSchemasCreated',
     disposition: 'attribution',

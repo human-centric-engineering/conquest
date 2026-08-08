@@ -1017,3 +1017,72 @@ export const SUGGEST_ROUND_BRIEFING_FUNCTION_DEFINITION: CapabilityFunctionDefin
     required: ['questions'],
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* Definitions / glossary (P16)                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Slug of the glossary-analysis capability — proposes ambiguous terms + candidate definitions. */
+export const ANALYSE_GLOSSARY_TERMS_CAPABILITY_SLUG = 'app_analyse_glossary_terms';
+
+/** `AiCapability.executionHandler` for the glossary analyst — the class the dispatcher resolves. */
+export const ANALYSE_GLOSSARY_TERMS_HANDLER = 'AppAnalyseGlossaryTermsCapability';
+
+/** Slug of the seeded Glossary Analyst `AiAgent` (empty provider/model → dynamic resolution). */
+export const QUESTIONNAIRE_GLOSSARY_ANALYST_AGENT_SLUG = 'app-questionnaire-glossary-analyst';
+
+/**
+ * The glossary-analysis capability's OpenAI-compatible function definition — one source of truth
+ * shared by the `BaseCapability` subclass and the `AiCapability` seed, so they can't drift.
+ * Dispatched programmatically by the Definitions tab's analysis route; persists nothing.
+ */
+export const ANALYSE_GLOSSARY_TERMS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: ANALYSE_GLOSSARY_TERMS_CAPABILITY_SLUG,
+  description:
+    'Analyse a questionnaire for terms that are ambiguous, contested, or context-dependent ("higher self", "ego", "regularly") and propose the readings this questionnaire appears to intend — grounded in an admin-supplied definitions document when one is given. Returns candidate terms with candidate definitions for an administrator to adjudicate; persists nothing and changes no questions.',
+  parameters: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        description:
+          'The questionnaire’s questions — each { key, prompt, guidelines, sectionTitle }. The vocabulary to analyse.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      goal: {
+        type: 'string',
+        description:
+          'What the questionnaire is for — the strongest signal for which sense of a word is meant.',
+      },
+      audience: {
+        type: 'object',
+        description:
+          'Who answers it. A term can be settled for one audience and contested for another.',
+        additionalProperties: true,
+      },
+      dataSlotNames: {
+        type: 'array',
+        description:
+          'Names of the version’s data slots, when it has any (more of the same vocabulary).',
+        items: { type: 'string' },
+      },
+      documentText: {
+        type: 'string',
+        description:
+          'Text of the admin’s authoritative definitions document, when attached. Treated as authoritative over anything inferred.',
+      },
+      documentFileName: {
+        type: 'string',
+        description: 'Original file name of the definitions document (prompt context).',
+      },
+      existingTerms: {
+        type: 'array',
+        description:
+          'Terms the admin has already accepted or rejected. Excluded from the proposal so a re-run never re-raises a settled decision.',
+        items: { type: 'string' },
+      },
+      versionId: { type: 'string', description: 'Optional stable identity for cost-log metadata.' },
+    },
+    required: ['questions'],
+  },
+};

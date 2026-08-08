@@ -38,6 +38,7 @@ import {
   usesOpenOpening,
 } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
+import { formatGlossarySection } from '@/lib/app/questionnaire/glossary/injection';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 
 /** Token budget + timeout for the (short) conversational question prose. */
@@ -85,6 +86,15 @@ export interface QuestionComposeInput {
    * → the block is omitted. Built by `_lib/round-briefing.ts` + `rounds/briefing.ts`.
    */
   briefing?: string[];
+  /**
+   * Definitions / glossary (P16): the questionnaire's curated definitions for the terms THIS turn
+   * actually uses — each a `"- <term>: <definition>"` line, or `"(1) …; (2) …"` when the admin
+   * deliberately kept several senses. Relevance-filtered by the shared matcher, so the terms the
+   * interviewer is briefed on are exactly the ones the respondent can see underlined. The
+   * interviewer interprets the words this way but must NOT recite the definitions. Absent/empty →
+   * the block is omitted. Built by `glossary/injection.ts` from `glossary/resolve.ts`.
+   */
+  glossary?: string[];
   /**
    * Learning Mode peer context: generalised, anonymised themes from PRIOR respondents in the same
    * round (built by `lib/app/questionnaire/learning`). Each entry a one-line theme. The interviewer
@@ -484,6 +494,10 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
           )
         : ''
     ),
+    // Definitions / glossary: what the questionnaire means by the contested terms in play this
+    // turn. Sits beside the briefing because it is the same kind of thing — context for YOU, not
+    // material to read out. Omitted when no defined term is in play (the section collapses to '').
+    section('glossary', formatGlossarySection(input.glossary ?? [])),
     // Learning Mode: generalised, anonymised themes from EARLIER respondents in this round. The
     // interviewer may gently raise ONE to deepen the conversation, in aggregate terms only — never
     // naming or quoting anyone, never as fact, never implying a "correct" answer. Used sparingly so

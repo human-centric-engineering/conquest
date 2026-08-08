@@ -106,6 +106,17 @@ export interface ContradictionContext {
    * answer-vs-answer pass, unchanged.
    */
   currentStatement?: string;
+  /**
+   * Definitions / glossary (P16): the questionnaire's curated definitions for the terms in play,
+   * as `"- <term>: <definition>"` lines.
+   *
+   * This is the highest-value glossary seam. Two answers that look contradictory are very often
+   * the same contested term read two ways — "my ego is healthy" and "my ego gets in the way" only
+   * conflict if "ego" means one thing. Without the definitions the detector raises that with the
+   * respondent as if they had contradicted themselves, which is a visible, confidence-damaging
+   * false positive. Absent/empty → the block is omitted.
+   */
+  glossary?: string[];
   /** Stable session identity — threaded into cost-log metadata. */
   sessionId: string;
 }

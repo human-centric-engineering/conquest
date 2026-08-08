@@ -86,6 +86,12 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/detail', () => ({
   getVersionGraph: vi.fn(),
 }));
 
+// The glossary read is a Prisma round-trip unrelated to the route's format/serialiser behaviour;
+// the blank instrument always carries the appendix, so it is stubbed empty here.
+vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
+  loadAcceptedGlossaryEntries: vi.fn(async () => []),
+}));
+
 vi.mock('@/lib/app/questionnaire/export/build-instrument-model', () => ({
   buildInstrumentModel: vi.fn(),
 }));
@@ -418,7 +424,10 @@ describe('GET instrument — common behaviour', () => {
     expect(buildInstrumentModel).toHaveBeenCalledWith(
       QUESTIONNAIRE_ROW.title,
       GRAPH,
-      expect.any(String) // ISO timestamp
+      expect.any(String), // ISO timestamp
+      // The glossary appendix (P16). Null here because the stubbed version has no accepted terms —
+      // the blank instrument carries it whenever there ARE terms, regardless of the report switch.
+      null
     );
   });
 });

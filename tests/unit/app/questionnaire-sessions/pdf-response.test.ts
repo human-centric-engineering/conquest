@@ -18,6 +18,8 @@ import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
   return {
     questionnaireTitle: 'Onboarding Survey',
+    // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+    glossary: null,
     versionNumber: 3,
     ref: null,
     goal: null,

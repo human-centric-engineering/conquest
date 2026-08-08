@@ -100,6 +100,8 @@ function makeEnvelope(
       goal: null,
       audience: null,
       tags: [],
+      // Definitions / glossary (P16) — empty here; the round-trip has its own tests.
+      glossary: [],
       sections: [
         {
           ordinal: 0,

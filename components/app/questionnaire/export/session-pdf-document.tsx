@@ -480,6 +480,26 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
             </View>
           ))}
 
+        {/* Definitions / glossary (P16). LAST, unlike the blank instrument: the respondent already
+            had the definitions inline in the conversation, so here it is a reference the later
+            reader turns to, not something to read before the report. react-pdf has no popovers,
+            so this appendix IS the equivalent affordance. Rendered only when the admin opted in. */}
+        {model.glossary && (
+          <View>
+            <Text style={styles.sectionTitle}>{model.glossary.heading}</Text>
+            {model.glossary.entries.map((entry) => (
+              <View key={entry.term} style={styles.slot} wrap={false}>
+                <Text style={styles.prompt}>{entry.term}</Text>
+                {entry.definitions.map((definition, i) => (
+                  <Text key={i} style={styles.answer}>
+                    {entry.definitions.length > 1 ? `${i + 1}. ${definition}` : definition}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.footer} fixed>
           <Text>{`Generated ${formatDate(model.generatedAt)}`}</Text>
           <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />

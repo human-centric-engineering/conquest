@@ -26,6 +26,7 @@ import { getTextContent, type LlmMessage } from '@/lib/orchestration/llm/types';
 
 import { buildExtractionPrompt } from '@/lib/app/questionnaire/ingestion/extraction-prompt';
 import { buildVerifyPrompt } from '@/lib/app/questionnaire/ingestion/verify-prompt';
+import { buildGlossaryAnalysisPrompt } from '@/lib/app/questionnaire/glossary/analysis-prompt';
 import { buildRepairPrompt } from '@/lib/app/questionnaire/ingestion/repair-prompt';
 import {
   buildComposeFullPrompt,
@@ -71,6 +72,7 @@ import {
   QUESTIONNAIRE_DATA_SLOTS_AGENT_SLUG,
   QUESTIONNAIRE_EXTRACTION_VERIFIER_AGENT_SLUG,
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
+  QUESTIONNAIRE_GLOSSARY_ANALYST_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
@@ -312,6 +314,60 @@ const EXTRACTION_VERIFIER: PromptAgentCatalogEntry = {
             documentText:
               '{{ text extracted from the uploaded document — its questions, sections, and rating grids }}',
             fileName: '{{ uploaded-file.pdf }}',
+          })
+        ),
+    }),
+  ],
+};
+
+const GLOSSARY_ANALYST: PromptAgentCatalogEntry = {
+  slug: QUESTIONNAIRE_GLOSSARY_ANALYST_AGENT_SLUG,
+  name: 'Glossary Analyst',
+  stage: 'authoring',
+  summary:
+    'Proposes the terms a questionnaire leans on whose meaning is not settled — contested vocabulary, in-house coinages, undefined thresholds — each with the readings this questionnaire appears to intend. Proposes only; an administrator adjudicates every term.',
+  dispatch:
+    'On demand from the Definitions tab, and re-runnable after a structure edit. Never runs during ingest.',
+  builderModule: 'lib/app/questionnaire/glossary/analysis-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: 'glossary.default',
+      label: 'Analyse the questionnaire',
+      description:
+        'The prompt sent when no definitions document is attached — the analyst infers every reading from the questionnaire itself.',
+      build: () =>
+        norm(
+          buildGlossaryAnalysisPrompt({
+            goal: '{{ questionnaire goal }}',
+            audience: SAMPLE_AUDIENCE,
+            questions: [
+              {
+                key: 'q1',
+                prompt: '{{ question 1 — the wording the analyst reads for contested terms }}',
+                sectionTitle: '{{ section 1 title }}',
+              },
+              { key: 'q2', prompt: '{{ question 2 }}', guidelines: '{{ interviewer guidance }}' },
+            ],
+            dataSlotNames: ['{{ data slot 1 }}', '{{ data slot 2 }}'],
+          })
+        ),
+    }),
+    specimen({
+      id: 'glossary.with-document',
+      label: 'With a definitions document',
+      description:
+        'The prompt sent when the admin has attached an authoritative definitions document, and after terms have already been adjudicated — the document outranks anything inferred, and settled terms are excluded so a re-run never re-raises them.',
+      conditions: ['Definitions document attached', 'Some terms already accepted or rejected'],
+      build: () =>
+        norm(
+          buildGlossaryAnalysisPrompt({
+            goal: '{{ questionnaire goal }}',
+            audience: SAMPLE_AUDIENCE,
+            questions: [{ key: 'q1', prompt: '{{ question 1 }}' }],
+            documentText: '{{ text extracted from the uploaded definitions document }}',
+            documentFileName: '{{ definitions.pdf }}',
+            existingTerms: ['{{ a term already accepted }}', '{{ a term already rejected }}'],
           })
         ),
     }),
@@ -1027,6 +1083,7 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     STRUCTURE_EXTRACTOR,
     EXTRACTION_VERIFIER,
     SCALE_MATRIX_REPAIR,
+    GLOSSARY_ANALYST,
     COMPOSER,
     DATA_SLOT_GENERATOR,
     // Live conversation

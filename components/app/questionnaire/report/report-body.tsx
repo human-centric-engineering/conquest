@@ -14,6 +14,7 @@ import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
+import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
 import { formatAnswerValue } from '@/components/app/questionnaire/panel/format-answer-value';
 import {
   partialReportCaveat,
@@ -378,6 +379,63 @@ export function ReportDataAppendix({
           ))}
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * The deterministic glossary appendix (P16) — the terms this questionnaire defined and what it
+ * meant by them.
+ *
+ * Sibling to {@link ReportDataAppendix} and shares its `variant` split, so it renders correctly on
+ * the respondent's screen and in the paper/print layout. Gated by the version's
+ * `glossaryReportAppendix` switch, applied upstream by `buildGlossaryAppendix` — this component
+ * simply renders `null` when handed `null`.
+ *
+ * A report outlives the conversation: months later someone reads "their higher self" and supplies
+ * their own meaning unless the questionnaire's is written down beside it.
+ */
+export function ReportGlossaryAppendix({
+  appendix,
+  variant = 'screen',
+}: {
+  appendix: GlossaryAppendixView | null;
+  variant?: 'screen' | 'paper';
+}) {
+  if (!appendix) return null;
+  const paper = variant === 'paper';
+
+  const heading = paper
+    ? 'text-base font-semibold text-neutral-900'
+    : 'text-foreground text-sm font-semibold';
+  const term = paper ? 'text-[13px] font-medium text-neutral-800' : 'text-foreground text-sm';
+  const definition = paper
+    ? 'text-[13px] leading-6 text-neutral-600'
+    : 'text-muted-foreground text-sm leading-relaxed';
+
+  return (
+    <div className={cn('text-left', paper ? 'mt-8 space-y-3' : 'mt-6 space-y-2.5 border-t pt-5')}>
+      <h2 className={heading}>{appendix.heading}</h2>
+      <dl className="space-y-2">
+        {appendix.entries.map((entry) => (
+          <div key={entry.term}>
+            <dt className={term}>{entry.term}</dt>
+            {/* Several definitions are numbered, never merged — the questionnaire deliberately
+                accepts more than one reading, and flattening them would overstate its precision. */}
+            {entry.definitions.length === 1 ? (
+              <dd className={definition}>{entry.definitions[0]}</dd>
+            ) : (
+              <dd>
+                <ol className={cn(definition, 'list-decimal space-y-0.5 pl-5')}>
+                  {entry.definitions.map((text, i) => (
+                    <li key={i}>{text}</li>
+                  ))}
+                </ol>
+              </dd>
+            )}
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }

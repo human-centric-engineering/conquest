@@ -15,6 +15,7 @@
  */
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
 import {
+  AppAnalyseGlossaryTermsCapability,
   AppAssignDataSlotsCapability,
   AppAuthorIntroBackgroundCapability,
   AppComposeCompletionOfferCapability,
@@ -64,6 +65,10 @@ export function initAppCapabilities(): void {
   // between extract and persist on the streaming ingest surface. Dispatched by the orchestrator.
   registerAppCapability(new AppVerifyExtractionStructureCapability());
   registerAppCapability(new AppRepairQuestionsCapability());
+
+  // Definitions / glossary (P16) — proposes ambiguous terms + candidate definitions for an admin
+  // to adjudicate. Dispatched by the Definitions tab's analysis route.
+  registerAppCapability(new AppAnalyseGlossaryTermsCapability());
 
   // Data Slots — the data-slot generator. Dispatched by the generate-data-slots route.
   registerAppCapability(new AppGenerateDataSlotsCapability());

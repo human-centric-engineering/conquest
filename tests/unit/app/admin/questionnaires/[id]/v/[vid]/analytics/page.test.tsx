@@ -145,6 +145,10 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
     tags: [makeTag()],
     config: {
       saved: true,
+      // Definitions / glossary (P16) — inert here; present so the fixture matches the shape.
+      glossaryPromptInjection: true,
+      glossaryRespondentHints: true,
+      glossaryReportAppendix: false,
       selectionStrategy: 'sequential',
       minQuestionsAnswered: 0,
       coverageThreshold: 1,

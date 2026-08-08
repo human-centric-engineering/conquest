@@ -53,6 +53,8 @@ function setAuth(s: ReturnType<typeof mockAuthenticatedUser> | null): void {
 function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
   return {
     questionnaireTitle: 'Onboarding survey',
+    // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+    glossary: null,
     versionNumber: 2,
     ref: 'GSP289HB',
     goal: null,
