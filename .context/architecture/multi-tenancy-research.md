@@ -12,16 +12,18 @@
 
 ## How to read this
 
-| If you are…                                                                      | Start at                                                                                                                                                  |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Deciding whether to build MT into a fork                                         | [§2 The two questions](#2-the-two-questions) → [§9 Deployment topologies](#9-deployment-topologies)                                                       |
-| Already committed and want the work breakdown                                    | [§5 Gap register](#5-gap-register) → [§10 Sequencing](#10-sequencing-shape)                                                                               |
-| A fork author worried about upstream merges                                      | [§7 Ownership matrix](#7-ownership-platform-tier-vs-fork-tier) → [§8 Downstream forks](#8-downstream-fork-considerations)                                 |
-| A Sunrise maintainer triaging #366 / #367                                        | [§6 The decision gate](#6-the-decision-gate) → [§7](#7-ownership-platform-tier-vs-fork-tier)                                                              |
-| Answering a tenant asking for their own data storage, region, or encryption keys | [§5B Data handling, residency and storage](#5b-data-handling-residency-and-storage-flexibility)                                                           |
-| Answering a tenant asking to bring their own AI provider, models, or API keys    | [§5C Provider credentials and per-tenant AI config](#5c-provider-credentials-and-per-tenant-ai-configuration)                                             |
-| About to start building any of it                                                | [§5A Topology and the prerequisite](#5a-topology-and-the-prerequisite-nobody-costed) — **read this first**, it decides whether the rest is the right work |
-| Wanting the answer rather than the analysis                                      | [§14 The recommendation](#14-the-recommendation)                                                                                                          |
+| If you are…                                                                      | Start at                                                                                                                                                                               |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deciding whether to build MT into a fork                                         | [§2 The two questions](#2-the-two-questions) → [§9 Deployment topologies](#9-deployment-topologies)                                                                                    |
+| Already committed and want the work breakdown                                    | [§5 Gap register](#5-gap-register) → [§10 Sequencing](#10-sequencing-shape)                                                                                                            |
+| A fork author worried about upstream merges                                      | [§7 Ownership matrix](#7-ownership-platform-tier-vs-fork-tier) → [§8 Downstream forks](#8-downstream-fork-considerations)                                                              |
+| A Sunrise maintainer triaging #366 / #367                                        | [§6 The decision gate](#6-the-decision-gate) → [§7](#7-ownership-platform-tier-vs-fork-tier)                                                                                           |
+| A Sunrise maintainer asking what to ship for forks without building MT           | [§8 Provisions upstream should ship](#provisions-upstream-should-ship) → [§14.5](#145-what-to-commit-to-for-forks-regardless-of-question-b)                                            |
+| A fork that has already shipped MT and is merging a Sunrise release              | [§8 The standing obligation](#the-standing-obligation-after-mt-ships-in-a-fork) → the playbook's [sync checklist](./multi-tenancy.md#keeping-the-retrofit-alive-across-upstream-syncs) |
+| Answering a tenant asking for their own data storage, region, or encryption keys | [§5B Data handling, residency and storage](#5b-data-handling-residency-and-storage-flexibility)                                                                                        |
+| Answering a tenant asking to bring their own AI provider, models, or API keys    | [§5C Provider credentials and per-tenant AI config](#5c-provider-credentials-and-per-tenant-ai-configuration)                                                                          |
+| About to start building any of it                                                | [§5A Topology and the prerequisite](#5a-topology-and-the-prerequisite-nobody-costed) — **read this first**, it decides whether the rest is the right work                              |
+| Wanting the answer rather than the analysis                                      | [§14 The recommendation](#14-the-recommendation)                                                                                                                                       |
 
 ### Companion documents
 
@@ -1062,6 +1064,13 @@ than anything else in Part II, they are needed under **every** topology in
   system a tenant names.
 - **Diagnose before costing.** A large share of A3 requests are portability
   requests, and portability is an order of magnitude cheaper.
+- **For a fork specifically.** Rungs 0–2 and portability are reachable inside
+  fork-owned files today; the Art. 15 seam (`lib/app/data-export.ts`) is where
+  your org-owned tables join the export. Rung 4 is not fork-reachable —
+  `lib/db/client.ts` exports a client instance and the per-tenant DSN registry is
+  platform-tier ([§7](#7-ownership-platform-tier-vs-fork-tier)). Do not sell
+  rung 4 on the assumption it is a lighter variant of the playbook's retrofit;
+  it is a different one.
 
 ---
 
@@ -1285,6 +1294,14 @@ Per-tenant _policy_ is harder than per-tenant _credentials_:
   looks**, and the one most likely to be promised casually. Budget it with the
   singleton and cache-invalidation work, not with the credential work.
 
+- **For a fork specifically.** B1 is fork-reachable now. B2 and B3 are not:
+  both depend on platform-tier seams (the credential resolver and the cache /
+  breaker / counter re-keying), and doing them locally means editing five
+  orchestration core files and owning that conflict on every sync. If you cannot
+  wait, build the resolver in its final generic shape behind **one** call site
+  ([Fork-first informs upstream](#fork-first-informs-upstream)) so the eventual
+  upstream version is a delegation plus a deletion.
+
 Both B2 and B3 feed §5B's compliance table: "which sub-processors touch our
 data?" cannot be answered install-wide once tenants route to different
 providers, and cannot be answered at all without org in the log and cost
@@ -1429,6 +1446,33 @@ Sunrise-owned files. Each becomes a conflict on every sync:
 Only two of these are sanctioned fork edits. The rest are the merge fight
 #347/#350/#366/#367 exist to prevent.
 
+### Seams a fork can already ride
+
+The table above is the bad news. This is the good news, and it is usually missed
+because these seams were built for other reasons. Seven `lib/app/*` registries
+are **fork-owned scaffold** — Sunrise ships them empty and does not re-edit them,
+so what you add merges cleanly forever. Each absorbs a piece of MT work that
+would otherwise be a core edit:
+
+| Seam                                               | MT work it absorbs                                                                | Its limit                                                                                                                           |
+| -------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/app/env.ts` (`appEnvSchema`)                  | Tenancy env: privileged migration DSN, resolution mode, per-tenant storage config | None                                                                                                                                |
+| `lib/app/bootstrap.ts` (`initApp`)                 | Wiring your tenant registries at boot                                             | Runs after env validation; no request context                                                                                       |
+| `lib/app/jobs.ts` (`registerAppJob`)               | Tenant-aware periodic work on the existing tick                                   | The tick supplies **no** tenant context — iterate orgs yourself ([§5A.1](#5a1-the-prerequisite-there-is-no-tenant-context-to-pass)) |
+| `lib/app/data-export.ts` (`collectAppSubjectData`) | Art. 15 coverage for your org-owned tables                                        | Keyed on `userId`; no org dimension ([§5B](#portability-the-cheap-substitute-for-rungs-34))                                         |
+| `lib/app/db-drift.ts` (`registerAppDriftProbe`)    | CI proof that policies survived the last `migrate dev` and the last sync          | No `policyExists` / `rlsEnabled` probe factory ships — write the `pg_policies` query yourself                                       |
+| `lib/app/rate-limit.ts`                            | Org-scoped rules and tiers                                                        | The **key** union is closed — see below                                                                                             |
+| `lib/app/admin-nav.ts`, `protected-routes.ts`      | Tenant-admin navigation and route gating                                          | The console split itself is platform-tier                                                                                           |
+
+Two things follow. First, **the drift-probe registry is the one nobody expects
+to matter and the highest-value of the seven.** RLS policies are
+Prisma-unmodelled objects in precisely the sense that registry exists for, and
+`prisma migrate dev` emits `DROP` for objects it cannot represent. A fork with
+policies and no probes is one routine `migrate dev` away from a green test suite
+over an unprotected database — the failure mode nothing else on this page
+catches. Second, **every entry in the "limit" column is a platform-tier provision
+waiting to be written**; they are most of the list two subsections below.
+
 ### The `RateLimitKey` case study
 
 Worth singling out, because it shows how a _good_ seam can still be closed to
@@ -1482,6 +1526,59 @@ on #367) and from what the plane analysis implies:
    unscoped.
 7. **Enforce inventories with tests, not prose.** See [§12](#12-documentation-drift).
 
+### Provisions upstream should ship
+
+[§7](#7-ownership-platform-tier-vs-fork-tier) says what is platform-tier _if MT
+is ever built_. This is the narrower and more actionable question: **what should
+Sunrise ship for its forks even though Sunrise itself will never be
+multi-tenant?** Everything below is inert at `TENANCY_MODE=single`, costs a
+single-tenant install nothing, and converts a permanent fork conflict into a call
+site.
+
+| Provision                                                                                            | The fork conflict it removes                                                                                                      | Size                   |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `rlsEnabled(table)` / `policyExists(table, policy)` factories in `lib/db/drift-probes.ts`            | Hand-written `pg_policies` SQL re-derived in every fork                                                                           | Hours                  |
+| Org (or install) id in `getFullContext()` (`lib/logging/context.ts`)                                 | `lib/logging/context.ts`                                                                                                          | Hours                  |
+| Correct `VERSIONING.md`'s tenancy-seam path (see below)                                              | A fork looking for a module that was never shipped                                                                                | Minutes                |
+| Widen `RateLimitKey` and add a key-resolver registry                                                 | `rate-limit-policy.ts` + `rate-limit-middleware.ts`                                                                               | Small                  |
+| Optional scope dimension on `SUBJECT_DATA_SOURCES` / `collectAppSubjectData`                         | Per-org export re-invented per fork ([§5B](#portability-the-cheap-substitute-for-rungs-34))                                       | Small                  |
+| Tenant-context primitive — ALS entered in `withAuth`/`withAdminAuth`, explicit per-job context       | `guards.ts`, `run-tick.ts` — **and it gates every row below** ([§5A.1](#5a1-the-prerequisite-there-is-no-tenant-context-to-pass)) | Medium                 |
+| `resolveProviderCredential(config, ctx)`, defaulting to today's `process.env` lookup                 | `provider-manager.ts` ([§5C](#the-seam-that-avoids-choosing-now))                                                                 | Small, once ctx exists |
+| `getStorageClient(ctx)` over the existing `StorageProvider` interface                                | `lib/storage/client.ts` ([§5B](#the-one-change-that-keeps-the-ladder-reachable))                                                  | Small, once ctx exists |
+| Scope key on the process caches (settings resolver, breaker, in-flight counter), defaulting `global` | Six orchestration core files                                                                                                      | Medium                 |
+| Authorization predicate + ownership resolver (#366/#367)                                             | `guards.ts`, `utils.ts`                                                                                                           | Tracked, blocked       |
+
+Three of these are hours of work and remove three named files from the
+twenty-file merge surface. The tenant-context primitive gates most of the rest,
+which is why [§10](#10-sequencing-shape) puts it at Phase 0c and why it is the
+one to do first if only one gets done.
+
+**Publish each in `VERSIONING.md`'s public surface as it lands.** An undocumented
+seam is one a fork cannot rely on across releases, and a fork that cannot rely on
+a seam copies the file instead — which is the outcome all of this exists to
+avoid. **One correction to make before any of it:** `VERSIONING.md:75` names the
+tenancy seam `lib/tenancy/client.ts`; that file has never existed and the seam is
+`lib/db/client.ts` ([§12](#12-documentation-drift)).
+
+### The standing obligation after MT ships in a fork
+
+Provisions cover the build. The decay is the other half, and it has no owner
+today. A fork's isolation boundary is correct only against the release it was
+built on: upstream ships single-tenant and runs no policy tests, so any release
+can add a model, a raw SQL site, a process-global cache or a background job that
+lands outside the boundary — silently, because a clean merge looks like a clean
+merge.
+
+The fork-side answer is the per-sync checklist now carried in the playbook
+([Keeping the retrofit alive across upstream syncs](./multi-tenancy.md#keeping-the-retrofit-alive-across-upstream-syncs)):
+diff for new models, new `$queryRaw*` sites, new process-global state and new
+jobs, then run the two-tenant harness. The upstream-side answer is
+[§12](#12-documentation-drift)'s two enforcement tests — a raw-SQL allowlist and
+a schema-derived policy-coverage assertion. **Both are worth more to forks than
+to the platform**, which is the argument for shipping them upstream (inert at
+`single`) instead of leaving every fork to rediscover the need after its first
+leak.
+
 ### Guidance for fork authors, today
 
 **Do now, safely:**
@@ -1494,6 +1591,15 @@ on #367) and from what the plane analysis implies:
 - Put org in your own log context wrappers.
 - Write the two-tenant leakage harness early. It is the cheapest thing on this
   list and the only one that catches regressions in all the others.
+- Register a drift probe per RLS policy in `lib/app/db-drift.ts` in the same
+  change that creates the policy. `migrate dev` drops what Prisma cannot model,
+  and the drop is invisible to a schema-only test suite.
+- Put your tenancy modules in the tier that owns the tenant concept —
+  `lib/framework/` if you are a framework fork, `lib/app/` if you are a leaf —
+  and route everything you can through the existing registries above rather than
+  through a core edit.
+- Adopt the per-sync checklist as part of your upgrade ritual from the first
+  release you merge, not the first leak you find.
 
 **Wait for upstream, or accept a permanent conflict:**
 
@@ -1632,6 +1738,21 @@ metering rollups, invoicing.
 should land _with Phase 3_, not after. They are the only defence against every
 subsequent phase silently regressing the boundary.
 
+**What a fork can start before upstream answers anything.** The phases above
+assume the platform is doing the work; a fork cannot wait for Phase −1 to be
+answered by someone else, so its split is different:
+
+| Phase                             | A fork should…                                                                                                                                     |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0a — unconditional work           | **Start now.** All seven items live in fork-owned files or in code you already own, and they pay off single-tenant                                 |
+| 0b/−1 — decisions and topology    | **Answer locally.** These are your product's decisions, not upstream's                                                                             |
+| 0c — tenant context               | **Build in final generic shape.** Entering it in your own wrapper around `withAuth` keeps the eventual upstream primitive a delegation             |
+| 1 — control plane (#366/#367)     | **Wait, or build generic.** Do not copy `lib/auth/guards.ts`; a local copy converts a one-line future change into permanent divergence             |
+| 2–3 — identity, rows, namespace   | **Yours anyway.** `Org`/`OrgMembership` and the `orgId` migration ride your schema; the playbook is the recipe                                     |
+| 4–5 — process, temporal, external | **Build generic, expect conflicts.** These are the twenty-file merge surface; each upstream provision that lands deletes one of your local edits   |
+| 6–7 — commercial, console split   | **Yours** (commercial) and **wait** (console split — one tree behind one guard today)                                                              |
+| Continuous — assurance            | **Start with Phase 3, plus the per-sync checklist.** The harness is the only thing that fails when an upstream release lands outside your boundary |
+
 ---
 
 ## 11. Risk register
@@ -1693,8 +1814,18 @@ shape applies here:
   entries.
 - A test that parses the schema, derives the tenant-owned model list, and (under
   `TENANCY_MODE=multi`) asserts RLS is enabled with a policy on each.
+- A `policyExists` / `rlsEnabled` probe factory in `lib/db/drift-probes.ts`, so
+  a fork's per-table policy assertions are a one-liner in `lib/app/db-drift.ts`
+  instead of hand-rolled catalog SQL
+  ([§8](#provisions-upstream-should-ship)).
 
-Both are cheap, both fail loudly, and both survive the author leaving.
+All three are cheap, all three fail loudly, and all three survive the author
+leaving. **They are worth more to forks than to the platform** — upstream is
+single-tenant, so the policy-coverage test is a no-op at `TENANCY_MODE=single`
+and the raw-SQL allowlist is useful on its own terms, while for a fork running
+RLS they are the difference between a boundary that holds across releases and one
+that quietly decays. That asymmetry is the argument for shipping them upstream
+rather than leaving each fork to write them after its first leak.
 
 ---
 
@@ -1851,6 +1982,40 @@ Two more are cheap and pay off immediately: a **jurisdiction attribute on
 provider and model rows** (the `deploymentProfiles` vocabulary already exists and
 nothing enforces it), and the **two-tenant leakage harness**, which is the only
 control that keeps every other item fixed.
+
+### 14.5 What to commit to for forks, regardless of Question B
+
+[§2](#2-the-two-questions)'s Question B — should Sunrise itself be multi-tenant —
+can stay unanswered indefinitely, and [§14.1](#141-what-to-do-about-the-asks-that-prompted-part-ii)
+argues the enterprise asks are better answered with a cell than with a pooled
+retrofit. Question A cannot be deferred the same way: forks are retrofitting MT
+now, against a template that ships single-tenant, and every gap they hit becomes
+a copied core file that never merges cleanly again.
+
+**The position: commit to the seams, not to the feature.** Ship the provisions in
+[§8](#provisions-upstream-should-ship). Each is a no-op at `TENANCY_MODE=single`,
+each deletes a named file from the twenty-file merge surface, and together they
+move the "can a fork retrofit MT without fighting upstream?" figure in
+[§1](#1-executive-summary) without Sunrise building any tenancy at all. Three are
+hours of work — the drift-probe factories, org in the log context, and the
+`VERSIONING.md` path correction. The tenant-context primitive gates most of the
+rest and is the one to do first.
+
+**And write the contract down, not just the recipe.** A fork author needs three
+things the playbook did not previously state: where tenancy code lives in their
+tier, which core edits are sanctioned, and what they must re-check on every
+upstream sync. Those are now the playbook's
+[fork-tier map](./multi-tenancy.md#where-a-forks-tenancy-code-lives) and
+[sync checklist](./multi-tenancy.md#keeping-the-retrofit-alive-across-upstream-syncs).
+Keeping two short sections current is cheaper than answering the same question
+once per fork — and cheaper still than the alternative, which is a fork
+discovering the answer from a leak.
+
+**What this does not commit to.** None of it says Sunrise will ever have an `Org`
+table, and none of it should be read as a step toward one. A provision that only
+makes sense if MT lands upstream does not belong on the §8 list; the test is
+whether the seam is defensible at `TENANCY_MODE=single` on its own terms. All ten
+are.
 
 ### 14.4 Questions this document can answer, and questions it cannot
 
