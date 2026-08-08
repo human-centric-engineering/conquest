@@ -14,10 +14,11 @@ on Sunrise. The **platform tier** (Sunrise itself) is documented separately at
 
 ## Namespaces
 
-| Namespace                            | Holds                                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| [`planning/`](./planning/)           | The phased build plan, per-feature trackers (`features/`), and the `upstream-gaps.md` ledger           |
-| [`questionnaire/`](./questionnaire/) | Domain & technical docs for the questionnaire product — overview, schema, day-to-day development guide |
+| Namespace                            | Holds                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| [`planning/`](./planning/)           | The phased build plan, per-feature trackers (`features/`), and the `upstream-gaps.md` ledger            |
+| [`questionnaire/`](./questionnaire/) | Domain & technical docs for the questionnaire product — overview, schema, day-to-day development guide  |
+| [`marketing/`](./marketing/)         | Campaign subdomains and the admin Marketing section — segment landing pages, demo funnels, CRM/pipeline |
 
 ### `planning/`
 
@@ -31,6 +32,17 @@ on Sunrise. The **platform tier** (Sunrise itself) is documented separately at
   places where Sunrise's public surface doesn't yet cover an app need. Sibling to
   the plan's Decisions log / Carried Sunrise patches; entries retire when fixed
   upstream.
+
+### `marketing/`
+
+- [`campaign-subdomains.md`](./marketing/campaign-subdomains.md) — **design, not
+  shipped.** Segment campaign entry points (`hr.`, `cx.`) that hand visitors into
+  a live questionnaire, plus the admin Marketing section (campaign content,
+  contacts, testimonials, leads/pipeline). Also the free-trial
+  suite on the apex — `/evaluate`, compose-from-a-brief, the form-vs-conversation
+  comparison, the template library and the cost calculator. Covers the proxy-stays-lexical rule,
+  the two config constraints that silently break capture, the non-`User` PII
+  posture, and the demo-spend risk.
 
 ### `questionnaire/`
 
