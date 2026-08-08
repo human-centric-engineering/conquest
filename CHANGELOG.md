@@ -105,6 +105,48 @@ release process.
   signal. That warning now names the underlying cause rather than reporting a
   bare `fetch failed` — without it the condition is effectively undiagnosable.
   If you route escalations through a redirecting endpoint, re-point it (#553).
+- **The two HMAC token schemes are domain-separated.** `lib/storage/access-tokens.ts`
+  (grants a read of one storage key) and `lib/orchestration/approval-tokens.ts`
+  (grants an approve/reject on one execution) sign the same
+  `base64url(payload).base64url(HMAC-SHA256(BETTER_AUTH_SECRET, payload))`
+  construction with nothing in the signed bytes saying which scheme a token
+  belongs to, so a signature minted by one verified structurally as the other.
+  Cross-scheme replay failed only at the next step, because the two payload
+  schemas happen to be disjoint on required fields (`key` vs `executionId`) —
+  a property of today's shapes, not a decision, and one that stops holding the
+  day either payload gains an optional field that satisfies the other's schema.
+  Both payloads now carry a `typ` tag (`storage-read` / `workflow-approval`)
+  that verification asserts. A third scheme on the same secret must declare its
+  own (#507).
+  **Breaking for outstanding tokens:** the tag is inside the signed bytes, so
+  every token minted before this release fails verification. In practice that
+  is unclicked approval links (default 7-day expiry) and signed storage URLs
+  (capped at 7 days) — the same blast radius as rotating `BETTER_AUTH_SECRET`.
+  A dead approval link is not a stuck execution: the admin approval queue acts
+  on the execution directly under a session and never touches these tokens.
+  A dead storage URL is re-minted by whatever issued it. The third surface is
+  an in-chat or embedded approval card held by a browser across the deploy —
+  `run_workflow` hands the tokens to the client and they are persisted on
+  `AiMessage.metadata.pendingApproval` — which reports "Invalid or expired
+  approval token" on click, and on the embed surface the end user has no admin
+  queue to fall back to. Narrow, because a history reload drops
+  `pendingApproval`: it affects only sessions already open when you deploy.
+- **The local storage provider refuses a key that resolves to its own root.**
+  `validateStorageKey('.')` passes every rule it has (no `..`, not absolute, no
+  NUL, no backslash) and `resolve(root, '.')` is `root`, which `resolveWithin()`
+  used to permit — so a prefix of `.`, `./` or any equivalent reached
+  `rm(root, { recursive: true })` in `deletePrefix()` and erased every object
+  the provider held. The same key in `upload()` is not the harmless `EISDIR` it
+  looks like either: with the root absent (the default `.storage/private` on a
+  fresh checkout) it `mkdir`s **outside** the root and writes a regular file at
+  the root path, after which every upload fails `ENOTDIR`. The rejection
+  therefore lives in `resolveWithin()` and covers all four operations, rather
+  than only the destructive one. Not reachable today — object keys are
+  `avatars/${userId}/…` and `${keyPrefix}${randomUUID()}${ext}`, and no route
+  accepts a caller-supplied prefix — so this is defence in depth, taken because
+  the `deletePrefix` blast radius is total and the check is one comparison. S3
+  and Vercel Blob are unaffected: a prefix there is a literal string match
+  against keys, not a path (#508).
 
 ### Added
 

@@ -146,10 +146,12 @@ The approval system supports approvals from external channels (Slack, email, Wha
 Tokens are stateless HMAC-SHA256 signatures using `BETTER_AUTH_SECRET`:
 
 - Format: `base64url(payload).base64url(HMAC-SHA256(secret, payloadJSON))`
-- Payload: `{ executionId, action, expiresAt }`
+- Payload: `{ typ: 'workflow-approval', executionId, action, expiresAt }`
 - Default expiry: 7 days (overridden by step's `timeoutMinutes`)
 - Verified with constant-time comparison (`timingSafeEqual`)
 - No token table, no cleanup job, no migration
+
+`typ` is the domain separator against `lib/storage/access-tokens.ts`, which signs the same construction with the same secret: without a tag in the signed bytes the MAC cannot tell the two protocols apart, and the only thing preventing cross-scheme replay is that the two payload schemas happen to be disjoint on required fields. Verification asserts the tag (#507). Both modules HMAC `BETTER_AUTH_SECRET` directly, which is why they need a tag; `lib/logging/visitor-id.ts` HKDF-derives a subkey under a versioned label instead and is separated by construction. See [Storage — Signed Object Read](../storage/overview.md#signed-object-read) for which to reach for when adding a scheme.
 
 ### Step config for external channels
 
@@ -366,7 +368,7 @@ The chat card hits the channel-specific sub-route with the matching HMAC token; 
 
 The `actorLabel` is **route-pinned** server-side, never trusted from a body field. CORS posture differs per channel: same-origin only for `/chat` (rejects `null` Origin), allowlist (`embedAllowedOrigins`) for `/embed`, none for the legacy `/approve` and `/reject` routes that serve email and Slack callers.
 
-**Cross-channel token redemption — known limitation.** The HMAC token signs only `{ executionId, action, expiresAt }`; the channel is not part of the signature. A leaked email/Slack URL can therefore be redeemed against `/approve/chat` or `/approve/embed` from a same-origin admin session or an allowlisted partner site. The audit `actor` reflects the **route hit**, not the channel that originally issued the token, so a redemption from the wrong channel is detectable in the trace but the token itself is not channel-bound. Mitigations live at the CORS layer (chat = same-origin, embed = allowlist) and the standard token-leakage controls (HTTPS, expiry, revocation by `BETTER_AUTH_SECRET` rotation). Channel-binding the signature would require a token-format change and a migration window for in-flight tokens — deferred until a partner asks for it.
+**Cross-channel token redemption — known limitation.** The HMAC token signs only `{ typ, executionId, action, expiresAt }`; `typ` separates this scheme from the storage-token scheme (above) and says nothing about the channel, which is not part of the signature. A leaked email/Slack URL can therefore be redeemed against `/approve/chat` or `/approve/embed` from a same-origin admin session or an allowlisted partner site. The audit `actor` reflects the **route hit**, not the channel that originally issued the token, so a redemption from the wrong channel is detectable in the trace but the token itself is not channel-bound. Mitigations live at the CORS layer (chat = same-origin, embed = allowlist) and the standard token-leakage controls (HTTPS, expiry, revocation by `BETTER_AUTH_SECRET` rotation). Channel-binding the signature would require a token-format change and a migration window for in-flight tokens — deferred until a partner asks for it.
 
 See [Streaming Chat — In-chat approvals](../orchestration/chat.md#in-chat-approvals) for the SSE event sequence, and [Embed Widget](../orchestration/embed.md) for the partner-site setup.
 
