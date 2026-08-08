@@ -110,3 +110,9 @@ export {
   normalizeBraveResults,
   type WebSearchResult,
 } from '@/lib/app/questionnaire/capabilities/web-search';
+
+export {
+  AppAnalyseGlossaryTermsCapability,
+  type AnalyseGlossaryTermsArgs,
+  type AnalyseGlossaryTermsData,
+} from '@/lib/app/questionnaire/capabilities/analyse-glossary-terms';

@@ -21,6 +21,8 @@ import { prisma } from '@/lib/db/client';
 import { exportLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 
 import { buildInstrumentModel } from '@/lib/app/questionnaire/export/build-instrument-model';
+import { buildGlossaryAppendix } from '@/lib/app/questionnaire/glossary/report-appendix';
+import { loadAcceptedGlossaryEntries } from '@/lib/app/questionnaire/glossary/resolve';
 import { buildInstrumentText } from '@/lib/app/questionnaire/export/build-instrument-text';
 import { buildInstrumentCsv } from '@/lib/app/questionnaire/export/build-instrument-csv';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
@@ -61,7 +63,17 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
     }
 
-    const model = buildInstrumentModel(questionnaire.title, graph, new Date().toISOString());
+    // Definitions / glossary (P16): always included on the blank instrument — this is the
+    // reviewer's copy, where knowing what the questionnaire means by a contested term is the most
+    // useful thing on the page. The `glossaryReportAppendix` switch governs the RESPONDENT's
+    // report, not this.
+    const glossary = buildGlossaryAppendix(await loadAcceptedGlossaryEntries(vid));
+    const model = buildInstrumentModel(
+      questionnaire.title,
+      graph,
+      new Date().toISOString(),
+      glossary
+    );
     const stem = `instrument-${slugify(questionnaire.title)}-v${graph.versionNumber}`;
 
     log.info('Questionnaire instrument download', { questionnaireId: id, versionId: vid, format });

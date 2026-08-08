@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  BookMarked,
   Brain,
   ClipboardList,
   ChevronRight,
@@ -606,6 +607,15 @@ export function ConfigEditor({
     config.inlineCorrectionEnabled
   );
   const [sessionResumeEnabled, setSessionResumeEnabled] = useState(config.sessionResumeEnabled);
+  const [glossaryPromptInjection, setGlossaryPromptInjection] = useState(
+    config.glossaryPromptInjection
+  );
+  const [glossaryRespondentHints, setGlossaryRespondentHints] = useState(
+    config.glossaryRespondentHints
+  );
+  const [glossaryReportAppendix, setGlossaryReportAppendix] = useState(
+    config.glossaryReportAppendix
+  );
   const [reasoningStreamEnabled, setReasoningStreamEnabled] = useState(
     config.reasoningStreamEnabled
   );
@@ -681,6 +691,9 @@ export function ConfigEditor({
     setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
     setSessionResumeEnabled(config.sessionResumeEnabled);
+    setGlossaryPromptInjection(config.glossaryPromptInjection);
+    setGlossaryRespondentHints(config.glossaryRespondentHints);
+    setGlossaryReportAppendix(config.glossaryReportAppendix);
     setReasoningStreamEnabled(config.reasoningStreamEnabled);
     setReasoningStreamPlacement(config.reasoningStreamPlacement);
     setReasoningStreamDwellMs(String(config.reasoningStreamDwellMs));
@@ -888,6 +901,10 @@ export function ConfigEditor({
         inlineCorrectionEnabled,
         // Session resume: device-remember + Continue/Start-new chooser + by-ref resume.
         sessionResumeEnabled,
+        // Definitions / glossary: how the version's curated terms are put to work.
+        glossaryPromptInjection,
+        glossaryRespondentHints,
+        glossaryReportAppendix,
         // Live "watch it think" reasoning stream (demo feature). Requires the platform
         // reasoning-stream flag to take effect.
         reasoningStreamEnabled,
@@ -2169,6 +2186,71 @@ export function ConfigEditor({
                     <strong>Recommended for large surveys</strong> (roughly 50+ data slots / 70+
                     questions); leave off for smaller ones, where sending the full set is cheap and
                     maximises capture accuracy. Off by default.
+                  </FieldHelp>
+                </Label>
+              </div>
+            </div>
+          </SettingsGroup>
+
+          {/* ── Definitions / glossary — how curated terms reach agents and respondents. ── */}
+          <SettingsGroup
+            icon={BookMarked}
+            accent="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            id="glossary"
+            title="Definitions"
+            description="Where the terms you curated on the Definitions tab are used. All three do nothing until at least one term is accepted."
+          >
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={glossaryPromptInjection}
+                  onCheckedChange={setGlossaryPromptInjection}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Tell the agents what the terms mean{' '}
+                  <FieldHelp title="Definitions in prompts">
+                    Folds the definitions relevant to the current question into the prompts that ask
+                    it, interpret the reply, refine an answer, and check for contradictions — and
+                    the whole set into report generation. This is what stops the interviewer asking
+                    about one sense of a word while the extractor reads the answer as another. Only
+                    terms that actually appear in the question or the recent conversation are sent,
+                    so the cost is a few lines per turn. Default: on.
+                  </FieldHelp>
+                </Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={glossaryRespondentHints}
+                  onCheckedChange={setGlossaryRespondentHints}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Show respondents the definitions{' '}
+                  <FieldHelp title="Respondent hints">
+                    Underlines a defined term the first time it appears in a message, and on form
+                    labels; tapping it opens the definition. Where you selected more than one
+                    definition, all are shown as numbered senses. Turn this off if you would rather
+                    the definitions guided the agents without steering how respondents answer.
+                    Default: on.
+                  </FieldHelp>
+                </Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={glossaryReportAppendix}
+                  onCheckedChange={setGlossaryReportAppendix}
+                  disabled={busy}
+                />
+                <Label className="text-sm font-medium">
+                  Include a glossary in the report{' '}
+                  <FieldHelp title="Report glossary appendix">
+                    Appends the accepted terms and their definitions to the respondent&apos;s report
+                    and its PDF, so whoever reads it later knows what the words meant. Off by
+                    default because it changes a delivered document. (The blank instrument export
+                    always includes the glossary — that one is for you, not the respondent.)
                   </FieldHelp>
                 </Label>
               </div>

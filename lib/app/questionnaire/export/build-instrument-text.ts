@@ -37,6 +37,25 @@ export function buildInstrumentText(model: InstrumentModel): string {
   lines.push(RULE);
   lines.push('');
 
+  // ── Definitions / glossary (P16) ─────────────────────────────────────────────
+  // Before the questions, not after: a reviewer needs the vocabulary in hand while reading the
+  // wording, not as a footnote once they have already interpreted it their own way.
+  if (model.glossary) {
+    lines.push(model.glossary.heading.toUpperCase());
+    lines.push('');
+    for (const entry of model.glossary.entries) {
+      lines.push(`  ${entry.term}`);
+      entry.definitions.forEach((definition, i) => {
+        lines.push(
+          entry.definitions.length > 1 ? `    ${i + 1}. ${definition}` : `    ${definition}`
+        );
+      });
+      lines.push('');
+    }
+    lines.push(RULE);
+    lines.push('');
+  }
+
   // ── Sections / questions ─────────────────────────────────────────────────────
   if (model.sections.length === 0) {
     lines.push('This questionnaire has no sections yet.');

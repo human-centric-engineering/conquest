@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/button';
 import { FieldHelp } from '@/components/ui/field-help';
 import { useWizard } from '@/lib/hooks/use-wizard';
 import { QuestionField } from '@/components/app/questionnaire/form/question-field';
+import { GlossaryText } from '@/components/app/questionnaire/glossary/glossary-text';
+import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import { SectionNavigator } from '@/components/app/questionnaire/form/section-navigator';
 import { ConfidenceScore } from '@/components/app/questionnaire/panel/confidence-score';
 import { recentlyFilledByLatestTurn } from '@/lib/app/questionnaire/panel/newly-filled';
@@ -50,6 +52,12 @@ export interface QuestionnaireFormProps {
   onFlush: (slotKey: string) => void;
   /** Disable all inputs (e.g. a non-active session). */
   disabled?: boolean;
+  /**
+   * Definitions / glossary (P16): the version's live terms. A matched term in a question label is
+   * underlined with its definition in a popover. Already gated on `glossaryRespondentHints`
+   * server-side, so this surface carries no flag of its own.
+   */
+  glossary?: readonly GlossaryEntry[];
   className?: string;
 }
 
@@ -82,6 +90,7 @@ export function QuestionnaireForm({
   onChange,
   onFlush,
   disabled = false,
+  glossary,
   className,
 }: QuestionnaireFormProps) {
   const sections = useMemo(() => view?.sections ?? [], [view]);
@@ -231,10 +240,13 @@ export function QuestionnaireForm({
                   {/* Question — prompt + control. `min-w-0` so the control can shrink within the
                       lane rather than pushing the row wider than the viewport. */}
                   <div className="min-w-0 space-y-2">
-                    <label className="text-foreground text-sm font-medium">
-                      {slot.prompt}
+                    {/* A <span>, not a <label>: it carries no `htmlFor`, so nothing is lost — and
+                        a glossary popover trigger inside a <label> would also activate the
+                        labelled control when tapped. */}
+                    <span className="text-foreground block text-sm font-medium">
+                      <GlossaryText text={slot.prompt} glossary={glossary} />
                       {slot.required && <span className="text-destructive ml-0.5">*</span>}
-                    </label>
+                    </span>
                     <QuestionField
                       slot={slot}
                       value={values[slot.slotKey]}

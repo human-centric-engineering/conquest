@@ -99,6 +99,17 @@ const tx = {
   appDataSlotQuestion: {
     createMany: vi.fn(async () => ({ count: 0 })),
   },
+  appGlossaryTerm: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+    // Re-read by normalizedTerm after createMany to re-link the copied definitions.
+    findMany: vi.fn(async () => [{ id: 'newterm-1', normalizedTerm: 'higher self' }]),
+  },
+  appGlossaryDefinition: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
+  appGlossaryDocument: {
+    create: vi.fn(async () => ({ id: 'newglossarydoc-1' })),
+  },
   appQuestionnaireConfig: {
     create: vi.fn(async () => ({ id: 'newcfg-1' })),
   },
@@ -184,6 +195,40 @@ function sourceGraph() {
     ],
     // Data Slots feature: none on this source (copy is exercised by data-slot-specific tests).
     dataSlots: [],
+    // Definitions / glossary (P16): one accepted term with two senses, so the fork tests cover
+    // that the curated vocabulary the questions were written against travels with them.
+    glossaryTerms: [
+      {
+        term: 'higher self',
+        normalizedTerm: 'higher self',
+        aliases: ['higher-self'],
+        status: 'accepted',
+        source: 'ai_proposed',
+        rationale: 'Contested across traditions.',
+        contextQuote: 'How connected do you feel to your higher self?',
+        ordinal: 0,
+        createdBy: 'admin-1',
+        definitions: [
+          {
+            text: 'The observing, values-led part of you.',
+            selected: true,
+            source: 'ai_proposed',
+            sourceQuote: null,
+            edited: false,
+            ordinal: 0,
+          },
+          {
+            text: 'Your connection to something larger than yourself.',
+            selected: true,
+            source: 'admin',
+            sourceQuote: null,
+            edited: true,
+            ordinal: 1,
+          },
+        ],
+      },
+    ],
+    glossaryDocument: null,
   };
 }
 

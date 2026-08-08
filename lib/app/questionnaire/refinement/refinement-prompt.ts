@@ -15,6 +15,7 @@
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { joinSections, section, titledBlock } from '@/lib/app/questionnaire/prompt/format';
+import { formatGlossarySection } from '@/lib/app/questionnaire/glossary/injection';
 import {
   REFINEMENT_ACTIONS,
   REFINEMENT_SOURCES,
@@ -144,6 +145,9 @@ export function buildRefinementPrompt(ctx: RefinementContext): LlmMessage[] {
   // contradiction, and the respondent's new message are clearly separable (in the prompt and the
   // inspector). Section text is unchanged; absent parts collapse to nothing.
   const userContent = joinSections(
+    // Definitions / glossary first: whether an answer needs refining turns on what its words
+    // meant, so the definitions must be in hand before the answers are read. Collapses to ''.
+    section('glossary', formatGlossarySection(ctx.glossary ?? [])),
     section('existing_answers', titledBlock('Existing answers', answerLines.join('\n'))),
     contradiction ? section('contradiction', contradiction) : '',
     ctx.recentMessages && ctx.recentMessages.length > 0

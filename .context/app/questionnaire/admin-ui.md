@@ -271,3 +271,19 @@ specimen renders an error and `tests/unit/app/api/v1/app/questionnaires/_lib/pro
 fails — surfacing the drift before an admin sees a broken prompt. To add an agent or a
 variant, add a `specimen(...)` (or a catalog entry) in `prompt-catalog.ts`; the API,
 page, and UI pick it up with no other change.
+
+## Definitions tab (P16)
+
+`…/v/[vid]/definitions` — filed under the **Build** group in
+`lib/app/questionnaire/workspace-nav.ts` (a unit test asserts every tab belongs to exactly one
+group, so the flat list and the grouping must be edited together).
+
+Three parts, top to bottom: the optional **definitions document** card; the **Analyse** button
+(SSE, with live phase messages); and the **review queue**, grouped by curation state — proposed
+first (they need adjudicating), then in-use, then rejected (kept only so a re-run doesn't
+re-propose them).
+
+One Save PUTs the whole set as a replace-set — the surface already holds every term, and one fork
+per save beats N when the version is launched.
+
+See [`definitions-glossary.md`](./definitions-glossary.md).

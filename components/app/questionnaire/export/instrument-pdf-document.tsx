@@ -75,6 +75,20 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     marginTop: 2,
   },
+  // Definitions / glossary (P16): a compact definition list, visually quieter than a question
+  // block so it reads as reference material rather than as another thing to answer.
+  glossaryEntry: {
+    marginTop: 6,
+  },
+  glossaryTerm: {
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  glossaryDefinition: {
+    fontSize: 9,
+    color: COLORS.muted,
+    marginTop: 1,
+  },
   question: {
     marginTop: 10,
     paddingLeft: 10,
@@ -175,6 +189,26 @@ export function InstrumentPdfDocument({ model }: InstrumentPdfDocumentProps) {
             value={`${model.sectionCount} section${model.sectionCount === 1 ? '' : 's'}, ${model.questionCount} question${model.questionCount === 1 ? '' : 's'}`}
           />
         </View>
+
+        {/* Definitions / glossary (P16). Always present on the blank instrument (see
+            `buildInstrumentModel`) — this is the reviewer's copy. Before the questions, so the
+            vocabulary is in hand while the wording is read. react-pdf has no popovers, so the
+            appendix IS the equivalent affordance here. */}
+        {model.glossary && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{model.glossary.heading}</Text>
+            {model.glossary.entries.map((entry) => (
+              <View key={entry.term} style={styles.glossaryEntry} wrap={false}>
+                <Text style={styles.glossaryTerm}>{entry.term}</Text>
+                {entry.definitions.map((definition, i) => (
+                  <Text key={i} style={styles.glossaryDefinition}>
+                    {entry.definitions.length > 1 ? `${i + 1}. ${definition}` : definition}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
 
         {model.sections.length === 0 ? (
           <Text style={styles.empty}>This questionnaire has no sections yet.</Text>

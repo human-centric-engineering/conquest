@@ -19,6 +19,7 @@
  */
 
 import type { ResolvedTheme } from '@/lib/app/questionnaire/theming';
+import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
 import type { PanelSectionView } from '@/lib/app/questionnaire/panel/types';
 import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
@@ -135,6 +136,12 @@ export interface SessionExportModel {
    * config's `rawIncludes.dataSlots` (and only meaningful when the version runs in a data-slot mode).
    */
   includeDataSlots: boolean;
+  /**
+   * Definitions / glossary (P16): the terms this questionnaire defined, or `null` when the version
+   * has none OR the admin left `glossaryReportAppendix` off. Unlike the blank instrument (which
+   * always carries it), this is the RESPONDENT's copy, so the switch governs it.
+   */
+  glossary: GlossaryAppendixView | null;
   /** The captured data-slot values, grouped by theme — rendered when {@link includeDataSlots}. */
   dataSlots: ExportDataSlotGroup[];
 }

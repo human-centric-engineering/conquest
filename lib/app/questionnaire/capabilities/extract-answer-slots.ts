@@ -26,6 +26,7 @@
 
 import { isRecord } from '@/lib/utils';
 import { logger } from '@/lib/logging';
+import { GLOSSARY_MAX_TERMS } from '@/lib/app/questionnaire/glossary/injection';
 import { redactedString } from '@/lib/security/redact';
 import { CostOperation } from '@/types/orchestration';
 import { z } from 'zod';
@@ -165,6 +166,12 @@ const argsSchema = z
     candidateSlots: z.array(candidateSlotSchema).max(MAX_CANDIDATE_SLOTS),
     /** Data Slots feature: the data slots to also fill this turn (omit for question-only mode). */
     dataSlotCandidates: z.array(dataSlotCandidateSchema).max(MAX_CANDIDATE_SLOTS).optional(),
+    /**
+     * Definitions / glossary (P16): pre-formatted definition lines for the terms in play this
+     * turn, already relevance-filtered and capped by `glossary/injection.ts`. Bounded here too, so
+     * a caller can't widen the prompt past what the injection module intends.
+     */
+    glossary: z.array(z.string().min(1)).max(GLOSSARY_MAX_TERMS).optional(),
     /** Already-answered state, so the extractor doesn't re-ask. */
     answered: z
       .array(
@@ -317,6 +324,7 @@ function toExtractionContext(args: ExtractAnswerSlotsArgs): ExtractionContext {
     userMessage: args.userMessage,
     sessionId: args.sessionId ?? `dispatch-${args.activeQuestionKey ?? 'data-slot'}`,
     ...(args.sensitivityAware ? { sensitivityAware: true } : {}),
+    ...(args.glossary && args.glossary.length > 0 ? { glossary: args.glossary } : {}),
     ...(args.recentMessages ? { recentMessages: args.recentMessages } : {}),
     ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
     ...(args.dataSlotCandidates && args.dataSlotCandidates.length > 0

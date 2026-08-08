@@ -124,6 +124,14 @@ export interface ExtractionContext {
    * no prompt text and no behaviour, so the feature is zero-cost when disabled. The route sets this
    * from the per-questionnaire config toggle.
    */
+  /**
+   * Definitions / glossary (P16): the questionnaire's curated definitions for the terms in play,
+   * as `"- <term>: <definition>"` lines. The extractor must read the respondent's words against
+   * THESE meanings rather than its own — the case this exists for is an answer that only counts
+   * as agreement under one reading of a contested word. Absent/empty → the block is omitted.
+   */
+  glossary?: string[];
+
   sensitivityAware?: boolean;
   /**
    * Answer-fit resolver pass: when true, the prompt is reframed as a focused SECOND call over a

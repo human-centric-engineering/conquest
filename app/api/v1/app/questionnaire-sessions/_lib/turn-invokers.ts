@@ -50,6 +50,8 @@ import {
   type StrategyDeps,
 } from '@/lib/app/questionnaire/selection';
 import type { AnswerFitMode } from '@/lib/app/questionnaire/types';
+import { selectGlossaryLines } from '@/lib/app/questionnaire/glossary/injection';
+import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 import type {
   CapabilityInvokers,
   DataSlotSelectOutcome,
@@ -197,6 +199,13 @@ export async function buildTurnInvokers(opts: {
    * the LLM pick for anonymous sessions and fall back to deterministic selection.
    */
   anonymous?: boolean;
+  /**
+   * Definitions / glossary (P16): the version's accepted terms, loaded once per turn by the route.
+   * Each invoker below relevance-filters this set against what its own call is about, so an agent
+   * is told what a word means exactly when that word is in play. `[]` when the version has no
+   * accepted terms or prompt injection is off — every seam then collapses to nothing.
+   */
+  glossaryEntries?: readonly GlossaryEntry[];
 }): Promise<CapabilityInvokers> {
   const {
     userId,
@@ -212,6 +221,7 @@ export async function buildTurnInvokers(opts: {
     answerConfidenceFloor,
     anonymous,
     recordInspectorCall,
+    glossaryEntries = [],
   } = opts;
 
   // Inspector (admin preview only): resolve a binding's display model/provider for a trace, fail-soft.
@@ -252,7 +262,11 @@ export async function buildTurnInvokers(opts: {
   // Full candidate set — used by the contradiction detector + refiner (their coverage must not shrink).
   const candidateSlots = slots.map(toCapabilitySlot);
   // The EXTRACTOR sees the narrowed set when the route supplied one (the pre-filter), else the full set.
-  const extractionCandidates = (extractionCandidateSlots ?? slots).map(toCapabilitySlot);
+  // The TYPED source for the extractor's candidates. `extractionCandidates` below is the same set
+  // mapped to `Record<string, unknown>` for the dispatch payload, which erases the field types —
+  // so anything that reads a slot's own fields (the glossary relevance filter) reads this instead.
+  const extractionSourceSlots = extractionCandidateSlots ?? slots;
+  const extractionCandidates = extractionSourceSlots.map(toCapabilitySlot);
   // slotKey → question type, so the extractor's `answered` view can carry each answer's type (the
   // confirmation-refresh path re-emits an answer and needs its type without a slot lookup).
   const slotTypeByKey = new Map(slots.map((s) => [s.key, s.type]));
@@ -291,6 +305,17 @@ export async function buildTurnInvokers(opts: {
         ...(dataSlotCandidates && dataSlotCandidates.length > 0 ? { dataSlotCandidates } : {}),
         // Sensitivity awareness: ask the extractor to also flag a sensitive disclosure.
         ...(sensitivityAware ? { sensitivityAware: true } : {}),
+        // Definitions / glossary: the terms in play across the candidate questions and what the
+        // respondent just said — so a reply is read against the questionnaire's meaning of a
+        // contested word rather than the model's own.
+        ...(() => {
+          const lines = selectGlossaryLines(glossaryEntries, [
+            state.userMessage,
+            ...extractionSourceSlots.flatMap((slot) => [slot.prompt, slot.guidelines ?? '']),
+            ...(dataSlotCandidates ?? []).flatMap((slot) => [slot.name, slot.description]),
+          ]);
+          return lines.length > 0 ? { glossary: lines } : {};
+        })(),
         // Answer-fit resolver: let the extractor run the focused follow-up pass when enabled.
         ...(answerFitMode && answerFitMode !== 'off' ? { answerFitMode } : {}),
         ...(answerConfidenceFloor !== undefined ? { answerConfidenceFloor } : {}),
@@ -380,6 +405,19 @@ export async function buildTurnInvokers(opts: {
         // (e.g. an earlier "I hate the job" answer vs a current "I love my job") even when this
         // turn's extraction didn't overwrite the stored answer. Omitted on a kickoff (empty).
         ...(state.userMessage.trim().length > 0 ? { currentStatement: state.userMessage } : {}),
+        // Definitions / glossary: the highest-value seam. Two answers that look contradictory are
+        // often the same contested term read two ways — without the definitions the detector puts
+        // that to the respondent as if they had contradicted themselves.
+        ...(() => {
+          const lines = selectGlossaryLines(glossaryEntries, [
+            state.userMessage,
+            ...slots.map((slot) => slot.prompt),
+            ...state.existingAnswers.map((answer) =>
+              typeof answer.value === 'string' ? answer.value : JSON.stringify(answer.value)
+            ),
+          ]);
+          return lines.length > 0 ? { glossary: lines } : {};
+        })(),
         sessionId: state.sessionId,
       };
       const dispatch = await capabilityDispatcher.dispatch(
@@ -447,6 +485,16 @@ export async function buildTurnInvokers(opts: {
             }
           : {}),
         ...(state.recentMessages.length > 0 ? { recentMessages: state.recentMessages } : {}),
+        // Definitions / glossary: whether a stored answer should change in light of new context
+        // turns on what its words meant.
+        ...(() => {
+          const lines = selectGlossaryLines(glossaryEntries, [
+            state.userMessage,
+            ...(trigger.contradiction ? [trigger.contradiction.explanation] : []),
+            ...slots.map((slot) => slot.prompt),
+          ]);
+          return lines.length > 0 ? { glossary: lines } : {};
+        })(),
         sessionId: state.sessionId,
       };
       const dispatch = await capabilityDispatcher.dispatch(

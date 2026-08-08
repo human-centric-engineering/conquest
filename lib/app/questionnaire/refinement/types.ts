@@ -153,6 +153,13 @@ export interface RefinementContext {
   };
   /** Recent transcript lines for context, most recent last. */
   recentMessages?: string[];
+  /**
+   * Definitions / glossary (P16): the questionnaire's curated definitions for the terms in play,
+   * as `"- <term>: <definition>"` lines. A refinement pass decides whether a stored answer should
+   * change in light of new context — a judgement that turns on what the words meant. Absent/empty
+   * → the block is omitted.
+   */
+  glossary?: string[];
   /** Stable session identity — threaded into cost-log metadata. */
   sessionId: string;
 }

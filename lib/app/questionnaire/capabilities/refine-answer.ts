@@ -69,6 +69,7 @@ import type {
   RefinementDecision,
   RefinementSlotView,
 } from '@/lib/app/questionnaire/refinement/types';
+import { GLOSSARY_MAX_TERMS } from '@/lib/app/questionnaire/glossary/injection';
 
 const SLUG = REFINE_ANSWER_CAPABILITY_SLUG;
 
@@ -134,6 +135,13 @@ const argsSchema = z.object({
   /** Recent transcript lines, oldest first, for disambiguation. */
   recentMessages: z.array(z.string()).optional(),
   /** Stable session identity, threaded into cost-log metadata. */
+  /**
+   * Definitions / glossary (P16): pre-formatted definition lines for the terms in play. Whether a
+   * stored answer should change in light of new context turns on what its words meant.
+   *
+   * Without this key Zod strips it and the seam is inert — see the note on the detector's schema.
+   */
+  glossary: z.array(z.string().min(1)).max(GLOSSARY_MAX_TERMS).optional(),
   sessionId: z.string().optional(),
 });
 
@@ -216,6 +224,7 @@ function toRefinementContext(args: RefineAnswerArgs): RefinementContext {
       ? { triggeringContradiction: args.triggeringContradiction }
       : {}),
     ...(args.recentMessages !== undefined ? { recentMessages: args.recentMessages } : {}),
+    ...(args.glossary && args.glossary.length > 0 ? { glossary: args.glossary } : {}),
   };
 }
 

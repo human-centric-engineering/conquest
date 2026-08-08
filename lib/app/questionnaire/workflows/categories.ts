@@ -47,6 +47,7 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
       'design-evaluation',
       'structure-edit',
       'data-slot-generation',
+      'glossary-analysis',
     ],
   },
   {

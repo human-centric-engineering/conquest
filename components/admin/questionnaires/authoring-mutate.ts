@@ -6,6 +6,9 @@
  * that drives the "edited a launched version → new draft" notice and redirect. So
  * this thin wrapper does the fetch itself and returns both halves, throwing the
  * server's error message on failure (for inline errors / toasts).
+ *
+ * Bodies are JSON by default; pass a `FormData` to send a multipart upload through the same
+ * fork-confirmation protocol (the glossary's definitions document does this).
  */
 
 import { parseApiResponse } from '@/lib/api/parse-response';
@@ -64,6 +67,11 @@ function mutateFetch(
   confirm: 'prompt' | 'confirmed',
   archiveSource = false
 ): Promise<Response> {
+  // A multipart upload (the glossary's definitions document) is an authoring write like any other
+  // and needs the same fork protocol — but it must NOT be JSON-stringified, and the browser has to
+  // set `Content-Type` itself so the multipart boundary is included. Anything else is JSON.
+  const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
+
   return fetch(path, {
     method,
     // `x-fork-confirm` opts this request into the fork-confirmation protocol: `prompt` asks the
@@ -71,12 +79,12 @@ function mutateFetch(
     // `x-fork-archive-source` (confirmed retry only) carries the dialog's "archive the previous
     // version" choice so the server soft-archives the branched-from version after the fork commits.
     headers: {
-      'Content-Type': 'application/json',
+      ...(isMultipart ? {} : { 'Content-Type': 'application/json' }),
       'x-fork-confirm': confirm,
       ...(archiveSource ? { 'x-fork-archive-source': 'true' } : {}),
     },
     credentials: 'same-origin',
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body === undefined ? {} : { body: isMultipart ? body : JSON.stringify(body) }),
   });
 }
 

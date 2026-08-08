@@ -45,6 +45,7 @@ import { useRespondentReport } from '@/lib/hooks/use-respondent-report';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
 import type { RespondentReportHeader } from '@/lib/app/questionnaire/report/view';
 import type { ReportMethodClientView } from '@/lib/app/questionnaire/report/method-view';
 import type { AnswerPanelView } from '@/lib/app/questionnaire/panel/types';
@@ -53,6 +54,7 @@ import {
   ReportBody,
   ReportPaperHeader,
   ReportDataAppendix,
+  ReportGlossaryAppendix,
 } from '@/components/app/questionnaire/report/report-body';
 import { ReportMethodPanel } from '@/components/app/questionnaire/report/report-method';
 
@@ -84,6 +86,12 @@ export interface SessionCompleteProps {
    */
   captured?: AnswerPanelView | null;
   /**
+   * Definitions / glossary (P16): the appendix for this version, or `null` when it has no terms or
+   * the admin left `glossaryReportAppendix` off. Built server-side by `buildGlossaryAppendix`, so
+   * the on/off decision is made once rather than repeated here and in the PDF.
+   */
+  glossaryAppendix?: GlossaryAppendixView | null;
+  /**
    * Experiences (F15.4b): when this session is a leg of a concluded run, show the RUN-level report
    * — the summary of the whole journey — instead of this leg's own, which is no longer generated.
    * Omitted/null for an ordinary standalone session.
@@ -93,6 +101,7 @@ export interface SessionCompleteProps {
 }
 
 export function SessionComplete({
+  glossaryAppendix,
   sessionId,
   accessToken,
   answeredCount,
@@ -291,6 +300,9 @@ export function SessionComplete({
               {showData && reportReady && (
                 <ReportDataAppendix captured={captured ?? null} include={includeData} />
               )}
+              {/* Definitions last: the respondent already saw them inline during the conversation,
+                  so here they are a reference for whoever reads this later. */}
+              {reportReady && <ReportGlossaryAppendix appendix={glossaryAppendix ?? null} />}
             </div>
           </div>
         )}
@@ -351,6 +363,7 @@ export function SessionComplete({
           completionPct={view.insights.completionPct}
           captured={showData ? (captured ?? null) : null}
           include={includeData}
+          glossaryAppendix={glossaryAppendix ?? null}
         />
       )}
     </div>
@@ -373,6 +386,7 @@ function ReportPreviewDialog({
   completionPct,
   captured,
   include,
+  glossaryAppendix,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -385,6 +399,8 @@ function ReportPreviewDialog({
   captured: AnswerPanelView | null;
   /** Which questionnaire data to append below the report (config `rawIncludes`). */
   include: { questions: boolean; dataSlots: boolean };
+  /** The glossary appendix, or null when the version has none / the admin left it off. */
+  glossaryAppendix: GlossaryAppendixView | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -407,6 +423,7 @@ function ReportPreviewDialog({
               animate={false}
             />
             <ReportDataAppendix captured={captured} include={include} variant="paper" />
+            <ReportGlossaryAppendix appendix={glossaryAppendix} variant="paper" />
           </div>
         </div>
       </DialogContent>

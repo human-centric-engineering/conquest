@@ -21,6 +21,7 @@ import { Prisma } from '@prisma/client';
 
 import { executeTransaction } from '@/lib/db/utils';
 import { slugifyKey, nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
+import { normalizeGlossarySurface } from '@/lib/app/questionnaire/glossary/normalize';
 import { normalizeTagLabel } from '@/lib/app/questionnaire/tagging';
 import { AUDIENCE_FIELDS } from '@/lib/app/questionnaire/types';
 import type { DefinitionImport } from '@/lib/app/questionnaire/authoring';
@@ -282,6 +283,40 @@ export async function persistDefinitionImport(
             content: jsonInput(version.scoringSchema.content),
             source: 'manual',
             createdBy: adminId,
+          },
+          select: { id: true },
+        });
+      }
+
+      // 9. Definitions / glossary (P16) — the curated vocabulary the questions were written
+      //    against. Carried at every status: a rejected term is a decision worth preserving, so
+      //    a later analysis run on the imported copy doesn't resurrect it as a fresh proposal.
+      for (let i = 0; i < version.glossary.length; i += 1) {
+        const term = version.glossary[i];
+        const normalizedTerm = normalizeGlossarySurface(term.term);
+        if (normalizedTerm.length === 0) continue;
+        await tx.appGlossaryTerm.create({
+          data: {
+            versionId,
+            term: term.term,
+            normalizedTerm,
+            aliases: jsonInput(term.aliases),
+            status: term.status,
+            source: term.source,
+            ordinal: i,
+            ...(term.rationale ? { rationale: term.rationale } : {}),
+            ...(term.contextQuote ? { contextQuote: term.contextQuote } : {}),
+            createdBy: adminId,
+            definitions: {
+              create: term.definitions.map((definition, ordinal) => ({
+                text: definition.text,
+                selected: definition.selected,
+                source: definition.source,
+                edited: definition.edited,
+                ordinal,
+                ...(definition.sourceQuote ? { sourceQuote: definition.sourceQuote } : {}),
+              })),
+            },
           },
           select: { id: true },
         });

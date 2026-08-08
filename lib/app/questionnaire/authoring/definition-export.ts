@@ -31,6 +31,14 @@ import {
 // Prisma-touching `compute` module, which would leak server code into the client bundle that
 // imports `parseDefinitionImport` through the authoring barrel).
 import { scoringSchemaContentSchema } from '@/lib/app/questionnaire/scoring/schema-validation';
+import { normalizeGlossarySurface } from '@/lib/app/questionnaire/glossary/normalize';
+import {
+  GLOSSARY_DEFINITION_SOURCES,
+  GLOSSARY_MAX_DEFINITIONS_PER_TERM,
+  GLOSSARY_MAX_TERMS_PER_VERSION,
+  GLOSSARY_TERM_SOURCES,
+  GLOSSARY_TERM_STATUSES,
+} from '@/lib/app/questionnaire/glossary/types';
 import type { ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
@@ -84,6 +92,28 @@ export interface DefinitionDataSlot {
   questionKeys: string[];
 }
 
+/** One curated glossary term in an export. */
+export interface DefinitionGlossaryTerm {
+  term: string;
+  aliases: string[];
+  status: string;
+  source: string;
+  rationale: string | null;
+  contextQuote: string | null;
+  definitions: {
+    text: string;
+    selected: boolean;
+    source: string;
+    sourceQuote: string | null;
+    /**
+     * Whether an admin changed the AI's wording. Carried through the round-trip because a later
+     * analysis re-run leaves an edited definition alone — losing the flag on import would let the
+     * next run overwrite exactly the wording it is meant to preserve.
+     */
+    edited: boolean;
+  }[];
+}
+
 /** The on-disk envelope written by {@link buildDefinitionExport}. */
 export interface DefinitionExport {
   kind: typeof DEFINITION_EXPORT_KIND;
@@ -98,6 +128,13 @@ export interface DefinitionExport {
     config: QuestionnaireConfigShape;
     dataSlots: DefinitionDataSlot[];
     scoringSchema: { name: string; content: ScoringSchemaContent } | null;
+    /**
+     * Definitions / glossary (P16). Carries the CURATED set — terms, their status, and every
+     * candidate definition with its selection state — so a round-trip preserves an admin's
+     * adjudication rather than making them re-decide. `sourceQuote` travels too, but the source
+     * DOCUMENT does not: it is an upload, not part of a portable definition.
+     */
+    glossary: DefinitionGlossaryTerm[];
   };
 }
 
@@ -112,7 +149,8 @@ export function buildDefinitionExport(
   graph: VersionGraphView,
   dataSlots: DataSlotView[],
   scoring: { name: string; content: ScoringSchemaContent } | null,
-  exportedAt: string
+  exportedAt: string,
+  glossary: DefinitionGlossaryTerm[] = []
 ): DefinitionExport {
   return {
     kind: DEFINITION_EXPORT_KIND,
@@ -151,6 +189,7 @@ export function buildDefinitionExport(
         questionKeys: d.questionKeys,
       })),
       scoringSchema: scoring,
+      glossary,
     },
   };
 }
@@ -206,6 +245,31 @@ const dataSlotImportSchema = z.object({
   questionKeys: z.array(z.string()),
 });
 
+/** One curated glossary term, as an import file carries it. Lenient on vocabulary — a value the
+ *  current build doesn't know is rejected by the enum, so a forward-compatible file fails loudly
+ *  rather than importing a term in a state nothing can render. */
+const glossaryTermImportSchema = z.object({
+  term: z.string().trim().min(1).max(120),
+  aliases: z.array(z.string().trim().min(1).max(120)).max(8).default([]),
+  status: z.enum(GLOSSARY_TERM_STATUSES).default('proposed'),
+  source: z.enum(GLOSSARY_TERM_SOURCES).default('admin'),
+  rationale: z.string().trim().max(2000).nullish(),
+  contextQuote: z.string().trim().max(2000).nullish(),
+  definitions: z
+    .array(
+      z.object({
+        text: z.string().trim().min(1).max(2000),
+        selected: z.boolean().default(false),
+        source: z.enum(GLOSSARY_DEFINITION_SOURCES).default('ai_proposed'),
+        sourceQuote: z.string().trim().max(2000).nullish(),
+        // Defaults false so a file exported before this field existed still imports.
+        edited: z.boolean().default(false),
+      })
+    )
+    .max(GLOSSARY_MAX_DEFINITIONS_PER_TERM)
+    .default([]),
+});
+
 /**
  * The full envelope validator — the external-data boundary. `config` reuses the all-optional
  * {@link updateConfigSchema} (so an import is validated exactly like a settings PATCH and unknown
@@ -228,6 +292,36 @@ export const definitionImportSchema = z.object({
       .object({ name: z.string().trim().min(1).max(120), content: scoringSchemaContentSchema })
       .nullable()
       .optional(),
+    // Definitions / glossary (P16). `.default([])` deliberately, NOT a schemaVersion bump: the
+    // parser rejects any schemaVersion !== 1 outright, so bumping it would reject every file
+    // exported before this feature. With a default, an old file imports (no glossary) and a new
+    // file imports into older code too (Zod strips the unknown key) — both directions stay
+    // compatible without a migration.
+    glossary: z
+      .array(glossaryTermImportSchema)
+      .max(GLOSSARY_MAX_TERMS_PER_VERSION)
+      .default([])
+      // The DB's `@@unique([versionId, normalizedTerm])` would otherwise surface a hand-edited or
+      // foreign-tool file containing e.g. "higher-self" AND "Higher Self" as a P2002 mid-
+      // transaction — a 500 on what is really a bad request. `saveGlossarySchema` rejects the same
+      // collision at the save boundary; the import path needs the same guard.
+      .superRefine((terms, ctx) => {
+        const seen = new Map<string, number>();
+        terms.forEach((entry, index) => {
+          const normalized = normalizeGlossarySurface(entry.term);
+          if (normalized.length === 0) return;
+          const first = seen.get(normalized);
+          if (first !== undefined) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [index, 'term'],
+              message: `Duplicate glossary term — "${entry.term}" repeats the term at position ${first + 1}`,
+            });
+            return;
+          }
+          seen.set(normalized, index);
+        });
+      }),
   }),
 });
 

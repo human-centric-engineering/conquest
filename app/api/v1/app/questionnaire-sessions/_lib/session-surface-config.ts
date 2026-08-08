@@ -17,6 +17,8 @@ import { prisma } from '@/lib/db/client';
 export interface SessionSurfaceConfig {
   status: string;
   respondentUserId: string | null;
+  /** The version this session runs on — the page resolves version-scoped extras (glossary) from it. */
+  versionId: string;
   config: {
     anonymousMode: boolean;
     presentationMode: string;
@@ -39,6 +41,7 @@ export async function loadSessionSurfaceConfig(
     select: {
       status: true,
       respondentUserId: true,
+      versionId: true,
       version: {
         select: {
           config: {
@@ -64,6 +67,7 @@ export async function loadSessionSurfaceConfig(
   return {
     status: row.status,
     respondentUserId: row.respondentUserId,
+    versionId: row.versionId,
     config: row.version.config,
   };
 }

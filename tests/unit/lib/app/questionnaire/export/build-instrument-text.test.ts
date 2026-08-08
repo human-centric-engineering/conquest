@@ -54,6 +54,8 @@ function section(over: Partial<InstrumentSection> = {}): InstrumentSection {
 function model(over: Partial<InstrumentModel> = {}): InstrumentModel {
   return {
     title: 'Test Questionnaire',
+    // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+    glossary: null,
     versionNumber: 1,
     goal: null,
     audienceSummary: null,
@@ -341,6 +343,8 @@ describe('buildInstrumentText', () => {
     it('renders a complete instrument with all optional fields in the expected block order', () => {
       const txt = buildInstrumentText({
         title: 'Staff Survey',
+        // Definitions / glossary (P16) — absent here; the appendix has its own tests.
+        glossary: null,
         versionNumber: 2,
         goal: 'Measure satisfaction',
         audienceSummary: 'All staff',

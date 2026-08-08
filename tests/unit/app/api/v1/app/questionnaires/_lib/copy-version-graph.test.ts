@@ -92,6 +92,16 @@ function buildTx() {
     appDataSlotQuestion: {
       createMany: vi.fn(async () => ({ count: 0 })),
     },
+    appGlossaryTerm: {
+      createMany: vi.fn(async () => ({ count: 0 })),
+      findMany: vi.fn(async () => [] as Array<{ id: string; normalizedTerm: string }>),
+    },
+    appGlossaryDefinition: {
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
+    appGlossaryDocument: {
+      create: vi.fn(async () => ({ id: 'new-glossary-doc' })),
+    },
     $executeRawUnsafe: vi.fn(async () => 0),
   };
 }
@@ -129,6 +139,33 @@ const MINIMAL_SOURCE = {
     generationConfidence: number | null;
     questions: Array<{ questionSlotId: string }>;
   }>,
+  glossaryTerms: [] as Array<{
+    term: string;
+    normalizedTerm: string;
+    aliases: string[];
+    status: string;
+    source: string;
+    rationale: string | null;
+    contextQuote: string | null;
+    ordinal: number;
+    createdBy: string | null;
+    definitions: Array<{
+      text: string;
+      selected: boolean;
+      source: string;
+      sourceQuote: string | null;
+      edited: boolean;
+      ordinal: number;
+    }>;
+  }>,
+  glossaryDocument: null as {
+    fileName: string;
+    fileHash: string;
+    byteSize: number;
+    mimeType: string | null;
+    extractedText: string;
+    uploadedBy: string | null;
+  } | null,
   sections: [
     {
       id: 'oldsec-1',
@@ -357,6 +394,8 @@ describe('copyVersionGraph — positive branches (tags + data slots)', () => {
     return {
       config: null,
       scoringSchema: null,
+      glossaryTerms: [],
+      glossaryDocument: null,
       tags: [
         {
           id: 'oldtag-1',
@@ -575,5 +614,223 @@ describe('copyVersionGraph — with config and scoring schema', () => {
     expect(schemaCall.data.versionId).toBe('tgt-v');
     expect(schemaCall.data.name).toBe('NPS scoring');
     expect(schemaCall.data.source).toBe('admin');
+  });
+});
+
+// ─── Glossary (P16) ───────────────────────────────────────────────────────────
+
+/**
+ * The glossary forks with the version. This matters because the questions were WRITTEN against
+ * these definitions — a fork that dropped them would silently change what the questionnaire
+ * means, and nothing else in the system would notice.
+ *
+ * The re-link is the part worth pinning: definitions are children of terms, `createMany` returns
+ * no ids, and the join back is the per-version-unique `normalizedTerm`. Get that wrong and the
+ * copy lands with orphaned or cross-linked definitions.
+ */
+describe('copyVersionGraph — glossary', () => {
+  let tx: ReturnType<typeof buildTx>;
+
+  beforeEach(() => {
+    tx = buildTx();
+  });
+
+  /** Two terms, one with two senses and one with none, plus an attached document. */
+  function glossarySource() {
+    return {
+      ...MINIMAL_SOURCE,
+      glossaryTerms: [
+        {
+          term: 'higher self',
+          normalizedTerm: 'higher self',
+          aliases: ['higher-self', 'HS'],
+          status: 'accepted',
+          source: 'ai_proposed',
+          rationale: 'Contested across traditions.',
+          contextQuote: 'How connected do you feel to your higher self?',
+          ordinal: 0,
+          createdBy: 'admin-1',
+          definitions: [
+            {
+              text: 'The observing, values-led part of you.',
+              selected: true,
+              source: 'ai_proposed',
+              sourceQuote: null,
+              edited: false,
+              ordinal: 0,
+            },
+            {
+              text: 'Your connection to something larger than yourself.',
+              selected: true,
+              source: 'document',
+              sourceQuote: 'the Self that observes',
+              edited: false,
+              ordinal: 1,
+            },
+          ],
+        },
+        {
+          term: 'ego',
+          normalizedTerm: 'ego',
+          aliases: [],
+          status: 'rejected',
+          source: 'ai_proposed',
+          rationale: null,
+          contextQuote: null,
+          ordinal: 1,
+          createdBy: null,
+          definitions: [],
+        },
+      ],
+      glossaryDocument: null,
+    };
+  }
+
+  it('copies terms into the target version, preserving status and ordinal', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(glossarySource());
+    tx.appGlossaryTerm.findMany.mockResolvedValue([
+      { id: 'new-term-1', normalizedTerm: 'higher self' },
+      { id: 'new-term-2', normalizedTerm: 'ego' },
+    ]);
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appGlossaryTerm.createMany).toHaveBeenCalledTimes(1);
+    const { data } = (tx.appGlossaryTerm.createMany as Mock).mock.calls[0][0] as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(data).toHaveLength(2);
+    expect(data[0]).toMatchObject({
+      versionId: 'tgt-v',
+      term: 'higher self',
+      normalizedTerm: 'higher self',
+      status: 'accepted',
+      ordinal: 0,
+      createdBy: 'admin-1',
+    });
+    // A rejected term forks too — that adjudication is exactly what stops a later analyst
+    // re-run re-proposing it on the new draft.
+    expect(data[1]).toMatchObject({ term: 'ego', status: 'rejected', ordinal: 1 });
+    // A null optional is omitted rather than written as null (the house key-absent idiom).
+    expect(data[1]).not.toHaveProperty('rationale');
+    expect(data[1]).not.toHaveProperty('createdBy');
+  });
+
+  it('re-links each definition to its copied term via normalizedTerm', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(glossarySource());
+    tx.appGlossaryTerm.findMany.mockResolvedValue([
+      // Deliberately returned out of source order — the join is by key, not by position.
+      { id: 'new-term-2', normalizedTerm: 'ego' },
+      { id: 'new-term-1', normalizedTerm: 'higher self' },
+    ]);
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appGlossaryDefinition.createMany).toHaveBeenCalledTimes(1);
+    const { data } = (tx.appGlossaryDefinition.createMany as Mock).mock.calls[0][0] as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(data).toHaveLength(2);
+    // Both senses land on the term that owns them, not on the row that happened to come back first.
+    expect(data.every((row) => row.termId === 'new-term-1')).toBe(true);
+    expect(data[0]).toMatchObject({ text: 'The observing, values-led part of you.', ordinal: 0 });
+    expect(data[1]).toMatchObject({
+      text: 'Your connection to something larger than yourself.',
+      selected: true,
+      source: 'document',
+      sourceQuote: 'the Self that observes',
+      ordinal: 1,
+    });
+  });
+
+  it('skips both writes entirely when the source has no glossary', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(MINIMAL_SOURCE);
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appGlossaryTerm.createMany).not.toHaveBeenCalled();
+    expect(tx.appGlossaryTerm.findMany).not.toHaveBeenCalled();
+    expect(tx.appGlossaryDefinition.createMany).not.toHaveBeenCalled();
+    expect(tx.appGlossaryDocument.create).not.toHaveBeenCalled();
+  });
+
+  it('does not write definitions when every copied term has none', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...MINIMAL_SOURCE,
+      glossaryTerms: [glossarySource().glossaryTerms[1]],
+    });
+    tx.appGlossaryTerm.findMany.mockResolvedValue([{ id: 'new-term-2', normalizedTerm: 'ego' }]);
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appGlossaryTerm.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.appGlossaryDefinition.createMany).not.toHaveBeenCalled();
+  });
+
+  it('copies the definitions document when one is attached', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...MINIMAL_SOURCE,
+      glossaryDocument: {
+        fileName: 'house-glossary.pdf',
+        fileHash: 'sha256-abc',
+        byteSize: 4096,
+        mimeType: 'application/pdf',
+        extractedText: 'Higher self: the observing Self.',
+        uploadedBy: 'admin-1',
+      },
+    });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appGlossaryDocument.create).toHaveBeenCalledTimes(1);
+    const { data } = (tx.appGlossaryDocument.create as Mock).mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).toMatchObject({
+      versionId: 'tgt-v',
+      fileName: 'house-glossary.pdf',
+      fileHash: 'sha256-abc',
+      extractedText: 'Higher self: the observing Self.',
+      uploadedBy: 'admin-1',
+    });
+  });
+
+  it('omits null document optionals rather than writing them as null', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...MINIMAL_SOURCE,
+      glossaryDocument: {
+        fileName: 'notes.md',
+        fileHash: 'sha256-def',
+        byteSize: 128,
+        mimeType: null,
+        extractedText: 'Ego: the constructed self.',
+        uploadedBy: null,
+      },
+    });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const { data } = (tx.appGlossaryDocument.create as Mock).mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('mimeType');
+    expect(data).not.toHaveProperty('uploadedBy');
+  });
+
+  it('returns no glossary id map — nothing addresses a glossary row by URL', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(glossarySource());
+    tx.appGlossaryTerm.findMany.mockResolvedValue([
+      { id: 'new-term-1', normalizedTerm: 'higher self' },
+      { id: 'new-term-2', normalizedTerm: 'ego' },
+    ]);
+
+    const maps = await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(Object.keys(maps).sort()).toEqual([
+      'dataSlotIdMap',
+      'questionIdMap',
+      'sectionIdMap',
+      'tagIdMap',
+    ]);
   });
 });

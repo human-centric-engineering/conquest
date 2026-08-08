@@ -4,6 +4,10 @@ import { notFound } from 'next/navigation';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { SessionEntry } from '@/components/app/questionnaire/intro/session-entry';
+import {
+  resolveGlossaryAppendixForVersion,
+  resolveGlossaryForHints,
+} from '@/lib/app/questionnaire/glossary/resolve';
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import { resolveThemeForSession } from '@/lib/app/questionnaire/chat/theme';
@@ -150,6 +154,15 @@ export default async function QuestionnaireSessionPage({
   // half is gathered in-chat). Purely per-version config (like profileFields).
   const capture = await resolveSessionCapture(sessionId);
 
+  // Definitions / glossary (P16): the version's live terms, so a defined word is underlined in the
+  // interviewer's messages and on form labels with its definition in a popover. Gated server-side
+  // — `resolveGlossaryForHints` returns [] when `glossaryRespondentHints` is off, so the client
+  // components carry no flag of their own.
+  const [glossary, glossaryAppendix] = await Promise.all([
+    resolveGlossaryForHints(row.versionId),
+    resolveGlossaryAppendixForVersion(row.versionId),
+  ]);
+
   // Resumed = the session already has turns. Replay them (transcript-only — the conversation is
   // its own context); a fresh session shows the branded welcome + guidance and auto-opens. Keyed
   // on turn count, not answers: a session can have turns with no captured answer yet (e.g. an
@@ -168,6 +181,8 @@ export default async function QuestionnaireSessionPage({
     <div className={`${RESPONDENT_SHELL} h-[calc(100vh-12rem)]`}>
       <BrandThemeProvider theme={theme} header={bandHeader}>
         <SessionEntry
+          glossary={glossary}
+          glossaryAppendix={glossaryAppendix}
           intro={intro}
           personas={personas}
           capture={capture}

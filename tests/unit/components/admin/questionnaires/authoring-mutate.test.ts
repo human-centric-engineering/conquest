@@ -150,3 +150,39 @@ describe('authoringMutate', () => {
     expect((err as AuthoringError).details).toEqual({ field: ['x'] });
   });
 });
+
+describe('authoringMutate — multipart bodies', () => {
+  it('sends FormData verbatim and lets the browser set the boundary Content-Type', async () => {
+    // A JSON Content-Type here would omit the multipart boundary and the upload would fail to
+    // parse server-side; JSON.stringify would send "[object FormData]". Both are silent failures,
+    // so the shape of this request is pinned.
+    const form = new FormData();
+    form.append('file', new Blob(['glossary text'], { type: 'text/plain' }), 'glossary.txt');
+
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, data: { ok: true }, meta: null }));
+
+    await authoringMutate(
+      'POST',
+      '/api/v1/app/questionnaires/q1/versions/v1/glossary/document',
+      form
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.body).toBe(form);
+    expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+    // The fork protocol still applies to a multipart write.
+    expect((init.headers as Record<string, string>)['x-fork-confirm']).toBe('prompt');
+  });
+
+  it('still JSON-encodes a plain object body', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, data: { ok: true }, meta: null }));
+
+    await authoringMutate('PUT', '/api/v1/app/questionnaires/q1/versions/v1/glossary', {
+      terms: [],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.body).toBe(JSON.stringify({ terms: [] }));
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+  });
+});

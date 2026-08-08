@@ -25,6 +25,7 @@ import { experienceSynthesisWorkflow } from '@/lib/app/questionnaire/workflows/d
 import { dataSlotGenerationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-generation';
 import { dataSlotTurnWorkflow } from '@/lib/app/questionnaire/workflows/definitions/data-slot-turn';
 import { generativeAuthoringWorkflow } from '@/lib/app/questionnaire/workflows/definitions/generative-authoring';
+import { glossaryAnalysisWorkflow } from '@/lib/app/questionnaire/workflows/definitions/glossary-analysis';
 import { ingestionWorkflow } from '@/lib/app/questionnaire/workflows/definitions/ingestion';
 import { reportConfigAssistantWorkflow } from '@/lib/app/questionnaire/workflows/definitions/report-config-assistant';
 import { respondentReportWorkflow } from '@/lib/app/questionnaire/workflows/definitions/respondent-report';
@@ -38,6 +39,7 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   generativeAuthoringWorkflow,
   structureEditWorkflow,
   dataSlotGenerationWorkflow,
+  glossaryAnalysisWorkflow,
   conversationTurnWorkflow,
   answerExtractionWorkflow,
   dataSlotTurnWorkflow,

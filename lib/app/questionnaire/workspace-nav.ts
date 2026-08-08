@@ -29,6 +29,7 @@ export const QUESTIONNAIRE_WORKSPACE_TABS: readonly WorkspaceTab[] = [
   { id: 'overview', label: 'Overview', segment: '', exact: true },
   { id: 'structure', label: 'Structure', segment: 'structure' },
   { id: 'data-slots', label: 'Data slots', segment: 'data-slots' },
+  { id: 'definitions', label: 'Definitions', segment: 'definitions' },
   { id: 'invitations', label: 'Invitations', segment: 'invitations' },
   { id: 'sessions', label: 'Sessions', segment: 'sessions' },
   {
@@ -86,7 +87,7 @@ export interface WorkspaceGroup {
 }
 
 /**
- * Lifecycle grouping of the 13 workspace tabs into the four life-stages of a
+ * Lifecycle grouping of the 14 workspace tabs into the four life-stages of a
  * questionnaire — Overview · Build · Distribute · Results — plus a standalone
  * Settings. The flat `QUESTIONNAIRE_WORKSPACE_TABS` stays the source of truth
  * (hrefs, intra-group order); this layer only adds the two-tier shape the
@@ -99,7 +100,7 @@ export const QUESTIONNAIRE_WORKSPACE_GROUPS: readonly WorkspaceGroup[] = [
     id: 'build',
     label: 'Build',
     phase: 'build',
-    tabIds: ['structure', 'data-slots', 'evaluations', 'extraction-changes'],
+    tabIds: ['structure', 'data-slots', 'definitions', 'evaluations', 'extraction-changes'],
   },
   {
     id: 'distribute',

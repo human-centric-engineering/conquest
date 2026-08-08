@@ -492,6 +492,18 @@ export const API = {
       /** Pending generated data-slot draft for a version (DELETE — discard the proposal). */
       versionDataSlotsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/draft`,
+      /** Curated glossary for a version (GET terms + document, PUT replace-set the reviewed set). */
+      versionGlossary: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary`,
+      /** Run the Glossary Analyst over a version (POST → SSE: analysing → done). Writes proposals only. */
+      versionGlossaryAnalyseStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary/analyse/stream`,
+      /** Publish a version's glossary into its demo client's knowledge base (POST — opt-in, one-way). */
+      versionGlossaryPublish: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary/publish`,
+      /** Authoritative definitions document for a version (POST multipart upload, DELETE remove). */
+      versionGlossaryDocument: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary/document`,
       /** Extraction-change log for a version (GET list, filter by status/type). */
       versionChanges: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/changes`,

@@ -172,3 +172,16 @@ Same shape as the existing `evaluationRetentionDays <= executionRetentionDays` n
 - [`upstream-gaps.md`](../planning/upstream-gaps.md) — UG-12, agent-version pinning
 - `.context/orchestration/retention.md` — platform prune windows
 - `.context/app/questionnaire/respondent-report.md` — the `methodRecord` pattern this generalises
+
+## `glossary_analysis` (P16)
+
+One run per Glossary Analyst pass over a version. Recorded because a human acts on the verdict (the
+admin adjudicates every proposal) **and** because the accepted result changes durable config — an
+accepted definition is injected into the interviewer and extraction prompts, so "where did this
+definition come from?" is a question worth being able to answer months later.
+
+`detail` carries `{ proposedCount, skippedExistingCount, questionCount, usedDocument }`.
+`outputSnapshot` is the analyst's raw proposal. A failed dispatch is recorded too, with
+`status: 'failed'` — "the analyst errored" is a real answer.
+
+See [`definitions-glossary.md`](./definitions-glossary.md).

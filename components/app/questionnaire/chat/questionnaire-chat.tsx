@@ -27,7 +27,8 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { SendHorizontal } from 'lucide-react';
-import Markdown from 'react-markdown';
+import { GlossaryMarkdown } from '@/components/app/questionnaire/glossary/glossary-markdown';
+import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
 
 import { cn } from '@/lib/utils';
 import { API } from '@/lib/api/endpoints';
@@ -68,6 +69,14 @@ import type { StitchedHistory } from '@/lib/app/questionnaire/experiences/run/ty
 export interface QuestionnaireChatProps {
   /** The session id powering `/questionnaire-sessions/:id/messages` (used by the mic). */
   sessionId: string;
+  /**
+   * Definitions / glossary (P16): the version's live terms. A matched term is underlined in the
+   * interviewer's messages with its definition in a popover. Resolved server-side and already
+   * gated on `glossaryRespondentHints` — the page passes `[]` when the switch is off, so this
+   * surface carries no flag of its own. Never annotates the RESPONDENT's own messages: only the
+   * assistant-turn bodies below are wrapped.
+   */
+  glossary?: readonly GlossaryEntry[];
   /** Anonymous no-login token; omit for authenticated sessions. */
   accessToken?: string;
   /** The shared stream state, owned by {@link SessionWorkspace}. */
@@ -257,9 +266,12 @@ function TypewriterAssistantTurn({
   reasoningAutoReveal = false,
   reasoningDwellMs,
   reasoningHoldMs = 0,
+  glossary,
   onDone,
 }: {
   content: string;
+  /** Live glossary terms to underline once the reply has settled. */
+  glossary?: readonly GlossaryEntry[];
   /** Side-band notices to render beneath the reply once it has finished typing in. */
   warnings?: SessionWarning[];
   /** The turn's reasoning trace, rendered collapsed beneath the reply once it has typed in. */
@@ -330,7 +342,7 @@ function TypewriterAssistantTurn({
       {holding ? null : done ? (
         <>
           <div className="prose prose-sm dark:prose-invert max-w-none">
-            <Markdown>{content}</Markdown>
+            <GlossaryMarkdown glossary={glossary}>{content}</GlossaryMarkdown>
           </div>
           {/* The notices only land once the reply has fully typed in — they read as the agent's
               considered aside, not something racing the message itself. */}
@@ -366,9 +378,12 @@ function RevealedAssistantTurn({
   reasoningDwellMs,
   reasoningHoldMs = 0,
   beatMs,
+  glossary,
   onDone,
 }: {
   content: string;
+  /** Live glossary terms to underline once the reply has settled. */
+  glossary?: readonly GlossaryEntry[];
   /** Side-band notices to render beneath the reply once it has finished typing in. */
   warnings?: SessionWarning[];
   /** The turn's reasoning trace, rendered collapsed beneath the reply once it has typed in. */
@@ -407,6 +422,7 @@ function RevealedAssistantTurn({
       reasoningAutoReveal={reasoningAutoReveal}
       reasoningDwellMs={reasoningDwellMs}
       reasoningHoldMs={reasoningHoldMs}
+      glossary={glossary}
       onDone={onDone}
     />
   );
@@ -414,6 +430,7 @@ function RevealedAssistantTurn({
 
 export function QuestionnaireChat({
   sessionId,
+  glossary,
   accessToken,
   stream,
   voiceInputEnabled = false,
@@ -582,7 +599,7 @@ export function QuestionnaireChat({
                   <AssistantTurn key={`seg-${s}-t-${t}`}>
                     <TurnReasoning steps={turn.reasoning} placement={reasoningPlacement} />
                     <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <Markdown>{turn.content}</Markdown>
+                      <GlossaryMarkdown glossary={glossary}>{turn.content}</GlossaryMarkdown>
                     </div>
                     <TurnNotices warnings={turn.warnings} />
                   </AssistantTurn>
@@ -611,7 +628,7 @@ export function QuestionnaireChat({
                   {/* Reasoning above the reply — directly under the message it processed. */}
                   <TurnReasoning steps={turn.reasoning} placement={reasoningPlacement} />
                   <div className="prose prose-sm dark:prose-invert max-w-none">
-                    <Markdown>{turn.content}</Markdown>
+                    <GlossaryMarkdown glossary={glossary}>{turn.content}</GlossaryMarkdown>
                   </div>
                   {/* Replayed transcript: its persisted notices render beneath the turn. */}
                   <TurnNotices warnings={turn.warnings} />
@@ -650,6 +667,7 @@ export function QuestionnaireChat({
                 reasoningDwellMs={reasoningDwell}
                 reasoningHoldMs={reasoningHoldMs}
                 beatMs={isActive ? beatForTurn(i) : 0}
+                glossary={glossary}
                 onDone={isActive ? () => setRevealCursor((c) => Math.max(c, i + 1)) : () => {}}
               />
             );

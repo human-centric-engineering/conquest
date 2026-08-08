@@ -4,6 +4,10 @@ import { notFound } from 'next/navigation';
 
 import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
 import { RunSessionBoot } from '@/components/app/questionnaire/experiences/run-session-boot';
+import {
+  resolveGlossaryAppendixForVersion,
+  resolveGlossaryForHints,
+} from '@/lib/app/questionnaire/glossary/resolve';
 import { resolveRunSurface } from '@/app/api/v1/app/experiences/_lib/run-surface';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
@@ -92,6 +96,8 @@ export default async function ExperienceRunPage({
     reasoningPlacement,
     reasoningDwell,
     inlineCorrectionEnabled,
+    glossary,
+    glossaryAppendix,
   ] = await Promise.all([
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
@@ -102,6 +108,8 @@ export default async function ExperienceRunPage({
     resolveReasoningPlacementForVersion(versionId),
     resolveReasoningDwellForVersion(versionId),
     resolveInlineCorrectionForVersion(versionId),
+    resolveGlossaryForHints(versionId),
+    resolveGlossaryAppendixForVersion(versionId),
   ]);
 
   // `px-4` matches the site header's own container padding, so the conversation's left and right
@@ -111,6 +119,8 @@ export default async function ExperienceRunPage({
       <BrandThemeProvider theme={theme} header={bandHeader}>
         <RunSessionBoot
           sessionId={sessionId}
+          glossary={glossary}
+          glossaryAppendix={glossaryAppendix}
           accessToken={sessionToken ?? undefined}
           welcomeCopy={theme.welcomeCopy}
           voiceInputEnabled={voiceInputEnabled}

@@ -74,19 +74,23 @@ model AppQuestionnaireVersion {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  questionnaire   AppQuestionnaire                   @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
-  sections        AppQuestionnaireSection[]
-  changeRecords   AppQuestionnaireExtractionChange[]
-  sourceDocuments AppQuestionnaireSourceDocument[]
-  tags            AppQuestionTag[]
-  config          AppQuestionnaireConfig?
-  invitations     AppQuestionnaireInvitation[]
-  sessions        AppQuestionnaireSession[]
-  evaluationRuns  AppQuestionnaireEvaluationRun[]
-  dataSlots       AppDataSlot[]
-  dataSlotDraft   AppDataSlotDraft?
-  scoringSchema   AppScoringSchema?
-  errors          AppQuestionnaireError[]
+  questionnaire    AppQuestionnaire                   @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  sections         AppQuestionnaireSection[]
+  changeRecords    AppQuestionnaireExtractionChange[]
+  sourceDocuments  AppQuestionnaireSourceDocument[]
+  tags             AppQuestionTag[]
+  config           AppQuestionnaireConfig?
+  invitations      AppQuestionnaireInvitation[]
+  sessions         AppQuestionnaireSession[]
+  evaluationRuns   AppQuestionnaireEvaluationRun[]
+  dataSlots        AppDataSlot[]
+  dataSlotDraft    AppDataSlotDraft?
+  scoringSchema    AppScoringSchema?
+  errors           AppQuestionnaireError[]
+  // Definitions / glossary: the curated terms (with their candidate definitions) and the
+  // optional authoritative definitions document. Both fork with the version.
+  glossaryTerms    AppGlossaryTerm[]
+  glossaryDocument AppGlossaryDocument?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -236,6 +240,18 @@ model AppQuestionnaireConfig {
   sensitivityAwareness Boolean @default(false)
   supportMessage       String  @default("")
   supportResourceUrl   String  @default("")
+
+  // Definitions / glossary (P16) — how the version's curated terms are put to work.
+  //
+  // All three are INERT when the version has no accepted terms, so the first two default ON at
+  // zero cost: an admin who never opens the Definitions tab sees no change whatsoever. The
+  // appendix defaults OFF because it alters a delivered artifact, which is the admin's call.
+  //
+  // Scalars rather than one Json blob: three booleans need no narrower, and copyVersionGraph's
+  // `...source.config` spread carries a scalar for free (a Json column needs a jsonInput() line).
+  glossaryPromptInjection Boolean @default(true)
+  glossaryRespondentHints Boolean @default(true)
+  glossaryReportAppendix  Boolean @default(false)
 
   // Respondent answer-slot panel (F7.2): how much of the questionnaire the live
   // panel shows. full_progress = every slot grouped by section (X-of-N progress);
@@ -1405,6 +1421,102 @@ model AppDataSlotFill {
   @@index([sessionId])
   @@index([dataSlotId])
   @@map("app_data_slot_fill")
+}
+
+/// A curated GLOSSARY TERM for one questionnaire version — a word or phrase the questionnaire
+/// leans on that is ambiguous, contested, or context-dependent ("higher self", "ego"), proposed
+/// by the Glossary Analyst or added by an admin.
+///
+/// VERSION-SCOPED and copied on fork (copy-version-graph), like tags and data slots. `status` is
+/// the curation gate: ONLY `accepted` terms carrying at least one SELECTED definition reach
+/// prompt injection, the respondent hints, or the report appendix — `proposed` rows are inert.
+/// That is the same "a proposal isn't the live set" rule as AppDataSlotDraft, and it is why the
+/// analysis run does NOT fork a launched version while the reviewed save does.
+///
+/// `normalizedTerm` is `normalizeGlossarySurface(term)` (glossary/normalize.ts) — the single
+/// normalisation shared by this uniqueness key, the respondent-facing matcher, and the save
+/// schema's duplicate check, so the three can never disagree about what counts as the same term.
+///
+/// `source` is a plain String (no enums — TS validates at the seam): a later per-demo-client term
+/// LIBRARY adds the value `library` and a nullable pointer with no change to this table.
+///
+/// `createdBy` is a plain String User.id with no @relation (UG-1) — declared in
+/// lib/app/questionnaire/privacy/export-sources.ts as `attribution`.
+model AppGlossaryTerm {
+  id             String   @id @default(cuid())
+  term           String // display form, e.g. "higher self"
+  normalizedTerm String // normalizeGlossarySurface(term) — the per-version uniqueness key
+  versionId      String
+  aliases        Json     @default("[]") // string[] — extra surface forms the matcher also hits
+  status         String   @default("proposed") // GLOSSARY_TERM_STATUSES: proposed | accepted | rejected
+  source         String   @default("ai_proposed") // GLOSSARY_TERM_SOURCES: ai_proposed | admin | document
+  rationale      String?  @db.Text // why the analyst judged this term ambiguous
+  contextQuote   String?  @db.Text // a span from the questionnaire where the term appears
+  ordinal        Int      @default(0)
+  createdBy      String? // admin User.id; plain String, no FK (UG-1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  version     AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  definitions AppGlossaryDefinition[]
+
+  @@unique([versionId, normalizedTerm])
+  @@index([versionId, status])
+  @@map("app_glossary_term")
+}
+
+/// One candidate reading of a glossary term. A term carries 1–4; the admin ticks the one(s) that
+/// apply (`selected`) and may edit the wording. `edited` records that the AI's text was changed,
+/// so a later re-run can leave a hand-tuned definition alone.
+///
+/// Multiple selected definitions are deliberate and are NEVER merged: they render as numbered
+/// senses in the respondent popover and serialise as numbered senses into prompts. The whole
+/// point of a multi-select is that the ambiguity is real and the admin chose to keep it visible.
+///
+/// No user column by design — authorship attribution rides on the parent term.
+model AppGlossaryDefinition {
+  id          String   @id @default(cuid())
+  termId      String
+  text        String   @db.Text
+  selected    Boolean  @default(false)
+  source      String   @default("ai_proposed") // GLOSSARY_DEFINITION_SOURCES: ai_proposed | admin | document
+  sourceQuote String?  @db.Text // span from the definitions document, when source = document
+  edited      Boolean  @default(false) // admin changed the AI wording — a re-run leaves it alone
+  ordinal     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  term AppGlossaryTerm @relation(fields: [termId], references: [id], onDelete: Cascade)
+
+  @@index([termId])
+  @@map("app_glossary_definition")
+}
+
+/// An OPTIONAL authoritative definitions document for a version — the admin's own glossary or
+/// handbook. Stored as extracted TEXT only and used solely as analysis input: it is NOT embedded,
+/// NOT chunked, and never reaches the knowledge base. (Publishing to the client KB is a separate,
+/// deliberately opt-in admin action; the KB is scoped per demo client while a glossary is scoped
+/// per version, so an automatic mirror would let two questionnaires' contradictory definitions of
+/// the same term collide in one corpus.)
+///
+/// Mirrors AppQuestionnaireSourceDocument minus the raw `bytes` — there is no re-parse path, so
+/// storing the upload again would be dead weight. One per version; cascades and forks with it.
+model AppGlossaryDocument {
+  id            String   @id @default(cuid())
+  versionId     String   @unique
+  fileName      String
+  fileHash      String // sha256 of the raw bytes
+  byteSize      Int
+  mimeType      String?
+  extractedText String   @db.Text
+  uploadedBy    String? // admin User.id; plain String, no FK (UG-1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([fileHash])
+  @@map("app_glossary_document")
 }
 
 /// The append-only audit trail of a session's lifecycle (F4.6). One row per recorded
