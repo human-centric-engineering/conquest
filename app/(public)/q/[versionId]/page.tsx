@@ -14,6 +14,7 @@ import { themeToCssVariables } from '@/lib/app/questionnaire/theming';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   resolveAnonymousForVersion,
+  resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
@@ -85,6 +86,7 @@ export default async function PublicQuestionnairePage({
     bandHeader,
     anonymous,
     presentationMode,
+    answerPanelScope,
     voiceConfigured,
     attachmentsConfigured,
     reasoningPlacementConfigured,
@@ -99,6 +101,7 @@ export default async function PublicQuestionnairePage({
     resolveVersionHeader(versionId),
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
+    resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
     resolveReasoningPlacementForVersion(versionId),
@@ -159,6 +162,7 @@ export default async function PublicQuestionnairePage({
             attachmentInputEnabled={attachmentInputEnabled}
             anonymous={anonymous}
             presentationMode={presentationMode}
+            answerPanelScope={answerPanelScope}
             reasoningPlacement={reasoningPlacement}
             reasoningDwellMs={reasoningDwell.dwellMs}
             reasoningPerItemMs={reasoningDwell.perItemMs}

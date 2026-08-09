@@ -32,6 +32,7 @@ import {
   resolveVoiceEnabledForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
+  resolveAnswerPanelScopeForVersion,
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
@@ -161,6 +162,63 @@ describe('resolvePresentationModeForVersion', () => {
     expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
       where: { id: 'ver-xyz' },
       select: { config: { select: { presentationMode: true } } },
+    });
+  });
+});
+
+describe('resolveAnswerPanelScopeForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored scope (answered_only)', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { answerSlotPanelScope: 'answered_only' },
+    } as never);
+    expect(await resolveAnswerPanelScopeForVersion('ver-abc')).toBe('answered_only');
+  });
+
+  it('returns the stored scope when set to hidden', async () => {
+    // Arrange: this branch's new value — must be explicitly exercised, not just narrowed-to
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { answerSlotPanelScope: 'hidden' },
+    } as never);
+    expect(await resolveAnswerPanelScopeForVersion('ver-abc')).toBe('hidden');
+  });
+
+  it('defaults to full_progress when the config row is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveAnswerPanelScopeForVersion('ver-abc')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
+    );
+  });
+
+  it('defaults to full_progress when the version is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveAnswerPanelScopeForVersion('ver-missing')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
+    );
+  });
+
+  it('narrows an unrecognised stored value to full_progress', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { answerSlotPanelScope: 'invisible-ink' },
+    } as never);
+    expect(await resolveAnswerPanelScopeForVersion('ver-abc')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
+    );
+  });
+
+  it('selects only the answerSlotPanelScope field for the given version', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { answerSlotPanelScope: 'hidden' },
+    } as never);
+    await resolveAnswerPanelScopeForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { answerSlotPanelScope: true } } },
     });
   });
 });

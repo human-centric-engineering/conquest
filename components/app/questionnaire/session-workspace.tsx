@@ -17,7 +17,9 @@
  *
  * Layout: a single readable chat column with the answer panel beside it on `lg`+, both tracks
  * widening with the viewport (`RESPONDENT_SPLIT`);
- * below `lg` the panel is hidden and the chat is full-width (the F7.1 experience). Both
+ * below `lg` the panel is hidden and the chat is full-width (the F7.1 experience). When the
+ * version's `answerPanelScope` is `hidden` the split is dropped entirely — chat only, at every
+ * breakpoint, with no mobile review sheet either. Both
  * sit under the page's `BrandThemeProvider`, so they inherit the brand CSS vars with no
  * prop-drilling.
  */
@@ -83,7 +85,11 @@ import type {
   DataSlotPanelSlot,
   PanelSlotView,
 } from '@/lib/app/questionnaire/panel/types';
-import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import type {
+  AnswerSlotPanelScope,
+  PresentationMode,
+  ReasoningPlacement,
+} from '@/lib/app/questionnaire/types';
 import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-view';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
@@ -151,6 +157,14 @@ export interface SessionWorkspaceProps {
    * (toggle). Defaults to `chat`. Drives which surface renders below the lifecycle bar.
    */
   presentationMode?: PresentationMode;
+  /**
+   * How much of the live answer panel the respondent sees (F7.2): `full_progress`, `answered_only`,
+   * or `hidden` — the chat-only surface, where no panel rides beside the conversation, the mobile
+   * "Review answers" sheet is gone, and the transcript takes the full shell width. Defaults to
+   * `full_progress`. Passed as a prop rather than read off the fetched view's own `scope` so the
+   * layout is correct on first paint instead of reflowing when the first fetch lands.
+   */
+  answerPanelScope?: AnswerSlotPanelScope;
   /** SSR-resolved full form view (forForm) for `form`/`both` modes; omit for anonymous. */
   initialFormView?: AnswerPanelView;
   /**
@@ -241,6 +255,7 @@ export function SessionWorkspace({
   attachmentInputEnabled = false,
   autoStart = false,
   presentationMode = 'both',
+  answerPanelScope = 'full_progress',
   initialFormView,
   reasoningPlacement,
   reasoningDwellMs,
@@ -254,6 +269,10 @@ export function SessionWorkspace({
 }: SessionWorkspaceProps) {
   const showChat = presentationMode === 'chat' || presentationMode === 'both';
   const showForm = presentationMode === 'form' || presentationMode === 'both';
+  // Chat-only (`answerSlotPanelScope: 'hidden'`): the conversation is the whole surface — no side
+  // panel on `lg`+, no mobile review sheet, no "Review answers" trigger. Orthogonal to
+  // `presentationMode`: a hidden panel still allows the form tab, which is its own surface.
+  const showPanel = answerPanelScope !== 'hidden';
   // The intro recap rides the carousel whenever the version enables it — on a fresh session AND on a
   // resume, so a returning respondent can still slide back to re-read it. (`autoStart` only governs
   // whether we LAND on it and defer the kickoff; see below.) Never in the read-only admin viewer.
@@ -846,7 +865,11 @@ export function SessionWorkspace({
   // `undefined` when neither applies so the lifecycle strip still collapses to nothing on a plain
   // form-only session (the bar renders the strip whenever `trailing` is present).
   const showReviewTrigger =
-    showChat && activeView !== 'intro' && activeView !== 'capture' && activeView !== 'persona'; // the answer panel only rides the chat surface
+    showChat &&
+    showPanel && // chat-only mode has no answers surface to review
+    activeView !== 'intro' &&
+    activeView !== 'capture' &&
+    activeView !== 'persona'; // the answer panel only rides the chat surface
   // The interviewer chip only makes sense on the chat surface (not while reading the intro / on the
   // form / on the picker page itself).
   const showChipHere = showInterviewerChip && activeView === 'chat';
@@ -920,33 +943,37 @@ export function SessionWorkspace({
     <EarlyFinishControl onFinish={doFinishEarly} busy={lifecycle.busy} />
   ) : null;
 
-  const chatSurface = (
+  const chatColumn = (
+    <div className={cn('flex min-h-0 flex-col gap-3', !showPanel && 'h-full')}>
+      {completionAffordance}
+      <QuestionnaireChat
+        sessionId={sessionId}
+        glossary={glossary}
+        accessToken={accessToken}
+        stream={stream}
+        voiceInputEnabled={voiceInputEnabled}
+        attachmentInputEnabled={attachmentInputEnabled}
+        reasoningPlacement={reasoningPlacement}
+        reasoningDwellMs={reasoningDwellMs}
+        reasoningPerItemMs={reasoningPerItemMs}
+        // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
+        // resumes render their history instantly.
+        animateOpening={autoStart}
+        correctionTargets={correctionTargets}
+        onCorrected={onTurnSettled}
+        stitchedHistory={stitchedHistory}
+        stitchedSeamLabel={stitchedSeamLabel}
+        className="min-h-0 flex-1"
+      />
+    </div>
+  );
+
+  const chatSurface = showPanel ? (
     // The conversation ⇄ panel split. Track widths ladder up with the viewport (see
     // RESPONDENT_SPLIT) so a large display gives the panel real room instead of pouring every
     // extra pixel into the transcript's line length.
     <div className={cn('grid h-full min-h-0', RESPONDENT_SPLIT)}>
-      <div className="flex min-h-0 flex-col gap-3">
-        {completionAffordance}
-        <QuestionnaireChat
-          sessionId={sessionId}
-          glossary={glossary}
-          accessToken={accessToken}
-          stream={stream}
-          voiceInputEnabled={voiceInputEnabled}
-          attachmentInputEnabled={attachmentInputEnabled}
-          reasoningPlacement={reasoningPlacement}
-          reasoningDwellMs={reasoningDwellMs}
-          reasoningPerItemMs={reasoningPerItemMs}
-          // Fresh sessions (autoStart) type the seeded greeting in, like a streamed reply;
-          // resumes render their history instantly.
-          animateOpening={autoStart}
-          correctionTargets={correctionTargets}
-          onCorrected={onTurnSettled}
-          stitchedHistory={stitchedHistory}
-          stitchedSeamLabel={stitchedSeamLabel}
-          className="min-h-0 flex-1"
-        />
-      </div>
+      {chatColumn}
       <AnswerSlotPanel
         view={panel.view}
         loading={panel.loading}
@@ -958,6 +985,10 @@ export function SessionWorkspace({
         className="hidden lg:flex"
       />
     </div>
+  ) : (
+    // Chat-only: no split at all, so the conversation gets the shell's full width at every
+    // breakpoint rather than an empty panel track beside it.
+    chatColumn
   );
 
   const formSurface = (
@@ -1100,25 +1131,29 @@ export function SessionWorkspace({
         leading={showIntro ? undefined : resumeByRef}
       />
 
-      <AnswerReviewDrawer
-        open={reviewOpen}
-        onOpenChange={setReviewOpen}
-        view={panel.view}
-        loading={panel.loading}
-        canRevisit={stream.canSend}
-        newlyFilledKeys={newlyFilledKeys}
-        correction={correction}
-        // Revisiting sends the respondent back to chat to re-answer, so dismiss the sheet.
-        onRevisit={(slot) => {
-          handleRevisit(slot);
-          setReviewOpen(false);
-        }}
-        // Refining likewise sends a turn — close the sheet so the respondent sees the agent's probe.
-        onRefine={(slot) => {
-          handleRefine(slot);
-          setReviewOpen(false);
-        }}
-      />
+      {/* The mobile answers sheet is the below-`lg` twin of the side panel — chat-only mode drops
+          both, so it never mounts there. */}
+      {showPanel && (
+        <AnswerReviewDrawer
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          view={panel.view}
+          loading={panel.loading}
+          canRevisit={stream.canSend}
+          newlyFilledKeys={newlyFilledKeys}
+          correction={correction}
+          // Revisiting sends the respondent back to chat to re-answer, so dismiss the sheet.
+          onRevisit={(slot) => {
+            handleRevisit(slot);
+            setReviewOpen(false);
+          }}
+          // Refining likewise sends a turn — close the sheet so the respondent sees the agent's probe.
+          onRefine={(slot) => {
+            handleRefine(slot);
+            setReviewOpen(false);
+          }}
+        />
+      )}
 
       {views.length > 1 ? (
         // Carousel: each surface is an absolutely-positioned cell pinned to the clipped frame

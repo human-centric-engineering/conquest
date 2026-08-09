@@ -108,6 +108,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     initialTurns,
     initialPanel,
     initialStatusView,
+    answerPanelScope,
   }: {
     sessionId: string;
     initialStatus: string;
@@ -116,6 +117,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     initialTurns: Array<{ role: string; content: string }>;
     initialPanel?: Record<string, unknown>;
     initialStatusView?: Record<string, unknown>;
+    answerPanelScope?: string;
   }) => (
     <div
       data-testid="questionnaire-chat"
@@ -126,6 +128,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-initial-turns={JSON.stringify(initialTurns)}
       data-has-panel={initialPanel ? 'true' : 'false'}
       data-has-status-view={initialStatusView ? 'true' : 'false'}
+      data-answer-panel-scope={answerPanelScope}
     />
   ),
 }));
@@ -219,6 +222,7 @@ function makeRow(
     anonymous?: boolean;
     voiceEnabled?: boolean;
     attachmentsEnabled?: boolean;
+    answerSlotPanelScope?: string;
   } = {}
 ) {
   return {
@@ -231,6 +235,9 @@ function makeRow(
         // affordance, with the opt-out paths exercised by dedicated tests below.
         voiceEnabled: overrides.voiceEnabled ?? true,
         attachmentsEnabled: overrides.attachmentsEnabled ?? true,
+        ...(overrides.answerSlotPanelScope !== undefined
+          ? { answerSlotPanelScope: overrides.answerSlotPanelScope }
+          : {}),
       },
     },
     _count: { answers: overrides.answerCount ?? 0 },
@@ -610,6 +617,29 @@ describe('QuestionnaireSessionPage', () => {
       expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
         'data-voice-input-enabled',
         'false'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Answer-panel scope propagation (F7.2)
+  // -------------------------------------------------------------------------
+
+  describe('answerPanelScope (per-version config)', () => {
+    it('passes answerPanelScope=hidden when the version configures the chat-only surface', async () => {
+      // Arrange: the version's config row has the new F7.2 'hidden' scope
+      vi.mocked(prisma.appQuestionnaireSession.findUnique).mockResolvedValue(
+        makeRow({ answerSlotPanelScope: 'hidden' }) as never
+      );
+
+      // Act
+      const Component = await QuestionnaireSessionPage({ params: makeParams() });
+      render(Component);
+
+      // Assert: the page narrowed and forwarded the stored scope, not the default
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-answer-panel-scope',
+        'hidden'
       );
     });
   });

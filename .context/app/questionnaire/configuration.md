@@ -56,13 +56,18 @@ truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
 options all derive from them): `SELECTION_STRATEGIES`
 (`sequential | weighted | adaptive`), `CONTRADICTION_MODES` (`off | flag | probe`),
 `PROFILE_FIELD_TYPES` (`text | email | number | select`), `ANSWER_SLOT_PANEL_SCOPES`
-(`full_progress | answered_only`), `PRESENTATION_MODES` (`chat | form | both`).
+(`full_progress | answered_only | hidden`), `PRESENTATION_MODES` (`chat | form | both`).
 
 `answerSlotPanelScope` (F7.2) is read by the respondent answer-panel endpoint
 (`GET …/questionnaire-sessions/:id/answers`), not the turn engine: `full_progress`
 returns every slot grouped by section (an X-of-N progress view), `answered_only`
 returns just the captured answers so the pending structure is never sent to the
-client. See `.context/app/questionnaire/answer-slot-panel.md`.
+client, and `hidden` is the **chat-only** surface — the respondent sees no panel at
+all (no side panel on `lg`+, no mobile "Review answers" sheet, no data slots on show).
+`hidden` is a presentation choice, not a privacy one: the endpoint filters it exactly
+like `answered_only`, because the captured answers still feed inline correction and the
+completion screen's cycler. It is orthogonal to `presentationMode` — a hidden panel
+still allows a form tab. See `.context/app/questionnaire/answer-slot-panel.md`.
 
 `accessMode` and `anonymousMode` are **orthogonal axes**. `accessMode`
 (`invitation_only` | `public` | `both`) is the _access_ axis — who may start a session;

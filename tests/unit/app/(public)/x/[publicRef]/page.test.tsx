@@ -65,6 +65,7 @@ vi.mock('@/lib/app/questionnaire/header/resolve', () => ({
 
 vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
+  resolveAnswerPanelScopeForVersion: vi.fn(),
   resolveAttachmentsEnabledForVersion: vi.fn(),
   resolveInlineCorrectionForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
@@ -84,16 +85,19 @@ vi.mock('@/components/app/questionnaire/experiences/run-session-boot', () => ({
     sessionId,
     accessToken,
     welcomeCopy,
+    answerPanelScope,
   }: {
     sessionId: string;
     accessToken?: string;
     welcomeCopy?: string;
+    answerPanelScope?: string;
   }) => (
     <div
       data-testid="run-session-boot"
       data-session-id={sessionId}
       data-access-token={accessToken}
       data-welcome-copy={welcomeCopy}
+      data-answer-panel-scope={answerPanelScope}
     />
   ),
 }));
@@ -111,6 +115,7 @@ import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import {
   resolveAnonymousForVersion,
+  resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
   resolvePresentationModeForVersion,
@@ -184,6 +189,7 @@ describe('ExperienceRunPage', () => {
     });
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
+    vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('full_progress');
     vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveAttachmentsEnabledForVersion).mockResolvedValue(true);
     vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');
@@ -284,6 +290,18 @@ describe('ExperienceRunPage', () => {
       // page ever regresses to forwarding the literal string "null".
       expect(screen.getByTestId('run-session-boot')).not.toHaveAttribute('data-access-token');
     });
+
+    it("forwards the current leg's answer-panel scope so the chat-only layout is right on first paint", async () => {
+      vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('hidden');
+
+      const Component = await ExperienceRunPage({ params: makeParams(PUBLIC_REF) });
+      render(Component);
+
+      expect(screen.getByTestId('run-session-boot')).toHaveAttribute(
+        'data-answer-panel-scope',
+        'hidden'
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -331,6 +349,7 @@ describe('ExperienceRunPage', () => {
       expect(resolveVersionHeader).toHaveBeenCalledWith(SURFACE_VERSION_ID);
       expect(resolveAnonymousForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
       expect(resolvePresentationModeForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
+      expect(resolveAnswerPanelScopeForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
       expect(resolveVoiceEnabledForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
       expect(resolveAttachmentsEnabledForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
       expect(resolveReasoningPlacementForVersion).toHaveBeenCalledWith(SURFACE_VERSION_ID);
@@ -349,6 +368,8 @@ describe('ExperienceRunPage', () => {
 
       expect(resolveThemeForVersion).toHaveBeenCalledWith(otherLegVersionId);
       expect(resolveThemeForVersion).not.toHaveBeenCalledWith(SURFACE_VERSION_ID);
+      expect(resolveAnswerPanelScopeForVersion).toHaveBeenCalledWith(otherLegVersionId);
+      expect(resolveAnswerPanelScopeForVersion).not.toHaveBeenCalledWith(SURFACE_VERSION_ID);
     });
   });
 });

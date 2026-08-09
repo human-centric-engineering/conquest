@@ -47,8 +47,23 @@ endpoint returns:
   drops sections left empty, so the **pending prompts are never sent to the client**.
   `totalCount` still reflects the whole version, so the header reads "N captured"
   honestly.
+- `hidden` — **chat only**: the workspace renders no panel at all. The `lg`+ split is
+  dropped (the conversation takes the shell's full width), the mobile review sheet and
+  its "Review answers" trigger never mount, and a data-slot questionnaire shows the
+  respondent no slot rows.
 
 The filter lives in the pure builder, not the route — see below.
+
+`hidden` is projected exactly like `answered_only` rather than emptied. It is a
+**presentation** choice, not a data-privacy one: pending prompts stay server-side either
+way, but the captured answers still ship, because two features that are NOT governed by
+this setting read them — the chat's inline-correction strip (the only correction surface
+left once the panel is gone) and the completion screen's captured-position cycler.
+
+Because the layout differs from the first paint, the scope is also passed to
+`SessionWorkspace` as the `answerPanelScope` prop (resolved server-side by each of the
+three respondent pages) rather than read off the fetched view's own `scope` — otherwise
+the panel track would render and then collapse when the first fetch lands.
 
 ## Code map
 

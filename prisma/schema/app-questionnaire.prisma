@@ -256,7 +256,7 @@ model AppQuestionnaireConfig {
   // Respondent answer-slot panel (F7.2): how much of the questionnaire the live
   // panel shows. full_progress = every slot grouped by section (X-of-N progress);
   // answered_only = just captured answers (no pending structure). (ANSWER_SLOT_PANEL_SCOPES)
-  answerSlotPanelScope String @default("full_progress") // full_progress | answered_only
+  answerSlotPanelScope String @default("full_progress") // full_progress | answered_only | hidden
 
   // Presentation mode (P-presentation): how the respondent completes the session.
   // chat = streaming conversation (incl. data slots); form = raw sectioned form with the

@@ -46,6 +46,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     initialTurns,
     initialInspectorTurns,
     intro,
+    answerPanelScope,
   }: SessionWorkspaceProps & { intro?: { enabled?: boolean } | null }) => (
     <div
       data-testid="questionnaire-chat"
@@ -55,6 +56,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-turn-count={String(initialTurns?.length ?? 0)}
       data-inspector-count={String(initialInspectorTurns?.length ?? 0)}
       data-intro-enabled={String(intro?.enabled ?? false)}
+      data-answer-panel-scope={answerPanelScope ?? ''}
     />
   ),
 }));
@@ -379,6 +381,32 @@ describe('AnonymousSessionBoot', () => {
         voiceInputEnabled: true,
         anonymous: true,
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Answer-panel scope propagation (F7.2) — the chat-only surface prop.
+  // -------------------------------------------------------------------------
+
+  describe('answerPanelScope propagation (F7.2)', () => {
+    it('forwards answerPanelScope="hidden" to the workspace unchanged', async () => {
+      // Arrange: a valid stored token (fastest path to the workspace render).
+      fakeStorage.setItem(
+        STORAGE_KEY,
+        storedSession('stored-sess-4', 'stored-tok-4', futureExpiry())
+      );
+
+      // Act
+      render(<AnonymousSessionBoot versionId={VERSION_ID} answerPanelScope="hidden" />);
+
+      // Assert: the chat-only scope reaches the workspace stub unchanged.
+      await waitFor(() => {
+        expect(screen.getByTestId('questionnaire-chat')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('questionnaire-chat')).toHaveAttribute(
+        'data-answer-panel-scope',
+        'hidden'
+      );
     });
   });
 

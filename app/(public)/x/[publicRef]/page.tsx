@@ -15,6 +15,7 @@ import {
   resolveAnonymousForVersion,
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
+  resolveAnswerPanelScopeForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
@@ -91,6 +92,7 @@ export default async function ExperienceRunPage({
     bandHeader,
     anonymous,
     presentationMode,
+    answerPanelScope,
     voiceInputEnabled,
     attachmentInputEnabled,
     reasoningPlacement,
@@ -103,6 +105,7 @@ export default async function ExperienceRunPage({
     resolveVersionHeader(versionId),
     resolveAnonymousForVersion(versionId),
     resolvePresentationModeForVersion(versionId),
+    resolveAnswerPanelScopeForVersion(versionId),
     resolveVoiceEnabledForVersion(versionId),
     resolveAttachmentsEnabledForVersion(versionId),
     resolveReasoningPlacementForVersion(versionId),
@@ -127,6 +130,7 @@ export default async function ExperienceRunPage({
           attachmentInputEnabled={attachmentInputEnabled}
           anonymous={anonymous}
           presentationMode={presentationMode}
+          answerPanelScope={answerPanelScope}
           reasoningPlacement={reasoningPlacement}
           reasoningDwellMs={reasoningDwell.dwellMs}
           reasoningPerItemMs={reasoningDwell.perItemMs}

@@ -31,7 +31,11 @@ import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
-import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import type {
+  AnswerSlotPanelScope,
+  PresentationMode,
+  ReasoningPlacement,
+} from '@/lib/app/questionnaire/types';
 
 export interface RunSessionBootProps {
   sessionId: string;
@@ -51,6 +55,12 @@ export interface RunSessionBootProps {
   attachmentInputEnabled?: boolean;
   anonymous?: boolean;
   presentationMode?: PresentationMode;
+  /**
+   * Answer-panel scope (F7.2) — `hidden` is the chat-only surface (no panel beside the
+   * conversation, no mobile review sheet). Resolved server-side and forwarded to the workspace so
+   * the layout is right on the first paint.
+   */
+  answerPanelScope?: AnswerSlotPanelScope;
   reasoningPlacement?: ReasoningPlacement | null;
   reasoningDwellMs?: number;
   reasoningPerItemMs?: number;
@@ -79,6 +89,7 @@ export function RunSessionBoot({
   attachmentInputEnabled = false,
   anonymous = false,
   presentationMode,
+  answerPanelScope,
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
@@ -143,6 +154,7 @@ export function RunSessionBoot({
       initialInspectorTurns={state.initialInspectorTurns}
       autoStart={state.autoStart}
       presentationMode={presentationMode}
+      answerPanelScope={answerPanelScope}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
       reasoningPlacement={reasoningPlacement}

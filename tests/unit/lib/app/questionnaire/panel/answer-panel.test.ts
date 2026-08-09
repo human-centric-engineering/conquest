@@ -105,6 +105,28 @@ describe('buildAnswerPanelView — answered_only', () => {
   });
 });
 
+describe('buildAnswerPanelView — hidden (chat-only)', () => {
+  it('filters exactly like answered_only so the correction strip still has its targets', () => {
+    const view = buildAnswerPanelView(input({ scope: 'hidden' }));
+    expect(view.scope).toBe('hidden');
+    // Same projection as answered_only: pending prompts stay server-side, captured answers ship
+    // (the chat's inline-correction strip and the completion cycler read them; neither is
+    // governed by this setting — the workspace simply renders no panel).
+    expect(view.sections).toHaveLength(1);
+    expect(view.sections[0].slots.map((s) => s.slotKey)).toEqual(['role']);
+    expect(view.sections[0].slots[0].value).toBe('Engineer');
+    expect(view.answeredCount).toBe(1);
+    expect(view.totalCount).toBe(3);
+  });
+
+  it('never leaks a pending slot prompt', () => {
+    const view = buildAnswerPanelView(input({ scope: 'hidden' }));
+    const prompts = view.sections.flatMap((sec) => sec.slots.map((s) => s.prompt));
+    expect(prompts).not.toContain('Team size?');
+    expect(prompts).not.toContain('Favourite colour?');
+  });
+});
+
 describe('buildAnswerPanelView — narrowing & history', () => {
   it('defaults an unknown stored type to free_text and unknown provenance to direct', () => {
     const view = buildAnswerPanelView(

@@ -15,11 +15,13 @@
 import { prisma } from '@/lib/db/client';
 import {
   ACCESS_MODES,
+  ANSWER_SLOT_PANEL_SCOPES,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
   REASONING_PLACEMENTS,
   type AccessMode,
+  type AnswerSlotPanelScope,
   type PresentationMode,
   type ReasoningPlacement,
 } from '@/lib/app/questionnaire/types';
@@ -90,6 +92,28 @@ export async function resolvePresentationModeForVersion(
     select: { config: { select: { presentationMode: true } } },
   });
   return narrowToEnum(version?.config?.presentationMode ?? 'both', PRESENTATION_MODES, 'both');
+}
+
+/**
+ * Resolve `answerSlotPanelScope` (full_progress | answered_only | hidden) for a launched version
+ * (no-login / preview respondent surface). `hidden` is the chat-only surface — the workspace drops
+ * the answer panel and the mobile review sheet. Resolved server-side so the layout is right on the
+ * first paint rather than reflowing when the panel fetch lands. Config is 1:1 and lazy — an absent
+ * row defaults to `full_progress`. The authenticated surface reads it off its session-ownership
+ * query instead.
+ */
+export async function resolveAnswerPanelScopeForVersion(
+  versionId: string
+): Promise<AnswerSlotPanelScope> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { answerSlotPanelScope: true } } },
+  });
+  return narrowToEnum(
+    version?.config?.answerSlotPanelScope ?? DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,
+    ANSWER_SLOT_PANEL_SCOPES,
+    DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
+  );
 }
 
 /**
