@@ -23,7 +23,12 @@ import { validatePathParam, validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities';
-import { updateCapabilitySchema } from '@/lib/validations/orchestration';
+import {
+  capabilityFunctionDefinitionSchema,
+  updateCapabilitySchema,
+} from '@/lib/validations/orchestration';
+import { mcpToolNameSchema } from '@/lib/validations/mcp';
+import { clearMcpToolCache, broadcastMcpToolsChanged } from '@/lib/orchestration/mcp';
 import { cuidSchema } from '@/lib/validations/common';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
@@ -38,6 +43,22 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
   log.info('Capability fetched', { capabilityId: id });
   return successResponse(capability);
 });
+
+/**
+ * The function name a write is about to displace, or `null` if it displaces
+ * nothing. Used to pin the capability's MCP tool name before it moves (#509).
+ */
+function displacedFunctionName(
+  storedFunctionDefinition: unknown,
+  nextName: string | undefined
+): string | null {
+  if (nextName === undefined) return null;
+
+  const stored = capabilityFunctionDefinitionSchema.safeParse(storedFunctionDefinition);
+  if (!stored.success) return null;
+
+  return stored.data.name === nextName ? null : stored.data.name;
+}
 
 export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
   const clientIP = getClientIP(request);
@@ -67,6 +88,60 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
     }
   }
 
+  // `functionDefinition.name` must equal `slug` — dispatch resolves the name a
+  // model emits AS the slug, so divergence means a capability is checked by the
+  // #476 tool-call guard under one identity and executed under another (#509).
+  // A PATCH can move either half alone, which the schema cannot decide from the
+  // body, so compare the EFFECTIVE pair against the stored row — same shape as
+  // the executionHandler/executionType case above.
+  if (body.slug !== undefined || body.functionDefinition !== undefined) {
+    const storedFn = capabilityFunctionDefinitionSchema.safeParse(current.functionDefinition);
+    const effectiveSlug = body.slug ?? current.slug;
+    // An unparseable stored definition leaves nothing to compare against. The
+    // row is already inert — `getCapabilityDefinitions` skips it — so let the
+    // write through rather than blocking a PATCH that may be repairing it.
+    const effectiveName = body.functionDefinition
+      ? body.functionDefinition.name
+      : storedFn.success
+        ? storedFn.data.name
+        : undefined;
+
+    if (effectiveName !== undefined && effectiveName !== effectiveSlug) {
+      throw new ValidationError('functionDefinition.name must equal slug', {
+        'functionDefinition.name': [`Must equal the capability slug ("${effectiveSlug}")`],
+      });
+    }
+  }
+
+  // A write that moves `functionDefinition.name` also moves the capability's
+  // MCP tool name, because `tools/list` advertises `customName ?? name` and
+  // `tools/call` resolves an incoming call by whatever was advertised. Since
+  // #509 forces the name to equal the slug, and every capability created
+  // through the admin UI before that release diverged by default
+  // (`search-web` / `search_web`), the first ordinary save of such a row would
+  // silently rename its public tool and leave external clients calling a name
+  // that no longer resolves.
+  //
+  // Pin the OLD name into `customName` first. `customName` takes precedence
+  // over the function name and is never touched by the invariant, so the
+  // external contract stays exactly where it was while the internal one is
+  // repaired. Only rows that have not already set an override are touched.
+  const displacedName = displacedFunctionName(
+    current.functionDefinition,
+    body.functionDefinition?.name
+  );
+  // A name that cannot legally live in `customName` (`^[a-z][a-z0-9_]*$` — no
+  // hyphens, must start with a letter) is deliberately NOT pinned: writing it
+  // would satisfy this moment and then fail validation the next time an admin
+  // touched the MCP row, on a field they had not changed. The rename still
+  // happens, so it is logged — but inside the transaction, below, because
+  // logging it here announced a broken tool name for writes that then got
+  // rejected by the system-capability guard or a slug collision, sending
+  // whoever investigated to a capability that was never modified.
+  const renamedFrom =
+    displacedName && mcpToolNameSchema.safeParse(displacedName).success ? displacedName : null;
+  const unpinnableName = displacedName && !renamedFrom ? displacedName : null;
+
   // System capabilities cannot be deactivated via PATCH (equivalent to deletion).
   if (current.isSystem && body.isActive === false) {
     throw new ForbiddenError('System capabilities cannot be deactivated');
@@ -94,9 +169,108 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
   }
 
   try {
-    const capability = await prisma.aiCapability.update({ where: { id }, data });
+    const capability = await prisma.$transaction(async (tx) => {
+      // Nothing below concerns a capability that was never published over
+      // MCP. Both warnings used to fire regardless, announcing a moved tool
+      // name for a capability with no tool — sending whoever read the log to
+      // investigate an integration that does not exist.
+      const exposed = displacedName
+        ? await tx.mcpExposedTool.findUnique({
+            where: { capabilityId: id },
+            select: { id: true },
+          })
+        : null;
+
+      if (exposed && unpinnableName) {
+        log.warn('Capability rename moves an MCP tool name that cannot be pinned', {
+          capabilityId: id,
+          displacedName: unpinnableName,
+          newFunctionName: body.functionDefinition?.name,
+        });
+      }
+      if (exposed && renamedFrom) {
+        // `customName` has no unique constraint, and `callMcpTool` resolves an
+        // incoming call with `tools.find(t => t.name === toolName)` — first
+        // match wins. Pinning a name another exposed tool already advertises
+        // would therefore make every call to it dispatch to whichever row the
+        // query returned first, silently running the wrong capability. Refuse
+        // rather than create that: the rename proceeds unpinned and is logged,
+        // which breaks one client's tool name loudly instead of misrouting two.
+        // Compare against what each other tool ACTUALLY advertises, which is
+        // `customName ?? functionDefinition.name`. Approximating the null case
+        // with the capability's slug would miss precisely the legacy divergent
+        // rows this pin exists for. `functionDefinition` is a JSON column, so
+        // the comparison happens here rather than in the query; the candidate
+        // set is only the exposed tools, which is small by construction.
+        // Two different questions, so two different filters.
+        //
+        // An explicit `customName` is a CLAIM on that name, live or not: the
+        // row keeps it when re-enabled, and nothing enforces uniqueness at the
+        // enable path or in the schema. Pinning the same string alongside it
+        // would leave a duplicate lying in wait, and `callMcpTool` resolves
+        // first-match-wins. So explicit names are checked across every row.
+        //
+        // A DERIVED name (null `customName`) only exists while the row is
+        // advertised, and is re-derived from whatever the capability says at
+        // the time — so only enabled rows with an active capability can
+        // collide on one. Checking derived names on disabled rows is what
+        // caused the previous over-refusal, where a tool advertising nothing
+        // blocked the pin and let the protected name move anyway.
+        const others = await tx.mcpExposedTool.findMany({
+          where: {
+            capabilityId: { not: id },
+            OR: [
+              { customName: { not: null } },
+              { customName: null, isEnabled: true, capability: { isActive: true } },
+            ],
+          },
+          select: {
+            id: true,
+            customName: true,
+            capability: { select: { functionDefinition: true } },
+          },
+        });
+        const clash = others.find((tool) => {
+          if (tool.customName !== null) return tool.customName === renamedFrom;
+          const parsedOther = capabilityFunctionDefinitionSchema.safeParse(
+            tool.capability.functionDefinition
+          );
+          return parsedOther.success && parsedOther.data.name === renamedFrom;
+        });
+        if (clash) {
+          log.warn('Not pinning an MCP tool name that another exposed tool already advertises', {
+            capabilityId: id,
+            displacedName: renamedFrom,
+            conflictingToolId: clash.id,
+          });
+          return tx.aiCapability.update({ where: { id }, data });
+        }
+
+        const pinned = await tx.mcpExposedTool.updateMany({
+          where: { capabilityId: id, customName: null },
+          data: { customName: renamedFrom },
+        });
+        if (pinned.count > 0) {
+          log.info('Pinned the MCP tool name before a capability rename', {
+            capabilityId: id,
+            customName: renamedFrom,
+            newFunctionName: body.functionDefinition?.name,
+          });
+        }
+      }
+      return tx.aiCapability.update({ where: { id }, data });
+    });
 
     capabilityDispatcher.clearCache();
+    // The MCP tool list caches for 5 minutes and serves both `tools/list` and
+    // `tools/call`. A capability PATCH rewrites `functionDefinition.parameters`,
+    // which IS the advertised `inputSchema` — so without this an admin who
+    // tightens a parameter leaves MCP clients fetching the old schema for up to
+    // five minutes, sending args the live dispatcher then rejects. Every writer
+    // under `/mcp/tools` already pairs its write with this; this route became a
+    // writer of MCP state when it started pinning `customName` (#509).
+    clearMcpToolCache();
+    broadcastMcpToolsChanged();
 
     log.info('Capability updated', {
       capabilityId: id,
@@ -145,6 +319,14 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
   });
 
   capabilityDispatcher.clearCache();
+  // `isActive` is exactly what `loadGlobalTools` filters on, so a soft delete
+  // changes the MCP surface as surely as a PATCH does — and the identical
+  // state change sent as `PATCH { isActive: false }` (what the capabilities
+  // table sends) already clears it. Without this, `tools/list` advertises the
+  // deleted tool for up to five minutes and `tools/call` resolves it before
+  // failing at dispatch.
+  clearMcpToolCache();
+  broadcastMcpToolsChanged();
 
   log.info('Capability soft-deleted', {
     capabilityId: id,
