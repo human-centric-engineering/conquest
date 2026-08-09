@@ -409,7 +409,9 @@ function RevealedAssistantTurn({
   if (thinking) {
     return (
       <AssistantTurn>
-        <ThinkingIndicator />
+        {/* `min-h-6` matches the 24px first-line box the accent dot is positioned against — the
+            indicator's own row is only 20px tall, which would leave the dot sitting below it. */}
+        <ThinkingIndicator className="min-h-6" />
       </AssistantTurn>
     );
   }
@@ -682,7 +684,7 @@ export function QuestionnaireChat({
               {/* A calm "thinking" indicator stands in while the reply composes; the reasoning trace
                   reveals on the settled turn (above), tucking itself away under the "Animated"
                   placement. */}
-              <ThinkingIndicator />
+              <ThinkingIndicator className="min-h-6" />
             </AssistantTurn>
           )}
 

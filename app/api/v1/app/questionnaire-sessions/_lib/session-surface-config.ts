@@ -3,8 +3,8 @@
  *
  * The signed-in session page needs two things before it can render: the ownership fields
  * (so it can 404 a session that isn't this user's, without confirming existence) and the
- * version's presentation config (anonymous mode, chat/form, voice/attachment/reasoning
- * opt-ins). Loading them lives here in the API layer rather than in the page so the page
+ * version's presentation config (anonymous mode, chat/form, answer-panel
+ * scope, voice/attachment/reasoning opt-ins). Loading them lives here in the API layer rather than in the page so the page
  * stays free of direct Prisma access, consistent with the other `_lib` loaders
  * (`loadSessionStatus`, `loadAnswerPanelState`, `loadTranscript`).
  *
@@ -22,6 +22,7 @@ export interface SessionSurfaceConfig {
   config: {
     anonymousMode: boolean;
     presentationMode: string;
+    answerSlotPanelScope: string;
     inlineCorrectionEnabled: boolean;
     voiceEnabled: boolean;
     attachmentsEnabled: boolean;
@@ -48,6 +49,7 @@ export async function loadSessionSurfaceConfig(
             select: {
               anonymousMode: true,
               presentationMode: true,
+              answerSlotPanelScope: true,
               inlineCorrectionEnabled: true,
               voiceEnabled: true,
               attachmentsEnabled: true,

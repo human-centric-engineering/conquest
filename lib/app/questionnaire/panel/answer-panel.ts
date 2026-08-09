@@ -12,6 +12,10 @@
  *   - `answered_only` — answered slots only; empty sections dropped, so the pending
  *     prompts are never sent to the client. `totalCount` still reflects the whole
  *     version so the panel can show "N captured" honestly.
+ *   - `hidden` — the surface renders no panel at all (chat only). Projected exactly like
+ *     `answered_only` rather than emptied: the captured answers are what the chat's inline
+ *     correction strip edits and what the completion screen echoes back, and neither of those
+ *     is governed by this setting. Pending prompts stay server-side, same as `answered_only`.
  *
  * `// DEMO-ONLY (F7.2):` questionnaire-domain shape — a fork strips this module.
  */
@@ -102,6 +106,11 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
   let answeredCount = 0;
   let totalCount = 0;
 
+  // Both `answered_only` and `hidden` project identically (see the module docblock): pending
+  // prompts never leave the server. Named once so the two call sites below can't drift on what
+  // "outside full_progress" means to a future third scope value.
+  const answeredOnlyProjection = input.scope !== 'full_progress';
+
   const sections: PanelSectionView[] = [];
   for (const section of input.sections) {
     const slots: PanelSlotView[] = [];
@@ -111,8 +120,8 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
       const answered = answer !== undefined;
       if (answered) answeredCount += 1;
 
-      // In answered_only scope, never emit a pending slot — its prompt stays server-side.
-      if (input.scope === 'answered_only' && !answered) continue;
+      // Outside full_progress, never emit a pending slot — its prompt stays server-side.
+      if (answeredOnlyProjection && !answered) continue;
 
       slots.push({
         slotKey: slot.slotKey,
@@ -132,8 +141,8 @@ export function buildAnswerPanelView(input: PanelBuilderInput): AnswerPanelView 
       });
     }
 
-    // Drop sections that ended up with no rows (only possible in answered_only).
-    if (slots.length === 0 && input.scope === 'answered_only') continue;
+    // Drop sections that ended up with no rows (impossible in full_progress).
+    if (slots.length === 0 && answeredOnlyProjection) continue;
     sections.push({ sectionId: section.sectionId, title: section.title, slots });
   }
 

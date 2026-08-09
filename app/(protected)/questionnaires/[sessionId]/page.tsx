@@ -23,6 +23,8 @@ import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/
 import { loadSessionSurfaceConfig } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-surface-config';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import {
+  ANSWER_SLOT_PANEL_SCOPES,
+  DEFAULT_QUESTIONNAIRE_CONFIG,
   narrowToEnum,
   PRESENTATION_MODES,
   REASONING_PLACEMENTS,
@@ -107,6 +109,13 @@ export default async function QuestionnaireSessionPage({
     'both'
   );
   const wantsForm = presentationMode === 'form' || presentationMode === 'both';
+  // Answer-panel scope (F7.2) — `hidden` renders the chat-only surface (no side panel, no mobile
+  // review sheet). Resolved here so the layout is right in the SSR paint.
+  const answerPanelScope = narrowToEnum(
+    row.config?.answerSlotPanelScope ?? DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope,
+    ANSWER_SLOT_PANEL_SCOPES,
+    DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope
+  );
   // Voice and attachments each need the version's per-questionnaire opt-in, so the affordance
   // shows only when the author turned it on.
   const voiceConfigured = row.config?.voiceEnabled ?? false;
@@ -194,6 +203,7 @@ export default async function QuestionnaireSessionPage({
           initialStatusView={status?.view}
           initialFormView={formPanel?.view}
           presentationMode={presentationMode}
+          answerPanelScope={answerPanelScope}
           voiceInputEnabled={voiceInputEnabled}
           attachmentInputEnabled={attachmentInputEnabled}
           reasoningPlacement={reasoningPlacement}

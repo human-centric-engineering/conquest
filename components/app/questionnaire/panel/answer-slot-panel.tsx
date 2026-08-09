@@ -148,8 +148,12 @@ function ProgressHeading({ view }: { view: AnswerPanelView }) {
     const base = `${capturedCount} of ${totalAreas} context areas captured`;
     summary = avgConfidence !== null ? `${base} with ${avgConfidence}% confidence` : base;
   } else {
+    // Same generalization as the panel builder (`answer-panel.ts`): anything other than
+    // full_progress reads as a plain captured count, not an X-of-N. Currently this component
+    // never mounts under `hidden` (session-workspace.tsx gates it behind `showPanel`), but the
+    // check should still agree with the builder rather than special-case `answered_only` alone.
     const completion =
-      view.scope === 'answered_only'
+      view.scope !== 'full_progress'
         ? `${view.answeredCount} captured`
         : `${view.answeredCount} of ${view.totalCount} answered`;
     summary =

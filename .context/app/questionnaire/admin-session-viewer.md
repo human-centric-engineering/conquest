@@ -51,8 +51,19 @@ identity.
 - **Viewer route:** `…/v/[vid]/sessions/[sessionId]` (server component). Loads the metadata +
   transcript, branches on `isPreview`:
   - real respondent → `SessionWorkspace readOnly` (transcript replay, no composer/panel/lifecycle).
-  - active preview → mints a token server-side (`mintSessionToken`) and renders the full interactive
-    `SessionWorkspace` so the admin can continue.
+  - active preview → mints a token server-side (`mintSessionToken`), resolves the version's
+    respondent-surface config, and renders the full interactive `SessionWorkspace` so the admin can
+    continue.
+
+The continue branch resolves that surface config from the **version**, not from defaults:
+`presentationMode`, `answerSlotPanelScope`, voice / attachment opt-ins, reasoning placement + dwell,
+and inline correction (the `resolve*ForVersion` helpers in `lib/app/questionnaire/chat/anonymity.ts`,
+in one `Promise.all`). Continuing a preview therefore shows the **same** surface as
+`/q/<vid>?preview=1`. Without it the admin always got the chat-plus-full-panel default, so a
+chat-only (`answerSlotPanelScope: 'hidden'`) or form-mode questionnaire silently misrepresented
+itself at exactly the moment the admin was checking it. The reads are skipped entirely on the
+read-only branch — `SessionWorkspace` returns before any of those props are consulted, so resolving
+them would be wasted queries on every transcript view.
 
 `SessionWorkspace` / `QuestionnaireChat` gained an additive `readOnly` prop; in read-only mode the
 panel/lifecycle/form hooks are made inert (`enabled: false`) since the viewing admin holds no

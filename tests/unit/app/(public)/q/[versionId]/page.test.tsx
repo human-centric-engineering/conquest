@@ -46,6 +46,7 @@ vi.mock('@/lib/app/questionnaire/header/resolve', () => ({
 
 vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnonymousForVersion: vi.fn(),
+  resolveAnswerPanelScopeForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
   resolveAttachmentsEnabledForVersion: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
     voiceInputEnabled,
     attachmentInputEnabled,
     anonymous,
+    answerPanelScope,
     welcomeCopy,
     preview,
   }: {
@@ -76,6 +78,7 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
     voiceInputEnabled: boolean;
     attachmentInputEnabled: boolean;
     anonymous: boolean;
+    answerPanelScope?: string;
     welcomeCopy: string;
     preview: boolean;
   }) => (
@@ -85,6 +88,7 @@ vi.mock('@/components/app/questionnaire/chat/anonymous-session-boot', () => ({
       data-voice-input-enabled={String(voiceInputEnabled)}
       data-attachment-input-enabled={String(attachmentInputEnabled)}
       data-anonymous={String(anonymous)}
+      data-answer-panel-scope={String(answerPanelScope)}
       data-welcome-copy={welcomeCopy}
       data-preview={String(preview)}
     />
@@ -104,6 +108,7 @@ import { resolveVersionHeader } from '@/lib/app/questionnaire/header/resolve';
 import { resolveThemeForVersion } from '@/lib/app/questionnaire/chat/theme';
 import {
   resolveAnonymousForVersion,
+  resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningPlacementForVersion,
@@ -153,6 +158,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveThemeForVersion).mockResolvedValue(MOCK_THEME);
     vi.mocked(resolveAnonymousForVersion).mockResolvedValue(false);
     vi.mocked(resolvePresentationModeForVersion).mockResolvedValue('chat');
+    vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('full_progress');
     vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');
     vi.mocked(resolveReasoningDwellForVersion).mockResolvedValue({ dwellMs: 2000, perItemMs: 330 });
     vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
@@ -304,6 +310,17 @@ describe('PublicQuestionnairePage', () => {
       expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
         'data-attachment-input-enabled',
         'false'
+      );
+    });
+
+    it("forwards the version's answer-panel scope so the chat-only layout is right on first paint", async () => {
+      vi.mocked(resolveAnswerPanelScopeForVersion).mockResolvedValue('hidden');
+      render(
+        await PublicQuestionnairePage({ params: makeParams(), searchParams: makeSearchParams() })
+      );
+      expect(screen.getByTestId('anonymous-session-boot')).toHaveAttribute(
+        'data-answer-panel-scope',
+        'hidden'
       );
     });
 

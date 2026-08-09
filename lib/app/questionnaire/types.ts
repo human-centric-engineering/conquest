@@ -287,10 +287,19 @@ export type CaptureMode = (typeof CAPTURE_MODES)[number];
  * How much of the questionnaire the respondent's live answer-slot panel shows
  * (F7.2). `full_progress` lists every slot grouped by section with an X-of-N
  * header (the conversation's running state); `answered_only` shows just the
- * captured answers, so the pending structure is never sent to the client. An
- * admin chooses per version in the config editor; the read endpoint enforces it.
+ * captured answers, so the pending structure is never sent to the client;
+ * `hidden` removes the panel from the surface altogether — the respondent sees
+ * only the conversation (no side panel on `lg`+, no mobile review sheet, no
+ * "Review answers" trigger). An admin chooses per version in the config editor;
+ * the read endpoint enforces it.
+ *
+ * `hidden` is a PRESENTATION choice, not a data-privacy one: the read endpoint
+ * filters it exactly like `answered_only` (pending prompts never reach the
+ * client), but the captured answers still ship, because inline correction (the
+ * chat's "fix this" strip — the only correction surface left once the panel is
+ * gone) and the completion screen's captured-position cycler both read them.
  */
-export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only'] as const;
+export const ANSWER_SLOT_PANEL_SCOPES = ['full_progress', 'answered_only', 'hidden'] as const;
 export type AnswerSlotPanelScope = (typeof ANSWER_SLOT_PANEL_SCOPES)[number];
 
 /**

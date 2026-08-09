@@ -60,6 +60,8 @@ describe('updateConfigSchema', () => {
     expect(updateConfigSchema.safeParse({ answerSlotPanelScope: 'answered_only' }).success).toBe(
       true
     );
+    // Chat-only surface — no panel at all.
+    expect(updateConfigSchema.safeParse({ answerSlotPanelScope: 'hidden' }).success).toBe(true);
   });
 
   it('rejects an unknown answer-panel scope', () => {

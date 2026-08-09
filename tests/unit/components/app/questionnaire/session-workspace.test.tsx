@@ -1072,6 +1072,43 @@ describe('SessionWorkspace', () => {
     });
   });
 
+  describe('chat-only surface (answerPanelScope: hidden)', () => {
+    const questionView = {
+      status: 'active' as const,
+      scope: 'hidden' as const,
+      sections: [],
+      answeredCount: 3,
+      totalCount: 8,
+    };
+
+    it('renders the side panel by default (full_progress)', () => {
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" />);
+      expect(screen.getByTestId('panel')).toBeInTheDocument();
+    });
+
+    it('renders no answer panel at all when the scope is hidden', () => {
+      panelHook.mockReturnValue({ view: questionView, loading: false, error: false, refetch });
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" answerPanelScope="hidden" />);
+      expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+      // The conversation is still the surface — only the panel beside it is gone.
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
+    });
+
+    it('drops the mobile review trigger and its sheet when the scope is hidden', () => {
+      panelHook.mockReturnValue({ view: questionView, loading: false, error: false, refetch });
+      render(<SessionWorkspace sessionId="s1" presentationMode="chat" answerPanelScope="hidden" />);
+      expect(screen.queryByRole('button', { name: /review answers/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('still offers the form tab in both mode — the two settings are orthogonal', () => {
+      panelHook.mockReturnValue({ view: questionView, loading: false, error: false, refetch });
+      render(<SessionWorkspace sessionId="s1" presentationMode="both" answerPanelScope="hidden" />);
+      expect(screen.getByRole('tab', { name: 'Form' })).toBeInTheDocument();
+      expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+    });
+  });
+
   describe('mobile "Review answers" drawer', () => {
     const questionView = {
       status: 'active' as const,

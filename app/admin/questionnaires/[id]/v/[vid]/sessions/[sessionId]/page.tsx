@@ -12,6 +12,13 @@
  *  - preview session (`isPreview: true`) that is still active → mint a session token here and render
  *    the full interactive workspace, so the admin can continue the conversation they started.
  *
+ * A continued preview resolves the version's respondent-surface config (presentation mode,
+ * answer-panel scope, voice/attachment affordances, reasoning trace, inline correction) and hands
+ * it to the workspace, so continuing here shows the SAME surface as `/q/<vid>?preview=1`. Without
+ * it the admin always got the chat-plus-full-panel default and a chat-only (`answerPanelScope:
+ * 'hidden'`) or form-mode questionnaire silently misrepresented itself. The read-only replay skips
+ * all of it — that branch returns the bare transcript before any of these props are read.
+ *
  * Identity is redacted in anonymous mode by {@link loadAdminSessionView} (mirrors the PDF export).
  */
 import type { Metadata } from 'next';
@@ -21,6 +28,15 @@ import { ArrowLeft } from 'lucide-react';
 
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
 import { resolveGlossaryForHints } from '@/lib/app/questionnaire/glossary/resolve';
+import {
+  resolveAnswerPanelScopeForVersion,
+  resolveAttachmentsEnabledForVersion,
+  resolveInlineCorrectionForVersion,
+  resolvePresentationModeForVersion,
+  resolveReasoningDwellForVersion,
+  resolveReasoningPlacementForVersion,
+  resolveVoiceEnabledForVersion,
+} from '@/lib/app/questionnaire/chat/anonymity';
 import { SessionDownloads } from '@/components/admin/questionnaires/sessions/session-downloads';
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { Badge } from '@/components/ui/badge';
@@ -58,6 +74,41 @@ export default async function SessionViewerPage({ params }: PageProps) {
   // session never reaches this branch, so it can never be continued by an admin.
   const continuable = view.isPreview && view.status === 'active';
   const accessToken = continuable ? mintSessionToken(sessionId).token : undefined;
+
+  // Respondent-surface config for a continued preview. Resolved in parallel (independent reads),
+  // and only when the session is actually continuable — a read-only replay never renders these
+  // surfaces, so the queries would be wasted work.
+  const surface = continuable
+    ? await (async () => {
+        const [
+          presentationMode,
+          answerPanelScope,
+          voiceInputEnabled,
+          attachmentInputEnabled,
+          reasoningPlacement,
+          reasoningDwell,
+          inlineCorrectionEnabled,
+        ] = await Promise.all([
+          resolvePresentationModeForVersion(vid),
+          resolveAnswerPanelScopeForVersion(vid),
+          resolveVoiceEnabledForVersion(vid),
+          resolveAttachmentsEnabledForVersion(vid),
+          resolveReasoningPlacementForVersion(vid),
+          resolveReasoningDwellForVersion(vid),
+          resolveInlineCorrectionForVersion(vid),
+        ]);
+        return {
+          presentationMode,
+          answerPanelScope,
+          voiceInputEnabled,
+          attachmentInputEnabled,
+          reasoningPlacement,
+          reasoningDwellMs: reasoningDwell.dwellMs,
+          reasoningPerItemMs: reasoningDwell.perItemMs,
+          inlineCorrectionEnabled,
+        };
+      })()
+    : null;
 
   // Admin "re-run report" affordance. Seeds the panel with the version's current report config (the
   // re-run starting point) and the existing re-run history.
@@ -110,7 +161,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
           sessionId={sessionId}
           glossary={glossary}
           initialTurns={turns}
-          {...(continuable ? { accessToken } : { readOnly: true })}
+          {...(continuable && surface ? { accessToken, ...surface } : { readOnly: true as const })}
         />
       </div>
     </div>

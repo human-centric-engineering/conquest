@@ -270,6 +270,7 @@ function Segmented<T extends string>({
 const ANSWER_SLOT_PANEL_SCOPE_LABELS: Record<AnswerSlotPanelScope, string> = {
   full_progress: 'Full progress (all questions)',
   answered_only: 'Answered only',
+  hidden: 'Hidden (chat only)',
 };
 
 const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
@@ -1272,7 +1273,11 @@ export function ConfigEditor({
                   <FieldHelp title="Answer panel scope">
                     How much of the questionnaire the live answer panel shows the respondent beside
                     the chat. Full progress lists every question grouped by section with an
-                    answered-count; answered only shows just the answers captured so far.
+                    answered-count; answered only shows just the answers captured so far. Hidden
+                    removes the panel entirely — the respondent sees only the conversation, with no
+                    side panel, no &ldquo;Review answers&rdquo; sheet on mobile, and no data slots
+                    on show. Independent of presentation mode: a hidden panel still allows the form
+                    tab if you have one.
                   </FieldHelp>
                 </Label>
                 <Select

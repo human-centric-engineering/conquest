@@ -43,7 +43,11 @@ import { buildWelcomeTurns } from '@/lib/app/questionnaire/chat/greeting';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
-import type { PresentationMode, ReasoningPlacement } from '@/lib/app/questionnaire/types';
+import type {
+  AnswerSlotPanelScope,
+  PresentationMode,
+  ReasoningPlacement,
+} from '@/lib/app/questionnaire/types';
 import type { QuestionnaireTurn } from '@/lib/app/questionnaire/chat/types';
 import {
   VERSION_ARCHIVED_CODE,
@@ -94,6 +98,12 @@ interface AnonymousSessionBootProps {
    * form view itself fetches client-side here (no SSR seed — the token is client-only).
    */
   presentationMode?: PresentationMode;
+  /**
+   * Answer-panel scope (F7.2) — `hidden` is the chat-only surface (no panel beside the
+   * conversation, no mobile review sheet). Resolved server-side and forwarded to the workspace so
+   * the layout is right on the first paint.
+   */
+  answerPanelScope?: AnswerSlotPanelScope;
   /**
    * Live "watch it think" reasoning placement (demo feature) — `overlay` | `inline`, or
    * `undefined`/null when off. Resolved server-side from the version toggle and
@@ -234,6 +244,7 @@ export function AnonymousSessionBoot({
   preview = false,
   inviteToken,
   presentationMode = 'both',
+  answerPanelScope,
   reasoningPlacement,
   reasoningDwellMs,
   reasoningPerItemMs,
@@ -493,6 +504,7 @@ export function AnonymousSessionBoot({
       initialInspectorTurns={state.initialInspectorTurns}
       autoStart={state.autoStart}
       presentationMode={presentationMode}
+      answerPanelScope={answerPanelScope}
       voiceInputEnabled={voiceInputEnabled}
       attachmentInputEnabled={attachmentInputEnabled}
       reasoningPlacement={reasoningPlacement}

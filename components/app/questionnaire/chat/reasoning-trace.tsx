@@ -196,7 +196,10 @@ export function ReasoningTrace({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={contentId}
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-md text-xs font-medium transition-colors"
+        // `min-h-6` reserves the same 24px first-line box a reply's first line occupies, so the
+        // turn's accent dot (`AssistantTurn`, fixed `mt-2.5`) lands on the chip's centre rather
+        // than a few pixels below it — the chip's own `text-xs` line box is only 16px.
+        className="text-muted-foreground hover:text-foreground inline-flex min-h-6 items-center gap-1.5 rounded-md text-xs font-medium transition-colors"
       >
         <Brain className="h-3.5 w-3.5" style={{ color: ACCENT }} aria-hidden="true" />
         <span>Reasoning · {steps.length}</span>

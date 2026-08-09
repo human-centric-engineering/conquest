@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useConsent } from '@/lib/consent';
-import { BRAND } from '@/lib/brand';
 import { footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { DEFAULT_FOOTER_NAV, DEFAULT_FOOTER_LEGAL } from '@/lib/public-nav/types';
 
@@ -10,9 +9,15 @@ import { DEFAULT_FOOTER_NAV, DEFAULT_FOOTER_LEGAL } from '@/lib/public-nav/types
  * Public Footer Component
  *
  * Footer for public/marketing pages.
- * Includes navigation links, legal links, and copyright.
+ * Includes navigation links and legal links.
  *
  * Phase 3.5: Landing Page & Marketing
+ *
+ * ConQuest-local platform edit: the centred "© <year> <legalName>. All rights reserved."
+ * row was removed. The `(public)` group also hosts the full-height respondent conversation
+ * surfaces (`/q`, `/x`, `/m`), where a second footer line is pure vertical cost. Attribution
+ * to `BRAND.legalName` still ships on the authenticated surface via `ProtectedFooter`.
+ * Re-apply this deletion if an upstream Sunrise sync restores the row.
  */
 
 // Fork overrides (non-null arrays) replace the platform defaults wholesale.
@@ -20,7 +25,6 @@ const navigationLinks = footerNavItems ?? DEFAULT_FOOTER_NAV;
 const legalLinks = footerLegalItems ?? DEFAULT_FOOTER_LEGAL;
 
 export function PublicFooter() {
-  const currentYear = new Date().getFullYear();
   const { openPreferences } = useConsent();
 
   return (
@@ -60,11 +64,6 @@ export function PublicFooter() {
               Cookie Preferences
             </button>
           </nav>
-        </div>
-
-        {/* Copyright */}
-        <div className="text-muted-foreground mt-6 text-center text-sm">
-          &copy; {currentYear} {BRAND.legalName}. All rights reserved.
         </div>
       </div>
     </footer>

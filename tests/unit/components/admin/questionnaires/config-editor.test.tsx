@@ -364,6 +364,24 @@ describe('ConfigEditor', () => {
     expect(bodyOf(specs).answerSlotPanelScope).toBe('answered_only');
   });
 
+  it('PATCHes the chat-only "hidden" answerSlotPanelScope (F7.2) on save', async () => {
+    // Arrange: the new chat-only value this branch added, selected via the same
+    // label-mapped option ("Hidden (chat only)") as any other scope choice.
+    const { specs } = setup({ answerSlotPanelScope: 'full_progress' });
+    const user = userEvent.setup();
+    const selects = screen.getAllByRole('combobox');
+    const scopeSelect = selects.find(
+      (s) => (s as HTMLSelectElement).value === 'full_progress'
+    ) as HTMLSelectElement;
+
+    // Act
+    await user.selectOptions(scopeSelect, 'hidden');
+    clickSave();
+
+    // Assert: the PATCH body carries the chat-only scope
+    expect(bodyOf(specs).answerSlotPanelScope).toBe('hidden');
+  });
+
   // ── Reasoning stream section ─────────────────────────────────────────────────
 
   it('shows the placement/persist sub-controls only when reasoningStreamEnabled is on', () => {

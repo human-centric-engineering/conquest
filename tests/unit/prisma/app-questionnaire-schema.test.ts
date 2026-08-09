@@ -308,7 +308,7 @@ describe('questionnaire datamodel (Prisma.dmmf)', () => {
     // Detection cadence — run every N respondent turns (1 = every turn).
     expect(getField(model, 'contradictionEveryNTurns').type).toBe('Int');
     expect(getField(model, 'anonymousMode').type).toBe('Boolean');
-    // F7.2 — respondent answer-panel scope (full_progress | answered_only).
+    // F7.2 — respondent answer-panel scope (full_progress | answered_only | hidden).
     expect(getField(model, 'answerSlotPanelScope').type).toBe('String');
     // P-presentation — how the respondent completes the session (chat | form | both).
     expect(getField(model, 'presentationMode').type).toBe('String');

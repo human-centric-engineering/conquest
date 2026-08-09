@@ -8,6 +8,10 @@
  * requirement, not fork copy). Lists resolve at module load, so override cases
  * stub the scaffold via `vi.doMock` and re-import fresh.
  *
+ * This footer carries no copyright row (ConQuest removed it — see the component
+ * docblock). The `BRAND.legalName` attribution contract (#363) is asserted in
+ * `tests/unit/components/layouts/protected-footer.test.tsx`, which still renders one.
+ *
  * @see components/layouts/public-footer.tsx · lib/app/public-nav.ts
  */
 
@@ -30,7 +34,7 @@ afterEach(() => {
 });
 
 describe('PublicFooter', () => {
-  it('renders the platform default nav, legal links, and copyright', async () => {
+  it('renders the platform default nav and legal links', async () => {
     vi.resetModules();
     // ConQuest populates the real seam (`lib/app/public-nav.ts`), so mock it back
     // to null here to exercise the platform component's `?? DEFAULT_*` fallback —
@@ -52,22 +56,11 @@ describe('PublicFooter', () => {
       'href',
       '/terms'
     );
-    expect(screen.getByText(/All rights reserved/)).toHaveTextContent('Sunrise');
     // Cookie Preferences control is present out of the box.
+    // No copyright row — ConQuest drops it here (see the component docblock); the
+    // `BRAND.legalName` attribution is asserted against `ProtectedFooter` instead.
+    expect(screen.queryByText(/All rights reserved/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cookie Preferences' })).toBeInTheDocument();
-  });
-
-  it('attributes the copyright to NEXT_PUBLIC_LEGAL_NAME, not the product name (#363)', async () => {
-    vi.resetModules();
-    vi.stubEnv('NEXT_PUBLIC_APP_NAME', 'ConQuest');
-    vi.stubEnv('NEXT_PUBLIC_LEGAL_NAME', 'All Too Human Ltd');
-    const { PublicFooter } = await import('@/components/layouts/public-footer');
-    render(React.createElement(PublicFooter));
-
-    const copyright = screen.getByText(/All rights reserved/);
-    expect(copyright).toHaveTextContent('All Too Human Ltd');
-    // The copyright line names the legal entity, NOT the product.
-    expect(copyright).not.toHaveTextContent('ConQuest');
   });
 
   it('replaces nav and legal clusters wholesale with override lists', async () => {
