@@ -35,6 +35,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
     anonymous: false,
     ref: null,
     experience: null,
+    reopenAvailable: false,
     ...over,
   };
 }
@@ -166,6 +167,41 @@ describe('useSessionLifecycle', () => {
       );
       expect(budgetPaused.result.current.canResume).toBe(false);
     });
+
+    it('canReopen for a completed+reopenable session, and STAYS true for an anonymous caller (unlike canResume)', () => {
+      const authed = renderHook(() =>
+        useSessionLifecycle({
+          sessionId: SESSION_ID,
+          initialView: view({ status: 'completed', reopenAvailable: true }),
+          applyStatus,
+        })
+      );
+      expect(authed.result.current.canReopen).toBe(true);
+
+      const anon = renderHook(() =>
+        useSessionLifecycle({
+          sessionId: SESSION_ID,
+          accessToken: 'tok',
+          initialView: view({ status: 'completed', reopenAvailable: true, anonymous: true }),
+          applyStatus,
+        })
+      );
+      // Contrast with canResume/canPause, which are anonymous-excluded — reopen is not.
+      expect(anon.result.current.canReopen).toBe(true);
+      expect(anon.result.current.canResume).toBe(false);
+      expect(anon.result.current.canPause).toBe(false);
+    });
+
+    it('canReopen is false when the server has not marked the session reopenable', () => {
+      const { result } = renderHook(() =>
+        useSessionLifecycle({
+          sessionId: SESSION_ID,
+          initialView: view({ status: 'completed', reopenAvailable: false }),
+          applyStatus,
+        })
+      );
+      expect(result.current.canReopen).toBe(false);
+    });
   });
 
   describe('actions', () => {
@@ -200,6 +236,43 @@ describe('useSessionLifecycle', () => {
         await result.current.resume();
       });
       expect(applyStatus).toHaveBeenCalledWith('idle');
+    });
+
+    it('reopen POSTs the lifecycle endpoint with action=reopen and pushes idle', async () => {
+      fetchMock
+        .mockResolvedValueOnce(okPost())
+        .mockResolvedValueOnce(okResponse(view({ status: 'active' })));
+      const { result } = renderHook(() =>
+        useSessionLifecycle({
+          sessionId: SESSION_ID,
+          initialView: view({ status: 'completed', reopenAvailable: true }),
+          applyStatus,
+        })
+      );
+      await act(async () => {
+        await result.current.reopen();
+      });
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(API.APP.QUESTIONNAIRE_SESSIONS.lifecycle(SESSION_ID));
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body as string)).toEqual({ action: 'reopen' });
+      expect(applyStatus).toHaveBeenCalledWith('idle');
+    });
+
+    it('reopen surfaces a 409 REOPEN_NOT_PERMITTED error without changing status', async () => {
+      fetchMock.mockResolvedValueOnce(errPost('This session cannot be reopened', 409));
+      const { result } = renderHook(() =>
+        useSessionLifecycle({
+          sessionId: SESSION_ID,
+          initialView: view({ status: 'completed', reopenAvailable: true }),
+          applyStatus,
+        })
+      );
+      await act(async () => {
+        await result.current.reopen();
+      });
+      expect(result.current.actionError).toBe('This session cannot be reopened');
+      expect(applyStatus).not.toHaveBeenCalled();
     });
 
     it('submit POSTs the submit endpoint and pushes completed', async () => {

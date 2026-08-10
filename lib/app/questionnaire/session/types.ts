@@ -23,6 +23,16 @@ import type { SessionStatus } from '@/lib/app/questionnaire/types';
  * hook F6.3/F6.5 fires when a session hits its budget, wired here but never fired in
  * F4.6.
  *
+ * `reopened` is the one deliberate exception to the terminal-`completed` rule: the
+ * respondent early-finish "back to conversation" feature. Unlike every other entry
+ * here, it is never produced by {@link eventTypeFor}/`classifyTransition` — those still
+ * treat `completed → active` as unconditionally `illegal` (see
+ * {@link TransitionClassification} below). `reopened` is written directly by
+ * `reopenSession` (`app/api/v1/app/questionnaires/_lib/sessions.ts`), a narrow,
+ * purpose-built seam that bypasses the shared transition matrix entirely so no other
+ * caller (`resumeSession`, the admin `/transition` route) can traverse
+ * `completed → active`.
+ *
  * A `const` tuple for the same single-source reason as the sets in
  * `lib/app/questionnaire/types.ts`: the seam, any Zod enum, and tests derive from it.
  */
@@ -38,6 +48,8 @@ export const SESSION_EVENT_TYPES = [
   // Sensitivity awareness / safeguarding: a non-transition event recorded when a sensitive
   // disclosure is flagged (metadata: { severity, category } — never the summary).
   'sensitivity_flagged',
+  // Respondent early-finish "back to conversation" — see the doc comment above.
+  'reopened',
 ] as const;
 export type SessionEventType = (typeof SESSION_EVENT_TYPES)[number];
 
@@ -47,8 +59,17 @@ export type SessionEventType = (typeof SESSION_EVENT_TYPES)[number];
  *  - `apply` — a legal status change: update the status AND write its event.
  *  - `noop` — `from === to` (a self-edge, incl. terminal re-entry like
  *    `completed → completed`): no status change, **no event written**, idempotent.
- *  - `illegal` — a disallowed move (e.g. `completed → active`, `paused → completed`):
+ *  - `illegal` — a disallowed move (e.g. `abandoned → active`, `paused → completed`):
  *    the seam throws {@link SessionTransitionError}; the route maps it to 409.
+ *
+ * `completed → active` is illegal for this classifier **unconditionally and always** —
+ * that never changes, and `LEGAL_TRANSITIONS.completed` in `session-logic.ts` stays
+ * `[]`. The respondent "reopen" feature does not use this classifier or the shared
+ * matrix at all; it is a separately-gated, separately-implemented seam (`reopenSession`)
+ * that only a narrow eligibility check (early-finish origin, config still on, not an
+ * experience leg) may invoke. Do not "helpfully" add `active` to
+ * `LEGAL_TRANSITIONS.completed` — that would let every caller of the shared matrix
+ * (including admin resume) reopen *any* completed session unconditionally.
  */
 export type TransitionClassification = 'apply' | 'noop' | 'illegal';
 

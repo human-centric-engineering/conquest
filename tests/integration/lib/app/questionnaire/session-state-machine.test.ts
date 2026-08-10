@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
   const tx = {
     appQuestionnaireSession: { findUnique: vi.fn(), update: vi.fn() },
     appQuestionnaireSessionEvent: { create: vi.fn() },
+    appQuestionnaireInvitation: { updateMany: vi.fn() },
   };
   const prisma = {
     $transaction: vi.fn((cb: (t: typeof tx) => unknown) => cb(tx)),
@@ -36,6 +37,7 @@ import {
   pauseSession,
   recordCostCapReached,
   recordSessionCreated,
+  reopenSession,
   resumeSession,
   transitionSession,
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
@@ -51,10 +53,19 @@ function currentStatus(status: string | null): void {
   );
 }
 
+/** Set the status + invitationId the in-transaction findUnique returns for the session. */
+function currentStatusWithInvitation(status: string, invitationId: string | null): void {
+  (mocks.tx.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+    status,
+    invitationId,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   (mocks.tx.appQuestionnaireSession.update as Mock).mockResolvedValue({});
   (mocks.tx.appQuestionnaireSessionEvent.create as Mock).mockResolvedValue({});
+  (mocks.tx.appQuestionnaireInvitation.updateMany as Mock).mockResolvedValue({ count: 0 });
   (mocks.prisma.appQuestionnaireSessionEvent.create as Mock).mockResolvedValue({});
 });
 
@@ -344,5 +355,127 @@ describe('loadSessionResumeState', () => {
   it('throws NotFoundError when the session id does not resolve', async () => {
     (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(null);
     await expect(loadSessionResumeState('missing')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('reopenSession (F-early-finish-reopen)', () => {
+  it('writes a reopened event and flips the session status to active on a completed session', async () => {
+    currentStatusWithInvitation('completed', null);
+
+    const result = await reopenSession('sess-1');
+
+    expect(result).toBe('active');
+    expect(mocks.tx.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { status: 'active' },
+    });
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'sess-1',
+        eventType: 'reopened',
+        fromStatus: 'completed',
+        toStatus: 'active',
+      },
+    });
+  });
+
+  it('threads reason and metadata onto the reopened event when supplied', async () => {
+    currentStatusWithInvitation('completed', null);
+
+    await reopenSession('sess-1', {
+      reason: 'respondent_reopen',
+      metadata: { source: 'report_screen' },
+    });
+
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'sess-1',
+        eventType: 'reopened',
+        fromStatus: 'completed',
+        toStatus: 'active',
+        reason: 'respondent_reopen',
+        metadata: { source: 'report_screen' },
+      },
+    });
+  });
+
+  it('reverts a completed invitation back to opened', async () => {
+    currentStatusWithInvitation('completed', 'inv-1');
+    (mocks.tx.appQuestionnaireInvitation.updateMany as Mock).mockResolvedValue({ count: 1 });
+
+    await reopenSession('sess-1');
+
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'inv-1', status: 'completed' },
+      data: { status: 'opened' },
+    });
+  });
+
+  it('never touches a revoked (or any non-completed) invitation — the where guard excludes it by status', async () => {
+    currentStatusWithInvitation('completed', 'inv-1');
+    // In real Postgres a revoked invitation row would not match `status: 'completed'`, so the
+    // update would match zero rows — mirrored here by a zero-count resolve. The assertion that
+    // matters is the exact `where` clause below: it is scoped to `status: 'completed'` alone, so a
+    // revoked/expired row is structurally excluded rather than merely "unluckily not updated".
+    (mocks.tx.appQuestionnaireInvitation.updateMany as Mock).mockResolvedValue({ count: 0 });
+
+    await reopenSession('sess-1');
+
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'inv-1', status: 'completed' },
+      data: { status: 'opened' },
+    });
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: 'revoked' }) })
+    );
+  });
+
+  it('does not call the invitation update at all when the session has no linked invitation', async () => {
+    currentStatusWithInvitation('completed', null);
+
+    await reopenSession('sess-1');
+
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('throws SessionTransitionError when the session is active, not completed', async () => {
+    currentStatusWithInvitation('active', null);
+
+    const err = await reopenSession('sess-1').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SessionTransitionError);
+    expect(err).toMatchObject({ from: 'active', to: 'active' });
+    expect(mocks.tx.appQuestionnaireSession.update).not.toHaveBeenCalled();
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('throws SessionTransitionError when the session is paused, not completed', async () => {
+    currentStatusWithInvitation('paused', null);
+
+    const err = await reopenSession('sess-1').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SessionTransitionError);
+    expect(err).toMatchObject({ from: 'paused', to: 'active' });
+    expect(mocks.tx.appQuestionnaireSession.update).not.toHaveBeenCalled();
+    expect(mocks.tx.appQuestionnaireSessionEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('has no noop self-edge — unlike transitionSession, a second call once the session is already active throws', async () => {
+    // reopenSession does NOT call classifyTransition, so there is no `completed → completed`-style
+    // no-op path for it to fall into; it only ever checks `status !== 'completed'` directly.
+    currentStatusWithInvitation('completed', null);
+    await expect(reopenSession('sess-1')).resolves.toBe('active');
+
+    // The mock doesn't persist state between calls — simulate the session having actually moved to
+    // 'active' by the time a second reopen is attempted.
+    currentStatusWithInvitation('active', null);
+    const err = await reopenSession('sess-1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SessionTransitionError);
+    expect(err).toMatchObject({ from: 'active', to: 'active' });
+  });
+
+  it('throws NotFoundError when the session id does not resolve', async () => {
+    (mocks.tx.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(null);
+    await expect(reopenSession('missing')).rejects.toBeInstanceOf(NotFoundError);
   });
 });

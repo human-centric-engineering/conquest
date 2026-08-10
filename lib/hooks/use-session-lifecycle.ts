@@ -27,6 +27,7 @@ import { API } from '@/lib/api/endpoints';
 import {
   canSubmitSession,
   canFinishEarly,
+  canReopen,
   type SessionStatusView,
 } from '@/lib/app/questionnaire/session/status-view';
 import type { QuestionnaireChatStatus } from '@/lib/app/questionnaire/chat/types';
@@ -73,6 +74,13 @@ export interface UseSessionLifecycleReturn {
   canPause: boolean;
   /** Whether Resume should show (signed-in + respondent-paused, not budget-paused). */
   canResume: boolean;
+  /**
+   * Whether "Continue answering" should show on the report screen — a completed session that was
+   * finished via the early-finish escape hatch, with `allowEarlyFinish` still on. Distinct from
+   * {@link canResume} (the paused-session case): NOT anonymous-gated — reopening is an immediate
+   * same-tab action with the access token already in hand, unlike resuming a durably-paused session.
+   */
+  canReopen: boolean;
   refetch: () => void;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -85,6 +93,8 @@ export interface UseSessionLifecycleReturn {
    * match. Wired to the final-check modal's escape hatch and the chat's "finish anyway" affordance.
    */
   finishAnyway: (early: boolean) => Promise<void>;
+  /** "Continue answering" — reopens a `completed` (early-finished) session back to `active`. */
+  reopen: () => Promise<void>;
 }
 
 interface SuccessEnvelope {
@@ -264,12 +274,22 @@ export function useSessionLifecycle(
     [runAction, sessionId, applyStatus]
   );
 
+  const reopen = useCallback(
+    () =>
+      runAction(API.APP.QUESTIONNAIRE_SESSIONS.lifecycle(sessionId), { action: 'reopen' }, () =>
+        applyStatus('idle')
+      ),
+    [runAction, sessionId, applyStatus]
+  );
+
   const canSubmit = view !== null && canSubmitSession(view);
   const canFinishEarlyValue = view !== null && canFinishEarly(view);
   const canPause = !anonymous && view?.status === 'active';
   // A budget-paused session (cost hard) isn't respondent-resumable — resuming would hit the
   // hard cap again immediately. Only a respondent-initiated pause offers Resume.
   const canResume = !anonymous && view?.status === 'paused' && view.cost?.tier !== 'hard';
+  // NOT anonymous-gated, unlike canResume — see the field doc on UseSessionLifecycleReturn.
+  const canReopenValue = view !== null && canReopen(view);
 
   return {
     view,
@@ -280,11 +300,13 @@ export function useSessionLifecycle(
     canFinishEarly: canFinishEarlyValue,
     canPause,
     canResume,
+    canReopen: canReopenValue,
     refetch,
     pause,
     resume,
     submit,
     finishEarly,
     finishAnyway,
+    reopen,
   };
 }

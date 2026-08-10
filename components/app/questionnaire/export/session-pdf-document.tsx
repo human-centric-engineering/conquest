@@ -87,9 +87,14 @@ const styles = StyleSheet.create({
   // One paragraph within the summary or a section body. Bottom margin gives visible separation
   // between paragraphs so a multi-paragraph body reads as prose, not a single block. The last
   // paragraph's margin is harmless (the next heading has its own top margin).
+  //
+  // Deliberately NO `lineHeight` here — the page's 1.4 already applies. react-pdf resolves a
+  // unitless lineHeight against the fontSize declared *in the same style object*, falling back to
+  // its own 18pt default when there is none. So `lineHeight: 1.4` on a style that inherits the
+  // page's 10pt font silently becomes 25.2pt of leading (18 × 1.4) instead of 14pt, and the report
+  // prose renders double-spaced. Only ever pair a lineHeight with an explicit fontSize.
   insightsParagraph: {
     marginBottom: 6,
-    lineHeight: 1.4,
   },
   // Partial-report caveat — a muted, italic note under the report title when the questionnaire
   // was only partially complete at generation.
@@ -123,9 +128,10 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: '#6b7280',
   },
+  // No `lineHeight` — see {@link styles.insightsParagraph}: it would resolve against react-pdf's
+  // 18pt default, not the inherited 10pt, and double-space the note.
   researchNote: {
     marginBottom: 6,
-    lineHeight: 1.4,
   },
   researchTableRow: {
     flexDirection: 'row',

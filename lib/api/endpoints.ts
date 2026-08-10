@@ -580,6 +580,9 @@ export const API = {
       /** Blank-instrument download via `?format=pdf|text|csv` (GET — F14.9). */
       versionInstrument: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/instrument`,
+      /** Branded Questionnaire Pack download via `?format=pdf|csv|md` + include flags (GET). */
+      versionPack: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/pack`,
       /** Invitations for a questionnaire (GET list, POST send single/bulk — F3.2). */
       invitations: (id: string): string => `/api/v1/app/questionnaires/${id}/invitations`,
       /** Single invitation (PATCH revoke — F3.2). */

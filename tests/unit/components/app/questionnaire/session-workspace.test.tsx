@@ -769,6 +769,7 @@ describe('SessionWorkspace', () => {
       anonymous: false,
       ref: null,
       experience: null,
+      reopenAvailable: false,
     };
     render(<SessionWorkspace sessionId="s1" initialStatusView={statusSeed} />);
 

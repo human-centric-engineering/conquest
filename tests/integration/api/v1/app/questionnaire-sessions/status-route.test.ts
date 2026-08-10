@@ -55,6 +55,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
     anonymous: false,
     ref: null,
     experience: null,
+    reopenAvailable: false,
     ...over,
   };
 }

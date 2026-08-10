@@ -42,6 +42,14 @@ export interface ReportWorkerResult {
   claimed: number;
   succeeded: number;
   failed: number;
+  /**
+   * Terminal writes skipped because the row's `generation` moved on mid-flight (a respondent
+   * reopened and re-finished, force-requeuing the row, while this claim's generation was still
+   * running) — see {@link ClaimedReport.generation}. Expected/benign, not a failure: the row is
+   * left at its bumped `generation`, `status: 'queued'` state and gets picked up fresh on the
+   * next tick.
+   */
+  superseded: number;
 }
 
 function errorMessage(err: unknown): string {
@@ -77,6 +85,13 @@ interface ClaimedReport {
   runId: string | null;
   /** Respondent opted in to a report-ready email; null when they didn't. */
   notifyEmail: string | null;
+  /**
+   * Monotonic fence (F-early-finish-reopen): bumped by `enqueueOrRegenerateRespondentReport`
+   * every time an already-delivered report is force-requeued. The terminal writes below guard on
+   * this value so a stale write from a SUPERSEDED claim (the respondent reopened and re-finished
+   * while this generation was still in flight) can never clobber the fresh regenerate.
+   */
+  generation: number;
 }
 
 /** Atomically claim the oldest claimable report. Returns the claimed row, or null. */
@@ -98,12 +113,12 @@ async function claimNextReport(workerId: string): Promise<ClaimedReport | null> 
 
   return prisma.appRespondentReport.findUnique({
     where: { id: candidate.id },
-    select: { id: true, sessionId: true, runId: true, notifyEmail: true },
+    select: { id: true, sessionId: true, runId: true, notifyEmail: true, generation: true },
   });
 }
 
-/** Generate + persist one claimed report. Returns whether it succeeded. */
-async function driveReport(claimed: ClaimedReport): Promise<boolean> {
+/** Generate + persist one claimed report. */
+async function driveReport(claimed: ClaimedReport): Promise<'succeeded' | 'failed' | 'superseded'> {
   try {
     // Which generator depends on what the report is ABOUT. Both return the identical shape and
     // both run the same downstream pipeline (KB grounding, research rounds, formatter, method
@@ -129,8 +144,13 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
       select: { notifyEmail: true },
     });
     const notifyEmail = fresh?.notifyEmail ?? claimed.notifyEmail;
-    await prisma.appRespondentReport.updateMany({
-      where: { id: claimed.id, status: 'processing' },
+    const readyWrite = await prisma.appRespondentReport.updateMany({
+      // The `generation` guard is the fence: if a reopen-then-refinish force-requeued this row
+      // (bumping `generation`, flipping `status` back to `queued`) while this claim was still
+      // generating, this write must NOT land — it would clobber the fresh regenerate with stale
+      // content. `status: 'processing'` alone can't catch this: a requeue-then-reclaim on the SAME
+      // worker tick could plausibly find `processing` again before this write runs.
+      where: { id: claimed.id, status: 'processing', generation: claimed.generation },
       data: {
         status: 'ready',
         content,
@@ -149,6 +169,16 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
         notifyEmail: null,
       } as unknown as ReportUpdateData,
     });
+    if (readyWrite.count === 0) {
+      // Superseded, not failed — expected/benign (see ReportWorkerResult.superseded). The row is
+      // already back at `queued` with a bumped `generation`, ready for a fresh claim next tick.
+      logger.info('respondent report generation superseded by a regenerate', {
+        reportId: claimed.id,
+        sessionId: claimed.sessionId,
+        generation: claimed.generation,
+      });
+      return 'superseded';
+    }
     // Best-effort report-ready email — the report is already saved, so a send failure is logged,
     // never surfaced or retried.
     // Branch on the same polymorphic owner the generator did. A run-scope row has NO sessionId by
@@ -173,15 +203,17 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
         });
       }
     }
-    return true;
+    return 'succeeded';
   } catch (err) {
     logger.error('respondent report generation failed', {
       reportId: claimed.id,
       sessionId: claimed.sessionId,
       error: errorMessage(err),
     });
-    await prisma.appRespondentReport.updateMany({
-      where: { id: claimed.id, status: 'processing' },
+    const failedWrite = await prisma.appRespondentReport.updateMany({
+      // Same generation fence as the ready-write above — a failure from a superseded claim must
+      // not stamp `failed` over a row a regenerate already moved past.
+      where: { id: claimed.id, status: 'processing', generation: claimed.generation },
       data: {
         status: 'failed',
         error: errorMessage(err).slice(0, ERROR_MAX),
@@ -189,7 +221,8 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
         lockedAt: null,
       },
     });
-    return false;
+    if (failedWrite.count === 0) return 'superseded';
+    return 'failed';
   }
 }
 
@@ -200,15 +233,16 @@ async function driveReport(claimed: ClaimedReport): Promise<boolean> {
 export async function processQueuedRespondentReports(): Promise<ReportWorkerResult> {
   const workerId = `report-worker:${crypto.randomUUID()}`;
   const deadline = Date.now() + TICK_BUDGET_MS;
-  const out: ReportWorkerResult = { claimed: 0, succeeded: 0, failed: 0 };
+  const out: ReportWorkerResult = { claimed: 0, succeeded: 0, failed: 0, superseded: 0 };
 
   while (out.claimed < MAX_PER_TICK && Date.now() < deadline) {
     const claimed = await claimNextReport(workerId);
     if (!claimed) break;
     out.claimed += 1;
-    const ok = await driveReport(claimed);
-    if (ok) out.succeeded += 1;
-    else out.failed += 1;
+    const outcome = await driveReport(claimed);
+    if (outcome === 'succeeded') out.succeeded += 1;
+    else if (outcome === 'failed') out.failed += 1;
+    else out.superseded += 1;
   }
 
   // Ops signal: if we filled the batch there may be a backlog. Count what's still waiting so a
@@ -333,7 +367,8 @@ async function driveRevision(claimed: ClaimedRevision): Promise<boolean> {
 export async function processQueuedReportRevisions(): Promise<ReportWorkerResult> {
   const workerId = `report-revision-worker:${crypto.randomUUID()}`;
   const deadline = Date.now() + TICK_BUDGET_MS;
-  const out: ReportWorkerResult = { claimed: 0, succeeded: 0, failed: 0 };
+  // Revisions have no generation fence (only the delivered report does) — `superseded` stays 0.
+  const out: ReportWorkerResult = { claimed: 0, succeeded: 0, failed: 0, superseded: 0 };
 
   while (out.claimed < MAX_PER_TICK && Date.now() < deadline) {
     const claimed = await claimNextRevision(workerId);

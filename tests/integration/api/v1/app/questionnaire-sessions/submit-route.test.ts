@@ -33,12 +33,12 @@ vi.mock('next/server', async (importOriginal) => {
 });
 
 const reportMock = vi.hoisted(() => ({
-  enqueueRespondentReport: vi.fn(),
+  enqueueOrRegenerateRespondentReport: vi.fn(),
   isExperienceLeg: vi.fn(),
   processQueuedRespondentReports: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/report/enqueue', () => ({
-  enqueueRespondentReport: reportMock.enqueueRespondentReport,
+  enqueueOrRegenerateRespondentReport: reportMock.enqueueOrRegenerateRespondentReport,
   isExperienceLeg: reportMock.isExperienceLeg,
 }));
 vi.mock('@/lib/app/questionnaire/report/worker', () => ({
@@ -152,7 +152,7 @@ beforeEach(() => {
   ctxMock.buildTurnContext.mockResolvedValue(loadedContext());
   sessionsMock.markSessionCompleted.mockResolvedValue('completed');
   // Default: no report enqueued → the instant-start kick is not scheduled (individual tests opt in).
-  reportMock.enqueueRespondentReport.mockResolvedValue(false);
+  reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(false);
   // The overwhelming majority of sessions are standalone, not a leg of an experience run.
   reportMock.isExperienceLeg.mockResolvedValue(false);
   reportMock.processQueuedRespondentReports.mockResolvedValue({
@@ -306,11 +306,11 @@ describe('transition race', () => {
 
 describe('respondent report instant-start kick', () => {
   it('schedules the report worker via after() when a report was enqueued', async () => {
-    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+    reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(true);
 
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
-    expect(reportMock.enqueueRespondentReport).toHaveBeenCalledWith('sess-1');
+    expect(reportMock.enqueueOrRegenerateRespondentReport).toHaveBeenCalledWith('sess-1');
     // after() was scheduled — and the callback drains the report queue when run.
     expect(afterMock.after).toHaveBeenCalledTimes(1);
     const cb = afterMock.after.mock.calls[0][0] as () => Promise<void>;
@@ -319,7 +319,7 @@ describe('respondent report instant-start kick', () => {
   });
 
   it('does not schedule the kick when no report was enqueued', async () => {
-    reportMock.enqueueRespondentReport.mockResolvedValue(false);
+    reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(false);
 
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
@@ -330,28 +330,28 @@ describe('respondent report instant-start kick', () => {
     // F15.4b: the run-level report covers every leg. Enqueuing here too would bill the journey
     // twice and hand the respondent n+1 reports where they were promised one summary.
     reportMock.isExperienceLeg.mockResolvedValue(true);
-    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+    reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(true);
 
     const res = await POST(req(), ctx);
 
     expect(res.status).toBe(200);
-    expect(reportMock.enqueueRespondentReport).not.toHaveBeenCalled();
+    expect(reportMock.enqueueOrRegenerateRespondentReport).not.toHaveBeenCalled();
   });
 
   it('falls back to enqueuing when the leg lookup fails', async () => {
     // Fail-soft direction matters: a redundant per-leg report is a far better outcome than a
     // respondent who receives nothing because one lookup errored.
     reportMock.isExperienceLeg.mockRejectedValue(new Error('db down'));
-    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+    reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(true);
 
     const res = await POST(req(), ctx);
 
     expect(res.status).toBe(200);
-    expect(reportMock.enqueueRespondentReport).toHaveBeenCalledWith('sess-1');
+    expect(reportMock.enqueueOrRegenerateRespondentReport).toHaveBeenCalledWith('sess-1');
   });
 
   it('completes the submit even if enqueue throws', async () => {
-    reportMock.enqueueRespondentReport.mockRejectedValue(new Error('db down'));
+    reportMock.enqueueOrRegenerateRespondentReport.mockRejectedValue(new Error('db down'));
 
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
@@ -403,7 +403,7 @@ describe('final completion sweep', () => {
     expect(body.data.probe.slotKeys).toEqual(['role']);
     // Not completed, no report enqueued while held.
     expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
-    expect(reportMock.enqueueRespondentReport).not.toHaveBeenCalled();
+    expect(reportMock.enqueueOrRegenerateRespondentReport).not.toHaveBeenCalled();
     // The probe + ledger were parked, and the probe recorded as a turn (so it shows + replays).
     const update = prismaMock.prisma.appQuestionnaireSession.update.mock.calls[0]?.[0];
     expect(update.where).toEqual({ id: 'sess-1' });
@@ -456,14 +456,14 @@ describe('final completion sweep', () => {
   it('completes cleanly when the sweep finds nothing (and enqueues the report)', async () => {
     ctxMock.buildTurnContext.mockResolvedValue(sweepContext());
     sweepMock.runCompletionSweep.mockResolvedValue({ findings: [], costUsd: 0 });
-    reportMock.enqueueRespondentReport.mockResolvedValue(true);
+    reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(true);
 
     const res = await POST(req(), ctx);
 
     expect(res.status).toBe(200);
     expect(sweepMock.runCompletionSweep).toHaveBeenCalledTimes(1);
     expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
-    expect(reportMock.enqueueRespondentReport).toHaveBeenCalledWith('sess-1');
+    expect(reportMock.enqueueOrRegenerateRespondentReport).toHaveBeenCalledWith('sess-1');
   });
 
   it('skipSweep bypasses the sweep entirely and completes (the "finish anyway" escape)', async () => {

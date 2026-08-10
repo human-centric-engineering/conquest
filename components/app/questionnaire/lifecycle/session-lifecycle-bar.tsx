@@ -3,18 +3,20 @@
 /**
  * SessionLifecycleBar — the quiet strip above the respondent chat (F7.3).
  *
- * Home for the session-level affordances the chat itself doesn't carry: the
- * anonymous-mode indicator, the respondent Pause/Resume control (signed-in only), a soft
- * cost-budget hint, and any lifecycle-action error. Deliberately understated — it renders
- * nothing at all when there's nothing to say (the common case: an authed active session
- * with no cost pressure still shows a single Pause control).
+ * Home for the session-level affordances the chat itself doesn't carry: the respondent
+ * Pause/Resume control (signed-in only), a soft cost-budget hint, and any lifecycle-action error.
+ * The anonymous-mode indicator is NOT here — it rides the brand band above the conversation
+ * (`BrandThemeProvider`), under the questionnaire title, so it costs no row on this strip.
+ *
+ * Deliberately understated — it renders nothing at all when there's nothing to say (the common
+ * case: an authed active session with no cost pressure still shows a single Pause control).
  *
  * Brand colours come from the CSS custom properties the page's `BrandThemeProvider` sets,
  * with platform-default fallbacks.
  */
 
 import type { ReactNode } from 'react';
-import { PauseCircle, PlayCircle, ShieldCheck, Hourglass, AlertTriangle } from 'lucide-react';
+import { PauseCircle, PlayCircle, Hourglass, AlertTriangle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -40,7 +42,7 @@ export interface SessionLifecycleBarProps {
    */
   trailing?: ReactNode;
   /**
-   * Left-cluster slot, beside the anonymity indicator — for session-level affordances that belong to
+   * Left-cluster slot — for session-level affordances that belong to
    * the surface rather than the conversation (today: cross-device resume, only when the version
    * disables the intro splash and so has no footer to carry it). Present → the strip always renders.
    */
@@ -68,7 +70,6 @@ export function SessionLifecycleBar({
   download,
   className,
 }: SessionLifecycleBarProps) {
-  const anonymous = view?.anonymous ?? false;
   // Soft cost hint only while still going — once paused/offered it's noise.
   const showCostHint = !paused && view?.cost?.tier === 'soft';
   const showResume = paused && canResume;
@@ -82,7 +83,7 @@ export function SessionLifecycleBar({
   // The right cluster splits into two wrap-units: an info chip and the action controls.
   const hasInfo = ref !== null || download != null;
   const hasActions = actionError !== null || showResume || showPause || trailing != null;
-  const hasStrip = anonymous || showCostHint || hasInfo || hasActions || leading != null;
+  const hasStrip = showCostHint || hasInfo || hasActions || leading != null;
   if (!showProgress && !hasStrip) return null;
 
   return (
@@ -90,20 +91,6 @@ export function SessionLifecycleBar({
       {showProgress && <SessionProgressBar coverage={view.completion.displayCoverage} />}
       {hasStrip && (
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          {anonymous && (
-            <span
-              className="inline-flex items-center gap-1.5"
-              title="Your responses are not linked to an account."
-            >
-              <ShieldCheck
-                className="h-3.5 w-3.5"
-                style={{ color: 'var(--app-accent-color, var(--color-primary))' }}
-                aria-hidden="true"
-              />
-              Responses are anonymous
-            </span>
-          )}
-
           {leading}
 
           {showCostHint && (

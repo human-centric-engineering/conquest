@@ -13,6 +13,10 @@
  *     settings + data slots + scoring, no respondent data) without leaving for a file round-trip.
  *   - **Download instrument (PDF / text / CSV)** — the *blank* questionnaire (its questions, for
  *     human review or paper distribution), with no respondent data.
+ *   - **Download pack…** — a branded, shareable Questionnaire Pack (title/goals, questions, data
+ *     slots, definitions, experience setup) as PDF/CSV/Markdown, with which sections to include
+ *     picked in {@link PackExportDialog}. The external/showcase counterpart of the brand-free
+ *     instrument above.
  *
  * The export / download links are authenticated same-origin GET routes that respond with
  * `Content-Disposition: attachment`, so a plain `<a download>` is enough. (Respondent *results*
@@ -30,6 +34,7 @@ import {
   FileType,
   FileUp,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -42,6 +47,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ImportDefinitionDialog } from '@/components/admin/questionnaires/import-definition-dialog';
+import { PackExportDialog } from '@/components/admin/questionnaires/pack-export-dialog';
 import { API } from '@/lib/api/endpoints';
 import { useDuplicateQuestionnaire } from '@/components/admin/questionnaires/use-duplicate-questionnaire';
 
@@ -55,6 +61,7 @@ export function DefinitionExportMenu({ questionnaireId, versionId }: DefinitionE
   const instrumentUrl = API.APP.QUESTIONNAIRES.versionInstrument(questionnaireId, versionId);
 
   const [importOpen, setImportOpen] = useState(false);
+  const [packOpen, setPackOpen] = useState(false);
   const { duplicate, isDuplicating, error } = useDuplicateQuestionnaire();
 
   return (
@@ -120,6 +127,19 @@ export function DefinitionExportMenu({ questionnaireId, versionId }: DefinitionE
               Download instrument (CSV)
             </a>
           </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuLabel className="font-normal">
+            <span className="font-medium">Questionnaire pack</span>
+            <span className="text-muted-foreground block text-xs">
+              A branded, shareable document — questions, data slots, definitions & setup.
+            </span>
+          </DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => setPackOpen(true)}>
+            <Sparkles className="mr-2 h-4 w-4" />
+            Download pack…
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -127,6 +147,14 @@ export function DefinitionExportMenu({ questionnaireId, versionId }: DefinitionE
 
       {/* Controlled — opened by the "Import definition" item. */}
       <ImportDefinitionDialog open={importOpen} onOpenChange={setImportOpen} />
+
+      {/* Controlled — opened by the "Download pack…" item. */}
+      <PackExportDialog
+        open={packOpen}
+        onOpenChange={setPackOpen}
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+      />
     </div>
   );
 }

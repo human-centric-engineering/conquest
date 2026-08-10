@@ -65,7 +65,10 @@ import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-cont
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { advanceExperienceRun, legForSession } from '@/app/api/v1/app/experiences/_lib/run-advance';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
-import { enqueueRespondentReport, isExperienceLeg } from '@/lib/app/questionnaire/report/enqueue';
+import {
+  enqueueOrRegenerateRespondentReport,
+  isExperienceLeg,
+} from '@/lib/app/questionnaire/report/enqueue';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
@@ -334,7 +337,7 @@ async function handleSubmit(
       // or narrative). Best-effort — a queue failure must never fail the submission just made.
       const enqueued = partOfRun
         ? false
-        : await enqueueRespondentReport(sessionId).catch((err) => {
+        : await enqueueOrRegenerateRespondentReport(sessionId).catch((err) => {
             log.error('Failed to enqueue respondent report', {
               sessionId,
               error: err instanceof Error ? err.message : String(err),

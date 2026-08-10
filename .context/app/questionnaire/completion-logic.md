@@ -113,7 +113,9 @@ required questions still open** (a deliberate escape hatch, unlike `offer`).
 It is **config-only** (no platform flag), three fields on `AppQuestionnaireConfig`
 (`configuration.md`):
 
-- `allowEarlyFinish` (bool, default `false`) — turns the feature on.
+- `allowEarlyFinish` (bool, default `true`) — turns the feature on. Defaulting on is safe
+  because completing this way is no longer a dead end for the respondent — see the reopen
+  note below.
 - `earlyFinishMinCoverage` (0–1, default `1.0`) — weighted-coverage bar. Stored as a fraction but
   **edited as a whole percent** (0–100) in `config-editor.tsx` (`pctString` / `fractionFromPct`);
   the default `1.0` (100%) surfaces the control only once the respondent has effectively completed
@@ -146,6 +148,12 @@ full `CompletionOffer` takes precedence when both are available. The submit rout
 (`POST …/questionnaire-sessions/:id/submit`) accepts an optional `{ early?: boolean }` body;
 `early: true` resolves via `finish_early` and completes with reason
 `respondent_early_finish` (vs `respondent_submit`).
+
+**Completing early is no longer strictly terminal.** The `respondent_early_finish` reason is
+what a later "Continue answering" reopen checks for — see
+[`session-state-machine.md`](./session-state-machine.md#reopen-early-finish-only) for the
+full mechanism. A session completed via the ordinary `respondent_submit` path stays exactly
+as terminal as it always was.
 
 ## The offer composer (capability, agent)
 

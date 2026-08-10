@@ -22,10 +22,16 @@
  *
  * F7.6: adds a {@link TranscriptDownload} (themed PDF / plain text) of the conversation
  * itself, always available once submitted — independent of the responses-report config.
+ *
+ * F-early-finish-reopen: when this session was completed via the early-finish escape
+ * hatch (not a full natural completion), a server-gated "Continue answering" control
+ * (`canReopen`/`onReopen`, sourced from `useSessionLifecycle`) offers a way back into
+ * the conversation — see `session-workspace.tsx`, which unmounts this component once
+ * the reopen succeeds and the session flips back to `active`.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Download, Info, Loader2, Maximize2 } from 'lucide-react';
+import { CheckCircle2, Download, Info, Loader2, Maximize2, MessageCircle } from 'lucide-react';
 
 import { cn, slugify } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -97,6 +103,16 @@ export interface SessionCompleteProps {
    * Omitted/null for an ordinary standalone session.
    */
   runId?: string | null;
+  /**
+   * Whether "Continue answering" should show — server-gated (`resolveReopenEligibility`): the
+   * session completed via the early-finish escape hatch, `allowEarlyFinish` is still on, and
+   * it isn't a leg of an experience run. Omitted/false hides the control entirely.
+   */
+  canReopen?: boolean;
+  /** Reopens the session back to `active`. On success the caller unmounts this component. */
+  onReopen?: () => Promise<void>;
+  /** A lifecycle action (pause/resume/reopen/etc.) is in flight — disables the reopen button. */
+  reopenBusy?: boolean;
   className?: string;
 }
 
@@ -108,6 +124,9 @@ export function SessionComplete({
   refRaw,
   captured,
   runId,
+  canReopen,
+  onReopen,
+  reopenBusy,
   className,
 }: SessionCompleteProps) {
   const [downloading, setDownloading] = useState(false);
@@ -332,6 +351,20 @@ export function SessionComplete({
             {/* The conversation record is always available once submitted — a completed session
                 always has a transcript, independent of the responses-report config above. */}
             <TranscriptDownload sessionId={sessionId} accessToken={accessToken} variant="outline" />
+            {/* The escape-hatch-of-the-escape-hatch: visually secondary (ghost, not outline) and
+                ordered last — download/transcript stay the primary actions. */}
+            {canReopen && onReopen && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void onReopen()}
+                disabled={reopenBusy}
+              >
+                <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                Continue answering
+              </Button>
+            )}
           </div>
           {error && (
             <p className="text-destructive text-xs" role="alert">

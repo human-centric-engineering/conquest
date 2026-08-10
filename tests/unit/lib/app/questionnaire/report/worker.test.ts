@@ -59,7 +59,7 @@ describe('processQueuedRespondentReports', () => {
     (prisma.appRespondentReport.findFirst as Mock).mockResolvedValue(null);
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(prisma.appRespondentReport.updateMany).not.toHaveBeenCalled();
   });
 
@@ -72,7 +72,7 @@ describe('processQueuedRespondentReports', () => {
     });
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
     expect(generateRespondentReport).toHaveBeenCalledWith('sess-1');
 
     // The terminal write: status ready + content + cost + formatted flag + cleared lease, guarded on processing.
@@ -96,7 +96,7 @@ describe('processQueuedRespondentReports', () => {
     (generateRespondentReport as Mock).mockRejectedValue(new Error('no provider'));
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, superseded: 0 });
 
     const failWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
       (c) => c[0]?.data?.status === 'failed'
@@ -114,7 +114,7 @@ describe('processQueuedRespondentReports', () => {
     (prisma.appRespondentReport.updateMany as Mock).mockResolvedValue({ count: 0 });
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(generateRespondentReport).not.toHaveBeenCalled();
   });
 
@@ -167,7 +167,7 @@ describe('processQueuedRespondentReports', () => {
     (sendRespondentReportReadyEmail as Mock).mockRejectedValue(new Error('smtp down'));
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
   });
 
   it('warns when a full batch (MAX_PER_TICK) leaves a large backlog', async () => {
@@ -240,7 +240,7 @@ describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
 
     const result = await processQueuedRespondentReports();
 
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
     expect(generateRunReport).toHaveBeenCalledWith('run-1');
     expect(sendRespondentReportReadyEmail).toHaveBeenCalledWith(
       { runId: 'run-1' },
@@ -271,7 +271,7 @@ describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
     (sendRespondentReportReadyEmail as Mock).mockRejectedValue(new Error('smtp down'));
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
   });
 
   it('fails an ownerless row terminally rather than trying to email about it', async () => {
@@ -284,7 +284,7 @@ describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
 
     const result = await processQueuedRespondentReports();
 
-    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, superseded: 0 });
     expect(sendRespondentReportReadyEmail).not.toHaveBeenCalled();
   });
 });

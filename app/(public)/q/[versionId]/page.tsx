@@ -151,7 +151,7 @@ export default async function PublicQuestionnairePage({
         </header>
       )}
       <div className="min-h-0 flex-1">
-        <BrandThemeProvider theme={theme} header={bandHeader}>
+        <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
           <AnonymousSessionBoot
             glossary={glossary}
             glossaryAppendix={glossaryAppendix}

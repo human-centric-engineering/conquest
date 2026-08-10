@@ -585,6 +585,53 @@ describe('generateRespondentReport', () => {
     expect(system?.content).not.toContain('shown to them in full alongside this report');
   });
 
+  // The grounding contract's counterweight. Grounding, the coverage fence and the confidence
+  // discount all push toward the safest output — repeating the respondent's answers back at them —
+  // and the one rule that pushed the other way was gated on an appended Q&A recap that a narrative
+  // report never has. These pin that the analysis contract reaches BOTH modes unconditionally.
+  it.each([['narrative'], ['raw_plus_insights']] as const)(
+    'instructs the model to analyse rather than restate in mode `%s`',
+    async (mode) => {
+      (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionMeta({
+          respondentReport: {
+            enabled: true,
+            mode,
+            // No appended data — so `APPENDED_DATA_RULES` is absent and this is the only thing
+            // standing between the writer and verbatim regurgitation.
+            rawIncludes: { questionsAsPresented: false, dataSlots: false },
+          },
+        })
+      );
+      const { provider, chat } = fakeProvider(VALID_RESPONSE);
+      (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+      await generateRespondentReport('sess-1');
+      const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+        (m) => m.role === 'system'
+      );
+      expect(system?.content).toContain('not an instruction to restate');
+      expect(system?.content).toMatch(/recapping what they said should be the minority/i);
+      // The rule this test guards is absent, so the analysis contract is doing the work alone.
+      expect(system?.content).not.toContain('shown to them in full alongside this report');
+    }
+  );
+
+  it('asks for alternative readings rather than a single asserted conclusion', async () => {
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+
+    await generateRespondentReport('sess-1');
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    );
+    expect(system?.content).toMatch(/support more than one reading, name the alternative/i);
+    // Interpretation is widened; the factual contract is NOT. Both must survive together, or the
+    // report trades regurgitation for invention.
+    expect(system?.content).toMatch(/does not license new facts about them/i);
+    expect(system?.content).toMatch(/never invent facts/i);
+  });
+
   it('instructs the model to stay grounded and avoid unsupported generalisations', async () => {
     const { provider, chat } = fakeProvider(VALID_RESPONSE);
     (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });

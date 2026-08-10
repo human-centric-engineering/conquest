@@ -34,4 +34,10 @@ export {
   type SessionStatusInput,
   buildSessionStatusView,
   canSubmitSession,
+  canReopen,
 } from '@/lib/app/questionnaire/session/status-view';
+
+export {
+  type ReopenEligibilityInput,
+  isReopenEligible,
+} from '@/lib/app/questionnaire/session/reopen-logic';

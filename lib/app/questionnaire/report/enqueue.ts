@@ -9,6 +9,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { DB_JSON_NULL } from '@/lib/db/json';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 
@@ -29,6 +30,68 @@ export async function enqueueRespondentReport(sessionId: string): Promise<boolea
     create: { sessionId, mode: settings.mode, status: 'queued' },
     // Idempotent: a re-submit must not reset an already-generated (or in-flight) report.
     update: {},
+  });
+  return true;
+}
+
+/**
+ * Enqueue OR regenerate a respondent report for a just-completed session — the submit-time call
+ * site (F-early-finish-reopen). Unlike {@link enqueueRespondentReport}'s deliberate
+ * double-submit-safe idempotency, this one force-resets an already-`ready`/`failed` row, because
+ * the ONLY way this call site sees an existing row at all is a genuine reopen-then-refinish: a
+ * same-session double-submit is already short-circuited earlier in `submit/route.ts` by its
+ * `status === 'completed'` idempotent-200 check, before `markSessionCompleted` (and this enqueue)
+ * ever run. A `queued`/`processing` row (a still-in-flight FIRST generation, reached only if a
+ * respondent reopens and re-finishes before it lands) is left untouched here — the worker's
+ * `generation` fence (`lib/app/questionnaire/report/worker.ts`) is what stops its stale write from
+ * later clobbering a fresh one, not this function.
+ *
+ * Returns `true` whenever a row now needs draining (fresh create OR regenerate), so the caller's
+ * `after()` instant-start kick fires either way.
+ */
+export async function enqueueOrRegenerateRespondentReport(sessionId: string): Promise<boolean> {
+  const meta = await prisma.appQuestionnaireSession.findUnique({
+    where: { id: sessionId },
+    select: { version: { select: { config: { select: { respondentReport: true } } } } },
+  });
+  const settings = narrowRespondentReportSettings(meta?.version?.config?.respondentReport);
+  if (!settings.enabled || !isAiRespondentReportMode(settings.mode)) return false;
+
+  const existing = await prisma.appRespondentReport.findUnique({
+    where: { sessionId },
+    select: { status: true },
+  });
+
+  if (!existing) {
+    await prisma.appRespondentReport.create({
+      data: { sessionId, mode: settings.mode, status: 'queued' },
+    });
+    return true;
+  }
+
+  if (existing.status === 'queued' || existing.status === 'processing') return true;
+
+  // `ready` or `failed` — a delivered report from BEFORE a reopen. Force-requeue: clear every
+  // generated field so the respondent never sees stale content, bump `generation` (the worker
+  // fence), but PRESERVE `notifyEmail` — a respondent who opted in before a failure should still
+  // get emailed once the new generation succeeds.
+  await prisma.appRespondentReport.update({
+    where: { sessionId },
+    data: {
+      status: 'queued',
+      mode: settings.mode,
+      content: DB_JSON_NULL,
+      formatted: false,
+      completionPct: null,
+      costUsd: null,
+      methodRecord: DB_JSON_NULL,
+      error: null,
+      generatedAt: null,
+      deliveredRevisionId: null,
+      lockedBy: null,
+      lockedAt: null,
+      generation: { increment: 1 },
+    },
   });
   return true;
 }

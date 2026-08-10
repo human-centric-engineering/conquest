@@ -124,9 +124,11 @@ describe('GlossaryEditor — rendering', () => {
       term({ id: 't3', term: 'shadow', normalizedTerm: 'shadow', status: 'rejected' }),
     ]);
 
-    expect(screen.getByText(/Proposed/)).toBeInTheDocument();
-    expect(screen.getByText(/In use/)).toBeInTheDocument();
-    expect(screen.getByText(/Rejected/)).toBeInTheDocument();
+    // By role: a settled card carries its own "Accepted"/"Rejected" stamp, so a bare text match
+    // would no longer distinguish the group heading from the cards inside it.
+    expect(screen.getByRole('heading', { name: /Proposed/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /In use/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Rejected/ })).toBeInTheDocument();
   });
 
   it('offers to find terms when there are none, and explains hand-authoring', () => {
@@ -206,8 +208,12 @@ describe('GlossaryEditor — curation', () => {
 
     await user.click(screen.getByRole('button', { name: /^Accept/ }));
 
-    const inUse = screen.getByText(/In use/).closest('section');
-    expect(within(inUse as HTMLElement).getByDisplayValue('higher self')).toBeInTheDocument();
+    // Accepting settles the term: it moves group AND collapses to a stamped record, so the term
+    // reads as text rather than as a form field.
+    const inUse = screen.getByRole('heading', { name: /In use/ }).closest('section');
+    expect(within(inUse as HTMLElement).getByText('higher self')).toBeInTheDocument();
+    expect(within(inUse as HTMLElement).getByText('Accepted')).toBeInTheDocument();
+    expect(within(inUse as HTMLElement).queryByDisplayValue('higher self')).not.toBeInTheDocument();
   });
 
   it('keeps a rejected term in the payload so a re-run does not re-propose it', async () => {

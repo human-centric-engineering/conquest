@@ -130,6 +130,9 @@ export default async function SessionViewerPage({ params }: PageProps) {
           </span>
         )}
         <Badge variant="outline">{view.status}</Badge>
+        {/* The respondent surface carries this under the band title; the admin viewer has no band,
+            so the badge is where an admin sees that the session is PII-free. */}
+        {view.anonymous && <Badge variant="outline">Anonymous</Badge>}
         {view.isPreview ? (
           <Badge variant="secondary">Preview</Badge>
         ) : (

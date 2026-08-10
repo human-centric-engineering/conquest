@@ -133,4 +133,76 @@ describe('SessionComplete', () => {
     // branch is unreachable via DOM interaction. Covered by the disabled-state test instead.
     it.todo('no-ops a second click that races the disabled attribute (browser-only path)');
   });
+
+  describe('reopen (F-early-finish-reopen)', () => {
+    it('renders "Continue answering" when canReopen is true and onReopen is provided', () => {
+      render(
+        <SessionComplete
+          sessionId="sess-1"
+          answeredCount={3}
+          canReopen
+          onReopen={() => Promise.resolve()}
+        />
+      );
+      expect(screen.getByRole('button', { name: /continue answering/i })).toBeInTheDocument();
+    });
+
+    it('does not render "Continue answering" when canReopen is false', () => {
+      render(
+        <SessionComplete
+          sessionId="sess-1"
+          answeredCount={3}
+          canReopen={false}
+          onReopen={() => Promise.resolve()}
+        />
+      );
+      expect(screen.queryByRole('button', { name: /continue answering/i })).not.toBeInTheDocument();
+    });
+
+    it('does not render "Continue answering" when canReopen is omitted', () => {
+      render(<SessionComplete sessionId="sess-1" answeredCount={3} />);
+      expect(screen.queryByRole('button', { name: /continue answering/i })).not.toBeInTheDocument();
+    });
+
+    it('does not render "Continue answering" when canReopen is true but onReopen is not provided', () => {
+      render(<SessionComplete sessionId="sess-1" answeredCount={3} canReopen />);
+      expect(screen.queryByRole('button', { name: /continue answering/i })).not.toBeInTheDocument();
+    });
+
+    it('calls onReopen when clicked', async () => {
+      const onReopen = vi.fn(() => Promise.resolve());
+      render(
+        <SessionComplete sessionId="sess-1" answeredCount={3} canReopen onReopen={onReopen} />
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /continue answering/i }));
+
+      expect(onReopen).toHaveBeenCalledTimes(1);
+    });
+
+    it('is disabled when reopenBusy is true', () => {
+      render(
+        <SessionComplete
+          sessionId="sess-1"
+          answeredCount={3}
+          canReopen
+          onReopen={() => Promise.resolve()}
+          reopenBusy
+        />
+      );
+      expect(screen.getByRole('button', { name: /continue answering/i })).toBeDisabled();
+    });
+
+    it('is enabled when reopenBusy is false/omitted', () => {
+      render(
+        <SessionComplete
+          sessionId="sess-1"
+          answeredCount={3}
+          canReopen
+          onReopen={() => Promise.resolve()}
+        />
+      );
+      expect(screen.getByRole('button', { name: /continue answering/i })).toBeEnabled();
+    });
+  });
 });

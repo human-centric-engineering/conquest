@@ -19,6 +19,10 @@
  * `markSessionCompleted` lives here (moved from `answer-slots.ts`, which re-exports it
  * for the F4.5 `/complete` route) so completion now writes its `completed` event like
  * every other transition.
+ *
+ * {@link reopenSession} is deliberately NOT a `transitionSession` wrapper like the others
+ * above — see its own doc comment for why `completed → active` must stay off the shared
+ * matrix.
  */
 
 import { Prisma } from '@prisma/client';
@@ -148,6 +152,66 @@ export function markSessionCompleted(
   opts?: TransitionOptions
 ): Promise<SessionStatus> {
   return transitionSession(sessionId, 'completed', opts);
+}
+
+/**
+ * Reopen a `completed` session back to `active` — the respondent early-finish "Continue
+ * answering" action (F-early-finish-reopen). Deliberately its OWN transaction, NOT a call
+ * through {@link transitionSession}: `classifyTransition('completed', 'active')` stays
+ * `illegal` unconditionally for every other caller (`resumeSession`, the admin
+ * `/transition` route), so this is the one narrow, purpose-built seam allowed to write
+ * the exception.
+ *
+ * The ROUTE (`app/api/v1/app/questionnaire-sessions/[id]/lifecycle/route.ts`) is
+ * responsible for calling `resolveReopenEligibility` and refusing with a 409 BEFORE
+ * reaching here — the `status !== 'completed'` guard below is a defensive backstop, not
+ * the eligibility gate itself.
+ *
+ * Writes a `reopened` event (not `active`, which `eventTypeFor` reserves for the
+ * `resumed` pause-edge and would mis-name this as a resume), and — symmetric with
+ * `transitionSession`'s complete-time invitation stamp — reverts a currently-`completed`
+ * linked invitation back to `opened`, so the admin invitation list doesn't keep reading
+ * "Completed" while the respondent is back in the conversation. Never touches a
+ * `revoked`/`expired` invitation.
+ */
+export async function reopenSession(
+  sessionId: string,
+  opts: TransitionOptions = {}
+): Promise<SessionStatus> {
+  return prisma.$transaction(async (tx): Promise<SessionStatus> => {
+    const row = await tx.appQuestionnaireSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true, invitationId: true },
+    });
+    if (!row) throw new NotFoundError('Session not found');
+
+    const from = narrowToEnum(row.status, SESSION_STATUSES, 'active');
+    if (from !== 'completed') {
+      throw new SessionTransitionError(from, 'active');
+    }
+
+    await tx.appQuestionnaireSession.update({
+      where: { id: sessionId },
+      data: { status: 'active' },
+    });
+    await tx.appQuestionnaireSessionEvent.create({
+      data: {
+        sessionId,
+        eventType: 'reopened',
+        fromStatus: 'completed',
+        toStatus: 'active',
+        ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        ...(opts.metadata !== undefined ? { metadata: opts.metadata } : {}),
+      },
+    });
+    if (row.invitationId) {
+      await tx.appQuestionnaireInvitation.updateMany({
+        where: { id: row.invitationId, status: 'completed' },
+        data: { status: 'opened' },
+      });
+    }
+    return 'active';
+  });
 }
 
 /** Which cost-cap threshold a `cost_cap_reached` event marks (F6.3). */

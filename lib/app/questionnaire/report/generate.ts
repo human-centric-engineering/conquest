@@ -103,13 +103,36 @@ function errorMessage(err: unknown): string {
  * generalisations that make a report read as boilerplate rather than about *them*.
  */
 const GROUNDING_RULES =
-  'Ground every observation in a specific answer the respondent actually gave — refer to what they ' +
-  'said. Do NOT make broad or sweeping generalisations their answers do not support, and do NOT ' +
-  'attribute a trait, situation, or conclusion to the respondent or their organisation unless their ' +
-  'own answers established it. Where their answers are thin on a topic, say less rather than ' +
-  'inferring. You may bring in general context or an illustrative example, but frame it explicitly ' +
-  'as general (e.g. "in many organisations…") — never state an unsupported example as a fact about ' +
-  'this respondent. Never invent facts.';
+  'Ground every observation in a specific answer the respondent actually gave — every claim must ' +
+  'trace back to something they said. Do NOT make broad or sweeping generalisations their answers ' +
+  'do not support, and do NOT attribute a trait, situation, or conclusion to the respondent or ' +
+  'their organisation unless their own answers established it. Where their answers are thin on a ' +
+  'topic, say less rather than inferring. You may bring in general context or an illustrative ' +
+  'example, but frame it explicitly as general (e.g. "in many organisations…") — never state an ' +
+  'unsupported example as a fact about this respondent. Never invent facts.';
+
+/**
+ * The analysis contract, shared by both AI modes and always on.
+ *
+ * The counterweight to {@link GROUNDING_RULES}. Grounding, the coverage fence and the low-confidence
+ * discount all push the writer the same way — toward the safest possible output, which is repeating
+ * the respondent's answers back to them. Nothing balanced that: the one rule telling the writer to
+ * add value beyond restatement ({@link APPENDED_DATA_RULES}) is conditional on a Q&A recap being
+ * appended, and a narrative report never appends one. So the mode that most needs analysis was the
+ * mode most likely to get verbatim regurgitation.
+ *
+ * Deliberately framed as *reallocation* rather than a prohibition — "say it once, briefly, then
+ * analyse". A flat ban on referring to their answers would trade regurgitation for vagueness, which
+ * is the worse failure: a report that could be about anyone.
+ */
+const ANALYSIS_RULES =
+  'Grounding is a constraint on what is TRUE, not an instruction to restate. Reference an answer ' +
+  'compactly — a brief paraphrase or a short phrase, not a retelling — then spend the rest of the ' +
+  'paragraph on what it MEANS: patterns across their answers, tensions between them, what follows ' +
+  'from them. Recapping what they said should be the minority of any paragraph. Where their answers ' +
+  'support more than one reading, name the alternative rather than asserting a single conclusion ' +
+  '(e.g. "one way to read this is…, though it could equally be…"). That is interpretation of what ' +
+  'they told you, offered as a possibility — it does not license new facts about them.';
 
 /**
  * The framing that turns the unanswered-question list into context rather than hallucination fodder.
@@ -285,6 +308,9 @@ function buildReportMessages(opts: {
           'Address the respondent directly (second person). ' +
           GROUNDING_RULES
   );
+  // The counterweight, immediately after the grounding contract it qualifies: ground the claims, but
+  // spend the words on analysis rather than repeating their answers back to them.
+  system.push(ANALYSIS_RULES);
   // Negative space, immediately after the grounding contract it makes actionable: what the respondent
   // did NOT answer, fenced so the list reads as context and never as questions to answer.
   if (coverage && coverage.unansweredBlock.trim())

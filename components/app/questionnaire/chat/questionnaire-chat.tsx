@@ -577,15 +577,16 @@ export function QuestionnaireChat({
       {inspectorTurns.length > 0 && (
         <TurnInspectorDrawer turns={inspectorTurns} sessionId={sessionId} messages={turns} />
       )}
-      {/* Pre-release transparency notice — pinned above the transcript so it stays visible as the
-          conversation scrolls. Never shown in the read-only admin viewer (the admin isn't the
-          recorded party). Renders nothing once the product is `stable`. */}
-      {!readOnly && <ReleaseStageNotice className="mx-4 mt-4 sm:mx-6" />}
       {/* Transcript. `cq-chat-scale` resolves the respondent's text-size preference from the
           `--cq-chat-scale` custom property SessionWorkspace sets; the bubbles below inherit it
           rather than pinning their own size. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 2xl:px-10">
         <div className="cq-chat-scale cq-chat-measure flex flex-col gap-6">
+          {/* Pre-release transparency notice — lives at the top of the transcript so it scrolls
+              away with the conversation rather than pinning above it. Never shown in the
+              read-only admin viewer (the admin isn't the recorded party). Renders nothing once
+              the product is `stable`. */}
+          {!readOnly && <ReleaseStageNotice />}
           {/* Experiences, `stitched` continuity (P15.3): the earlier legs of this run, replayed
               above the live conversation so the journey reads as one. Rendered as its own block
               rather than concatenated into `turns` — the reveal cursor, the typewriter and the

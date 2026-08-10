@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import { GlossaryMarkdown } from '@/components/app/questionnaire/glossary/glossary-markdown';
 import { GlossaryText } from '@/components/app/questionnaire/glossary/glossary-text';
@@ -179,5 +180,54 @@ describe('GlossaryMarkdown — re-render stability', () => {
     );
     const p = container.querySelector('p');
     expect(p?.hasAttribute('node')).toBe(false);
+  });
+});
+
+describe('GlossaryTermMark', () => {
+  it('opens the definition popover when the term is clicked', async () => {
+    // THE REGRESSION. The trigger's own onClick called `event.preventDefault()` (to stop a
+    // surrounding <label> toggling its control). Radix composes its open-toggle onto that handler
+    // with `composeEventHandlers`, which bails when the event was default-prevented — so the click
+    // focused the word and did nothing else. In prod, defined terms looked live but never
+    // explained themselves.
+    const user = userEvent.setup();
+    render(<GlossaryMarkdown glossary={[EGO]}>{'Describe your ego honestly.'}</GlossaryMarkdown>);
+
+    await user.click(triggers()[0]);
+
+    expect(
+      await screen.findByText('The constructed self that seeks approval.')
+    ).toBeInTheDocument();
+  });
+
+  it('lists every sense when the term has more than one definition', async () => {
+    const user = userEvent.setup();
+    render(<GlossaryMarkdown glossary={[MULTI]}>{'Your higher self knows.'}</GlossaryMarkdown>);
+
+    await user.click(triggers()[0]);
+
+    expect(await screen.findByText(/uses this term in more than one sense/)).toBeInTheDocument();
+    expect(screen.getByText('The observing part of you.')).toBeInTheDocument();
+    expect(screen.getByText('Your connection to something larger.')).toBeInTheDocument();
+  });
+
+  it('does not toggle a surrounding clickable control when the term is clicked', async () => {
+    // Why the handler still calls stopPropagation: a defined term can sit inside a label or a
+    // clickable row, and opening a definition must not also select that option.
+    const user = userEvent.setup();
+    let rowClicks = 0;
+    render(
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+      <div onClick={() => (rowClicks += 1)}>
+        <GlossaryMarkdown glossary={[EGO]}>{'Describe your ego honestly.'}</GlossaryMarkdown>
+      </div>
+    );
+
+    await user.click(triggers()[0]);
+
+    expect(
+      await screen.findByText('The constructed self that seeks approval.')
+    ).toBeInTheDocument();
+    expect(rowClicks).toBe(0);
   });
 });
