@@ -161,6 +161,50 @@ jobs:
         if: needs.config.outputs.code == 'true'
         run: npm run lint
       - run: npm run format:check
+      # CHANGELOG.md is the one file a fork reads before deciding what an
+      # upgrade will cost it, and the release process edits it by text
+      # replacement every single time (CONTRIBUTING step 4). Cutting 0.8.1
+      # replaced a block that included the previous release's heading,
+      # `## [0.8.0]` was never re-added, and 962 lines of 0.8.0 content — two
+      # migrations, two breaking changes — re-attributed themselves to a patch
+      # release. It merged and was tagged; Prettier saw well-formed markdown
+      # and nothing else looked (#550).
+      #
+      # Ungated like format:check above, and for the same reason: a
+      # CHANGELOG-only PR is docs-only, so a code-gated check would skip
+      # exactly the change most able to break this file.
+      #
+      # The append-only rule needs the base revision — a deleted heading leaves
+      # a file that is still valid in every static sense. Fetched shallowly
+      # here rather than raising the job to `fetch-depth: 0`, which would pull
+      # the whole history on every docs-only PR to read one file. The script
+      # treats an unreadable `--base` as a hard failure, so a broken fetch
+      # surfaces instead of silently downgrading to the static rules.
+      #
+      # `HEAD^` is the right base for BOTH events, and for the same structural
+      # reason. On a PR, checkout gives us `refs/pull/N/merge`, whose first
+      # parent IS the base commit it was merged against — that is what the merge
+      # ref is made of, so there is no assumption to get wrong. On push, HEAD is
+      # the commit that just landed and `HEAD^` is the one before it.
+      #
+      # Deepening by `github.sha` and not by branch name matters: `--depth`
+      # counts from the tip of whatever is fetched, so `origin main` would
+      # deepen around the CURRENT tip. Another merge landing while this run sits
+      # in the queue would leave this commit's parent unfetched, `HEAD^` would
+      # be unreadable, and main would go red for a PR that never touched the
+      # file.
+      #
+      # Guarded, because `--depth` TRUNCATES a complete clone as readily as it
+      # deepens a shallow one: on a full checkout this fetch takes the repo from
+      # its whole history down to two commits. Vanilla Sunrise checks out at
+      # depth 1 so it would be a no-op here — but the two fork-seam steps below
+      # run later in this same job, and a fork that raised the job to
+      # `fetch-depth: 0` so its `app:ci-checks` could look at history would find
+      # the history gone by the time its own check ran.
+      - name: CHANGELOG structure
+        run: |
+          git cat-file -e 'HEAD^' 2>/dev/null || git fetch --no-tags --depth=2 origin "${{ github.sha }}"
+          npx tsx scripts/ci/check-changelog.ts --base 'HEAD^'
       # Prettier does not format .prisma files, so drift from the pinned Prisma's
       # own formatter is invisible to format:check. Without this, an unformatted
       # schema lands on main and every fork's next `prisma format` — which
