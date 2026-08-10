@@ -84,6 +84,33 @@ upstream is named something else. CI is where that rule is enforced.
 > put your app's release notes in a file of your own; all four current forks
 > already do the former by default, simply by merging upstream.
 
+### The `Prisma schema format check` step
+
+Unlike the CHANGELOG step above, this one **is** gated on the code filter
+(`if: needs.config.outputs.code == 'true'`) — correct, because editing a
+`.prisma` file sets `code=true`, and a docs-only PR cannot change schema
+formatting. Since #510 it runs the same `npm run format:prisma:check` that
+`npm run validate` does, rather than keeping its own copy of the logic. Prettier has no `.prisma` parser, so this drift is
+invisible to `format:check`, and while the check lived only in CI the first
+signal was a red job named "Lint & format" on a branch about something else.
+
+**Forks feel this more than core does.** The `/framework` and `/app` tiers own
+`prisma/schema/framework-*.prisma` and `app.prisma` — precisely the files core
+never reformats, because core never edits them. A Prisma bump upstream
+therefore invalidates the formatting of files only the fork owns, and until now
+no fork could catch it before pushing.
+
+The check walks `prisma/schema` recursively (so does `prisma format`), runs
+Prisma's declared entry point under `node` rather than `npx` or the `.bin`
+shim — neither of which can be spawned on Windows without a shell, and a shell
+concatenates argv without escaping — and formats a **copy** in a temp directory
+and compares, rather than running the formatter over `prisma/schema` and
+diffing against git. The git
+form is correct only on a clean tree: run it while editing a schema and it
+reports your own well-formatted uncommitted work as drift. `npm run
+format:prisma` is the mutating fixer; `format:prisma:check` never writes, which
+is what makes it safe inside `validate`.
+
 ### Universal speedups (on for everyone)
 
 These help both repo types and cost nothing, so they're always on:

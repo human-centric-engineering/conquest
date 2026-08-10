@@ -254,6 +254,29 @@ release process.
   `CHANGELOG.md` carries Sunrise's release history, which it does by default
   after any upstream merge; keep your own app's release notes in a separate
   file. See `.context/architecture/ci.md` (#550).
+- **`npm run format:prisma` and `npm run format:prisma:check`**, the latter
+  wired into `npm run validate` and now the implementation the CI step calls
+  too. Prettier has no `.prisma` parser, so schema drift from the pinned
+  Prisma's own formatter was invisible to `format:check` and surfaced only as a
+  red CI job named "Lint & format" — a misleading place to look for a Prisma
+  problem, on a branch about something else. It lands hardest on forks: the
+  `/framework` and `/app` tiers own `framework-*.prisma` and `app.prisma`,
+  exactly the files core never reformats, so a Prisma bump upstream silently
+  invalidates formatting only the fork can fix. The check formats a **copy** in
+  a temp directory and compares, rather than running the formatter over
+  `prisma/schema` and diffing against git: the git form is correct only on a
+  clean tree, and locally it reports your own well-formatted uncommitted work
+  as drift — the exact situation a local check exists for. It walks
+  `prisma/schema` **recursively**, because `prisma format` does, and a flat
+  listing would silently skip a fork's nested schema files while failing P1012
+  on any relation that crossed into them. It runs Prisma's own declared entry
+  point under `process.execPath` rather than `npx` or the `.bin` shim: both
+  force a shell on Windows, and `shell: true` concatenates argv without
+  escaping it (Node emits DEP0190 saying so), which would split any temp path
+  containing a space — `os.tmpdir()` there sits under `%USERPROFILE%`. Formatter errors are
+  rewritten to name the real schema path: Prisma reports against the copy, and
+  the copy is deleted before the message prints. `format:prisma` is the
+  mutating fixer, mirroring `format` / `format:check` (#510).
 
 ### Changed
 
