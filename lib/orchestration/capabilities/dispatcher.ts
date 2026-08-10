@@ -554,9 +554,32 @@ class CapabilityDispatcher {
    * `mcp-system` agent, which dispatches built-ins with no pivot rows in a
    * default install. Audit your `AiAgentCapability` table before enabling it.
    *
-   * Independently of this setting, the chat handler refuses any tool name
-   * outside the agent's advertised set before dispatch, which closes the
-   * reachable path (see `advertisedToolNames` in `streaming-handler.ts`).
+   * Independently of this setting, here is what each caller checks before it
+   * gets here. THREE of the four take a name from a model.
+   *
+   * - `chat/streaming-handler.ts` and `engine/executors/agent-call.ts` —
+   *   model-emitted, both checked against the calling agent's advertised set
+   *   (`advertisedToolNames`, built from `getCapabilityDefinitions`).
+   * - `mcp/tool-registry.ts` — ALSO model-emitted; the host behind an MCP key
+   *   is an LLM. Checked against the globally EXPOSED-TOOL set (publishing an
+   *   `McpExposedTool` row is the grant), but NOT against the calling key's
+   *   scoped agent — and with no pivot row for that agent this method
+   *   default-allows, so a scoped key can reach an exposed tool its agent was
+   *   never granted. Deliberate opt-out scoping, documented in
+   *   `.context/orchestration/mcp.md` with the open question of whether scoped
+   *   should mean allow-list-only.
+   * - `executors/tool-call.ts` — the only one that is NOT model-driven:
+   *   `capabilitySlug` comes from Zod-parsed, admin-authored step config.
+   *
+   * An earlier draft of this note listed MCP among the callers that "do not
+   * take a name from a model at all" and then contradicted itself two lines
+   * later. Stated plainly here because a reader who stops at the first
+   * sentence is exactly who this note keeps failing.
+   *
+   * This note used to say "the chat handler … closes the reachable path". That
+   * was true of chat and false of `agent_call`, which had no such check until
+   * #559 — so a sentence intended to explain why the default is safe was, for
+   * anyone weighing `strict`, the reason not to look.
    */
   private async getAgentBinding(
     agentId: string,

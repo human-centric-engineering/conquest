@@ -57,9 +57,15 @@ export const HOOK_EVENT_TYPES = [
   // so it is a security signal, not an operational one, and it fires whether or
   // not the capability exists elsewhere in the registry. The handler refuses
   // the call; this event is how a fork notices it happened. Payload carries
-  // `{ conversationId, agentId, agentSlug, userId, toolName, advertised }`
-  // (`advertised` is the tool set the model actually had, so a reviewer can see
-  // what it invented the name from).
+  // `{ agentId, agentSlug, userId, toolName, advertised }` plus the surface's
+  // own correlation ids — `conversationId` from chat, `executionId` + `stepId`
+  // from a workflow `agent_call` step (#559). `advertised` is the tool set the
+  // model actually had, so a reviewer can see what it invented the name from.
+  //
+  // Both surfaces emit it, and a subscriber keying only on `conversationId`
+  // silently misses the workflow half. Treat neither as the riskier one: both
+  // take a tool name from a model, and both read content an attacker may have
+  // planted (chat additionally takes end-user text directly).
   'capability.refused_not_advertised',
 ] as const;
 
