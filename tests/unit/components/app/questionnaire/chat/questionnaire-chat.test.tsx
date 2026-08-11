@@ -218,10 +218,16 @@ describe('QuestionnaireChat', () => {
 
     const notice = screen.getByText("You're 50% of the way through.");
     expect(notice).toBeInTheDocument();
-    // The MilestoneNotice's own container is role="status", same as the other bespoke notices —
-    // distinguishing it from the generic fallback line would need a DOM/class assertion the other
-    // "renders a generic..." test already covers for contrast; here we pin the message renders.
-    expect(notice.closest('[role="status"]')).toBeInTheDocument();
+
+    // Assert on something ONLY MilestoneNotice produces. `role="status"` alone is worthless here:
+    // the generic fallback line carries it too, so a `role` assertion passes even if the
+    // `code === 'milestone'` branch is deleted entirely. MilestoneNotice renders a boxed callout
+    // (`rounded-lg` + `border`) with a flag icon; the fallback is a bare `border-l-2 pl-3 text-xs`
+    // line with no icon.
+    const container = notice.closest('[role="status"]');
+    expect(container).toHaveClass('rounded-lg');
+    expect(container?.querySelector('svg.lucide-flag')).toBeInTheDocument();
+    expect(container).not.toHaveClass('border-l-2');
   });
 
   it('renders a flagged contradiction as the "I noticed something" callout beneath its turn', () => {

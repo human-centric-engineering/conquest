@@ -261,6 +261,13 @@ export function MeetingParticipantBoot({
       {answering && session ? (
         // `key` per session so a new breakout mounts a fresh workspace rather than reusing the
         // previous breakout's stream and transcript.
+        //
+        // NOTE: this surface deliberately runs the workspace on its DEFAULTS — no per-version
+        // respondent config is threaded here (voice, presentation mode, inline correction, the
+        // progress-percent text, …), because a breakout boots client-side from the join response,
+        // which carries no config. A breakout is a short facilitated burst, so the defaults are
+        // tolerable; but an admin who turns one of those settings off will still see it on in a
+        // meeting. Fixing it properly means widening the join payload, not adding props here.
         <div className="min-h-0 flex-1">
           <SessionWorkspace
             key={session.id}

@@ -32,6 +32,7 @@ import {
   resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
+  resolveShowProgressPercentTextForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
@@ -88,6 +89,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
           reasoningPlacement,
           reasoningDwell,
           inlineCorrectionEnabled,
+          showProgressPercentText,
         ] = await Promise.all([
           resolvePresentationModeForVersion(vid),
           resolveAnswerPanelScopeForVersion(vid),
@@ -96,6 +98,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
           resolveReasoningPlacementForVersion(vid),
           resolveReasoningDwellForVersion(vid),
           resolveInlineCorrectionForVersion(vid),
+          resolveShowProgressPercentTextForVersion(vid),
         ]);
         return {
           presentationMode,
@@ -106,6 +109,7 @@ export default async function SessionViewerPage({ params }: PageProps) {
           reasoningDwellMs: reasoningDwell.dwellMs,
           reasoningPerItemMs: reasoningDwell.perItemMs,
           inlineCorrectionEnabled,
+          showProgressPercentText,
         };
       })()
     : null;

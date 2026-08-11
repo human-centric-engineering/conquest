@@ -1025,3 +1025,57 @@ describe('runDataSlotTurn — deepen a volunteered tangent', () => {
     expect(pool).not.toContain('d_be');
   });
 });
+
+// ─── Completeness milestones ──────────────────────────────────────────────────
+//
+// Regression guard: milestones were originally wired into `runTurn` only, so they silently never
+// fired on THIS pipeline — which is the one every version with data slots takes, i.e. in practice
+// the whole feature was a no-op. Both pipelines now delegate to the same `resolveMilestoneCrossing`.
+
+describe('runDataSlotTurn — completeness milestones (F-progress)', () => {
+  /** 4 questions, 2 answered → data-slot coverage 0.5 (50%). */
+  const halfway = (config: Partial<TurnState['config']> = {}) =>
+    dsState({
+      userMessage: 'an answer',
+      questions: [
+        q({ id: 'a', key: 'a' }),
+        q({ id: 'b', key: 'b' }),
+        q({ id: 'c', key: 'c' }),
+        q({ id: 'd', key: 'd' }),
+      ],
+      answered: [
+        { questionId: 'a', confidence: 1 },
+        { questionId: 'b', confidence: 1 },
+      ],
+      dataSlots: [ds({ id: 'd1', theme: 'work', key: 'k1' })],
+      config: { milestoneBannerThresholds: [25, 50, 75], ...config },
+    });
+
+  it('fires the milestone banner on the data-slot pipeline too', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(halfway(), invokers);
+
+    const milestones = result.events.filter(
+      (e): e is Extract<typeof e, { type: 'warning' }> =>
+        e.type === 'warning' && e.code === 'milestone'
+    );
+    expect(milestones.map((e) => e.message)).toEqual(["You're 50% of the way through."]);
+    expect(result.sideEffects.raisedMilestones).toEqual([25, 50]);
+  });
+
+  it('respects the session ledger, so a resumed data-slot session does not repeat a banner', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn({ ...halfway(), raisedMilestones: [25, 50] }, invokers);
+
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
+
+  it('fires nothing when the version turned milestone banners off', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(halfway({ milestoneBannerEnabled: false }), invokers);
+
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
+});

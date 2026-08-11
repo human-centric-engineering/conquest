@@ -818,8 +818,12 @@ export function ConfigEditor({
     setMilestoneThresholdError(null);
   };
 
-  const removeMilestoneThreshold = (value: number) =>
+  const removeMilestoneThreshold = (value: number) => {
     setMilestoneBannerThresholds((prev) => prev.filter((t) => t !== value));
+    // Clear any stale add-error: the most likely one is "at most N thresholds", which removing a
+    // chip has just resolved — leaving it on screen would read as still-blocked.
+    setMilestoneThresholdError(null);
+  };
 
   // Live conflict detection over the CURRENT editor state — recomputed as the admin edits, so a
   // contradictory combination (e.g. profile fields on an anonymous version) is flagged inline and in

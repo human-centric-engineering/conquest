@@ -324,15 +324,28 @@ experience** (the percent text) and its own **Progress milestones** group (the b
 - `milestoneBannerEnabled` + `milestoneBannerThresholds` (`number[]`, 1–99 each, default
   `[25, 50, 75, 90]`, admin add/remove up to `MAX_MILESTONE_THRESHOLDS` (12), unique, sorted
   ascending on read) — when the respondent's graded `displayCoverage` (the same figure the
-  progress bar shows) crosses a configured threshold, the orchestrator (`orchestrator.ts`, right
-  after `assessCompletion`) emits a `warning` event with `code: 'milestone'` and a quiet "You're
-  N% of the way through." banner renders inline in the chat via `TurnNotices` → `MilestoneNotice`
-  (mirrors the `support`/`seriousness`/`contradiction` notice pattern).
+  progress bar shows) crosses a configured threshold, a `warning` event with `code: 'milestone'`
+  is emitted and a quiet "You're N% of the way through." banner renders inline in the chat via
+  `TurnNotices` → `MilestoneNotice` (mirrors the `support`/`seriousness`/`contradiction` pattern).
+
+  The decision itself is the pure `resolveMilestoneCrossing`
+  (`lib/app/questionnaire/completion/milestones.ts`), called from **both** turn pipelines —
+  `runTurn` _and_ `runDataSlotTurn`. That sharing is load-bearing, not tidiness: any version with
+  data slots takes the data-slot pipeline, so logic living only in `runTurn` makes the feature a
+  silent no-op for most real questionnaires.
+
+  **At most one banner per turn.** A turn can clear several thresholds at once (a rich answer
+  filling three slots; or a short questionnaire where one answer is worth 50%), so only the
+  _highest_ crossed threshold is announced — stacking three banners under one reply reads as a
+  glitch. Every threshold jumped over is still banked in the ledger, so a skipped one can never
+  fire later and announce progress the respondent passed long ago.
 
   Fires **once per threshold per session**: `AppQuestionnaireSession.raisedMilestones` (`Json`,
   `number[]`, default `[]`) is a ledger checked before firing — a threshold already in it never
-  re-fires, even if `displayCoverage` later dips (e.g. a contradiction resolution invalidates an
-  answer). Same shape and wiring as the contradiction "don't nag" ledger
+  re-fires. A ledger rather than a diff against a previous coverage figure precisely because
+  coverage is **not monotonic**: a contradiction resolution can invalidate an answer and pull the
+  number back down, and nothing should re-announce on the way back up. Same shape and wiring as
+  the contradiction "don't nag" ledger
   (`raisedContradictions`): loaded in `buildTurnContext`, written back via `persistTurn` →
   `prisma.appQuestionnaireSession.update` alongside `pendingContradiction`/`raisedContradictions`
   in one call, and the milestone `warning` persists on `AppQuestionnaireTurn.warnings` for replay

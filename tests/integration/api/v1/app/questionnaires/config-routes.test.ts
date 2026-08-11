@@ -245,6 +245,26 @@ describe('upsert + response', () => {
     expect((await res.json()).data.milestoneBannerThresholds).toEqual(milestoneBannerThresholds);
   });
 
+  it('sanitises a malformed stored thresholds column on the way back out', async () => {
+    // The column is Json, so a hand-edited / drifted row can hold anything. The read view sorts,
+    // dedupes and range-filters rather than handing junk to the editor.
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ milestoneBannerThresholds: [90, 25, 25, 0, 100, 50.5, 'fifty', null, 50] })
+    );
+
+    const res = await configPATCH(req({ milestoneBannerEnabled: true }), ctx(PARAMS));
+    expect((await res.json()).data.milestoneBannerThresholds).toEqual([25, 50, 90]);
+  });
+
+  it('falls back to the defaults when the stored thresholds column is not an array', async () => {
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ milestoneBannerThresholds: 'nonsense' })
+    );
+
+    const res = await configPATCH(req({ milestoneBannerEnabled: true }), ctx(PARAMS));
+    expect((await res.json()).data.milestoneBannerThresholds).toEqual([25, 50, 75, 90]);
+  });
+
   it('writes showProgressPercentText and milestoneBannerEnabled as plain scalars (no JSON wrapping)', async () => {
     prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
       configRow({ showProgressPercentText: false, milestoneBannerEnabled: false })

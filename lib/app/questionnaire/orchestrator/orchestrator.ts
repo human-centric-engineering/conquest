@@ -24,6 +24,10 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
 import {
+  milestoneMessage,
+  resolveMilestoneCrossing,
+} from '@/lib/app/questionnaire/completion/milestones';
+import {
   runContradictionPhase,
   questionProbeLabels,
   MIN_CONTRADICTION_ANSWERS as MIN_CONTRADICTION_ANSWERS_INTERNAL,
@@ -348,28 +352,28 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     sessionId: effective.sessionId,
   });
 
-  // 5b. Completeness milestones: a quiet inline banner the first time the respondent crosses each
-  // configured threshold this session. Ledger-checked (like the contradiction "don't nag" ledger)
-  // rather than delta-checked against a "previous" coverage figure — simpler, and never re-fires a
-  // threshold even if displayCoverage later dips (e.g. an answer is invalidated by a contradiction
-  // resolution). `events` gets one warning per newly crossed threshold, oldest-first.
-  let raisedMilestones: number[] | undefined;
-  if (state.config.milestoneBannerEnabled) {
-    const pctNow = Math.round(assessment.displayCoverage * 100);
-    const ledger = state.raisedMilestones ?? [];
-    const crossed = state.config.milestoneBannerThresholds
-      .filter((t) => pctNow >= t && !ledger.includes(t))
-      .sort((a, b) => a - b);
-    if (crossed.length > 0) {
-      raisedMilestones = [...ledger, ...crossed].sort((a, b) => a - b);
-      for (const t of crossed) {
-        events.push({
-          type: 'warning',
-          code: 'milestone',
-          message: `You're ${t}% of the way through.`,
-        });
-      }
-    }
+  // 5b. Completeness milestones: a quiet inline banner the first time the respondent crosses a
+  // configured threshold. Shared with the data-slot pipeline so both agree on when one fires —
+  // see `resolveMilestoneCrossing` for why it announces only the highest crossed threshold and
+  // banks the rest.
+  // Skipped on a probe turn: `effective` already merged this turn's intents, but `suppressWrites`
+  // means none of them are persisted — the conflicting answer is re-asked instead. Crossing a
+  // threshold on an answer that is about to be rolled back would bank it *permanently* (the ledger
+  // never re-fires), so the respondent would silently lose that milestone.
+  const milestone = contradiction.suppressWrites
+    ? { announce: null, raisedMilestones: undefined }
+    : resolveMilestoneCrossing(
+        state.config,
+        assessment.displayCoverage,
+        state.raisedMilestones,
+        effective.questions.length
+      );
+  if (milestone.announce !== null) {
+    events.push({
+      type: 'warning',
+      code: 'milestone',
+      message: milestoneMessage(milestone.announce),
+    });
   }
 
   // Soft cost cap (F6.3): bias toward offering completion early so the session winds down
@@ -469,7 +473,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       ...(contradiction.raisedContradictions !== undefined
         ? { raisedContradictions: contradiction.raisedContradictions }
         : {}),
-      ...(raisedMilestones !== undefined ? { raisedMilestones } : {}),
+      ...(milestone.raisedMilestones !== undefined
+        ? { raisedMilestones: milestone.raisedMilestones }
+        : {}),
     },
     events,
     toolCalls,

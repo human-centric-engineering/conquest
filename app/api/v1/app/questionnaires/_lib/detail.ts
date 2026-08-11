@@ -233,7 +233,10 @@ function asProfileFields(value: Prisma.JsonValue): ProfileFieldConfig[] {
  * {@link DEFAULT_MILESTONE_THRESHOLDS} when the column isn't an array at all.
  */
 function asMilestoneThresholds(value: Prisma.JsonValue): number[] {
-  if (!Array.isArray(value)) return DEFAULT_MILESTONE_THRESHOLDS;
+  // A COPY, never the shared module-level default: this value is handed to the config editor as
+  // mutable React state, and an in-place sort/splice there would corrupt the default for every
+  // other version in the process.
+  if (!Array.isArray(value)) return [...DEFAULT_MILESTONE_THRESHOLDS];
   const nums = value.filter(
     (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 99
   );

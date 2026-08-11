@@ -54,6 +54,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveAnswerPanelScopeForVersion: vi.fn(),
   resolveAttachmentsEnabledForVersion: vi.fn(),
   resolveInlineCorrectionForVersion: vi.fn(),
+  resolveShowProgressPercentTextForVersion: vi.fn(),
   resolvePresentationModeForVersion: vi.fn(),
   resolveReasoningDwellForVersion: vi.fn(),
   resolveReasoningPlacementForVersion: vi.fn(),
@@ -75,6 +76,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     reasoningDwellMs,
     reasoningPerItemMs,
     inlineCorrectionEnabled,
+    showProgressPercentText,
   }: {
     sessionId: string;
     accessToken?: string;
@@ -88,6 +90,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
     reasoningDwellMs?: number;
     reasoningPerItemMs?: number;
     inlineCorrectionEnabled?: boolean;
+    showProgressPercentText?: boolean;
   }) => (
     <div
       data-testid="session-workspace"
@@ -103,6 +106,7 @@ vi.mock('@/components/app/questionnaire/session-workspace', () => ({
       data-reasoning-dwell={String(reasoningDwellMs ?? '')}
       data-reasoning-per-item={String(reasoningPerItemMs ?? '')}
       data-inline-correction={String(inlineCorrectionEnabled ?? false)}
+      data-progress-percent-text={String(showProgressPercentText ?? true)}
     />
   ),
 }));
@@ -126,6 +130,7 @@ import {
   resolveAnswerPanelScopeForVersion,
   resolveAttachmentsEnabledForVersion,
   resolveInlineCorrectionForVersion,
+  resolveShowProgressPercentTextForVersion,
   resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
@@ -188,6 +193,7 @@ beforeEach(() => {
     perItemMs: 750,
   });
   vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
+  vi.mocked(resolveShowProgressPercentTextForVersion).mockResolvedValue(false);
 });
 
 describe('SessionViewerPage', () => {
@@ -247,6 +253,9 @@ describe('SessionViewerPage', () => {
       expect(workspace).toHaveAttribute('data-reasoning-dwell', '2500');
       expect(workspace).toHaveAttribute('data-reasoning-per-item', '750');
       expect(workspace).toHaveAttribute('data-inline-correction', 'true');
+      // The continued preview must show the SAME surface as /q/<vid>?preview=1 — an admin who
+      // turned the percent text off must not see it reappear when they continue from here.
+      expect(workspace).toHaveAttribute('data-progress-percent-text', 'false');
     });
 
     it('resolves the surface config against the route version, not the questionnaire', async () => {

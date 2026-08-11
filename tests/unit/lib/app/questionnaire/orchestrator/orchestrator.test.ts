@@ -426,7 +426,10 @@ describe('runTurn — completeness milestones (F-progress)', () => {
       ...over,
     });
 
-  it('fires a milestone warning + ledger entry for every threshold crossed this turn', async () => {
+  it('announces ONE banner (the highest crossed) but banks every threshold jumped this turn', async () => {
+    // A turn can clear several thresholds at once — here one answer takes coverage 0% → 50%,
+    // clearing both 25 and 50. Stacking two banners under one reply reads as a glitch, so only
+    // the highest is announced; the skipped one is still banked so it can never fire later.
     const { invokers } = stubInvokers();
     const result = await runTurn(halfwayState(), invokers);
 
@@ -434,10 +437,7 @@ describe('runTurn — completeness milestones (F-progress)', () => {
       (e): e is Extract<typeof e, { type: 'warning' }> =>
         e.type === 'warning' && e.code === 'milestone'
     );
-    expect(milestoneEvents.map((e) => e.message)).toEqual([
-      "You're 25% of the way through.",
-      "You're 50% of the way through.",
-    ]);
+    expect(milestoneEvents.map((e) => e.message)).toEqual(["You're 50% of the way through."]);
     expect(result.sideEffects.raisedMilestones).toEqual([25, 50]);
   });
 
