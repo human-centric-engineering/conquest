@@ -23,22 +23,19 @@ import userEvent from '@testing-library/user-event';
 import { AgentsTable } from '@/components/admin/orchestration/agents-table';
 import type { PaginationMeta } from '@/types/api';
 import { createMockFetchResponse } from '@/tests/helpers/mocks';
+import { createMockRouter } from '@/tests/types/mocks';
 import type { AiAgentListItem } from '@/types/orchestration';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  })),
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: vi.fn(() => createMockRouter()),
 
-  useSearchParams: () => ({ get: () => null }),
-}));
+    useSearchParams: () => ({ get: () => null }),
+  };
+});
 
 vi.mock('@/lib/api/client', () => ({
   apiClient: {
@@ -973,14 +970,7 @@ describe('AgentsTable', () => {
       // Arrange
       const { useRouter } = await import('next/navigation');
       const push = vi.fn();
-      vi.mocked(useRouter).mockReturnValue({
-        push,
-        replace: vi.fn(),
-        refresh: vi.fn(),
-        back: vi.fn(),
-        forward: vi.fn(),
-        prefetch: vi.fn(),
-      });
+      vi.mocked(useRouter).mockReturnValue(createMockRouter({ push }));
 
       const user = userEvent.setup();
       render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
@@ -1170,14 +1160,7 @@ describe('AgentsTable', () => {
       // Arrange
       const { useRouter } = await import('next/navigation');
       const push = vi.fn();
-      vi.mocked(useRouter).mockReturnValue({
-        push,
-        replace: vi.fn(),
-        refresh: vi.fn(),
-        back: vi.fn(),
-        forward: vi.fn(),
-        prefetch: vi.fn(),
-      });
+      vi.mocked(useRouter).mockReturnValue(createMockRouter({ push }));
 
       const user = userEvent.setup();
       render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
