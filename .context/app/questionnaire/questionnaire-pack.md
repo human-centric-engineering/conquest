@@ -4,15 +4,16 @@ The admin can download a **branded, shareable artifact** covering everything abo
 questionnaire is set up — title/version/goals, the question structure, the semantic data slots
 (with their linked questions), the definitions/glossary, a curated summary of the experience-setup
 config, and (opt-in) the latest F5.1–F5.3 design-evaluation run's judge findings — as a PDF, CSV, or
-Markdown file. The admin picks which of those six sections to include from a dialog on the
-Structure tab; five are ticked by default, "Evaluation findings" is not (see below).
+Markdown file. The admin picks which of those six sections to include from a dialog opened by the
+**Questionnaire pack** button in the workspace header; five are ticked by default, "Evaluation
+findings" is not (see below).
 
 Distinct from the brand-free [blank instrument export](./admin-ui.md) (F14.9): the instrument is
 the design-time reviewer copy of just the questions, deliberately unbranded. The Pack is the
 external/showcase counterpart — it carries the ConQuest wordmark, tagline, website, and a closing
 "About ConQuest" blurb, and additionally covers data slots (which the instrument doesn't) and the
-experience-setup summary. Both live in the same "Export / download" menu; neither replaces the
-other.
+experience-setup summary. The instrument lives only in the Structure tab's "Export / download"
+menu; the Pack is additionally promoted to a header button (below). Neither replaces the other.
 
 ## What's in the document
 
@@ -82,15 +83,25 @@ Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 | PDF render helper          | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf.tsx`              |
 | Route                      | `app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/route.ts`                         |
 | Dialog (UI)                | `components/admin/questionnaires/pack-export-dialog.tsx`                                  |
-| Menu entry point           | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")           |
+| Header button (primary)    | `components/admin/questionnaires/workspace/questionnaire-pack-button.tsx`                 |
+| Menu entry point (2nd)     | `components/admin/questionnaires/definition-export-menu.tsx` ("Download pack…")           |
 | Latest evaluation run load | `app/api/v1/app/questionnaires/_lib/evaluation-run-routes.ts` (`loadLatestEvaluationRun`) |
 
 ## UI surface
 
-The Structure tab's "Export / download" menu (`DefinitionExportMenu`) gets a third group,
-"Questionnaire pack" → **Download pack…**, opening `PackExportDialog`: six checkboxes (five
-default-checked, "Evaluation findings" default-unchecked) and a format select (PDF / CSV /
-Markdown). Since the download URL depends on that dialog state (unlike the menu's static
+Two entry points, both opening the same `PackExportDialog`:
+
+- **Workspace header** (primary) — `QuestionnairePackButton`, a `secondary`-variant button beside
+  Preview and Duplicate in the shared `/v/[vid]` layout header, so the Pack is reachable from every
+  workspace tab rather than only from Structure. Rendered only when the version graph exists (the
+  Pack renders the structure), the same gate Preview uses. `secondary` rather than the neighbours'
+  `outline` gives it weight without claiming the primary slot that per-tab CTAs (Edit, Launch) use.
+- **Structure tab's "Export / download" menu** (secondary) — `DefinitionExportMenu`'s third group,
+  "Questionnaire pack" → **Download pack…**, kept for admins who look for downloads under an
+  export menu.
+
+The dialog offers six checkboxes (five default-checked, "Evaluation findings" default-unchecked)
+and a format select (PDF / CSV / Markdown). Since the download URL depends on that dialog state (unlike the menu's static
 `<a download>` links), Download sets `window.location.href` directly rather than using a plain
 anchor — same-origin authenticated GET, `Content-Disposition: attachment` forces the download
 without navigating away.
