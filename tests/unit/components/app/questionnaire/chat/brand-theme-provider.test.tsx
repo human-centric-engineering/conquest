@@ -172,6 +172,30 @@ describe('BrandThemeProvider', () => {
       expect(band.className).toContain('border-b');
       expect(band.className).not.toContain('rounded-xl');
     });
+
+    it('stacks the mark above the title below 420px, and restores the one-line layout past it', () => {
+      // Below the stacking breakpoint the mark (logo/wordmark) and a real title no longer fit on
+      // one line without crushing the title to a sliver — the band drops to two rows instead.
+      const { container } = render(
+        <BrandThemeProvider
+          theme={{ ...BASE, logoUrl: 'https://acme.example/logo.png' }}
+          header={openHeader()}
+        >
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const band = container.querySelector('header') as HTMLElement;
+      expect(band.className).toContain('flex-col');
+      expect(band.className).toContain('items-center');
+      expect(band.className).toContain('min-[420px]:flex-row');
+
+      const titleBlock = screen.getByText('Customer Experience Survey')
+        .parentElement as HTMLElement;
+      // Centred while stacked; only anchors opposite the mark once there's room for one line.
+      expect(titleBlock.className).toContain('items-center');
+      expect(titleBlock.className).toContain('text-center');
+      expect(titleBlock.className).toContain('min-[420px]:items-end');
+    });
   });
 
   describe('custom banner (full-bleed band replacement)', () => {
@@ -261,6 +285,22 @@ describe('BrandThemeProvider', () => {
       expect(screen.getByText(/^Open/)).toBeInTheDocument();
     });
 
+    it('stacks the anonymity badge under the title strip below 420px', () => {
+      // The badge is fixed-width and sits beside the title on the same line; below the stacking
+      // breakpoint that squeezes a real title, so the strip drops the badge to its own row.
+      const { container } = render(
+        <BrandThemeProvider theme={BANNERED} header={openHeader()} anonymous>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const note = screen.getByText(/responses are anonymous/i);
+      const strip = note.parentElement as HTMLElement;
+      expect(strip.className).toContain('flex-col');
+      expect(strip.className).toContain('items-center');
+      expect(strip.className).toContain('min-[420px]:flex-row');
+      expect(container.contains(strip)).toBe(true);
+    });
+
     it('names the banner after the questionnaire when a title is present', () => {
       render(
         <BrandThemeProvider theme={BANNERED} header={{ title: 'Staff Survey', round: null }}>
@@ -322,7 +362,9 @@ describe('BrandThemeProvider', () => {
         </BrandThemeProvider>
       );
       expect(screen.getByText('Standalone Survey')).toBeInTheDocument();
-      expect(container.querySelector('.items-end')).toBeInTheDocument();
+      // `items-end` only applies past the small-screen stacking breakpoint now — assert by
+      // substring rather than an exact class token.
+      expect(container.querySelector('[class*="items-end"]')).toBeInTheDocument();
     });
 
     it('yields to a client logo — the wordmark never competes with real branding', () => {
@@ -351,11 +393,14 @@ describe('BrandThemeProvider', () => {
         </BrandThemeProvider>
       );
       const note = screen.getByText(/responses are anonymous/i);
-      // Inside the band, not the conversation below it, and in the title's own right-aligned column.
+      // Inside the band, not the conversation below it, and in the title's own right-aligned column
+      // (`items-end` only applies past the small-screen stacking breakpoint — substring match).
       const band = container.querySelector('header') as HTMLElement;
       expect(band).toContainElement(note);
-      expect(note.closest('.items-end')).toBeInTheDocument();
-      expect(note.closest('.items-end')).toContainElement(screen.getByText('Standalone Survey'));
+      expect(note.closest('[class*="items-end"]')).toBeInTheDocument();
+      expect(note.closest('[class*="items-end"]')).toContainElement(
+        screen.getByText('Standalone Survey')
+      );
     });
 
     it('stays off the band for a non-anonymous version', () => {

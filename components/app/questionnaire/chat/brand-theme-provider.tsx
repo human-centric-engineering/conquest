@@ -87,12 +87,16 @@ function LogoMark({ hasBackdrop }: { hasBackdrop: boolean }) {
  * opacity as the round/schedule meta line, so it reads correctly on a client surface, on the
  * ConQuest band tone and on the neutral canvas without knowing which it sits on.
  */
-function AnonymityNote({ align }: { align: 'start' | 'end' }) {
+function AnonymityNote({ align }: { align: 'center-then-end' | 'center-then-start' }) {
   return (
     <p
       className={cn(
-        'flex max-w-full items-center gap-1.5 text-xs font-medium opacity-75',
-        align === 'end' ? 'justify-end' : 'justify-start'
+        // Centred while its row is its own stacked line on a narrow band (below 420px, see
+        // the header container), flipping to the opposite/leading end once there's room to
+        // sit beside the mark on one line.
+        'flex max-w-full items-center justify-center gap-1.5 text-xs font-medium opacity-75',
+        align === 'center-then-end' && 'min-[420px]:justify-end',
+        align === 'center-then-start' && 'min-[420px]:justify-start'
       )}
       title="Your responses are not linked to an account."
     >
@@ -167,11 +171,20 @@ export function BrandThemeProvider({
             style={{ backgroundImage: 'var(--app-banner-url)' }}
           />
           {(title || anonymous) && (
-            <div className="flex shrink-0 items-center gap-4 border-b px-4 py-2.5 sm:px-6">
-              {/* The banner strip is left-led, so the anonymity note anchors the opposite end of the
-                  same line rather than costing a second one. */}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-base leading-tight font-semibold sm:text-lg">{title}</p>
+            <div
+              // Same stacking rule as the logo/wordmark band below: past a point the fixed-width
+              // anonymity badge and a real title no longer fit on one line without crushing the
+              // title, so the badge drops to its own row underneath instead of one costing width.
+              // Centred while stacked (`items-center`) — the leading/two-item layout only makes
+              // sense once there's room for one line.
+              className="flex w-full shrink-0 flex-col items-center gap-1.5 border-b px-4 py-2.5 min-[420px]:flex-row min-[420px]:gap-4 sm:px-6"
+            >
+              {/* The banner strip is left-led once there's room for one line (see the wrapper
+                  above), so the anonymity note anchors the opposite end of that line. */}
+              <div className="w-full min-w-0 flex-1 min-[420px]:w-auto">
+                <p className="max-w-full truncate text-center text-base leading-tight font-semibold min-[420px]:text-left sm:text-lg">
+                  {title}
+                </p>
                 {(round?.name || schedule) && (
                   <div className="mt-0.5 hidden items-center gap-2 text-xs font-medium opacity-75 sm:flex">
                     {round?.name && <span className="min-w-0 truncate">{round.name}</span>}
@@ -200,7 +213,7 @@ export function BrandThemeProvider({
                   </div>
                 )}
               </div>
-              {anonymous && <AnonymityNote align="end" />}
+              {anonymous && <AnonymityNote align="center-then-end" />}
             </div>
           )}
         </>
@@ -208,7 +221,13 @@ export function BrandThemeProvider({
         showBand && (
           <header
             className={cn(
-              'flex shrink-0 items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6',
+              // Below 420px there's no room for the mark and the title on one line without
+              // crushing the title to a sliver ("Workplac…") — stack them instead: mark on
+              // its own row, title block on the next, both centred (`items-center` is cross-axis,
+              // so it centres horizontally while stacked and — unchanged — vertically once the
+              // header is a row). `min-[420px]:` restores the one-line two-anchor layout as soon
+              // as there's width to spare.
+              'flex shrink-0 flex-col items-center gap-2 px-4 py-3 min-[420px]:flex-row min-[420px]:gap-4 sm:gap-6 sm:px-6',
               // Matches the conversation card's own `rounded-xl` below it, so the band reads as
               // part of the same composition rather than a full-bleed strip laid over it. Only
               // when the band actually paints something — rounding a transparent box with a
@@ -242,12 +261,18 @@ export function BrandThemeProvider({
 
             {/* Two-anchor header. With a logo, the title anchors hard RIGHT opposite it — the empty
               middle is deliberate negative space, not waste. With no logo the title leads from the
-              LEFT instead. `flex-1 min-w-0` lets a long title truncate cleanly against the logo. */}
+              LEFT instead. `flex-1 min-w-0` lets a long title truncate cleanly against the logo.
+              Below 420px the header stacks (above) and this block is centred — `w-full` so it
+              doesn't shrink to its content's width under the row's now-centred cross-axis, and
+              `min-[420px]:w-auto` hands sizing back to `flex-1` once the header is a row again,
+              exactly as before this block ever had to stack. */}
             {(title || round?.name || schedule || anonymous) && (
               <div
                 className={cn(
-                  'flex min-w-0 flex-1 flex-col gap-0.5',
-                  hasMark ? 'items-end text-right' : 'items-start text-left'
+                  'flex w-full min-w-0 flex-1 flex-col items-center gap-0.5 text-center min-[420px]:w-auto',
+                  hasMark
+                    ? 'min-[420px]:items-end min-[420px]:text-right'
+                    : 'min-[420px]:items-start min-[420px]:text-left'
                 )}
               >
                 {title && (
@@ -298,7 +323,9 @@ export function BrandThemeProvider({
 
                 {/* The anonymity reassurance sits under the title, aligned with it — the band's
                     negative space absorbs it, so the lifecycle strip below keeps its whole row. */}
-                {anonymous && <AnonymityNote align={hasMark ? 'end' : 'start'} />}
+                {anonymous && (
+                  <AnonymityNote align={hasMark ? 'center-then-end' : 'center-then-start'} />
+                )}
               </div>
             )}
           </header>
