@@ -21,6 +21,7 @@ import {
   ANSWER_SLOT_PANEL_SCOPES,
   CAPTURE_MODES,
   CONTRADICTION_MODES,
+  DEFAULT_MILESTONE_THRESHOLDS,
   DEFAULT_QUESTIONNAIRE_CONFIG,
   ACCESS_MODES,
   FIELD_PROVENANCES,
@@ -126,6 +127,9 @@ export const CONFIG_SELECT = {
   presentationMode: true,
   inlineCorrectionEnabled: true,
   sessionResumeEnabled: true,
+  showProgressPercentText: true,
+  milestoneBannerEnabled: true,
+  milestoneBannerThresholds: true,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: true,
   reasoningStreamDwellMs: true,
@@ -175,6 +179,9 @@ type ConfigRow = {
   presentationMode: string;
   inlineCorrectionEnabled: boolean;
   sessionResumeEnabled: boolean;
+  showProgressPercentText: boolean;
+  milestoneBannerEnabled: boolean;
+  milestoneBannerThresholds: Prisma.JsonValue;
   reasoningStreamEnabled: boolean;
   reasoningStreamPlacement: string;
   reasoningStreamDwellMs: number;
@@ -218,6 +225,22 @@ function asAnswerFitMode(value: string): AnswerFitMode {
  */
 function asProfileFields(value: Prisma.JsonValue): ProfileFieldConfig[] {
   return parseProfileFields(value);
+}
+
+/**
+ * Parse a stored `milestoneBannerThresholds` Json column back to a sorted, deduped number list —
+ * defensive against a malformed/hand-edited row rather than a blind cast. Falls back to
+ * {@link DEFAULT_MILESTONE_THRESHOLDS} when the column isn't an array at all.
+ */
+function asMilestoneThresholds(value: Prisma.JsonValue): number[] {
+  // A COPY, never the shared module-level default: this value is handed to the config editor as
+  // mutable React state, and an in-place sort/splice there would corrupt the default for every
+  // other version in the process.
+  if (!Array.isArray(value)) return [...DEFAULT_MILESTONE_THRESHOLDS];
+  const nums = value.filter(
+    (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 99
+  );
+  return [...new Set(nums)].sort((a, b) => a - b);
 }
 
 /** Narrow a stored `captureMode` to the enum (default when unknown). */
@@ -298,6 +321,9 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     presentationMode: asPresentationMode(row.presentationMode),
     inlineCorrectionEnabled: row.inlineCorrectionEnabled,
     sessionResumeEnabled: row.sessionResumeEnabled,
+    showProgressPercentText: row.showProgressPercentText,
+    milestoneBannerEnabled: row.milestoneBannerEnabled,
+    milestoneBannerThresholds: asMilestoneThresholds(row.milestoneBannerThresholds),
     reasoningStreamEnabled: row.reasoningStreamEnabled,
     reasoningStreamPlacement: asReasoningPlacement(row.reasoningStreamPlacement),
     reasoningStreamDwellMs: row.reasoningStreamDwellMs,

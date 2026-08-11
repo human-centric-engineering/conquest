@@ -17,6 +17,12 @@
  * The analysis appears here only if the author turned it on AND chose to put it on people's own
  * screens; the default is the shared screen alone, because a room looking at one thing together is
  * a different meeting from forty people looking down at phones.
+ *
+ * Each breakout is read for its OWN configuration — affordances, presentation, brand, vocabulary —
+ * via {@link fetchSurfaceConfig}, because a meeting's steps (and the rooms inside one step) may each
+ * run a different questionnaire, and this surface never re-renders on the server to pick that up.
+ * See `lib/app/questionnaire/session/respondent-surface.ts` for why the read is keyed on the session
+ * rather than carried in the join, poll, or room-choice payloads.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,6 +31,9 @@ import { Loader2 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
 import { SessionWorkspace } from '@/components/app/questionnaire/session-workspace';
+import { BrandThemeProvider } from '@/components/app/questionnaire/chat/brand-theme-provider';
+import { fetchSurfaceConfig } from '@/lib/app/questionnaire/session/boot-fetchers';
+import type { RespondentSurfaceConfig } from '@/lib/app/questionnaire/session/respondent-surface';
 import { MeetingInsightPanel } from '@/components/app/questionnaire/experiences/meeting-insight-panel';
 import { BreakoutRoomPicker } from '@/components/app/questionnaire/experiences/breakout-room-picker';
 import {
@@ -80,6 +89,13 @@ export function MeetingParticipantBoot({
   const [live, setLive] = useState<LiveResponse | null>(null);
   const [rooms, setRooms] = useState<BreakoutRoomView[]>([]);
   const [now, setNow] = useState<Date | null>(null);
+  // The breakout's own per-version config, keyed by the session it was read for. Held as a pair
+  // rather than a bare object so a stale read from the PREVIOUS breakout can never be painted onto
+  // the next one: the render compares `forSessionId` against the live session before using it.
+  const [surface, setSurface] = useState<{
+    forSessionId: string;
+    config: RespondentSurfaceConfig | null;
+  } | null>(null);
   // Dedup the join across React 19 StrictMode's double-invoke, which would otherwise put two
   // participants in the room and make the facilitator's count wrong.
   const joined = useRef(false);
@@ -171,6 +187,31 @@ export function MeetingParticipantBoot({
     };
   }, [runId, poll]);
 
+  // Read the breakout's own configuration whenever the session changes.
+  //
+  // This is the one hook that covers all three moments a session id arrives on this surface — the
+  // join response, the participant poll when a breakout starts, and choosing a breakout room —
+  // which is exactly why the config is keyed on the SESSION and not carried in any of those three
+  // payloads. Each breakout may run a different questionnaire, and a room may run a different one
+  // again from its step, so this genuinely re-reads per breakout rather than once per meeting.
+  //
+  // Fails soft to `null`, which renders as the workspace's own prop defaults — the behaviour this
+  // surface had before the read existed. A participant is never blocked from answering by it.
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    void (async () => {
+      const config = await fetchSurfaceConfig(sessionId, sessionToken ?? '');
+      // The breakout may have moved on while this was in flight (a short round closing, the
+      // facilitator starting the next one). Dropping a late read is correct: the effect for the
+      // NEW session is already running and will paint the right thing.
+      if (!cancelled) setSurface({ forSessionId: sessionId, config });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, sessionToken]);
+
   if (boot.phase === 'joining') {
     return (
       <Centered>
@@ -212,6 +253,16 @@ export function MeetingParticipantBoot({
 
   const answering = Boolean(session && participantWindow?.canSubmit);
 
+  // The config, but only once it has been read FOR the session on screen. A bundle resolved for the
+  // previous breakout must never paint the next one — the two can be different questionnaires.
+  const surfaceReady = Boolean(session && surface?.forSessionId === session.id);
+  const activeSurface = surfaceReady ? (surface?.config ?? null) : null;
+  // The brand deliberately OUTLIVES the breakout it was read for: it belongs to the meeting, and
+  // letting the chrome fall back to neutral in the gaps between rounds would read as the
+  // participant having been dropped somewhere else. The band's HEADER is not treated this way —
+  // it names the live breakout's questionnaire, which stops being true the moment that ends.
+  const brand = (activeSurface ?? surface?.config)?.theme ?? null;
+
   // A breakout with rooms, running, and this participant has not picked one yet. `canChooseRoom`
   // excludes the grace window: arriving at a room with seconds left, to a questionnaire not yet
   // started, is worse than being told you missed it.
@@ -239,7 +290,7 @@ export function MeetingParticipantBoot({
     );
   }
 
-  return (
+  const body = (
     <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl flex-col gap-3 px-4 py-4">
       {/* The room's clock, above whatever they are doing. During grace the instruction changes —
           "30 seconds to finish and send" is a different thing from "30 seconds left". */}
@@ -261,13 +312,42 @@ export function MeetingParticipantBoot({
       {answering && session ? (
         // `key` per session so a new breakout mounts a fresh workspace rather than reusing the
         // previous breakout's stream and transcript.
+        //
+        // The workspace waits for the breakout's own config rather than mounting on defaults and
+        // reflowing when it lands: `presentationMode` and `answerPanelScope` decide the LAYOUT, so
+        // painting first would show the wrong surface and then rearrange it under someone who is
+        // already reading — and in a breakout they are reading against a clock.
+        //
+        // What is deliberately NOT threaded, and is not an oversight: the pre-chat gates (intro
+        // splash, persona picker, profile capture) and cross-device resume. Each is a screen the
+        // respondent must move THROUGH before the first question streams, which is right for a
+        // questionnaire someone opens alone and wrong for a six-minute facilitated round that has
+        // already been introduced out loud by a human.
         <div className="min-h-0 flex-1">
-          <SessionWorkspace
-            key={session.id}
-            sessionId={session.id}
-            accessToken={session.token}
-            autoStart
-          />
+          {surfaceReady ? (
+            <SessionWorkspace
+              key={session.id}
+              sessionId={session.id}
+              accessToken={session.token}
+              autoStart
+              voiceInputEnabled={activeSurface?.voiceInputEnabled}
+              attachmentInputEnabled={activeSurface?.attachmentInputEnabled}
+              presentationMode={activeSurface?.presentationMode}
+              answerPanelScope={activeSurface?.answerPanelScope}
+              reasoningPlacement={activeSurface?.reasoningPlacement}
+              reasoningDwellMs={activeSurface?.reasoningDwellMs}
+              reasoningPerItemMs={activeSurface?.reasoningPerItemMs}
+              inlineCorrectionEnabled={activeSurface?.inlineCorrectionEnabled}
+              showProgressPercentText={activeSurface?.showProgressPercentText}
+              glossary={activeSurface?.glossary}
+              glossaryAppendix={activeSurface?.glossaryAppendix}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
+              <span className="sr-only">Opening this round</span>
+            </div>
+          )}
         </div>
       ) : (
         <Centered>
@@ -285,6 +365,21 @@ export function MeetingParticipantBoot({
         <MeetingInsightPanel insights={live.insights} display={insightDisplay} />
       )}
     </div>
+  );
+
+  // Unbranded until the first config lands — there is nothing to brand a room WITH before a
+  // breakout has revealed which questionnaire it runs. After that the band wraps everything, so a
+  // breakout looks like the questionnaire it actually is rather than like generic chrome.
+  if (!brand) return body;
+
+  return (
+    <BrandThemeProvider
+      theme={brand}
+      header={activeSurface?.header ?? null}
+      anonymous={activeSurface?.anonymous ?? false}
+    >
+      {body}
+    </BrandThemeProvider>
   );
 }
 

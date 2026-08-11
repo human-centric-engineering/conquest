@@ -100,12 +100,13 @@ describe('resolveThemeForVersion', () => {
     // Act
     await resolveThemeForVersion('ver-001');
 
-    // Assert: the select shape reaches into the relation (a shallow select would miss it).
-    expect(mockVersionFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        select: { questionnaire: { select: { demoClientId: true } } },
-      })
-    );
+    // Assert: the select shape reaches into the relation (a shallow select would miss it). The
+    // row is the SHARED respondent-surface row, so this asserts the relation is selected, not the
+    // whole select shape — the surface's other columns are `surface-config.ts`'s business.
+    const arg = mockVersionFindUnique.mock.calls[0][0] as {
+      select: { questionnaire: { select: Record<string, boolean> } };
+    };
+    expect(arg.select.questionnaire.select).toMatchObject({ demoClientId: true });
   });
 
   it('calls resolveTheme(null) when the version has no demoClientId', async () => {

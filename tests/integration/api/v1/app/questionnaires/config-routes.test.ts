@@ -230,6 +230,56 @@ describe('upsert + response', () => {
     expect(call.update.profileFields).toEqual([{ ...fields[0], validation: 'deterministic' }]);
   });
 
+  it('writes milestoneBannerThresholds through the JSON boundary and narrows it back', async () => {
+    const milestoneBannerThresholds = [25, 50, 75, 90];
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ milestoneBannerThresholds })
+    );
+
+    const res = await configPATCH(req({ milestoneBannerThresholds }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    // The JSON column is written on both create + update paths (like tone/profileFields).
+    expect(call.create.milestoneBannerThresholds).toEqual(milestoneBannerThresholds);
+    expect(call.update.milestoneBannerThresholds).toEqual(milestoneBannerThresholds);
+    expect((await res.json()).data.milestoneBannerThresholds).toEqual(milestoneBannerThresholds);
+  });
+
+  it('sanitises a malformed stored thresholds column on the way back out', async () => {
+    // The column is Json, so a hand-edited / drifted row can hold anything. The read view sorts,
+    // dedupes and range-filters rather than handing junk to the editor.
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ milestoneBannerThresholds: [90, 25, 25, 0, 100, 50.5, 'fifty', null, 50] })
+    );
+
+    const res = await configPATCH(req({ milestoneBannerEnabled: true }), ctx(PARAMS));
+    expect((await res.json()).data.milestoneBannerThresholds).toEqual([25, 50, 90]);
+  });
+
+  it('falls back to the defaults when the stored thresholds column is not an array', async () => {
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ milestoneBannerThresholds: 'nonsense' })
+    );
+
+    const res = await configPATCH(req({ milestoneBannerEnabled: true }), ctx(PARAMS));
+    expect((await res.json()).data.milestoneBannerThresholds).toEqual([25, 50, 75, 90]);
+  });
+
+  it('writes showProgressPercentText and milestoneBannerEnabled as plain scalars (no JSON wrapping)', async () => {
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(
+      configRow({ showProgressPercentText: false, milestoneBannerEnabled: false })
+    );
+
+    const res = await configPATCH(
+      req({ showProgressPercentText: false, milestoneBannerEnabled: false }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.update.showProgressPercentText).toBe(false);
+    expect(call.update.milestoneBannerEnabled).toBe(false);
+  });
+
   it('writes the tone block through the JSON boundary and narrows it back on the response', async () => {
     const tone = {
       empathy: { enabled: true, level: 5 },

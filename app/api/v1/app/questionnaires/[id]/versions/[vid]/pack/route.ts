@@ -2,15 +2,18 @@
  * Questionnaire Pack download.
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md
- *     &meta=&questions=&dataSlots=&definitions=&setup=&evaluations=
+ *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=
  *   Admin-only. Downloads a branded, shareable "pack" covering how the questionnaire is set up —
  *   title/version/goals, the question structure, the data slots (with linked questions), the
- *   definitions/glossary, a curated experience-setup summary, and (opt-in) the latest F5.1–F5.3
+ *   definitions/glossary, the experience-setup summary, and (opt-in) the latest F5.1–F5.3
  *   design-evaluation run's judge findings — as a PDF, CSV, or Markdown file. Each of the six
  *   sections can be toggled off via its query flag; all default `true` except `evaluations`, which
- *   defaults `false` (unreviewed AI critique — the admin opts in per download). Distinct from the
- *   brand-free `…/instrument` export (F14.9), which is the design-time reviewer copy of just the
- *   questions — this is the external/showcase artifact.
+ *   defaults `false` (unreviewed AI critique — the admin opts in per download). `setupTechnical`
+ *   (also `false` by default) widens the setup summary from the standard tier to every setting,
+ *   including numeric tuning and cost/abuse thresholds — see
+ *   `lib/app/questionnaire/settings-registry.ts`. Distinct from the brand-free `…/instrument`
+ *   export (F14.9), which is the design-time reviewer copy of just the questions — this is the
+ *   external/showcase artifact.
  *
  * Node runtime — `@react-pdf/renderer` needs Node. Bulk read: the same `exportLimiter` sub-cap the
  * instrument/definition routes use. Version-scoped.
@@ -53,6 +56,9 @@ const querySchema = z.object({
   dataSlots: includeParam('true'),
   definitions: includeParam('true'),
   setup: includeParam('true'),
+  // Technical/tuning tier of the setup summary — opt-in, so a client-facing pack doesn't open with
+  // a cost budget and a confidence floor.
+  setupTechnical: includeParam('false'),
   // Unreviewed AI critique — opt-in, unlike every other section (see the route JSDoc).
   evaluations: includeParam('false'),
 });
@@ -66,9 +72,17 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     const { id, vid } = await params;
 
     const { searchParams } = new URL(request.url);
-    const { format, meta, questions, dataSlots, definitions, setup, evaluations } =
+    const { format, meta, questions, dataSlots, definitions, setup, setupTechnical, evaluations } =
       validateQueryParams(searchParams, querySchema);
-    const include = { meta, questions, dataSlots, definitions, setup, evaluations };
+    const include = {
+      meta,
+      questions,
+      dataSlots,
+      definitions,
+      setup,
+      setupTechnical,
+      evaluations,
+    };
 
     // Definitions / glossary (P16): accepted-only, same as the instrument's reviewer copy — this is
     // a distribution artifact, not the curated proposals/rejections `loadGlossaryForExport` returns.

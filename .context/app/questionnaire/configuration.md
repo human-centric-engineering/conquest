@@ -22,34 +22,38 @@ and stores them; the consumers land later (see _Who consumes it_).
 like goal/audience and the section graph. One typed column per setting plus a
 single JSON column for the profile fields:
 
-| Setting                               | Column                     | Type                   | Default             |
-| ------------------------------------- | -------------------------- | ---------------------- | ------------------- |
-| Question selection strategy           | `selectionStrategy`        | String (enum)          | `'adaptive'`        |
-| Completion: min questions             | `minQuestionsAnswered`     | Int                    | `0`                 |
-| Completion: coverage threshold        | `coverageThreshold`        | Float (0–1)            | `1.0`               |
-| Early finish: allow                   | `allowEarlyFinish`         | Boolean                | `false`             |
-| Early finish: min coverage            | `earlyFinishMinCoverage`   | Float (0–1; 0 = off)   | `1.0`               |
-| Early finish: min questions           | `earlyFinishMinQuestions`  | Int (0 = off)          | `0`                 |
-| Cost budget (USD / session)           | `costBudgetUsd`            | Float? (null = no cap) | `null`              |
-| Per-session question cap              | `maxQuestionsPerSession`   | Int? (null = no cap)   | `null`              |
-| Voice input                           | `voiceEnabled`             | Boolean                | `false`             |
-| Contradiction-detection mode          | `contradictionMode`        | String (enum)          | `'off'`             |
-| Contradiction look-back window N      | `contradictionWindowN`     | Int                    | `0`                 |
-| Contradiction cadence (every N turns) | `contradictionEveryNTurns` | Int                    | `1`                 |
-| Answer-fit resolver mode              | `answerFitMode`            | String (enum)          | `'fallback'`        |
-| Anonymous mode (identity axis)        | `anonymousMode`            | Boolean                | `false`             |
-| Access mode (who may start)           | `accessMode`               | String (enum)          | `'invitation_only'` |
-| Invitee detail fields                 | `inviteeFields`            | Json (array)           | email + names       |
-| Abuse threshold (seriousness gate)    | `abuseThreshold`           | Int (0 = off)          | `4`                 |
-| Sensitivity awareness (safeguarding)  | `sensitivityAwareness`     | Boolean                | `false`             |
-| Support message (signpost copy)       | `supportMessage`           | String (empty = off)   | `''`                |
-| Support resource URL                  | `supportResourceUrl`       | String (URL)           | `''`                |
-| Session-start profile fields          | `profileFields`            | Json (array)           | `[]`                |
-| Answer panel scope                    | `answerSlotPanelScope`     | String (enum)          | `'full_progress'`   |
-| Presentation mode                     | `presentationMode`         | String (enum)          | `'chat'`            |
-| Inline answer correction              | `inlineCorrectionEnabled`  | Boolean                | `true`              |
-| Interviewer tone & persona            | `tone`                     | Json (object)          | all dimensions off  |
-| Respondent Report                     | `respondentReport`         | Json (object)          | disabled, raw mode  |
+| Setting                               | Column                      | Type                   | Default             |
+| ------------------------------------- | --------------------------- | ---------------------- | ------------------- |
+| Question selection strategy           | `selectionStrategy`         | String (enum)          | `'adaptive'`        |
+| Completion: min questions             | `minQuestionsAnswered`      | Int                    | `0`                 |
+| Completion: coverage threshold        | `coverageThreshold`         | Float (0–1)            | `1.0`               |
+| Early finish: allow                   | `allowEarlyFinish`          | Boolean                | `false`             |
+| Early finish: min coverage            | `earlyFinishMinCoverage`    | Float (0–1; 0 = off)   | `1.0`               |
+| Early finish: min questions           | `earlyFinishMinQuestions`   | Int (0 = off)          | `0`                 |
+| Cost budget (USD / session)           | `costBudgetUsd`             | Float? (null = no cap) | `null`              |
+| Per-session question cap              | `maxQuestionsPerSession`    | Int? (null = no cap)   | `null`              |
+| Voice input                           | `voiceEnabled`              | Boolean                | `false`             |
+| Contradiction-detection mode          | `contradictionMode`         | String (enum)          | `'off'`             |
+| Contradiction look-back window N      | `contradictionWindowN`      | Int                    | `0`                 |
+| Contradiction cadence (every N turns) | `contradictionEveryNTurns`  | Int                    | `1`                 |
+| Answer-fit resolver mode              | `answerFitMode`             | String (enum)          | `'fallback'`        |
+| Anonymous mode (identity axis)        | `anonymousMode`             | Boolean                | `false`             |
+| Access mode (who may start)           | `accessMode`                | String (enum)          | `'invitation_only'` |
+| Invitee detail fields                 | `inviteeFields`             | Json (array)           | email + names       |
+| Abuse threshold (seriousness gate)    | `abuseThreshold`            | Int (0 = off)          | `4`                 |
+| Sensitivity awareness (safeguarding)  | `sensitivityAwareness`      | Boolean                | `false`             |
+| Support message (signpost copy)       | `supportMessage`            | String (empty = off)   | `''`                |
+| Support resource URL                  | `supportResourceUrl`        | String (URL)           | `''`                |
+| Session-start profile fields          | `profileFields`             | Json (array)           | `[]`                |
+| Answer panel scope                    | `answerSlotPanelScope`      | String (enum)          | `'full_progress'`   |
+| Presentation mode                     | `presentationMode`          | String (enum)          | `'chat'`            |
+| Inline answer correction              | `inlineCorrectionEnabled`   | Boolean                | `true`              |
+| Session resume                        | `sessionResumeEnabled`      | Boolean                | `true`              |
+| Show percent-completed text           | `showProgressPercentText`   | Boolean                | `true`              |
+| Completeness milestone banners        | `milestoneBannerEnabled`    | Boolean                | `true`              |
+| Milestone thresholds (percent)        | `milestoneBannerThresholds` | Json (number array)    | `[25,50,75,90]`     |
+| Interviewer tone & persona            | `tone`                      | Json (object)          | all dimensions off  |
+| Respondent Report                     | `respondentReport`          | Json (object)          | disabled, raw mode  |
 
 The enums are `const` tuples in `lib/app/questionnaire/types.ts` (single source of
 truth — the Zod schema, the read-view narrowing, and the editor's `<Select>`
@@ -308,3 +312,49 @@ The blank **instrument** export always carries the glossary regardless of `gloss
 — that switch governs what the _respondent_ receives, and the instrument is the reviewer's copy.
 
 See [`definitions-glossary.md`](./definitions-glossary.md).
+
+## Progress display & completeness milestones (F-progress)
+
+Two independent, respondent-facing toggles, both on by default — Settings → **Respondent
+experience** (the percent text) and its own **Progress milestones** group (the banners):
+
+- `showProgressPercentText` — the "N% completed" label beside the session progress bar
+  (`SessionProgressBar`, threaded through `SessionLifecycleBar` → `SessionWorkspace` → each
+  respondent page). The bar itself always renders; this only toggles the numeric label.
+- `milestoneBannerEnabled` + `milestoneBannerThresholds` (`number[]`, 1–99 each, default
+  `[25, 50, 75, 90]`, admin add/remove up to `MAX_MILESTONE_THRESHOLDS` (12), unique, sorted
+  ascending on read) — when the respondent's graded `displayCoverage` (the same figure the
+  progress bar shows) crosses a configured threshold, a `warning` event with `code: 'milestone'`
+  is emitted and a quiet "You're N% of the way through." banner renders inline in the chat via
+  `TurnNotices` → `MilestoneNotice` (mirrors the `support`/`seriousness`/`contradiction` pattern).
+
+  **N is the respondent's actual coverage, not the threshold that fired** (`MilestoneOutcome.coveragePct`,
+  not `.announce`). The threshold decides _whether_ to speak; coverage decides what is _true_. The
+  two come apart whenever thresholds are sparse or one rich answer clears several at once — a lone
+  threshold of `40` with the respondent at 92% would otherwise read "You're 40% of the way through."
+  beside a progress bar showing 92%, and the default list, topping out at 90, would tell a fully
+  completed session it was 90% done.
+
+  The decision itself is the pure `resolveMilestoneCrossing`
+  (`lib/app/questionnaire/completion/milestones.ts`), called from **both** turn pipelines —
+  `runTurn` _and_ `runDataSlotTurn`. That sharing is load-bearing, not tidiness: any version with
+  data slots takes the data-slot pipeline, so logic living only in `runTurn` makes the feature a
+  silent no-op for most real questionnaires.
+
+  **At most one banner per turn.** A turn can clear several thresholds at once (a rich answer
+  filling three slots; or a short questionnaire where one answer is worth 50%), so only the
+  _highest_ crossed threshold is announced — stacking three banners under one reply reads as a
+  glitch. Every threshold jumped over is still banked in the ledger, so a skipped one can never
+  fire later and announce progress the respondent passed long ago.
+
+  Fires **once per threshold per session**: `AppQuestionnaireSession.raisedMilestones` (`Json`,
+  `number[]`, default `[]`) is a ledger checked before firing — a threshold already in it never
+  re-fires. A ledger rather than a diff against a previous coverage figure precisely because
+  coverage is **not monotonic**: a contradiction resolution can invalidate an answer and pull the
+  number back down, and nothing should re-announce on the way back up. Same shape and wiring as
+  the contradiction "don't nag" ledger
+  (`raisedContradictions`): loaded in `buildTurnContext`, written back via `persistTurn` →
+  `prisma.appQuestionnaireSession.update` alongside `pendingContradiction`/`raisedContradictions`
+  in one call, and the milestone `warning` persists on `AppQuestionnaireTurn.warnings` for replay
+  on resume (no separate plumbing needed there — any `{type:'warning', code, message}` event
+  already rides that pipe).

@@ -42,10 +42,12 @@ export function buildPackCsv(model: PackModel): string {
   }
 
   if (model.setup) {
+    // A `group` column rather than a block per group — one flat table filters and pivots in a
+    // spreadsheet, which is what the CSV format is for.
     blocks.push([
       '# Experience setup',
-      row(['field', 'value']),
-      ...model.setup.map((item) => row([item.label, item.value])),
+      row(['group', 'field', 'value']),
+      ...model.setup.map((item) => row([item.group, item.label, item.value])),
     ]);
   }
 

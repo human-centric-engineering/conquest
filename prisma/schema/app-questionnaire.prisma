@@ -278,6 +278,16 @@ model AppQuestionnaireConfig {
   // behaviour (anonymous returns always mint a fresh session; by-ref resume 404s).
   sessionResumeEnabled Boolean @default(true)
 
+  // The "N% completed" text beside the session progress bar. The bar itself always renders; this
+  // only toggles the numeric label next to it. On by default; respondent-facing UX, no platform flag.
+  showProgressPercentText Boolean @default(true)
+
+  // Completeness milestone banners: when the respondent's graded coverage crosses one of
+  // milestoneBannerThresholds, an inline banner appears in the chat — once per threshold per
+  // session (the "don't nag" ledger is AppQuestionnaireSession.raisedMilestones). On by default.
+  milestoneBannerEnabled    Boolean @default(true)
+  milestoneBannerThresholds Json    @default("[25,50,75,90]") // number[], each 1-99, admin add/remove
+
   // Session-start profile fields (ProfileFieldConfig[] — types.ts). Each field carries its own
   // `validation` mode (deterministic | agentic | hybrid) inside this JSON — no column per field.
   profileFields Json @default("[]")
@@ -950,6 +960,10 @@ model AppQuestionnaireSession {
   // already here — no re-probe, no re-alert — whether or not it was ever reconciled. PII-free by design
   // (identity + how it ended only; never the explanation/statement/values). Defaults to an empty list.
   raisedContradictions Json     @default("[]")
+  // "Don't nag" ledger for completeness milestones: percent-complete thresholds (number[]) already
+  // banner-shown this session — the orchestrator fires a threshold once, on first crossing, and never
+  // again even if displayCoverage later dips (e.g. an answer is invalidated). Defaults to empty.
+  raisedMilestones     Json     @default("[]")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

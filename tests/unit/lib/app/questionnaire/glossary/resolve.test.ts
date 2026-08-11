@@ -109,14 +109,27 @@ describe('resolveGlossaryForPrompts / ForHints', () => {
     expect(await resolveGlossaryForPrompts('nope')).toEqual([]);
   });
 
-  it('reads a DIFFERENT column for each surface, so the switches are independent', async () => {
+  it('gates each surface on its OWN column, so the switches are independent', async () => {
+    // Prompt injection ON, respondent hints OFF — the two surfaces must disagree.
+    mocks.findUnique.mockResolvedValue(
+      row({ config: { glossaryPromptInjection: true, glossaryRespondentHints: false } })
+    );
+    expect(await resolveGlossaryForPrompts('ver-1')).toHaveLength(1);
+    expect(await resolveGlossaryForHints('ver-1')).toEqual([]);
+  });
+
+  it('serves every gate from ONE query shape, so surfaces on a page share the read', async () => {
+    // The collapse this guards: hints and the report appendix render on the same page and used to
+    // pull the whole term/definition tree twice. All three gates are selected up front and applied
+    // as a projection, so the query does not vary by caller and `cache()` can dedupe it.
     await resolveGlossaryForPrompts('ver-1');
     await resolveGlossaryForHints('ver-1');
-    expect(mocks.findUnique.mock.calls[0][0].select.config.select).toEqual({
+    const [first, second] = mocks.findUnique.mock.calls.map((call) => call[0]);
+    expect(second).toEqual(first);
+    expect(first.select.config.select).toEqual({
       glossaryPromptInjection: true,
-    });
-    expect(mocks.findUnique.mock.calls[1][0].select.config.select).toEqual({
       glossaryRespondentHints: true,
+      glossaryReportAppendix: true,
     });
   });
 
@@ -189,13 +202,6 @@ describe('resolveGlossaryAppendixForVersion', () => {
 });
 
 describe('loadAcceptedGlossaryEntries — the ungated export read', () => {
-  it('asks for NO config column at all', async () => {
-    await loadAcceptedGlossaryEntries('ver-1');
-    // The export surfaces are gated by `glossaryReportAppendix` (applied by the caller) or not at
-    // all — never by prompt injection.
-    expect(mocks.findUnique.mock.calls[0][0].select).not.toHaveProperty('config');
-  });
-
   it('returns the accepted terms even when EVERY config switch is off', async () => {
     // The regression this guards: reading the blank instrument or the report PDF through
     // `resolveGlossaryForPrompts` meant an admin who turned prompt injection off silently lost

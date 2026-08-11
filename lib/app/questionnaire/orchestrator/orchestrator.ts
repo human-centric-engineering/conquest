@@ -24,6 +24,10 @@ import {
 } from '@/lib/app/questionnaire/constants';
 import { assessCompletion } from '@/lib/app/questionnaire/completion/completion-logic';
 import {
+  milestoneMessage,
+  resolveMilestoneCrossing,
+} from '@/lib/app/questionnaire/completion/milestones';
+import {
   runContradictionPhase,
   questionProbeLabels,
   MIN_CONTRADICTION_ANSWERS as MIN_CONTRADICTION_ANSWERS_INTERNAL,
@@ -348,6 +352,32 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     sessionId: effective.sessionId,
   });
 
+  // 5b. Completeness milestones: a quiet inline banner the first time the respondent crosses a
+  // configured threshold. Shared with the data-slot pipeline so both agree on when one fires —
+  // see `resolveMilestoneCrossing` for why it announces only the highest crossed threshold and
+  // banks the rest.
+  // Skipped on a probe turn: `effective` already merged this turn's intents, but `suppressWrites`
+  // means none of them are persisted — the conflicting answer is re-asked instead. Crossing a
+  // threshold on an answer that is about to be rolled back would bank it *permanently* (the ledger
+  // never re-fires), so the respondent would silently lose that milestone.
+  const milestone = contradiction.suppressWrites
+    ? // Nothing is announced, so `coveragePct` is never read — it is present only to satisfy
+      // the shared `MilestoneOutcome` shape.
+      { announce: null, coveragePct: 0, raisedMilestones: undefined }
+    : resolveMilestoneCrossing(
+        state.config,
+        assessment.displayCoverage,
+        state.raisedMilestones,
+        effective.questions.length
+      );
+  if (milestone.announce !== null) {
+    events.push({
+      type: 'warning',
+      code: 'milestone',
+      message: milestoneMessage(milestone.coveragePct),
+    });
+  }
+
   // Soft cost cap (F6.3): bias toward offering completion early so the session winds down
   // before the hard cap, and tag the offer prose with a wrap-up instruction. Only overrides
   // `not_ready` (thresholds merely unmet) — never the required-questions gate
@@ -444,6 +474,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
         : {}),
       ...(contradiction.raisedContradictions !== undefined
         ? { raisedContradictions: contradiction.raisedContradictions }
+        : {}),
+      ...(milestone.raisedMilestones !== undefined
+        ? { raisedMilestones: milestone.raisedMilestones }
         : {}),
     },
     events,

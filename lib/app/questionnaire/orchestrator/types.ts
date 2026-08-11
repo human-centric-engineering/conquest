@@ -178,6 +178,13 @@ export interface TurnState {
    */
   raisedContradictions?: RaisedContradiction[];
   /**
+   * The "don't nag" ledger for completeness milestones: percent-complete thresholds already
+   * banner-shown this session, loaded from `AppQuestionnaireSession.raisedMilestones`. A threshold
+   * already here is never re-fired, even if it's crossed again later. Absent/empty on a session
+   * that has raised none.
+   */
+  raisedMilestones?: number[];
+  /**
    * Data Slots feature: present in data-slot mode. `dataSlots` is the version's data slots
    * (theme-ordered for topic-local targeting); `dataSlotAnswered` is the filled set; the
    * `activeDataSlotKey` is the slot the previous turn targeted (for re-ask/transition framing).
@@ -433,6 +440,12 @@ export interface TurnResult {
      * the ledger is unchanged this turn, leave it as-is. Always the FULL list (overwrites the column).
      */
     raisedContradictions?: RaisedContradiction[];
+    /**
+     * The updated "don't nag" ledger to persist to `AppQuestionnaireSession.raisedMilestones`, when
+     * this turn crossed one or more fresh completeness-milestone thresholds. `undefined` (the
+     * default) = unchanged this turn, leave it as-is. Always the FULL list (overwrites the column).
+     */
+    raisedMilestones?: number[];
   };
   /** Side-band frames to stream (warnings/status) — NOT the main content. */
   events: ChatEvent[];

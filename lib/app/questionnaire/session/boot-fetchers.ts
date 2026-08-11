@@ -5,6 +5,10 @@
  * P15.3) needed the same four reads to open a session it did not create. Two copies of a
  * fail-soft fetch is the shape that drifts: the copy that gets a fix and the copy that does not.
  *
+ * {@link fetchSurfaceConfig} joined them later, for the surface that has no server render at all:
+ * the facilitated-meeting participant (P15.5) swaps sessions IN PLACE as breakouts start, so it
+ * cannot receive per-version config as props the way the page-rendered surfaces do.
+ *
  * Every one of these FAILS SOFT to null/empty by design, and that is load-bearing rather than
  * lazy. None of them is the enforcing boundary — the server routes are — so the worst case of a
  * soft failure is a slightly plainer surface (no intro splash, no persona step, a re-asked opening
@@ -20,12 +24,17 @@ import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 import type { ResolvedSessionIntro } from '@/lib/app/questionnaire/intro/resolve';
 import type { ResolvedSessionPersonas } from '@/lib/app/questionnaire/persona/resolve';
 import type { ResolvedSessionCapture } from '@/lib/app/questionnaire/profile/resolve-capture';
+import type { RespondentSurfaceConfig } from '@/lib/app/questionnaire/session/respondent-surface';
 import {
   ANSWER_PROVENANCES,
+  ANSWER_SLOT_PANEL_SCOPES,
   CAPTURE_MODES,
+  DEFAULT_QUESTIONNAIRE_CONFIG,
   PERSONA_SWITCHERS,
+  PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   PROFILE_FIELD_VALIDATION_MODES,
+  REASONING_PLACEMENTS,
 } from '@/lib/app/questionnaire/types';
 import { REASONING_STEP_KINDS, REASONING_TONES } from '@/lib/app/questionnaire/reasoning';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
@@ -221,6 +230,105 @@ export async function fetchCapture(
     const parsed = captureResponseSchema.safeParse(await res.json());
     if (!parsed.success) return null;
     return parsed.data.data?.capture ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Surface configuration                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The band's round window. Dates cross the wire as ISO strings, so they are coerced back rather
+ * than passed through — the schedule helpers the band uses do real date arithmetic on them.
+ */
+const bandRoundSchema = z.object({
+  name: z.string(),
+  status: z.string(),
+  opensAt: z.coerce.date().nullable(),
+  closesAt: z.coerce.date().nullable(),
+  closedAt: z.coerce.date().nullable(),
+});
+
+const resolvedThemeSchema = z.object({
+  ctaColor: z.string(),
+  accentColor: z.string(),
+  logoUrl: z.string().nullable(),
+  bannerUrl: z.string().nullable(),
+  welcomeCopy: z.string(),
+  surfaceColor: z.string().nullable(),
+  ctaColorEnd: z.string().nullable(),
+  logoBackgroundColor: z.string().nullable(),
+  hasBrandIdentity: z.boolean(),
+});
+
+/**
+ * Each field `.catch()`es to the same default the server-side resolver would have produced, so a
+ * single unrecognised value (an enum widened by a newer deploy, say) degrades that ONE affordance
+ * instead of failing the parse and dropping the respondent back to every default at once.
+ */
+const surfaceConfigSchema = z.object({
+  voiceInputEnabled: z.boolean().catch(DEFAULT_QUESTIONNAIRE_CONFIG.voiceEnabled),
+  attachmentInputEnabled: z.boolean().catch(DEFAULT_QUESTIONNAIRE_CONFIG.attachmentsEnabled),
+  presentationMode: z.enum(PRESENTATION_MODES).catch(DEFAULT_QUESTIONNAIRE_CONFIG.presentationMode),
+  answerPanelScope: z
+    .enum(ANSWER_SLOT_PANEL_SCOPES)
+    .catch(DEFAULT_QUESTIONNAIRE_CONFIG.answerSlotPanelScope),
+  reasoningPlacement: z.enum(REASONING_PLACEMENTS).nullable().catch(null),
+  reasoningDwellMs: z.number().catch(DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamDwellMs),
+  reasoningPerItemMs: z.number().catch(DEFAULT_QUESTIONNAIRE_CONFIG.reasoningStreamPerItemMs),
+  inlineCorrectionEnabled: z.boolean().catch(DEFAULT_QUESTIONNAIRE_CONFIG.inlineCorrectionEnabled),
+  showProgressPercentText: z.boolean().catch(DEFAULT_QUESTIONNAIRE_CONFIG.showProgressPercentText),
+  anonymous: z.boolean().catch(false),
+  theme: resolvedThemeSchema,
+  header: z.object({ title: z.string(), round: bandRoundSchema.nullable() }).nullable().catch(null),
+  glossary: z
+    .array(
+      z.object({
+        termId: z.string(),
+        term: z.string(),
+        surfaces: z.array(z.string()),
+        definitions: z.array(z.string()),
+      })
+    )
+    .catch([]),
+  glossaryAppendix: z
+    .object({
+      heading: z.string(),
+      entries: z.array(z.object({ term: z.string(), definitions: z.array(z.string()) })),
+    })
+    .nullable()
+    .catch(null),
+});
+
+const surfaceResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({ surface: surfaceConfigSchema }).optional(),
+});
+
+/**
+ * Fetch the resolved surface configuration for a session.
+ *
+ * Fails soft to `null`, and here that is worth being precise about: `null` means "the caller keeps
+ * whatever it would have rendered without this read", which is the workspace's own prop defaults —
+ * exactly the behaviour every client-booted surface had before this endpoint existed. So a soft
+ * failure is a plainer surface, never a respondent who cannot answer. None of these values is a
+ * security boundary: the turn, transcript and submit routes enforce access on their own, and the
+ * affordances this governs are presentational.
+ */
+export async function fetchSurfaceConfig(
+  sessionId: string,
+  accessToken: string
+): Promise<RespondentSurfaceConfig | null> {
+  try {
+    const res = await fetch(API.APP.QUESTIONNAIRE_SESSIONS.surface(sessionId), {
+      headers: authHeaders(accessToken),
+    });
+    if (!res.ok) return null;
+    const parsed = surfaceResponseSchema.safeParse(await res.json());
+    if (!parsed.success) return null;
+    return parsed.data.data?.surface ?? null;
   } catch {
     return null;
   }

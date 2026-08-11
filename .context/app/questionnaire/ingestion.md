@@ -145,8 +145,11 @@ The **streaming** ingest surface (`POST …/questionnaires/stream`, the "watch i
 dialog) does not call `extractFromDocument` directly — it drives
 `orchestrateExtraction` (`_lib/orchestrate-extraction.ts`), an async generator that yields
 **real** phase events (`extracting → verifying → repairing → saving`) and returns the same
-`PipelineResult` the non-streaming route uses. The non-streaming `POST /questionnaires` and
-`reingest` routes keep the single synchronous extractor pass unchanged.
+`PipelineResult` the non-streaming route uses. The streaming **re-ingest** route
+(`POST …/versions/:vid/reingest/stream`) drives the same generator — the two "watch it
+extract" surfaces share one orchestrator so their progress can't drift
+([`reingest.md`](./reingest.md#the-endpoint)). The non-streaming `POST /questionnaires` and
+`…/reingest` routes keep the single synchronous extractor pass unchanged.
 
 The orchestrator **always** inserts a critic + repair pass between extract and coherence:
 
@@ -186,9 +189,11 @@ The signal path, outermost to innermost:
    into `extractFromDocument`, which forwards it onto the capability dispatch's
    `entityContext` under the `onExtractionProgress` key (the one documented free-form seam
    from caller to capability). Producer/consumer share the key + narrowing via
-   `ingestion/extraction-progress-context.ts` so they can't drift. The non-streaming ingest /
-   re-ingest routes pass **no** sink — the presence of the sink is exactly what flips the
-   extractor onto the streamed path, so those routes keep their single blocking call.
+   `ingestion/extraction-progress-context.ts` so they can't drift. Both streaming surfaces
+   (ingest and re-ingest) get the count for free by going through the orchestrator; the
+   non-streaming ingest / re-ingest routes pass **no** sink — the presence of the sink is
+   exactly what flips the extractor onto the streamed path, so those routes keep their
+   single blocking call.
 2. **Capability.** When the sink is present, `extract-questionnaire-structure` runs
    `runStreamingStructuredExtraction` (`ingestion/stream-structured-extraction.ts`) instead
    of the blocking `runStructuredCompletion`: it drives attempt 1 through

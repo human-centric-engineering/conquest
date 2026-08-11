@@ -944,6 +944,10 @@ async function handleMessage(
           ...(result.sideEffects.raisedContradictions !== undefined
             ? { raisedContradictions: result.sideEffects.raisedContradictions }
             : {}),
+          // "Don't nag" ledger: persist the updated raised-milestone list (undefined = unchanged).
+          ...(result.sideEffects.raisedMilestones !== undefined
+            ? { raisedMilestones: result.sideEffects.raisedMilestones }
+            : {}),
           keyToSlotId,
           // Retry dedup (F7.x): stamp this attempt's key so a later retry re-sending it replays
           // this turn instead of minting a duplicate.

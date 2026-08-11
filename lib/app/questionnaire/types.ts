@@ -396,6 +396,16 @@ export const DEFAULT_INVITEE_FIELDS: InviteeFieldConfig[] = [
 ];
 
 /**
+ * The default completeness-milestone thresholds (percent-complete) — mirrors the schema column
+ * default; the read path returns it when no row exists. Admin-editable (add/remove), 1–99 each.
+ */
+export const DEFAULT_MILESTONE_THRESHOLDS: number[] = [25, 50, 75, 90];
+
+/** Upper bound on how many milestone thresholds an admin may configure — keeps the chat from
+ * turning into a wall of "you're N% done" banners. */
+export const MAX_MILESTONE_THRESHOLDS = 12;
+
+/**
  * The ways an admin can bulk-add invitees on the import wizard. `paste` is a heuristic free-text
  * parse (no AI); `csv` maps columns; `pdf`/`image` extract people via an AI agent (PDF text / vision)
  * All converge on the editable verify grid before send.
@@ -1175,6 +1185,25 @@ export type QuestionnaireConfigShape = {
    */
   sessionResumeEnabled: boolean;
   /**
+   * Show the "N% completed" text beside the session progress bar. The bar itself always renders;
+   * this only toggles the numeric label next to it. On by default.
+   */
+  showProgressPercentText: boolean;
+  /**
+   * Completeness milestone banners: when the respondent's graded coverage crosses one of
+   * {@link milestoneBannerThresholds}, an inline banner ("You're N% of the way through…") appears
+   * in the chat, once per threshold per session (the "don't nag" ledger is
+   * `AppQuestionnaireSession.raisedMilestones`). On by default.
+   */
+  milestoneBannerEnabled: boolean;
+  /**
+   * The percent-complete thresholds (each 1–99) that trigger a milestone banner when crossed,
+   * admin-editable (add/remove). Order doesn't matter for behaviour — every crossed threshold not
+   * yet in the session's ledger fires — but the read path always returns them sorted ascending.
+   * Default {@link DEFAULT_MILESTONE_THRESHOLDS}.
+   */
+  milestoneBannerThresholds: number[];
+  /**
    * Live "watch it think" reasoning trace (demo feature): show the agent's per-turn reasoning —
    * answers captured (with provenance + confidence), contradictions spotted, why the next question
    * was chosen — as a live feed beside the chat. On by default.
@@ -1306,6 +1335,9 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   presentationMode: 'both',
   inlineCorrectionEnabled: false,
   sessionResumeEnabled: true,
+  showProgressPercentText: true,
+  milestoneBannerEnabled: true,
+  milestoneBannerThresholds: DEFAULT_MILESTONE_THRESHOLDS,
   reasoningStreamEnabled: true,
   reasoningStreamPlacement: 'inline',
   reasoningStreamDwellMs: 2000,

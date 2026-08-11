@@ -216,11 +216,13 @@ through the shared `authoringMutate` runner (fork-redirect / `router.refresh()`)
 A **Re-ingest** action in the **Structure** tab header — offered only on **draft** versions —
 uploads a replacement document and **replaces that draft's structure, change log,
 and tags** with a fresh extraction. `components/admin/questionnaires/reingest-dialog.tsx`
-(file picker + optional goal override + extract-tables toggle, each with
-`FieldHelp`) states the replace is destructive; the submit button is the confirm.
-An identical document short-circuits to a no-op. Full behaviour — replace-in-place
-semantics, the draft-only `409`, and the version-scoped dedup — is in
-[`reingest.md`](./reingest.md).
+(file picker + optional goal override + extraction instructions + extract-tables toggle,
+each with `FieldHelp`) states the replace is destructive; the submit button is the confirm.
+It posts to the **streaming** re-ingest endpoint and renders the same live
+`ExtractionProgress` line as the upload dialog — real phases and a rising "N questions so
+far" count, not a scripted ticker. An identical document short-circuits to a no-op. Full
+behaviour — replace-in-place semantics, the draft-only `409`, the version-scoped dedup,
+and the SSE event contract — is in [`reingest.md`](./reingest.md).
 
 Creating a _new_ questionnaire is still the F1.1 ingestion endpoint (no UI). With
 re-ingest shipped, an admin can ingest, review, edit, tag, version, and re-ingest

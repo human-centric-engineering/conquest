@@ -37,8 +37,23 @@ import {
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
   resolveSessionResumeEnabledForVersion,
+  resolveShowProgressPercentTextForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+
+/**
+ * The `findUnique` argument the resolvers passed, narrowed to what these assertions read.
+ *
+ * They all project off ONE shared surface row (`loadVersionSurface`), so the assertions check the
+ * version queried and the presence of the column each resolver reads — not the exact select shape,
+ * which is deliberately shared and grows as switches are added.
+ */
+function findUniqueArg(): {
+  where: { id: string };
+  select: { config: { select: Record<string, boolean> } };
+} {
+  return vi.mocked(prisma.appQuestionnaireVersion.findUnique).mock.calls[0]?.[0] as never;
+}
 
 describe('resolveAnonymousForVersion', () => {
   beforeEach(() => {
@@ -105,10 +120,11 @@ describe('resolveAnonymousForVersion', () => {
     await resolveAnonymousForVersion('ver-xyz');
 
     // Assert: verify the shape of the DB call — not just that it was called
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { anonymousMode: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ anonymousMode: true });
   });
 
   it('calls findUnique exactly once per invocation', async () => {
@@ -159,10 +175,11 @@ describe('resolvePresentationModeForVersion', () => {
       config: { presentationMode: 'form' },
     } as never);
     await resolvePresentationModeForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { presentationMode: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ presentationMode: true });
   });
 });
 
@@ -216,10 +233,11 @@ describe('resolveAnswerPanelScopeForVersion', () => {
       config: { answerSlotPanelScope: 'hidden' },
     } as never);
     await resolveAnswerPanelScopeForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { answerSlotPanelScope: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ answerSlotPanelScope: true });
   });
 });
 
@@ -256,10 +274,11 @@ describe('resolveInlineCorrectionForVersion', () => {
       config: { inlineCorrectionEnabled: true },
     } as never);
     await resolveInlineCorrectionForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { inlineCorrectionEnabled: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ inlineCorrectionEnabled: true });
   });
 });
 
@@ -289,6 +308,47 @@ describe('resolveSessionResumeEnabledForVersion', () => {
     expect(await resolveSessionResumeEnabledForVersion('ver-missing')).toBe(
       DEFAULT_QUESTIONNAIRE_CONFIG.sessionResumeEnabled
     );
+  });
+});
+
+describe('resolveShowProgressPercentTextForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored toggle (off)', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { showProgressPercentText: false },
+    } as never);
+    expect(await resolveShowProgressPercentTextForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to ON when the config row is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveShowProgressPercentTextForVersion('ver-abc')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.showProgressPercentText
+    );
+  });
+
+  it('defaults to ON when the version is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveShowProgressPercentTextForVersion('ver-missing')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.showProgressPercentText
+    );
+  });
+
+  it('selects only the showProgressPercentText field for the given version', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { showProgressPercentText: true },
+    } as never);
+    await resolveShowProgressPercentTextForVersion('ver-xyz');
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ showProgressPercentText: true });
   });
 });
 
@@ -335,10 +395,11 @@ describe('resolveAccessModeForVersion', () => {
       config: { accessMode: 'public' },
     } as never);
     await resolveAccessModeForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { accessMode: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ accessMode: true });
   });
 });
 
@@ -378,10 +439,11 @@ describe('resolveVoiceEnabledForVersion', () => {
       config: { voiceEnabled: true },
     } as never);
     await resolveVoiceEnabledForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { voiceEnabled: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ voiceEnabled: true });
   });
 });
 
@@ -421,10 +483,11 @@ describe('resolveAttachmentsEnabledForVersion', () => {
       config: { attachmentsEnabled: true },
     } as never);
     await resolveAttachmentsEnabledForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: { config: { select: { attachmentsEnabled: true } } },
-    });
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({ attachmentsEnabled: true });
   });
 });
 
@@ -480,11 +543,13 @@ describe('resolveReasoningPlacementForVersion', () => {
       config: { reasoningStreamEnabled: true, reasoningStreamPlacement: 'overlay' },
     } as never);
     await resolveReasoningPlacementForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: {
-        config: { select: { reasoningStreamEnabled: true, reasoningStreamPlacement: true } },
-      },
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({
+      reasoningStreamEnabled: true,
+      reasoningStreamPlacement: true,
     });
   });
 });
@@ -527,11 +592,13 @@ describe('resolveReasoningDwellForVersion', () => {
       config: { reasoningStreamDwellMs: 2000, reasoningStreamPerItemMs: 330 },
     } as never);
     await resolveReasoningDwellForVersion('ver-xyz');
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-xyz' },
-      select: {
-        config: { select: { reasoningStreamDwellMs: true, reasoningStreamPerItemMs: true } },
-      },
+    const call = findUniqueArg();
+    expect(call.where).toEqual({ id: 'ver-xyz' });
+    // The switch this resolver projects must actually be in the shared surface select —
+    // the exact shape is `SURFACE_CONFIG_SELECT`'s business, the column is this one's.
+    expect(call.select.config.select).toMatchObject({
+      reasoningStreamDwellMs: true,
+      reasoningStreamPerItemMs: true,
     });
   });
 });

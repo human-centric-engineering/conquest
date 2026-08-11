@@ -86,10 +86,17 @@ describe('resolveAdminPreviewMeta', () => {
     // Act
     await resolveAdminPreviewMeta('ver-1');
 
-    // Assert: minimal projection — not a full-row fetch
-    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
-      where: { id: 'ver-1' },
-      select: { questionnaireId: true, versionNumber: true, status: true },
+    // Assert: the banner's three fields all live on the shared respondent-surface row, so the
+    // preview banner adds no query of its own — it must ask for that version and read them off it.
+    const arg = vi.mocked(prisma.appQuestionnaireVersion.findUnique).mock.calls[0][0] as {
+      where: { id: string };
+      select: Record<string, unknown>;
+    };
+    expect(arg.where).toEqual({ id: 'ver-1' });
+    expect(arg.select).toMatchObject({
+      questionnaireId: true,
+      versionNumber: true,
+      status: true,
     });
   });
 

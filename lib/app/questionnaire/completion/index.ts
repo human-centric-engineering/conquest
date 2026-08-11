@@ -40,3 +40,9 @@ export {
   type CompletionPromptSlot,
   type CompletionOfferPromptInput,
 } from '@/lib/app/questionnaire/completion/completion-prompt';
+
+export {
+  resolveMilestoneCrossing,
+  milestoneMessage,
+  type MilestoneOutcome,
+} from '@/lib/app/questionnaire/completion/milestones';

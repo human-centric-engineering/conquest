@@ -24,6 +24,7 @@ import { ForkConfirmProvider } from '@/components/admin/questionnaires/fork-conf
 import { QuestionnaireSubNav } from '@/components/admin/questionnaires/workspace/questionnaire-sub-nav';
 import { VersionSelector } from '@/components/admin/questionnaires/workspace/version-selector';
 import { PreviewRespondentButton } from '@/components/admin/questionnaires/workspace/preview-respondent-button';
+import { QuestionnairePackButton } from '@/components/admin/questionnaires/workspace/questionnaire-pack-button';
 import { SessionRefLookup } from '@/components/admin/questionnaires/sessions/session-ref-lookup';
 import { QUESTIONNAIRE_STATUS_BADGE } from '@/components/admin/questionnaires/status-badge';
 import { Badge } from '@/components/ui/badge';
@@ -112,6 +113,8 @@ export default async function QuestionnaireWorkspaceLayout({ params, children }:
               {/* Quick "view a session by reference" — present wherever sessions can exist. */}
               <SessionRefLookup compact />
               {previewAvailable && <PreviewRespondentButton versionId={selected.id} />}
+              {/* The pack renders the version's structure, so it needs the graph to exist. */}
+              {graph && <QuestionnairePackButton questionnaireId={id} versionId={selected.id} />}
               <DuplicateQuestionnaireButton questionnaireId={id} />
               <VersionSelector
                 questionnaireId={id}

@@ -54,6 +54,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolveReasoningDwellForVersion: vi.fn(),
   resolveInlineCorrectionForVersion: vi.fn(),
   resolveSessionResumeEnabledForVersion: vi.fn(),
+  resolveShowProgressPercentTextForVersion: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/chat/preview-nav', () => ({
@@ -115,6 +116,7 @@ import {
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
   resolveSessionResumeEnabledForVersion,
+  resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { resolveAdminPreviewMeta } from '@/lib/app/questionnaire/chat/preview-nav';
@@ -163,6 +165,7 @@ describe('PublicQuestionnairePage', () => {
     vi.mocked(resolveReasoningDwellForVersion).mockResolvedValue({ dwellMs: 2000, perItemMs: 330 });
     vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
     vi.mocked(resolveSessionResumeEnabledForVersion).mockResolvedValue(true);
+    vi.mocked(resolveShowProgressPercentTextForVersion).mockResolvedValue(true);
     // Per-questionnaire opt-ins default ON here; the page reads the config opt-in for each
     // affordance, and dedicated tests below exercise the config-off path.
     vi.mocked(resolveVoiceEnabledForVersion).mockResolvedValue(true);

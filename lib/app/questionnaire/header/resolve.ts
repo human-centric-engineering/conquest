@@ -18,6 +18,7 @@
 import { cache } from 'react';
 
 import { prisma } from '@/lib/db/client';
+import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
 import type { BandHeader } from '@/lib/app/questionnaire/header/types';
 
 /**
@@ -69,10 +70,7 @@ export const resolveSessionHeader = cache(async (sessionId: string): Promise<Ban
  * it in both `generateMetadata` and the page body.
  */
 export const resolveVersionHeader = cache(async (versionId: string): Promise<BandHeader | null> => {
-  const version = await prisma.appQuestionnaireVersion.findUnique({
-    where: { id: versionId },
-    select: { questionnaire: { select: { title: true } } },
-  });
+  const version = await loadVersionSurface(versionId);
   if (!version) return null;
   return { title: version.questionnaire.title, round: null };
 });

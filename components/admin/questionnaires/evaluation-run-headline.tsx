@@ -14,8 +14,11 @@
  * summary is a way into the work rather than decoration. Judges that failed are rendered but not
  * clickable — they have no findings to filter to.
  *
- * Honesty: when judges failed, the severity totals are an undercount and the band says so. A
- * summary that quietly omits the judges that never ran is worse than no summary.
+ * Honesty: when judges failed, the severity totals are an undercount and the band says so — as a
+ * ruled warning row carrying the reason and a per-judge retry, not a muted footnote. A summary
+ * that quietly omits the judges that never ran is worse than no summary, and one that admits it
+ * in grey 11px is barely better. Failed judges are styled as failures (destructive tint, warning
+ * icon) and offer the only action that fixes the undercount: re-run that one judge into this run.
  */
 
 import { cn } from '@/lib/utils';
@@ -33,6 +36,11 @@ import {
   tallySeverities,
   type SeverityCounts,
 } from '@/components/admin/questionnaires/evaluation-grouping';
+import {
+  JudgeFailureIcon,
+  RetryJudgeButton,
+  judgeFailureReason,
+} from '@/components/admin/questionnaires/evaluation-judge-failure';
 
 /**
  * Severity → bar fill, from the `--cq-sev-*` ramp in `globals.css` (which documents how the steps
@@ -92,6 +100,12 @@ interface Props {
   /** Active dimension filter, or `null` for "all judges". */
   activeDimension: EvaluationDimension | null;
   onDimensionChange: (dimension: EvaluationDimension | null) => void;
+  /** Re-dispatch one failed judge into this run. */
+  onRetryJudge: (dimension: EvaluationDimension) => void;
+  /** Which judge is being re-dispatched right now, if any. */
+  retryingDimension: EvaluationDimension | null;
+  /** Why the last retry failed to even reach the server; `null` when there's nothing to say. */
+  retryError: string | null;
 }
 
 export function EvaluationRunHeadline({
@@ -103,6 +117,9 @@ export function EvaluationRunHeadline({
   targetCount,
   activeDimension,
   onDimensionChange,
+  onRetryJudge,
+  retryingDimension,
+  retryError,
 }: Props) {
   const severity = tallySeverities(findings);
 
@@ -147,8 +164,13 @@ export function EvaluationRunHeadline({
           <h3 className="text-sm font-semibold">Judges</h3>
           <span className="text-muted-foreground text-xs tabular-nums">
             {dimensionsRun}/{dimensionsRequested} ran
-            {dimensionsFailed > 0 ? ` · ${dimensionsFailed} failed` : ''}
           </span>
+          {dimensionsFailed > 0 && (
+            <span className="text-destructive inline-flex items-center gap-1 text-xs font-medium tabular-nums">
+              <JudgeFailureIcon />
+              {dimensionsFailed} failed
+            </span>
+          )}
           {activeDimension && (
             <button
               type="button"
@@ -190,15 +212,19 @@ export function EvaluationRunHeadline({
                     })}
                 className={cn(
                   'rounded-lg border p-2.5 text-left transition-colors',
-                  failed && 'border-dashed opacity-70',
+                  // A failed judge is the one cell whose *absence* of numbers matters, so it is
+                  // tinted rather than faded — the old dashed-and-70%-opacity treatment read as
+                  // "less important" when it means "this column of the summary is missing".
+                  failed && 'border-destructive/40 bg-destructive/5',
                   !failed && 'cursor-pointer hover:border-[color:var(--cq-accent)]',
                   active && 'border-[color:var(--cq-accent)] bg-[color:var(--cq-accent-muted)]'
                 )}
               >
                 <div className="flex items-baseline justify-between gap-2">
                   {/* Specs label them "Clarity Judge"; the heading above already says "Judges". */}
-                  <span className="truncate text-xs font-medium">
-                    {spec.label.replace(/ Judge$/, '')}
+                  <span className="flex min-w-0 items-center gap-1 text-xs font-medium">
+                    {failed && <JudgeFailureIcon />}
+                    <span className="truncate">{spec.label.replace(/ Judge$/, '')}</span>
                   </span>
                   <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                     {dim.score !== null ? dim.score.toFixed(2) : '—'}
@@ -206,9 +232,24 @@ export function EvaluationRunHeadline({
                 </div>
 
                 {failed ? (
-                  <Badge variant="outline" className="mt-1.5 text-[10px]">
-                    failed
-                  </Badge>
+                  <div className="mt-1.5 space-y-1.5">
+                    <Badge variant="destructive" className="text-[10px]">
+                      Failed
+                    </Badge>
+                    {/* The code itself stays reachable — it's the first thing support asks for. */}
+                    <p
+                      className="text-destructive text-[11px] leading-snug"
+                      title={dim.diagnostic ?? undefined}
+                    >
+                      {judgeFailureReason(dim.diagnostic ?? '')}
+                    </p>
+                    <RetryJudgeButton
+                      dimension={dim.dimension}
+                      busy={retryingDimension === dim.dimension}
+                      disabled={retryingDimension !== null}
+                      onRetry={onRetryJudge}
+                    />
+                  </div>
                 ) : (
                   <>
                     <SeverityBar counts={counts} />
@@ -225,12 +266,32 @@ export function EvaluationRunHeadline({
           })}
         </div>
 
-        {(dimensionsFailed > 0 || staleCount > 0) && (
+        {dimensionsFailed > 0 && (
+          <div
+            role="status"
+            className="border-destructive/40 bg-destructive/5 text-destructive mt-3 flex items-start gap-2 rounded-lg border p-2.5 text-xs"
+          >
+            <JudgeFailureIcon className="mt-px" />
+            <p className="leading-snug">
+              <strong className="font-semibold">
+                {dimensionsFailed} judge{dimensionsFailed === 1 ? '' : 's'} did not run
+              </strong>{' '}
+              — the severity totals above are an undercount. Retry{' '}
+              {dimensionsFailed === 1 ? 'it' : 'them'} above to fill the gap in this run.
+            </p>
+          </div>
+        )}
+
+        {retryError && (
+          <p role="alert" className="text-destructive mt-2 text-xs">
+            Retry failed: {retryError}
+          </p>
+        )}
+
+        {staleCount > 0 && (
           <p className="text-muted-foreground mt-3 text-xs">
-            {dimensionsFailed > 0 &&
-              `${dimensionsFailed} judge${dimensionsFailed === 1 ? '' : 's'} did not run — these totals are an undercount. `}
-            {staleCount > 0 &&
-              `${staleCount} finding${staleCount === 1 ? '' : 's'} went stale as the structure changed; re-run to refresh.`}
+            {staleCount} finding{staleCount === 1 ? '' : 's'} went stale as the structure changed;
+            re-run to refresh.
           </p>
         )}
       </div>

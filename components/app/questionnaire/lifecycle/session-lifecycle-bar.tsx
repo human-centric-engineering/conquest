@@ -26,6 +26,9 @@ import type { SessionStatusView } from '@/lib/app/questionnaire/session/status-v
 
 export interface SessionLifecycleBarProps {
   view: SessionStatusView | null;
+  /** Show the "N% completed" text beside the progress bar (`config.showProgressPercentText`). The
+   * bar itself always renders regardless. Default `true`. */
+  showProgressPercentText?: boolean;
   /** The session is respondent-paused (resumable). */
   paused: boolean;
   /** A pause/resume action is in flight. */
@@ -58,6 +61,7 @@ export interface SessionLifecycleBarProps {
 
 export function SessionLifecycleBar({
   view,
+  showProgressPercentText = true,
   paused,
   busy,
   actionError,
@@ -88,7 +92,12 @@ export function SessionLifecycleBar({
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
-      {showProgress && <SessionProgressBar coverage={view.completion.displayCoverage} />}
+      {showProgress && (
+        <SessionProgressBar
+          coverage={view.completion.displayCoverage}
+          showPercentText={showProgressPercentText}
+        />
+      )}
       {hasStrip && (
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
           {leading}

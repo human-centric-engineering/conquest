@@ -23,10 +23,16 @@ import { cn } from '@/lib/utils';
 export interface SessionProgressBarProps {
   /** Weighted coverage in [0, 1]; out-of-range values are clamped. */
   coverage: number;
+  /** Show the "N% completed" text beside the bar. The bar itself always renders. Default `true`. */
+  showPercentText?: boolean;
   className?: string;
 }
 
-export function SessionProgressBar({ coverage, className }: SessionProgressBarProps) {
+export function SessionProgressBar({
+  coverage,
+  showPercentText = true,
+  className,
+}: SessionProgressBarProps) {
   const pct = Math.round(Math.min(1, Math.max(0, coverage)) * 100);
 
   return (
@@ -47,7 +53,11 @@ export function SessionProgressBar({ coverage, className }: SessionProgressBarPr
           }}
         />
       </div>
-      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{pct}% completed</span>
+      {showPercentText && (
+        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+          {pct}% completed
+        </span>
+      )}
     </div>
   );
 }

@@ -57,6 +57,11 @@ import type {
 } from '@/lib/app/questionnaire/extraction/types';
 import type { CompletionAssessment } from '@/lib/app/questionnaire/completion/types';
 import { isEarlyFinishAvailable } from '@/lib/app/questionnaire/completion/completion-logic';
+import {
+  milestoneMessage,
+  resolveMilestoneCrossing,
+} from '@/lib/app/questionnaire/completion/milestones';
+import { gradedCoverage } from '@/lib/app/questionnaire/selection/context';
 
 import type {
   CapabilityInvokers,
@@ -476,6 +481,34 @@ export async function runDataSlotTurn(
       : `${remainingQuestions.length} question(s) still unanswered.`,
   };
 
+  // 2b. Completeness milestones. Shared with `runTurn` so the banner fires identically on both
+  // pipelines — this path is the one MOST sessions take (any version with data slots), so omitting
+  // it here would make the whole feature a no-op in practice.
+  //
+  // Deliberately NOT `assessment.displayCoverage`: this pipeline sets that to a raw answered/total
+  // count ratio (see above), while the progress bar the respondent is looking at re-derives GRADED
+  // coverage from the status endpoint. Feeding the count ratio in here would announce "You're 50%
+  // of the way through." beside a bar reading 40%. Grade it the same way the bar does.
+  // Skipped on a probe turn for the same reason as `runTurn`: the merged intents aren't persisted,
+  // so banking a threshold off them would silently cost the respondent that milestone forever.
+  const milestone = contradiction.suppressWrites
+    ? // Nothing is announced, so `coveragePct` is never read — it is present only to satisfy
+      // the shared `MilestoneOutcome` shape.
+      { announce: null, coveragePct: 0, raisedMilestones: undefined }
+    : resolveMilestoneCrossing(
+        state.config,
+        gradedCoverage(effective.questions, effective.answered, state.config.answerConfidenceFloor),
+        state.raisedMilestones,
+        effective.questions.length
+      );
+  if (milestone.announce !== null) {
+    events.push({
+      type: 'warning',
+      code: 'milestone',
+      message: milestoneMessage(milestone.coveragePct),
+    });
+  }
+
   // 3. Respond.
   let response: TurnResponse;
   let targetedQuestionId: string | null = null;
@@ -621,6 +654,9 @@ export async function runDataSlotTurn(
         : {}),
       ...(contradiction.raisedContradictions !== undefined
         ? { raisedContradictions: contradiction.raisedContradictions }
+        : {}),
+      ...(milestone.raisedMilestones !== undefined
+        ? { raisedMilestones: milestone.raisedMilestones }
         : {}),
     },
     events,

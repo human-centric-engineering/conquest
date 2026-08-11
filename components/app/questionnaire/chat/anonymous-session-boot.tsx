@@ -120,6 +120,11 @@ interface AnonymousSessionBootProps {
    */
   inlineCorrectionEnabled?: boolean;
   /**
+   * Show the "N% completed" text beside the progress bar (resolved server-side from the version
+   * config, default on). The bar itself always renders regardless.
+   */
+  showProgressPercentText?: boolean;
+  /**
    * Session resume opt-in (per-version config, resolved server-side). When on (and this is the public
    * anonymous path — not preview/invite), the credential is kept durably in `localStorage` so the
    * session survives a browser close, and a genuine return (new tab / after close, NOT a same-tab
@@ -249,6 +254,7 @@ export function AnonymousSessionBoot({
   reasoningDwellMs,
   reasoningPerItemMs,
   inlineCorrectionEnabled = false,
+  showProgressPercentText = true,
   resumeEnabled = false,
   resumeByRef,
 }: AnonymousSessionBootProps) {
@@ -511,6 +517,7 @@ export function AnonymousSessionBoot({
       reasoningDwellMs={reasoningDwellMs}
       reasoningPerItemMs={reasoningPerItemMs}
       inlineCorrectionEnabled={inlineCorrectionEnabled}
+      showProgressPercentText={showProgressPercentText}
       resumeByRef={resumeByRef}
     />
   );

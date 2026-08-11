@@ -202,6 +202,34 @@ describe('QuestionnaireChat', () => {
     expect(screen.queryByText(/I noticed something/i)).not.toBeInTheDocument();
   });
 
+  it('renders a milestone-coded warning as the MilestoneNotice, not the generic quiet line', () => {
+    // The orchestrator emits a `milestone`-coded warning when the respondent crosses a
+    // configured completeness threshold — it should get its own notice, not the generic fallback.
+    hookReturn = makeReturn({
+      turns: [
+        {
+          role: 'assistant',
+          content: 'A question.',
+          warnings: [{ code: 'milestone', message: "You're 50% of the way through." }],
+        },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    const notice = screen.getByText("You're 50% of the way through.");
+    expect(notice).toBeInTheDocument();
+
+    // Assert on something ONLY MilestoneNotice produces. `role="status"` alone is worthless here:
+    // the generic fallback line carries it too, so a `role` assertion passes even if the
+    // `code === 'milestone'` branch is deleted entirely. MilestoneNotice renders a boxed callout
+    // (`rounded-lg` + `border`) with a flag icon; the fallback is a bare `border-l-2 pl-3 text-xs`
+    // line with no icon.
+    const container = notice.closest('[role="status"]');
+    expect(container).toHaveClass('rounded-lg');
+    expect(container?.querySelector('svg.lucide-flag')).toBeInTheDocument();
+    expect(container).not.toHaveClass('border-l-2');
+  });
+
   it('renders a flagged contradiction as the "I noticed something" callout beneath its turn', () => {
     // The orchestrator emits a `contradiction`-coded warning whose message is the agent's probe.
     hookReturn = makeReturn({

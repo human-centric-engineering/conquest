@@ -5,7 +5,10 @@
  *
  * Lets the admin pick which of the pack's six sections to include (all ticked by default except
  * "Evaluation findings", which is opt-in — see its description) and the output format, then
- * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. Opened from
+ * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. "Experience
+ * setup" carries one nested sub-option — the technical/tuning settings tier — which is indented
+ * under its parent and disabled while the parent is off, so it reads as a refinement of that
+ * section rather than a seventh section. Opened from
  * {@link file://./definition-export-menu.tsx}'s "Download pack…" item, the same way that menu
  * already opens {@link file://./import-definition-dialog.tsx}.
  *
@@ -38,7 +41,10 @@ import {
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
-import { DEFAULT_PACK_INCLUDE } from '@/lib/app/questionnaire/export/build-pack-model';
+import {
+  DEFAULT_PACK_INCLUDE,
+  type PackInclude,
+} from '@/lib/app/questionnaire/export/build-pack-model';
 
 export interface PackExportDialogProps {
   open: boolean;
@@ -60,6 +66,9 @@ interface SectionOption {
   label: string;
   description: string;
 }
+
+/** The one nested sub-option — a refinement of `setup`, not a section of its own. */
+const TECHNICAL_SETTINGS_KEY = 'setupTechnical';
 
 const SECTIONS: SectionOption[] = [
   {
@@ -85,7 +94,7 @@ const SECTIONS: SectionOption[] = [
   {
     key: 'setup',
     label: 'Experience setup',
-    description: 'A summary of how the respondent experience is configured.',
+    description: 'Every setting that shapes the respondent experience, grouped by area.',
   },
   {
     key: 'evaluations',
@@ -101,11 +110,11 @@ export function PackExportDialog({
   questionnaireId,
   versionId,
 }: PackExportDialogProps) {
-  const [included, setIncluded] =
-    useState<Record<SectionOption['key'], boolean>>(DEFAULT_PACK_INCLUDE);
+  const [included, setIncluded] = useState<PackInclude>(DEFAULT_PACK_INCLUDE);
   const [format, setFormat] = useState<PackFormat>('pdf');
 
-  const nothingIncluded = Object.values(included).every((v) => !v);
+  // Only the six SECTIONS count — `setupTechnical` on its own produces nothing to download.
+  const nothingIncluded = SECTIONS.every((section) => !included[section.key]);
 
   function handleDownload() {
     const url = new URL(
@@ -116,6 +125,7 @@ export function PackExportDialog({
     for (const section of SECTIONS) {
       url.searchParams.set(section.key, String(included[section.key]));
     }
+    url.searchParams.set(TECHNICAL_SETTINGS_KEY, String(included[TECHNICAL_SETTINGS_KEY]));
     window.location.href = url.toString();
     onOpenChange(false);
   }
@@ -140,19 +150,48 @@ export function PackExportDialog({
 
         <div className="space-y-3">
           {SECTIONS.map((section) => (
-            <div key={section.key} className="flex items-start gap-2">
-              <Checkbox
-                id={`pack-section-${section.key}`}
-                checked={included[section.key]}
-                onCheckedChange={(checked) =>
-                  setIncluded((prev) => ({ ...prev, [section.key]: checked }))
-                }
-                className="mt-0.5"
-              />
-              <Label htmlFor={`pack-section-${section.key}`} className="flex-1 font-normal">
-                <span className="font-medium">{section.label}</span>
-                <span className="text-muted-foreground block text-xs">{section.description}</span>
-              </Label>
+            <div key={section.key} className="space-y-2">
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id={`pack-section-${section.key}`}
+                  checked={included[section.key]}
+                  onCheckedChange={(checked) =>
+                    setIncluded((prev) => ({ ...prev, [section.key]: checked === true }))
+                  }
+                  className="mt-0.5"
+                />
+                <Label htmlFor={`pack-section-${section.key}`} className="flex-1 font-normal">
+                  <span className="font-medium">{section.label}</span>
+                  <span className="text-muted-foreground block text-xs">{section.description}</span>
+                </Label>
+              </div>
+
+              {section.key === 'setup' && (
+                <div className="ml-6 flex items-start gap-2">
+                  <Checkbox
+                    id={`pack-section-${TECHNICAL_SETTINGS_KEY}`}
+                    checked={included[TECHNICAL_SETTINGS_KEY]}
+                    disabled={!included.setup}
+                    onCheckedChange={(checked) =>
+                      setIncluded((prev) => ({
+                        ...prev,
+                        [TECHNICAL_SETTINGS_KEY]: checked === true,
+                      }))
+                    }
+                    className="mt-0.5"
+                  />
+                  <Label
+                    htmlFor={`pack-section-${TECHNICAL_SETTINGS_KEY}`}
+                    className="flex-1 font-normal"
+                  >
+                    <span className="font-medium">Technical &amp; tuning settings</span>
+                    <span className="text-muted-foreground block text-xs">
+                      Also list the numeric tuning, prompt and cost settings behind the experience —
+                      useful internally, usually noise in a client-facing pack. Off by default.
+                    </span>
+                  </Label>
+                </div>
+              )}
             </div>
           ))}
         </div>

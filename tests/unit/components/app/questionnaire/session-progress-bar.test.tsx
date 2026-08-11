@@ -42,4 +42,15 @@ describe('SessionProgressBar', () => {
     const { container } = render(<SessionProgressBar coverage={0.3} className="mt-4" />);
     expect(container.firstChild).toHaveClass('mt-4');
   });
+
+  it('shows the percent-completed text by default', () => {
+    render(<SessionProgressBar coverage={0.5} />);
+    expect(screen.getByText('50% completed')).toBeInTheDocument();
+  });
+
+  it('hides the percent-completed text when showPercentText is false, keeping the bar itself', () => {
+    render(<SessionProgressBar coverage={0.5} showPercentText={false} />);
+    expect(screen.queryByText(/completed/)).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+  });
 });

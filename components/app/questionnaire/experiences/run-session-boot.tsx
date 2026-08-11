@@ -65,6 +65,8 @@ export interface RunSessionBootProps {
   reasoningDwellMs?: number;
   reasoningPerItemMs?: number;
   inlineCorrectionEnabled?: boolean;
+  /** Show the "N% completed" text beside the progress bar (resolved server-side, default on). */
+  showProgressPercentText?: boolean;
 }
 
 type BootState =
@@ -94,6 +96,7 @@ export function RunSessionBoot({
   reasoningDwellMs,
   reasoningPerItemMs,
   inlineCorrectionEnabled = false,
+  showProgressPercentText = true,
 }: RunSessionBootProps) {
   const [state, setState] = useState<BootState>({ phase: 'loading' });
   // Dedup across React 19 StrictMode's double-invoke. Harmless here (these are reads, not a
@@ -161,6 +164,7 @@ export function RunSessionBoot({
       reasoningDwellMs={reasoningDwellMs}
       reasoningPerItemMs={reasoningPerItemMs}
       inlineCorrectionEnabled={inlineCorrectionEnabled}
+      showProgressPercentText={showProgressPercentText}
     />
   );
 }

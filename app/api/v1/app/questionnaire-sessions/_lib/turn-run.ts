@@ -87,6 +87,12 @@ export async function persistTurn(opts: {
    * moves atomically.
    */
   raisedContradictions?: RaisedContradiction[];
+  /**
+   * "Don't nag" ledger for completeness milestones: the FULL updated
+   * `AppQuestionnaireSession.raisedMilestones` list to write when this turn crossed a fresh
+   * threshold. `undefined` (the default) leaves the column untouched.
+   */
+  raisedMilestones?: number[];
   /** The send attempt's idempotency key (F7.x retry) — stamped on the turn for dedup-and-replay. */
   idempotencyKey?: string | null;
 }): Promise<string> {
@@ -194,11 +200,15 @@ export async function persistTurn(opts: {
   });
   sideEffectDataSlotIds.push(...reconciledDataSlotIds);
 
-  // Probe-confirm flow + "don't nag" ledger: park a raised probe or clear a resolved one, and/or write
-  // the updated raised-contradiction ledger. Each is `undefined` = leave untouched (the common case);
-  // for the probe, `null` writes SQL NULL (DbNull) to clear. Both ride one update so raise/resolve
-  // state moves together.
-  if (opts.pendingContradiction !== undefined || opts.raisedContradictions !== undefined) {
+  // Probe-confirm flow + "don't nag" ledgers: park a raised probe or clear a resolved one, and/or
+  // write the updated raised-contradiction / raised-milestone ledgers. Each is `undefined` = leave
+  // untouched (the common case); for the probe, `null` writes SQL NULL (DbNull) to clear. All ride
+  // one update so this turn's ledger state moves together.
+  if (
+    opts.pendingContradiction !== undefined ||
+    opts.raisedContradictions !== undefined ||
+    opts.raisedMilestones !== undefined
+  ) {
     await prisma.appQuestionnaireSession.update({
       where: { id: opts.sessionId },
       data: {
@@ -215,6 +225,7 @@ export async function persistTurn(opts: {
               raisedContradictions: opts.raisedContradictions as unknown as Prisma.InputJsonValue,
             }
           : {}),
+        ...(opts.raisedMilestones !== undefined ? { raisedMilestones: opts.raisedMilestones } : {}),
       },
     });
   }

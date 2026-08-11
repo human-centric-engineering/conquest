@@ -3,8 +3,9 @@
  *
  * Pins: each `PackInclude` flag nulling out its own section (and no others), data-slot
  * `questionKeys` resolving to `{ key, prompt }` pairs against the graph (falling back to the bare
- * key when a question was deleted), the curated experience-setup summary reading friendly labels
- * off the config, that meta/section/question fields are exactly what `buildInstrumentModel` would
+ * key when a question was deleted), the experience-setup summary deriving from the settings
+ * registry (grouped rows, the technical tier behind `setupTechnical`, nested blocks expanding, inert
+ * settings skipped), that meta/section/question fields are exactly what `buildInstrumentModel` would
  * produce (reused, not re-derived), and the evaluations appendix — all seven dimensions present in
  * `EVALUATION_DIMENSIONS` order, findings grouped per dimension with `pending` ones included, and
  * the `hasRun: false` shape when no run was passed in.
@@ -20,6 +21,7 @@ import {
   type PackInclude,
 } from '@/lib/app/questionnaire/export/build-pack-model';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import { SETTING_GROUPS } from '@/lib/app/questionnaire/settings-registry';
 import type {
   VersionGraphView,
   SectionView,
@@ -198,6 +200,7 @@ describe('buildPackModel', () => {
       dataSlots: false,
       definitions: true,
       setup: false,
+      setupTechnical: false,
       evaluations: false,
     };
     const model = buildPackModel(
@@ -284,38 +287,115 @@ describe('buildPackModel', () => {
   });
 
   describe('experience-setup summary', () => {
-    it('reads friendly labels for access mode and on/off flags', () => {
+    /** Build a model and index its setup rows by label. */
+    function setupOf(
+      configOverrides: Partial<typeof DEFAULT_QUESTIONNAIRE_CONFIG> = {},
+      include: PackInclude = DEFAULT_PACK_INCLUDE
+    ) {
       const model = buildPackModel(
         'T',
-        graphOf(SECTIONS, {
-          accessMode: 'public',
-          voiceEnabled: true,
-          attachmentsEnabled: false,
-        }),
+        graphOf(SECTIONS, configOverrides),
         [],
         null,
         null,
-        DEFAULT_PACK_INCLUDE,
+        include,
         'now'
       );
-      const byLabel = new Map(model.setup?.map((item) => [item.label, item.value]));
+      const rows = model.setup ?? [];
+      return { rows, byLabel: new Map(rows.map((item) => [item.label, item.value])) };
+    }
+
+    it('reads friendly labels for access mode and on/off flags', () => {
+      const { byLabel } = setupOf({
+        accessMode: 'public',
+        voiceEnabled: true,
+        attachmentsEnabled: false,
+      });
       expect(byLabel.get('Access')).toBe('Public link');
       expect(byLabel.get('Voice input')).toBe('Enabled');
       expect(byLabel.get('File attachments')).toBe('Disabled');
     });
 
-    it('does not leak internal tuning fields (e.g. answerConfidenceFloor) into the summary', () => {
-      const model = buildPackModel(
-        'T',
-        graphOf(SECTIONS),
-        [],
-        null,
-        null,
-        DEFAULT_PACK_INCLUDE,
-        'now'
+    it('derives from the registry, so settings added after the original ten are present', () => {
+      // The three that shipped with the progress/milestone work — the drift that motivated the
+      // registry. They must be in the pack without anyone editing a curated list.
+      const { byLabel } = setupOf({
+        showProgressPercentText: false,
+        milestoneBannerEnabled: true,
+        milestoneBannerThresholds: [30, 60],
+      });
+      expect(byLabel.get('Progress percentage shown')).toBe('No');
+      expect(byLabel.get('Completeness milestone banners')).toBe('Enabled');
+      expect(byLabel.get('Milestone thresholds')).toBe('30%, 60%');
+    });
+
+    it('stamps every row with a group, and emits groups in SETTING_GROUPS order', () => {
+      const { rows } = setupOf();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expect(SETTING_GROUPS).toContain(row.group);
+
+      // Each group appears as one contiguous run, ordered by SETTING_GROUPS.
+      const order = rows.map((row) => SETTING_GROUPS.indexOf(row.group));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    });
+
+    it('omits the technical tier by default and includes it on opt-in', () => {
+      const standard = setupOf();
+      expect(standard.byLabel.has('Cost budget per session')).toBe(false);
+      expect(standard.byLabel.has('Answer confirmation floor')).toBe(false);
+      // The long-standing guarantee: no tuning vocabulary in a client-facing pack.
+      expect(standard.rows.map((r) => r.label).join(' ')).not.toMatch(
+        /confidence|budget|coverage/i
       );
-      const labels = model.setup?.map((item) => item.label) ?? [];
-      expect(labels.join(' ')).not.toMatch(/confidence|budget|coverage/i);
+
+      const technical = setupOf({}, { ...DEFAULT_PACK_INCLUDE, setupTechnical: true });
+      expect(technical.byLabel.get('Cost budget per session')).toBe('No limit');
+      expect(technical.byLabel.get('Answer confirmation floor')).toBe('50%');
+      expect(technical.rows.length).toBeGreaterThan(standard.rows.length);
+      // Opting in ADDS rows; it never changes or drops a standard one.
+      for (const [label, value] of standard.byLabel) {
+        expect(technical.byLabel.get(label)).toBe(value);
+      }
+    });
+
+    it('expands a nested settings block into one row per meaningful setting', () => {
+      const off = setupOf();
+      expect(off.byLabel.get('Respondent report')).toBe('Disabled');
+      // Disabled ⇒ the block contributes its master toggle and nothing else.
+      expect(off.byLabel.has('Report style')).toBe(false);
+
+      const on = setupOf({
+        respondentReport: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.respondentReport,
+          enabled: true,
+          mode: 'narrative',
+        },
+      });
+      expect(on.byLabel.get('Respondent report')).toBe('Enabled');
+      expect(on.byLabel.get('Report style')).toBe('Woven narrative');
+      expect(on.byLabel.get('Narrative style')).toBe('Flowing prose');
+      expect(on.byLabel.get('Report delivery')).toBe('On the completion screen, PDF download');
+      // `narrative` has no separate raw section to describe.
+      expect(on.byLabel.has('Report shows')).toBe(false);
+    });
+
+    it('skips settings made inert by the rest of the config', () => {
+      // Milestone thresholds say nothing while the banners are off.
+      expect(setupOf({ milestoneBannerEnabled: false }).byLabel.has('Milestone thresholds')).toBe(
+        false
+      );
+      // A built-in persona replaces the version tone, so listing custom dials would misdescribe it.
+      const withPersona = setupOf({
+        personaSelection: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.personaSelection,
+          enabled: true,
+        },
+      });
+      expect(withPersona.byLabel.has('Interviewer tone')).toBe(false);
+      // Nobody is invited on a public-only link.
+      expect(setupOf({ accessMode: 'public' }).byLabel.has('Invitee details collected')).toBe(
+        false
+      );
     });
   });
 

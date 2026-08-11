@@ -1110,6 +1110,7 @@ describe('API Endpoints', () => {
       expect(Q.versionArchive('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/archive`);
       expect(Q.versionRestore('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/restore`);
       expect(Q.versionReingest('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/reingest`);
+      expect(Q.versionReingestStream('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/reingest/stream`);
       expect(Q.versionConfig('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/config`);
       expect(Q.reportCraft('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/report/craft`);
       expect(Q.reportPreview('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/report/preview`);
@@ -1161,6 +1162,9 @@ describe('API Endpoints', () => {
       expect(Q.versionEvaluations('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/evaluations`);
       expect(Q.versionEvaluationById('qn1', 'v1', 'run1')).toBe(
         `${base}/qn1/versions/v1/evaluations/run1`
+      );
+      expect(Q.versionEvaluationRetryJudge('qn1', 'v1', 'run1')).toBe(
+        `${base}/qn1/versions/v1/evaluations/run1/retry`
       );
       expect(Q.versionEvaluationFinding('qn1', 'v1', 'run1', 'f1')).toBe(
         `${base}/qn1/versions/v1/evaluations/run1/findings/f1`

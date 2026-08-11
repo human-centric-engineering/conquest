@@ -61,6 +61,7 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
       respondentReport,
       cohortReport,
       intro,
+      milestoneBannerThresholds,
       ...scalars
     } = body;
     const writeData = {
@@ -72,6 +73,9 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
       ...(respondentReport !== undefined ? { respondentReport: jsonInput(respondentReport) } : {}),
       ...(cohortReport !== undefined ? { cohortReport: jsonInput(cohortReport) } : {}),
       ...(intro !== undefined ? { intro: jsonInput(intro) } : {}),
+      ...(milestoneBannerThresholds !== undefined
+        ? { milestoneBannerThresholds: jsonInput(milestoneBannerThresholds) }
+        : {}),
     };
 
     // Read the pre-edit row for the audit diff (null on first save).

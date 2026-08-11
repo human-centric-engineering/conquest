@@ -6,7 +6,9 @@
  *
  * Test Coverage:
  * - Five of the six section checkboxes are checked by default; "Evaluation findings" is not
- * - Download is disabled once every checkbox is unchecked, with a hint message
+ * - The nested "Technical & tuning settings" sub-option: off by default, disabled with its parent,
+ *   and not counted as a section by the "pick at least one" gate
+ * - Download is disabled once every SECTION checkbox is unchecked, with a hint message
  * - Unchecking a single section still allows Download and reflects in the built URL
  * - Download navigates to the pack URL with format + include flags as query params
  * - Cancel closes the dialog without navigating
@@ -31,6 +33,15 @@ function renderDialog(onOpenChange = vi.fn()) {
   return onOpenChange;
 }
 
+/** The six section checkboxes, in document order — excludes the nested technical sub-option. */
+function sectionBoxes(): HTMLElement[] {
+  return screen
+    .getAllByRole('checkbox')
+    .filter((box) => box.getAttribute('id') !== 'pack-section-setupTechnical');
+}
+
+const technicalBox = () => screen.getByRole('checkbox', { name: /technical & tuning/i });
+
 let originalLocation: Location;
 
 beforeEach(() => {
@@ -49,12 +60,27 @@ afterEach(() => {
 
 describe('PackExportDialog', () => {
   describe('section checkboxes', () => {
-    it('renders six checkboxes, all checked by default except "Evaluation findings"', () => {
+    it('renders six section checkboxes, all checked by default except "Evaluation findings"', () => {
       renderDialog();
-      const boxes = screen.getAllByRole('checkbox');
+      const boxes = sectionBoxes();
       expect(boxes).toHaveLength(6);
       for (const box of boxes.slice(0, 5)) expect(box).toBeChecked();
       expect(boxes[5]).not.toBeChecked();
+    });
+
+    it('starts the nested technical sub-option unchecked, enabled under a checked parent', () => {
+      renderDialog();
+      expect(technicalBox()).not.toBeChecked();
+      expect(technicalBox()).not.toBeDisabled();
+    });
+
+    it('disables the technical sub-option when "Experience setup" is unchecked', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      await user.click(screen.getByRole('checkbox', { name: /experience setup/i }));
+
+      expect(technicalBox()).toBeDisabled();
     });
 
     it('disables Download and shows a hint once every checkbox is unchecked', async () => {
@@ -62,7 +88,7 @@ describe('PackExportDialog', () => {
       renderDialog();
 
       // Only the first five are checked by default — "Evaluation findings" starts unchecked.
-      for (const box of screen.getAllByRole('checkbox').slice(0, 5)) {
+      for (const box of sectionBoxes().slice(0, 5)) {
         await user.click(box);
       }
 
@@ -70,12 +96,22 @@ describe('PackExportDialog', () => {
       expect(screen.getByText(/pick at least one section/i)).toBeInTheDocument();
     });
 
+    it('does not count the technical sub-option as a section for the "pick at least one" gate', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      await user.click(technicalBox());
+      for (const box of sectionBoxes().slice(0, 5)) await user.click(box);
+
+      // The sub-option is ticked, but it produces nothing on its own — Download stays disabled.
+      expect(screen.getByRole('button', { name: /download/i })).toBeDisabled();
+    });
+
     it('keeps Download enabled while at least one section remains checked', async () => {
       const user = userEvent.setup();
       renderDialog();
 
-      const boxes = screen.getAllByRole('checkbox');
-      for (const box of boxes.slice(0, 4)) await user.click(box);
+      for (const box of sectionBoxes().slice(0, 4)) await user.click(box);
 
       expect(screen.getByRole('button', { name: /download/i })).not.toBeDisabled();
     });
@@ -96,6 +132,7 @@ describe('PackExportDialog', () => {
       expect(window.location.href).toContain('definitions=true');
       expect(window.location.href).toContain('setup=true');
       expect(window.location.href).toContain('evaluations=false');
+      expect(window.location.href).toContain('setupTechnical=false');
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
 
@@ -103,8 +140,8 @@ describe('PackExportDialog', () => {
       const user = userEvent.setup();
       renderDialog();
 
-      // "Data slots" is the second checkbox in document order.
-      await user.click(screen.getAllByRole('checkbox')[2]);
+      // "Data slots" is the third section checkbox in document order.
+      await user.click(sectionBoxes()[2]);
       await user.click(screen.getByRole('button', { name: /download/i }));
 
       expect(window.location.href).toContain('dataSlots=false');
@@ -115,11 +152,22 @@ describe('PackExportDialog', () => {
       const user = userEvent.setup();
       renderDialog();
 
-      // "Evaluation findings" is the sixth (last) checkbox in document order.
-      await user.click(screen.getAllByRole('checkbox')[5]);
+      // "Evaluation findings" is the sixth (last) section checkbox in document order.
+      await user.click(sectionBoxes()[5]);
       await user.click(screen.getByRole('button', { name: /download/i }));
 
       expect(window.location.href).toContain('evaluations=true');
+    });
+
+    it('checking "Technical & tuning settings" reflects as setupTechnical=true in the URL', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      await user.click(technicalBox());
+      await user.click(screen.getByRole('button', { name: /download/i }));
+
+      expect(window.location.href).toContain('setupTechnical=true');
+      expect(window.location.href).toContain('setup=true');
     });
 
     it('reflects a changed format selection in the URL', async () => {

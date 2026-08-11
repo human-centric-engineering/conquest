@@ -30,6 +30,7 @@ export interface SessionSurfaceConfig {
     reasoningStreamPlacement: string;
     reasoningStreamDwellMs: number;
     reasoningStreamPerItemMs: number;
+    showProgressPercentText: boolean;
   } | null;
 }
 
@@ -57,6 +58,7 @@ export async function loadSessionSurfaceConfig(
               reasoningStreamPlacement: true,
               reasoningStreamDwellMs: true,
               reasoningStreamPerItemMs: true,
+              showProgressPercentText: true,
             },
           },
         },

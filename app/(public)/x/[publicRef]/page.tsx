@@ -19,6 +19,7 @@ import {
   resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
+  resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { RESPONDENT_SHELL } from '@/lib/app/questionnaire/layout';
@@ -100,6 +101,7 @@ export default async function ExperienceRunPage({
     inlineCorrectionEnabled,
     glossary,
     glossaryAppendix,
+    showProgressPercentText,
   ] = await Promise.all([
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
@@ -113,6 +115,7 @@ export default async function ExperienceRunPage({
     resolveInlineCorrectionForVersion(versionId),
     resolveGlossaryForHints(versionId),
     resolveGlossaryAppendixForVersion(versionId),
+    resolveShowProgressPercentTextForVersion(versionId),
   ]);
 
   // `px-4` matches the site header's own container padding, so the conversation's left and right
@@ -135,6 +138,7 @@ export default async function ExperienceRunPage({
           reasoningDwellMs={reasoningDwell.dwellMs}
           reasoningPerItemMs={reasoningDwell.perItemMs}
           inlineCorrectionEnabled={inlineCorrectionEnabled}
+          showProgressPercentText={showProgressPercentText}
         />
       </BrandThemeProvider>
     </div>

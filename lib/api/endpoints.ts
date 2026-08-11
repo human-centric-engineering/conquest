@@ -404,6 +404,9 @@ export const API = {
       /** Re-ingest a replacement source doc into a draft version (POST multipart). */
       versionReingest: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/reingest`,
+      /** Streaming re-ingest — replacement doc → extract → verify → replace over SSE (POST multipart). */
+      versionReingestStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/reingest/stream`,
       /** Duplicate the questionnaire's current version into a new draft questionnaire (POST JSON). */
       duplicate: (id: string): string => `/api/v1/app/questionnaires/${id}/duplicate`,
       /** Clone the questionnaire's current version into a new questionnaire for a demo client (POST — DEMO-ONLY). */
@@ -516,6 +519,9 @@ export const API = {
       /** One persisted evaluation run with its findings (GET — F5.2). */
       versionEvaluationById: (id: string, versionId: string, runId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}`,
+      /** Re-run one failed judge into an existing run (POST — merges into the same run). */
+      versionEvaluationRetryJudge: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/retry`,
       /** Review one finding (PATCH accept/decline/edit — F5.3). */
       versionEvaluationFinding: (
         id: string,
@@ -656,6 +662,8 @@ export const API = {
       profile: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/profile`,
       /** Selectable interviewer persona — resolved menu (GET) + set the chosen persona (PATCH). */
       persona: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/persona`,
+      /** Resolved respondent surface config — affordances, presentation, theme, glossary (GET). */
+      surface: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/surface`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */

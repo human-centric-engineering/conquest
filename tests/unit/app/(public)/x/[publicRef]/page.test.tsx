@@ -71,6 +71,7 @@ vi.mock('@/lib/app/questionnaire/chat/anonymity', () => ({
   resolvePresentationModeForVersion: vi.fn(),
   resolveReasoningDwellForVersion: vi.fn(),
   resolveReasoningPlacementForVersion: vi.fn(),
+  resolveShowProgressPercentTextForVersion: vi.fn(),
   resolveVoiceEnabledForVersion: vi.fn(),
 }));
 
@@ -121,6 +122,7 @@ import {
   resolvePresentationModeForVersion,
   resolveReasoningDwellForVersion,
   resolveReasoningPlacementForVersion,
+  resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import type { RunSurface } from '@/app/api/v1/app/experiences/_lib/run-surface';
@@ -195,6 +197,7 @@ describe('ExperienceRunPage', () => {
     vi.mocked(resolveReasoningPlacementForVersion).mockResolvedValue('overlay');
     vi.mocked(resolveReasoningDwellForVersion).mockResolvedValue({ dwellMs: 2000, perItemMs: 330 });
     vi.mocked(resolveInlineCorrectionForVersion).mockResolvedValue(true);
+    vi.mocked(resolveShowProgressPercentTextForVersion).mockResolvedValue(true);
   });
 
   // -------------------------------------------------------------------------

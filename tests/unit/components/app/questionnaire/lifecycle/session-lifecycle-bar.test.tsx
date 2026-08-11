@@ -62,6 +62,20 @@ describe('SessionLifecycleBar', () => {
     expect(bar).toHaveAttribute('aria-valuenow', '90');
   });
 
+  it('shows the percent-completed text by default', () => {
+    renderBar();
+    expect(screen.getByText('90% completed')).toBeInTheDocument();
+  });
+
+  it('hides the percent-completed text when showProgressPercentText is false, keeping the bar', () => {
+    renderBar({ showProgressPercentText: false });
+    expect(screen.queryByText(/completed/)).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: /questionnaire progress/i })).toHaveAttribute(
+      'aria-valuenow',
+      '90'
+    );
+  });
+
   it('drives the bar off the graded displayCoverage, not the strict gate coverage', () => {
     // A session mid-capture: strict gate at 0% but graded display shows tentative momentum.
     renderBar({

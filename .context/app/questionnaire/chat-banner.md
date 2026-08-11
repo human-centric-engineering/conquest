@@ -22,6 +22,18 @@ Rendered by `BrandThemeProvider` (`components/app/questionnaire/chat/brand-theme
 The middle zone takes the slack and truncates, so a long title never pushes the schedule off the
 bar. The schedule cluster is **hidden below `sm`** — on a phone the title keeps priority.
 
+**Below 420px the band stacks** (mark on its own row, title block on the next) instead of
+squeezing both onto one line — a fixed-width logo/wordmark next to a `flex-1` title otherwise
+crushes the title to a sliver (e.g. "Workplac…") on narrow phones. `min-[420px]:flex-row` restores
+the one-line two-anchor layout as soon as there's width to spare. **While stacked, everything is
+centred** (`items-center` + `text-center`) rather than left-led — a lone row of centred text reads
+as deliberate on a narrow phone, where a left-led block sitting under a centred mark would not; the
+title block carries an explicit `w-full` so it still fills the row (and its `truncate` still has a
+real width to truncate against) instead of shrinking to its own content width under the now-centred
+cross-axis, handing back to `flex-1` via `min-[420px]:w-auto` once the header is a row again. The
+same treatment applies to the anonymity badge in the banner-mode title strip, which centres under
+the title below 420px rather than squeezing it.
+
 The band renders whenever there's a surface to paint, a logo, a title, **or** an anonymity notice
 — so a themed or unthemed questionnaire both get a title bar. With no surface, no logo, no header
 and a non-anonymous version it renders nothing (unchanged).
@@ -32,6 +44,8 @@ and a non-anonymous version it renders nothing (unchanged).
 alongside `header`) puts a shield-marked **"Responses are anonymous"** line under the title,
 aligned with it — right-aligned in the two-anchor band, left-led when there's no mark, and on the
 opposite end of the title row in the banner variant (which is left-led and has no slack beneath).
+Below the 420px stacking breakpoint it's always centred with the title, since it no longer shares a
+row with the mark to anchor against.
 It used to sit on the `SessionLifecycleBar` below the band; moving it here reclaims that strip's
 whole row and keeps the reassurance next to the questionnaire it applies to. The strip no longer
 renders it at all, and the admin session viewer — which has no band — shows an `Anonymous` badge
@@ -49,7 +63,8 @@ pure presentational. `BandHeader = { title, round: BandRound | null }`.
     (open-ended).
   - `resolveVersionHeader(versionId)` — no-login `/q/[versionId]`. The session is booted
     client-side and doesn't exist at SSR, so only the version's title resolves; `round` is always
-    null there (title shows, schedule omitted).
+    null there (title shows, schedule omitted). The title is projected off the shared respondent
+    surface row, not queried — see [`surface-config.md`](./surface-config.md).
 - **`lib/app/questionnaire/header/schedule.ts`** — pure derivation. `buildScheduleView(round, now)`
   returns `{ status, statusLabel, dateRange } | null`. `now` is injected (the band passes the
   render-time clock; tests inject a fixed instant). Status precedence:

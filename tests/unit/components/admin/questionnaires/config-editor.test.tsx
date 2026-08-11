@@ -188,6 +188,7 @@ describe('ConfigEditor', () => {
     const content = settingsContent();
     expect(content.getByText('Questions & completion')).toBeInTheDocument();
     expect(content.getByText('Respondent experience')).toBeInTheDocument();
+    expect(content.getByText('Progress milestones')).toBeInTheDocument();
     expect(content.getByText('Reasoning stream')).toBeInTheDocument();
     expect(content.getByText('Interviewer tone & persona')).toBeInTheDocument();
     expect(content.getByText('Access & invitations')).toBeInTheDocument();
@@ -311,6 +312,84 @@ describe('ConfigEditor', () => {
     fireEvent.click(switchNear(/^Attachments/));
     clickSave();
     expect(bodyOf(specs).attachmentsEnabled).toBe(true);
+  });
+
+  it('PATCHes showProgressPercentText toggled off on save', () => {
+    const { specs } = setup({ showProgressPercentText: true });
+    fireEvent.click(switchNear(/^Show percent completed/));
+    clickSave();
+    expect(bodyOf(specs).showProgressPercentText).toBe(false);
+  });
+
+  // ── Progress milestones ───────────────────────────────────────────────────────
+
+  const milestoneToggle = () =>
+    screen.getByRole('switch', { name: /show completeness milestone banners/i });
+
+  it('reflects milestoneBannerEnabled in the header switch', () => {
+    setup({ milestoneBannerEnabled: true });
+    expect(milestoneToggle()).toHaveAttribute('data-state', 'checked');
+  });
+
+  it('shows the off-state panel and a Turn on button when disabled', () => {
+    setup({ milestoneBannerEnabled: false });
+    expect(screen.getByText(/no milestone banners/i)).toBeInTheDocument();
+    // Exact match: "Turn on" only, not the profile-fields panel's "Turn on & add starter fields"
+    // (that panel is also in its off state by default — profileFields defaults to []).
+    expect(screen.getByRole('button', { name: /^turn on$/i })).toBeInTheDocument();
+  });
+
+  it('shows the configured thresholds as chips when enabled', () => {
+    setup({ milestoneBannerEnabled: true, milestoneBannerThresholds: [25, 50, 75, 90] });
+    for (const t of [25, 50, 75, 90]) {
+      expect(screen.getByText(`${t}%`)).toBeInTheDocument();
+    }
+  });
+
+  it('PATCHes milestoneBannerEnabled toggled off on save', () => {
+    const { specs } = setup({ milestoneBannerEnabled: true });
+    fireEvent.click(milestoneToggle());
+    clickSave();
+    expect(bodyOf(specs).milestoneBannerEnabled).toBe(false);
+  });
+
+  it('adds a new threshold and PATCHes the sorted list on save', () => {
+    const { specs } = setup({ milestoneBannerEnabled: true, milestoneBannerThresholds: [25, 75] });
+    fireEvent.change(screen.getByPlaceholderText('e.g. 60'), { target: { value: '60' } });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    expect(screen.getByText('60%')).toBeInTheDocument();
+    clickSave();
+    expect(bodyOf(specs).milestoneBannerThresholds).toEqual([25, 60, 75]);
+  });
+
+  it('rejects an out-of-range threshold with an inline error and does not add it', () => {
+    setup({ milestoneBannerEnabled: true, milestoneBannerThresholds: [25] });
+    fireEvent.change(screen.getByPlaceholderText('e.g. 60'), { target: { value: '150' } });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    expect(screen.getByText(/enter a whole number between 1 and 99/i)).toBeInTheDocument();
+    expect(screen.queryByText('150%')).not.toBeInTheDocument();
+  });
+
+  it('rejects a duplicate threshold with an inline error', () => {
+    setup({ milestoneBannerEnabled: true, milestoneBannerThresholds: [50] });
+    fireEvent.change(screen.getByPlaceholderText('e.g. 60'), { target: { value: '50' } });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    expect(screen.getByText(/already in the list/i)).toBeInTheDocument();
+  });
+
+  it('removes a threshold via its Remove button and PATCHes the reduced list', () => {
+    const { specs } = setup({
+      milestoneBannerEnabled: true,
+      milestoneBannerThresholds: [25, 50],
+    });
+    fireEvent.click(screen.getByRole('button', { name: /remove 25%/i }));
+
+    expect(screen.queryByText('25%')).not.toBeInTheDocument();
+    clickSave();
+    expect(bodyOf(specs).milestoneBannerThresholds).toEqual([50]);
   });
 
   it('PATCHes anonymousMode toggled on on save', () => {
