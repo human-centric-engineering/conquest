@@ -118,5 +118,58 @@ export function buildPackCsv(model: PackModel): string {
     ]);
   }
 
+  if (model.evaluations) {
+    // One row per finding; a dimension with zero findings still gets one row (blank finding
+    // columns) so its score/diagnostic isn't lost. `!hasRun` yields zero dimensions, so the block
+    // degrades to header-only — the same "nothing here" shape empty dataSlots/sections use.
+    const evaluationRows = model.evaluations.dimensions.flatMap((dim) =>
+      dim.findings.length === 0
+        ? [
+            row([
+              dim.dimension,
+              dim.label,
+              dim.score !== null ? String(dim.score) : '',
+              dim.diagnostic ?? '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+            ]),
+          ]
+        : dim.findings.map((finding) =>
+            row([
+              dim.dimension,
+              dim.label,
+              dim.score !== null ? String(dim.score) : '',
+              dim.diagnostic ?? '',
+              finding.severity,
+              finding.status,
+              finding.targetLabel,
+              finding.proposedChange,
+              finding.rationale,
+              finding.sourceQuote ?? '',
+            ])
+          )
+    );
+    blocks.push([
+      '# Evaluation',
+      row([
+        'dimension',
+        'judge',
+        'score',
+        'diagnostic',
+        'severity',
+        'status',
+        'target',
+        'proposed_change',
+        'rationale',
+        'source_quote',
+      ]),
+      ...evaluationRows,
+    ]);
+  }
+
   return `${blocks.map((block) => block.join('\r\n')).join('\r\n\r\n')}\r\n`;
 }

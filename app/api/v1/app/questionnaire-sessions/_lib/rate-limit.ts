@@ -91,3 +91,30 @@ export const resumeByRefLimiter = createRateLimiter({
   interval: RESUME_BY_REF_RATE_LIMIT_INTERVAL_MS,
   maxRequests: RESUME_BY_REF_RATE_LIMIT_MAX,
 });
+
+/**
+ * Report-regeneration sub-cap. `submit` calls `enqueueOrRegenerateRespondentReport` on the
+ * path that actually completes the session — a paid LLM call (report generation, optionally
+ * with KB grounding + web-search rounds per report-web-search.md) that's MORE expensive than
+ * the per-turn contradiction sweep above, not less. Since `reopen` (the sibling lifecycle
+ * route) has no cooldown and early-finish defaults to available, a held session can be
+ * looped reopen→submit to force unlimited regenerations without this guard. Sized well
+ * below `turnLimiter` — in line with the other genuinely-expensive per-flow caps in
+ * `lib/security/rate-limit.ts` (`synthesisLimiter` 10/min for a single case-gen LLM call,
+ * `pairwiseVerdictLimiter` 5/min for a heavier multi-call judge run); report generation's
+ * grounding rounds put it nearer that heavier end, so 5/min. A legitimate respondent
+ * completes (and thus regenerates) a given session only a handful of times. Keyed on
+ * `resolveTurnAccess().rateKey` (respondent user id, or client IP on the no-login path)
+ * COMPOUNDED with the session id — the abuse case is looping reopen→submit on one
+ * session, not completing many different sessions in a burst, so the cap must not share
+ * one bucket across a user's unrelated sessions.
+ */
+export const REPORT_REGENERATE_RATE_LIMIT_MAX = 5;
+
+/** Sliding-window length for {@link reportRegenerateLimiter}, in milliseconds. */
+export const REPORT_REGENERATE_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const reportRegenerateLimiter = createRateLimiter({
+  interval: REPORT_REGENERATE_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: REPORT_REGENERATE_RATE_LIMIT_MAX,
+});

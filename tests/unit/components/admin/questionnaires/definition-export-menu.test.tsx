@@ -12,6 +12,7 @@
  * - Three instrument download links (pdf/text/csv) with correct query strings
  * - "Import definition (JSON)" item opens the ImportDefinitionDialog
  * - "Duplicate this questionnaire" calls the hook's duplicate(questionnaireId)
+ * - "Download pack…" item opens the PackExportDialog
  * - Error string from the hook renders when present
  *
  * @see components/admin/questionnaires/definition-export-menu.tsx
@@ -42,6 +43,12 @@ vi.mock('@/components/admin/questionnaires/use-duplicate-questionnaire', () => (
 vi.mock('@/components/admin/questionnaires/import-definition-dialog', () => ({
   ImportDefinitionDialog: ({ open }: { open: boolean }) => (
     <div data-testid="import-dialog" data-open={String(open)} />
+  ),
+}));
+
+vi.mock('@/components/admin/questionnaires/pack-export-dialog', () => ({
+  PackExportDialog: ({ open }: { open: boolean }) => (
+    <div data-testid="pack-dialog" data-open={String(open)} />
   ),
 }));
 
@@ -234,6 +241,37 @@ describe('DefinitionExportMenu', () => {
       // Assert: the dialog component receives open=true, proving setImportOpen(true) was called
       await waitFor(() => {
         expect(screen.getByTestId('import-dialog')).toHaveAttribute('data-open', 'true');
+      });
+    });
+  });
+
+  // ── Pack export dialog ─────────────────────────────────────────────────────
+
+  describe('pack export dialog', () => {
+    it('dialog is closed on initial render', () => {
+      // Arrange & Act
+      renderMenu();
+
+      // Assert: the stubbed dialog renders with open=false
+      expect(screen.getByTestId('pack-dialog')).toHaveAttribute('data-open', 'false');
+    });
+
+    it('clicking "Download pack…" opens the PackExportDialog', async () => {
+      // Arrange
+      const user = userEvent.setup();
+      renderMenu();
+      await openDropdown(user);
+
+      // Act: select the pack export item
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /download pack/i })).toBeInTheDocument();
+      });
+      const packItem = screen.getByRole('menuitem', { name: /download pack/i });
+      await user.click(packItem);
+
+      // Assert: the dialog component receives open=true, proving setPackOpen(true) was called
+      await waitFor(() => {
+        expect(screen.getByTestId('pack-dialog')).toHaveAttribute('data-open', 'true');
       });
     });
   });

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   buildTurnContext: vi.fn(),
   sumSessionTurnCost: vi.fn(),
   experienceContextForSession: vi.fn(),
+  resolveReopenEligibility: vi.fn(),
 }));
 
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turn-context', () => ({
@@ -34,6 +35,12 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/turns', () => ({
 // `prisma:error` noise rather than failing.
 vi.mock('@/app/api/v1/app/experiences/_lib/run-read', () => ({
   experienceContextForSession: mocks.experienceContextForSession,
+}));
+// Reopen eligibility (F-early-finish-reopen) only queries when the session is completed; mocked
+// like the other DB seams so the fail-soft `.catch(() => false)` branch can be exercised
+// deterministically without a real Prisma read.
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/reopen-eligibility', () => ({
+  resolveReopenEligibility: mocks.resolveReopenEligibility,
 }));
 
 import { loadSessionStatus } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-status';
@@ -122,6 +129,7 @@ beforeEach(() => {
   mocks.sumSessionTurnCost.mockResolvedValue(0);
   // The overwhelming majority of sessions are standalone, not a leg of an experience run.
   mocks.experienceContextForSession.mockResolvedValue(null);
+  mocks.resolveReopenEligibility.mockResolvedValue(false);
 });
 
 describe('loadSessionStatus', () => {
@@ -348,5 +356,22 @@ describe('loadSessionStatus — experience membership', () => {
     expect(loaded).not.toBeNull();
     expect(loaded?.view.experience).toBeNull();
     expect(loaded?.view.status).toBe('active');
+  });
+});
+
+/**
+ * Reopen eligibility (F-early-finish-reopen). Only queried once the session is `completed`;
+ * a rejecting lookup must not take down the whole lifecycle status.
+ */
+describe('loadSessionStatus — reopen eligibility', () => {
+  it('degrades to reopenAvailable: false rather than failing the whole status read when the eligibility lookup rejects', async () => {
+    mocks.buildTurnContext.mockResolvedValue(ctx({ status: 'completed' }));
+    mocks.resolveReopenEligibility.mockRejectedValue(new Error('db unavailable'));
+
+    const loaded = await loadSessionStatus('sess-1');
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.view.reopenAvailable).toBe(false);
+    expect(loaded?.view.status).toBe('completed');
   });
 });

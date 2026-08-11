@@ -2,12 +2,14 @@
  * Route-local persistence + read models for design-time evaluation runs (F5.2).
  *
  * The DB seam for the run route: `lib/app/questionnaire/evaluation/**` stays Prisma-free
- * (the shared `runEvaluationPanel` dispatches; this file persists and reads). Three jobs:
+ * (the shared `runEvaluationPanel` dispatches; this file persists and reads). Four jobs:
  *
  *   - `persistEvaluationRun` — turn a finished panel result into a run header + one finding
  *     row per judge finding, in a single transaction, deriving the terminal `status`.
  *   - `listEvaluationRuns` — newest-first page of run headers for a version (no findings).
  *   - `getEvaluationRunDetail` — one run with its findings, version-scoped (404 on mismatch).
+ *   - `loadLatestEvaluationRun` — the newest run with its findings, for callers (the Questionnaire
+ *     Pack export) that just want "the current state of the panel," not the run history.
  *
  * `dimensionSummary` is persisted as JSON and validated with a Zod schema on read (the
  * `parseAudienceShape` posture — never trust a stored JSON blob's shape), degrading a
@@ -338,6 +340,20 @@ export async function listEvaluationRuns(
     prisma.appQuestionnaireEvaluationRun.count({ where: { versionId } }),
   ]);
   return { runs: rows.map(toRunListItem), total };
+}
+
+/**
+ * The version's most recently started evaluation run, with its findings — the "latest run"
+ * consumers outside the evaluations UI want (the Questionnaire Pack export) without paging the
+ * run list themselves. `null` when the version has never been evaluated.
+ */
+export async function loadLatestEvaluationRun(
+  versionId: string
+): Promise<EvaluationRunDetail | null> {
+  const { runs } = await listEvaluationRuns(versionId, { skip: 0, limit: 1 });
+  const latest = runs[0];
+  if (!latest) return null;
+  return getEvaluationRunDetail(versionId, latest.id);
 }
 
 /** A finding row plus the run context needed to apply/derive it (snapshot + scope). */

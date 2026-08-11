@@ -6,8 +6,9 @@
  * brand-free {@link file://./instrument-pdf-document.tsx}: same question-block styling, but this one
  * carries the ConQuest wordmark/tagline/website in the header and a closing "About ConQuest" page —
  * it's the external/showcase artifact, not the design-time reviewer copy. Renders whichever of
- * meta / experience-setup / data-slots / questions / definitions the model includes (`null` fields
- * are simply skipped).
+ * meta / experience-setup / data-slots / questions / definitions / evaluations the model includes
+ * (`null` fields are simply skipped). Evaluations render last, right before the closing page — the
+ * appendix position.
  *
  * No font is registered — `@react-pdf/renderer` ships Helvetica by default and no other document in
  * this app registers a custom font, so the wordmark is approximated with Helvetica-Bold + the brand
@@ -158,6 +159,39 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
     borderLeftWidth: 2,
     borderLeftColor: COLORS.hairline,
+  },
+  evaluationIntro: {
+    fontSize: 8,
+    color: COLORS.faint,
+    fontFamily: 'Helvetica-Oblique',
+    marginTop: 2,
+  },
+  evaluationDimension: {
+    marginTop: 10,
+  },
+  evaluationDimensionLabel: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+  },
+  evaluationDimensionScore: {
+    fontSize: 8,
+    color: COLORS.faint,
+    marginTop: 1,
+  },
+  evaluationFinding: {
+    marginTop: 6,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.hairline,
+  },
+  evaluationFindingHeader: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+  },
+  evaluationFindingBody: {
+    fontSize: 9,
+    color: COLORS.muted,
+    marginTop: 1,
   },
   prompt: {
     fontSize: 10,
@@ -359,6 +393,42 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                     <Text style={styles.empty}>(no questions)</Text>
                   ) : (
                     section.questions.map((q) => <QuestionBlock key={q.key} q={q} />)
+                  )}
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {model.evaluations && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Evaluation</Text>
+            <Text style={styles.evaluationIntro}>
+              AI judge panel — includes findings not yet reviewed; treat as suggestions, not
+              conclusions.
+            </Text>
+            {!model.evaluations.hasRun ? (
+              <Text style={styles.empty}>No evaluation has been run for this version yet.</Text>
+            ) : (
+              model.evaluations.dimensions.map((dim) => (
+                <View key={dim.dimension} style={styles.evaluationDimension}>
+                  <Text style={styles.evaluationDimensionLabel}>{dim.label}</Text>
+                  <Text style={styles.evaluationDimensionScore}>
+                    {dim.diagnostic
+                      ? `Judge unavailable: ${dim.diagnostic}`
+                      : `Score: ${dim.score !== null ? `${Math.round(dim.score * 100)}%` : 'n/a'}`}
+                  </Text>
+                  {dim.findings.length === 0 ? (
+                    <Text style={styles.empty}>No findings raised.</Text>
+                  ) : (
+                    dim.findings.map((finding, i) => (
+                      <View key={i} style={styles.evaluationFinding} wrap={false}>
+                        <Text
+                          style={styles.evaluationFindingHeader}
+                        >{`[${finding.severity} · ${finding.status}]  ${finding.targetLabel} — ${finding.proposedChange}`}</Text>
+                        <Text style={styles.evaluationFindingBody}>{finding.rationale}</Text>
+                      </View>
+                    ))
                   )}
                 </View>
               ))

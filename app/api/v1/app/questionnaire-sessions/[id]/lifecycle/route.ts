@@ -24,12 +24,15 @@
  * {@link resolveReopenEligibility} (completed via the early-finish escape hatch,
  * `allowEarlyFinish` still on, not an experience leg) BEFORE calling
  * {@link reopenSession} — a completed session stays terminal for every other caller of
- * the shared state machine (see `session-logic.ts`).
+ * the shared state machine (see `session-logic.ts`). For a round-scoped session, `reopen`
+ * is ALSO gated on {@link assertRoundAccess} — same as `resume` — so a closed round or a
+ * removed cohort member can't be re-entered through the early-finish escape hatch either.
  *
  * Gate order: live-sessions flag (404 before auth) → load → access (401/403) → parse →
- * anonymous-refusal for pause/resume (403) → transition. An illegal move (e.g. resuming an
- * active session, or abandoning a completed one) is a 409 via {@link SessionTransitionError}.
- * Completion is NOT an action here — accept→submit is the dedicated `/submit` route.
+ * anonymous-refusal for pause/resume (403) → round access for resume/reopen (403/404) →
+ * transition. An illegal move (e.g. resuming an active session, or abandoning a completed
+ * one) is a 409 via {@link SessionTransitionError}. Completion is NOT an action here —
+ * accept→submit is the dedicated `/submit` route.
  */
 
 import { z } from 'zod';
@@ -95,10 +98,11 @@ async function handleLifecycle(
       });
     }
 
-    // Cohorts & Rounds: a respondent may only resume a round-scoped session while the round is
-    // still open AND they're still an active member — a closed round / removed member can't be
-    // re-entered. (A since-deleted round no longer gates.) Pausing stays available regardless.
-    if (body.action === 'resume' && row.roundId) {
+    // Cohorts & Rounds: a respondent may only resume OR reopen a round-scoped session while the
+    // round is still open AND they're still an active member — a closed round / removed member
+    // can't be re-entered either way. (A since-deleted round no longer gates.) Pausing stays
+    // available regardless.
+    if ((body.action === 'resume' || body.action === 'reopen') && row.roundId) {
       const verdict = await assertRoundAccess({
         roundId: row.roundId,
         cohortMemberId: row.cohortMemberId,
@@ -106,7 +110,10 @@ async function handleLifecycle(
         onMissingRound: 'allow',
       });
       if (!verdict.ok) {
-        log.info('Resume refused: round access', { sessionId, code: verdict.code });
+        log.info(`${body.action === 'resume' ? 'Resume' : 'Reopen'} refused: round access`, {
+          sessionId,
+          code: verdict.code,
+        });
         return errorResponse(verdict.message, { code: verdict.code, status: verdict.status });
       }
     }

@@ -54,11 +54,11 @@ function okPost(): Response {
     json: async () => ({ success: true, data: {} }),
   } as unknown as Response;
 }
-function errPost(message: string, status = 409): Response {
+function errPost(message: string, status = 409, code = 'SUBMIT_NOT_READY'): Response {
   return {
     ok: false,
     status,
-    json: async () => ({ success: false, error: { code: 'SUBMIT_NOT_READY', message } }),
+    json: async () => ({ success: false, error: { code, message } }),
   } as unknown as Response;
 }
 /** A submit that was HELD by the final sweep — active, with a reconciliation probe. */
@@ -260,7 +260,9 @@ describe('useSessionLifecycle', () => {
     });
 
     it('reopen surfaces a 409 REOPEN_NOT_PERMITTED error without changing status', async () => {
-      fetchMock.mockResolvedValueOnce(errPost('This session cannot be reopened', 409));
+      fetchMock.mockResolvedValueOnce(
+        errPost('This session cannot be reopened', 409, 'REOPEN_NOT_PERMITTED')
+      );
       const { result } = renderHook(() =>
         useSessionLifecycle({
           sessionId: SESSION_ID,

@@ -63,6 +63,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-routes', () => ({
   loadDataSlots: vi.fn(async () => []),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes', () => ({
+  loadLatestEvaluationRun: vi.fn(async () => null),
+}));
+
 vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
   loadAcceptedGlossaryEntries: vi.fn(async () => []),
 }));
@@ -100,6 +104,7 @@ import { exportLimiter } from '@/lib/security/rate-limit';
 import { prisma } from '@/lib/db/client';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
+import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
 import { buildGlossaryAppendix } from '@/lib/app/questionnaire/glossary/report-appendix';
 import { buildPackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
@@ -139,6 +144,7 @@ beforeEach(() => {
   (prisma.appQuestionnaire.findUnique as Mock).mockResolvedValue(QUESTIONNAIRE_ROW);
   (getVersionGraph as Mock).mockResolvedValue(GRAPH);
   (loadDataSlots as Mock).mockResolvedValue([]);
+  (loadLatestEvaluationRun as Mock).mockResolvedValue(null);
   (buildPackModel as Mock).mockReturnValue(PACK_MODEL);
 });
 
@@ -189,14 +195,22 @@ describe('GET pack — format validation', () => {
 // ─── Include flags ──────────────────────────────────────────────────────────────
 
 describe('GET pack — include flags', () => {
-  it('defaults every include flag to true when omitted', async () => {
+  it('defaults every include flag to true except evaluations when omitted', async () => {
     await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
     expect(buildPackModel).toHaveBeenCalledWith(
       QUESTIONNAIRE_ROW.title,
       GRAPH,
       [],
       null,
-      { meta: true, questions: true, dataSlots: true, definitions: true, setup: true },
+      null,
+      {
+        meta: true,
+        questions: true,
+        dataSlots: true,
+        definitions: true,
+        setup: true,
+        evaluations: false,
+      },
       expect.any(String)
     );
   });
@@ -212,7 +226,15 @@ describe('GET pack — include flags', () => {
       GRAPH,
       [],
       null,
-      { meta: true, questions: true, dataSlots: false, definitions: true, setup: false },
+      null,
+      {
+        meta: true,
+        questions: true,
+        dataSlots: false,
+        definitions: true,
+        setup: false,
+        evaluations: false,
+      },
       expect.any(String)
     );
   });
@@ -229,6 +251,42 @@ describe('GET pack — include flags', () => {
   it('loads the glossary appendix when definitions=true (default)', async () => {
     await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
     expect(buildGlossaryAppendix).toHaveBeenCalled();
+  });
+
+  it('does not load the evaluation run when evaluations=false (default)', async () => {
+    await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
+    expect(loadLatestEvaluationRun).not.toHaveBeenCalled();
+    expect(buildPackModel).toHaveBeenCalledWith(
+      QUESTIONNAIRE_ROW.title,
+      GRAPH,
+      [],
+      null,
+      null,
+      expect.objectContaining({ evaluations: false }),
+      expect.any(String)
+    );
+  });
+
+  it('loads the latest evaluation run and threads it through when evaluations=true', async () => {
+    const run = { id: 'run1' };
+    (loadLatestEvaluationRun as Mock).mockResolvedValue(run);
+
+    await GET(
+      makeRequest(QN_ID, VID, { format: 'md', evaluations: 'true' }),
+      ADMIN_SESSION,
+      makeContext()
+    );
+
+    expect(loadLatestEvaluationRun).toHaveBeenCalledWith(VID);
+    expect(buildPackModel).toHaveBeenCalledWith(
+      QUESTIONNAIRE_ROW.title,
+      GRAPH,
+      [],
+      null,
+      run,
+      expect.objectContaining({ evaluations: true }),
+      expect.any(String)
+    );
   });
 });
 

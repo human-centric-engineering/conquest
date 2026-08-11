@@ -50,7 +50,14 @@ function model(over: Partial<PackModel> = {}): PackModel {
     title: 'Test Pack',
     versionNumber: 1,
     generatedAt: '2026-08-10T00:00:00.000Z',
-    include: { meta: true, questions: true, dataSlots: true, definitions: true, setup: true },
+    include: {
+      meta: true,
+      questions: true,
+      dataSlots: true,
+      definitions: true,
+      setup: true,
+      evaluations: false,
+    },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
     sections: [section()],
     sectionCount: 1,
@@ -70,6 +77,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       entries: [{ term: 'Engagement', definitions: ['Commitment level'] }],
     },
     setup: [{ label: 'Access', value: 'Public link' }],
+    evaluations: null,
     ...over,
   };
 }
@@ -160,5 +168,134 @@ describe('buildPackCsv', () => {
     );
     expect(csv.length).toBeGreaterThan(0);
     expect(csv).not.toContain('#');
+  });
+
+  describe('evaluations block', () => {
+    it('omits the block entirely when the model field is null', () => {
+      const csv = buildPackCsv(model({ evaluations: null }));
+      expect(csv).not.toContain('# Evaluation');
+    });
+
+    it('renders after Definitions, with the fixed header row, even with zero dimensions (no run yet)', () => {
+      const csv = buildPackCsv(
+        model({ evaluations: { hasRun: false, runAt: null, totalFindings: 0, dimensions: [] } })
+      );
+      const definitionsIdx = csv.indexOf('# Definitions');
+      const evaluationIdx = csv.indexOf('# Evaluation');
+      expect(definitionsIdx).toBeGreaterThan(-1);
+      expect(definitionsIdx).toBeLessThan(evaluationIdx);
+      expect(csv).toContain(
+        'dimension,judge,score,diagnostic,severity,status,target,proposed_change,rationale,source_quote'
+      );
+    });
+
+    it('emits one row per finding, with the dimension score/diagnostic repeated on each', () => {
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 1,
+            dimensions: [
+              {
+                dimension: 'clarity',
+                label: 'Clarity Judge',
+                score: 0.75,
+                diagnostic: null,
+                findings: [
+                  {
+                    severity: 'major',
+                    status: 'pending',
+                    targetLabel: 'Q1',
+                    proposedChange: 'Split into two questions',
+                    rationale: 'Asks two things at once',
+                    sourceQuote: 'both engaged and satisfied',
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+      expect(csv).toContain(
+        'clarity,Clarity Judge,0.75,,major,pending,Q1,Split into two questions,Asks two things at once,both engaged and satisfied'
+      );
+    });
+
+    it('emits one summary-only row (blank finding columns) for a clean dimension with zero findings', () => {
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 0,
+            dimensions: [
+              {
+                dimension: 'ordering',
+                label: 'Ordering Judge',
+                score: 1,
+                diagnostic: null,
+                findings: [],
+              },
+            ],
+          },
+        })
+      );
+      expect(csv).toContain('ordering,Ordering Judge,1,,,,,,,');
+    });
+
+    it('leaves the score column blank and carries the diagnostic when a judge failed', () => {
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 0,
+            dimensions: [
+              {
+                dimension: 'coverage',
+                label: 'Coverage Judge',
+                score: null,
+                diagnostic: 'judge_error',
+                findings: [],
+              },
+            ],
+          },
+        })
+      );
+      expect(csv).toContain('coverage,Coverage Judge,,judge_error,,,,,,');
+    });
+
+    it('neutralises a formula-injection proposedChange via csvEscape', () => {
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 1,
+            dimensions: [
+              {
+                dimension: 'clarity',
+                label: 'Clarity Judge',
+                score: 0.5,
+                diagnostic: null,
+                findings: [
+                  {
+                    severity: 'minor',
+                    status: 'pending',
+                    targetLabel: 'Q1',
+                    proposedChange: '=HYPERLINK("evil")',
+                    rationale: 'r',
+                    sourceQuote: null,
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+      expect(csv).not.toContain(',=HYPERLINK');
+      expect(csv).toContain("'=HYPERLINK");
+    });
   });
 });

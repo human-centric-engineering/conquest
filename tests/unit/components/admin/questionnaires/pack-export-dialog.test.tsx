@@ -5,7 +5,7 @@
  * download URL built from that state.
  *
  * Test Coverage:
- * - All five section checkboxes are checked by default
+ * - Five of the six section checkboxes are checked by default; "Evaluation findings" is not
  * - Download is disabled once every checkbox is unchecked, with a hint message
  * - Unchecking a single section still allows Download and reflects in the built URL
  * - Download navigates to the pack URL with format + include flags as query params
@@ -49,18 +49,20 @@ afterEach(() => {
 
 describe('PackExportDialog', () => {
   describe('section checkboxes', () => {
-    it('are all checked by default', () => {
+    it('renders six checkboxes, all checked by default except "Evaluation findings"', () => {
       renderDialog();
       const boxes = screen.getAllByRole('checkbox');
-      expect(boxes).toHaveLength(5);
-      for (const box of boxes) expect(box).toBeChecked();
+      expect(boxes).toHaveLength(6);
+      for (const box of boxes.slice(0, 5)) expect(box).toBeChecked();
+      expect(boxes[5]).not.toBeChecked();
     });
 
     it('disables Download and shows a hint once every checkbox is unchecked', async () => {
       const user = userEvent.setup();
       renderDialog();
 
-      for (const box of screen.getAllByRole('checkbox')) {
+      // Only the first five are checked by default — "Evaluation findings" starts unchecked.
+      for (const box of screen.getAllByRole('checkbox').slice(0, 5)) {
         await user.click(box);
       }
 
@@ -80,7 +82,7 @@ describe('PackExportDialog', () => {
   });
 
   describe('download URL', () => {
-    it('navigates to the pack URL with format=pdf and every include flag true by default', async () => {
+    it('navigates to the pack URL with format=pdf, evaluations=false, and every other include flag true by default', async () => {
       const user = userEvent.setup();
       const onOpenChange = renderDialog();
 
@@ -93,6 +95,7 @@ describe('PackExportDialog', () => {
       expect(window.location.href).toContain('dataSlots=true');
       expect(window.location.href).toContain('definitions=true');
       expect(window.location.href).toContain('setup=true');
+      expect(window.location.href).toContain('evaluations=false');
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
 
@@ -106,6 +109,17 @@ describe('PackExportDialog', () => {
 
       expect(window.location.href).toContain('dataSlots=false');
       expect(window.location.href).toContain('meta=true');
+    });
+
+    it('checking "Evaluation findings" reflects as evaluations=true in the URL', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      // "Evaluation findings" is the sixth (last) checkbox in document order.
+      await user.click(screen.getAllByRole('checkbox')[5]);
+      await user.click(screen.getByRole('button', { name: /download/i }));
+
+      expect(window.location.href).toContain('evaluations=true');
     });
 
     it('reflects a changed format selection in the URL', async () => {

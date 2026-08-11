@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { GlossaryTermCard } from '@/components/admin/questionnaires/glossary/glossary-term-card';
@@ -118,6 +118,15 @@ describe('GlossaryTermCard — settled record', () => {
     expect(screen.getByRole('button', { name: /Restore/ })).toBeInTheDocument();
     expect(termField()).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('restores a rejected term to accepted on Restore', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderCard(draft({ status: 'rejected' }));
+
+    await user.click(screen.getByRole('button', { name: /Restore/ }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ status: 'accepted' }));
   });
 
   it('reopens the form on Edit, keeping the stamp visible while editing', async () => {
@@ -221,6 +230,83 @@ describe('GlossaryTermCard — adjudication', () => {
 
     const next = onChange.mock.calls.at(-1)?.[0] as DraftTerm;
     expect(next.definitions[1].selected).toBe(true);
+  });
+});
+
+describe('GlossaryTermCard — definitions', () => {
+  it('adds a blank admin-sourced definition on "Add a definition"', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderCard(draft({ status: 'proposed' }));
+
+    await user.click(screen.getByRole('button', { name: /Add a definition/ }));
+
+    const next = onChange.mock.calls.at(-1)?.[0] as DraftTerm;
+    expect(next.definitions).toHaveLength(2);
+    expect(next.definitions[1]).toMatchObject({
+      text: '',
+      selected: false,
+      source: 'admin',
+      sourceQuote: null,
+      edited: false,
+    });
+  });
+
+  it('removes a definition on "Remove definition"', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderCard(
+      draft({
+        status: 'proposed',
+        definitions: [definition({ id: 'd1' }), definition({ id: 'd2', text: 'Second.' })],
+      })
+    );
+
+    const removeButtons = screen.getAllByRole('button', { name: /Remove definition/ });
+    await user.click(removeButtons[0]);
+
+    const next = onChange.mock.calls.at(-1)?.[0] as DraftTerm;
+    expect(next.definitions.map((d) => d.id)).toEqual(['d2']);
+  });
+
+  it('stamps edited:true the first time an unedited AI-suggested definition is changed', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderCard(
+      draft({
+        status: 'proposed',
+        definitions: [
+          definition({ source: 'ai_proposed', edited: false, text: 'Original.', selected: true }),
+        ],
+      })
+    );
+
+    const textarea = screen.getByPlaceholderText('What this term means in this questionnaire…');
+    await user.type(textarea, '!');
+
+    const next = onChange.mock.calls.at(-1)?.[0] as DraftTerm;
+    expect(next.definitions[0].text).toBe('Original.!');
+    expect(next.definitions[0].edited).toBe(true);
+  });
+
+  it('badges a document-sourced definition as from the source document', () => {
+    renderCard(
+      draft({
+        status: 'proposed',
+        definitions: [definition({ source: 'document' })],
+      })
+    );
+
+    expect(screen.getByText('From your document')).toBeInTheDocument();
+  });
+});
+
+describe('GlossaryTermCard — term and aliases fields', () => {
+  it('parses the aliases field into a trimmed, comma-separated list', () => {
+    const { onChange } = renderCard(draft({ status: 'proposed' }));
+
+    const aliasInput = screen.getByPlaceholderText('e.g. Higher Self, HS');
+    fireEvent.change(aliasInput, { target: { value: 'Higher Self, HS' } });
+
+    const next = onChange.mock.calls.at(-1)?.[0] as DraftTerm;
+    expect(next.aliases).toEqual(['Higher Self', 'HS']);
   });
 });
 

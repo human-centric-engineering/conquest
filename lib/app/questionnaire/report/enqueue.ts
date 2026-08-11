@@ -37,14 +37,26 @@ export async function enqueueRespondentReport(sessionId: string): Promise<boolea
 /**
  * Enqueue OR regenerate a respondent report for a just-completed session — the submit-time call
  * site (F-early-finish-reopen). Unlike {@link enqueueRespondentReport}'s deliberate
- * double-submit-safe idempotency, this one force-resets an already-`ready`/`failed` row, because
- * the ONLY way this call site sees an existing row at all is a genuine reopen-then-refinish: a
+ * double-submit-safe idempotency, this one force-resets ANY existing row regardless of status,
+ * because the ONLY way this call site sees an existing row at all is a genuine reopen-then-refinish: a
  * same-session double-submit is already short-circuited earlier in `submit/route.ts` by its
  * `status === 'completed'` idempotent-200 check, before `markSessionCompleted` (and this enqueue)
  * ever run. A `queued`/`processing` row (a still-in-flight FIRST generation, reached only if a
- * respondent reopens and re-finishes before it lands) is left untouched here — the worker's
- * `generation` fence (`lib/app/questionnaire/report/worker.ts`) is what stops its stale write from
- * later clobbering a fresh one, not this function.
+ * respondent reopens and re-finishes before it lands) is force-requeued exactly like a
+ * `ready`/`failed` row below: `generation` is bumped and `status` reset to `queued`. This is NOT a
+ * no-op — the worker's `generation` fence (`lib/app/questionnaire/report/worker.ts`) only trips
+ * when `generation` actually changes. Leaving a `processing` row untouched would let the in-flight
+ * generation's terminal write (still matching `status: 'processing', generation: claimed.generation`)
+ * land as `ready` — delivering content generated from the PRE-reopen answers, with no fresh
+ * generation ever triggered for the respondent's actual final answers. Bumping `generation` here is
+ * what makes that stale write lose the fence (the worker logs it `superseded`) and makes the row
+ * claimable again. Clearing `lockedBy`/`lockedAt` in the same update is required too, not cosmetic:
+ * the claim predicate (`claimableWhere` in worker.ts) only treats a `queued` row as claimable when
+ * `lockedBy` is null, so resetting `status` to `queued` while leaving a `processing` row's lease
+ * fields set would strand it — unclaimable by the fresh-queued branch, and no longer matched by
+ * the orphaned-`processing` branch either. The row may then be claimed by a different worker while
+ * the original is still generating; that's fine — the original's own terminal write is exactly
+ * what the bumped `generation` fences out (it logs `superseded`, it doesn't corrupt anything).
  *
  * Returns `true` whenever a row now needs draining (fresh create OR regenerate), so the caller's
  * `after()` instant-start kick fires either way.
@@ -69,12 +81,15 @@ export async function enqueueOrRegenerateRespondentReport(sessionId: string): Pr
     return true;
   }
 
-  if (existing.status === 'queued' || existing.status === 'processing') return true;
-
-  // `ready` or `failed` — a delivered report from BEFORE a reopen. Force-requeue: clear every
-  // generated field so the respondent never sees stale content, bump `generation` (the worker
-  // fence), but PRESERVE `notifyEmail` — a respondent who opted in before a failure should still
-  // get emailed once the new generation succeeds.
+  // Force-requeue regardless of current status. For `ready`/`failed` this clears stale delivered
+  // content; for `queued`/`processing` (a still-in-flight FIRST generation) this is what makes the
+  // worker's `generation` fence actually trip — without the bump, an in-flight terminal write would
+  // still match `status: 'processing', generation: claimed.generation` and land stale content as
+  // `ready`. Clearing `lockedBy`/`lockedAt` here too (not just for `ready`/`failed`) matters for a
+  // `processing` row specifically: leaving them set while flipping `status` to `queued` would strand
+  // the row — unclaimable by either arm of `claimableWhere` in worker.ts (see the JSDoc above).
+  // PRESERVE `notifyEmail` throughout — a respondent who opted in before this should still get
+  // emailed once the new generation succeeds.
   await prisma.appRespondentReport.update({
     where: { sessionId },
     data: {

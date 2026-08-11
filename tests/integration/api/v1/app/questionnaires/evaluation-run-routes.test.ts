@@ -7,7 +7,9 @@
  *   - POST persistence: the derived terminal status (completed / partial / failed), the
  *     per-judge finding rows, and that the response is the full run detail;
  *   - GET list: version-scope 404 and newest-first paged headers;
- *   - GET detail: version-scope 404, run-not-found 404, and the findings payload.
+ *   - GET detail: version-scope 404, run-not-found 404, and the findings payload;
+ *   - `loadLatestEvaluationRun`: the newest-run-with-findings helper the Questionnaire Pack
+ *     export calls directly (no route), null when the version was never evaluated.
  * The panel fan-out itself is unit-tested in run-panel.test.ts.
  */
 
@@ -56,6 +58,7 @@ import {
   GET as LIST,
 } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/route';
 import { GET as DETAIL } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/evaluations/[runId]/route';
+import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
 
 import { auth } from '@/lib/auth/config';
 import {
@@ -416,5 +419,35 @@ describe('GET evaluations — detail', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.dimensionSummary).toEqual([]);
+  });
+});
+
+describe('loadLatestEvaluationRun', () => {
+  it('returns null without loading a detail when the version has never been evaluated', async () => {
+    prismaMock.appQuestionnaireEvaluationRun.findMany.mockResolvedValue([]);
+    prismaMock.appQuestionnaireEvaluationRun.count.mockResolvedValue(0);
+
+    const run = await loadLatestEvaluationRun('v1');
+
+    expect(run).toBeNull();
+    expect(prismaMock.appQuestionnaireEvaluationRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('pages exactly one newest-first header, then loads its full detail (with findings)', async () => {
+    prismaMock.appQuestionnaireEvaluationRun.findMany.mockResolvedValue([persistedRunRow()]);
+    prismaMock.appQuestionnaireEvaluationRun.count.mockResolvedValue(3);
+    prismaMock.appQuestionnaireEvaluationRun.findFirst.mockResolvedValue(persistedRunRow());
+
+    const run = await loadLatestEvaluationRun('v1');
+
+    expect(run?.id).toBe('run-1');
+    expect(run?.findings).toHaveLength(1);
+    const findManyArg = prismaMock.appQuestionnaireEvaluationRun.findMany.mock.calls[0][0];
+    expect(findManyArg.orderBy).toEqual({ createdAt: 'desc' });
+    expect(findManyArg.where).toEqual({ versionId: 'v1' });
+    expect(findManyArg.take).toBe(1);
+    // The detail load is scoped to the same version + the run just paged in.
+    const findFirstArg = prismaMock.appQuestionnaireEvaluationRun.findFirst.mock.calls[0][0];
+    expect(findFirstArg.where).toEqual({ id: 'run-1', versionId: 'v1' });
   });
 });

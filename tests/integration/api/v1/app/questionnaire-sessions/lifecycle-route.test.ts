@@ -6,8 +6,10 @@
  * resume payload (status + answers so far), that an illegal transition maps to 409, and
  * — new — the `reopen` action: permitted for BOTH anonymous and authenticated callers
  * (unlike pause/resume), gated by `resolveReopenEligibility` before it ever calls
- * `reopenSession`. The sessions seam and the reopen-eligibility seam are mocked; the
- * REAL `resolveTurnAccess` runs (only the HMAC token verify is stubbed).
+ * `reopenSession`, AND — for a round-scoped session — gated by the same `assertRoundAccess`
+ * check as `resume` (a closed round or removed cohort member can't reopen either). The
+ * sessions seam and the reopen-eligibility seam are mocked; the REAL `resolveTurnAccess`
+ * runs (only the HMAC token verify is stubbed).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -36,6 +38,9 @@ vi.mock(
   '@/app/api/v1/app/questionnaire-sessions/_lib/reopen-eligibility',
   () => reopenEligibilityMock
 );
+
+const roundAccessMock = vi.hoisted(() => ({ assertRoundAccess: vi.fn() }));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/round-access', () => roundAccessMock);
 
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
@@ -78,6 +83,7 @@ beforeEach(() => {
   });
   sessionsMock.reopenSession.mockResolvedValue('active');
   reopenEligibilityMock.resolveReopenEligibility.mockResolvedValue(true);
+  roundAccessMock.assertRoundAccess.mockResolvedValue({ ok: true });
 });
 
 describe('gate order', () => {
@@ -187,6 +193,109 @@ describe('resume', () => {
     expect(sessionsMock.resumeSession).toHaveBeenCalledWith('sess-1', {
       reason: 'respondent_resume',
     });
+  });
+});
+
+describe('resume — round access gate (Cohorts & Rounds)', () => {
+  function withRoundScopedSession(): void {
+    dbMock.prisma.appQuestionnaireSession.findUnique.mockResolvedValue({
+      id: 'sess-1',
+      respondentUserId: USER,
+      versionId: 'v1',
+      roundId: 'round-1',
+      cohortMemberId: 'member-1',
+    });
+  }
+
+  it('checks round access before resuming a round-scoped session and proceeds when allowed', async () => {
+    withRoundScopedSession();
+
+    const res = await POST(req({ action: 'resume' }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(roundAccessMock.assertRoundAccess).toHaveBeenCalledWith({
+      roundId: 'round-1',
+      cohortMemberId: 'member-1',
+      versionId: 'v1',
+      onMissingRound: 'allow',
+    });
+    expect(sessionsMock.resumeSession).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_resume',
+    });
+  });
+
+  it('does not call assertRoundAccess when the session has no roundId', async () => {
+    const res = await POST(req({ action: 'resume' }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(roundAccessMock.assertRoundAccess).not.toHaveBeenCalled();
+    expect(sessionsMock.resumeSession).toHaveBeenCalled();
+  });
+
+  it('propagates a round-access refusal and never calls resumeSession', async () => {
+    withRoundScopedSession();
+    roundAccessMock.assertRoundAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: 'ROUND_CLOSED',
+      message: 'This round is closed',
+    });
+
+    const res = await POST(req({ action: 'resume' }), ctx);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe('ROUND_CLOSED');
+    expect(body.error.message).toBe('This round is closed');
+    expect(sessionsMock.resumeSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('reopen — round access gate (Cohorts & Rounds)', () => {
+  function withRoundScopedSession(): void {
+    dbMock.prisma.appQuestionnaireSession.findUnique.mockResolvedValue({
+      id: 'sess-1',
+      respondentUserId: USER,
+      versionId: 'v1',
+      roundId: 'round-1',
+      cohortMemberId: 'member-1',
+    });
+  }
+
+  it('checks round access before reopening a round-scoped session and proceeds when allowed', async () => {
+    withRoundScopedSession();
+
+    const res = await POST(req({ action: 'reopen' }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(roundAccessMock.assertRoundAccess).toHaveBeenCalledWith({
+      roundId: 'round-1',
+      cohortMemberId: 'member-1',
+      versionId: 'v1',
+      onMissingRound: 'allow',
+    });
+    expect(sessionsMock.reopenSession).toHaveBeenCalledWith('sess-1', {
+      reason: 'respondent_reopen',
+    });
+  });
+
+  it('propagates a round-access refusal and never calls reopenSession — a closed round or removed member cannot reopen', async () => {
+    withRoundScopedSession();
+    roundAccessMock.assertRoundAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      code: 'ROUND_CLOSED',
+      message: 'This round is closed',
+    });
+
+    const res = await POST(req({ action: 'reopen' }), ctx);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe('ROUND_CLOSED');
+    expect(body.error.message).toBe('This round is closed');
+    expect(sessionsMock.reopenSession).not.toHaveBeenCalled();
+    expect(reopenEligibilityMock.resolveReopenEligibility).not.toHaveBeenCalled();
   });
 });
 

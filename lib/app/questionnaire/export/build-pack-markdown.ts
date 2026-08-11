@@ -11,9 +11,15 @@
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 
-/** Escape the handful of characters that would otherwise break a GFM table cell. */
+/**
+ * Escape the handful of characters that would otherwise break a GFM table cell. Backslashes
+ * MUST be escaped before pipes: escaping `|` alone lets a value already containing `\|` (e.g.
+ * a question prompt ending in a literal backslash right before a pipe) produce `\\|` in the
+ * output — a GFM parser reads that as an escaped backslash followed by an UNESCAPED pipe,
+ * breaking out of the cell and injecting a raw column/row boundary into the exported document.
+ */
 function cell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
 }
 
 /** Serialise the pack model to a Markdown document. */
@@ -101,6 +107,44 @@ export function buildPackMarkdown(model: PackModel): string {
         lines.push(entry.definitions.length > 1 ? `${i + 1}. ${definition}` : `: ${definition}`);
       });
       lines.push('');
+    }
+  }
+
+  if (model.evaluations) {
+    lines.push('## Evaluation');
+    lines.push('');
+    lines.push(
+      '*AI judge panel — includes findings not yet reviewed; treat as suggestions, not conclusions.*'
+    );
+    lines.push('');
+    if (!model.evaluations.hasRun) {
+      lines.push('_No evaluation has been run for this version yet._');
+      lines.push('');
+    } else {
+      lines.push(
+        `Last run ${model.evaluations.runAt} · ${model.evaluations.totalFindings} finding(s) across ${model.evaluations.dimensions.length} judges`
+      );
+      lines.push('');
+      for (const dim of model.evaluations.dimensions) {
+        lines.push(`### ${dim.label}`);
+        lines.push(
+          dim.diagnostic
+            ? `_Judge unavailable: ${dim.diagnostic}_`
+            : `Score: ${dim.score !== null ? `${Math.round(dim.score * 100)}%` : 'n/a'}`
+        );
+        lines.push('');
+        if (dim.findings.length === 0) {
+          lines.push('_No findings raised._');
+        } else {
+          for (const finding of dim.findings) {
+            lines.push(
+              `- **[${finding.severity} · ${finding.status}] ${cell(finding.targetLabel)}** — ${finding.proposedChange}`
+            );
+            lines.push(`  ${finding.rationale}`);
+          }
+        }
+        lines.push('');
+      }
     }
   }
 

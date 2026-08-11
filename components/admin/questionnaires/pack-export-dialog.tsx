@@ -3,10 +3,11 @@
 /**
  * PackExportDialog — download a branded Questionnaire Pack (PDF/CSV/Markdown).
  *
- * Lets the admin pick which of the pack's five sections to include (all ticked by default) and the
- * output format, then triggers the same-origin authenticated download from
- * `GET …/versions/:vid/pack`. Opened from {@link file://./definition-export-menu.tsx}'s "Download
- * pack…" item, the same way that menu already opens {@link file://./import-definition-dialog.tsx}.
+ * Lets the admin pick which of the pack's six sections to include (all ticked by default except
+ * "Evaluation findings", which is opt-in — see its description) and the output format, then
+ * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. Opened from
+ * {@link file://./definition-export-menu.tsx}'s "Download pack…" item, the same way that menu
+ * already opens {@link file://./import-definition-dialog.tsx}.
  *
  * The download URL is dynamic (it depends on the checkbox/format state), so unlike the menu's static
  * `<a download>` links, the Download button sets `window.location.href` directly — same-origin GET,
@@ -37,6 +38,7 @@ import {
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
+import { DEFAULT_PACK_INCLUDE } from '@/lib/app/questionnaire/export/build-pack-model';
 
 export interface PackExportDialogProps {
   open: boolean;
@@ -54,7 +56,7 @@ const FORMAT_LABELS: Record<PackFormat, string> = {
 };
 
 interface SectionOption {
-  key: 'meta' | 'questions' | 'dataSlots' | 'definitions' | 'setup';
+  key: 'meta' | 'questions' | 'dataSlots' | 'definitions' | 'setup' | 'evaluations';
   label: string;
   description: string;
 }
@@ -85,6 +87,12 @@ const SECTIONS: SectionOption[] = [
     label: 'Experience setup',
     description: 'A summary of how the respondent experience is configured.',
   },
+  {
+    key: 'evaluations',
+    label: 'Evaluation findings',
+    description:
+      "The AI judge panel's latest scores and findings for this version, including suggestions not yet reviewed. Off by default — review before sharing externally.",
+  },
 ];
 
 export function PackExportDialog({
@@ -93,13 +101,8 @@ export function PackExportDialog({
   questionnaireId,
   versionId,
 }: PackExportDialogProps) {
-  const [included, setIncluded] = useState<Record<SectionOption['key'], boolean>>({
-    meta: true,
-    questions: true,
-    dataSlots: true,
-    definitions: true,
-    setup: true,
-  });
+  const [included, setIncluded] =
+    useState<Record<SectionOption['key'], boolean>>(DEFAULT_PACK_INCLUDE);
   const [format, setFormat] = useState<PackFormat>('pdf');
 
   const nothingIncluded = Object.values(included).every((v) => !v);

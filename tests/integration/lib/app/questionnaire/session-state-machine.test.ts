@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
   };
   const prisma = {
     $transaction: vi.fn((cb: (t: typeof tx) => unknown) => cb(tx)),
-    appQuestionnaireSession: { findUnique: vi.fn() },
+    appQuestionnaireSession: { findUnique: vi.fn(), update: vi.fn() },
     appQuestionnaireSessionEvent: { create: vi.fn(), findFirst: vi.fn() },
   };
   return { tx, prisma };
@@ -35,12 +35,17 @@ import {
   loadSessionResumeState,
   markSessionCompleted,
   pauseSession,
+  persistAbuseStrikes,
+  persistSensitivity,
   recordCostCapReached,
+  recordSensitivityFlagged,
   recordSessionCreated,
   reopenSession,
   resumeSession,
   transitionSession,
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
+import { SENSITIVITY_FLAGGED_EVENT } from '@/lib/app/questionnaire/types';
+import type { SensitivityNote } from '@/lib/app/questionnaire/sensitivity/types';
 import { NotFoundError } from '@/lib/api/errors';
 import { SessionTransitionError } from '@/lib/app/questionnaire/session';
 
@@ -67,6 +72,7 @@ beforeEach(() => {
   (mocks.tx.appQuestionnaireSessionEvent.create as Mock).mockResolvedValue({});
   (mocks.tx.appQuestionnaireInvitation.updateMany as Mock).mockResolvedValue({ count: 0 });
   (mocks.prisma.appQuestionnaireSessionEvent.create as Mock).mockResolvedValue({});
+  (mocks.prisma.appQuestionnaireSession.update as Mock).mockResolvedValue({});
 });
 
 describe('transitionSession — apply', () => {
@@ -114,6 +120,37 @@ describe('transitionSession — apply', () => {
         metadata: { source: 'timeout' },
       },
     });
+  });
+
+  it('stamps a linked, non-terminal invitation as completed when the session completes', async () => {
+    // markSessionCompleted is the real F4.5 accept→submit call path; exercising it (rather than
+    // transitionSession directly) also pins that the wrapper threads the invitation stamp.
+    currentStatusWithInvitation('active', 'inv-1');
+    (mocks.tx.appQuestionnaireInvitation.updateMany as Mock).mockResolvedValue({ count: 1 });
+
+    const result = await markSessionCompleted('sess-1');
+
+    expect(result).toBe('completed');
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'inv-1', status: { notIn: ['completed', 'revoked'] } },
+      data: { status: 'completed' },
+    });
+  });
+
+  it('does not stamp an invitation when completing a session with no linked invitation', async () => {
+    currentStatusWithInvitation('active', null);
+
+    await markSessionCompleted('sess-1');
+
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not stamp the invitation for a non-completing transition, even when linked', async () => {
+    currentStatusWithInvitation('active', 'inv-1');
+
+    await transitionSession('sess-1', 'paused');
+
+    expect(mocks.tx.appQuestionnaireInvitation.updateMany).not.toHaveBeenCalled();
   });
 });
 
@@ -329,6 +366,108 @@ describe('recordSessionCreated', () => {
     });
     // Used the tx client, not the top-level prisma.
     expect(mocks.prisma.appQuestionnaireSessionEvent.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('persistAbuseStrikes', () => {
+  it('writes the strike count as a plain column update via the top-level client', async () => {
+    await persistAbuseStrikes('sess-1', 2);
+
+    expect(mocks.prisma.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { abuseStrikes: 2 },
+    });
+    // No event is written and no transaction is opened — a plain best-effort column write.
+    expect(mocks.prisma.appQuestionnaireSessionEvent.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('persistSensitivity', () => {
+  const note: SensitivityNote = {
+    severity: 'high',
+    category: 'self-harm',
+    summary: 'Respondent disclosed distress.',
+    turnOrdinal: 3,
+    createdAt: '2026-08-10T00:00:00.000Z',
+  };
+
+  it('appends the note to an empty notes array and sets the running-max severity', async () => {
+    (mocks.tx.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      sensitivityNotes: [],
+    });
+
+    await persistSensitivity('sess-1', 'high', note);
+
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.tx.appQuestionnaireSession.findUnique).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      select: { sensitivityNotes: true },
+    });
+    expect(mocks.tx.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { sensitivityLevel: 'high', sensitivityNotes: [note] },
+    });
+  });
+
+  it('appends onto existing notes without dropping prior entries (read-modify-write)', async () => {
+    const priorNote: SensitivityNote = {
+      severity: 'low',
+      category: 'bereavement',
+      summary: 'Earlier disclosure.',
+      turnOrdinal: 1,
+      createdAt: '2026-08-09T00:00:00.000Z',
+    };
+    (mocks.tx.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      sensitivityNotes: [priorNote],
+    });
+
+    await persistSensitivity('sess-1', 'medium', note);
+
+    expect(mocks.tx.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { sensitivityLevel: 'medium', sensitivityNotes: [priorNote, note] },
+    });
+  });
+
+  it('treats a non-array (or missing) sensitivityNotes column as empty rather than throwing', async () => {
+    (mocks.tx.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      sensitivityNotes: null,
+    });
+
+    await persistSensitivity('sess-1', 'low', note);
+
+    expect(mocks.tx.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { sensitivityLevel: 'low', sensitivityNotes: [note] },
+    });
+  });
+
+  it('treats a missing row (findUnique resolves null) as empty notes rather than throwing', async () => {
+    (mocks.tx.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(null);
+
+    await persistSensitivity('sess-1', 'low', note);
+
+    expect(mocks.tx.appQuestionnaireSession.update).toHaveBeenCalledWith({
+      where: { id: 'sess-1' },
+      data: { sensitivityLevel: 'low', sensitivityNotes: [note] },
+    });
+  });
+});
+
+describe('recordSensitivityFlagged', () => {
+  it('writes a non-transition sensitivity_flagged event carrying only severity + category', async () => {
+    await recordSensitivityFlagged('sess-1', { severity: 'high', category: 'self-harm' });
+
+    expect(mocks.prisma.appQuestionnaireSessionEvent.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'sess-1',
+        eventType: SENSITIVITY_FLAGGED_EVENT,
+        metadata: { severity: 'high', category: 'self-harm' },
+      },
+    });
+    // No status change and no transaction — mirrors recordCostCapReached.
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 });
 

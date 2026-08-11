@@ -48,6 +48,16 @@ vi.mock('@/lib/app/questionnaire/report/worker', () => ({
 const digestMock = vi.hoisted(() => ({ refreshRoundLearningDigest: vi.fn() }));
 vi.mock('@/lib/app/questionnaire/learning/digest', () => digestMock);
 
+// Experience run advance (P15.2): unmocked, the real module hits the real prisma client (only
+// stubbed for `appQuestionnaireSession.update` above), throws, and the route's fail-soft `.catch`
+// already covers that as `null`. Mock it explicitly so a leg-session test can assert the real
+// after()-scheduled advance path rather than relying on that incidental throw-and-swallow.
+const runAdvanceMock = vi.hoisted(() => ({
+  legForSession: vi.fn(),
+  advanceExperienceRun: vi.fn(),
+}));
+vi.mock('@/app/api/v1/app/experiences/_lib/run-advance', () => runAdvanceMock);
+
 // Final completion sweep: the detector run + turn recording + session update are all mocked so the
 // route's held/clean branching can be asserted without an LLM call or a DB.
 const sweepMock = vi.hoisted(() => ({ runCompletionSweep: vi.fn() }));
@@ -58,8 +68,12 @@ const prismaMock = vi.hoisted(() => ({
   prisma: { appQuestionnaireSession: { update: vi.fn() } },
 }));
 vi.mock('@/lib/db/client', () => prismaMock);
-// Per-flow sweep sub-cap: default to allow; one test forces a 429.
-const rlMock = vi.hoisted(() => ({ turnLimiter: { check: vi.fn() } }));
+// Per-flow sweep sub-cap: default to allow; one test forces a 429. Report-regeneration sub-cap:
+// same default-allow shape; one test forces a refusal.
+const rlMock = vi.hoisted(() => ({
+  turnLimiter: { check: vi.fn() },
+  reportRegenerateLimiter: { check: vi.fn() },
+}));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rlMock);
 
 import { POST } from '@/app/api/v1/app/questionnaire-sessions/[id]/submit/route';
@@ -166,6 +180,13 @@ beforeEach(() => {
   turnsMock.recordTurn.mockResolvedValue('turn-sweep');
   prismaMock.prisma.appQuestionnaireSession.update.mockResolvedValue({});
   rlMock.turnLimiter.check.mockReturnValue({ success: true });
+  rlMock.reportRegenerateLimiter.check.mockReturnValue({ success: true });
+  // Default: standalone (non-experience) session — no leg, no run-advance scheduled.
+  runAdvanceMock.legForSession.mockResolvedValue(null);
+  runAdvanceMock.advanceExperienceRun.mockResolvedValue({
+    kind: 'noop',
+    runId: 'run-unused',
+  });
 });
 
 describe('gate order', () => {
@@ -356,6 +377,26 @@ describe('respondent report instant-start kick', () => {
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
     // A failed enqueue resolves to false → no kick scheduled, submit still succeeds.
+    expect(afterMock.after).not.toHaveBeenCalled();
+  });
+
+  it('skips the report-regeneration call under the per-flow sub-cap, without failing the submit', async () => {
+    // The session is already durably marked completed by the time this guard is checked, so a
+    // refusal must NOT surface as a 429 (that would contradict "a queue failure must never fail
+    // the submission just made" and strand the report forever, since a resubmit of a completed
+    // session short-circuits before ever reaching this call again). It skips the paid call and
+    // still returns success.
+    rlMock.reportRegenerateLimiter.check.mockReturnValue({
+      success: false,
+      reset: Date.now() + 1000,
+      remaining: 0,
+    });
+
+    const res = await POST(req(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(sessionsMock.markSessionCompleted).toHaveBeenCalledTimes(1);
+    expect(reportMock.enqueueOrRegenerateRespondentReport).not.toHaveBeenCalled();
     expect(afterMock.after).not.toHaveBeenCalled();
   });
 });
@@ -595,5 +636,166 @@ describe('final completion sweep', () => {
         (c[0] as { data?: { pendingContradiction?: unknown } }).data?.pendingContradiction != null
     );
     expect(clearCall).toBeDefined();
+  });
+});
+
+describe('malformed request body', () => {
+  it('400s on invalid JSON syntax (a JSON.parse throw, not a schema failure)', async () => {
+    const badReq = {
+      url: URL,
+      headers: new Headers(),
+      text: () => Promise.resolve('{ this is not valid json'),
+    } as unknown as NextRequest;
+
+    const res = await POST(badReq, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toContain('Invalid JSON');
+    expect(sessionsMock.markSessionCompleted).not.toHaveBeenCalled();
+  });
+});
+
+describe('learning digest refresh (roundId)', () => {
+  it('schedules a round learning-digest refresh via after() when the session has a roundId', async () => {
+    const withRound = loadedContext();
+    withRound.session = { ...withRound.session, roundId: 'round-1' } as typeof withRound.session;
+    ctxMock.buildTurnContext.mockResolvedValue(withRound);
+    digestMock.refreshRoundLearningDigest.mockResolvedValue(undefined);
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+
+    // Drive every after()-scheduled callback (report kick + digest refresh) and confirm the
+    // digest refresh actually fired with the session's roundId + versionId.
+    const calls = afterMock.after.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [cb] of calls) {
+      await (cb as () => Promise<void> | void)();
+    }
+    expect(digestMock.refreshRoundLearningDigest).toHaveBeenCalledWith('round-1', 'v1');
+  });
+
+  it('does not schedule a digest refresh when the session has no roundId', async () => {
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+
+    const calls = afterMock.after.mock.calls;
+    for (const [cb] of calls) {
+      await (cb as () => Promise<void> | void)();
+    }
+    expect(digestMock.refreshRoundLearningDigest).not.toHaveBeenCalled();
+  });
+});
+
+describe('experience run advance (leg sessions)', () => {
+  it('schedules a run-advance via after() and echoes runId when the session is a leg', async () => {
+    runAdvanceMock.legForSession.mockResolvedValue({ runId: 'run-1', ordinal: 2 });
+    runAdvanceMock.advanceExperienceRun.mockResolvedValue({
+      kind: 'conclude',
+      runId: 'run-1',
+      reason: 'selector',
+    });
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.runId).toBe('run-1');
+    expect(runAdvanceMock.legForSession).toHaveBeenCalledWith('sess-1');
+
+    // The advance itself is fire-and-forget via after() — drive it and confirm it was invoked
+    // with the resolved runId + the just-completed sessionId.
+    const calls = afterMock.after.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [cb] of calls) {
+      await (cb as () => Promise<void> | void)();
+    }
+    expect(runAdvanceMock.advanceExperienceRun).toHaveBeenCalledWith('run-1', 'sess-1');
+  });
+
+  it('does not echo a runId or call advance when the session is standalone (no leg)', async () => {
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.runId).toBeUndefined();
+    expect(runAdvanceMock.advanceExperienceRun).not.toHaveBeenCalled();
+  });
+
+  it('fails soft (no leg, no advance) when the legForSession lookup itself rejects', async () => {
+    runAdvanceMock.legForSession.mockRejectedValue(new Error('db down'));
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.runId).toBeUndefined();
+    expect(runAdvanceMock.advanceExperienceRun).not.toHaveBeenCalled();
+  });
+
+  it('logs (and does not throw) when advanceExperienceRun resolves "blocked"', async () => {
+    runAdvanceMock.legForSession.mockResolvedValue({ runId: 'run-1', ordinal: 2 });
+    runAdvanceMock.advanceExperienceRun.mockResolvedValue({
+      kind: 'blocked',
+      runId: 'run-1',
+      code: 'unknown_run',
+      message: 'run not found',
+    });
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+
+    const calls = afterMock.after.mock.calls;
+    for (const [cb] of calls) {
+      await expect((cb as () => Promise<void> | void)()).resolves.not.toThrow();
+    }
+    expect(runAdvanceMock.advanceExperienceRun).toHaveBeenCalledWith('run-1', 'sess-1');
+  });
+});
+
+describe('post-response after() callback failures (fire-and-forget, must not throw)', () => {
+  it('swallows a report-worker kick failure', async () => {
+    reportMock.enqueueOrRegenerateRespondentReport.mockResolvedValue(true);
+    reportMock.processQueuedRespondentReports.mockRejectedValue(new Error('worker down'));
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+
+    const calls = afterMock.after.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [cb] of calls) {
+      await expect((cb as () => Promise<void> | void)()).resolves.not.toThrow();
+    }
+  });
+
+  it('swallows a learning-digest refresh failure', async () => {
+    const withRound = loadedContext();
+    withRound.session = { ...withRound.session, roundId: 'round-1' } as typeof withRound.session;
+    ctxMock.buildTurnContext.mockResolvedValue(withRound);
+    digestMock.refreshRoundLearningDigest.mockRejectedValue(new Error('digest failed'));
+
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(200);
+
+    const calls = afterMock.after.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [cb] of calls) {
+      await expect((cb as () => Promise<void> | void)()).resolves.not.toThrow();
+    }
+  });
+});
+
+describe('completion transition — unexpected error', () => {
+  it('propagates a generic (non-SessionTransitionError) Error through handleAPIError as a 500', async () => {
+    sessionsMock.markSessionCompleted.mockRejectedValue(new Error('unexpected db failure'));
+
+    const res = await POST(req(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.success).toBe(false);
   });
 });
