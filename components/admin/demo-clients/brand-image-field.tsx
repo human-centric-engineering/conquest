@@ -211,13 +211,14 @@ export function BrandImageField({
           </Button>
         )}
         <span className={cn('text-muted-foreground text-xs', !canUpload && 'italic')}>
+          {spec.aspectRatio
+            ? `${recommendedSize(spec)}px recommended (${spec.aspectRatio}:1, min ${spec.minWidth}x${spec.minHeight})`
+            : `Up to ${recommendedSize(spec)}px, min ${spec.minWidth}x${spec.minHeight}`}
           {canUpload
-            ? spec.aspectRatio
-              ? `${recommendedSize(spec)}px recommended (${spec.aspectRatio}:1, min ${spec.minWidth}x${spec.minHeight}) — uploads apply immediately`
-              : `Up to ${recommendedSize(spec)}px, min ${spec.minWidth}x${spec.minHeight} — uploads apply immediately`
+            ? ' — uploads apply immediately'
             : uploadEnabled
-              ? 'Save the client first to upload a file'
-              : 'File uploads are not configured — paste an image URL'}
+              ? ' — save the client first to upload a file'
+              : ' — file uploads are not configured, paste an image URL'}
         </span>
       </div>
 
