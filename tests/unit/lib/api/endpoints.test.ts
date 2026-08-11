@@ -1162,6 +1162,9 @@ describe('API Endpoints', () => {
       expect(Q.versionEvaluationById('qn1', 'v1', 'run1')).toBe(
         `${base}/qn1/versions/v1/evaluations/run1`
       );
+      expect(Q.versionEvaluationRetryJudge('qn1', 'v1', 'run1')).toBe(
+        `${base}/qn1/versions/v1/evaluations/run1/retry`
+      );
       expect(Q.versionEvaluationFinding('qn1', 'v1', 'run1', 'f1')).toBe(
         `${base}/qn1/versions/v1/evaluations/run1/findings/f1`
       );

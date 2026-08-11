@@ -18,12 +18,21 @@
  *
  * Findings live in component state so a review action updates its card in place. When an apply
  * forks a launched version the returned meta raises a banner pointing at the new draft.
+ *
+ * The run header itself is state too, because a **judge retry** rewrites it: a failed judge leaves
+ * this run's totals an undercount, and the retry route re-dispatches that one judge *into the same
+ * run* (rather than spawning a second one, which would strand the review decisions already made
+ * here). This component owns that fetch — it is the one that holds the run — and swaps in the
+ * refreshed detail wholesale; the review statuses it returns are the persisted ones, so nothing
+ * local is lost.
  */
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import { cn } from '@/lib/utils';
+import { API } from '@/lib/api/endpoints';
+import { parseApiResponse } from '@/lib/api/parse-response';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -42,6 +51,11 @@ import { runStatusBadge } from '@/components/admin/questionnaires/evaluation-sta
 import { FindingReviewCard } from '@/components/admin/questionnaires/evaluation-finding-review';
 import { EvaluationRunHeadline } from '@/components/admin/questionnaires/evaluation-run-headline';
 import { EvaluationByQuestion } from '@/components/admin/questionnaires/evaluation-by-question';
+import {
+  JudgeFailureIcon,
+  RetryJudgeButton,
+  judgeFailureReason,
+} from '@/components/admin/questionnaires/evaluation-judge-failure';
 import {
   groupFindingsByTarget,
   GROUP_SORTS,
@@ -80,9 +94,14 @@ export function EvaluationRunDetail({
   canApply,
   dataSlotsAvailable = false,
 }: Props) {
-  const badge = runStatusBadge(run.status);
+  // The run header changes under a judge retry (status, tallies, per-judge summary), so it is
+  // state rather than the prop read directly.
+  const [runState, setRunState] = useState<EvaluationRunDetailView>(run);
+  const badge = runStatusBadge(runState.status);
   const [findings, setFindings] = useState<EvaluationFindingView[]>(run.findings);
   const [fork, setFork] = useState<ForkNotice | null>(null);
+  const [retrying, setRetrying] = useState<EvaluationDimension | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<ViewMode>('question');
   const [sort, setSort] = useState<GroupSort>('natural');
@@ -97,6 +116,40 @@ export function EvaluationRunDetail({
     setFindings((prev) => prev.map((f) => (f.id === next.id ? next : f)));
     if (meta?.forked) setFork({ versionId: meta.versionId, versionNumber: meta.versionNumber });
   }
+
+  async function handleRetryJudge(judge: EvaluationDimension) {
+    setRetrying(judge);
+    setRetryError(null);
+    try {
+      const res = await fetch(
+        API.APP.QUESTIONNAIRES.versionEvaluationRetryJudge(questionnaireId, versionId, run.id),
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dimension: judge }),
+        }
+      );
+      const json = await parseApiResponse<EvaluationRunDetailView>(res);
+      if (!res.ok || !json.success) {
+        setRetryError(json.success ? 'Request failed' : json.error.message);
+        return;
+      }
+      // The response is the whole run, re-read after the merge — including the judge's fresh
+      // diagnostic if it failed again, which is exactly what the band should then say.
+      setRunState(json.data);
+      setFindings(json.data.findings);
+    } catch {
+      // `parseApiResponse` throws on a body that isn't a valid envelope; a network failure lands
+      // here too. Either way the run on screen is untouched.
+      setRetryError('Network error');
+    } finally {
+      setRetrying(null);
+    }
+  }
+
+  /** The void-returning handler the retry buttons take (they don't await). */
+  const retryJudge = (judge: EvaluationDimension) => void handleRetryJudge(judge);
 
   const visible = useMemo(
     () =>
@@ -136,23 +189,26 @@ export function EvaluationRunDetail({
       <div className="flex flex-wrap items-center gap-3 border-b pb-3">
         <Badge variant={badge.variant}>{badge.label}</Badge>
         <span className="text-muted-foreground text-sm">
-          {run.totalFindings} finding{run.totalFindings === 1 ? '' : 's'} from {run.dimensionsRun}{' '}
-          judge{run.dimensionsRun === 1 ? '' : 's'}
+          {runState.totalFindings} finding{runState.totalFindings === 1 ? '' : 's'} from{' '}
+          {runState.dimensionsRun} judge{runState.dimensionsRun === 1 ? '' : 's'}
         </span>
         <span className="text-muted-foreground ml-auto text-xs">
-          {new Date(run.createdAt).toLocaleString()}
+          {new Date(runState.createdAt).toLocaleString()}
         </span>
       </div>
 
       <EvaluationRunHeadline
-        dimensionSummary={run.dimensionSummary}
+        dimensionSummary={runState.dimensionSummary}
         findings={findings}
-        dimensionsRun={run.dimensionsRun}
-        dimensionsRequested={run.dimensionsRequested}
-        dimensionsFailed={run.dimensionsFailed}
+        dimensionsRun={runState.dimensionsRun}
+        dimensionsRequested={runState.dimensionsRequested}
+        dimensionsFailed={runState.dimensionsFailed}
         targetCount={targetCount}
         activeDimension={dimension}
         onDimensionChange={setDimension}
+        onRetryJudge={retryJudge}
+        retryingDimension={retrying}
+        retryError={retryError}
       />
 
       {fork && (
@@ -274,18 +330,18 @@ export function EvaluationRunDetail({
         />
       ) : (
         <div className="space-y-6">
-          {run.dimensionSummary.map((dim) => {
+          {runState.dimensionSummary.map((dim) => {
             const spec = EVALUATION_DIMENSION_SPECS[dim.dimension];
             const dimFindings = byDimension.get(dim.dimension) ?? [];
             // Hide a clean dimension entirely once a filter is active and it has nothing to show.
             if (filtered && dimFindings.length === 0) return null;
             return (
               <section key={dim.dimension} className="space-y-3">
-                <div className="flex flex-wrap items-baseline gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold">{spec.label}</h3>
                   {dim.diagnostic ? (
-                    <Badge variant="outline" className="text-xs">
-                      failed · {dim.diagnostic}
+                    <Badge variant="destructive" className="text-xs">
+                      Failed
                     </Badge>
                   ) : (
                     <span className="text-muted-foreground text-xs tabular-nums">
@@ -294,6 +350,26 @@ export function EvaluationRunDetail({
                     </span>
                   )}
                 </div>
+
+                {/* A failed judge's section is otherwise empty, which reads as "nothing to say"
+                    rather than "this judge never spoke" — so it states the reason and offers
+                    the retry, the same treatment the headline strip gives it. */}
+                {dim.diagnostic && (
+                  <div className="border-destructive/40 bg-destructive/5 text-destructive flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-xs">
+                    <JudgeFailureIcon />
+                    <span className="leading-snug" title={dim.diagnostic}>
+                      {judgeFailureReason(dim.diagnostic)} Findings from this judge are missing from
+                      the queue below.
+                    </span>
+                    <RetryJudgeButton
+                      dimension={dim.dimension}
+                      busy={retrying === dim.dimension}
+                      disabled={retrying !== null}
+                      onRetry={retryJudge}
+                      className="ml-auto"
+                    />
+                  </div>
+                )}
 
                 {!filtered && !dim.diagnostic && dimFindings.length === 0 && (
                   <p className="text-muted-foreground text-sm italic">No issues raised.</p>

@@ -564,14 +564,20 @@ describe('EvaluationRunDetail review queue', () => {
     expect(screen.getByRole('link', { name: /open in editor/i })).toBeInTheDocument();
   });
 
-  it('renders a failed dimension diagnostic instead of a score', async () => {
+  it('renders a failed dimension as a failure — reason, raw code, and a retry — not a score', async () => {
     const r = run([]);
     r.dimensionSummary = [
       { dimension: 'duplicates', score: null, findingCount: 0, diagnostic: 'judge_not_configured' },
     ];
     render(<EvaluationRunDetail run={r} questionnaireId="qn1" versionId="v1" canApply />);
     await switchToJudgeView();
-    expect(screen.getByText(/judge_not_configured/)).toBeInTheDocument();
+
+    // The diagnostic code is translated for the admin...
+    expect(screen.getAllByText(/no agent configured/i).length).toBeGreaterThan(0);
+    // ...but stays reachable for support, on the element carrying the reason.
+    expect(document.querySelector('[title="judge_not_configured"]')).toBeInTheDocument();
+    // Both the headline strip and the judge section offer the way out.
+    expect(screen.getAllByRole('button', { name: 'Retry judge' })).toHaveLength(2);
   });
 
   it('shows "No issues raised" for a clean dimension', async () => {
@@ -750,6 +756,30 @@ function crossJudgeRun(): EvaluationRunDetailView {
     { dimension: 'ordering', score: 0.5, findingCount: 1, diagnostic: null },
     { dimension: 'coverage', score: 0.4, findingCount: 1, diagnostic: null },
   ];
+  return r;
+}
+
+/**
+ * A run where the `ordering` judge failed — the undercount case. Its findings come out with it:
+ * a judge that never returned a verdict raised nothing, which is exactly why the totals lie.
+ */
+function failedJudgeRun(): EvaluationRunDetailView {
+  const r = crossJudgeRun();
+  r.findings = r.findings.filter((f) => f.dimension !== 'ordering');
+  r.totalFindings = r.findings.length;
+  r.status = 'partial';
+  r.dimensionsRun = 6;
+  r.dimensionsFailed = 1;
+  r.dimensionSummary = r.dimensionSummary.map((d) =>
+    d.dimension === 'ordering'
+      ? {
+          dimension: 'ordering' as const,
+          score: null,
+          findingCount: 0,
+          diagnostic: 'dispatch_error',
+        }
+      : d
+  );
   return r;
 }
 
@@ -995,14 +1025,81 @@ describe('EvaluationRunDetail by-question view', () => {
   });
 
   it('warns that totals undercount when a judge failed to run', () => {
-    const r = crossJudgeRun();
-    r.dimensionsRun = 6;
-    r.dimensionsFailed = 1;
-    r.dimensionSummary = [
-      ...r.dimensionSummary,
-      { dimension: 'ordering', score: null, findingCount: 0, diagnostic: 'judge_error' },
-    ];
-    render(<EvaluationRunDetail run={r} questionnaireId="qn1" versionId="v1" canApply />);
-    expect(screen.getByText(/did not run — these totals are an undercount/)).toBeInTheDocument();
+    render(
+      <EvaluationRunDetail run={failedJudgeRun()} questionnaireId="qn1" versionId="v1" canApply />
+    );
+    expect(screen.getByText('1 judge did not run')).toBeInTheDocument();
+    expect(screen.getByText(/severity totals above are an undercount/)).toBeInTheDocument();
+    // The failure names itself rather than leaving a bare code, and offers its way out.
+    expect(screen.getByText(/errored before it returned/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry judge' })).toBeInTheDocument();
+  });
+});
+
+describe('EvaluationRunDetail judge retry', () => {
+  /** The run the retry route returns: the same run with `ordering` now having a verdict. */
+  function repairedRun(): EvaluationRunDetailView {
+    const r = failedJudgeRun();
+    return {
+      ...r,
+      status: 'completed',
+      dimensionsRun: 7,
+      dimensionsFailed: 0,
+      dimensionSummary: r.dimensionSummary.map((d) =>
+        d.dimension === 'ordering' ? { ...d, score: 0.75, findingCount: 0, diagnostic: null } : d
+      ),
+    };
+  }
+
+  it('re-runs the one failed judge against the retry endpoint', async () => {
+    mockFetchOnce(repairedRun());
+    render(
+      <EvaluationRunDetail run={failedJudgeRun()} questionnaireId="qn1" versionId="v1" canApply />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry judge' }));
+
+    const [url, init] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe('/api/v1/app/questionnaires/qn1/versions/v1/evaluations/run1/retry');
+    expect(init.method).toBe('POST');
+    // Only the failed judge is re-dispatched — not the whole panel.
+    expect(JSON.parse(init.body as string)).toEqual({ dimension: 'ordering' });
+  });
+
+  it('swaps in the refreshed run, so the undercount warning clears', async () => {
+    mockFetchOnce(repairedRun());
+    render(
+      <EvaluationRunDetail run={failedJudgeRun()} questionnaireId="qn1" versionId="v1" canApply />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry judge' }));
+
+    await waitFor(() => expect(screen.queryByText('1 judge did not run')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Retry judge' })).not.toBeInTheDocument();
+    // The judge now reads as a judge that ran.
+    expect(screen.getByText('0.75')).toBeInTheDocument();
+  });
+
+  it('keeps the failure on screen and says why when the retry itself fails', async () => {
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({
+        success: false,
+        error: { code: 'CONFLICT', message: 'That judge already returned a verdict' },
+      }),
+    });
+    render(
+      <EvaluationRunDetail run={failedJudgeRun()} questionnaireId="qn1" versionId="v1" canApply />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry judge' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Retry failed: That judge already returned a verdict/)
+      ).toBeInTheDocument()
+    );
+    // The run is untouched — the warning is still true.
+    expect(screen.getByText('1 judge did not run')).toBeInTheDocument();
   });
 });

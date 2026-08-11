@@ -153,12 +153,40 @@ POST …/evaluations                 → run the panel, persist, return the run 
   body: { dimensions?: EvaluationDimension[] }   // default: all seven
 GET  …/evaluations                 → run headers, newest-first, paginated
 GET  …/evaluations/:runId          → one run with its findings (version-scoped)
+POST …/evaluations/:runId/retry    → re-run ONE failed judge into that run
+  body: { dimension: EvaluationDimension }
 ```
 
 The **POST** is paid LLM work, so it keeps the F5.1 gating verbatim: the
 `designEvaluationLimiter` 429 (reused — same seven-call cost), version-scope 404, and a
 not-configured 404 when zero judges are seeded. The two **GETs are read-only**:
 version-scope only (the `changes`-list posture).
+
+### Retrying one failed judge
+
+Fail-soft means a run can persist with a hole in it: six verdicts and one diagnostic, and severity
+totals that are therefore an **undercount**. The fix is not "run the panel again" — that pays for
+six needless judge calls and, worse, produces a _second_ run, stranding every accept/decline/apply
+decision already recorded against the first. So `POST …/:runId/retry` re-dispatches the one judge
+and merges the outcome back into the same run (`mergeJudgeRetry`):
+
+- that dimension's summary entry is **replaced**, its finding rows deleted and rewritten (a retry
+  can never double up), and the run's `dimensionsRun` / `dimensionsFailed` / `totalFindings` /
+  `status` / `error` are re-derived from the patched summary — via the same `statusFromCounts` the
+  initial persist uses. `dimensionsRequested` never moves: the panel that was asked for is a fact
+  about the run. `completedAt` is re-stamped, because the run genuinely gained work.
+- the judge reads the run's **`structureSnapshot`**, not the live structure. A run is a verdict on
+  one structure; mixing in a judgement of a newer draft would make the per-finding staleness
+  derivation (which diffs snapshot vs live) meaningless. Only a pre-F5.3 run without a snapshot
+  falls back to the live structure.
+- a retry that fails again merges the **fresh** diagnostic and leaves the run `partial` — the
+  undercount warning stays true rather than silently keeping a stale reason.
+
+Gating: the same `designEvaluationLimiter` sub-cap (a hammered retry button is exactly the spend
+that cap exists to bound), version+questionnaire-scope 404, 404 when the dimension was not part of
+the run or its judge is unseeded, and **409** when the judge already returned a verdict — its
+findings may carry review decisions, and deleting those to make room for a fresh opinion is not
+this route's call. Re-run the panel for that.
 
 Admin UI (`app/admin/questionnaires/[id]/v/[vid]/evaluations/**`): the **Evaluations**
 workspace tab with a "Run evaluation" button, and a read-only run-detail page
@@ -394,8 +422,19 @@ read as slotting the group heading rather than the question being drafted.
 `EvaluationRunHeadline` puts the two questions an admin opens the page with above the fold: severity
 totals + review progress (`CqStatTiles`), and a per-judge strip carrying each dimension's score and
 its severity split. **Judge cells are filter buttons** — the summary is a way into the work, not
-decoration. When judges failed, the band says the totals are an undercount rather than quietly
-omitting them; a stale count is surfaced the same way.
+decoration.
+
+**A failed judge is styled as a failure, and carries its own way out.** The first cut admitted the
+undercount honestly but quietly — a dashed, 70%-opacity cell with an outline `failed` chip, and a
+grey 11px footnote — which reads as _less important_ when it means _a column of this summary is
+missing_. Now: the tally splits into "6/7 ran" plus a destructive "1 failed", the cell is tinted
+rather than faded and carries a warning icon, the stored diagnostic **code** is translated into a
+sentence an admin can act on (`judgeFailureReason`, in `evaluation-judge-failure.tsx`; the raw code
+stays on the `title` for support), the undercount note is a ruled destructive row, and both the
+headline cell and the by-judge section offer **Retry judge** — the only action that actually fixes
+the undercount. `EvaluationRunDetail` owns the fetch and holds the run in state, swapping in the
+refreshed detail wholesale; the review statuses it returns are the persisted ones, so nothing local
+is lost. Stale counts stay a muted footnote — a stale finding is information, not a hole.
 
 **The severity bar's ramp is measured, not chosen by eye.** Fills come from `--cq-sev-major` /
 `-minor` / `-info` in `globals.css` — hot red → warm amber → neutral grey, so severity reads as

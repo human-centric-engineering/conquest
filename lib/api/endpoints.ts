@@ -516,6 +516,9 @@ export const API = {
       /** One persisted evaluation run with its findings (GET — F5.2). */
       versionEvaluationById: (id: string, versionId: string, runId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}`,
+      /** Re-run one failed judge into an existing run (POST — merges into the same run). */
+      versionEvaluationRetryJudge: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/evaluations/${runId}/retry`,
       /** Review one finding (PATCH accept/decline/edit — F5.3). */
       versionEvaluationFinding: (
         id: string,

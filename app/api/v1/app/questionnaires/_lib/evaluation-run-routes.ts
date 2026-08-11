@@ -2,7 +2,7 @@
  * Route-local persistence + read models for design-time evaluation runs (F5.2).
  *
  * The DB seam for the run route: `lib/app/questionnaire/evaluation/**` stays Prisma-free
- * (the shared `runEvaluationPanel` dispatches; this file persists and reads). Four jobs:
+ * (the shared `runEvaluationPanel` dispatches; this file persists and reads). Six jobs:
  *
  *   - `persistEvaluationRun` — turn a finished panel result into a run header + one finding
  *     row per judge finding, in a single transaction, deriving the terminal `status`.
@@ -10,6 +10,10 @@
  *   - `getEvaluationRunDetail` — one run with its findings, version-scoped (404 on mismatch).
  *   - `loadLatestEvaluationRun` — the newest run with its findings, for callers (the Questionnaire
  *     Pack export) that just want "the current state of the panel," not the run history.
+ *   - `loadRunForJudgeRetry` / `mergeJudgeRetry` — re-run one failed judge *into the existing run*
+ *     (replace its summary entry + findings, re-derive the tallies) rather than spawning a second
+ *     run: a failed judge is a hole in this run's totals, and filling it in place is what makes
+ *     the "these totals are an undercount" warning go away honestly.
  *
  * `dimensionSummary` is persisted as JSON and validated with a Zod schema on read (the
  * `parseAudienceShape` posture — never trust a stored JSON blob's shape), degrading a
@@ -27,11 +31,15 @@ import {
   parseAudienceShape,
   versionStructureSchema,
   type EvaluationDimension,
+  type JudgeVerdict,
   type ProposedEdit,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation';
 import { narrowToEnum } from '@/lib/app/questionnaire/types';
-import type { EvaluationPanelResult } from '@/lib/app/questionnaire/evaluation/run-panel';
+import type {
+  DimensionResult,
+  EvaluationPanelResult,
+} from '@/lib/app/questionnaire/evaluation/run-panel';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import {
@@ -58,11 +66,42 @@ const dimensionSummarySchema = z.object({
 });
 const dimensionSummaryArraySchema = z.array(dimensionSummarySchema);
 
+/**
+ * Terminal status from the run/failed tallies. Shared by the initial persist and the
+ * single-judge retry, so a retried run's status is derived the same way the original was.
+ */
+function statusFromCounts(dimensionsRun: number, dimensionsFailed: number): EvaluationRunStatus {
+  if (dimensionsRun === 0) return 'failed';
+  if (dimensionsFailed > 0) return 'partial';
+  return 'completed';
+}
+
 /** Derive the terminal status from the panel tallies. */
 function deriveStatus(summary: EvaluationPanelResult['summary']): EvaluationRunStatus {
-  if (summary.dimensionsRun === 0) return 'failed';
-  if (summary.dimensionsFailed > 0) return 'partial';
-  return 'completed';
+  return statusFromCounts(summary.dimensionsRun, summary.dimensionsFailed);
+}
+
+/**
+ * One judge finding → a `createMany` row (the caller assigns `ordinal`, which is stable across the
+ * whole run). The judge's optional structured `proposedEdit` is soft-validated on the way in — a
+ * malformed op degrades to `null` (prose-only) rather than sinking the finding. Shared by the
+ * initial persist and the single-judge retry so both write identical rows.
+ */
+function findingRowData(
+  dimension: EvaluationDimension,
+  finding: JudgeVerdict['findings'][number],
+  ordinal: number
+) {
+  return {
+    dimension,
+    ordinal,
+    targetKey: finding.targetKey,
+    severity: finding.severity,
+    proposedChange: finding.proposedChange,
+    rationale: finding.rationale,
+    sourceQuote: finding.sourceQuote ?? null,
+    proposedEdit: jsonInput(coerceProposedEdit(finding.proposedEdit)),
+  };
 }
 
 /** Build the per-dimension summary array (one entry per requested dimension, dispatch order). */
@@ -265,21 +304,10 @@ export async function persistEvaluationRun(args: {
   const status = deriveStatus(panel.summary);
   const dimensionSummary = buildDimensionSummary(panel);
 
-  // Flatten verdicts → finding rows, ordinal stable across the whole run (dispatch order). The
-  // judge's optional structured `proposedEdit` is soft-validated on the way in — a malformed op
-  // degrades to `null` (prose-only) rather than sinking the finding.
+  // Flatten verdicts → finding rows, ordinal stable across the whole run (dispatch order).
   let ordinal = 0;
   const findingRows = panel.results.flatMap((r) =>
-    (r.verdict?.findings ?? []).map((f) => ({
-      dimension: r.dimension,
-      ordinal: ordinal++,
-      targetKey: f.targetKey,
-      severity: f.severity,
-      proposedChange: f.proposedChange,
-      rationale: f.rationale,
-      sourceQuote: f.sourceQuote ?? null,
-      proposedEdit: jsonInput(coerceProposedEdit(f.proposedEdit)),
-    }))
+    (r.verdict?.findings ?? []).map((f) => findingRowData(r.dimension, f, ordinal++))
   );
 
   const runId = await prisma.$transaction(async (tx) => {
@@ -482,4 +510,128 @@ export async function getEvaluationRunDetail(
     error: row.error,
     findings,
   };
+}
+
+/**
+ * A run loaded for a single-judge retry: its scope, the structure the judges actually read, and
+ * the current per-dimension summary the retry will patch one entry of.
+ */
+export interface RetryableRun {
+  id: string;
+  versionId: string;
+  questionnaireId: string;
+  summary: EvaluationDimensionSummary[];
+  /** The run's structure snapshot, already parsed; `null` on a pre-F5.3 run or a malformed blob. */
+  snapshot: VersionStructureInput | null;
+}
+
+/**
+ * Load one run for a judge retry, scoped to the version (a run from another version returns
+ * `null` → 404). Deliberately does not read the findings: the retry only rewrites one
+ * dimension's rows, and the full detail is re-read after the merge.
+ */
+export async function loadRunForJudgeRetry(
+  versionId: string,
+  runId: string
+): Promise<RetryableRun | null> {
+  const row = await prisma.appQuestionnaireEvaluationRun.findFirst({
+    where: { id: runId, versionId },
+    select: {
+      id: true,
+      versionId: true,
+      questionnaireId: true,
+      dimensionSummary: true,
+      structureSnapshot: true,
+    },
+  });
+  if (!row) return null;
+  return {
+    id: row.id,
+    versionId: row.versionId,
+    questionnaireId: row.questionnaireId,
+    summary: parseDimensionSummary(row.dimensionSummary, row.id),
+    snapshot: parseStructureSnapshot(row.structureSnapshot, row.id),
+  };
+}
+
+/**
+ * Fold one judge's re-dispatch back into the run it belongs to, then return the refreshed detail.
+ *
+ * A retry *replaces* that dimension's contribution rather than creating a second run: the
+ * dimension's summary entry is swapped for the new outcome, its finding rows are deleted and
+ * rewritten (so a retry can never double up), and the run's tallies + terminal status are
+ * re-derived from the patched summary. `dimensionsRequested` never moves — the panel that was
+ * asked for is a fact about the run. `completedAt` is re-stamped because the run genuinely
+ * gained work now.
+ *
+ * A retry that fails again is merged the same way, carrying the *fresh* diagnostic: the run
+ * stays honest about being an undercount rather than silently keeping the old reason.
+ */
+export async function mergeJudgeRetry(args: {
+  run: RetryableRun;
+  result: DimensionResult;
+  completedAt: Date;
+}): Promise<EvaluationRunDetail> {
+  const { run, result, completedAt } = args;
+  const findings = result.verdict?.findings ?? [];
+
+  const patched: EvaluationDimensionSummary = {
+    dimension: result.dimension,
+    score: result.verdict ? result.verdict.score : null,
+    findingCount: findings.length,
+    diagnostic: result.diagnostic ?? null,
+  };
+  const summary = run.summary.map((d) => (d.dimension === result.dimension ? patched : d));
+
+  // Derive both tallies from the same patched summary so they can never disagree with each other.
+  const dimensionsFailed = summary.filter((d) => d.diagnostic !== null).length;
+  const dimensionsRun = summary.length - dimensionsFailed;
+  const status = statusFromCounts(dimensionsRun, dimensionsFailed);
+
+  await prisma.$transaction(async (tx) => {
+    // Clear whatever this judge left on a previous attempt — a retry replaces, never appends.
+    await tx.appQuestionnaireEvaluationFinding.deleteMany({
+      where: { runId: run.id, dimension: result.dimension },
+    });
+
+    if (findings.length > 0) {
+      // Continue the run's ordinal sequence: ordinals only have to be stable and unique within
+      // the run, and the detail read orders by (dimension, ordinal) anyway.
+      const highest = await tx.appQuestionnaireEvaluationFinding.aggregate({
+        where: { runId: run.id },
+        _max: { ordinal: true },
+      });
+      let ordinal = (highest._max.ordinal ?? -1) + 1;
+      await tx.appQuestionnaireEvaluationFinding.createMany({
+        data: findings.map((f) => ({
+          ...findingRowData(result.dimension, f, ordinal++),
+          runId: run.id,
+        })),
+      });
+    }
+
+    const totalFindings = await tx.appQuestionnaireEvaluationFinding.count({
+      where: { runId: run.id },
+    });
+
+    await tx.appQuestionnaireEvaluationRun.update({
+      where: { id: run.id },
+      data: {
+        status,
+        dimensionsRun,
+        dimensionsFailed,
+        totalFindings,
+        dimensionSummary: jsonInput(summary),
+        error: status === 'failed' ? 'all_judges_failed' : null,
+        completedAt,
+      },
+    });
+  });
+
+  const detail = await getEvaluationRunDetail(run.versionId, run.id);
+  if (!detail) {
+    // The row was just updated in the same request; absence here is a real fault.
+    throw new Error(`Evaluation run ${run.id} vanished immediately after a judge retry`);
+  }
+  return detail;
 }
