@@ -54,8 +54,8 @@ administrator will discard along with your credibility.
 
 PROPOSE a term when at least one of these is true:
 - It is contested or tradition-dependent — it means materially different things in different \
-schools of thought, faiths, professions, or cultures (e.g. "higher self", "ego", "mindfulness", \
-"trauma", "spirit").
+schools of thought, professions, faiths, or cultures (e.g. "wellbeing", "engagement", \
+"resilience", "trauma", "culture").
 - It is an in-house or programme-specific coinage the questionnaire uses as if the respondent \
 already shares its meaning.
 - It is a scale or threshold word whose bar is undefined and does the load-bearing work of the \
