@@ -156,7 +156,7 @@ describe('GlossaryEditor — curation', () => {
     renderEditor([]);
 
     await user.click(screen.getByRole('button', { name: /Add a term/ }));
-    await user.type(screen.getByPlaceholderText('e.g. higher self'), 'ego');
+    await user.type(screen.getByPlaceholderText('The term as it appears in your questions'), 'ego');
     await user.type(screen.getByPlaceholderText(/What this term means/), 'The constructed self.');
     await user.click(screen.getByRole('button', { name: /Save definitions/ }));
 
@@ -176,7 +176,7 @@ describe('GlossaryEditor — curation', () => {
     renderEditor([term({ term: 'higher self' })]);
 
     await user.click(screen.getByRole('button', { name: /Add a term/ }));
-    const inputs = screen.getAllByPlaceholderText('e.g. higher self');
+    const inputs = screen.getAllByPlaceholderText('The term as it appears in your questions');
     await user.type(inputs[inputs.length - 1], 'higher-self');
 
     expect(await screen.findByText(/Already defined above/)).toBeInTheDocument();

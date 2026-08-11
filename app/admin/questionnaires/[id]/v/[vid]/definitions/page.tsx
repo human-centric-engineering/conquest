@@ -59,10 +59,11 @@ export default async function DefinitionsTab({ params }: PageProps) {
   return (
     <div className="space-y-4">
       <p className="text-muted-foreground max-w-3xl text-sm">
-        Some questionnaires lean on words whose meaning is not settled — “higher self”, “ego”,
-        “engagement”. Define them here once and every surface agrees: the interviewer phrases
-        questions against your definition, the answer extractor interprets replies against it, and
-        respondents can tap the term to see what you meant.
+        Some questionnaires lean on words whose meaning is not settled — terms of art, internal
+        jargon, or everyday words each respondent reads differently. Define them here once and every
+        surface agrees: the interviewer phrases questions against your definition, the answer
+        extractor interprets replies against it, and respondents can tap the term to see what you
+        meant.
       </p>
 
       <GlossaryEditor

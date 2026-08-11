@@ -67,7 +67,7 @@ function renderCard(term: DraftTerm, duplicateOf: string | null = null) {
 }
 
 /** The card's open face is the one with editable fields; the settled face has none. */
-const termField = () => screen.queryByPlaceholderText('e.g. higher self');
+const termField = () => screen.queryByPlaceholderText('The term as it appears in your questions');
 
 describe('GlossaryTermCard — settled record', () => {
   it('collapses an accepted term to a stamped record with the reading in force', () => {
@@ -302,7 +302,9 @@ describe('GlossaryTermCard — term and aliases fields', () => {
   it('parses the aliases field into a trimmed, comma-separated list', () => {
     const { onChange } = renderCard(draft({ status: 'proposed' }));
 
-    const aliasInput = screen.getByPlaceholderText('e.g. Higher Self, HS');
+    const aliasInput = screen.getByPlaceholderText(
+      'Comma-separated alternative spellings or acronyms'
+    );
     fireEvent.change(aliasInput, { target: { value: 'Higher Self, HS' } });
 
     const next = onChange.mock.calls.at(-1)?.[0] as DraftTerm;

@@ -320,6 +320,15 @@ describe('ConfigEditor', () => {
     expect(bodyOf(specs).anonymousMode).toBe(true);
   });
 
+  it('shows an "Anonymous mode on" badge on the Access & invitations header when anonymous, and hides it otherwise', () => {
+    const { unmount } = setup({ anonymousMode: true });
+    expect(settingsContent().getByText('Anonymous mode on')).toBeInTheDocument();
+    unmount();
+
+    setup({ anonymousMode: false });
+    expect(settingsContent().queryByText('Anonymous mode on')).not.toBeInTheDocument();
+  });
+
   it('PATCHes extractionPrefilter toggled on on save', () => {
     const { specs } = setup({ extractionPrefilter: false });
     fireEvent.click(switchNear(/^Extraction pre-filter/));

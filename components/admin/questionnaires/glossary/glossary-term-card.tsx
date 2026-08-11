@@ -271,14 +271,14 @@ export function GlossaryTermCard({ term, duplicateOf, onChange, onRemove }: Glos
                 Term{' '}
                 <FieldHelp title="Term">
                   The word or phrase as it appears in your questions. Matching ignores case and
-                  treats hyphens as spaces, so “higher-self” and “higher self” are the same term.
-                  Add other spellings, acronyms, or irregular plurals as aliases.
+                  treats hyphens as spaces, so a hyphenated spelling and a spaced one are the same
+                  term. Add other spellings, acronyms, or irregular plurals as aliases.
                 </FieldHelp>
               </Label>
               <Input
                 id={`${term.id}-term`}
                 value={term.term}
-                placeholder="e.g. higher self"
+                placeholder="The term as it appears in your questions"
                 onChange={(event) => patch({ term: event.target.value })}
               />
             </div>
@@ -288,15 +288,15 @@ export function GlossaryTermCard({ term, duplicateOf, onChange, onRemove }: Glos
                 Aliases{' '}
                 <FieldHelp title="Aliases">
                   Comma-separated alternative surfaces that mean the same thing — other spellings,
-                  acronyms, or irregular plurals. Regular plurals (<code>ego</code> →{' '}
-                  <code>egos</code>, <code>ego’s</code>) are handled automatically, so you only need
-                  aliases for the ones a simple “add an s” wouldn’t produce. Default: none.
+                  acronyms, or irregular plurals. Regular plurals and possessives (adding “s” or
+                  “’s”) are handled automatically, so you only need aliases for the ones a simple
+                  “add an s” wouldn’t produce. Default: none.
                 </FieldHelp>
               </Label>
               <Input
                 id={`${term.id}-aliases`}
                 value={term.aliases.join(', ')}
-                placeholder="e.g. Higher Self, HS"
+                placeholder="Comma-separated alternative spellings or acronyms"
                 onChange={(event) =>
                   patch({
                     aliases: event.target.value
