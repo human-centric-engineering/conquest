@@ -23,7 +23,32 @@ form fields as the F1.1 ingest (`file`, `goal`, `instructions`,
 Markdown by `flattenWorkbook`, same as ingest) and `instructions` carries
 free-text extractor steering — both inherited for free through the shared
 `parseAndGuardUpload` / `extractFromDocument` helpers. See
-[`ingestion.md`](./ingestion.md#spreadsheet-ingestion-xlsx).
+[`ingestion.md`](./ingestion.md#spreadsheet-ingestion-xlsx). **Still supported and
+tested** (API clients, the F2.4 regression net), but the UI no longer uses it — see
+the streaming variant below.
+
+**`POST /api/v1/app/questionnaires/:id/versions/:vid/reingest/stream`** (the surface
+the `ReingestDialog` now uses) runs the identical pipeline over **SSE**, exactly as
+`…/questionnaires/stream` does for a fresh ingest — same gate order, same form fields,
+same dedup scoping. Two things follow from that:
+
+- The admin watches the **real** phases (`extracting` → `verifying` → `repairing` →
+  `saving`), including the rising "…12 questions so far" count, instead of a scripted
+  ticker. Before this, re-ingest's dialog ran `StatusTicker` with a canned message list
+  — which is why a re-ingest never showed a question count while an upload did.
+- It drives `orchestrateExtraction`, so re-ingest gets the **verify + repair** fidelity
+  pass the streaming ingest gets (fail-soft throughout, and its `extraction_verify`
+  `AppAiRun` is recorded against the re-ingested version). The non-streaming route keeps
+  the single blocking extractor pass.
+
+Pre-stream validation (rate-limit, scope-404, draft-only 409, upload guard) still returns
+a normal JSON error envelope; once the stream opens, a failure is a terminal `error` event
+(never a 5xx) — including the writer's TOCTOU `REINGEST_NOT_DRAFT`. Events: `phase`, then
+`done { questionnaireId, versionId, sectionCount, questionCount, changeCount, deduped }`
+or `error { code, message }`. The **dedup no-op rides the same `done` event** with
+`deduped: true` (resolved pre-stream, so an identical re-upload still costs nothing) —
+one terminal path for the client. Event contract:
+`lib/app/questionnaire/ingestion/extraction-stream-events.ts`, shared with ingest.
 
 ### Pipeline (order is load-bearing)
 
@@ -129,15 +154,23 @@ version-scoped `200` no-op) and the persistence call (`persistIngestion` creates
 questionnaire; `reingestVersion` replaces a draft). The F1.1 ingest route's
 integration tests are the behaviour-preserving regression net for the refactor.
 
+The streaming pair mirrors that split one level up: `…/questionnaires/stream` and
+`…/reingest/stream` both drive the shared `_lib/orchestrate-extraction.ts` generator and
+re-yield its events over `sseResponse`, differing only at the same two seams. Keeping the
+two stream routes on one orchestrator (rather than a re-ingest-specific progress path) is
+what stops the two "watch it extract" surfaces from drifting again.
+
 ## UI
 
 `components/admin/questionnaires/reingest-dialog.tsx` — a **Re-ingest** action on
 the detail page, offered only on **draft** versions. Opens a dialog (file picker +
-optional goal override + extract-tables toggle, each with a `FieldHelp` ⓘ) whose
-copy states the replace is destructive; the submit button is the confirm.
-Multipart, so it `fetch`es a `FormData` body directly (the JSON `authoringMutate`
-runner doesn't fit) and `router.refresh()`es on success. An identical upload
-surfaces as "nothing changed".
+optional goal override + extraction instructions + extract-tables toggle, each with a
+`FieldHelp` ⓘ) whose copy states the replace is destructive; the submit button is the
+confirm. Multipart request / SSE response, so it `fetch`es a `FormData` body and reads
+the stream directly (the JSON `authoringMutate` runner doesn't fit), rendering each real
+phase message through `ExtractionProgress` — the same component and the same read loop
+as `UploadQuestionnaireDialog`. On the terminal `done` event it shows the new counts and
+`router.refresh()`es; a `done { deduped: true }` surfaces as "nothing changed".
 
 ## Not in F2.4
 

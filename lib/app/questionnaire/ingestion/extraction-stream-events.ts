@@ -1,5 +1,6 @@
 /**
- * Event contract for the streaming questionnaire ingest (`POST …/questionnaires/stream`).
+ * Event contract for the streaming questionnaire ingest (`POST …/questionnaires/stream`)
+ * and its re-ingest twin (`POST …/versions/:vid/reingest/stream`).
  *
  * Upload → extract → (verify) → persist can run well past a synchronous request's
  * idle limit on a multi-page PDF (the extractor's own LLM call is bounded at 120s, and
@@ -49,6 +50,14 @@ export interface ExtractionDoneEvent {
   sectionCount: number;
   questionCount: number;
   changeCount: number;
+  /**
+   * Re-ingest only: the upload was byte-identical to the version's current source
+   * document, so nothing was re-extracted or written and the counts below are the
+   * version's unchanged ones. Absent (or `false`) on a real ingest/re-ingest. The
+   * no-op short-circuit rides the SAME terminal event rather than a separate JSON
+   * response so the client keeps one code path for "the work finished".
+   */
+  deduped?: boolean;
 }
 
 export type ExtractionStreamEvent =

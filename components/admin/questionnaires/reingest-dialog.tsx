@@ -10,8 +10,12 @@
  * identical re-upload (same SHA-256) short-circuits server-side to a no-op, which
  * the dialog surfaces as "nothing changed".
  *
- * Multipart, so it `fetch`es a `FormData` body directly (the JSON `authoringMutate`
- * runner doesn't fit). On success it `router.refresh()`es the detail page so the
+ * Multipart request / SSE response, so it `fetch`es a `FormData` body and reads the
+ * stream directly (the JSON `authoringMutate` runner doesn't fit). It posts to
+ * `POST …/versions/:vid/reingest/stream` — the same streaming pipeline the new-upload
+ * dialog uses — so the admin sees the REAL phases (extracting, with a rising
+ * "N questions so far" count → verifying → repairing → saving) rather than a scripted
+ * ticker. On the terminal `done` event it `router.refresh()`es the detail page so the
  * new structure renders.
  */
 
@@ -34,13 +38,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FieldHelp } from '@/components/ui/field-help';
-import {
-  StatusTicker,
-  REINGEST_MESSAGES,
-  estimateExtractionMs,
-} from '@/components/admin/questionnaires/status-ticker';
+import { ExtractionProgress } from '@/components/admin/questionnaires/status-ticker';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
+import { parseSseBlock } from '@/lib/api/sse-parser';
 
 /** Allowed upload extensions — mirrors the server's `ALLOWED_EXTENSIONS`. */
 const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx';
@@ -72,7 +73,9 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
   // On by default — the table pass self-detects (merges only when tables are found). Override.
   const [extractTables, setExtractTables] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [estimatedMs, setEstimatedMs] = useState<number | undefined>(undefined);
+  // The latest REAL phase message streamed from the re-ingest route (extracting →
+  // verifying → repairing → saving). Rendered live — no scripted ticker.
+  const [phase, setPhase] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ReingestResult | null>(null);
 
@@ -83,7 +86,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
     setError(null);
     setResult(null);
     setBusy(false);
-    setEstimatedMs(undefined);
+    setPhase('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -95,7 +98,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
       return;
     }
 
-    setEstimatedMs(estimateExtractionMs(file.size, file.name));
+    setPhase('');
     setBusy(true);
     setError(null);
     setResult(null);
@@ -111,18 +114,74 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
       // send 'false' to override rather than just omitting the field.
       body.set('extractTables', String(extractTables));
 
-      // Multipart — do NOT set Content-Type; the browser adds the boundary.
-      const res = await fetch(API.APP.QUESTIONNAIRES.versionReingest(questionnaireId, versionId), {
-        method: 'POST',
-        credentials: 'same-origin',
-        body,
-      });
-      const parsed = await parseApiResponse<ReingestResult>(res);
-      if (!parsed.success) {
-        setError(parsed.error.message);
+      // Multipart request, SSE response — extraction can outrun a synchronous request's
+      // idle timeout on a multi-page PDF, so the server streams the work and reports its
+      // real phases. Do NOT set Content-Type; the browser adds the multipart boundary.
+      const res = await fetch(
+        API.APP.QUESTIONNAIRES.versionReingestStream(questionnaireId, versionId),
+        { method: 'POST', credentials: 'same-origin', body }
+      );
+
+      // A non-2xx (rate limit, scope-404, non-draft 409, upload guard) returns the JSON
+      // error envelope, not a stream — surface its message.
+      if (!res.ok || !res.body) {
+        let message = 'Re-ingest failed. Please try again.';
+        try {
+          const parsed = await parseApiResponse<ReingestResult>(res);
+          if (!parsed.success) message = parsed.error.message;
+        } catch {
+          // Non-JSON body — keep the default message.
+        }
+        setError(message);
+        setBusy(false);
         return;
       }
-      setResult(parsed.data);
+
+      // Consume the event stream: `done` carries the new counts (or the dedup no-op),
+      // `error` a message.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let done: ReingestResult | null = null;
+      let streamError: string | null = null;
+
+      streamLoop: while (true) {
+        const { value, done: finished } = await reader.read();
+        if (finished) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseBlock(block);
+          if (parsed) {
+            if (parsed.type === 'phase' && typeof parsed.data.message === 'string') {
+              // Real progress — the actual phase (extracting / verifying / repairing / saving).
+              setPhase(parsed.data.message);
+            } else if (parsed.type === 'done') {
+              done = {
+                sectionCount: Number(parsed.data.sectionCount ?? 0),
+                questionCount: Number(parsed.data.questionCount ?? 0),
+                changeCount: Number(parsed.data.changeCount ?? 0),
+                deduped: parsed.data.deduped === true,
+              };
+            } else if (parsed.type === 'error') {
+              streamError =
+                typeof parsed.data.message === 'string'
+                  ? parsed.data.message
+                  : 'Re-ingest failed. Please try again.';
+              break streamLoop;
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+
+      if (streamError || !done) {
+        setError(streamError ?? 'Re-ingest failed. Please try again.');
+        return;
+      }
+      setResult(done);
       // Refresh the detail page so the replaced structure renders behind the dialog.
       router.refresh();
     } catch {
@@ -259,7 +318,7 @@ export function ReingestDialog({ questionnaireId, versionId, versionNumber }: Re
               </FieldHelp>
             </div>
 
-            {busy && <StatusTicker messages={REINGEST_MESSAGES} estimatedMs={estimatedMs} />}
+            {busy && <ExtractionProgress message={phase} />}
             {error && <p className="text-destructive text-sm">{error}</p>}
 
             <DialogFooter>

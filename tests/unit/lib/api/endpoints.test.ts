@@ -1110,6 +1110,7 @@ describe('API Endpoints', () => {
       expect(Q.versionArchive('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/archive`);
       expect(Q.versionRestore('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/restore`);
       expect(Q.versionReingest('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/reingest`);
+      expect(Q.versionReingestStream('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/reingest/stream`);
       expect(Q.versionConfig('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/config`);
       expect(Q.reportCraft('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/report/craft`);
       expect(Q.reportPreview('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/report/preview`);

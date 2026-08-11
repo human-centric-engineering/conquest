@@ -4,8 +4,8 @@
  * StatusTicker — theatrical progress messages for any long agent wait.
  *
  * Several admin actions fire a single long-running request with no real
- * progress signal — extracting an uploaded document, generating data slots,
- * running a design evaluation, re-ingesting. While one is in flight, this
+ * progress signal — generating data slots, running a design evaluation. While
+ * one is in flight, this
  * cycles through reassuring status messages — "Reading…", "Thinking…", … —
  * purely to show that something is happening. Each message types out character
  * by character, holds for a while, then yields to the next; the final message
@@ -45,15 +45,6 @@ export const EXTRACTION_MESSAGES: readonly string[] = [
   'Identifying questions…',
   'Validating structure…',
   'Saving your draft…',
-];
-
-/** Re-ingesting a replacement document onto an existing draft. */
-export const REINGEST_MESSAGES: readonly string[] = [
-  'Reading the new document…',
-  'Re-extracting sections…',
-  'Identifying questions…',
-  'Reconciling changes…',
-  'Finishing up…',
 ];
 
 /** Generating proposed data slots from the version's questions. */
@@ -165,10 +156,11 @@ export interface ExtractionProgressProps {
 
 /**
  * ExtractionProgress — the honest counterpart to {@link StatusTicker} for the document-upload
- * flow, which streams REAL phase events. It renders the actual current phase message (not a
+ * and re-ingest flows, which stream REAL phase events. It renders the actual current phase message (not a
  * scripted script) plus the same live elapsed mm:ss counter. Use this wherever a genuine
- * progress signal exists; keep {@link StatusTicker} only for the long single-request waits that
- * have none (data slots, design evaluation, re-ingest).
+ * progress signal exists — document upload AND re-ingest both stream real phases — and keep
+ * {@link StatusTicker} only for the long single-request waits that have none (data slots,
+ * design evaluation).
  */
 export function ExtractionProgress({ message, className }: ExtractionProgressProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
