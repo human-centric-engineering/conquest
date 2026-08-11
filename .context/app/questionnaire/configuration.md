@@ -328,6 +328,13 @@ experience** (the percent text) and its own **Progress milestones** group (the b
   is emitted and a quiet "You're N% of the way through." banner renders inline in the chat via
   `TurnNotices` → `MilestoneNotice` (mirrors the `support`/`seriousness`/`contradiction` pattern).
 
+  **N is the respondent's actual coverage, not the threshold that fired** (`MilestoneOutcome.coveragePct`,
+  not `.announce`). The threshold decides _whether_ to speak; coverage decides what is _true_. The
+  two come apart whenever thresholds are sparse or one rich answer clears several at once — a lone
+  threshold of `40` with the respondent at 92% would otherwise read "You're 40% of the way through."
+  beside a progress bar showing 92%, and the default list, topping out at 90, would tell a fully
+  completed session it was 90% done.
+
   The decision itself is the pure `resolveMilestoneCrossing`
   (`lib/app/questionnaire/completion/milestones.ts`), called from **both** turn pipelines —
   `runTurn` _and_ `runDataSlotTurn`. That sharing is load-bearing, not tidiness: any version with

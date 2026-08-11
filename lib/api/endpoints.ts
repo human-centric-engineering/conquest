@@ -662,6 +662,8 @@ export const API = {
       profile: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/profile`,
       /** Selectable interviewer persona — resolved menu (GET) + set the chosen persona (PATCH). */
       persona: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/persona`,
+      /** Resolved respondent surface config — affordances, presentation, theme, glossary (GET). */
+      surface: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/surface`,
       /** Answer-slot panel state — live read for the respondent panel (GET) (F7.2). */
       answers: (id: string): string => `/api/v1/app/questionnaire-sessions/${id}/answers`,
       /** Session lifecycle/status — completion-offer + cost tier + anon (GET) (F7.3). */

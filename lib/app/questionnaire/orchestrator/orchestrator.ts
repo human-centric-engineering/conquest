@@ -361,7 +361,9 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
   // threshold on an answer that is about to be rolled back would bank it *permanently* (the ledger
   // never re-fires), so the respondent would silently lose that milestone.
   const milestone = contradiction.suppressWrites
-    ? { announce: null, raisedMilestones: undefined }
+    ? // Nothing is announced, so `coveragePct` is never read — it is present only to satisfy
+      // the shared `MilestoneOutcome` shape.
+      { announce: null, coveragePct: 0, raisedMilestones: undefined }
     : resolveMilestoneCrossing(
         state.config,
         assessment.displayCoverage,
@@ -372,7 +374,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     events.push({
       type: 'warning',
       code: 'milestone',
-      message: milestoneMessage(milestone.announce),
+      message: milestoneMessage(milestone.coveragePct),
     });
   }
 

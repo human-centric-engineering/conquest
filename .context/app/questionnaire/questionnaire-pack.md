@@ -2,8 +2,8 @@
 
 The admin can download a **branded, shareable artifact** covering everything about how a
 questionnaire is set up — title/version/goals, the question structure, the semantic data slots
-(with their linked questions), the definitions/glossary, a curated summary of the experience-setup
-config, and (opt-in) the latest F5.1–F5.3 design-evaluation run's judge findings — as a PDF, CSV, or
+(with their linked questions), the definitions/glossary, the experience-setup summary, and (opt-in)
+the latest F5.1–F5.3 design-evaluation run's judge findings — as a PDF, CSV, or
 Markdown file. The admin picks which of those six sections to include from a dialog opened by the
 **Questionnaire pack** button in the workspace header; five are ticked by default, "Evaluation
 findings" is not (see below).
@@ -26,11 +26,13 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   the question(s) it covers, resolved by key against the version graph.
 - **Definitions** — the accepted glossary appendix (same accepted-only set the instrument's
   reviewer copy carries — not the curated proposals/rejections the JSON definition export carries).
-- **Experience setup** — a small, hand-picked, non-technical subset of the run-time config (access
-  mode, presentation mode, voice/attachments, early finish, session resume, respondent/cohort
-  report on/off, whether definitions show to respondents). Deliberately NOT the full
-  `QuestionnaireConfigShape` — that has 40+ internal tuning knobs (confidence floors, cost budgets,
-  reasoning-trace timings) that mean nothing outside the admin console.
+- **Experience setup** — every run-time setting, grouped by area (Access & participation,
+  Respondent experience, Interviewer, Questioning & completion, Definitions, Reports, Safeguarding,
+  Operations). **Derived from the [settings registry](#the-settings-registry), not hand-listed** —
+  a config field added tomorrow appears here without anyone remembering to add it. Split into two
+  tiers: the standard tier always renders; the technical tier (numeric tuning, prompt presence, cost
+  and abuse thresholds, admin-only debugging) renders only when the admin ticks **Technical & tuning
+  settings**, a sub-option nested under this section in the dialog.
 - **Evaluation findings** (opt-in, off by default) — the [F5.1–F5.3 judge panel](./design-evaluation.md)'s
   most recent run for this version: each of the seven dimensions' score/diagnostic plus every finding
   it raised, **including findings still `pending` review** — this is a record of what the panel said,
@@ -59,13 +61,65 @@ blurb; its plain-data-table shape has no equivalent trailing section. No custom 
 (`@react-pdf/renderer` ships Helvetica only, as every other PDF document in this app does) — the
 wordmark is Helvetica-Bold in the two brand colours, not the web's Fraunces serif.
 
+## The settings registry
+
+`lib/app/questionnaire/settings-registry.ts` declares **one descriptor per
+`QuestionnaireConfigShape` field** — group heading, tier, and a `rows(config)` function producing
+the presented label/value pairs.
+
+**Why it exists.** The setup table used to be a hand-written array of ten rows, documented as "a
+deliberate editorial choice". Every config field added after it was written simply never appeared in
+the pack, silently — by the time anyone noticed, 10 of 49 settings were covered and the progress /
+milestone-banner settings that had just shipped were invisible. The registry is declared
+
+```ts
+} satisfies Record<keyof QuestionnaireConfigShape, SettingDescriptor>;
+```
+
+so **adding a config field is now a compile error until it is classified.** New settings are
+included by default; leaving one out of the shared artifact is a visible `tier: 'technical'` a
+reviewer can argue with. Same pattern and same motivation as the platform's
+[agent field registry](../../orchestration/agent-fields.md), which exists because hand-maintained
+parallel field lists had already shipped real silent bugs.
+
+**Adding a config field:** add it to `QuestionnaireConfigShape` +
+`DEFAULT_QUESTIONNAIRE_CONFIG` as usual, then add one descriptor to `SETTING_DESCRIPTORS` — the
+compiler and `tests/unit/lib/app/questionnaire/settings-registry.test.ts` both fail until you do.
+Nothing else needs editing: the pack model, all three serialisers, and the dialog derive from it.
+
+**Descriptor reference:**
+
+| Field   | Meaning                                                                                                              |
+| ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `group` | One of `SETTING_GROUPS`; sets the heading the row sits under and the output order                                    |
+| `tier`  | `standard` (always shown) or `technical` (behind the dialog opt-in) — the default for the rows this descriptor emits |
+| `rows`  | `(config) => SettingRow[]` — **0..n** rows; a row may override `tier` for itself                                     |
+
+Three behaviours worth knowing:
+
+- **Nested blocks expand.** `respondentReport`, `cohortReport`, `tone`, `intro`,
+  `personaSelection`, `interviewerStrategy` each emit many rows — one per meaningful sub-setting —
+  rather than a JSON blob.
+- **Inert settings emit nothing.** Milestone thresholds while banners are off, tone dials while a
+  built-in persona governs, invitee fields on a public-only link. `rows` receives the whole config,
+  so it can reason about the rest of it.
+- **Prompt-shaped settings report presence, not content.** Report instructions, structure, and
+  background context render as `Set` / `Not set`; free-text admin copy (support message, persona
+  text) is whitespace-collapsed and clipped to 160 characters. A pack row is a table cell, and a
+  client-facing PDF is not the place to dump a system prompt.
+
+Per format: the PDF and Markdown render a sub-heading per group (Markdown opens a fresh GFM table
+each time); the CSV keeps one flat table with a leading `group` column, which is what pivots in a
+spreadsheet.
+
 ## Route
 
-`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&evaluations=`
+`GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md&meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=`
 
 Admin-only (`withAdminAuth`), the same `exportLimiter` sub-cap the instrument/definition routes
-use. Each include flag is `true`/`false`; all default `true` except `evaluations`, which defaults
-`false`. `runtime = 'nodejs'` (react-pdf). Filename: `pack-<slug>-v<N>.<ext>`,
+use. Each include flag is `true`/`false`; all default `true` except `evaluations` and
+`setupTechnical`, which default `false`. `setupTechnical` is a sub-option of `setup`, not a seventh
+section — it widens the setup summary rather than adding one, and is ignored when `setup=false`. `runtime = 'nodejs'` (react-pdf). Filename: `pack-<slug>-v<N>.<ext>`,
 `Cache-Control: no-store`. The evaluation run is only loaded (`loadLatestEvaluationRun`) when
 `evaluations=true` — the common case skips that query entirely.
 
@@ -77,6 +131,7 @@ Registry: `API.APP.QUESTIONNAIRES.versionPack(id, versionId)`.
 | -------------------------- | ----------------------------------------------------------------------------------------- |
 | Brand copy (shared)        | `lib/app/questionnaire/export/pack-brand.ts`                                              |
 | Model builder (pure)       | `lib/app/questionnaire/export/build-pack-model.ts`                                        |
+| Settings registry (pure)   | `lib/app/questionnaire/settings-registry.ts`                                              |
 | CSV serialiser (pure)      | `lib/app/questionnaire/export/build-pack-csv.ts`                                          |
 | Markdown serialiser (pure) | `lib/app/questionnaire/export/build-pack-markdown.ts`                                     |
 | PDF document               | `components/app/questionnaire/export/pack-pdf-document.tsx`                               |
@@ -100,8 +155,11 @@ Two entry points, both opening the same `PackExportDialog`:
   "Questionnaire pack" → **Download pack…**, kept for admins who look for downloads under an
   export menu.
 
-The dialog offers six checkboxes (five default-checked, "Evaluation findings" default-unchecked)
-and a format select (PDF / CSV / Markdown). Since the download URL depends on that dialog state (unlike the menu's static
+The dialog offers six section checkboxes (five default-checked, "Evaluation findings"
+default-unchecked), one nested sub-checkbox — **Technical & tuning settings**, indented under
+"Experience setup" and disabled while that parent is off — and a format select (PDF / CSV /
+Markdown). The sub-option does not count toward the "pick at least one section" gate, since it
+produces nothing on its own. Since the download URL depends on that dialog state (unlike the menu's static
 `<a download>` links), Download sets `window.location.href` directly rather than using a plain
 anchor — same-origin authenticated GET, `Content-Disposition: attachment` forces the download
 without navigating away.

@@ -435,8 +435,14 @@ describe('POST …/reingest/stream — mid-stream failures', () => {
 
     expect(res.status).toBe(200);
     const frames = await drainSse(res);
-    const errorFrame = frames.find((f) => f.type === 'error');
-    expect(errorFrame).toBeDefined();
+    // The dispatcher's `rate_limited` is translated on the way out — 429 → `EXTRACTOR_RATE_LIMITED`
+    // (`dispatchErrorCode` in `extract-pipeline.ts`). Asserting the code, not just that *an* error
+    // frame exists, is what pins that translation: a regression collapsing every dispatch failure
+    // to the generic `EXTRACTION_FAILED` would otherwise land green here.
+    expect(frames[frames.length - 1].data).toMatchObject({
+      type: 'error',
+      code: 'EXTRACTOR_RATE_LIMITED',
+    });
     expect(frames.some((f) => f.type === 'done')).toBe(false);
     expect(reingestVersion).not.toHaveBeenCalled();
     expect(logAdminAction).not.toHaveBeenCalled();

@@ -26,7 +26,7 @@ vi.mock('next/headers', () => ({ headers: vi.fn(() => Promise.resolve(new Header
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireVersion: { findFirst: vi.fn() },
   aiAgent: { findMany: vi.fn() },
-  appQuestionnaireEvaluationRun: { findFirst: vi.fn(), update: vi.fn() },
+  appQuestionnaireEvaluationRun: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   appQuestionnaireEvaluationFinding: {
     deleteMany: vi.fn(),
     createMany: vi.fn(),
@@ -34,6 +34,8 @@ const prismaMock = vi.hoisted(() => ({
     count: vi.fn(),
   },
   $transaction: vi.fn(),
+  // The merge takes a `FOR UPDATE` lock on the run row before re-reading the summary it patches.
+  $queryRaw: vi.fn(),
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
@@ -207,6 +209,12 @@ beforeEach(() => {
   prismaMock.appQuestionnaireEvaluationRun.findFirst
     .mockResolvedValueOnce(runRow())
     .mockResolvedValue(detailRow());
+  prismaMock.$queryRaw.mockResolvedValue([{ id: 'run-1' }]);
+  // The in-transaction summary re-read. Defaults to the same summary the loader saw, so the
+  // ordinary single-retry path behaves exactly as before; the concurrency test overrides it.
+  prismaMock.appQuestionnaireEvaluationRun.findUnique.mockResolvedValue({
+    dimensionSummary: runRow().dimensionSummary,
+  });
   prismaMock.appQuestionnaireEvaluationFinding.deleteMany.mockResolvedValue({ count: 0 });
   prismaMock.appQuestionnaireEvaluationFinding.createMany.mockResolvedValue({ count: 1 });
   prismaMock.appQuestionnaireEvaluationFinding.aggregate.mockResolvedValue({
@@ -376,5 +384,41 @@ describe('POST retry — merge', () => {
     expect(body.success).toBe(true);
     expect(body.data.id).toBe('run-1');
     expect(body.data.dimensionsFailed).toBe(0);
+  });
+
+  it('merges onto the CONCURRENTLY updated summary, not the snapshot read before the judge ran', async () => {
+    // Two admins retry two different failed judges on the same run. This request loaded the summary
+    // before its judge call — seconds ago — and `clarity` was repaired by the other request in the
+    // meantime. Patching the stale snapshot would resurrect `clarity` as failed while its freshly
+    // written finding rows sat in the table, and the UI would then offer a "Retry judge" whose
+    // deleteMany destroys them. The in-transaction re-read under `FOR UPDATE` is what prevents it.
+    prismaMock.appQuestionnaireEvaluationRun.findUnique.mockResolvedValue({
+      dimensionSummary: [
+        { dimension: 'clarity', score: 0.9, findingCount: 2, diagnostic: null },
+        { dimension: 'ordering', score: null, findingCount: 0, diagnostic: 'dispatch_error' },
+      ],
+    });
+
+    await POST(req({ dimension: 'ordering' }), ctx(PARAMS));
+
+    const update = prismaMock.appQuestionnaireEvaluationRun.update.mock.calls[0][0] as {
+      data: { dimensionSummary: unknown; dimensionsRun: number; dimensionsFailed: number };
+    };
+    // The other admin's repair survives verbatim; only this request's own dimension is replaced.
+    expect(update.data.dimensionSummary).toEqual([
+      { dimension: 'clarity', score: 0.9, findingCount: 2, diagnostic: null },
+      { dimension: 'ordering', score: 0.7, findingCount: 1, diagnostic: null },
+    ]);
+    expect(update.data).toMatchObject({ dimensionsRun: 2, dimensionsFailed: 0 });
+  });
+
+  it('takes the row lock before reading the summary it is about to patch', async () => {
+    await POST(req({ dimension: 'ordering' }), ctx(PARAMS));
+
+    // Ordering is the whole point: re-reading without the lock still races.
+    const lockOrder = prismaMock.$queryRaw.mock.invocationCallOrder[0];
+    const readOrder =
+      prismaMock.appQuestionnaireEvaluationRun.findUnique.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(readOrder);
   });
 });

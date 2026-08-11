@@ -190,6 +190,7 @@ describe('renderPackPdf', () => {
       dataSlots: false,
       definitions: false,
       setup: false,
+      setupTechnical: false,
       evaluations: false,
     };
     const model = buildPackModel(

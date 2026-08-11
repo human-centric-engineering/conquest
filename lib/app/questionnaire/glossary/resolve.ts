@@ -13,6 +13,8 @@
  * defined" identically and stay free of feature flags.
  */
 
+import { cache } from 'react';
+
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 
@@ -37,13 +39,50 @@ function readAliases(value: unknown): string[] {
 /**
  * Load the version's live glossary, or `[]` when `gate` is off.
  *
- * One indexed query (`app_glossary_term_versionId_status_idx`) plus the config row. Definitions
- * are filtered to the selected ones in SQL, so a term whose readings were all unticked comes back
- * with none and is dropped here — it must never underline with an empty popover.
+ * One indexed query (`app_glossary_term_versionId_status_idx`) plus the config row, `cache()`d so
+ * the surfaces that read the SAME glossary through DIFFERENT gates — the respondent's inline hints
+ * and the report appendix render on one page load — share it instead of each pulling the whole
+ * term/definition tree. That is also why all three gate columns are selected up front: the gate is
+ * applied here as a projection, so it can vary per caller without varying the query.
+ *
+ * Definitions are filtered to the selected ones in SQL, so a term whose readings were all unticked
+ * comes back with none and is dropped here — it must never underline with an empty popover.
  *
  * `surfaces` is assembled and normalised once, server-side: the client receives ready-to-index
  * strings rather than re-deriving them per render.
+ *
+ * DELIBERATELY NOT folded into `loadVersionSurface`: this read is best-effort (see
+ * {@link loadGlossary}), and a page's primary row must not inherit a fail-soft contract.
  */
+const loadGlossaryRow = cache(async (versionId: string) => {
+  return prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      config: {
+        select: {
+          glossaryPromptInjection: true,
+          glossaryRespondentHints: true,
+          glossaryReportAppendix: true,
+        },
+      },
+      glossaryTerms: {
+        where: { status: 'accepted' },
+        orderBy: { ordinal: 'asc' },
+        select: {
+          id: true,
+          term: true,
+          aliases: true,
+          definitions: {
+            where: { selected: true },
+            orderBy: { ordinal: 'asc' },
+            select: { text: true },
+          },
+        },
+      },
+    },
+  });
+});
+
 async function loadGlossary(versionId: string, gate: GlossaryGateOrNone): Promise<GlossaryEntry[]> {
   try {
     return await queryGlossary(versionId, gate);
@@ -64,33 +103,12 @@ async function queryGlossary(
   versionId: string,
   gate: GlossaryGateOrNone
 ): Promise<GlossaryEntry[]> {
-  const version = await prisma.appQuestionnaireVersion.findUnique({
-    where: { id: versionId },
-    select: {
-      ...(gate ? { config: { select: { [gate]: true } } } : {}),
-      glossaryTerms: {
-        where: { status: 'accepted' },
-        orderBy: { ordinal: 'asc' },
-        select: {
-          id: true,
-          term: true,
-          aliases: true,
-          definitions: {
-            where: { selected: true },
-            orderBy: { ordinal: 'asc' },
-            select: { text: true },
-          },
-        },
-      },
-    },
-  });
+  const version = await loadGlossaryRow(versionId);
   if (!version) return [];
 
   if (gate) {
-    const configuredGate: GlossaryGate = gate;
-    const enabled =
-      (version.config as Record<string, boolean | undefined> | null)?.[configuredGate] ??
-      DEFAULT_QUESTIONNAIRE_CONFIG[configuredGate];
+    // Config is 1:1 and lazy — an absent row means the documented default for this gate.
+    const enabled = version.config?.[gate] ?? DEFAULT_QUESTIONNAIRE_CONFIG[gate];
     if (!enabled) return [];
   }
 

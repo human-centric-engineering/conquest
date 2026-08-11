@@ -4,11 +4,13 @@
  * Flattens a {@link VersionGraphView} (plus its data slots, glossary appendix, and latest design
  * evaluation run) into a presentation-ready {@link PackModel} — a branded, shareable artifact that
  * covers everything about how the questionnaire is set up: title/version/goals, the question
- * structure, the semantic data slots (with their linked questions), the definitions/glossary, a
- * curated summary of the experience-setup config, and (opt-in) the F5.1–F5.3 judge panel's findings
- * for this version. The admin picks which of those six sections to include via {@link PackInclude};
- * excluded sections are `null` on the model so every serialiser (PDF/CSV/Markdown) skips them the
- * same way.
+ * structure, the semantic data slots (with their linked questions), the definitions/glossary, the
+ * experience-setup summary, and (opt-in) the F5.1–F5.3 judge panel's findings for this version. The
+ * admin picks which of those six sections to include via {@link PackInclude}; excluded sections are
+ * `null` on the model so every serialiser (PDF/CSV/Markdown) skips them the same way.
+ *
+ * The setup summary is DERIVED from `lib/app/questionnaire/settings-registry.ts`, not hand-listed —
+ * a new config field appears in the pack automatically (and cannot compile until it is classified).
  *
  * Distinct from the brand-free {@link file://./build-instrument-model.ts} (F14.9), which is the
  * design-time reviewer copy of just the questions. This is the external/showcase artifact — it
@@ -18,13 +20,9 @@
  * deterministic in its input.
  */
 
-import { ACCESS_MODE_LABELS, type PresentationMode } from '@/lib/app/questionnaire/types';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
-import type {
-  ConfigView,
-  EvaluationRunDetail,
-  VersionGraphView,
-} from '@/lib/app/questionnaire/views';
+import type { EvaluationRunDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
+import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/settings-registry';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
   EVALUATION_DIMENSIONS,
@@ -38,7 +36,10 @@ import {
   type InstrumentSection,
 } from '@/lib/app/questionnaire/export/build-instrument-model';
 
-/** Which of the pack's six sections to include. All default `true` except `evaluations`. */
+/**
+ * Which of the pack's six sections to include, plus the one sub-option (`setupTechnical`). All
+ * default `true` except `evaluations` and `setupTechnical`.
+ */
 export interface PackInclude {
   /** Title, version, goal, audience. */
   meta: boolean;
@@ -48,8 +49,15 @@ export interface PackInclude {
   dataSlots: boolean;
   /** The definitions / glossary appendix. */
   definitions: boolean;
-  /** A curated summary of the experience-setup config. */
+  /** The experience-setup summary — every setting in the standard tier. */
   setup: boolean;
+  /**
+   * Sub-option of {@link setup}: also list the technical tier — numeric tuning, prompt/instruction
+   * presence, cost and abuse thresholds, admin-only debugging toggles. Defaults `false` because the
+   * pack is the external/showcase artifact; the classification per setting lives in
+   * `lib/app/questionnaire/settings-registry.ts`. Ignored when `setup` is off.
+   */
+  setupTechnical: boolean;
   /**
    * The latest F5.1–F5.3 design-evaluation run's judge scores and findings — including findings
    * still `pending` review. Defaults `false`, unlike every other section: this is unreviewed AI
@@ -59,13 +67,17 @@ export interface PackInclude {
   evaluations: boolean;
 }
 
-/** The export dialog's default checkbox state — every section except `evaluations`. */
+/**
+ * The export dialog's default checkbox state — every section except `evaluations`, and the
+ * standard settings tier only.
+ */
 export const DEFAULT_PACK_INCLUDE: PackInclude = {
   meta: true,
   questions: true,
   dataSlots: true,
   definitions: true,
   setup: true,
+  setupTechnical: false,
   evaluations: false,
 };
 
@@ -79,11 +91,8 @@ export interface PackDataSlot {
   questions: { key: string; prompt: string }[];
 }
 
-/** One row of the curated experience-setup summary. */
-export interface PackSetupItem {
-  label: string;
-  value: string;
-}
+/** One row of the experience-setup summary — re-exported so the serialisers have one import site. */
+export type { PackSetupItem };
 
 /** One judge finding, resolved for the pack — `targetLabel` is the finding's subject, not its raw key. */
 export interface PackEvaluationFinding {
@@ -132,41 +141,6 @@ export interface PackModel {
   glossary: GlossaryAppendixView | null;
   setup: PackSetupItem[] | null;
   evaluations: PackEvaluations | null;
-}
-
-const PRESENTATION_MODE_LABELS: Record<PresentationMode, string> = {
-  chat: 'Chat',
-  form: 'Form',
-  both: 'Both (respondent can toggle)',
-};
-
-const onOff = (value: boolean): string => (value ? 'Enabled' : 'Disabled');
-
-/**
- * Hand-picked, non-technical subset of {@link ConfigView} — "what we set up to drive the respondent
- * experience", not the full tuning surface (confidence floors, cost budgets, reasoning-trace
- * timings, ...). Extending this list is a deliberate editorial choice, not a mechanical derivation
- * like {@link CONFIG_KEYS} in `config-export.ts`.
- */
-function buildSetupSummary(config: ConfigView): PackSetupItem[] {
-  return [
-    { label: 'Access', value: ACCESS_MODE_LABELS[config.accessMode] },
-    { label: 'Anonymous respondents', value: config.anonymousMode ? 'Yes' : 'No' },
-    { label: 'Presentation', value: PRESENTATION_MODE_LABELS[config.presentationMode] },
-    { label: 'Voice input', value: onOff(config.voiceEnabled) },
-    { label: 'File attachments', value: onOff(config.attachmentsEnabled) },
-    {
-      label: 'Respondent early finish',
-      value: config.allowEarlyFinish ? 'Allowed' : 'Not allowed',
-    },
-    { label: 'Session resume', value: onOff(config.sessionResumeEnabled) },
-    { label: 'Respondent report', value: onOff(config.respondentReport.enabled) },
-    { label: 'Cohort report', value: onOff(config.cohortReport.enabled) },
-    {
-      label: 'Definitions shown to respondents',
-      value: config.glossaryRespondentHints ? 'Yes' : 'No',
-    },
-  ];
 }
 
 /** Resolve a data slot's `questionKeys` to `{ key, prompt }` pairs against a pre-built prompt map. */
@@ -263,7 +237,7 @@ export function buildPackModel(
         }))
       : null,
     glossary: include.definitions ? glossary : null,
-    setup: include.setup ? buildSetupSummary(graph.config) : null,
+    setup: include.setup ? buildSettingRows(graph.config, include.setupTechnical) : null,
     evaluations: include.evaluations ? buildEvaluationsSection(evaluationRun) : null,
   };
 }

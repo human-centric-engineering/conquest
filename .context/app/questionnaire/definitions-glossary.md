@@ -109,6 +109,14 @@ builder directly.
 Gated on `glossaryRespondentHints`, resolved **server-side** — `resolveGlossaryForHints` returns
 `[]` when the switch is off, so no client component carries a flag.
 
+All four reads (`ForPrompts` / `ForHints` / the appendix / the ungated export read) share ONE
+`cache()`d query — `loadGlossaryRow` selects all three gate columns plus the accepted
+term/definition tree, and each entry point applies **its own** gate as a projection. That is what
+keeps a page rendering both the inline hints and the report appendix from pulling the whole tree
+twice, without letting one surface's switch decide another's. The read is deliberately kept out of
+the shared respondent-surface row because it is fail-soft; see
+[`surface-config.md`](./surface-config.md).
+
 - **Chat** — `GlossaryMarkdown` replaces `<Markdown>` in the three assistant-turn render sites.
   Never the respondent's own messages: `UserBubble` is untouched.
 - **Form labels** — `GlossaryText`. The label became a `<span>` (it carried no `htmlFor`), because

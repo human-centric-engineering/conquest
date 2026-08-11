@@ -27,9 +27,24 @@ import type { QuestionnaireConfigShape } from '@/lib/app/questionnaire/types';
 export interface MilestoneOutcome {
   /**
    * The single threshold to announce this turn (the highest newly crossed), or `null` when nothing
-   * was crossed / the feature is off.
+   * was crossed / the feature is off. This is the DECISION value — the ledger's unit, and what
+   * "once per threshold per session" is keyed on. It is deliberately NOT what the banner states;
+   * see {@link coveragePct}.
    */
   announce: number | null;
+  /**
+   * The respondent's clamped, rounded coverage — the figure the progress bar shows, and the one the
+   * banner states.
+   *
+   * Separate from {@link announce} because the two genuinely differ: a turn that crosses 25 may
+   * land the respondent at 30, and a single rich answer can take them from 0 to 92 while crossing a
+   * lone configured threshold of 40. Announcing the THRESHOLD there read "You're 40% of the way
+   * through." beside a bar showing 92% — the copy understated progress by however far apart the
+   * admin's thresholds happen to sit. The threshold decides *whether* to speak; coverage decides
+   * *what is true*. Always present, so callers never have to re-derive the clamp-and-round and
+   * drift from it.
+   */
+  coveragePct: number;
   /**
    * The FULL updated ledger to persist to `AppQuestionnaireSession.raisedMilestones`, or
    * `undefined` when nothing changed this turn (leave the column untouched).
@@ -37,9 +52,12 @@ export interface MilestoneOutcome {
   raisedMilestones: number[] | undefined;
 }
 
-/** The respondent-facing copy for a crossed threshold. */
-export function milestoneMessage(threshold: number): string {
-  return `You're ${threshold}% of the way through.`;
+/**
+ * The respondent-facing copy. Takes the respondent's ACTUAL coverage, not the threshold that fired
+ * — see {@link MilestoneOutcome.coveragePct}.
+ */
+export function milestoneMessage(coveragePct: number): string {
+  return `You're ${coveragePct}% of the way through.`;
 }
 
 /**
@@ -56,20 +74,23 @@ export function resolveMilestoneCrossing(
   raised: number[] | undefined,
   questionCount: number
 ): MilestoneOutcome {
-  if (!config.milestoneBannerEnabled) return { announce: null, raisedMilestones: undefined };
+  // Clamp before rounding so an out-of-range coverage can't reach a threshold it shouldn't.
+  // Computed up front so every return path carries the same figure the progress bar shows.
+  const pct = Math.round(Math.min(1, Math.max(0, displayCoverage)) * 100);
+  const silent = { announce: null, coveragePct: pct, raisedMilestones: undefined };
+
+  if (!config.milestoneBannerEnabled) return silent;
 
   // A version with no questions has no meaningful progress to report — and both coverage helpers
   // return 1 for an empty question set (`gradedCoverage` short-circuits; the data-slot path pins
   // its ratio to 1), which would otherwise announce the TOP milestone on the opening turn of a
   // pure data-slot version. Guarded here rather than at each call site so neither pipeline can
   // forget it.
-  if (questionCount <= 0) return { announce: null, raisedMilestones: undefined };
+  if (questionCount <= 0) return silent;
 
-  // Clamp before rounding so an out-of-range coverage can't reach a threshold it shouldn't.
-  const pct = Math.round(Math.min(1, Math.max(0, displayCoverage)) * 100);
   const ledger = raised ?? [];
   const crossed = config.milestoneBannerThresholds.filter((t) => pct >= t && !ledger.includes(t));
-  if (crossed.length === 0) return { announce: null, raisedMilestones: undefined };
+  if (crossed.length === 0) return silent;
 
   const top = Math.max(...crossed);
   const highestAnnounced = ledger.length > 0 ? Math.max(...ledger) : 0;
@@ -78,9 +99,11 @@ export function resolveMilestoneCrossing(
     // The highest newly crossed threshold — but only if it's actually ahead of what we've already
     // told them. An admin can add a threshold to a LAUNCHED version (config is editable, and the
     // fork copies it), so a respondent sitting at 92% with 90 already banked can suddenly "cross"
-    // a newly-added 60. Announcing that would read "You're 60% of the way through." beside a
-    // progress bar showing 92%. Bank it silently instead.
+    // a newly-added 60. Re-announcing there would repeat a beat they have already had. Bank it
+    // silently instead. (The banner's NUMBER is `coveragePct` either way, so a crossing that does
+    // fire can never contradict the progress bar.)
     announce: top > highestAnnounced ? top : null,
+    coveragePct: pct,
     // Every crossed threshold is banked either way, so a skipped-over one never fires later.
     raisedMilestones: [...new Set([...ledger, ...crossed])].sort((a, b) => a - b),
   };

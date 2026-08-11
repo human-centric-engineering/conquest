@@ -566,6 +566,16 @@ export async function loadRunForJudgeRetry(
  *
  * A retry that fails again is merged the same way, carrying the *fresh* diagnostic: the run
  * stays honest about being an undercount rather than silently keeping the old reason.
+ *
+ * `dimensionSummary` is a read-modify-write of a JSON column, and the modify step is a judge call
+ * that takes SECONDS — so the summary is deliberately re-read inside the transaction, under a
+ * `FOR UPDATE` lock on the run row, rather than reused from the pre-dispatch
+ * {@link loadRunForJudgeRetry} snapshot. Two admins retrying two DIFFERENT failed judges on the
+ * same run would otherwise both patch the stale snapshot and the second write would erase the
+ * first: the run would then report a judge as failed whose finding rows are sitting in the table,
+ * `dimensionsFailed` would overcount, and the UI would offer a "Retry judge" button whose
+ * `deleteMany` destroys real findings. The lock serialises the merges; the same posture (and the
+ * same reason) as the dataset-case PATCH route.
  */
 export async function mergeJudgeRetry(args: {
   run: RetryableRun;
@@ -581,14 +591,26 @@ export async function mergeJudgeRetry(args: {
     findingCount: findings.length,
     diagnostic: result.diagnostic ?? null,
   };
-  const summary = run.summary.map((d) => (d.dimension === result.dimension ? patched : d));
-
-  // Derive both tallies from the same patched summary so they can never disagree with each other.
-  const dimensionsFailed = summary.filter((d) => d.diagnostic !== null).length;
-  const dimensionsRun = summary.length - dimensionsFailed;
-  const status = statusFromCounts(dimensionsRun, dimensionsFailed);
 
   await prisma.$transaction(async (tx) => {
+    // Serialise concurrent merges against this run before reading the summary we are about to
+    // patch (see the JSDoc). Everything derived below therefore reflects every committed retry.
+    await tx.$queryRaw`SELECT id FROM "app_questionnaire_evaluation_run" WHERE id = ${run.id} FOR UPDATE`;
+
+    const current = await tx.appQuestionnaireEvaluationRun.findUnique({
+      where: { id: run.id },
+      select: { dimensionSummary: true },
+    });
+    // The route already scoped and loaded this run, and the lock above is held — a miss here means
+    // it was deleted mid-retry. Fall back to the pre-dispatch snapshot rather than lose the merge.
+    const base = current ? parseDimensionSummary(current.dimensionSummary, run.id) : run.summary;
+    const summary = base.map((d) => (d.dimension === result.dimension ? patched : d));
+
+    // Derive both tallies from the same patched summary so they can never disagree with each other.
+    const dimensionsFailed = summary.filter((d) => d.diagnostic !== null).length;
+    const dimensionsRun = summary.length - dimensionsFailed;
+    const status = statusFromCounts(dimensionsRun, dimensionsFailed);
+
     // Clear whatever this judge left on a previous attempt — a retry replaces, never appends.
     await tx.appQuestionnaireEvaluationFinding.deleteMany({
       where: { runId: run.id, dimension: result.dimension },

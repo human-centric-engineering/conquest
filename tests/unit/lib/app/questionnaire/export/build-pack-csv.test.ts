@@ -56,6 +56,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       dataSlots: true,
       definitions: true,
       setup: true,
+      setupTechnical: false,
       evaluations: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -76,7 +77,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       heading: 'Definitions',
       entries: [{ term: 'Engagement', definitions: ['Commitment level'] }],
     },
-    setup: [{ label: 'Access', value: 'Public link' }],
+    setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
     ...over,
   };
@@ -98,6 +99,22 @@ describe('buildPackCsv', () => {
     expect(setupIdx).toBeLessThan(slotsIdx);
     expect(slotsIdx).toBeLessThan(questionsIdx);
     expect(questionsIdx).toBeLessThan(definitionsIdx);
+  });
+
+  it('renders the experience-setup block with a group column, one flat table', () => {
+    const csv = buildPackCsv(
+      model({
+        setup: [
+          { group: 'Access & participation', label: 'Access', value: 'Public link' },
+          { group: 'Reports', label: 'Respondent report', value: 'Enabled' },
+        ],
+      })
+    );
+    expect(csv).toContain('group,field,value');
+    expect(csv).toContain('Access & participation,Access,Public link');
+    expect(csv).toContain('Reports,Respondent report,Enabled');
+    // A single header row — the groups are a column, not separate blocks.
+    expect(csv.split('group,field,value').length - 1).toBe(1);
   });
 
   it('omits a block entirely when its model field is null', () => {

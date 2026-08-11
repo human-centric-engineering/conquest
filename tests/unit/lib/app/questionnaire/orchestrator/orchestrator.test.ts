@@ -495,6 +495,40 @@ describe('runTurn — completeness milestones (F-progress)', () => {
     expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
     expect(result.sideEffects.raisedMilestones).toBeUndefined();
   });
+
+  it('announces and banks nothing on a contradiction-probe turn, so the milestone survives', async () => {
+    // A probe turn has already merged this turn's intents into `effective` — coverage LOOKS like
+    // it crossed — but `suppressWrites` means none of them are persisted and the conflicting answer
+    // is re-asked instead. Banking a threshold off that would be PERMANENT (the ledger never
+    // re-fires), so the respondent would silently lose that milestone for the rest of the session.
+    const { invokers } = stubInvokers({
+      detect: {
+        findings: [
+          finding({
+            slotKeys: ['a'],
+            explanation: 'Said A then not-A.',
+            suggestedProbe: 'Which of those is right?',
+          }),
+        ],
+      },
+    });
+    const result = await runTurn(
+      halfwayState({
+        config: {
+          milestoneBannerThresholds: [25, 50, 75],
+          contradictionMode: 'probe',
+          contradictionWindowN: 1,
+        },
+        existingAnswers: TWO_ANSWERS,
+      }),
+      invokers
+    );
+
+    // Guard the premise: without this the test would pass for the wrong reason (no probe at all).
+    expect(result.response.kind).toBe('contradiction_probe');
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
 });
 
 describe('runTurn — selection terminal branches', () => {

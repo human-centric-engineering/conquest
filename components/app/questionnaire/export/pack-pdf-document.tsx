@@ -18,7 +18,7 @@
 import { Document, Page, Text, View, Link, StyleSheet } from '@react-pdf/renderer';
 
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
-import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
+import type { PackModel, PackSetupItem } from '@/lib/app/questionnaire/export/build-pack-model';
 import type { InstrumentQuestion } from '@/lib/app/questionnaire/export/build-instrument-model';
 
 const COLORS = {
@@ -115,6 +115,12 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: COLORS.muted,
     marginTop: 1,
+  },
+  setupGroup: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+    color: COLORS.text,
+    marginTop: 8,
   },
   setupRow: {
     flexDirection: 'row',
@@ -255,6 +261,21 @@ const styles = StyleSheet.create({
 });
 
 /** The ConQuest wordmark + tagline + website, rendered as the running header on every page. */
+/**
+ * Bucket the already-ordered setup rows into `[group, rows]` pairs so each settings group gets its
+ * own sub-heading. Preserves arrival order — the registry has already sorted by group then by
+ * declaration order, so this only has to detect the boundaries.
+ */
+function groupSetup(items: PackSetupItem[]): [string, PackSetupItem[]][] {
+  const groups: [string, PackSetupItem[]][] = [];
+  for (const item of items) {
+    const last = groups[groups.length - 1];
+    if (last && last[0] === item.group) last[1].push(item);
+    else groups.push([item.group, [item]]);
+  }
+  return groups;
+}
+
 function BrandHeader() {
   return (
     <View style={styles.brandRow} fixed>
@@ -328,10 +349,15 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
         {model.setup && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Experience setup</Text>
-            {model.setup.map((item) => (
-              <View key={item.label} style={styles.setupRow}>
-                <Text style={styles.setupLabel}>{item.label}</Text>
-                <Text style={styles.setupValue}>{item.value}</Text>
+            {groupSetup(model.setup).map(([group, items]) => (
+              <View key={group}>
+                <Text style={styles.setupGroup}>{group}</Text>
+                {items.map((item) => (
+                  <View key={item.label} style={styles.setupRow} wrap={false}>
+                    <Text style={styles.setupLabel}>{item.label}</Text>
+                    <Text style={styles.setupValue}>{item.value}</Text>
+                  </View>
+                ))}
               </View>
             ))}
           </View>

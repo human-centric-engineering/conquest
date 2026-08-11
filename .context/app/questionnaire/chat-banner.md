@@ -63,7 +63,8 @@ pure presentational. `BandHeader = { title, round: BandRound | null }`.
     (open-ended).
   - `resolveVersionHeader(versionId)` — no-login `/q/[versionId]`. The session is booted
     client-side and doesn't exist at SSR, so only the version's title resolves; `round` is always
-    null there (title shows, schedule omitted).
+    null there (title shows, schedule omitted). The title is projected off the shared respondent
+    surface row, not queried — see [`surface-config.md`](./surface-config.md).
 - **`lib/app/questionnaire/header/schedule.ts`** — pure derivation. `buildScheduleView(round, now)`
   returns `{ status, statusLabel, dateRange } | null`. `now` is injected (the band passes the
   render-time clock; tests inject a fixed instant). Status precedence:

@@ -492,7 +492,9 @@ export async function runDataSlotTurn(
   // Skipped on a probe turn for the same reason as `runTurn`: the merged intents aren't persisted,
   // so banking a threshold off them would silently cost the respondent that milestone forever.
   const milestone = contradiction.suppressWrites
-    ? { announce: null, raisedMilestones: undefined }
+    ? // Nothing is announced, so `coveragePct` is never read — it is present only to satisfy
+      // the shared `MilestoneOutcome` shape.
+      { announce: null, coveragePct: 0, raisedMilestones: undefined }
     : resolveMilestoneCrossing(
         state.config,
         gradedCoverage(effective.questions, effective.answered, state.config.answerConfidenceFloor),
@@ -503,7 +505,7 @@ export async function runDataSlotTurn(
     events.push({
       type: 'warning',
       code: 'milestone',
-      message: milestoneMessage(milestone.announce),
+      message: milestoneMessage(milestone.coveragePct),
     });
   }
 

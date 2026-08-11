@@ -2,7 +2,8 @@
  * Questionnaire Pack export — Markdown serialiser.
  *
  * Renders a {@link PackModel} as a readable `.md` document: a branded title block, then whichever of
- * meta / experience-setup / data-slots / questions / definitions the admin included, and a closing
+ * meta / experience-setup (one table per settings group) / data-slots / questions / definitions the
+ * admin included, and a closing
  * "About ConQuest" blurb. The first Markdown serialiser in the export family — the instrument export
  * only has text and CSV — so this establishes the pattern (ATX headings, GFM tables) new export
  * builders can follow. Pure: deterministic in its input, no external Markdown library.
@@ -46,9 +47,20 @@ export function buildPackMarkdown(model: PackModel): string {
   if (model.setup) {
     lines.push('## Experience setup');
     lines.push('');
-    lines.push('| Setting | Value |');
-    lines.push('| --- | --- |');
-    for (const item of model.setup) lines.push(`| ${cell(item.label)} | ${cell(item.value)} |`);
+    // One table per group, in the order the rows arrive (the registry already sorted them) — a
+    // single 60-row table is unreadable, and the group headings carry real meaning.
+    let currentGroup: string | null = null;
+    for (const item of model.setup) {
+      if (item.group !== currentGroup) {
+        if (currentGroup !== null) lines.push('');
+        currentGroup = item.group;
+        lines.push(`### ${currentGroup}`);
+        lines.push('');
+        lines.push('| Setting | Value |');
+        lines.push('| --- | --- |');
+      }
+      lines.push(`| ${cell(item.label)} | ${cell(item.value)} |`);
+    }
     lines.push('');
   }
 

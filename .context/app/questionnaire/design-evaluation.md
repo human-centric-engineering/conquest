@@ -181,6 +181,12 @@ and merges the outcome back into the same run (`mergeJudgeRetry`):
   falls back to the live structure.
 - a retry that fails again merges the **fresh** diagnostic and leaves the run `partial` — the
   undercount warning stays true rather than silently keeping a stale reason.
+- the summary is re-read **inside the transaction, under a `FOR UPDATE` lock on the run row** —
+  never reused from the snapshot `loadRunForJudgeRetry` took before the judge call. That call takes
+  seconds, so two admins retrying two _different_ failed judges on one run would otherwise both
+  patch the same stale array and the second write would erase the first: the run would report a
+  judge as failed while its finding rows sat in the table, and the UI would offer a Retry whose
+  `deleteMany` destroyed them. Same posture, same reason, as the dataset-case PATCH route.
 
 Gating: the same `designEvaluationLimiter` sub-cap (a hammered retry button is exactly the spend
 that cap exists to bound), version+questionnaire-scope 404, 404 when the dimension was not part of

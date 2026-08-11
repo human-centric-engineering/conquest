@@ -56,6 +56,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       dataSlots: true,
       definitions: true,
       setup: true,
+      setupTechnical: false,
       evaluations: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
@@ -79,7 +80,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       heading: 'Definitions',
       entries: [{ term: 'Engagement', definitions: ['Commitment level'] }],
     },
-    setup: [{ label: 'Access', value: 'Public link' }],
+    setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
     ...over,
   };
@@ -111,6 +112,26 @@ describe('buildPackMarkdown', () => {
     const md = buildPackMarkdown(model());
     expect(md).toContain('| Setting | Value |');
     expect(md).toContain('| Access | Public link |');
+  });
+
+  it('opens a fresh sub-heading and table per settings group, in arrival order', () => {
+    const md = buildPackMarkdown(
+      model({
+        setup: [
+          { group: 'Access & participation', label: 'Access', value: 'Public link' },
+          { group: 'Access & participation', label: 'Anonymous respondents', value: 'No' },
+          { group: 'Reports', label: 'Respondent report', value: 'Enabled' },
+        ],
+      })
+    );
+    const accessIdx = md.indexOf('### Access & participation');
+    const reportsIdx = md.indexOf('### Reports');
+    expect(accessIdx).toBeGreaterThan(-1);
+    expect(reportsIdx).toBeGreaterThan(accessIdx);
+    // One header pair per group, not per row — two groups here, so exactly two tables.
+    expect(md.split('| Setting | Value |').length - 1).toBe(2);
+    // The two same-group rows share the first table (no heading between them).
+    expect(md.indexOf('| Anonymous respondents | No |')).toBeLessThan(reportsIdx);
   });
 
   it('renders data slots as a table with semicolon-joined linked-question prompts', () => {

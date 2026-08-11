@@ -189,6 +189,45 @@ meeting from forty people looking down at phones.
 The console polls at 3s for the room's numbers and ticks locally at 1s for the countdown; a dropped
 poll keeps the last known state rather than replacing a facilitator's numbers with an error.
 
+## A breakout runs on its own questionnaire's configuration
+
+The participant surface mounts **once** and then swaps sessions in place as breakouts start. There
+is no second server render, so nothing re-resolves the per-version respondent config the way a
+`/x` handoff does (that surface continues by `router.refresh`, which re-runs the page). Until
+F15.5c it therefore ran the workspace on its **prop defaults** — every authored choice ignored, in
+both directions: voice, attachments and inline correction switched on showed nothing;
+`presentationMode: 'chat'` still got a Form tab; a `hidden` answer panel still got a panel; the
+reasoning stream never appeared; and the room's brand was absent entirely.
+
+The fix is a session-scoped read, `GET …/questionnaire-sessions/:id/surface`
+(`resolveRespondentSurfaceConfig`), fetched once per session change and threaded into the
+workspace. It projects off the shared `cache()`d version row like every other surface —
+see `surface-config.md`. **Keyed on the session, deliberately not on the run, the version, or the
+join payload:**
+
+- the participant's session does not exist at `/join` — it is minted lazily when a breakout starts,
+  so the payload that could carry config is not the payload that reveals the session;
+- a session id arrives at **three** separate moments (join, the participant poll, choosing a room),
+  and one `useEffect` on the session id covers all three;
+- a room may run its own questionnaire (`AppExperienceBreakoutRoom.versionId`), so two participants
+  in the **same** breakout can legitimately need different config.
+
+Two properties worth keeping:
+
+- The config is stored **paired with the session it was read for**. Between the poll swapping the
+  session and the new read landing, the only config in state is the previous breakout's — painting
+  it would show one questionnaire's layout under another's conversation. The workspace waits behind
+  a spinner instead, because `presentationMode` and `answerPanelScope` decide the layout and
+  reflowing it under someone reading against a clock is worse than a beat of waiting.
+- The **brand outlives the breakout** it was read for; the band's header does not. The brand belongs
+  to the meeting, and dropping to neutral chrome between rounds reads as being dropped somewhere
+  else. The header names the live breakout's questionnaire, which stops being true when it ends.
+
+The pre-chat gates — intro splash, persona picker, profile capture, cross-device resume — stay
+suppressed, and that is a decision rather than an omission. Each is a screen the respondent must
+move **through** before the first question streams, which is right for a questionnaire someone opens
+alone and wrong for a six-minute round a human has already introduced out loud.
+
 ## `runId` is an address, not a credential
 
 The participant routes take a `runId` from the caller — `/participant` from the query string,

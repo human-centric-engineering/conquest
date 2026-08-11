@@ -12,7 +12,7 @@
  * @see app/(public)/q/[versionId]/page.tsx
  */
 
-import { prisma } from '@/lib/db/client';
+import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 
@@ -31,10 +31,9 @@ export interface AdminPreviewMeta {
  * in which case the banner simply renders without the exit link or version detail.
  */
 export async function resolveAdminPreviewMeta(versionId: string): Promise<AdminPreviewMeta | null> {
-  const version = await prisma.appQuestionnaireVersion.findUnique({
-    where: { id: versionId },
-    select: { questionnaireId: true, versionNumber: true, status: true },
-  });
+  // Every field here lives on the version row the surface already loads, so the preview banner
+  // costs nothing beyond the projection.
+  const version = await loadVersionSurface(versionId);
   if (!version) return null;
   return {
     exitHref: workspaceVersionBase(version.questionnaireId, versionId),

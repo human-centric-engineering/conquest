@@ -209,6 +209,7 @@ describe('GET pack — include flags', () => {
         dataSlots: true,
         definitions: true,
         setup: true,
+        setupTechnical: false,
         evaluations: false,
       },
       expect.any(String)
@@ -233,8 +234,26 @@ describe('GET pack — include flags', () => {
         dataSlots: false,
         definitions: true,
         setup: false,
+        setupTechnical: false,
         evaluations: false,
       },
+      expect.any(String)
+    );
+  });
+
+  it('threads setupTechnical=true through as its own flag, leaving setup untouched', async () => {
+    await GET(
+      makeRequest(QN_ID, VID, { format: 'md', setupTechnical: 'true' }),
+      ADMIN_SESSION,
+      makeContext()
+    );
+    expect(buildPackModel).toHaveBeenCalledWith(
+      QUESTIONNAIRE_ROW.title,
+      GRAPH,
+      [],
+      null,
+      null,
+      expect.objectContaining({ setup: true, setupTechnical: true }),
       expect.any(String)
     );
   });

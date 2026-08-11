@@ -1078,4 +1078,36 @@ describe('runDataSlotTurn — completeness milestones (F-progress)', () => {
     expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
     expect(result.sideEffects.raisedMilestones).toBeUndefined();
   });
+
+  it('announces and banks nothing on a contradiction-probe turn, so the milestone survives', async () => {
+    // Same rule as `runTurn`, and it has to hold on BOTH pipelines or the guard is only half there.
+    // A probe turn's merged intents are never persisted — the conflicting answer is re-asked — so
+    // banking a threshold off them would permanently cost the respondent that milestone.
+    const { invokers } = stubInvokers({
+      detect: {
+        findings: [
+          finding({
+            slotKeys: ['a'],
+            explanation: 'Said A then not-A.',
+            suggestedProbe: 'Which of those is right?',
+          }),
+        ],
+      },
+    });
+    const result = await runDataSlotTurn(
+      {
+        ...halfway({ contradictionMode: 'probe', contradictionWindowN: 1 }),
+        existingAnswers: [
+          { slotKey: 'a', value: 1, provenance: 'direct' as const },
+          { slotKey: 'b', value: 2, provenance: 'direct' as const },
+        ],
+      },
+      invokers
+    );
+
+    // Guard the premise: without this the test would pass for the wrong reason (no probe at all).
+    expect(result.response.kind).toBe('contradiction_probe');
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
 });

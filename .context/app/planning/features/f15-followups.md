@@ -200,6 +200,28 @@ class of mistake that is easy to repeat.
 - **A legless run is NORMAL on the meeting path.** A participant has a run from the moment they
   join and no leg until a breakout starts, so refusing a legless run would have locked meeting
   participants out. `canReadRun` checks the run credential before the leg-based proofs.
+- **A client-booted surface silently loses every per-version setting.** Meeting breakouts ran the
+  workspace on its prop defaults — no voice, no reasoning stream, no brand, `presentationMode` and
+  the answer-panel scope ignored — because the page-rendered surfaces resolve that config in a
+  server render this one never performs. Nothing errors; the breakout just behaves as a different
+  questionnaire than the one configured. Fixed by a session-scoped read
+  (`…/questionnaire-sessions/:id/surface`); see `experience-meetings.md`. Worth remembering as a
+  class: **any surface that swaps sessions client-side has this bug until it explicitly re-reads.**
+- **The declared default and the resolver disagree on `voiceEnabled`.** `DEFAULT_QUESTIONNAIRE_CONFIG.voiceEnabled`
+  is `true`, but `resolveVoiceEnabledForVersion` falls back to `false` for a version with no config
+  row — and the resolver is what `/q` and `/x` actually run on. The surface-config bundle mirrors
+  the **resolver** so a breakout matches the same questionnaire's standalone run, with a parity test
+  pinning the two together. Only versions with no config row at all are affected, so this is latent
+  rather than live; resolving it is a platform-wide change and deliberately was not made here.
+- **The breakout brand deliberately outlives the breakout — and that is only safe because a meeting
+  runs ONE client.** `MeetingParticipantBoot` keeps the previous bundle's `theme` while the next
+  breakout's surface config is in flight, so the chrome does not fall back to neutral in the gaps
+  between rounds. Review flagged this as a possible cross-client leak: if two steps of one meeting
+  ran questionnaires belonging to different `demoClientId`s, client A's branding would paint over
+  client B's breakout. Confirmed **not a gap** — a meeting is scoped to a single client. If that
+  ever stops being true, this is the line to revisit
+  (`components/app/questionnaire/experiences/meeting-participant-boot.tsx`, the `brand` const), and
+  the fix is to clear the theme on session change and accept a brief unbranded beat.
 
 ## Related
 

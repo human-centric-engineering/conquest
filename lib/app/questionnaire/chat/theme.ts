@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { loadVersionSurface } from '@/lib/app/questionnaire/chat/surface-config';
 import { resolveTheme, type ResolvedTheme } from '@/lib/app/questionnaire/theming';
 
 async function loadClientTheme(demoClientId: string | null): Promise<ResolvedTheme> {
@@ -34,12 +35,14 @@ async function loadClientTheme(demoClientId: string | null): Promise<ResolvedThe
   return resolveTheme(client);
 }
 
-/** Resolve the theme for a launched version (no-login anonymous surface). */
+/**
+ * Resolve the theme for a launched version (no-login anonymous surface).
+ *
+ * The version→client hop rides the shared `cache()`d surface row, so on a respondent page this
+ * costs only the client lookup itself — and nothing at all when the questionnaire is unattributed.
+ */
 export async function resolveThemeForVersion(versionId: string): Promise<ResolvedTheme> {
-  const version = await prisma.appQuestionnaireVersion.findUnique({
-    where: { id: versionId },
-    select: { questionnaire: { select: { demoClientId: true } } },
-  });
+  const version = await loadVersionSurface(versionId);
   return loadClientTheme(version?.questionnaire.demoClientId ?? null);
 }
 
