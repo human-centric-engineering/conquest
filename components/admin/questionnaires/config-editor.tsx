@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfigImportExport } from '@/components/admin/questionnaires/config-import-export';
 import { SaveButton } from '@/components/admin/questionnaires/save-button';
@@ -1874,10 +1875,18 @@ export function ConfigEditor({
             title="Access & invitations"
             description="Who may start this questionnaire, the identity (anonymous) axis, and which invitee details the Invitations tab captures."
             conflicts={conflictsFor('access')}
+            headerAction={
+              anonymousMode ? (
+                <Badge variant="secondary" className="whitespace-nowrap">
+                  Anonymous mode on
+                </Badge>
+              ) : undefined
+            }
           >
             {/* Identity axis — lives here (with Access) so it's findable, though it's independent of
                 the access mode: an anonymous questionnaire can still be invitation-only, and a named
-                one can still be public. */}
+                one can still be public. A header badge (above) surfaces the on-state at a glance
+                while scrolling, since this switch is easy to miss inside a long settings page. */}
             <div className="bg-muted/20 flex items-start gap-3 rounded-lg border p-3">
               <Switch
                 checked={anonymousMode}
