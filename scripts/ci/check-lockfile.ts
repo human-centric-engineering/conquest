@@ -187,6 +187,7 @@ export function main(argv: string[]): number {
     diff.removed.length === 0 &&
     diff.changed.length === 0 &&
     diff.lostNativeMetadata.length === 0 &&
+    diff.gainedNativeMetadata.length === 0 &&
     !diff.overridesChanged;
 
   if (nothingMoved) {
@@ -218,6 +219,20 @@ export function main(argv: string[]): number {
     console.log(`  ~ ${label} ${change.from} → ${change.to}${note}`);
   }
 
+  // Grouped by the exact key set, not a union across all of them. Pairing one
+  // count with the union reads as "all N gained all of these": 100 packages
+  // gaining `libc` and one gaining `cpu` printed "101 package(s) gained cpu,
+  // libc". This hunk exists because the previous output made a true statement
+  // misleading; the replacement should not do the same thing.
+  const gainedByKeys = new Map<string, number>();
+  for (const entry of diff.gainedNativeMetadata) {
+    const label = entry.keys.join(', ');
+    gainedByKeys.set(label, (gainedByKeys.get(label) ?? 0) + 1);
+  }
+  for (const [label, count] of [...gainedByKeys].sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`  ${count} package(s) gained ${label} — platform metadata restored.`);
+  }
+
   if (!hasRisk(diff)) {
     const transitive = diff.changed.filter((c) => c.downgrade).length;
     console.log('');
@@ -235,13 +250,10 @@ export function main(argv: string[]): number {
     console.error(`  ${lost.name} lost ${lost.keys.join(', ')}`);
   }
   if (diff.lostNativeMetadata.length > 0) {
-    console.error(
-      '  → npm dropped platform metadata, which happens when the tree is recomputed on macOS.'
-    );
-    console.error(
-      '    The lockfile will install fine locally and wrong on Linux. See CONTRIBUTING.md,'
-    );
-    console.error('    "Cutting a release that changes dependencies".');
+    console.error('  → npm below 11.11.0 deletes `libc` from every entry it writes, on every');
+    console.error('    platform — check `npm -v`. The lockfile will install fine locally and');
+    console.error('    wrong on Alpine. Repair with `npm run fix:lockfile-libc`; background in');
+    console.error('    CONTRIBUTING.md, "Cutting a release that changes dependencies".');
   }
 
   for (const change of diff.changed.filter((entry) => entry.downgrade && entry.direct)) {
