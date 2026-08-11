@@ -168,6 +168,7 @@ export async function copyVersionGraph(
         respondentReport: jsonInput(source.config.respondentReport),
         cohortReport: jsonInput(source.config.cohortReport),
         intro: jsonInput(source.config.intro),
+        milestoneBannerThresholds: jsonInput(source.config.milestoneBannerThresholds),
       },
     });
   }

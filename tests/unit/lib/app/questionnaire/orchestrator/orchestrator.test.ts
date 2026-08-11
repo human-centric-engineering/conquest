@@ -407,6 +407,96 @@ describe('runTurn — completion offer', () => {
   });
 });
 
+describe('runTurn — completeness milestones (F-progress)', () => {
+  /** 4 equal-weight questions, 2 answered at full confidence → displayCoverage 0.5 (50%). */
+  const halfwayState = (over: Partial<Parameters<typeof state>[0]> = {}) =>
+    state({
+      userMessage: 'an answer',
+      questions: [
+        q({ id: 'a', key: 'a', prompt: 'Q A' }),
+        q({ id: 'b', key: 'b', prompt: 'Q B' }),
+        q({ id: 'c', key: 'c', prompt: 'Q C' }),
+        q({ id: 'd', key: 'd', prompt: 'Q D' }),
+      ],
+      answered: [
+        { questionId: 'a', confidence: 1 },
+        { questionId: 'b', confidence: 1 },
+      ],
+      config: { milestoneBannerThresholds: [25, 50, 75] },
+      ...over,
+    });
+
+  it('fires a milestone warning + ledger entry for every threshold crossed this turn', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runTurn(halfwayState(), invokers);
+
+    const milestoneEvents = result.events.filter(
+      (e): e is Extract<typeof e, { type: 'warning' }> =>
+        e.type === 'warning' && e.code === 'milestone'
+    );
+    expect(milestoneEvents.map((e) => e.message)).toEqual([
+      "You're 25% of the way through.",
+      "You're 50% of the way through.",
+    ]);
+    expect(result.sideEffects.raisedMilestones).toEqual([25, 50]);
+  });
+
+  it('does not re-fire a threshold already in the session ledger', async () => {
+    const { invokers } = stubInvokers();
+    const withLedger = { ...halfwayState(), raisedMilestones: [25] };
+    const result = await runTurn(withLedger, invokers);
+
+    const milestoneEvents = result.events.filter(
+      (e) => e.type === 'warning' && e.code === 'milestone'
+    );
+    expect(milestoneEvents).toHaveLength(1);
+    expect(milestoneEvents[0]).toMatchObject({ message: "You're 50% of the way through." });
+    // Ledger is the FULL merged list, not just this turn's new entry.
+    expect(result.sideEffects.raisedMilestones).toEqual([25, 50]);
+  });
+
+  it('leaves raisedMilestones undefined (unchanged) once every crossed threshold is already raised', async () => {
+    const { invokers } = stubInvokers();
+    const allRaised = { ...halfwayState(), raisedMilestones: [25, 50] };
+    const result = await runTurn(allRaised, invokers);
+
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
+
+  it('fires nothing when displayCoverage has not reached the lowest configured threshold', async () => {
+    const { invokers } = stubInvokers();
+    const belowFirst = state({
+      userMessage: 'an answer',
+      questions: [
+        q({ id: 'a', key: 'a', prompt: 'Q A' }),
+        q({ id: 'b', key: 'b', prompt: 'Q B' }),
+        q({ id: 'c', key: 'c', prompt: 'Q C' }),
+        q({ id: 'd', key: 'd', prompt: 'Q D' }),
+      ],
+      answered: [],
+      config: { milestoneBannerThresholds: [25, 50, 75] },
+    });
+    const result = await runTurn(belowFirst, invokers);
+
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
+
+  it('fires nothing when milestoneBannerEnabled is off, even past every threshold', async () => {
+    const { invokers } = stubInvokers();
+    const result = await runTurn(
+      halfwayState({
+        config: { milestoneBannerThresholds: [25, 50], milestoneBannerEnabled: false },
+      }),
+      invokers
+    );
+
+    expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
+    expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
+});
+
 describe('runTurn — selection terminal branches', () => {
   it('maps a selection complete decision to a completion response', async () => {
     const { invokers, calls } = stubInvokers({

@@ -681,4 +681,49 @@ describe('buildTurnContext', () => {
       { key: 'e', slotKeys: ['e'], resolution: 'kept', raisedAtTurnIndex: 5 },
     ]);
   });
+
+  // -------------------------------------------------------------------------
+  // parseRaisedMilestones — defensive JSON parsing of the completeness-milestone
+  // "don't nag" ledger. A non-array degrades to []; out-of-range/non-integer entries skipped.
+  // -------------------------------------------------------------------------
+
+  it('parses a well-formed raisedMilestones ledger and threads it into base', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedMilestones: [25, 50] })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedMilestones).toEqual([25, 50]);
+  });
+
+  it('degrades a non-array raisedMilestones to an empty ledger', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedMilestones: 'not-an-array' })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedMilestones).toEqual([]);
+  });
+
+  it('defaults to an empty ledger when the column is the JSON default (empty array)', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedMilestones: [] })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedMilestones).toEqual([]);
+  });
+
+  it('skips ledger entries that are out of range or not integers, keeping only the valid ones', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ raisedMilestones: [25, 0, 100, 50.5, 'fifty', 90] })
+    );
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.raisedMilestones).toEqual([25, 90]);
+  });
 });

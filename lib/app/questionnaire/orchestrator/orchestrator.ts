@@ -348,6 +348,30 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
     sessionId: effective.sessionId,
   });
 
+  // 5b. Completeness milestones: a quiet inline banner the first time the respondent crosses each
+  // configured threshold this session. Ledger-checked (like the contradiction "don't nag" ledger)
+  // rather than delta-checked against a "previous" coverage figure — simpler, and never re-fires a
+  // threshold even if displayCoverage later dips (e.g. an answer is invalidated by a contradiction
+  // resolution). `events` gets one warning per newly crossed threshold, oldest-first.
+  let raisedMilestones: number[] | undefined;
+  if (state.config.milestoneBannerEnabled) {
+    const pctNow = Math.round(assessment.displayCoverage * 100);
+    const ledger = state.raisedMilestones ?? [];
+    const crossed = state.config.milestoneBannerThresholds
+      .filter((t) => pctNow >= t && !ledger.includes(t))
+      .sort((a, b) => a - b);
+    if (crossed.length > 0) {
+      raisedMilestones = [...ledger, ...crossed].sort((a, b) => a - b);
+      for (const t of crossed) {
+        events.push({
+          type: 'warning',
+          code: 'milestone',
+          message: `You're ${t}% of the way through.`,
+        });
+      }
+    }
+  }
+
   // Soft cost cap (F6.3): bias toward offering completion early so the session winds down
   // before the hard cap, and tag the offer prose with a wrap-up instruction. Only overrides
   // `not_ready` (thresholds merely unmet) — never the required-questions gate
@@ -445,6 +469,7 @@ export async function runTurn(state: TurnState, invokers: CapabilityInvokers): P
       ...(contradiction.raisedContradictions !== undefined
         ? { raisedContradictions: contradiction.raisedContradictions }
         : {}),
+      ...(raisedMilestones !== undefined ? { raisedMilestones } : {}),
     },
     events,
     toolCalls,

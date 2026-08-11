@@ -592,6 +592,39 @@ describe('copyVersionGraph — with config and scoring schema', () => {
     expect(createCall.data.versionId).toBe('tgt-v');
   });
 
+  it('copies milestoneBannerThresholds through the JSON boundary like the other list columns', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...MINIMAL_SOURCE,
+      config: {
+        selectionStrategy: 'weighted',
+        minQuestionsAnswered: 3,
+        coverageThreshold: 0.8,
+        costBudgetUsd: null,
+        maxQuestionsPerSession: 20,
+        voiceEnabled: false,
+        contradictionMode: null,
+        contradictionWindowN: null,
+        anonymousMode: false,
+        profileFields: null,
+        inviteeFields: null,
+        tone: null,
+        interviewerStrategy: null,
+        respondentReport: null,
+        cohortReport: null,
+        intro: null,
+        accessMode: null,
+        milestoneBannerThresholds: [25, 50, 75],
+      },
+    });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const createCall = (tx.appQuestionnaireConfig.create as Mock).mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(createCall.data.milestoneBannerThresholds).toEqual([25, 50, 75]);
+  });
+
   it('creates a scoring-schema row when the source has one', async () => {
     // Arrange: source with scoringSchema present
     tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({

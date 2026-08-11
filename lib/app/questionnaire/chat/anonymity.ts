@@ -146,6 +146,24 @@ export async function resolveSessionResumeEnabledForVersion(versionId: string): 
 }
 
 /**
+ * Resolve `showProgressPercentText` for a launched version (no-login / preview respondent
+ * surface). Governs whether the "N% completed" text renders beside the progress bar — the bar
+ * itself always renders. Config is 1:1 and lazy — an absent row defaults to ON. The authenticated
+ * surface reads it off its session-ownership query instead.
+ */
+export async function resolveShowProgressPercentTextForVersion(
+  versionId: string
+): Promise<boolean> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { config: { select: { showProgressPercentText: true } } },
+  });
+  return (
+    version?.config?.showProgressPercentText ?? DEFAULT_QUESTIONNAIRE_CONFIG.showProgressPercentText
+  );
+}
+
+/**
  * Resolve the live "watch it think" reasoning placement (demo feature) for a launched version
  * (no-login / preview respondent surface), or `null` when the version has the feature turned off.
  * The per-questionnaire opt-in; the caller ANDs the platform reasoning-stream flag and passes the

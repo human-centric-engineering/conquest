@@ -53,6 +53,7 @@ import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-p
 import { ReleaseStageNotice } from '@/components/app/questionnaire/chat/release-stage-notice';
 import { CorrectionStrip } from '@/components/app/questionnaire/chat/correction-strip';
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
+import { MilestoneNotice } from '@/components/app/questionnaire/chat/milestone-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
 import { SupportNotice } from '@/components/app/questionnaire/chat/support-notice';
 import {
@@ -142,8 +143,8 @@ export interface QuestionnaireChatProps {
 /**
  * The side-band notices that belong to one assistant turn, rendered inline beneath it. A flagged
  * contradiction (F4.3) gets a tasteful callout — the clearest "the agent is reasoning about your
- * answers" signal; seriousness/support get their bespoke notices; every other code stays a quiet
- * fail-soft line. Attached to the turn (not a transient banner), so they persist as the
+ * answers" signal; seriousness/support/milestone get their bespoke notices; every other code stays
+ * a quiet fail-soft line. Attached to the turn (not a transient banner), so they persist as the
  * conversation scrolls on and replay on resume. Renders nothing when the turn raised none.
  */
 function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
@@ -162,6 +163,8 @@ function TurnNotices({ warnings }: { warnings?: SessionWarning[] }) {
           />
         ) : warning.code === 'support' ? (
           <SupportNotice key={i} message={warning.message} />
+        ) : warning.code === 'milestone' ? (
+          <MilestoneNotice key={i} message={warning.message} />
         ) : (
           <div
             key={i}

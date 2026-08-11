@@ -248,6 +248,51 @@ describe('updateConfigSchema', () => {
     });
   });
 
+  describe('milestone thresholds', () => {
+    it('accepts a sorted, distinct list of 1-99 integers', () => {
+      const res = updateConfigSchema.safeParse({ milestoneBannerThresholds: [25, 50, 75, 90] });
+      expect(res.success).toBe(true);
+      if (res.success) expect(res.data.milestoneBannerThresholds).toEqual([25, 50, 75, 90]);
+    });
+
+    it('accepts an empty list (banners on, nothing configured to trigger one)', () => {
+      const res = updateConfigSchema.safeParse({ milestoneBannerThresholds: [] });
+      expect(res.success).toBe(true);
+    });
+
+    it('rejects duplicate thresholds', () => {
+      const res = updateConfigSchema.safeParse({ milestoneBannerThresholds: [50, 50] });
+      expect(res.success).toBe(false);
+      if (!res.success) {
+        expect(res.error.issues.some((i) => i.path.includes('milestoneBannerThresholds'))).toBe(
+          true
+        );
+      }
+    });
+
+    it('rejects a threshold of 0 or 100 (out of the 1-99 range)', () => {
+      expect(updateConfigSchema.safeParse({ milestoneBannerThresholds: [0] }).success).toBe(false);
+      expect(updateConfigSchema.safeParse({ milestoneBannerThresholds: [100] }).success).toBe(
+        false
+      );
+    });
+
+    it('rejects a non-integer threshold', () => {
+      const res = updateConfigSchema.safeParse({ milestoneBannerThresholds: [50.5] });
+      expect(res.success).toBe(false);
+    });
+
+    it('rejects more than MAX_MILESTONE_THRESHOLDS entries', () => {
+      const tooMany = Array.from({ length: 13 }, (_, i) => i + 1);
+      const res = updateConfigSchema.safeParse({ milestoneBannerThresholds: tooMany });
+      expect(res.success).toBe(false);
+    });
+
+    it('accepts the milestoneBannerEnabled toggle independently', () => {
+      expect(updateConfigSchema.safeParse({ milestoneBannerEnabled: false }).success).toBe(true);
+    });
+  });
+
   describe('captureMode', () => {
     it('accepts form and conversational', () => {
       expect(updateConfigSchema.safeParse({ captureMode: 'form' }).success).toBe(true);

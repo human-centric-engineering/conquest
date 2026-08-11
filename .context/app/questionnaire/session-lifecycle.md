@@ -115,7 +115,11 @@ refetch.
   there's nothing to say. The **anonymity notice is not on this strip** — it rides the brand
   band above the conversation (`BrandThemeProvider`), one quiet line under the questionnaire
   title, aligned with it, so it costs no row of its own. The admin session viewer has no band,
-  so it shows an `Anonymous` badge in its own header row instead.
+  so it shows an `Anonymous` badge in its own header row instead. Its `SessionProgressBar`
+  (`coverage={view.completion.displayCoverage}`) always renders once there's a status view; the
+  "N% completed" text beside it is a separate `showProgressPercentText` prop (config default
+  `true`), threaded from each respondent page down through `SessionWorkspace` — see
+  [configuration.md § Progress display & completeness milestones](./configuration.md#progress-display--completeness-milestones-f-progress).
 - **`CompletionOffer`** — a Submit CTA above the chat, shown when `canSubmit`. "Keep going"
   dismisses it; it reappears on the next settle if still offerable.
 - **`SessionComplete`** — replaces the workspace on `completed`: a calm, themed confirmation

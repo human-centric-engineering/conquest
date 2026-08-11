@@ -25,6 +25,7 @@ import {
   ClipboardList,
   ChevronRight,
   Compass,
+  Flag,
   Gauge,
   Hash,
   List,
@@ -94,6 +95,7 @@ import {
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_LABELS,
+  MAX_MILESTONE_THRESHOLDS,
   PRESENTATION_MODES,
   PROFILE_FIELD_TYPES,
   PROFILE_FIELD_VALIDATION_MODES,
@@ -609,6 +611,15 @@ export function ConfigEditor({
     config.inlineCorrectionEnabled
   );
   const [sessionResumeEnabled, setSessionResumeEnabled] = useState(config.sessionResumeEnabled);
+  const [showProgressPercentText, setShowProgressPercentText] = useState(
+    config.showProgressPercentText
+  );
+  const [milestoneBannerEnabled, setMilestoneBannerEnabled] = useState(
+    config.milestoneBannerEnabled
+  );
+  const [milestoneBannerThresholds, setMilestoneBannerThresholds] = useState<number[]>(
+    config.milestoneBannerThresholds
+  );
   const [glossaryPromptInjection, setGlossaryPromptInjection] = useState(
     config.glossaryPromptInjection
   );
@@ -693,6 +704,9 @@ export function ConfigEditor({
     setCaptureMode(config.captureMode);
     setInlineCorrectionEnabled(config.inlineCorrectionEnabled);
     setSessionResumeEnabled(config.sessionResumeEnabled);
+    setShowProgressPercentText(config.showProgressPercentText);
+    setMilestoneBannerEnabled(config.milestoneBannerEnabled);
+    setMilestoneBannerThresholds(config.milestoneBannerThresholds);
     setGlossaryPromptInjection(config.glossaryPromptInjection);
     setGlossaryRespondentHints(config.glossaryRespondentHints);
     setGlossaryReportAppendix(config.glossaryReportAppendix);
@@ -777,6 +791,35 @@ export function ConfigEditor({
     setCaptureEnabled(enabled);
     if (enabled && profileFields.length === 0) setProfileFields(defaultProfileFieldRows());
   };
+
+  // Milestone-threshold chip list: the "new threshold" text field + its own inline error, and
+  // add/remove against the live `milestoneBannerThresholds` state. Kept sorted ascending so the
+  // chip row always reads as a timeline; duplicates and out-of-range values are rejected here
+  // (client-side) rather than only on save, so the admin sees the problem immediately.
+  const [newMilestoneThreshold, setNewMilestoneThreshold] = useState('');
+  const [milestoneThresholdError, setMilestoneThresholdError] = useState<string | null>(null);
+
+  const addMilestoneThreshold = () => {
+    const n = Number(newMilestoneThreshold);
+    if (!Number.isInteger(n) || n < 1 || n > 99) {
+      setMilestoneThresholdError('Enter a whole number between 1 and 99');
+      return;
+    }
+    if (milestoneBannerThresholds.includes(n)) {
+      setMilestoneThresholdError('That threshold is already in the list');
+      return;
+    }
+    if (milestoneBannerThresholds.length >= MAX_MILESTONE_THRESHOLDS) {
+      setMilestoneThresholdError(`At most ${MAX_MILESTONE_THRESHOLDS} thresholds`);
+      return;
+    }
+    setMilestoneBannerThresholds((prev) => [...prev, n].sort((a, b) => a - b));
+    setNewMilestoneThreshold('');
+    setMilestoneThresholdError(null);
+  };
+
+  const removeMilestoneThreshold = (value: number) =>
+    setMilestoneBannerThresholds((prev) => prev.filter((t) => t !== value));
 
   // Live conflict detection over the CURRENT editor state — recomputed as the admin edits, so a
   // contradictory combination (e.g. profile fields on an anonymous version) is flagged inline and in
@@ -903,6 +946,12 @@ export function ConfigEditor({
         inlineCorrectionEnabled,
         // Session resume: device-remember + Continue/Start-new chooser + by-ref resume.
         sessionResumeEnabled,
+        // The "N% completed" text beside the progress bar (the bar itself always renders).
+        showProgressPercentText,
+        // Completeness milestone banners: inline "you're N% through" chat notice on crossing a
+        // configured threshold.
+        milestoneBannerEnabled,
+        milestoneBannerThresholds,
         // Definitions / glossary: how the version's curated terms are put to work.
         glossaryPromptInjection,
         glossaryRespondentHints,
@@ -1337,6 +1386,20 @@ export function ConfigEditor({
               </Label>
             </div>
             <div className="flex items-center gap-2">
+              <Switch
+                checked={showProgressPercentText}
+                onCheckedChange={setShowProgressPercentText}
+                disabled={busy}
+              />
+              <Label className="text-sm font-medium">
+                Show percent completed{' '}
+                <FieldHelp title="Show percent completed">
+                  Show the &ldquo;N% completed&rdquo; text beside the progress bar. The bar itself
+                  always renders — this only toggles the numeric label next to it. On by default.
+                </FieldHelp>
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
               <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} disabled={busy} />
               <Label className="text-sm font-medium">
                 Voice input{' '}
@@ -1364,6 +1427,137 @@ export function ConfigEditor({
                 </FieldHelp>
               </Label>
             </div>
+          </SettingsGroup>
+
+          {/* ── 2b. Progress milestones — inline "you're N% through" chat banners on crossing a
+             configured completeness threshold. Independent of "Show percent completed" above —
+             that's the progress bar's own numeric label; this is a conversational nudge. ── */}
+          <SettingsGroup
+            icon={Flag}
+            accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            id="milestones"
+            title="Progress milestones"
+            description="An inline chat banner (&ldquo;you're N% through&rdquo;) when the respondent crosses a completeness threshold — once per threshold per session."
+            conflicts={conflictsFor('milestones')}
+            headerAction={
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium select-none">
+                <span
+                  className={milestoneBannerEnabled ? 'text-foreground' : 'text-muted-foreground'}
+                >
+                  {milestoneBannerEnabled ? 'On' : 'Off'}
+                </span>
+                <Switch
+                  checked={milestoneBannerEnabled}
+                  onCheckedChange={setMilestoneBannerEnabled}
+                  disabled={busy}
+                  aria-label="Show completeness milestone banners"
+                />
+              </label>
+            }
+          >
+            {!milestoneBannerEnabled ? (
+              /* Off state — the default is ON, so this is the reversed case: an admin who turned
+                 it off. A calm panel that says what turning it back on does. */
+              <div className="bg-muted/20 border-border/70 rounded-xl border border-dashed px-6 py-8 text-center">
+                <div className="bg-muted text-muted-foreground/70 mx-auto flex h-11 w-11 items-center justify-center rounded-full">
+                  <Flag className="h-5 w-5" aria-hidden />
+                </div>
+                <p className="text-foreground mt-3 text-sm font-medium">No milestone banners</p>
+                <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-xs">
+                  Respondents see only the progress bar. Turn this on to nudge them with a quiet
+                  inline message (&ldquo;You&apos;re halfway through&rdquo;) at chosen completeness
+                  thresholds.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => setMilestoneBannerEnabled(true)}
+                  disabled={busy}
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Turn on
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">
+                  Thresholds{' '}
+                  <FieldHelp title="Thresholds">
+                    Percent-complete values (1–99) that trigger a banner when crossed. Each fires
+                    once per session — the respondent won&apos;t see the same one twice, however
+                    their coverage moves afterward. Defaults: 25, 50, 75, 90.
+                  </FieldHelp>
+                </Label>
+                {milestoneBannerThresholds.length === 0 ? (
+                  <p className="text-muted-foreground text-xs">
+                    No thresholds configured — banners are on but nothing will trigger one.
+                  </p>
+                ) : (
+                  <ul className="flex flex-wrap gap-2">
+                    {milestoneBannerThresholds.map((t) => (
+                      <li
+                        key={t}
+                        className="bg-muted flex items-center gap-1.5 rounded-full py-1 pr-1.5 pl-3 text-sm font-medium tabular-nums"
+                      >
+                        {t}%
+                        <button
+                          type="button"
+                          onClick={() => removeMilestoneThreshold(t)}
+                          disabled={busy}
+                          aria-label={`Remove ${t}%`}
+                          className="text-muted-foreground hover:text-destructive hover:bg-background inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-start gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={99}
+                    placeholder="e.g. 60"
+                    value={newMilestoneThreshold}
+                    onChange={(e) => {
+                      setNewMilestoneThreshold(e.target.value);
+                      setMilestoneThresholdError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addMilestoneThreshold();
+                      }
+                    }}
+                    disabled={busy || milestoneBannerThresholds.length >= MAX_MILESTONE_THRESHOLDS}
+                    className="w-24"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addMilestoneThreshold}
+                    disabled={
+                      busy ||
+                      !newMilestoneThreshold ||
+                      milestoneBannerThresholds.length >= MAX_MILESTONE_THRESHOLDS
+                    }
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {milestoneThresholdError && (
+                  <p className="text-destructive text-xs">{milestoneThresholdError}</p>
+                )}
+                {milestoneBannerThresholds.length >= MAX_MILESTONE_THRESHOLDS && (
+                  <p className="text-muted-foreground text-xs">
+                    At most {MAX_MILESTONE_THRESHOLDS} thresholds — remove one to add another.
+                  </p>
+                )}
+              </div>
+            )}
           </SettingsGroup>
 
           {/* ── 2a-intro. Respondent intro / splash — an admin opt-in cover screen shown before the

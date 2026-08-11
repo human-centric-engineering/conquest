@@ -714,4 +714,81 @@ describe('persistTurn', () => {
       expect(arg.data.raisedContradictions).toEqual(ledger);
     });
   });
+
+  describe('raisedMilestones ledger', () => {
+    beforeEach(() => {
+      (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    });
+
+    it('writes the raised-milestone ledger to the session when provided', async () => {
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'an answer',
+        agentResponse: 'next question',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        raisedMilestones: [25, 50],
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'sess-1' },
+          data: expect.objectContaining({ raisedMilestones: [25, 50] }),
+        })
+      );
+      expect(seamMock.recordTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT call session update when raisedMilestones is undefined (default)', async () => {
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'an answer',
+        agentResponse: 'next question',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        // raisedMilestones intentionally omitted — nothing crossed this turn
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).not.toHaveBeenCalled();
+    });
+
+    it('writes the contradiction ledger AND the milestone ledger in one session update when both change', async () => {
+      const raisedContradictions = [
+        {
+          key: 'role',
+          slotKeys: ['role'],
+          resolution: 'unresolved' as const,
+          raisedAtTurnIndex: 2,
+        },
+      ];
+
+      await persistTurn({
+        sessionId: 'sess-1',
+        userMessage: 'an answer',
+        agentResponse: 'next question',
+        targetedQuestionId: null,
+        toolCalls: [],
+        costUsd: 0,
+        upserts: [],
+        refinements: [],
+        keyToSlotId: new Map(),
+        raisedContradictions,
+        raisedMilestones: [25],
+      });
+
+      expect(prismaMock.appQuestionnaireSession.update).toHaveBeenCalledTimes(1);
+      const arg = (prismaMock.appQuestionnaireSession.update as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(arg.data.raisedContradictions).toEqual(raisedContradictions);
+      expect(arg.data.raisedMilestones).toEqual([25]);
+    });
+  });
 });

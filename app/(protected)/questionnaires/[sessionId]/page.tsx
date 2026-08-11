@@ -211,6 +211,7 @@ export default async function QuestionnaireSessionPage({
           reasoningPerItemMs={row.config?.reasoningStreamPerItemMs}
           // Inline answer correction (Variant B): respondent-facing UX, default off.
           inlineCorrectionEnabled={row.config?.inlineCorrectionEnabled ?? false}
+          showProgressPercentText={row.config?.showProgressPercentText ?? true}
         />
       </BrandThemeProvider>
     </div>

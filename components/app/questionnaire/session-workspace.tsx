@@ -144,6 +144,9 @@ export interface SessionWorkspaceProps {
   initialStatusView?: SessionStatusView;
   /** Show the voice-input affordance (gated server-side on the voice flag). */
   voiceInputEnabled?: boolean;
+  /** Show the "N% completed" text beside the progress bar (`config.showProgressPercentText`). The
+   * bar itself always renders. Default `true`. */
+  showProgressPercentText?: boolean;
   /** Show the attachment affordance (gated server-side on the attachment-input flag). */
   attachmentInputEnabled?: boolean;
   /**
@@ -253,6 +256,7 @@ export function SessionWorkspace({
   initialStatusView,
   voiceInputEnabled = false,
   attachmentInputEnabled = false,
+  showProgressPercentText = true,
   autoStart = false,
   presentationMode = 'both',
   answerPanelScope = 'full_progress',
@@ -1118,6 +1122,7 @@ export function SessionWorkspace({
           visible in "both" mode, so the form escape-hatch reads as ever-present. */}
       <SessionLifecycleBar
         view={lifecycle.view}
+        showProgressPercentText={showProgressPercentText}
         paused={stream.status === 'not_active'}
         busy={lifecycle.busy}
         actionError={lifecycle.actionError}

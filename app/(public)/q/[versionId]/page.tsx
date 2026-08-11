@@ -21,6 +21,7 @@ import {
   resolveReasoningPlacementForVersion,
   resolveReasoningDwellForVersion,
   resolveSessionResumeEnabledForVersion,
+  resolveShowProgressPercentTextForVersion,
   resolveVoiceEnabledForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { ResumeByRefEntry } from '@/components/app/questionnaire/chat/resume-by-ref-entry';
@@ -96,6 +97,7 @@ export default async function PublicQuestionnairePage({
     resumeEnabled,
     glossary,
     glossaryAppendix,
+    showProgressPercentText,
   ] = await Promise.all([
     resolveThemeForVersion(versionId),
     resolveVersionHeader(versionId),
@@ -111,6 +113,7 @@ export default async function PublicQuestionnairePage({
     resolveSessionResumeEnabledForVersion(versionId),
     resolveGlossaryForHints(versionId),
     resolveGlossaryAppendixForVersion(versionId),
+    resolveShowProgressPercentTextForVersion(versionId),
   ]);
   // The cross-device "continue with your code" footer is for the public anonymous path only — admin
   // preview and frictionless-invite links resume by other means, so it would only confuse there.
@@ -167,6 +170,7 @@ export default async function PublicQuestionnairePage({
             reasoningDwellMs={reasoningDwell.dwellMs}
             reasoningPerItemMs={reasoningDwell.perItemMs}
             inlineCorrectionEnabled={inlineCorrectionEnabled}
+            showProgressPercentText={showProgressPercentText}
             welcomeCopy={theme.welcomeCopy}
             resumeEnabled={resumeEnabled}
             // Handed down as a NODE rather than a flag: it needs the resolved theme (the dialog

@@ -33,6 +33,7 @@ import {
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
+  MAX_MILESTONE_THRESHOLDS,
   PERSONA_KEY_MAX_LENGTH,
   PERSONA_SWITCHERS,
   PRESENTATION_MODES,
@@ -353,6 +354,16 @@ export const updateConfigSchema = z
     // Session resume: remember an in-progress session on the device + the Continue/Start-new chooser
     // + the cross-device resume-by-ref endpoint. On by default.
     sessionResumeEnabled: z.boolean().optional(),
+    // The "N% completed" text beside the session progress bar (the bar itself always renders).
+    showProgressPercentText: z.boolean().optional(),
+    // Completeness milestone banners: an inline "you're N% through" chat notice on crossing a
+    // configured threshold. Thresholds are percent-complete, 1-99, admin add/remove (bounded so
+    // the chat doesn't fill up with banners); uniqueness checked in the superRefine below.
+    milestoneBannerEnabled: z.boolean().optional(),
+    milestoneBannerThresholds: z
+      .array(z.number().int().min(1).max(99))
+      .max(MAX_MILESTONE_THRESHOLDS)
+      .optional(),
     // Live "watch it think" reasoning trace (demo feature). placement = overlay | inline.
     reasoningStreamEnabled: z.boolean().optional(),
     reasoningStreamPlacement: z.enum(REASONING_PLACEMENTS).optional(),
@@ -434,6 +445,19 @@ export const updateConfigSchema = z
           code: 'custom',
           message: 'Profile field keys must be unique',
           path: ['profileFields'],
+        });
+      }
+    }
+
+    // Milestone thresholds unique across the list — a duplicate would just fire twice for no
+    // reason (the ledger dedupes by value, but a duplicate in config is always a mistake).
+    if (cfg.milestoneBannerThresholds) {
+      const values = cfg.milestoneBannerThresholds;
+      if (new Set(values).size !== values.length) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Milestone thresholds must be unique',
+          path: ['milestoneBannerThresholds'],
         });
       }
     }

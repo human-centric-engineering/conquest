@@ -116,6 +116,18 @@ function parseRaisedContradictions(raw: unknown): RaisedContradiction[] {
   return out;
 }
 
+/**
+ * Parse the persisted `raisedMilestones` JSON into a clean `number[]` — the completeness-milestone
+ * "don't nag" ledger. Defensive: a non-array degrades to `[]`, and non-integer/out-of-range entries
+ * are dropped rather than crashing the turn.
+ */
+function parseRaisedMilestones(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 99
+  );
+}
+
 /** A slot projected into the richer shape the P4 capabilities read (incl. type config). */
 export interface CapabilitySlotView {
   id: string;
@@ -235,6 +247,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // "Don't nag" ledger: contradictions already surfaced this session, so the phase never re-raises
       // the same conflict (RaisedContradiction[]). Empty list on a session that has raised none.
       raisedContradictions: true,
+      // "Don't nag" ledger for completeness milestones: percent-complete thresholds already
+      // banner-shown this session (number[]). Empty list on a session that has raised none.
+      raisedMilestones: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -473,6 +488,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   const pendingContradiction = parsePendingContradiction(session.pendingContradiction);
   // "Don't nag" ledger: contradictions already surfaced this session, so the phase never re-raises one.
   const raisedContradictions = parseRaisedContradictions(session.raisedContradictions);
+  // "Don't nag" ledger for completeness milestones: thresholds already banner-shown this session.
+  const raisedMilestones = parseRaisedMilestones(session.raisedMilestones);
 
   const audience = toTurnAudience(session.version.audience);
   const meta: TurnMeta = {
@@ -515,6 +532,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       pendingContradiction,
       // "Don't nag" ledger: conflicts already surfaced this session (suppress re-raising).
       raisedContradictions,
+      // "Don't nag" ledger for completeness milestones: thresholds already banner-shown this session.
+      raisedMilestones,
       // Monotonic per-turn counter (the engine contract selection-context.ts calls out):
       // the TRUE number of turns already taken (not the windowed `turns` array, whose length
       // saturates at RECENT_TURNS_WINDOW), so the `random` strategy's session+round seed keeps

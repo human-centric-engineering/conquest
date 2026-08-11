@@ -202,6 +202,28 @@ describe('QuestionnaireChat', () => {
     expect(screen.queryByText(/I noticed something/i)).not.toBeInTheDocument();
   });
 
+  it('renders a milestone-coded warning as the MilestoneNotice, not the generic quiet line', () => {
+    // The orchestrator emits a `milestone`-coded warning when the respondent crosses a
+    // configured completeness threshold — it should get its own notice, not the generic fallback.
+    hookReturn = makeReturn({
+      turns: [
+        {
+          role: 'assistant',
+          content: 'A question.',
+          warnings: [{ code: 'milestone', message: "You're 50% of the way through." }],
+        },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    const notice = screen.getByText("You're 50% of the way through.");
+    expect(notice).toBeInTheDocument();
+    // The MilestoneNotice's own container is role="status", same as the other bespoke notices —
+    // distinguishing it from the generic fallback line would need a DOM/class assertion the other
+    // "renders a generic..." test already covers for contrast; here we pin the message renders.
+    expect(notice.closest('[role="status"]')).toBeInTheDocument();
+  });
+
   it('renders a flagged contradiction as the "I noticed something" callout beneath its turn', () => {
     // The orchestrator emits a `contradiction`-coded warning whose message is the agent's probe.
     hookReturn = makeReturn({

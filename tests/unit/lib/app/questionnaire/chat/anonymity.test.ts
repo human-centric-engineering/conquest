@@ -37,6 +37,7 @@ import {
   resolveReasoningDwellForVersion,
   resolveInlineCorrectionForVersion,
   resolveSessionResumeEnabledForVersion,
+  resolveShowProgressPercentTextForVersion,
 } from '@/lib/app/questionnaire/chat/anonymity';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 
@@ -289,6 +290,46 @@ describe('resolveSessionResumeEnabledForVersion', () => {
     expect(await resolveSessionResumeEnabledForVersion('ver-missing')).toBe(
       DEFAULT_QUESTIONNAIRE_CONFIG.sessionResumeEnabled
     );
+  });
+});
+
+describe('resolveShowProgressPercentTextForVersion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the stored toggle (off)', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { showProgressPercentText: false },
+    } as never);
+    expect(await resolveShowProgressPercentTextForVersion('ver-abc')).toBe(false);
+  });
+
+  it('defaults to ON when the config row is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: null,
+    } as never);
+    expect(await resolveShowProgressPercentTextForVersion('ver-abc')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.showProgressPercentText
+    );
+  });
+
+  it('defaults to ON when the version is absent', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue(null);
+    expect(await resolveShowProgressPercentTextForVersion('ver-missing')).toBe(
+      DEFAULT_QUESTIONNAIRE_CONFIG.showProgressPercentText
+    );
+  });
+
+  it('selects only the showProgressPercentText field for the given version', async () => {
+    vi.mocked(prisma.appQuestionnaireVersion.findUnique).mockResolvedValue({
+      config: { showProgressPercentText: true },
+    } as never);
+    await resolveShowProgressPercentTextForVersion('ver-xyz');
+    expect(prisma.appQuestionnaireVersion.findUnique).toHaveBeenCalledWith({
+      where: { id: 'ver-xyz' },
+      select: { config: { select: { showProgressPercentText: true } } },
+    });
   });
 });
 
