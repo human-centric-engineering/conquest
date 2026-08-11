@@ -202,7 +202,7 @@ model AppQuestionnaireConfig {
   // Respondent-controlled early finish: let the respondent voluntarily end the session and get their
   // report before the agent's own completion thresholds are met. Bypasses the required-question gate.
   // Config-only (no platform flag). minCoverage/minQuestions are OR'd; 0 = not a criterion on that axis.
-  allowEarlyFinish        Boolean @default(false) // respondent may finish early (escape hatch)
+  allowEarlyFinish        Boolean @default(true) // respondent may finish early (escape hatch); the "reopen" feature makes defaulting-on safe (see reopen-logic.ts)
   earlyFinishMinCoverage  Float   @default(1.0) // 0–1 weighted coverage to unlock; 0 = not a criterion
   earlyFinishMinQuestions Int     @default(0) // answered slots to unlock; 0 = not a criterion
 
@@ -1058,6 +1058,11 @@ model AppRespondentReport {
   // the admin viewer mark which revision is live. Plain String pointer (no FK): a revision may be pruned
   // with the session while the header lingers only via cascade, so nothing dangles.
   deliveredRevisionId String?
+  // Monotonic fence (F-early-finish-reopen): bumped by `enqueueOrRegenerateRespondentReport` every
+  // time an already-delivered (ready/failed) report is force-requeued after a respondent reopens
+  // and re-finishes. The worker's terminal writes guard `WHERE generation = <claimed generation>`
+  // so a stale write from a superseded claim can never clobber the fresh regenerate.
+  generation          Int       @default(0)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

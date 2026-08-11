@@ -175,7 +175,7 @@ describe('eventTypeFor', () => {
 });
 
 describe('SESSION_EVENT_TYPES vocabulary', () => {
-  it('carries the transition events plus created, cost_cap_reached, and sensitivity_flagged', () => {
+  it('carries the transition events plus created, cost_cap_reached, sensitivity_flagged, and reopened', () => {
     expect(SESSION_EVENT_TYPES).toEqual([
       'created',
       'paused',
@@ -185,6 +185,17 @@ describe('SESSION_EVENT_TYPES vocabulary', () => {
       'aborted',
       'cost_cap_reached',
       'sensitivity_flagged',
+      'reopened',
     ]);
+  });
+});
+
+describe('completed → active regression (F-early-finish-reopen)', () => {
+  it('classifyTransition("completed", "active") is STILL illegal — the reopen feature never touches the shared matrix', () => {
+    expect(classifyTransition('completed', 'active')).toBe('illegal');
+  });
+
+  it('isTerminal("completed") is still true', () => {
+    expect(isTerminal('completed')).toBe(true);
   });
 });

@@ -147,7 +147,9 @@ and worker lease
 columns (`lockedBy`/`lockedAt`) for the maintenance-tick generation worker (mirrors the evaluations
 batch worker). Raw-only mode never creates a row. `deliveredRevisionId` points at the admin re-run
 revision last **promoted** into this delivered row (null = the original submit-time generation) — see
-[Admin re-run](#admin-re-run-revisions).
+[Admin re-run](#admin-re-run-revisions). `generation` (int, default `0`) is a monotonic fence bumped
+every time a **reopen-then-refinish** force-requeues an already-delivered row — see
+[Regenerate after a reopen](#regenerate-after-a-reopen).
 
 `AppRespondentReportRevision` — an append-only log of **admin re-runs** for a session (FK to
 `AppRespondentReport`, `onDelete: Cascade`). Each row carries its own `settingsSnapshot` (the exact
@@ -160,16 +162,38 @@ from the delivered report: a re-run never changes what the respondent sees until
 
 ## Generation pipeline (AI modes, async)
 
-1. **Enqueue** — the submit route calls `enqueueRespondentReport(sessionId)`
+1. **Enqueue** — the submit route calls `enqueueOrRegenerateRespondentReport(sessionId)`
    (`lib/app/questionnaire/report/enqueue.ts`) after `markSessionCompleted`. It creates a `queued`
    row only when the version's config is `enabled` + an AI mode
    (`raw_plus_insights` or `narrative`, via `isAiRespondentReportMode`).
    Idempotent (upsert by `sessionId`); best-effort — a failure never fails submission.
+
+   ### Regenerate after a reopen
+
+   Unlike the plain `enqueueRespondentReport` (still exported, kept idempotent for anywhere that
+   genuinely wants "ensure a row exists, never touch an existing one"),
+   `enqueueOrRegenerateRespondentReport` is what the submit route actually calls, and it
+   force-requeues an existing `ready`/`failed` row instead of leaving it alone. It can only ever
+   see such a row via a genuine **reopen-then-refinish** — the submit route already short-circuits
+   a same-session double-submit earlier (its `status === 'completed'` idempotent-200 check) before
+   `markSessionCompleted` runs at all. On a force-requeue it resets `status: 'queued'`, clears
+   `content`/`error`/`generatedAt`/`lockedBy`/`lockedAt`/`deliveredRevisionId`/`completionPct`/`costUsd`/`methodRecord`,
+   bumps `generation`, and **preserves `notifyEmail`** (a respondent who opted in before a failure
+   still gets emailed once the new generation succeeds). A `queued`/`processing` row (a still-in-flight
+   FIRST generation) is left untouched — regenerating reuses the same 1:1 row rather than creating a
+   second one, and the worker's `generation` fence (below) is what stops that first generation's
+   stale write from later clobbering the fresh one.
+
 2. **Worker** — `processQueuedRespondentReports()` (`lib/app/questionnaire/report/worker.ts`) runs in
    the maintenance-tick background chain (`lib/orchestration/maintenance/run-tick.ts`, task
    `respondentReports`). It lease-claims queued/orphan-stale rows (single conditional UPDATE; 5-min
    lease TTL), drains up to 5 per tick within a 45s budget, and marks each `ready` (+ content + cost)
-   or `failed` (+ error), clearing the lease either way. On `ready`, if the row has a `notifyEmail` it
+   or `failed` (+ error), clearing the lease either way. Both terminal writes additionally guard
+   `WHERE generation = <claimed generation>` — if a reopen-then-refinish force-requeued the row
+   (bumping `generation`) while this claim was still generating, the write is a no-op instead of
+   clobbering the fresh regenerate; the outcome is counted as `superseded` (`ReportWorkerResult`),
+   not `failed` — it's expected/benign, and the row is left at its bumped-`generation`, `queued`
+   state for a fresh claim next tick. On `ready`, if the row has a `notifyEmail` it
    sends the report-ready email best-effort (`sendRespondentReportReadyEmail` → `emails/respondent-report-ready.tsx`)
    and clears `notifyEmail`; a send failure is logged, never fails the report. A full-batch tick that
    leaves a large backlog logs `respondent report backlog` as an ops signal.
@@ -232,7 +256,14 @@ from the delivered report: a re-run never changes what the respondent sees until
    grounded in a specific answer the respondent gave — no broad/sweeping generalisations the answers
    don't support, and no trait/conclusion attributed to them unless their answers established it
    (general context or illustrative examples are allowed, but must be framed as general and never
-   asserted as facts about this respondent). The model is also told to write in short,
+   asserted as facts about this respondent). Balancing that, an always-on **analysis contract** tells
+   the writer that grounding constrains what is _true_, not how much to restate: reference an answer
+   compactly, then spend the paragraph on what it means, and where the answers support more than one
+   reading, name the alternative rather than asserting one. It exists because every other rule here
+   (grounding, the coverage fence, the confidence discount) pushes toward the safest output —
+   repeating the respondent's answers back at them — and the one rule that pushed the other way
+   (`APPENDED_DATA_RULES`) is gated on an appended Q&A recap that a narrative report never has. The
+   model is also told to write in short,
    blank-line-separated paragraphs (never one wall of text); the `narrativeStyle` preset layers
    density/format guidance on top (`flowing` / `concise` / `structured`). The renderers split
    `summary`/`body` on blank lines via `splitReportParagraphs`

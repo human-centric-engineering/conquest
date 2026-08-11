@@ -32,10 +32,14 @@ export function GlossaryTermMark({ surface, entry }: GlossaryTermMarkProps) {
           data-glossary-term={entry.termId}
           aria-label={`Definition of ${entry.term}`}
           className="decoration-muted-foreground/60 hover:decoration-foreground cursor-help underline decoration-dotted underline-offset-4 transition-colors"
-          // A defined term can appear inside a <label>; without this, opening the popover would
-          // also toggle the labelled control.
+          // A defined term can appear inside a <label> or a clickable row; stop the click there so
+          // opening the popover doesn't also toggle the surrounding control.
+          //
+          // Never call `event.preventDefault()` here. Radix composes the trigger's own open-toggle
+          // onto this handler with `composeEventHandlers`, which skips its handler when the event
+          // has been default-prevented — so preventing the default silently stops the popover from
+          // ever opening. The button gets focus and nothing else happens.
           onClick={(event) => {
-            event.preventDefault();
             event.stopPropagation();
           }}
         >

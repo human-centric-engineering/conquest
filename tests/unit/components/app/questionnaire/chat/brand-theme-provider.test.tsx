@@ -336,4 +336,59 @@ describe('BrandThemeProvider', () => {
       expect((container.firstChild as HTMLElement).dataset.brand).toBeUndefined();
     });
   });
+
+  // The anonymity reassurance used to live on the lifecycle strip below the band; it now rides the
+  // band under the title, so the strip keeps its row. These pin the move.
+  describe('anonymity notice', () => {
+    it('renders under the title, aligned with it, when the version is anonymous', () => {
+      const { container } = render(
+        <BrandThemeProvider
+          theme={UNBRANDED}
+          header={{ title: 'Standalone Survey', round: null }}
+          anonymous
+        >
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      const note = screen.getByText(/responses are anonymous/i);
+      // Inside the band, not the conversation below it, and in the title's own right-aligned column.
+      const band = container.querySelector('header') as HTMLElement;
+      expect(band).toContainElement(note);
+      expect(note.closest('.items-end')).toBeInTheDocument();
+      expect(note.closest('.items-end')).toContainElement(screen.getByText('Standalone Survey'));
+    });
+
+    it('stays off the band for a non-anonymous version', () => {
+      render(
+        <BrandThemeProvider theme={UNBRANDED} header={{ title: 'Standalone Survey', round: null }}>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.queryByText(/responses are anonymous/i)).not.toBeInTheDocument();
+    });
+
+    it('earns a band of its own for a branded client with nothing else to show', () => {
+      // Without this the notice would have no home: colours-only clients otherwise render no band.
+      const { container } = render(
+        <BrandThemeProvider theme={BASE} anonymous>
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(container.querySelector('header')).toBeInTheDocument();
+      expect(screen.getByText(/responses are anonymous/i)).toBeInTheDocument();
+    });
+
+    it('rides the banner title strip when a custom banner replaces the band', () => {
+      render(
+        <BrandThemeProvider
+          theme={{ ...BASE, bannerUrl: 'https://acme.example/banner.png' }}
+          header={{ title: 'Standalone Survey', round: null }}
+          anonymous
+        >
+          <span>child</span>
+        </BrandThemeProvider>
+      );
+      expect(screen.getByText(/responses are anonymous/i)).toBeInTheDocument();
+    });
+  });
 });

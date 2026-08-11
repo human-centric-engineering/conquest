@@ -59,13 +59,19 @@ import {
 import { DETECT_CONTRADICTIONS_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
 import { prisma } from '@/lib/db/client';
 import { resolveTurnAccess } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-access';
-import { turnLimiter } from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
+import {
+  turnLimiter,
+  reportRegenerateLimiter,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit';
 import { runCompletionSweep } from '@/app/api/v1/app/questionnaire-sessions/_lib/completion-sweep-run';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { markSessionCompleted } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { advanceExperienceRun, legForSession } from '@/app/api/v1/app/experiences/_lib/run-advance';
 import { recordTurn } from '@/app/api/v1/app/questionnaires/_lib/turns';
-import { enqueueRespondentReport, isExperienceLeg } from '@/lib/app/questionnaire/report/enqueue';
+import {
+  enqueueOrRegenerateRespondentReport,
+  isExperienceLeg,
+} from '@/lib/app/questionnaire/report/enqueue';
 import { processQueuedRespondentReports } from '@/lib/app/questionnaire/report/worker';
 import { refreshRoundLearningDigest } from '@/lib/app/questionnaire/learning/digest';
 
@@ -332,15 +338,38 @@ async function handleSubmit(
 
       // Queue the respondent report when the version is configured for an AI mode (raw_plus_insights
       // or narrative). Best-effort — a queue failure must never fail the submission just made.
+      //
+      // Per-flow sub-cap on the paid regeneration call: `enqueueOrRegenerateRespondentReport` is the
+      // ONLY call site that force-regenerates an already-`ready`/`failed` report (see enqueue.ts) —
+      // reached whenever a respondent reopens (sibling lifecycle route, no cooldown) and re-finishes.
+      // Without a guard, a looped reopen→submit forces unlimited report-gen spend (LLM, optionally
+      // with KB/web-search grounding — see report-web-search.md). Unlike the sweep's guard above,
+      // `markSessionCompleted` has ALREADY committed by this point, so a refused check is treated like
+      // any other enqueue failure below (skip + log, still 200) rather than surfaced as a 429: failing
+      // the whole response here would contradict this block's own "must never fail the submission"
+      // invariant, and would strand the respondent's report permanently for THIS completion — a resubmit
+      // of a now-completed session short-circuits on the idempotent `status === 'completed'` check
+      // above, before this call is ever reached again.
       const enqueued = partOfRun
         ? false
-        : await enqueueRespondentReport(sessionId).catch((err) => {
-            log.error('Failed to enqueue respondent report', {
-              sessionId,
-              error: err instanceof Error ? err.message : String(err),
+        : await (async () => {
+            // Compound key: bounds the documented reopen→submit loop on THIS session (the
+            // abuse case) without penalizing a respondent/admin who legitimately completes
+            // several unrelated sessions inside the same window — a bare `access.rateKey`
+            // would share one bucket across all of a user's sessions.
+            const limit = reportRegenerateLimiter.check(`${access.rateKey}:${sessionId}`);
+            if (!limit.success) {
+              log.info('Report regeneration rate-limited — skipping enqueue', { sessionId });
+              return false;
+            }
+            return enqueueOrRegenerateRespondentReport(sessionId).catch((err) => {
+              log.error('Failed to enqueue respondent report', {
+                sessionId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return false;
             });
-            return false;
-          });
+          })();
       // Instant start: kick the report worker AFTER the response so generation begins within
       // seconds rather than waiting for the next maintenance-cron minute. `after()` (next/server)
       // survives serverless (runs within the function's maxDuration) and on a persistent process

@@ -16,6 +16,9 @@
  *    a live status pill (Open / Closing soon / Opens / Closed) + the date window. The meta line is
  *    omitted for open-ended sessions and hidden on narrow screens. With NO logo the title instead
  *    leads from the left. `flex-1 min-w-0` truncates a long title cleanly.
+ *  - Anonymity (right, under the title): the "Responses are anonymous" reassurance, when the
+ *    version runs PII-free. It lives here rather than on the lifecycle strip below the band so it
+ *    costs no row of its own — it rides the negative space the two-anchor header already has.
  *
  * On a coloured surface the band paints `--app-surface-color` and uses `--app-on-surface` for
  * contrast-correct text; with no surface it sits on the neutral respondent canvas with a hairline
@@ -27,6 +30,7 @@
  */
 
 import type { CSSProperties } from 'react';
+import { ShieldCheck } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { ConquestWordmark } from '@/components/app/questionnaire/conquest-wordmark';
@@ -38,6 +42,11 @@ interface BrandThemeProviderProps {
   theme: ResolvedTheme;
   /** Title + round window shown in the band. Absent → logo-only band (legacy behaviour). */
   header?: BandHeader | null;
+  /**
+   * The version runs in anonymous (PII-free) mode → the band carries the respondent-facing
+   * reassurance under the title. Same config the welcome copy and the status view read.
+   */
+  anonymous?: boolean;
   className?: string;
   children: React.ReactNode;
 }
@@ -73,9 +82,30 @@ function LogoMark({ hasBackdrop }: { hasBackdrop: boolean }) {
   );
 }
 
+/**
+ * The PII-free reassurance, one quiet line under the band title. Uses `currentColor` at the same
+ * opacity as the round/schedule meta line, so it reads correctly on a client surface, on the
+ * ConQuest band tone and on the neutral canvas without knowing which it sits on.
+ */
+function AnonymityNote({ align }: { align: 'start' | 'end' }) {
+  return (
+    <p
+      className={cn(
+        'flex max-w-full items-center gap-1.5 text-xs font-medium opacity-75',
+        align === 'end' ? 'justify-end' : 'justify-start'
+      )}
+      title="Your responses are not linked to an account."
+    >
+      <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      Responses are anonymous
+    </p>
+  );
+}
+
 export function BrandThemeProvider({
   theme,
   header,
+  anonymous = false,
   className,
   children,
 }: BrandThemeProviderProps) {
@@ -98,10 +128,11 @@ export function BrandThemeProvider({
   // SSR-computed against the render-time clock: a day-granularity window, fresh enough for a header.
   const schedule = round ? buildScheduleView(round, new Date()) : null;
 
-  // Worth a band when there's a surface to paint, a mark to carry, or a title to show.
+  // Worth a band when there's a surface to paint, a mark to carry, a title to show, or an
+  // anonymity notice to carry (the band is its only home — the lifecycle strip no longer shows it).
   // An unbranded questionnaire ALWAYS gets one: the ConQuest wordmark is the whole point,
   // so it must not depend on a title being present.
-  const showBand = hasSurface || hasMark || Boolean(title);
+  const showBand = hasSurface || hasMark || Boolean(title) || anonymous;
 
   return (
     // `data-surface="respondent"` re-scopes the central questionnaire area to a
@@ -135,36 +166,41 @@ export function BrandThemeProvider({
             )}
             style={{ backgroundImage: 'var(--app-banner-url)' }}
           />
-          {title && (
-            <div className="shrink-0 border-b px-4 py-2.5 sm:px-6">
-              <p className="truncate text-base leading-tight font-semibold sm:text-lg">{title}</p>
-              {(round?.name || schedule) && (
-                <div className="mt-0.5 hidden items-center gap-2 text-xs font-medium opacity-75 sm:flex">
-                  {round?.name && <span className="min-w-0 truncate">{round.name}</span>}
-                  {round?.name && schedule && (
-                    <span aria-hidden className="opacity-50">
-                      ·
-                    </span>
-                  )}
-                  {schedule && (
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      <span
-                        aria-hidden
-                        className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[schedule.status])}
-                      />
-                      {schedule.statusLabel}
-                    </span>
-                  )}
-                  {schedule?.dateRange && (
-                    <span aria-hidden className="opacity-50">
-                      ·
-                    </span>
-                  )}
-                  {schedule?.dateRange && (
-                    <span className="shrink-0 tabular-nums">{schedule.dateRange}</span>
-                  )}
-                </div>
-              )}
+          {(title || anonymous) && (
+            <div className="flex shrink-0 items-center gap-4 border-b px-4 py-2.5 sm:px-6">
+              {/* The banner strip is left-led, so the anonymity note anchors the opposite end of the
+                  same line rather than costing a second one. */}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base leading-tight font-semibold sm:text-lg">{title}</p>
+                {(round?.name || schedule) && (
+                  <div className="mt-0.5 hidden items-center gap-2 text-xs font-medium opacity-75 sm:flex">
+                    {round?.name && <span className="min-w-0 truncate">{round.name}</span>}
+                    {round?.name && schedule && (
+                      <span aria-hidden className="opacity-50">
+                        ·
+                      </span>
+                    )}
+                    {schedule && (
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[schedule.status])}
+                        />
+                        {schedule.statusLabel}
+                      </span>
+                    )}
+                    {schedule?.dateRange && (
+                      <span aria-hidden className="opacity-50">
+                        ·
+                      </span>
+                    )}
+                    {schedule?.dateRange && (
+                      <span className="shrink-0 tabular-nums">{schedule.dateRange}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {anonymous && <AnonymityNote align="end" />}
             </div>
           )}
         </>
@@ -207,7 +243,7 @@ export function BrandThemeProvider({
             {/* Two-anchor header. With a logo, the title anchors hard RIGHT opposite it — the empty
               middle is deliberate negative space, not waste. With no logo the title leads from the
               LEFT instead. `flex-1 min-w-0` lets a long title truncate cleanly against the logo. */}
-            {(title || round?.name || schedule) && (
+            {(title || round?.name || schedule || anonymous) && (
               <div
                 className={cn(
                   'flex min-w-0 flex-1 flex-col gap-0.5',
@@ -259,6 +295,10 @@ export function BrandThemeProvider({
                     )}
                   </div>
                 )}
+
+                {/* The anonymity reassurance sits under the title, aligned with it — the band's
+                    negative space absorbs it, so the lifecycle strip below keeps its whole row. */}
+                {anonymous && <AnonymityNote align={hasMark ? 'end' : 'start'} />}
               </div>
             )}
           </header>

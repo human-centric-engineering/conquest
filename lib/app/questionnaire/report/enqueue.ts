@@ -9,6 +9,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { DB_JSON_NULL } from '@/lib/db/json';
 import { narrowRespondentReportSettings } from '@/lib/app/questionnaire/report/settings';
 import { isAiRespondentReportMode } from '@/lib/app/questionnaire/types';
 
@@ -29,6 +30,83 @@ export async function enqueueRespondentReport(sessionId: string): Promise<boolea
     create: { sessionId, mode: settings.mode, status: 'queued' },
     // Idempotent: a re-submit must not reset an already-generated (or in-flight) report.
     update: {},
+  });
+  return true;
+}
+
+/**
+ * Enqueue OR regenerate a respondent report for a just-completed session — the submit-time call
+ * site (F-early-finish-reopen). Unlike {@link enqueueRespondentReport}'s deliberate
+ * double-submit-safe idempotency, this one force-resets ANY existing row regardless of status,
+ * because the ONLY way this call site sees an existing row at all is a genuine reopen-then-refinish: a
+ * same-session double-submit is already short-circuited earlier in `submit/route.ts` by its
+ * `status === 'completed'` idempotent-200 check, before `markSessionCompleted` (and this enqueue)
+ * ever run. A `queued`/`processing` row (a still-in-flight FIRST generation, reached only if a
+ * respondent reopens and re-finishes before it lands) is force-requeued exactly like a
+ * `ready`/`failed` row below: `generation` is bumped and `status` reset to `queued`. This is NOT a
+ * no-op — the worker's `generation` fence (`lib/app/questionnaire/report/worker.ts`) only trips
+ * when `generation` actually changes. Leaving a `processing` row untouched would let the in-flight
+ * generation's terminal write (still matching `status: 'processing', generation: claimed.generation`)
+ * land as `ready` — delivering content generated from the PRE-reopen answers, with no fresh
+ * generation ever triggered for the respondent's actual final answers. Bumping `generation` here is
+ * what makes that stale write lose the fence (the worker logs it `superseded`) and makes the row
+ * claimable again. Clearing `lockedBy`/`lockedAt` in the same update is required too, not cosmetic:
+ * the claim predicate (`claimableWhere` in worker.ts) only treats a `queued` row as claimable when
+ * `lockedBy` is null, so resetting `status` to `queued` while leaving a `processing` row's lease
+ * fields set would strand it — unclaimable by the fresh-queued branch, and no longer matched by
+ * the orphaned-`processing` branch either. The row may then be claimed by a different worker while
+ * the original is still generating; that's fine — the original's own terminal write is exactly
+ * what the bumped `generation` fences out (it logs `superseded`, it doesn't corrupt anything).
+ *
+ * Returns `true` whenever a row now needs draining (fresh create OR regenerate), so the caller's
+ * `after()` instant-start kick fires either way.
+ */
+export async function enqueueOrRegenerateRespondentReport(sessionId: string): Promise<boolean> {
+  const meta = await prisma.appQuestionnaireSession.findUnique({
+    where: { id: sessionId },
+    select: { version: { select: { config: { select: { respondentReport: true } } } } },
+  });
+  const settings = narrowRespondentReportSettings(meta?.version?.config?.respondentReport);
+  if (!settings.enabled || !isAiRespondentReportMode(settings.mode)) return false;
+
+  const existing = await prisma.appRespondentReport.findUnique({
+    where: { sessionId },
+    select: { status: true },
+  });
+
+  if (!existing) {
+    await prisma.appRespondentReport.create({
+      data: { sessionId, mode: settings.mode, status: 'queued' },
+    });
+    return true;
+  }
+
+  // Force-requeue regardless of current status. For `ready`/`failed` this clears stale delivered
+  // content; for `queued`/`processing` (a still-in-flight FIRST generation) this is what makes the
+  // worker's `generation` fence actually trip — without the bump, an in-flight terminal write would
+  // still match `status: 'processing', generation: claimed.generation` and land stale content as
+  // `ready`. Clearing `lockedBy`/`lockedAt` here too (not just for `ready`/`failed`) matters for a
+  // `processing` row specifically: leaving them set while flipping `status` to `queued` would strand
+  // the row — unclaimable by either arm of `claimableWhere` in worker.ts (see the JSDoc above).
+  // PRESERVE `notifyEmail` throughout — a respondent who opted in before this should still get
+  // emailed once the new generation succeeds.
+  await prisma.appRespondentReport.update({
+    where: { sessionId },
+    data: {
+      status: 'queued',
+      mode: settings.mode,
+      content: DB_JSON_NULL,
+      formatted: false,
+      completionPct: null,
+      costUsd: null,
+      methodRecord: DB_JSON_NULL,
+      error: null,
+      generatedAt: null,
+      deliveredRevisionId: null,
+      lockedBy: null,
+      lockedAt: null,
+      generation: { increment: 1 },
+    },
   });
   return true;
 }

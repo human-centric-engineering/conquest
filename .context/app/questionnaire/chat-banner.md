@@ -22,9 +22,20 @@ Rendered by `BrandThemeProvider` (`components/app/questionnaire/chat/brand-theme
 The middle zone takes the slack and truncates, so a long title never pushes the schedule off the
 bar. The schedule cluster is **hidden below `sm`** — on a phone the title keeps priority.
 
-The band renders whenever there's a surface to paint, a logo, **or** a title — so a themed or
-unthemed questionnaire both get a title bar. With no surface, no logo and no header it renders
-nothing (unchanged).
+The band renders whenever there's a surface to paint, a logo, a title, **or** an anonymity notice
+— so a themed or unthemed questionnaire both get a title bar. With no surface, no logo, no header
+and a non-anonymous version it renders nothing (unchanged).
+
+## The anonymity notice
+
+`anonymous?: boolean` (the version's `anonymousMode`, threaded in from each respondent page
+alongside `header`) puts a shield-marked **"Responses are anonymous"** line under the title,
+aligned with it — right-aligned in the two-anchor band, left-led when there's no mark, and on the
+opposite end of the title row in the banner variant (which is left-led and has no slack beneath).
+It used to sit on the `SessionLifecycleBar` below the band; moving it here reclaims that strip's
+whole row and keeps the reassurance next to the questionnaire it applies to. The strip no longer
+renders it at all, and the admin session viewer — which has no band — shows an `Anonymous` badge
+in its own header row instead. See [session-lifecycle.md](./session-lifecycle.md).
 
 ## Data flow
 

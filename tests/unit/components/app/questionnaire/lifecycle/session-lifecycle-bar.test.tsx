@@ -27,6 +27,7 @@ function view(over: Partial<SessionStatusView> = {}): SessionStatusView {
     anonymous: false,
     ref: null,
     experience: null,
+    reopenAvailable: false,
     ...over,
   };
 }
@@ -70,9 +71,11 @@ describe('SessionLifecycleBar', () => {
     expect(bar).toHaveAttribute('aria-valuenow', '40');
   });
 
-  it('shows the anonymous indicator when the session is anonymous', () => {
+  // The anonymity notice moved to the brand band above the conversation (under the questionnaire
+  // title) so the strip keeps its row — the strip must not render a second copy of it.
+  it('does not show an anonymity notice even when the session is anonymous', () => {
     renderBar({ view: view({ anonymous: true }) });
-    expect(screen.getByText(/responses are anonymous/i)).toBeInTheDocument();
+    expect(screen.queryByText(/responses are anonymous/i)).not.toBeInTheDocument();
   });
 
   it('shows a Pause control for an authed active session and fires onPause', async () => {

@@ -119,7 +119,7 @@ export default async function ExperienceRunPage({
   // edges line up with the header content rather than sitting inside it.
   return (
     <div className={`${RESPONDENT_SHELL} h-[calc(100vh-8rem)] px-4`}>
-      <BrandThemeProvider theme={theme} header={bandHeader}>
+      <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
         <RunSessionBoot
           sessionId={sessionId}
           glossary={glossary}

@@ -137,6 +137,7 @@ describe('GET /api/v1/cron/maintenance', () => {
       claimed: 0,
       succeeded: 0,
       failed: 0,
+      superseded: 0,
     });
   });
 
@@ -183,7 +184,12 @@ describe('GET /api/v1/cron/maintenance', () => {
   it('AWAITS the background chain — the response does not resolve until the chain settles', async () => {
     // Hold the report worker pending; because the cron awaits the chain, the GET promise must not
     // resolve until we release it. (The admin tick would have returned 202 immediately here.)
-    const deferred = createDeferred<{ claimed: number; succeeded: number; failed: number }>();
+    const deferred = createDeferred<{
+      claimed: number;
+      succeeded: number;
+      failed: number;
+      superseded: number;
+    }>();
     vi.mocked(processQueuedRespondentReports).mockReturnValue(deferred.promise);
 
     let settled = false;
@@ -197,7 +203,7 @@ describe('GET /api/v1/cron/maintenance', () => {
     expect(settled).toBe(false);
 
     // Release the worker; now the awaited chain completes and the response resolves.
-    deferred.resolve({ claimed: 1, succeeded: 1, failed: 0 });
+    deferred.resolve({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
     const response = await responsePromise;
 
     expect(settled).toBe(true);

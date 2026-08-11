@@ -47,6 +47,7 @@ beforeEach(() => {
     sessionId: 'sess-1',
     runId: null,
     notifyEmail: null,
+    generation: 1,
   });
   // After the first drain iteration, no more candidates.
   (prisma.appRespondentReport.findFirst as Mock).mockResolvedValue(null);
@@ -59,7 +60,7 @@ describe('processQueuedRespondentReports', () => {
     (prisma.appRespondentReport.findFirst as Mock).mockResolvedValue(null);
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(prisma.appRespondentReport.updateMany).not.toHaveBeenCalled();
   });
 
@@ -72,7 +73,7 @@ describe('processQueuedRespondentReports', () => {
     });
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
     expect(generateRespondentReport).toHaveBeenCalledWith('sess-1');
 
     // The terminal write: status ready + content + cost + formatted flag + cleared lease, guarded on processing.
@@ -80,7 +81,11 @@ describe('processQueuedRespondentReports', () => {
       (c) => c[0]?.data?.status === 'ready'
     );
     if (!readyWrite) throw new Error('expected a ready write');
-    expect(readyWrite[0].where).toMatchObject({ id: 'r1', status: 'processing' });
+    expect(readyWrite[0].where).toMatchObject({
+      id: 'r1',
+      status: 'processing',
+      generation: expect.any(Number),
+    });
     expect(readyWrite[0].data).toMatchObject({
       status: 'ready',
       content: { summary: 'ok', sections: [], actions: [] },
@@ -96,7 +101,7 @@ describe('processQueuedRespondentReports', () => {
     (generateRespondentReport as Mock).mockRejectedValue(new Error('no provider'));
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, superseded: 0 });
 
     const failWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
       (c) => c[0]?.data?.status === 'failed'
@@ -114,8 +119,59 @@ describe('processQueuedRespondentReports', () => {
     (prisma.appRespondentReport.updateMany as Mock).mockResolvedValue({ count: 0 });
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(generateRespondentReport).not.toHaveBeenCalled();
+  });
+
+  it('returns superseded (not succeeded) when a reopen wins the generation fence on the ready write', async () => {
+    // The claim write (status: processing) still wins; only the terminal ready-write loses the
+    // fence — this is the reopen-mid-flight race the `generation` guard exists for.
+    (generateRespondentReport as Mock).mockResolvedValue({
+      content: { summary: 'ok', sections: [], actions: [] },
+      costUsd: 0.01,
+      formatted: true,
+      completionPct: 60,
+    });
+    // Call order: the claim write (status: processing) succeeds first, then the terminal
+    // ready-write loses the fence.
+    (prisma.appRespondentReport.updateMany as Mock).mockResolvedValueOnce({ count: 1 });
+    (prisma.appRespondentReport.updateMany as Mock).mockResolvedValueOnce({ count: 0 });
+
+    const result = await processQueuedRespondentReports();
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 0, superseded: 1 });
+
+    const readyWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
+      (c) => c[0]?.data?.status === 'ready'
+    );
+    if (!readyWrite) throw new Error('expected a ready write attempt');
+    expect(readyWrite[0].where).toMatchObject({
+      id: 'r1',
+      status: 'processing',
+      generation: 1,
+    });
+    // The row was superseded before delivery, so no ready-email should go out for this claim.
+    expect(sendRespondentReportReadyEmail).not.toHaveBeenCalled();
+  });
+
+  it('returns superseded (not failed) when a reopen wins the generation fence on the failed write', async () => {
+    (generateRespondentReport as Mock).mockRejectedValue(new Error('no provider'));
+    // Call order: the claim write (status: processing) succeeds first, then the terminal
+    // failed-write loses the fence.
+    (prisma.appRespondentReport.updateMany as Mock).mockResolvedValueOnce({ count: 1 });
+    (prisma.appRespondentReport.updateMany as Mock).mockResolvedValueOnce({ count: 0 });
+
+    const result = await processQueuedRespondentReports();
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 0, superseded: 1 });
+
+    const failWrite = (prisma.appRespondentReport.updateMany as Mock).mock.calls.find(
+      (c) => c[0]?.data?.status === 'failed'
+    );
+    if (!failWrite) throw new Error('expected a failed write attempt');
+    expect(failWrite[0].where).toMatchObject({
+      id: 'r1',
+      status: 'processing',
+      generation: 1,
+    });
   });
 
   it('sends the report-ready email when the row has a notifyEmail, and clears it on the ready write', async () => {
@@ -167,7 +223,7 @@ describe('processQueuedRespondentReports', () => {
     (sendRespondentReportReadyEmail as Mock).mockRejectedValue(new Error('smtp down'));
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
   });
 
   it('warns when a full batch (MAX_PER_TICK) leaves a large backlog', async () => {
@@ -240,7 +296,7 @@ describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
 
     const result = await processQueuedRespondentReports();
 
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
     expect(generateRunReport).toHaveBeenCalledWith('run-1');
     expect(sendRespondentReportReadyEmail).toHaveBeenCalledWith(
       { runId: 'run-1' },
@@ -271,7 +327,7 @@ describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
     (sendRespondentReportReadyEmail as Mock).mockRejectedValue(new Error('smtp down'));
 
     const result = await processQueuedRespondentReports();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
   });
 
   it('fails an ownerless row terminally rather than trying to email about it', async () => {
@@ -284,7 +340,7 @@ describe('processQueuedRespondentReports — run-scope rows (F15.4b)', () => {
 
     const result = await processQueuedRespondentReports();
 
-    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, superseded: 0 });
     expect(sendRespondentReportReadyEmail).not.toHaveBeenCalled();
   });
 });

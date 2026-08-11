@@ -3,10 +3,10 @@
  *
  * While ConQuest is in `alpha`/`beta` (see {@link RELEASE_STAGE}), respondents
  * are told up-front that their conversation is being recorded for analysis and
- * tuning. Persistent (not dismissible) and pinned above the transcript so it
- * stays visible as the conversation scrolls — it's a transparency notice, not a
- * transient banner. Renders nothing once the product is `stable`, so it drops
- * out cleanly when the stage env var is cleared.
+ * tuning. Persistent (not dismissible) and rendered at the top of the transcript,
+ * where it scrolls away with the conversation like any other turn — it's a
+ * transparency notice, not a sticky banner. Renders nothing once the product is
+ * `stable`, so it drops out cleanly when the stage env var is cleared.
  *
  * Mirrors the calm side-band notice treatment used elsewhere in the chat
  * ({@link SupportNotice}, {@link SeriousnessNotice}).

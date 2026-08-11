@@ -822,6 +822,13 @@ export function SessionWorkspace({
         // respondent sees their own captured positions echoed back instead of a bare spinner.
         captured={panel.view ?? null}
         glossaryAppendix={glossaryAppendix ?? null}
+        // Early-finish "Continue answering" (F-early-finish-reopen): server-gated via
+        // `lifecycle.view.reopenAvailable`. `reopen()` flips `stream.status`/`lifecycle.view.status`
+        // away from `completed`, so this component simply unmounts on success — the block above
+        // naturally falls through to the chat on the next render.
+        canReopen={lifecycle.canReopen}
+        onReopen={lifecycle.reopen}
+        reopenBusy={lifecycle.busy}
       />
     );
   }

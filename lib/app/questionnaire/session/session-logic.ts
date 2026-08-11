@@ -15,6 +15,14 @@
  *  - `completed` / `abandoned` / `aborted` are terminal — no outgoing edges. (`aborted` is the
  *    seriousness-gate terminal; `abandoned` is admin/manual.)
  *  - `from === to` (incl. terminal re-entry) is an idempotent no-op (no event).
+ *
+ * `completed` has exactly one narrow, SEPARATELY-implemented exception — the respondent
+ * early-finish "reopen" action (`reopenSession` in
+ * `app/api/v1/app/questionnaires/_lib/sessions.ts`) — which is intentionally NOT part of
+ * this matrix. It writes `completed → active` directly, gated by its own eligibility
+ * check (early-finish origin, config still on, not an experience leg), never through
+ * {@link classifyTransition}. See `lib/app/questionnaire/session/types.ts`'s
+ * `SESSION_EVENT_TYPES`/`TransitionClassification` docs for why it must stay separate.
  */
 
 import type { SessionStatus } from '@/lib/app/questionnaire/types';
@@ -32,6 +40,10 @@ import {
 const LEGAL_TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
   active: ['paused', 'completed', 'abandoned', 'aborted'],
   paused: ['active', 'abandoned', 'aborted'],
+  // Deliberately NOT ['active'], even though a narrow "reopen" path exists — see the
+  // module doc above and `reopenSession`. Adding it here would let every caller of this
+  // shared matrix (resumeSession, the admin /transition route) reopen ANY completed
+  // session with no eligibility check at all.
   completed: [],
   abandoned: [],
   aborted: [],

@@ -20,6 +20,7 @@ vi.mock('@/lib/db/client', () => ({
 
 import { prisma } from '@/lib/db/client';
 import {
+  enqueueOrRegenerateRespondentReport,
   enqueueRespondentReport,
   generateDeliveredRespondentReport,
 } from '@/lib/app/questionnaire/report/enqueue';
@@ -168,5 +169,133 @@ describe('generateDeliveredRespondentReport', () => {
     expect(prisma.appRespondentReport.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'queued', error: null }) })
     );
+  });
+});
+
+/**
+ * The reopen-driven submit-time call site (F-early-finish-reopen): unlike
+ * {@link enqueueRespondentReport}'s idempotent double-submit-safe upsert, this force-resets ANY
+ * existing row from BEFORE a reopen, regardless of status — the only way an existing row is seen at
+ * all here, since a same-session double-submit is already short-circuited earlier in
+ * `submit/route.ts`.
+ */
+describe('enqueueOrRegenerateRespondentReport', () => {
+  beforeEach(() => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue(null);
+    (prisma.appRespondentReport.create as Mock).mockResolvedValue({});
+    (prisma.appRespondentReport.update as Mock).mockResolvedValue({});
+  });
+
+  it('short-circuits to false without touching AppRespondentReport when the report is disabled', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      version: { config: { respondentReport: { enabled: false, mode: 'raw_plus_insights' } } },
+    });
+
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(false);
+
+    expect(prisma.appRespondentReport.findUnique).not.toHaveBeenCalled();
+    expect(prisma.appRespondentReport.create).not.toHaveBeenCalled();
+    expect(prisma.appRespondentReport.update).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits to false without touching AppRespondentReport for a non-AI (raw) mode', async () => {
+    (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue({
+      version: { config: { respondentReport: { enabled: true, mode: 'raw' } } },
+    });
+
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(false);
+
+    expect(prisma.appRespondentReport.findUnique).not.toHaveBeenCalled();
+    expect(prisma.appRespondentReport.create).not.toHaveBeenCalled();
+    expect(prisma.appRespondentReport.update).not.toHaveBeenCalled();
+  });
+
+  it('creates a fresh queued row when the session has none yet', async () => {
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(true);
+
+    expect(prisma.appRespondentReport.create).toHaveBeenCalledWith({
+      data: { sessionId: 'sess-1', mode: 'raw_plus_insights', status: 'queued' },
+    });
+    expect(prisma.appRespondentReport.update).not.toHaveBeenCalled();
+  });
+
+  it('force-requeues a queued row too, bumping generation (so a redundant claim later still fences correctly)', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({ status: 'queued' });
+
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(true);
+
+    expect(prisma.appRespondentReport.create).not.toHaveBeenCalled();
+    const call = (prisma.appRespondentReport.update as Mock).mock.calls[0][0];
+    expect(call.where).toEqual({ sessionId: 'sess-1' });
+    expect(call.data).toMatchObject({
+      status: 'queued',
+      lockedBy: null,
+      lockedAt: null,
+      generation: { increment: 1 },
+    });
+  });
+
+  // Regression test: a mid-flight reopen must bump `generation` and reset `status`/lease fields on
+  // a `processing` row, not leave it untouched. Without this, the worker's `generation` fence never
+  // trips — the in-flight (pre-reopen) generation's terminal write still matches
+  // `status: 'processing', generation: claimed.generation` and lands stale content as `ready`, and
+  // the respondent's post-reopen answers never get a fresh generation. Also: leaving `lockedBy`
+  // set while flipping `status` to `queued` would strand the row — `claimableWhere` in worker.ts
+  // only treats a `queued` row as claimable when `lockedBy` is null.
+  it('force-requeues a processing row, bumping generation and resetting status + lease so the worker fence trips and the row is re-claimable', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({ status: 'processing' });
+
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(true);
+
+    expect(prisma.appRespondentReport.create).not.toHaveBeenCalled();
+    expect(prisma.appRespondentReport.update).toHaveBeenCalledTimes(1);
+    const call = (prisma.appRespondentReport.update as Mock).mock.calls[0][0];
+    expect(call.where).toEqual({ sessionId: 'sess-1' });
+    expect(call.data).toMatchObject({
+      status: 'queued',
+      lockedBy: null,
+      lockedAt: null,
+      generation: { increment: 1 },
+    });
+  });
+
+  it('force-requeues a ready row, clearing generated fields and bumping generation — but preserves notifyEmail', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({ status: 'ready' });
+
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(true);
+
+    expect(prisma.appRespondentReport.update).toHaveBeenCalledTimes(1);
+    const call = (prisma.appRespondentReport.update as Mock).mock.calls[0][0];
+    expect(call.where).toEqual({ sessionId: 'sess-1' });
+    expect(call.data).toMatchObject({
+      status: 'queued',
+      mode: 'raw_plus_insights',
+      formatted: false,
+      completionPct: null,
+      costUsd: null,
+      error: null,
+      generatedAt: null,
+      deliveredRevisionId: null,
+      lockedBy: null,
+      lockedAt: null,
+      generation: { increment: 1 },
+    });
+    // content/methodRecord are cleared via Prisma.DbNull, not a plain JS null — assert presence
+    // rather than a strict equality the sentinel value would fail.
+    expect(call.data).toHaveProperty('content');
+    expect(call.data).toHaveProperty('methodRecord');
+    // notifyEmail is deliberately NOT in the update payload — a respondent who opted in before a
+    // failure should still get emailed once the new generation succeeds.
+    expect(call.data).not.toHaveProperty('notifyEmail');
+  });
+
+  it('force-requeues a failed row with the same clobber behaviour as ready', async () => {
+    (prisma.appRespondentReport.findUnique as Mock).mockResolvedValue({ status: 'failed' });
+
+    await expect(enqueueOrRegenerateRespondentReport('sess-1')).resolves.toBe(true);
+
+    const call = (prisma.appRespondentReport.update as Mock).mock.calls[0][0];
+    expect(call.data).toMatchObject({ status: 'queued', generation: { increment: 1 } });
+    expect(call.data).not.toHaveProperty('notifyEmail');
   });
 });

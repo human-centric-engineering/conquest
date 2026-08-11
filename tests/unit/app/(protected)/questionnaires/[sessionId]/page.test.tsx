@@ -269,6 +269,7 @@ function makeStatus(
       anonymous: false,
       ref: null,
       experience: null,
+      reopenAvailable: false,
     },
   };
 }

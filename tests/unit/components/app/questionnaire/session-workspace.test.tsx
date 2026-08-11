@@ -141,8 +141,29 @@ vi.mock('@/components/app/questionnaire/lifecycle/early-finish-control', () => (
     </div>
   ),
 }));
+// Completion stub surfaces the reopen wiring (canReopen/onReopen/reopenBusy) as data attributes
+// plus a clickable button, so the "Continue answering" prop threading from SessionWorkspace's
+// lifecycle hook can be pinned without rendering the real SessionComplete.
 vi.mock('@/components/app/questionnaire/lifecycle/session-complete', () => ({
-  SessionComplete: () => <div data-testid="session-complete" />,
+  SessionComplete: ({
+    canReopen,
+    onReopen,
+    reopenBusy,
+  }: {
+    canReopen?: boolean;
+    onReopen?: () => void;
+    reopenBusy?: boolean;
+  }) => (
+    <div
+      data-testid="session-complete"
+      data-can-reopen={String(Boolean(canReopen))}
+      data-reopen-busy={String(Boolean(reopenBusy))}
+    >
+      <button type="button" onClick={onReopen}>
+        complete-reopen
+      </button>
+    </div>
+  ),
 }));
 // Final-check modal stub surfaces `onClarify` / `onFinishAnyway` as buttons so the held-probe
 // escape-hatch wiring can be driven without the real Dialog.
@@ -317,11 +338,13 @@ function lifecycleReturn(over: Record<string, unknown> = {}) {
     canFinishEarly: false,
     canPause: false,
     canResume: false,
+    canReopen: false,
     refetch: lifecycleRefetch,
     pause: vi.fn(),
     resume: vi.fn(),
     submit: vi.fn(),
     finishEarly: vi.fn(),
+    reopen: vi.fn(),
     ...over,
   };
 }
@@ -769,6 +792,7 @@ describe('SessionWorkspace', () => {
       anonymous: false,
       ref: null,
       experience: null,
+      reopenAvailable: false,
     };
     render(<SessionWorkspace sessionId="s1" initialStatusView={statusSeed} />);
 
@@ -925,6 +949,18 @@ describe('SessionWorkspace', () => {
     expect(screen.getByTestId('session-complete')).toBeInTheDocument();
     expect(screen.queryByTestId('chat')).not.toBeInTheDocument();
     expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+  });
+
+  it('wires canReopen/onReopen/reopenBusy from the lifecycle hook into SessionComplete', () => {
+    const reopen = vi.fn();
+    setup({ status: 'completed', canSend: false }, {}, { canReopen: true, reopen, busy: true });
+
+    const complete = screen.getByTestId('session-complete');
+    expect(complete.dataset.canReopen).toBe('true');
+    expect(complete.dataset.reopenBusy).toBe('true');
+
+    fireEvent.click(within(complete).getByRole('button', { name: 'complete-reopen' }));
+    expect(reopen).toHaveBeenCalledTimes(1);
   });
 
   it('shows the completion screen for a reopened completed session, not the "not active" chat', () => {

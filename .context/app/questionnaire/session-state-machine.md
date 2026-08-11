@@ -25,12 +25,18 @@ sub-flag. It's gated by the master questionnaires flag only.
 | ------------- | :------: | :-------: | :---------: | :---------: |
 | **active**    | ✅ pause |     —     | ✅ complete | ✅ abandon  |
 | **paused**    |    —     | ✅ resume |     ❌      | ✅ abandon  |
-| **completed** |    ❌    |    ❌     |      —      |     ❌      |
+| **completed** |    ❌    |   ❌\*    |      —      |     ❌      |
 | **abandoned** |    ❌    |    ❌     |     ❌      |      —      |
+
+\* Except the narrow, separately-gated respondent **reopen** action (early-finish only) —
+see [Reopen (early-finish only)](#reopen-early-finish-only) below. It bypasses
+`classifyTransition`/`LEGAL_TRANSITIONS` entirely via its own seam, so this matrix's ❌
+remains true for every other caller (`resumeSession`, the admin `/transition` route).
 
 - `paused → completed` is **illegal**: completion runs the F4.5 gate/sweep over a _live_
   session, so a paused session must `resume` first.
-- `completed` / `abandoned` are **terminal**.
+- `completed` / `abandoned` are **terminal** — for `classifyTransition` and the shared
+  matrix, unconditionally and always.
 - A **self-edge** (`from === to`, including terminal re-entry like `completed → completed`)
   is an idempotent **no-op** — no status change, **no event written**. This is what keeps
   the F4.5 accept→submit path idempotent.
@@ -38,23 +44,62 @@ sub-flag. It's gated by the master questionnaires flag only.
 
 `classifyTransition(from, to)` returns `'apply' | 'noop' | 'illegal'` — the single switch
 the seam consumes. `canTransition`, `isTerminal`, `assertTransition`, and `eventTypeFor`
-round out the core.
+round out the core. **None of these were changed** to add the reopen exception — see below.
+
+## Reopen (early-finish only)
+
+The respondent early-finish "Continue answering" control (report screen, F-early-finish-
+reopen) lets a `completed` session go back to `active` — but only when it completed via the
+early-finish escape hatch, not a full natural completion. This is deliberately **not** an
+edge in `LEGAL_TRANSITIONS`: adding `completed: ['active']` there would let every caller of
+the shared matrix (`resumeSession`, the admin `/transition` route) reopen _any_ completed
+session unconditionally, with no eligibility check.
+
+Instead it's a separate, narrow path:
+
+- **Pure eligibility** — `isReopenEligible` (`lib/app/questionnaire/session/reopen-logic.ts`):
+  `status === 'completed' && allowEarlyFinish && !isExperienceLeg && latestCompletedReason === 'respondent_early_finish'`.
+  `allowEarlyFinish` is read **live** from the version's current config, not a snapshot from
+  the original early finish — an admin who disables the toggle also revokes reopen for
+  sessions that already early-finished under it.
+- **Impure gate** — `resolveReopenEligibility` (`app/api/v1/app/questionnaire-sessions/_lib/reopen-eligibility.ts`):
+  resolves the three inputs above (current config, experience-leg membership via the report
+  enqueue module's `isExperienceLeg`, and the `reason` on the most recent `completed`-type
+  session event) and feeds the pure decider. Consumed by both the status route (projecting
+  `SessionStatusView.reopenAvailable`) and the lifecycle route (gating the action itself).
+- **Seam writer** — `reopenSession` (`app/api/v1/app/questionnaires/_lib/sessions.ts`): its
+  own `$transaction`, **not** a `transitionSession` wrapper. Updates status to `active`,
+  writes a `reopened` event (`fromStatus: 'completed'`, `toStatus: 'active'`), and reverts a
+  currently-`completed` linked invitation back to `opened` (mirrors `transitionSession`'s
+  complete-time stamp; never touches `revoked`/`expired`). A defensive `status !== 'completed'`
+  check throws `SessionTransitionError` — the ROUTE is expected to have already called
+  `resolveReopenEligibility` and refused with 409 before reaching here.
+- **Route** — `POST …/questionnaire-sessions/:id/lifecycle` gains a `reopen` action,
+  available to **both** authenticated and anonymous respondents (unlike `pause`/`resume`,
+  which are signed-in only) — see [session-lifecycle.md](./session-lifecycle.md).
+- Re-finishing after a reopen force-regenerates the (1:1) `AppRespondentReport` row rather
+  than upserting idempotently — see [respondent-report.md](./respondent-report.md).
 
 ## The event log
 
 `AppQuestionnaireSessionEvent` is the append-only trail (`onDelete: Cascade` — it follows
 the session). One row per recorded event, `eventType` from `SESSION_EVENT_TYPES`:
 
-| eventType          | when                         | from/toStatus          |
-| ------------------ | ---------------------------- | ---------------------- |
-| `paused`           | `active → paused`            | active / paused        |
-| `resumed`          | `paused → active`            | paused / active        |
-| `completed`        | `active → completed`         | active / completed     |
-| `abandoned`        | `active\|paused → abandoned` | (from) / abandoned     |
-| `created`          | real respondent session born | null / active _(F6.1)_ |
-| `cost_cap_reached` | budget hit (non-transition)  | null / null            |
+| eventType          | when                                                | from/toStatus          |
+| ------------------ | --------------------------------------------------- | ---------------------- |
+| `paused`           | `active → paused`                                   | active / paused        |
+| `resumed`          | `paused → active`                                   | paused / active        |
+| `completed`        | `active → completed`                                | active / completed     |
+| `abandoned`        | `active\|paused → abandoned`                        | (from) / abandoned     |
+| `reopened`         | `completed → active` (early-finish only, see above) | completed / active     |
+| `created`          | real respondent session born                        | null / active _(F6.1)_ |
+| `cost_cap_reached` | budget hit (non-transition)                         | null / null            |
 
-`resumed` names the resume edge distinctly from the initial `active`. `created` and
+`resumed` names the resume edge distinctly from the initial `active`; `reopened` likewise
+names the early-finish-only reopen edge distinctly from `resumed` (they have different
+eligibility and different `from`/`to` pairs), and is the one deliberate, separately-gated
+exception to `completed` being terminal — see [Reopen (early-finish only)](#reopen-early-finish-only).
+`created` and
 `cost_cap_reached` are **non-transition** markers: `created` is reserved for when F6.1
 binds a real respondent session (F4.6 doesn't create real sessions — the preview session
 is admin-exercise scaffolding); `cost_cap_reached` has its hook now (see below) but is

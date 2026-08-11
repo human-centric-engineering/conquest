@@ -188,7 +188,7 @@ export default async function QuestionnaireSessionPage({
 
   return (
     <div className={`${RESPONDENT_SHELL} h-[calc(100vh-12rem)]`}>
-      <BrandThemeProvider theme={theme} header={bandHeader}>
+      <BrandThemeProvider theme={theme} header={bandHeader} anonymous={anonymous}>
         <SessionEntry
           glossary={glossary}
           glossaryAppendix={glossaryAppendix}

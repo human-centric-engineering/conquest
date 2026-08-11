@@ -1,7 +1,8 @@
 # Session lifecycle UX (F7.3)
 
 > The respondent-facing surface for the session's lifecycle: pause/resume, the
-> completion-offer → submit flow, the cost-cap state, and the anonymous-mode indicator.
+> completion-offer → submit flow, and the cost-cap state. (The anonymous-mode indicator started
+> here too; it now lives on the brand band — see the component list below.)
 > Built on the F4.6 state machine, the F4.5 completion logic, and the F6.3 cost cap — F7.3
 > is the **respondent's** window onto states the backend already models.
 
@@ -19,11 +20,11 @@ The F6.1 SSE stream emits only `start/content/warning/done/error`. Rather than r
 contract, F7.3 follows the same decision as the F7.2 answer panel: a **status read endpoint
 refetched on turn-settle**, plus two mutations.
 
-| Endpoint                                                | Who                   | Purpose                                            |
-| ------------------------------------------------------- | --------------------- | -------------------------------------------------- |
-| `GET /api/v1/app/questionnaire-sessions/:id/status`     | both respondent kinds | `SessionStatusView`: completion + cost tier + anon |
-| `POST /api/v1/app/questionnaire-sessions/:id/lifecycle` | **signed-in only**    | `{ action: 'pause' \| 'resume' }`                  |
-| `POST /api/v1/app/questionnaire-sessions/:id/submit`    | both respondent kinds | accept → `completed` (the sole respondent path)    |
+| Endpoint                                                | Who                                                    | Purpose                                                     |
+| ------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------- |
+| `GET /api/v1/app/questionnaire-sessions/:id/status`     | both respondent kinds                                  | `SessionStatusView`: completion + cost tier + anon + reopen |
+| `POST /api/v1/app/questionnaire-sessions/:id/lifecycle` | `pause`/`resume` **signed-in only**; `reopen` **both** | `{ action: 'pause' \| 'resume' \| 'abandon' \| 'reopen' }`  |
+| `POST /api/v1/app/questionnaire-sessions/:id/submit`    | both respondent kinds                                  | accept → `completed` (the sole respondent path)             |
 
 All three reuse `resolveTurnAccess` (authed owner OR a valid anonymous `X-Session-Token`).
 Gate order is the house pattern: **load → access (401/403) → action**.
@@ -39,6 +40,7 @@ F4.5 assessment + F6.3 cost tier + F4.6 status into:
   completion: { kind, coverage, answeredCount, requiredUnansweredKeys, capReached },
   cost: { tier } | null,           // coarse tier ONLY — never the raw USD spend
   anonymous,
+  reopenAvailable,                 // completed via early-finish AND still reopenable — see below
 }
 ```
 
@@ -76,6 +78,30 @@ still see system-driven states (budget pause, completed) via `GET …/status`. T
 the rule in `canPause`/`canResume` so the UI never offers an action that would 403; a
 budget-paused session (`cost.tier === 'hard'`) is **not** resumable (it would re-cap at once).
 
+**`reopen` is a separate action with its own (looser) access rule** — see
+[Reopen: both respondent kinds](#reopen-both-respondent-kinds) below. It is NOT swept into the
+anonymous-refusal branch above.
+
+## Reopen: both respondent kinds
+
+The early-finish "Continue answering" control (on `SessionComplete`, the report screen) lets a
+respondent who finished via the early-finish escape hatch go back into the conversation.
+Unlike pause/resume, `reopen` is available to **anonymous respondents too**: it's an
+immediate, same-tab action taken while the access token is already in hand (the respondent is
+looking at the report page in the same session), not a durable resume-in-a-future-visit —
+which is specifically what the pause/resume anonymous restriction guards against.
+
+Gated server-side by `resolveReopenEligibility` (completed via the early-finish escape hatch,
+`allowEarlyFinish` still on, not an experience-run leg) — see
+[`session-state-machine.md`](./session-state-machine.md#reopen-early-finish-only) for the full
+mechanism (pure decider, seam writer, the `reopened` event, and why it deliberately isn't a
+`LEGAL_TRANSITIONS` edge). `useSessionLifecycle` exposes `canReopen`/`reopen()`, mirroring
+`canResume`/`resume()`'s shape but **not** anonymous-gated. On success `reopen()` pushes
+`stream.applyStatus('idle')`, which — together with the hook's own refetch flipping
+`lifecycle.view.status` — makes `SessionComplete` unmount and the chat surface re-render, the
+same fallthrough `session-workspace.tsx` already relies on for a page-reload landing on a
+completed session.
+
 ## UI wiring
 
 `SessionWorkspace` lifts a third hook, `useSessionLifecycle`, alongside the F7.2 stream + panel
@@ -84,12 +110,18 @@ view. Lifecycle actions change status server-side, then push the authoritative s
 shared stream via `stream.applyStatus(...)` (so the composer enables/disables in lockstep) and
 refetch.
 
-- **`SessionLifecycleBar`** — a quiet strip above the chat: anonymous badge, Pause/Resume
-  control, soft cost-budget hint, action errors. Renders nothing when there's nothing to say.
+- **`SessionLifecycleBar`** — a quiet strip above the chat: Pause/Resume control, soft
+  cost-budget hint, session ref + transcript download, action errors. Renders nothing when
+  there's nothing to say. The **anonymity notice is not on this strip** — it rides the brand
+  band above the conversation (`BrandThemeProvider`), one quiet line under the questionnaire
+  title, aligned with it, so it costs no row of its own. The admin session viewer has no band,
+  so it shows an `Anonymous` badge in its own header row instead.
 - **`CompletionOffer`** — a Submit CTA above the chat, shown when `canSubmit`. "Keep going"
   dismisses it; it reappears on the next settle if still offerable.
 - **`SessionComplete`** — replaces the workspace on `completed`: a calm, themed confirmation
   (distinct in tone from `ChatErrorPanel`'s blocking states), acknowledging the captured count.
+  When `canReopen` (early-finish origin, config still on, not an experience leg), a secondary
+  "Continue answering" control calls `onReopen` — see [Reopen: both respondent kinds](#reopen-both-respondent-kinds).
 
 The authed page SSR-seeds the status view (`loadSessionStatus`) and maps it to the surface's
 initial chat status — a budget-paused session (`hard` tier) becomes terminal `cost_capped`, a

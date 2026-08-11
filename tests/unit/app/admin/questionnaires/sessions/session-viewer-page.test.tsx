@@ -331,4 +331,27 @@ describe('SessionViewerPage', () => {
       expect(resolveInlineCorrectionForVersion).not.toHaveBeenCalled();
     });
   });
+
+  describe('anonymous badge', () => {
+    it('shows an "Anonymous" badge when the view is anonymised', async () => {
+      // Arrange: identity is redacted by loadAdminSessionView in anonymous mode.
+      vi.mocked(loadAdminSessionView).mockResolvedValue(
+        makeView({ anonymous: true }) as unknown as Awaited<ReturnType<typeof loadAdminSessionView>>
+      );
+
+      // Act
+      render(await SessionViewerPage({ params: params() }));
+
+      // Assert
+      expect(screen.getByText('Anonymous')).toBeInTheDocument();
+    });
+
+    it('omits the "Anonymous" badge for an identified session', async () => {
+      // Arrange: default fixture carries no `anonymous` flag.
+      render(await SessionViewerPage({ params: params() }));
+
+      // Assert
+      expect(screen.queryByText('Anonymous')).not.toBeInTheDocument();
+    });
+  });
 });

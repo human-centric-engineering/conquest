@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildSessionStatusView,
   canSubmitSession,
+  canReopen,
   type SessionStatusInput,
 } from '@/lib/app/questionnaire/session/status-view';
 import type {
@@ -42,6 +43,7 @@ function input(over: Partial<SessionStatusInput> = {}): SessionStatusInput {
     anonymous: false,
     ref: null,
     experience: null,
+    reopenAvailable: false,
     ...over,
   };
 }
@@ -101,6 +103,42 @@ describe('buildSessionStatusView', () => {
     );
     expect(view.status).toBe('paused');
     expect(view.cost).toEqual({ tier: 'hard' });
+  });
+
+  it('projects reopenAvailable through verbatim', () => {
+    expect(buildSessionStatusView(input({ reopenAvailable: true })).reopenAvailable).toBe(true);
+    expect(buildSessionStatusView(input({ reopenAvailable: false })).reopenAvailable).toBe(false);
+  });
+});
+
+describe('canReopen', () => {
+  const cases: Array<[string, ReturnType<typeof buildSessionStatusView>, boolean]> = [
+    [
+      'completed + available',
+      buildSessionStatusView(input({ status: 'completed', reopenAvailable: true })),
+      true,
+    ],
+    [
+      'completed + unavailable',
+      buildSessionStatusView(input({ status: 'completed', reopenAvailable: false })),
+      false,
+    ],
+    // reopenAvailable would never be true for a non-completed session in practice (the seam only
+    // resolves it when status === 'completed'), but the pure helper still gates on status defensively.
+    [
+      'active + available (defensive)',
+      buildSessionStatusView(input({ status: 'active', reopenAvailable: true })),
+      false,
+    ],
+    [
+      'paused + unavailable',
+      buildSessionStatusView(input({ status: 'paused', reopenAvailable: false })),
+      false,
+    ],
+  ];
+
+  it.each(cases)('%s → %s', (_label, view, expected) => {
+    expect(canReopen(view)).toBe(expected);
   });
 });
 

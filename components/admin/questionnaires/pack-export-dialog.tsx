@@ -1,0 +1,192 @@
+'use client';
+
+/**
+ * PackExportDialog — download a branded Questionnaire Pack (PDF/CSV/Markdown).
+ *
+ * Lets the admin pick which of the pack's six sections to include (all ticked by default except
+ * "Evaluation findings", which is opt-in — see its description) and the output format, then
+ * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. Opened from
+ * {@link file://./definition-export-menu.tsx}'s "Download pack…" item, the same way that menu
+ * already opens {@link file://./import-definition-dialog.tsx}.
+ *
+ * The download URL is dynamic (it depends on the checkbox/format state), so unlike the menu's static
+ * `<a download>` links, the Download button sets `window.location.href` directly — same-origin GET,
+ * auth cookie carries over, `Content-Disposition: attachment` forces the download without navigating
+ * away from the page.
+ */
+
+import { useState } from 'react';
+import { Download } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { FieldHelp } from '@/components/ui/field-help';
+import { API } from '@/lib/api/endpoints';
+import { DEFAULT_PACK_INCLUDE } from '@/lib/app/questionnaire/export/build-pack-model';
+
+export interface PackExportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  questionnaireId: string;
+  versionId: string;
+}
+
+type PackFormat = 'pdf' | 'csv' | 'md';
+
+const FORMAT_LABELS: Record<PackFormat, string> = {
+  pdf: 'PDF',
+  csv: 'CSV',
+  md: 'Markdown',
+};
+
+interface SectionOption {
+  key: 'meta' | 'questions' | 'dataSlots' | 'definitions' | 'setup' | 'evaluations';
+  label: string;
+  description: string;
+}
+
+const SECTIONS: SectionOption[] = [
+  {
+    key: 'meta',
+    label: 'Title, version & goals',
+    description: 'Title, version number, goal, and audience.',
+  },
+  {
+    key: 'questions',
+    label: 'Questions',
+    description: 'The full section-by-section question structure.',
+  },
+  {
+    key: 'dataSlots',
+    label: 'Data slots',
+    description: 'The semantic data slots and the questions each one covers.',
+  },
+  {
+    key: 'definitions',
+    label: 'Definitions',
+    description: 'The accepted glossary terms and their definitions.',
+  },
+  {
+    key: 'setup',
+    label: 'Experience setup',
+    description: 'A summary of how the respondent experience is configured.',
+  },
+  {
+    key: 'evaluations',
+    label: 'Evaluation findings',
+    description:
+      "The AI judge panel's latest scores and findings for this version, including suggestions not yet reviewed. Off by default — review before sharing externally.",
+  },
+];
+
+export function PackExportDialog({
+  open,
+  onOpenChange,
+  questionnaireId,
+  versionId,
+}: PackExportDialogProps) {
+  const [included, setIncluded] =
+    useState<Record<SectionOption['key'], boolean>>(DEFAULT_PACK_INCLUDE);
+  const [format, setFormat] = useState<PackFormat>('pdf');
+
+  const nothingIncluded = Object.values(included).every((v) => !v);
+
+  function handleDownload() {
+    const url = new URL(
+      API.APP.QUESTIONNAIRES.versionPack(questionnaireId, versionId),
+      window.location.origin
+    );
+    url.searchParams.set('format', format);
+    for (const section of SECTIONS) {
+      url.searchParams.set(section.key, String(included[section.key]));
+    }
+    window.location.href = url.toString();
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Download questionnaire pack</DialogTitle>
+          <DialogDescription>
+            A shareable, ConQuest-branded document covering everything about how this questionnaire
+            is set up.{' '}
+            <FieldHelp title="Questionnaire pack">
+              <p>
+                Choose which sections to include and a format. PDF is best for sharing or printing;
+                CSV opens in a spreadsheet; Markdown is plain text for docs or wikis. Every format
+                carries the same content.
+              </p>
+            </FieldHelp>
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {SECTIONS.map((section) => (
+            <div key={section.key} className="flex items-start gap-2">
+              <Checkbox
+                id={`pack-section-${section.key}`}
+                checked={included[section.key]}
+                onCheckedChange={(checked) =>
+                  setIncluded((prev) => ({ ...prev, [section.key]: checked }))
+                }
+                className="mt-0.5"
+              />
+              <Label htmlFor={`pack-section-${section.key}`} className="flex-1 font-normal">
+                <span className="font-medium">{section.label}</span>
+                <span className="text-muted-foreground block text-xs">{section.description}</span>
+              </Label>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="pack-format">Format</Label>
+          <Select value={format} onValueChange={(v) => setFormat(v as PackFormat)}>
+            <SelectTrigger id="pack-format">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(FORMAT_LABELS) as PackFormat[]).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {FORMAT_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {nothingIncluded && (
+          <p className="text-destructive text-sm">Pick at least one section to include.</p>
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" onClick={handleDownload} disabled={nothingIncluded}>
+            <Download className="mr-1.5 h-4 w-4" />
+            Download
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

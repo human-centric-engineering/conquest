@@ -28,6 +28,7 @@ import {
 import { experienceContextForSession } from '@/app/api/v1/app/experiences/_lib/run-read';
 import { buildTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import { sumSessionTurnCost } from '@/app/api/v1/app/questionnaires/_lib/turns';
+import { resolveReopenEligibility } from '@/app/api/v1/app/questionnaire-sessions/_lib/reopen-eligibility';
 
 /** What the route needs: access fields + the rendered status view. */
 export interface LoadedSessionStatus {
@@ -88,6 +89,13 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
   // read that errors must not take down the lifecycle status the whole respondent UI depends on.
   const experience = await experienceContextForSession(sessionId).catch(() => null);
 
+  // Reopen eligibility only matters (and only costs a query) once the session is actually
+  // completed — an active/paused session is never reopenable, so skip the extra reads on the
+  // hot path. Fail-soft like `experience` above: an eligibility read that errors must not take
+  // down the whole lifecycle status.
+  const reopenAvailable =
+    status === 'completed' ? await resolveReopenEligibility(sessionId).catch(() => false) : false;
+
   const view = buildSessionStatusView({
     status,
     assessment,
@@ -97,6 +105,7 @@ export async function loadSessionStatus(sessionId: string): Promise<LoadedSessio
     // The support reference comes from the same turn-context load (null for pre-column rows).
     ref: loaded.session.publicRef ?? null,
     experience,
+    reopenAvailable,
   });
 
   return {

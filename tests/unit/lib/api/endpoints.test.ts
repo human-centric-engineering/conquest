@@ -1086,6 +1086,18 @@ describe('API Endpoints', () => {
     });
   });
 
+  describe('APP.EXPERIENCES.runStatus — sessionId query-string ternary', () => {
+    it('appends the sessionId query string when sessionId is provided', () => {
+      const path = API.APP.EXPERIENCES.runStatus('run1', 'sess1');
+      expect(path).toBe('/api/v1/app/experiences/runs/run1/status?sessionId=sess1');
+    });
+
+    it('omits the query string when sessionId is not provided', () => {
+      const path = API.APP.EXPERIENCES.runStatus('run1');
+      expect(path).toBe('/api/v1/app/experiences/runs/run1/status');
+    });
+  });
+
   describe('APP.QUESTIONNAIRES endpoint builders', () => {
     const Q = API.APP.QUESTIONNAIRES;
     const base = '/api/v1/app/questionnaires';
@@ -1105,6 +1117,7 @@ describe('API Endpoints', () => {
       expect(Q.versionNextQuestion('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/next-question`);
       expect(Q.versionEmbedQuestions('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/embed-questions`);
       expect(Q.versionExport('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/export`);
+      expect(Q.versionPack('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/pack`);
       expect(Q.versionDiagnostics('qn1', 'v1')).toBe(`${base}/qn1/versions/v1/diagnostics`);
       expect(Q.invitationDiagnostics('qn1', 'v1', 'inv1')).toBe(
         `${base}/qn1/versions/v1/diagnostics/inv1`
@@ -1156,5 +1169,39 @@ describe('API Endpoints', () => {
         `${base}/qn1/versions/v1/evaluations/run1/findings/f1/apply`
       );
     });
+  });
+
+  // `API` is a flat registry of path builders (string constants + pure template-literal
+  // functions), not business logic — there is no per-builder behaviour to assert beyond "it
+  // returns a well-formed API path", and the object is large and grows often (new admin/app
+  // surfaces add builders regularly). Hand-writing one `it()` per builder above pins the
+  // interesting ones (interpolation order, encodeURIComponent, optional-arg branches); this
+  // generic walk exists purely to keep line/function coverage honest as the registry grows,
+  // without demanding a bespoke assertion for every new one-line path builder.
+  describe('every builder resolves to a well-formed path (generic coverage sweep)', () => {
+    function walk(node: unknown, path: string): void {
+      if (typeof node === 'function') {
+        it(`${path} returns a /api/ path`, () => {
+          const args = Array.from({ length: node.length }, (_, i) => `arg${i}`);
+          const result = (node as (...a: string[]) => string)(...args);
+          expect(typeof result).toBe('string');
+          expect(result).toMatch(/^\/api\//);
+        });
+        return;
+      }
+      if (typeof node === 'string') {
+        it(`${path} is a /api/ path`, () => {
+          expect(node).toMatch(/^\/api\//);
+        });
+        return;
+      }
+      if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) {
+          walk(value, `${path}.${key}`);
+        }
+      }
+    }
+
+    walk(API, 'API');
   });
 });

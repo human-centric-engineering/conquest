@@ -52,7 +52,7 @@ describe('processQueuedReportRevisions', () => {
     (prisma.appRespondentReportRevision.findFirst as Mock).mockResolvedValue(null);
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(prisma.appRespondentReportRevision.updateMany).not.toHaveBeenCalled();
   });
 
@@ -65,7 +65,7 @@ describe('processQueuedReportRevisions', () => {
     });
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, superseded: 0 });
 
     // Generated with the session id + the NARROWED snapshot settings (not the version config).
     expect(generateRespondentReportWithSettings).toHaveBeenCalledWith(
@@ -93,7 +93,7 @@ describe('processQueuedReportRevisions', () => {
     (generateRespondentReportWithSettings as Mock).mockRejectedValue(new Error('no provider'));
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, superseded: 0 });
 
     const failWrite = (prisma.appRespondentReportRevision.updateMany as Mock).mock.calls.find(
       (c) => c[0]?.data?.status === 'failed'
@@ -111,7 +111,7 @@ describe('processQueuedReportRevisions', () => {
     (prisma.appRespondentReportRevision.updateMany as Mock).mockResolvedValue({ count: 0 });
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(generateRespondentReportWithSettings).not.toHaveBeenCalled();
   });
 
@@ -120,7 +120,7 @@ describe('processQueuedReportRevisions', () => {
     (prisma.appRespondentReportRevision.findUnique as Mock).mockResolvedValue(null);
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, superseded: 0 });
     expect(generateRespondentReportWithSettings).not.toHaveBeenCalled();
   });
 
@@ -137,7 +137,7 @@ describe('processQueuedReportRevisions', () => {
     (prisma.appRespondentReportRevision.count as Mock).mockResolvedValue(25); // ≥ BACKLOG_WARN_THRESHOLD (20)
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 5, succeeded: 5, failed: 0 });
+    expect(result).toEqual({ claimed: 5, succeeded: 5, failed: 0, superseded: 0 });
     expect(prisma.appRespondentReportRevision.count).toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith(
       'respondent report revision backlog',
@@ -157,7 +157,7 @@ describe('processQueuedReportRevisions', () => {
     (prisma.appRespondentReportRevision.count as Mock).mockResolvedValue(3); // < BACKLOG_WARN_THRESHOLD
 
     const result = await processQueuedReportRevisions();
-    expect(result).toEqual({ claimed: 5, succeeded: 5, failed: 0 });
+    expect(result).toEqual({ claimed: 5, succeeded: 5, failed: 0, superseded: 0 });
     expect(logger.warn).not.toHaveBeenCalled();
   });
 });

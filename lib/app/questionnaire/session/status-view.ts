@@ -78,6 +78,14 @@ export interface SessionStatusView {
    * screen and never learns the journey continues.
    */
   experience: SessionExperienceContext | null;
+  /**
+   * Whether a `completed` session may reopen back to `active` (the early-finish "Continue
+   * answering" control) — `false` for any session that isn't `completed`. A top-level fact about
+   * the completed session itself, not a live-session assessment, so it sits alongside `experience`
+   * rather than nested in `completion`. See {@link canReopen} and
+   * `lib/app/questionnaire/session/reopen-logic.ts`.
+   */
+  reopenAvailable: boolean;
 }
 
 /** Inputs the pure builder maps — all already computed by the route seam. */
@@ -94,6 +102,11 @@ export interface SessionStatusInput {
   ref: string | null;
   /** Experience-run membership, already resolved by the route seam. Null when standalone. */
   experience: SessionExperienceContext | null;
+  /**
+   * Reopen eligibility, already resolved by the route seam (`resolveReopenEligibility`) —
+   * `false` when `status !== 'completed'`. See {@link SessionStatusView.reopenAvailable}.
+   */
+  reopenAvailable: boolean;
 }
 
 /** Map the assessment + cost tier + status into the client-safe view. */
@@ -113,6 +126,7 @@ export function buildSessionStatusView(input: SessionStatusInput): SessionStatus
     anonymous: input.anonymous,
     ref: input.ref,
     experience: input.experience,
+    reopenAvailable: input.reopenAvailable,
   };
 }
 
@@ -133,4 +147,13 @@ export function canSubmitSession(view: SessionStatusView): boolean {
  */
 export function canFinishEarly(view: SessionStatusView): boolean {
   return view.status === 'active' && view.completion.earlyFinishAvailable;
+}
+
+/**
+ * Whether the respondent may reopen a `completed` session back into the conversation (the
+ * early-finish "Continue answering" control). Mirrors the route's own gate
+ * (`resolveReopenEligibility`) so the control and the endpoint can't disagree.
+ */
+export function canReopen(view: SessionStatusView): boolean {
+  return view.status === 'completed' && view.reopenAvailable;
 }
