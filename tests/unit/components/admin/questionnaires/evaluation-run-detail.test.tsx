@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { EvaluationRunDetail } from '@/components/admin/questionnaires/evaluation-run-detail';
@@ -93,6 +93,17 @@ async function renderQueue(
   // shows it without a collapse step; the by-question block below covers the default view.
   await switchToJudgeView();
   return result;
+}
+
+/**
+ * Scope a query to the finding cards.
+ *
+ * The filter row carries `<select>`s whose options spell the same words the cards do ("Accepted",
+ * "Major"), so an unscoped `getByText('Accepted')` matches the filter as well as the badge. Queries
+ * about a finding go through here.
+ */
+function inFindings() {
+  return within(screen.getAllByRole('list')[0]);
 }
 
 /** Switch the detail view to the per-judge grouping (the original F5.2/F5.3 default). */
@@ -325,7 +336,7 @@ describe('EvaluationRunDetail review queue', () => {
         body: JSON.stringify({ action: 'accept' }),
       })
     );
-    await waitFor(() => expect(screen.getByText('Accepted')).toBeInTheDocument());
+    await waitFor(() => expect(inFindings().getByText('Accepted')).toBeInTheDocument());
   });
 
   it('apply calls the apply endpoint and shows a fork banner when the response forks', async () => {
@@ -472,7 +483,7 @@ describe('EvaluationRunDetail review queue', () => {
     ]);
     // Both visible under "all".
     expect(screen.getAllByText('Remove the duplicate question.')).toHaveLength(2);
-    await userEvent.click(screen.getByRole('button', { name: 'applied' }));
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'applied');
     await waitFor(() =>
       expect(screen.getAllByText('Remove the duplicate question.')).toHaveLength(1)
     );
@@ -547,10 +558,11 @@ describe('EvaluationRunDetail review queue', () => {
 
   it('renders a change_type op summary and a type select in its edit form', async () => {
     await renderQueue([finding({ proposedEdit: { op: 'change_type', type: 'single_choice' } })]);
-    // Judge view has no sort control, so the only combobox on the page is the edit form's.
+    // The filter row carries its own selects, so scope to the finding card: the combobox under
+    // test is the edit form's type picker, not "Status" or "Severity".
     expect(screen.getByText(/Change answer type/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(screen.getByRole('combobox')).toBeInTheDocument();
+    expect(inFindings().getByRole('combobox')).toBeInTheDocument();
   });
 
   it('dims a terminal (applied) finding and offers no actions', async () => {
@@ -784,6 +796,30 @@ function failedJudgeRun(): EvaluationRunDetailView {
   return r;
 }
 
+/** A run whose contested `q_role` came back with two reconciled wordings. */
+function reconciledRun(): EvaluationRunDetailView {
+  const r = crossJudgeRun();
+  r.reconciled = [
+    {
+      targetKey: 'q_role',
+      alternatives: [
+        {
+          prompt: 'What is your current role?',
+          addresses: ['clarity', 'type_fit'],
+          note: 'One ask, and free text fits it.',
+        },
+        {
+          prompt: 'What do you do here?',
+          addresses: ['clarity'],
+          note: 'Shorter, but loses the seniority signal.',
+        },
+      ],
+      unresolved: ['ordering'],
+    },
+  ];
+  return r;
+}
+
 function npsTarget() {
   return {
     kind: 'question' as const,
@@ -822,15 +858,136 @@ describe('EvaluationRunDetail by-question view', () => {
     );
   });
 
-  it('starts every question group collapsed, showing the index rather than the findings', () => {
+  it('starts every question group collapsed, showing the verdict rather than the findings', () => {
     renderCrossJudge();
-    // Both questions are listed with their tallies...
+    // Both questions are listed, each with what the panel wants done about it...
     expect(screen.getByText('“What is your role and tenure?”')).toBeInTheDocument();
     expect(screen.getByText('“Would you recommend us?”')).toBeInTheDocument();
-    expect(screen.getByText('Flagged by 2 of 7 judges:')).toBeInTheDocument();
-    // ...but no finding body is rendered until one is opened.
+    // …each carrying how much of the panel is behind the proposed action.
+    expect(screen.getAllByText(/\d+ of \d+ judges|all \d+ judges|1 judge/).length).toBeGreaterThan(
+      0
+    );
+    // ...but no individual judgement is rendered until one is opened. The verdict is the
+    // headline; the judges that produced it are the drill-down.
     expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
     expect(screen.queryByText('Ask why, not just whether.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Flagged by')).not.toBeInTheDocument();
+  });
+
+  it('names the action the panel wants, not just that something is wrong', () => {
+    // The verb is the point: a reviewer scanning the index should learn "reword this one, delete
+    // that one" without opening a single card.
+    renderCrossJudge();
+    expect(
+      screen.getAllByText(/Reword it|Delete this question|Change the answer type|Review/).length
+    ).toBeGreaterThan(0);
+  });
+
+  it('shows the reconciled wording on the collapsed card, above the judgements that produced it', () => {
+    // The whole reason the reconcile step exists: a reviewer should see the wording several judges
+    // can live with WITHOUT opening the card and reading four competing rewrites.
+    render(
+      <EvaluationRunDetail
+        run={reconciledRun()}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        dataSlotsAvailable={false}
+      />
+    );
+
+    expect(screen.getByText('“What is your current role?”')).toBeInTheDocument();
+    expect(screen.getByText(/Satisfies Clarity, Type-Fit/)).toBeInTheDocument();
+    // The individual judgements stay closed.
+    expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
+  });
+
+  it('says which judge the rewrite cannot satisfy, rather than implying it satisfies all', () => {
+    // A rewrite offered as the answer to an ordering complaint would be a lie about the panel.
+    render(
+      <EvaluationRunDetail
+        run={reconciledRun()}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        dataSlotsAvailable={false}
+      />
+    );
+
+    expect(
+      screen.getByText('Ordering is not resolved by rewording — that needs a structural change.')
+    ).toBeInTheDocument();
+  });
+
+  it('holds the second wording back until the card is open', async () => {
+    // Two rewrites on a card the reviewer is still scanning recreates the choose-between-rewrites
+    // problem the reconciler exists to remove; the trade-off belongs in the drill-down.
+    render(
+      <EvaluationRunDetail
+        run={reconciledRun()}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        dataSlotsAvailable={false}
+      />
+    );
+    expect(screen.queryByText('“What do you do here?”')).not.toBeInTheDocument();
+    expect(screen.getByText(/1 alternative wording below/)).toBeInTheDocument();
+
+    await expandGroup(Q_ROLE);
+    await waitFor(() => expect(screen.getByText('“What do you do here?”')).toBeInTheDocument());
+  });
+
+  it('prints the dissent next to the headline verdict', async () => {
+    // Two judges want the question reworded and one wants it deleted. Showing "Reword it" alone
+    // would hide a proposed deletion behind a gentler verb until the reviewer opened the card.
+    const target = {
+      kind: 'question' as const,
+      key: 'q_role',
+      label: 'What is your role and tenure?',
+      sectionTitle: 'Background',
+      position: 1,
+      sectionPosition: 1,
+      questionType: 'likert',
+      removed: false,
+    };
+    const contested = run([
+      finding({
+        id: 'c1',
+        dimension: 'clarity',
+        targetKey: 'q_role',
+        target,
+        proposedEdit: { op: 'replace_prompt', prompt: 'What is your role?' },
+      }),
+      finding({
+        id: 'c2',
+        dimension: 'audience_match',
+        targetKey: 'q_role',
+        target,
+        proposedEdit: { op: 'replace_prompt', prompt: 'What is your role?' },
+      }),
+      finding({
+        id: 'c3',
+        dimension: 'goal_match',
+        targetKey: 'q_role',
+        target,
+        proposedEdit: { op: 'delete_question' },
+      }),
+    ]);
+
+    render(
+      <EvaluationRunDetail
+        run={contested}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        dataSlotsAvailable={false}
+      />
+    );
+
+    expect(screen.getByText('Reword it')).toBeInTheDocument();
+    expect(screen.getByText('2 of 3 judges')).toBeInTheDocument();
+    expect(screen.getByText('· 1 judge says delete this question instead')).toBeInTheDocument();
   });
 
   it('shows each question’s answer type on the collapsed index', async () => {
@@ -871,12 +1028,36 @@ describe('EvaluationRunDetail by-question view', () => {
   it('leads each card with the judge, since the group heading already names the question', async () => {
     renderCrossJudge();
     await expandGroup(Q_ROLE);
-    await expandGroup(Q_NPS);
-    // Two clarity findings (one per question), one type_fit — each card names its own judge.
-    expect(screen.getAllByText('Clarity Judge')).toHaveLength(2);
+    // The open question's findings each name their own judge...
+    expect(screen.getByText('Clarity Judge')).toBeInTheDocument();
     expect(screen.getByText('Type-Fit Judge')).toBeInTheDocument();
-    // ...and does not repeat the question, which the group heading already carries.
+    // ...and do not repeat the question, which the group heading already carries.
     expect(screen.getAllByText('“What is your role and tenure?”')).toHaveLength(1);
+  });
+
+  it('opens one question at a time — expanding another closes the first', async () => {
+    // These cards are tall when open. Two at once means scrolling past finished work to reach
+    // unfinished work, so the group behaves as an accordion.
+    renderCrossJudge();
+    await expandGroup(Q_ROLE);
+    expect(screen.getByText('Split the double-barrelled question.')).toBeInTheDocument();
+
+    await expandGroup(Q_NPS);
+    await waitFor(() => {
+      expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument();
+      expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument();
+    });
+  });
+
+  it('closes the open question when its own header is clicked again', async () => {
+    renderCrossJudge();
+    await expandGroup(Q_ROLE);
+    expect(screen.getByText('Split the double-barrelled question.')).toBeInTheDocument();
+
+    await expandGroup(Q_ROLE);
+    await waitFor(() =>
+      expect(screen.queryByText('Split the double-barrelled question.')).not.toBeInTheDocument()
+    );
   });
 
   it('shows the severity tally per question', () => {
@@ -901,38 +1082,42 @@ describe('EvaluationRunDetail by-question view', () => {
     expect(headings()).toEqual(['“What is your role and tenure?”', '“Would you recommend us?”']);
 
     // Worst-first flips them: q_nps has 2 majors to q_role's 1.
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'major');
+    await userEvent.selectOptions(screen.getByLabelText('Sort questions'), 'major');
     await waitFor(() =>
       expect(headings()).toEqual(['“Would you recommend us?”', '“What is your role and tenure?”'])
     );
 
     // Busiest-first also flips them: q_nps has 3 findings to q_role's 2.
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'findings');
+    await userEvent.selectOptions(screen.getByLabelText('Sort questions'), 'findings');
     await waitFor(() =>
       expect(headings()).toEqual(['“Would you recommend us?”', '“What is your role and tenure?”'])
     );
 
     // ...and back, proving the control drives the order rather than the fixture doing so.
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'natural');
+    await userEvent.selectOptions(screen.getByLabelText('Sort questions'), 'natural');
     await waitFor(() =>
       expect(headings()).toEqual(['“What is your role and tenure?”', '“Would you recommend us?”'])
     );
   });
 
-  it('filters by severity across the whole run', async () => {
+  it('filters by severity across the whole run, not just the open question', async () => {
     renderCrossJudge();
-    await expandGroup(Q_ROLE);
     await expandGroup(Q_NPS);
     expect(screen.getByText('Define "recommend".')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'major' }));
+    await userEvent.selectOptions(screen.getByLabelText('Severity'), 'major');
 
     await waitFor(() => {
-      expect(screen.getByText('Split the double-barrelled question.')).toBeInTheDocument();
-      // The info and minor findings drop out, while the majors on both questions remain.
-      expect(screen.queryByText('Define "recommend".')).not.toBeInTheDocument();
-      expect(screen.queryByText('Free text suits this better.')).not.toBeInTheDocument();
+      // The open question keeps only its major finding...
       expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument();
+      expect(screen.queryByText('Define "recommend".')).not.toBeInTheDocument();
+    });
+
+    // ...and the filter reached the closed question too, which still shows a major tally.
+    await expandGroup(Q_ROLE);
+    await waitFor(() => {
+      expect(screen.getByText('Split the double-barrelled question.')).toBeInTheDocument();
+      expect(screen.queryByText('Free text suits this better.')).not.toBeInTheDocument();
     });
   });
 
@@ -948,7 +1133,7 @@ describe('EvaluationRunDetail by-question view', () => {
 
   it('shows an empty state when the filters exclude everything', async () => {
     renderCrossJudge();
-    await userEvent.click(screen.getByRole('button', { name: 'declined' }));
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'declined');
     await waitFor(() =>
       expect(screen.getByText('No findings match these filters.')).toBeInTheDocument()
     );

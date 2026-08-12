@@ -155,7 +155,35 @@ statement that the run was never reconciled.
 
 The alternatives reach the [Questionnaire Pack](./questionnaire-pack.md) through
 `EvaluationRunDetail.reconciled`, rendered under the question they belong to with dimension keys
-mapped to judge labels.
+mapped to judge labels — and the run-detail page reads the same field (below).
+
+### The verdict band — what the reviewer sees first
+
+A by-question card leads with the **verb**, not the evidence: reword / move / delete / change the
+answer type, derived from the findings' effective ops by the pure `summariseGroupActions`
+(`evaluation/group-actions.ts`), followed by the reconciled wording and only then — on expand — the
+individual judgements. The page used to open at the evidence and leave the reviewer to infer the
+verb by reading four suggestions per question.
+
+Three rules hold it honest:
+
+- **Never manufacture a consensus.** The primary action is the one with the most judges behind it;
+  every dissenting action is printed beside it ("· 1 judge says delete this question instead"). The
+  reviewer is arbitrating, and needs both halves to do it.
+- **Ties break by consequence, not by order.** One judge saying delete and one saying reword surfaces
+  the deletion. Not because it is likelier to be right, but because it is the harder change to undo
+  and a collapsed card must never hide it.
+- **The verb follows `editedOverride ?? proposedEdit`** — what apply actually runs. A header reading
+  "Reword it" above a button that deletes the question would be lying about its own control.
+
+The backing count's denominator is the judges that **flagged this question**, not the seven on the
+panel: the other five had nothing to say about it, and counting them as absent votes would read as
+weaker support than the panel actually gave. Who flagged it at all is answered by the judge chips
+once the card is open.
+
+**One card open at a time.** These cards are tall when open (several finding cards, each with its own
+apply controls), so two at once means scrolling past finished work to reach unfinished work. The
+accordion also matches how the reviewing goes: fix one, move to the next.
 
 ## Gating & limits
 

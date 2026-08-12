@@ -73,6 +73,14 @@ export {
 } from '@/lib/app/questionnaire/evaluation/reconcile-prompt';
 
 export {
+  GROUP_ACTION_KINDS,
+  summariseGroupActions,
+  type GroupAction,
+  type GroupActionKind,
+  type GroupActionSummary,
+} from '@/lib/app/questionnaire/evaluation/group-actions';
+
+export {
   reviewFindingSchema,
   type ReviewFindingInput,
 } from '@/lib/app/questionnaire/evaluation/review-schema';

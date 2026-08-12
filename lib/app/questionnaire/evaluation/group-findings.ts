@@ -39,8 +39,13 @@ import type {
 const GAP_GROUP_KEY = 'gap:new-questions';
 const GAP_GROUP_LABEL = 'Questions not yet asked';
 
-/** The op that will actually run: the admin's edit wins over the judge's draft, as at apply. */
-function effectiveOp(finding: EvaluationFindingView): ProposedEdit | null {
+/**
+ * The op that will actually run: the admin's edit wins over the judge's draft, as at apply.
+ * Exported because `group-actions.ts` derives the reviewer-facing verb from the same value — if the
+ * card said "Reword" while apply ran the admin's edited `delete_question`, the header would be
+ * lying about what the button does.
+ */
+export function effectiveOp(finding: EvaluationFindingView): ProposedEdit | null {
   return finding.editedOverride ?? finding.proposedEdit;
 }
 
