@@ -249,15 +249,6 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       isLocal: this.isLocal,
     });
 
-    // Forward a per-request `timeout`/`signal` when the caller supplied one, so a
-    // long streaming job (e.g. live document extraction on a reasoning model) can
-    // override the client's construction-time default rather than being silently
-    // capped by it — mirroring the non-streaming `chat` path above. Undefined ⇒
-    // the client default applies, so this stays backward-compatible.
-    const requestOptions: { timeout?: number; signal?: AbortSignal } = {};
-    if (options.timeoutMs != null) requestOptions.timeout = options.timeoutMs;
-    if (options.signal !== undefined) requestOptions.signal = options.signal;
-
     let stream: AsyncIterable<ChatCompletionChunk>;
     try {
       stream = await this.client.chat.completions.create(params, buildRequestOptions(options));

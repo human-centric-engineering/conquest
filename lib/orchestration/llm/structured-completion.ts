@@ -182,9 +182,8 @@ export async function runStructuredCompletion<T>(
         temperature,
         maxTokens,
         // Both halves: the signal bounds the whole attempt sequence (it is
-        // absolute, so retries share it), while `timeoutMs` caps the individual
-        // HTTP request inside the provider SDK — otherwise a long call is capped
-        // at the provider client's construction default regardless of this one.
+        // absolute, so retries share it), `timeoutMs` caps the individual HTTP
+        // request inside the provider SDK.
         timeoutMs,
         signal: firstSignal,
         ...(responseFormat ? { responseFormat } : {}),
