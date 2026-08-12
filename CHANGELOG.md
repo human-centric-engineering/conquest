@@ -202,6 +202,13 @@ release process.
   in its place (#559).
 ### Added
 
+- **`migrator` and `seeder` Dockerfile stages**, and a profile-gated `seeder`
+  compose service. Both derive from `deps`, so they duplicate no layers and cost
+  a normal `docker build` nothing — BuildKit only materialises the stages the
+  requested target needs. They sit **before** `runner` in the file on purpose:
+  the last stage is what a bare `docker build .` produces, and that must stay
+  the runtime image (#583).
+
 - **`ESCALATION_WEBHOOK_ALLOW_PRIVATE`** — opt a deployment into escalation
   webhooks targeting its own private network (an in-VPC relay), for the case
   where the alternative is no validation at all. Off by default; accepts exactly
@@ -353,6 +360,61 @@ release process.
 
 ### Changed
 
+- **`.env.production` is no longer baked into the production image.**
+  **Action required if you keep runtime configuration there.** `.dockerignore`
+  excluded `.env` and the four `.env.*.local` names but nothing matched
+  `.env.production` or `.env.staging`, so those files entered the build context
+  — and Next's standalone output copies `.env` and `.env.production` into
+  `.next/standalone` (`next/dist/build/index.js:325-337`), where the server
+  loads them at boot. The result was a secrets file shipped inside the runtime
+  image *and* silently supplying `process.env`. Both now stop: a `.dockerignore`
+  rule of `.env.*` keeps them out of the context entirely (`.env.example` is
+  still re-included). A fork that relied on `.env.production` for runtime
+  configuration must supply those values another way — compose `env_file`,
+  `docker run --env-file`, or the platform's environment settings — or they
+  will read as `undefined` in a container that otherwise starts cleanly.
+  Note `.env.production` is **not** in `.gitignore` either, so check you have
+  not committed one (#583).
+
+- **The production runtime image no longer contains the Prisma CLI** — nor the
+  schema, the migrations, or `prisma.config.ts`. **Action required if you run Prisma inside
+  the app container.** `npx prisma …` and `npm run db:migrate:deploy` now fail
+  there with a message naming the replacement rather than a bare
+  `command not found`; `npm run db:seed` fails with `sh: tsx: not found`, since
+  `tsx` was never in that image either. Migrations run from a new `migrator`
+  image built from the same `Dockerfile`; seeding from a new `seeder` image.
+  The reason is that completing the CLI's dependency closure would have meant
+  shipping 133 packages / ~240 MB of deploy-time tooling — Prisma Studio, a WASM
+  Postgres, a charting stack — inside the process that serves traffic. Removing
+  it instead took the image from **739 MB to 402 MB** (arm64, like-for-like;
+  the amd64 image CI builds measures 298 MB). What the app needs
+  (`@prisma/client`, `.prisma/client`, `@prisma/adapter-pg`) arrives through
+  Next's standalone trace.
+  **Render, Railway and Fly.io users must change how migrations run**: all three
+  execute their migration hook inside the deployed image, and Render cannot
+  build a specific Dockerfile stage. Each platform guide now documents a
+  supported alternative, and `.context/deployment/overview.md` carries a
+  portable recipe that runs the real `migrator` image against production (#583).
+- **`docker-compose.prod.yml` gained explicit `target:` and `image:` keys and a
+  `seed` profile.** `migrator` builds the `migrator` target instead of the
+  runtime image and takes its command from the stage's `CMD`; a new
+  profile-gated `seeder` service handles `db:seed` and is never built or started
+  by a plain `up`. The `image:` names reproduce Compose's existing implicit
+  names, so nothing changes for existing stacks (#583).
+- **The CI `docker` job now runs the production stack instead of only building
+  it.** It builds three targets with `load: true`, asserts image invariants
+  (musl-only `sharp`; no Prisma CLI in the runtime image), brings up
+  `db` + `migrator` + `web`, and asserts the migrator exited 0, `web` reached
+  healthy, and a Prisma model query succeeds. Its path filter widened to include
+  `Dockerfile.dev`, `docker-compose*.yml`, `prisma.config.ts` and `prisma/**`,
+  so schema PRs now run it. The job id is unchanged, so `ci-status` needs no
+  edit — forks merging this will not see a conflict in that block (#583).
+- **The `deps` build stage no longer takes a `DATABASE_URL` build argument.** It
+  uses a fixed placeholder, because `prisma generate` only needs the DSN to
+  parse. Build arguments are recorded verbatim in `docker history`, and the
+  `migrator`/`seeder` images derive from `deps` — so a real production DSN would
+  otherwise have been readable from a shipped image (#583).
+
 - **Capability slugs may now contain underscores**
   (`^[a-z0-9]+(?:[_-][a-z0-9]+)*$`) and are capped at 64 characters rather than
   100, matching the provider tool-name limit the slug now has to satisfy — a
@@ -388,6 +450,26 @@ release process.
   explicitly (#509).
 
 ### Fixed
+
+- **The production Docker stack could not start at all.**
+  `docker compose -f docker-compose.prod.yml up` never reached the app: the
+  `migrator` service exited **127** (`sh: prisma: not found`), and `web` waits
+  on `service_completed_successfully`, so it never ran. Two independent faults,
+  both in the `runner` stage: `node_modules/.bin` was never copied, so there was
+  no `prisma` shim — and because a *partial* `node_modules/prisma` was present,
+  `npx` found the package, stopped looking, and never fell back to a registry
+  fetch (which is how this worked before the Prisma CLI was added to the image).
+  Second, the CLI's dependency closure was absent, so invoking the entry point
+  directly gave `Cannot find module 'effect'`. Broken since 2026-04-15 and
+  invisible because CI built the image and never ran it (#583).
+- **`docker compose … exec web npm run db:seed`, documented as REQUIRED on first
+  install, never worked.** `db:seed` is `tsx prisma/seed.ts`; `tsx` is a
+  devDependency and the seed units import from `lib/`, so neither the runner nor
+  any tool it contained could run it. Seeding now has its own image (#583).
+- **Two deployment docs told you to run `curl` inside the container.**
+  `node:24-alpine` does not ship `curl`, so `exec -T web curl -f …` failed
+  regardless of application health. Run health checks from the host, or use
+  `wget -qO-` inside (#583).
 
 - **`package-lock.json` declares `libc` again on 101 native Linux packages.**
   Production is `node:24-alpine` (musl) and `libc` is the only field separating
