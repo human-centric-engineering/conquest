@@ -33,6 +33,11 @@ import {
 import { isRecord } from '@/lib/utils';
 import { toConfigView, CONFIG_SELECT } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import type { AnsweredView, QuestionView } from '@/lib/app/questionnaire/selection';
+import {
+  buildSessionScope,
+  type SessionScope,
+} from '@/app/api/v1/app/questionnaires/_lib/session-scope';
+import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
 import type {
   DataSlotAnsweredView,
   DataSlotTarget,
@@ -193,6 +198,15 @@ export interface LoadedTurnContext {
   byId: Map<string, QuestionView>;
   /** Version goal + audience — used by the conversational question phraser (not the pure core). */
   meta: TurnMeta;
+  /**
+   * Adaptive Scope (P17): what this interview is about.
+   *
+   * `base.questions`, `base.dataSlots` and {@link slots} are ALREADY filtered by it — this is
+   * carried so the route can decide whether the planner needs to run, and so the reasoning trace
+   * can explain why a topic is or is not in play. `scope.active` is false for every version that
+   * never opted in, and nothing downstream behaves differently in that case.
+   */
+  scope: SessionScope;
 }
 
 /** Pull the interviewer-relevant string fields out of the opaque `audience` Json. */
@@ -250,6 +264,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // "Don't nag" ledger for completeness milestones: percent-complete thresholds already
       // banner-shown this session (number[]). Empty list on a session that has raised none.
       raisedMilestones: true,
+      // Adaptive Scope (P17): the frozen decision about which topics this interview covers.
+      // Null on every ordinary session, and before the planner has run on an adaptive one —
+      // both of which resolve to "everything the always-run phases hold". See session-scope.ts.
+      interviewPlan: true,
       version: {
         select: {
           // Version framing for the conversational question phraser (F6 interviewer).
@@ -462,12 +480,40 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
   // generic `targetedQuestionId` column holds a QUESTION id in question mode and a DATA-SLOT id
   // in data-slot mode — resolve against both maps; at most one matches.
   const lastTargetedId = session.turns[0]?.targetedQuestionId ?? null;
+  // Built from the UNSCOPED set on purpose: a turn taken before the plan narrowed the interview may
+  // have targeted a question now out of scope, and the extractor still needs to know what was asked
+  // in order to read the answer to it. Scope governs what is asked NEXT, never what was.
   const byId = new Map(questions.map((q) => [q.id, q]));
   const activeQuestionKey = lastTargetedId ? (byId.get(lastTargetedId)?.key ?? null) : null;
   const activeDataSlotKey = lastTargetedId ? (byDataSlotId.get(lastTargetedId)?.key ?? null) : null;
 
   const { saved: _saved, ...config } = toConfigView(session.version.config);
   void _saved;
+
+  // ── Adaptive Scope (P17) ──────────────────────────────────────────────────────────────────
+  // THE choke point. Filtering here — rather than in each consumer — is what makes scope
+  // impossible to apply inconsistently: targeting, the end-of-run sweep, coverage, completion and
+  // contradiction candidates all read these three lists, so narrowing them once narrows everything.
+  //
+  // Weights are threaded so a `light`-depth topic (the blind-spot check) contributes its most
+  // important members rather than whichever happened to be authored first.
+  const scope = await buildSessionScope(prisma, {
+    versionId: session.versionId,
+    settings: config.adaptiveScope,
+    interviewPlan: session.interviewPlan,
+    weightByQuestionKey: new Map(questions.map((q) => [q.key, q.weight])),
+    weightByDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight])),
+  });
+
+  const scopedQuestions = scope.scope.active
+    ? questions.filter((q) => isQuestionInScope(scope.scope, q.key))
+    : questions;
+  const scopedSlots = scope.scope.active
+    ? slots.filter((s) => isQuestionInScope(scope.scope, s.key))
+    : slots;
+  const scopedDataSlots = scope.scope.active
+    ? dataSlots.filter((d) => isDataSlotInScope(scope.scope, d.key))
+    : dataSlots;
 
   // Sensitivity awareness / safeguarding: the session's remembered disclosures. The running-max
   // level switches the phraser to a gentle tone; the note summaries remind it what to be careful
@@ -513,13 +559,13 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     base: {
       sessionId: session.id,
       config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...config },
-      questions,
+      questions: scopedQuestions,
       answered,
       existingAnswers,
       recentMessages,
       // Data Slots feature: present always (cheap); the route decides whether to run data-slot
       // mode (flag on + dataSlots non-empty). The pure orchestrators read these only in that mode.
-      dataSlots,
+      dataSlots: scopedDataSlots,
       dataSlotAnswered,
       activeDataSlotKey,
       dataSlotAttempts,
@@ -540,9 +586,10 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       // advancing and a presented-but-unanswered question isn't re-picked.
       selectionRound: session._count.turns,
     },
-    slots,
+    slots: scopedSlots,
     activeQuestionKey,
     byId,
     meta,
+    scope,
   };
 }

@@ -17,6 +17,12 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
+import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
+import {
+  narrowAdaptiveScopeSettings,
+  type NotAssessedTopic,
+} from '@/lib/app/questionnaire/scope/types';
 import { logger } from '@/lib/logging';
 import {
   SESSION_STATUSES,
@@ -79,6 +85,12 @@ export interface LoadedSessionExport {
    * the report config includes data slots; loaded unconditionally so the pure builder stays simple.
    */
   dataSlotGroups: ExportDataSlotGroup[];
+  /**
+   * Adaptive Scope (P17): the topics this interview deliberately did not cover (or covered only
+   * as a sample). Empty for every non-adaptive session. Consumed by the report so it can say what
+   * it did not assess, and by the exports so a blank cell reads as *not asked*.
+   */
+  notAssessed: NotAssessedTopic[];
   /** The version this session ran on — the seam resolves the version-scoped glossary from it. */
   versionId: string;
   /** The version's `glossaryReportAppendix` switch: does the RESPONDENT's copy carry the glossary? */
@@ -109,13 +121,21 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
       publicRef: true,
       updatedAt: true,
       versionId: true,
+      interviewPlan: true,
       version: {
         select: {
           versionNumber: true,
           goal: true,
           audience: true,
           questionnaireId: true,
-          config: { select: { anonymousMode: true, glossaryReportAppendix: true } },
+          config: {
+            select: {
+              anonymousMode: true,
+              glossaryReportAppendix: true,
+              // Adaptive Scope (P17): the export must distinguish NOT ASKED from NOT ANSWERED.
+              adaptiveScope: true,
+            },
+          },
           questionnaire: {
             select: {
               title: true,
@@ -131,7 +151,15 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
               title: true,
               questions: {
                 orderBy: { ordinal: 'asc' },
-                select: { key: true, prompt: true, type: true, required: true, typeConfig: true },
+                select: {
+                  key: true,
+                  prompt: true,
+                  type: true,
+                  required: true,
+                  typeConfig: true,
+                  // Adaptive Scope (P17): a `light`-depth topic samples its highest-weight members.
+                  weight: true,
+                },
               },
             },
           },
@@ -139,7 +167,8 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
           // optional "Captured information" appendix; empty for versions not in a data-slot mode.
           dataSlots: {
             orderBy: { ordinal: 'asc' },
-            select: { id: true, name: true, description: true, theme: true },
+            // `key` is Adaptive Scope's addressing (P17) — membership is keys, never row ids.
+            select: { id: true, key: true, name: true, description: true, theme: true },
           },
         },
       },
@@ -199,17 +228,62 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
 
   const turnOrdinal = new Map(row.turns.map((t) => [t.id, t.ordinal]));
 
-  const sections: PanelSectionInput[] = row.version.sections.map((s) => ({
-    sectionId: s.id,
-    title: s.title,
-    slots: s.questions.map((q) => ({
-      slotKey: q.key,
-      prompt: q.prompt,
-      type: q.type,
-      typeConfig: q.typeConfig,
-      required: q.required,
-    })),
-  }));
+  // Adaptive Scope (P17): narrow the record to the interview this respondent actually had.
+  // Without this the export lists every unasked question as UNANSWERED, which reads as a
+  // respondent who skipped forty questions rather than an instrument that never asked them.
+  const scoped = await buildSessionScope(prisma, {
+    versionId: row.versionId,
+    settings: narrowAdaptiveScopeSettings(row.version.config?.adaptiveScope),
+    interviewPlan: row.interviewPlan,
+    weightByQuestionKey: new Map(
+      row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
+    ),
+  });
+
+  const sections: PanelSectionInput[] = row.version.sections
+    .map((s) => ({
+      sectionId: s.id,
+      title: s.title,
+      slots: s.questions
+        .filter((q) => isQuestionInScope(scoped.scope, q.key))
+        .map((q) => ({
+          slotKey: q.key,
+          prompt: q.prompt,
+          type: q.type,
+          typeConfig: q.typeConfig,
+          required: q.required,
+        })),
+    }))
+    .filter((s) => s.slots.length > 0);
+
+  // What the interview deliberately did NOT cover, named by topic. This is the honest half of an
+  // adaptive instrument's record: a report that silently omits what it skipped is a report that
+  // implies it looked everywhere.
+  const notAssessed: NotAssessedTopic[] = [];
+  if (scoped.scope.active) {
+    const countByTopic = new Map<string, number>();
+    for (const section of row.version.sections) {
+      for (const q of section.questions) {
+        if (isQuestionInScope(scoped.scope, q.key)) continue;
+        const topicKey = scoped.scope.topicByQuestionKey.get(q.key);
+        if (!topicKey) continue;
+        countByTopic.set(topicKey, (countByTopic.get(topicKey) ?? 0) + 1);
+      }
+    }
+    for (const topic of scoped.topics) {
+      const questionCount = countByTopic.get(topic.key);
+      if (!questionCount) continue;
+      notAssessed.push({
+        key: topic.key,
+        label: topic.label,
+        questionCount,
+        // A topic that IS in scope but contributed only some members was sampled, not skipped —
+        // the distinction matters, because "we looked lightly" and "we did not look" are different
+        // claims and a report must not blur them.
+        partial: scoped.scope.topicKeys.has(topic.key),
+      });
+    }
+  }
 
   const answers: PanelAnswerInput[] = row.answers.map((a) => ({
     slotKey: a.questionSlot.key,
@@ -230,6 +304,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
   const dataSlotGroups: ExportDataSlotGroup[] = [];
   const groupByTheme = new Map<string, ExportDataSlotGroup>();
   for (const ds of row.version.dataSlots) {
+    if (!isDataSlotInScope(scoped.scope, ds.key)) continue;
     let group = groupByTheme.get(ds.theme);
     if (!group) {
       group = { theme: ds.theme, slots: [] };
@@ -270,6 +345,7 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     sections,
     answers,
     dataSlotGroups,
+    notAssessed,
     versionId: row.versionId,
     glossaryReportAppendix:
       row.version.config?.glossaryReportAppendix ??

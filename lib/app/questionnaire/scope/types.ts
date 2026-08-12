@@ -382,6 +382,21 @@ export interface InterviewPlan {
   decidedAt: string;
 }
 
+/**
+ * One topic an interview did not fully cover, as the report and exports consume it.
+ *
+ * `partial: true` means the topic WAS in scope but contributed only some of its members — a
+ * `light`-depth sample. The distinction is load-bearing: "we looked lightly" and "we did not look"
+ * are different claims about a respondent, and a report that blurs them overstates its own coverage.
+ */
+export interface NotAssessedTopic {
+  key: string;
+  label: string;
+  /** How many of the topic's questions were not asked. */
+  questionCount: number;
+  partial: boolean;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Narrowers                                                                  */
 /* -------------------------------------------------------------------------- */

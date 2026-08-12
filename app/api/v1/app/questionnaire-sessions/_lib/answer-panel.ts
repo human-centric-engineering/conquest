@@ -15,6 +15,9 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
+import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
+import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
 import {
   ANSWER_PROVENANCES,
   ANSWER_SLOT_PANEL_SCOPES,
@@ -108,6 +111,10 @@ export async function loadAnswerPanelState(
               answerSlotPanelScope: true,
               presentationMode: true,
               inlineCorrectionEnabled: true,
+              // Adaptive Scope (P17): the panel must show the interview the respondent is
+              // actually having, not the whole bank. Seeing "12 of 70 answered" after a complete
+              // run is the single most confidence-destroying way this feature could fail.
+              adaptiveScope: true,
             },
           },
           // Data Slots feature: the version's data slots (rendered when dataSlotMode), each with the
@@ -171,24 +178,45 @@ export async function loadAnswerPanelState(
         },
       },
       turns: { select: { id: true, ordinal: true } },
+      // Adaptive Scope (P17): the frozen decision about which topics this interview covers.
+      interviewPlan: true,
+      versionId: true,
     },
   });
   if (!row) return null;
 
+  // Adaptive Scope (P17): narrow the structure to what this respondent is actually being asked.
+  // Applied to the SECTIONS the panel renders and to the data-slot groups below, so progress,
+  // the required-count and the breadth meter all measure the real interview.
+  const scoped = await buildSessionScope(prisma, {
+    versionId: row.versionId,
+    settings: narrowAdaptiveScopeSettings(row.version.config?.adaptiveScope),
+    interviewPlan: row.interviewPlan,
+    weightByQuestionKey: new Map(
+      row.version.sections.flatMap((s) => s.questions.map((q) => [q.key, q.weight] as const))
+    ),
+  });
+
   // Map turn id → 1-based ordinal so an answer's lastUpdatedTurnId becomes a turn index.
   const turnOrdinal = new Map(row.turns.map((t) => [t.id, t.ordinal]));
 
-  const sections: PanelSectionInput[] = row.version.sections.map((s) => ({
-    sectionId: s.id,
-    title: s.title,
-    slots: s.questions.map((q) => ({
-      slotKey: q.key,
-      prompt: q.prompt,
-      type: q.type,
-      typeConfig: q.typeConfig,
-      required: q.required,
-    })),
-  }));
+  const sections: PanelSectionInput[] = row.version.sections
+    .map((s) => ({
+      sectionId: s.id,
+      title: s.title,
+      slots: s.questions
+        .filter((q) => isQuestionInScope(scoped.scope, q.key))
+        .map((q) => ({
+          slotKey: q.key,
+          prompt: q.prompt,
+          type: q.type,
+          typeConfig: q.typeConfig,
+          required: q.required,
+        })),
+    }))
+    // A section left with nothing is not "empty" to the respondent — it was never part of their
+    // interview, so rendering its heading would advertise an absence rather than describe one.
+    .filter((s) => s.slots.length > 0);
 
   const answers: PanelAnswerInput[] = row.answers.map((a) => ({
     slotKey: a.questionSlot.key,
@@ -224,7 +252,10 @@ export async function loadAnswerPanelState(
   // The form surface is always question-based (P-presentation): even when data slots are on,
   // it edits the underlying questions directly, so it keeps the question sections and never
   // swaps in the data-slot groups. The chat panel still shows the data-slot abstraction.
-  if (!forForm && dataSlotMode && row.version.dataSlots.length > 0) {
+  const scopedDataSlots = row.version.dataSlots.filter((d) =>
+    isDataSlotInScope(scoped.scope, d.key)
+  );
+  if (!forForm && dataSlotMode && scopedDataSlots.length > 0) {
     // Breadth inputs, built once: which questions are answered (+ their confidence), each
     // question's prompt + version order, and whether the panel may itemise the mapped questions
     // (only in `both` mode — see `showSlotQuestions`). `orderIndex` keeps a slot's question list in
@@ -266,7 +297,7 @@ export async function loadAnswerPanelState(
     );
     const groups: DataSlotPanelGroup[] = [];
     const byTheme = new Map<string, DataSlotPanelGroup>();
-    for (const ds of row.version.dataSlots) {
+    for (const ds of scopedDataSlots) {
       const fill = fillByDataSlotId.get(ds.id);
       // A slot is covered at a confident fill OR when parked with a provisional best-effort one
       // (the respondent sees forward progress; the marker flags it as tentative).
@@ -276,6 +307,10 @@ export async function loadAnswerPanelState(
       // `questions` is itemised only in `both` mode; otherwise the meter shows the summary alone.
       const mappedKeys = ds.questions
         .map((q) => q.questionSlot.key)
+        // Adaptive Scope (P17): a slot in a `light`-depth topic maps to questions this respondent
+        // will never be asked. Counting them would report "1 of 5" on a slot that is, for this
+        // interview, complete.
+        .filter((k) => isQuestionInScope(scoped.scope, k))
         .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
       const coverage = {
         total: mappedKeys.length,

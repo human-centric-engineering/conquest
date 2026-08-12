@@ -436,6 +436,7 @@ describe('buildSessionExportPdfModel', () => {
         },
       ],
       dataSlotGroups: [],
+      notAssessed: [],
       ...over,
     };
   }

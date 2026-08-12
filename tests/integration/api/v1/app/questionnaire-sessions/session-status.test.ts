@@ -48,6 +48,7 @@ import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import type { LoadedTurnContext } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
 import type { QuestionnaireConfigShape } from '@/lib/app/questionnaire/types';
 import type { DataSlotTarget } from '@/lib/app/questionnaire/orchestrator';
+import { inertScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 
 /**
  * Build a LoadedTurnContext matching what the seam reads from buildTurnContext. Defaults
@@ -121,6 +122,7 @@ function ctx(
     activeQuestionKey: null,
     byId: new Map(),
     meta: {},
+    scope: inertScope(),
   };
 }
 

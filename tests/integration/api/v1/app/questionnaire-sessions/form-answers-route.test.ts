@@ -40,6 +40,14 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/form-answers', () => seamM
 const tokenMock = vi.hoisted(() => ({ verifySessionToken: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token', () => tokenMock);
 
+// Adaptive Scope (P17): the route refuses a write to a question outside this interview. Mocked to
+// an inert scope here — the enforcement itself is covered in `scope/` and by its own case below.
+const scopeMock = vi.hoisted(() => ({
+  loadSessionScope: vi.fn(),
+  inertScope: vi.fn(),
+}));
+vi.mock('@/app/api/v1/app/questionnaires/_lib/session-scope', () => scopeMock);
+
 import { PUT } from '@/app/api/v1/app/questionnaire-sessions/[id]/answers/route';
 import { auth } from '@/lib/auth/config';
 import { mockAuthenticatedUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
@@ -88,6 +96,23 @@ beforeEach(() => {
   vi.clearAllMocks();
   setAuth(mockAuthenticatedUser());
   seamMock.loadSessionForFormWrite.mockResolvedValue(session());
+  // An inert scope: `active: false` admits every key, matching every version that never opted in.
+  scopeMock.loadSessionScope.mockResolvedValue({
+    scope: {
+      active: false,
+      topicKeys: new Set<string>(),
+      questionKeys: new Set<string>(),
+      dataSlotKeys: new Set<string>(),
+      notAskedQuestionKeys: new Set<string>(),
+      notAskedDataSlotKeys: new Set<string>(),
+      topicByQuestionKey: new Map<string, string>(),
+      topicByDataSlotKey: new Map<string, string>(),
+      depthByTopicKey: new Map<string, string>(),
+    },
+    topics: [],
+    settings: {},
+    plan: null,
+  });
   seamMock.loadVersionSlotsByKey.mockResolvedValue(slots());
   seamMock.recordManualAnswer.mockResolvedValue('created');
   seamMock.clearAnswer.mockResolvedValue(undefined);
@@ -226,5 +251,62 @@ describe('persistence', () => {
       'slot-role',
       'slot-score',
     ]);
+  });
+});
+
+describe('adaptive scope (P17)', () => {
+  it('refuses a write to a question this interview never asked', async () => {
+    // The form only RENDERS in-scope questions, so an out-of-scope key is a crafted or stale
+    // request. Storing it would put data in the report that the instrument itself reports as
+    // not assessed.
+    scopeMock.loadSessionScope.mockResolvedValue({
+      scope: {
+        active: true,
+        topicKeys: new Set(['open']),
+        questionKeys: new Set(['role']),
+        dataSlotKeys: new Set<string>(),
+        notAskedQuestionKeys: new Set(['score']),
+        notAskedDataSlotKeys: new Set<string>(),
+        topicByQuestionKey: new Map([['score', 'depth']]),
+        topicByDataSlotKey: new Map<string, string>(),
+        depthByTopicKey: new Map([['open', 'full']]),
+      },
+      topics: [],
+      settings: {},
+      plan: null,
+    });
+
+    // `score` is a real slot in the version — it is simply not part of THIS interview, which is
+    // exactly the case the check exists for (an unknown key is already a 400 for another reason).
+    const res = await PUT(req({ answers: [{ questionKey: 'score', value: 3 }] }), ctx);
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('QUESTION_NOT_IN_SCOPE');
+    // Nothing is written — the refusal happens before the transaction opens.
+    expect(seamMock.recordManualAnswer).not.toHaveBeenCalled();
+  });
+
+  it('allows the write when the question IS part of the interview', async () => {
+    scopeMock.loadSessionScope.mockResolvedValue({
+      scope: {
+        active: true,
+        topicKeys: new Set(['open']),
+        questionKeys: new Set(['role']),
+        dataSlotKeys: new Set<string>(),
+        notAskedQuestionKeys: new Set<string>(),
+        notAskedDataSlotKeys: new Set<string>(),
+        topicByQuestionKey: new Map<string, string>(),
+        topicByDataSlotKey: new Map<string, string>(),
+        depthByTopicKey: new Map([['open', 'full']]),
+      },
+      topics: [],
+      settings: {},
+      plan: null,
+    });
+
+    const res = await PUT(req({ answers: [{ questionKey: 'role', value: 'Eng' }] }), ctx);
+
+    expect(res.status).toBe(200);
   });
 });
