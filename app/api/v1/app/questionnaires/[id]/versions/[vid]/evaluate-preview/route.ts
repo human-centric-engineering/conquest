@@ -37,6 +37,15 @@ import { runEvaluationPanel } from '@/lib/app/questionnaire/evaluation/run-panel
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import { designEvaluationLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 
+/**
+ * Wall-clock ceiling for the whole panel. The seven judges fan out concurrently, so the run
+ * costs one slow judge — but that judge is a reasoning model reading a long instrument and
+ * writing a rewritten prompt per finding, which its own 90s cap allows for. That is past the
+ * platform's 60s default, and a function killed mid-fan-out gives the admin a blank failure
+ * with nothing in the logs. Matches the report-preview route's ceiling.
+ */
+export const maxDuration = 300;
+
 const bodySchema = z.object({
   /** Which dimensions to run; defaults to the whole panel. Deduped at use. */
   dimensions: z.array(z.enum(EVALUATION_DIMENSIONS)).max(EVALUATION_DIMENSIONS.length).optional(),

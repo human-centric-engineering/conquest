@@ -97,6 +97,19 @@ time (the pure core has no live graph), the F2.3 revert-planner posture.
 - **Fail-soft per judge**: a dimension whose judge errors or is unseeded returns a
   `diagnostic` instead of a verdict; the other six still return. Only _zero_ judges
   seeded is a 404 (`run db:seed`).
+- **Per-judge budget**: `JUDGE_MAX_TOKENS` 8,192 output tokens, `JUDGE_TIMEOUT_MS` 90s,
+  and `maxDuration = 300` on both panel routes (the judges fan out concurrently, so the
+  request costs one slow judge, not seven). Size the token cap for Clarity, not the
+  average: it attaches a full rewritten prompt to every finding, and on OpenAI's
+  reasoning families (`o*`, `gpt-5*`) the cap is sent as `max_completion_tokens`, so
+  hidden reasoning tokens come out of the same budget. At the original 2,048 the Clarity
+  judge was cut off mid-JSON on real questionnaires.
+- **Reading a judge failure**: a truncated response and a contract violation both end as
+  `evaluation_failed`, but they need opposite fixes, so the capability distinguishes them.
+  `parseableJson: false` in the error log (message says _"not parseable JSON … most likely
+  truncated"_) means the budget ran out — raise `JUDGE_MAX_TOKENS`. `parseableJson: true`
+  with populated `issuePaths` means the model broke the contract at those fields — a
+  prompt or schema problem. An empty `issuePaths` alone tells you nothing; read the flag.
 
 ## Seeds
 

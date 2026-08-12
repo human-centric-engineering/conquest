@@ -23,6 +23,7 @@
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
+import { MAX_FINDINGS_PER_JUDGE } from '@/lib/app/questionnaire/evaluation/judge-schema';
 import type {
   EvaluationDimension,
   VersionStructureInput,
@@ -213,6 +214,7 @@ ${rubric.ignore}
 
 FINDINGS
 - Emit a finding for each concrete issue you would fix on this dimension. A clean questionnaire yields an empty findings array — do not invent problems.
+- Emit at most ${MAX_FINDINGS_PER_JUDGE} findings, ordered most severe first, and keep each one tight (one rewritten question, one or two sentences of rationale). Your whole answer has a token budget: a long tail of minor findings costs you the important ones.
 - Address each finding's "targetKey" precisely: a question by its key exactly as shown (e.g. "q_role"), a section as "section:<title>", or the version-level "goal" / "audience".
 - "severity": "major" (fix before launch), "minor" (real but not blocking), or "info" (nice-to-have).
 - "proposedChange": the specific edit to make, in plain prose. "rationale": why, in one or two sentences. "sourceQuote": the offending text, when the finding points at a specific phrase.
@@ -255,10 +257,15 @@ export function buildJudgePrompt(
  * named fields.
  */
 export function buildJudgeRetryMessage(issuePaths: string[]): string {
+  // With no issue paths, the first response never parsed as JSON — usually a code fence or
+  // an answer cut off at the token cap. Ask for brevity as well as shape: a shorter answer is
+  // the one thing that can actually clear a truncation on the retry, which reuses the same cap.
   const detail =
     issuePaths.length > 0
       ? ` The previous response was invalid at: ${issuePaths.join('; ')}.`
-      : ' The previous response was not valid JSON for the required schema.';
+      : ' The previous response was not valid JSON for the required schema. Keep the response short —' +
+        ' emit only your most important findings, with brief rationales — so the JSON object closes' +
+        ' well within the token limit.';
   return (
     `Return ONLY the JSON object with a numeric "score" in [0, 1] and a "findings" array ` +
     `(each finding with "targetKey", "severity", "proposedChange", "rationale", an ` +

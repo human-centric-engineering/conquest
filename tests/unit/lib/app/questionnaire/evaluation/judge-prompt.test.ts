@@ -4,6 +4,7 @@ import {
   EVALUATION_DIMENSIONS,
   buildJudgePrompt,
   buildJudgeRetryMessage,
+  MAX_FINDINGS_PER_JUDGE,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation';
 
@@ -46,6 +47,18 @@ describe('buildJudgePrompt', () => {
     expect(messages).toHaveLength(2);
     expect(messages[0].role).toBe('system');
     expect(messages[1].role).toBe('user');
+  });
+
+  it('states the schema findings cap in the prompt, taken from the schema constant', () => {
+    // The cap is only enforced by Zod after the fact: a judge that emits 51 findings fails
+    // validation and its whole verdict is thrown away. Stating the same number the schema
+    // enforces — and reading it from that constant so the two cannot drift — turns a hard
+    // failure into a bounded answer. Every dimension carries it, not just clarity.
+    for (const dimension of ['clarity', 'coverage', 'type_fit'] as const) {
+      const system = buildJudgePrompt(dimension, STRUCTURE)[0].content;
+      expect(system).toContain(`at most ${MAX_FINDINGS_PER_JUDGE} findings`);
+      expect(system).toContain('most severe first');
+    }
   });
 
   it('splices a dimension-specific rubric into the system message', () => {
@@ -158,5 +171,14 @@ describe('buildJudgeRetryMessage', () => {
   it('falls back to a generic message with no paths', () => {
     const msg = buildJudgeRetryMessage([]);
     expect(msg).toContain('not valid JSON');
+  });
+
+  it('asks for brevity when there are no paths, since the likely cause is truncation', () => {
+    // No issue paths means the first response never parsed — usually a fence or an answer cut
+    // off at the token cap. The retry reuses the same cap, so "be shorter" is the only advice
+    // that can actually clear it; the path-named branch must NOT carry that advice, because a
+    // schema-invalid response needs the field fixed, not shortened.
+    expect(buildJudgeRetryMessage([])).toContain('Keep the response short');
+    expect(buildJudgeRetryMessage(['score'])).not.toContain('Keep the response short');
   });
 });

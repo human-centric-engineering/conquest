@@ -61,11 +61,27 @@ import {
 
 const SLUG = EVALUATE_STRUCTURE_CAPABILITY_SLUG;
 
-/** A judge analysing a structure + emitting findings is a moderate generation. */
-const JUDGE_MAX_TOKENS = 2_048;
+/**
+ * Output budget for one judge call.
+ *
+ * Sized for the worst case, not the average. Two things make the worst case big:
+ *
+ *  1. Clarity attaches a full rewritten prompt (`replace_prompt`) to every finding, so a
+ *     long instrument legitimately runs to thousands of output tokens.
+ *  2. On OpenAI's reasoning families (`o*`, `gpt-5*` — see `resolveParamProfile`) this cap
+ *     is sent as `max_completion_tokens`, which covers hidden reasoning tokens AND visible
+ *     output combined. The visible share is whatever reasoning leaves behind.
+ *
+ * The previous 2,048 was the smallest budget of any structured app capability and truncated
+ * the Clarity judge mid-JSON on real questionnaires. Truncation that leaves *partial* content
+ * is silent — the provider only raises when the content is empty — so it surfaced as a
+ * misleading "not valid against the schema" failure. Keep this generous; the judge stops when
+ * it has said its piece, so the cap costs nothing on a short questionnaire.
+ */
+const JUDGE_MAX_TOKENS = 8_192;
 
-/** One judge call; 45s covers a slow reasoning model without hanging the panel. */
-const JUDGE_TIMEOUT_MS = 45_000;
+/** One judge call; a reasoning model over a long instrument needs the full 90s. */
+const JUDGE_TIMEOUT_MS = 90_000;
 
 const argsSchema = z.object({
   /** Which dimension this judge scores. */
@@ -164,10 +180,19 @@ export class AppEvaluateStructureCapability extends BaseCapability<
     const structure: VersionStructureInput = args.structure;
     const messages = buildJudgePrompt(args.dimension, structure);
 
-    // 3. Structured call (parse → retry-once-at-temp-0 → cost-sum). Capture the Zod
-    //    issue paths of the most recent schema-invalid (but JSON-parseable) response
-    //    so a failure can name WHICH fields were wrong.
+    // 3. Structured call (parse → retry-once-at-temp-0 → cost-sum). Two failure modes are
+    //    worth telling apart, because the operator fix differs:
+    //
+    //      - the response parsed as JSON but broke the contract → name the Zod issue paths;
+    //      - the response never parsed as JSON at all → almost always truncation at the
+    //        token cap (a reasoning model spends the cap on reasoning, then gets cut off
+    //        mid-object), which the provider cannot raise for us because the content is
+    //        non-empty. Say so, and name the cap, rather than blaming "the schema".
+    //
+    //    `sawParseableJson` flips only inside the validate callback, which `tryParseJson`
+    //    reaches only after a successful `JSON.parse` — so it is exactly "we got JSON".
     let lastIssuePaths: string[] = [];
+    let sawParseableJson = false;
     let completion: StructuredCompletionResult<JudgeVerdictOutput>;
     try {
       completion = await runStructuredCompletion<JudgeVerdictOutput>({
@@ -178,6 +203,7 @@ export class AppEvaluateStructureCapability extends BaseCapability<
         timeoutMs: JUDGE_TIMEOUT_MS,
         parse: (raw) =>
           tryParseJson(raw, (parsed) => {
+            sawParseableJson = true;
             const validation = validateJudgeVerdict(parsed);
             if (validation.ok) return validation.value;
             lastIssuePaths = validation.issues.map((issue) =>
@@ -188,8 +214,10 @@ export class AppEvaluateStructureCapability extends BaseCapability<
         retryUserMessage: buildJudgeRetryMessage([]),
         onFinalFailure: () =>
           new Error(
-            'Judge response was not valid against the schema after one retry' +
-              (lastIssuePaths.length > 0 ? ` (invalid at: ${lastIssuePaths.join(', ')})` : '')
+            sawParseableJson
+              ? 'Judge response was not valid against the schema after one retry' +
+                  (lastIssuePaths.length > 0 ? ` (invalid at: ${lastIssuePaths.join(', ')})` : '')
+              : `Judge response was not parseable JSON after one retry — most likely truncated at the token cap (maxTokens: ${JUDGE_MAX_TOKENS}); raise JUDGE_MAX_TOKENS if this dimension needs a longer answer`
           ),
       });
     } catch (err) {
@@ -199,6 +227,11 @@ export class AppEvaluateStructureCapability extends BaseCapability<
         model,
         provider: providerSlug,
         issuePaths: lastIssuePaths,
+        // Without these, an empty `issuePaths` reads as "no schema problems" when it
+        // actually means "we never got JSON" — the exact ambiguity that made the prod
+        // Clarity failure look like a schema bug.
+        parseableJson: sawParseableJson,
+        maxTokens: JUDGE_MAX_TOKENS,
         error: errorMessage(err),
       });
       return this.error(errorMessage(err), 'evaluation_failed');
