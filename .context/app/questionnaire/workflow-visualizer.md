@@ -55,7 +55,7 @@ components/app/questionnaire/behind-the-scenes/          # client: explorer, can
 | `data-slot-turn`           | combined extract → park → contradiction → respond (offer/question/next-slot)                                                       | `orchestrator/data-slot-orchestrator.ts` |
 | `respondent-report`        | load → transcript → (client KB) → (before-research) → generate → format → (after-research) → (appendix) → deliver                  | `report/generate.ts`                     |
 | `cohort-report`            | dataset → material → (context KB) → synthesise → charts → publish                                                                  | `cohort-report/generate.ts`              |
-| `design-evaluation`        | structure snapshot → 7 judges (grouped, parallel) → aggregate → findings                                                           | `evaluation/run-panel.ts`                |
+| `design-evaluation`        | structure snapshot → 7 judges (grouped, parallel) → aggregate → reconcile → findings                                               | `evaluation/run-panel.ts`                |
 | `config-advisor`           | snapshot → narrative (stream) → structured suggestions → admin applies                                                             | `advisor/stream-advisor.ts`              |
 | `agent-settings-advisor`   | evaluate settings vs advisory table → structured explain (+ optional patch) → admin applies                                        | `agent-advisory/explain.ts`              |
 | `turn-inspector`           | gate → capture calls → capture vector calls → assemble → stream → (serialize/eval)                                                 | `inspector/index.ts`                     |

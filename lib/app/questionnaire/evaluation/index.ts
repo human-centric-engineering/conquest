@@ -52,6 +52,27 @@ export {
 } from '@/lib/app/questionnaire/evaluation/judge-prompt';
 
 export {
+  MAX_ALTERNATIVES_PER_TARGET,
+  MAX_RECONCILED_TARGETS,
+  reconciledAlternativeSchema,
+  reconciledSuggestionSchema,
+  reconcileResultSchema,
+  validateReconcileResult,
+  parseReconciledSuggestions,
+  type ReconciledAlternative,
+  type ReconciledSuggestion,
+  type ReconcileResult,
+} from '@/lib/app/questionnaire/evaluation/reconcile-schema';
+
+export {
+  buildReconcilePrompt,
+  buildReconcileRetryMessage,
+  type ReconcileTargetInput,
+  type ReconcileJudgeInput,
+  type ReconcileContextInput,
+} from '@/lib/app/questionnaire/evaluation/reconcile-prompt';
+
+export {
   reviewFindingSchema,
   type ReviewFindingInput,
 } from '@/lib/app/questionnaire/evaluation/review-schema';

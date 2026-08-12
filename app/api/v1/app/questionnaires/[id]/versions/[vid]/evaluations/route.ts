@@ -32,6 +32,7 @@ import {
   EVALUATION_DIMENSION_SPECS,
   type EvaluationDimension,
 } from '@/lib/app/questionnaire/evaluation';
+import { RECONCILER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { runEvaluationPanel } from '@/lib/app/questionnaire/evaluation/run-panel';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -82,15 +83,20 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
 
     // Load the judge agents for the requested dimensions in one query.
     const wantedSlugs = dimensions.map((d) => EVALUATION_DIMENSION_SPECS[d].slug);
+    // The reconciler rides along in the same query: it is not a judge (no dimension, no score),
+    // so it needs its own OR arm rather than joining the `kind: 'judge'` filter. Its absence is
+    // fail-soft inside the panel — the run still returns, just without merged alternatives.
     const agents = await prisma.aiAgent.findMany({
-      where: { slug: { in: wantedSlugs }, kind: 'judge' },
+      where: {
+        OR: [{ slug: { in: wantedSlugs }, kind: 'judge' }, { slug: RECONCILER_AGENT_SLUG }],
+      },
       select: { slug: true, id: true, provider: true, model: true, fallbackProviders: true },
     });
     const agentBySlug = new Map(agents.map((a) => [a.slug, a]));
 
     // Every judge missing means the seed never ran — a config problem, not a per-run
     // failure. A subset missing is fail-soft per dimension inside the panel.
-    if (agentBySlug.size === 0) {
+    if (wantedSlugs.every((slug) => !agentBySlug.has(slug))) {
       log.error('No design-evaluation judge agents found; run db:seed', { wantedSlugs });
       throw new NotFoundError('Questionnaire design-time evaluation is not configured');
     }

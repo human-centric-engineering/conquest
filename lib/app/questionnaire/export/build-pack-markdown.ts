@@ -175,6 +175,25 @@ export function buildPackMarkdown(model: PackModel): string {
             lines.push(`  ${judge.rationale}`);
             if (judge.sourceQuote) lines.push(`  > ${cell(judge.sourceQuote)}`);
           }
+          // The reconciled wording goes LAST, after the verdicts that produced it — it only makes
+          // sense once a reader has seen what it is reconciling.
+          if (target.alternatives.length > 0) {
+            lines.push('');
+            lines.push(
+              target.alternatives.length === 1
+                ? '**Suggested rewording** (addressing the judges above):'
+                : '**Suggested rewordings** (addressing the judges above):'
+            );
+            for (const alt of target.alternatives) {
+              lines.push(`- ${cell(alt.prompt)}`);
+              lines.push(`  _Addresses: ${alt.addresses.join(', ')}._ ${alt.note}`);
+            }
+            if (target.unresolvedBy.length > 0) {
+              lines.push(
+                `- _Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change._`
+              );
+            }
+          }
           lines.push('');
         }
       }

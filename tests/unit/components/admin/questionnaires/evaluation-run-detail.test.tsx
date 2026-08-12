@@ -63,6 +63,7 @@ function run(findings: EvaluationFindingView[]): EvaluationRunDetailView {
     dimensionSummary: [
       { dimension: 'duplicates', score: 0.8, findingCount: findings.length, diagnostic: null },
     ],
+    reconciled: [],
     triggeredByUserId: null,
     startedAt: '2026-06-05T00:00:00.000Z',
     completedAt: '2026-06-05T00:00:01.000Z',

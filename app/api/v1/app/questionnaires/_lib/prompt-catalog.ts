@@ -46,6 +46,7 @@ import {
   buildDataSlotAssignmentPrompt,
 } from '@/lib/app/questionnaire/data-slots/generation';
 import { buildJudgePrompt } from '@/lib/app/questionnaire/evaluation/judge-prompt';
+import { buildReconcilePrompt } from '@/lib/app/questionnaire/evaluation/reconcile-prompt';
 import { buildTurnEvaluatorPrompt } from '@/lib/app/questionnaire/turn-evaluation/prompt';
 import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation/types';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
@@ -77,6 +78,7 @@ import {
   QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
   TURN_EVALUATOR_AGENT_SLUG,
+  RECONCILER_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
 
 // ---------------------------------------------------------------------------
@@ -1068,6 +1070,70 @@ const JUDGES: PromptAgentCatalogEntry[] = EVALUATION_DIMENSIONS.map((dimension) 
 });
 
 // ---------------------------------------------------------------------------
+// Suggestion reconciler — runs once after the panel, over the contested questions
+// ---------------------------------------------------------------------------
+
+/**
+ * A specimen has to show the reconciler doing its actual job, which needs a question that two
+ * judges disagree about — so the sample carries one question with a clarity verdict and an
+ * audience verdict that pull in different directions. A single-judge sample would render a prompt
+ * the reconciler is never sent (the caller filters those out before dispatch).
+ */
+const SAMPLE_CONTESTED = [
+  {
+    key: 'q_engagement',
+    prompt:
+      'Do you feel engaged and satisfied with the support you receive from your line manager?',
+    questionType: 'likert',
+    context: 'Q2 · Working life',
+    judges: [
+      {
+        dimension: 'clarity' as const,
+        label: EVALUATION_DIMENSION_SPECS.clarity.label,
+        severity: 'major',
+        proposedChange:
+          'Split into two questions — one about engagement, one about satisfaction with support.',
+        rationale: 'It is double-barrelled: a respondent engaged but unsupported cannot answer it.',
+      },
+      {
+        dimension: 'audience_match' as const,
+        label: EVALUATION_DIMENSION_SPECS.audience_match.label,
+        severity: 'minor',
+        proposedChange: 'Say "manager" rather than "line manager" for a mixed-seniority audience.',
+        rationale: 'The stated audience spans contractors, for whom "line manager" does not apply.',
+      },
+    ],
+  },
+];
+
+const RECONCILER: PromptAgentCatalogEntry = {
+  slug: RECONCILER_AGENT_SLUG,
+  name: 'Suggestion Reconciler',
+  stage: 'evaluation',
+  summary:
+    "Merges several judges' verdicts about the same question into one or two alternative phrasings that satisfy as many of their concerns as possible.",
+  dispatch:
+    'Once per design-evaluation run, after the panel — over the questions more than one judge flagged.',
+  builderModule: 'lib/app/questionnaire/evaluation/reconcile-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: `${RECONCILER_AGENT_SLUG}.reconcile`,
+      label: 'Reconcile: contested question',
+      description:
+        'Proposes wording that satisfies every judge that flagged one question, and names any concern wording alone cannot fix.',
+      build: () =>
+        norm(
+          buildReconcilePrompt(SAMPLE_CONTESTED, {
+            goal: SAMPLE_VERSION_STRUCTURE.goal ?? null,
+            audience: SAMPLE_VERSION_STRUCTURE.audience ?? null,
+          })
+        ),
+    }),
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Catalog assembly
 // ---------------------------------------------------------------------------
 
@@ -1096,5 +1162,6 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     // Evaluation
     TURN_EVALUATOR,
     ...JUDGES,
+    RECONCILER,
   ];
 }

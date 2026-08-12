@@ -117,6 +117,19 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   startedAt: '2026-08-10T00:00:00.000Z',
   completedAt: '2026-08-10T00:00:05.000Z',
   createdAt: '2026-08-10T00:00:00.000Z',
+  reconciled: [
+    {
+      targetKey: 'q1',
+      alternatives: [
+        {
+          prompt: 'How would you describe your role?',
+          addresses: ['clarity', 'audience_match'],
+          note: 'One ask, plain language.',
+        },
+      ],
+      unresolved: ['type_fit'],
+    },
+  ],
   findings: [
     {
       id: 'f1',
@@ -583,6 +596,55 @@ describe('buildPackModel', () => {
       const orphan = model.evaluations?.targets.find((t) => t.key === 'deleted-question');
       expect(orphan).toMatchObject({ label: 'deleted-question', questionType: null });
       expect(orphan?.judges.map((j) => j.dimension)).toEqual(['duplicates']);
+    });
+
+    it('attaches the reconciled alternatives to the question they are about', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        EVALUATION_RUN,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+      const q1 = model.evaluations?.targets.find((t) => t.key === 'q1');
+      expect(q1?.alternatives).toHaveLength(1);
+      expect(q1?.alternatives[0].prompt).toBe('How would you describe your role?');
+      // Dimension keys are resolved to judge labels: a pack is read by people who never learn
+      // the enum, and "clarity" alone does not say who is satisfied by this wording.
+      expect(q1?.alternatives[0].addresses).toEqual(['Clarity Judge', 'Audience-Match Judge']);
+      expect(q1?.unresolvedBy).toEqual(['Type-Fit Judge']);
+    });
+
+    it('leaves a target with no reconciliation carrying no alternatives', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        EVALUATION_RUN,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+      // The orphan target was flagged by one judge, so nothing was reconciled for it — it shows
+      // that judge's own suggestion, exactly as before this step existed.
+      const orphan = model.evaluations?.targets.find((t) => t.key === 'deleted-question');
+      expect(orphan?.alternatives).toEqual([]);
+      expect(orphan?.unresolvedBy).toEqual([]);
+    });
+
+    it('carries no alternatives at all for a run that predates reconciliation', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        { ...EVALUATION_RUN, reconciled: [] },
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+      expect(model.evaluations?.targets.every((t) => t.alternatives.length === 0)).toBe(true);
     });
 
     it('includes pending findings — the appendix is a record of the panel, not a curated review outcome', () => {

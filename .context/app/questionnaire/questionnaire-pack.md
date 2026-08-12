@@ -52,8 +52,17 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   same function the console uses: the pack and the console must not disagree about what counts as one
   subject.
 
-  **CSV is the exception.** It emits two blocks — `# Judge scores` and `# Evaluation` (one row per
-  target-judge pair, target columns first) — and the target text _does_ repeat down the rows of a
+  **Reconciled rewordings ride with their question.** Each target also carries the run's
+  cross-judge `alternatives` — one or two phrasings proposed to satisfy several judges at once (see
+  [design-evaluation.md](./design-evaluation.md#cross-judge-reconciliation--the-step-after-the-panel))
+  — printed _after_ the verdicts that produced them, because a resolution only reads as one once you
+  have seen the disagreement. Dimension keys are mapped to judge labels on the way in: a pack is read
+  by people who never learn the enum. `unresolvedBy` is printed too rather than swallowed — a rewrite
+  that silently drops a judge's point reads as consensus. A target with one judge, a failed reconcile
+  call, or a run older than the step simply carries none, and shows the judges' own suggestions.
+
+  **CSV is the exception.** It emits three blocks — `# Judge scores`, `# Suggested rewordings` (one row
+  per proposed phrasing) and `# Evaluation` (one row per target-judge pair, target columns first) — and the target text _does_ repeat down the rows of a
   contested question. A CSV row has to survive a sort, a filter, or a pivot on its own, so blanking
   continuation rows would break all three. "Name the question once" is a rule about documents a
   person reads top to bottom.

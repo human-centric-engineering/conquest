@@ -162,6 +162,33 @@ export function buildPackCsv(model: PackModel): string {
         ])
       )
     );
+    // Alternatives are their own block: one row per proposed phrasing. Folding them into the
+    // findings rows would either duplicate every judge row or leave most of them blank.
+    const alternativeRows = model.evaluations.targets.flatMap((target) =>
+      target.alternatives.map((alt) =>
+        row([
+          target.key,
+          target.label,
+          alt.prompt,
+          alt.addresses.join('; '),
+          alt.note,
+          target.unresolvedBy.join('; '),
+        ])
+      )
+    );
+    blocks.push([
+      '# Suggested rewordings',
+      row([
+        'target_key',
+        'current_wording',
+        'suggested_wording',
+        'addresses',
+        'note',
+        'unresolved',
+      ]),
+      ...alternativeRows,
+    ]);
+
     blocks.push([
       '# Evaluation',
       row([

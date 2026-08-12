@@ -95,6 +95,7 @@ function makeRun(over: Partial<EvaluationRunDetailView> = {}): EvaluationRunDeta
     totalFindings: 3,
     dimensionSummary: [],
     findings: [],
+    reconciled: [],
     triggeredByUserId: null,
     startedAt: '2026-01-01T00:00:00.000Z',
     completedAt: '2026-01-01T00:05:00.000Z',

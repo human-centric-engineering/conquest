@@ -104,6 +104,59 @@ it, and Goal-Match prefers a refocus over a deletion where the question can be p
 goal. Both keep `delete_question` for the genuinely redundant and the genuinely off-mission — the
 change is which one they reach for first.
 
+## Cross-judge reconciliation — the step after the panel
+
+The panel's independence is the source of its credibility and the source of its most annoying
+output. Every judge scores blind to the others, so a question that four of them flag comes back with
+four rewrites, each fixing one dimension and quietly undoing another: apply the Clarity judge's
+wording and the jargon the Audience judge objected to can come back; apply the Audience judge's and
+the double-barrel returns. Nothing in the panel can fix that, because no judge is allowed to see
+another's verdict.
+
+So one more agent runs after the fan-in. The **Suggestion Reconciler**
+(`app-questionnaire-suggestion-reconciler` → `app_reconcile_suggestions`) takes the questions **more
+than one judge flagged** and proposes one or two phrasings that satisfy as many of their concerns as
+possible at once.
+
+| Aspect         | Choice                                                                                  |
+| -------------- | --------------------------------------------------------------------------------------- |
+| What it reads  | The contested questions, their current wording, every judge verdict, plus goal/audience |
+| What it writes | Nothing — a proposer, like the judges; the admin accepts, edits, or ignores             |
+| Batching       | ONE call for the whole run, not one per question                                        |
+| Scope          | Question targets only, 2+ **judges** (not 2+ findings), capped at 15 most-contested     |
+| Persistence    | `reconciledSuggestions` (nullable JSON) on the run row                                  |
+
+**Why "more than one judge" and not "more than one finding".** One judge raising two points about a
+question is still one perspective, and reconciling a perspective with itself proposes nothing worth
+paying for.
+
+**Why question targets only.** Findings against the `goal`, the `audience`, or a section are not
+phrasings to rewrite. This also excludes the Coverage judge's drafted new questions, which are
+addressed at `goal` by convention — a question that does not exist yet cannot be rephrased.
+
+**Why the cap logs.** Fifteen is a bound on cost and on one shared token budget, and targets go in
+most-contested-first (major findings, then judge count, then position — so the batch is reproducible
+run to run). When more questions were contested than fit, `runEvaluationPanel` logs how many were
+left out. A silent cap is the dangerous version: an admin reading 15 reconciled questions would take
+the other 5 for questions the panel was happy with.
+
+**`addresses` and `unresolved` are the honest half of the contract.** Each alternative names the
+dimensions it genuinely resolves, and `unresolved` names concerns no wording can fix — nearly always
+because the real fix is structural (split the question, change its answer type), which this step is
+not allowed to make. A reconciliation that silently dropped a judge's point would be worse than none
+at all: it would read as consensus that was never reached.
+
+**Fail-soft in the strong sense.** Nothing contested, no reconciler agent seeded, a failed dispatch,
+a thrown fault, or a success payload of the wrong shape — every one returns `[]` and the run
+completes with all seven judges' own suggestions intact. An admin who has just paid for seven judge
+calls must not lose them because an eighth failed. Legacy runs, written before the column existed,
+read as `null` → `[]` via `parseReconciledSuggestions`: not missing data to backfill, but a true
+statement that the run was never reconciled.
+
+The alternatives reach the [Questionnaire Pack](./questionnaire-pack.md) through
+`EvaluationRunDetail.reconciled`, rendered under the question they belong to with dimension keys
+mapped to judge labels.
+
 ## Gating & limits
 
 - Always on — no flag to check. The route is admin-only paid LLM work, gated only by auth

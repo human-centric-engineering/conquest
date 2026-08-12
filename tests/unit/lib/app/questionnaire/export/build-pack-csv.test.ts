@@ -260,6 +260,8 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                alternatives: [],
+                unresolvedBy: [],
                 judges: [
                   {
                     dimension: 'clarity',
@@ -295,6 +297,59 @@ describe('buildPackCsv', () => {
       );
     });
 
+    it('emits the reconciled rewordings as their own block, one row per phrasing', () => {
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 1,
+            scores: [],
+            targets: [
+              {
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 0, info: 0, total: 1 },
+                alternatives: [
+                  {
+                    prompt: 'How engaged do you feel at work?',
+                    addresses: ['Clarity Judge', 'Audience-Match Judge'],
+                    note: 'One ask.',
+                  },
+                ],
+                unresolvedBy: ['Type-Fit Judge'],
+                judges: [
+                  {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
+                    severity: 'major',
+                    status: 'pending',
+                    proposedChange: 'Split it',
+                    rationale: 'Two asks',
+                    sourceQuote: null,
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+
+      // Its own block, not extra columns on the findings rows — folding them together would
+      // duplicate every judge row or leave most of them blank.
+      expect(csv).toContain('# Suggested rewordings');
+      expect(csv).toContain(
+        'target_key,current_wording,suggested_wording,addresses,note,unresolved'
+      );
+      expect(csv).toContain(
+        'q1,Are you engaged and satisfied?,How engaged do you feel at work?,Clarity Judge; Audience-Match Judge,One ask.,Type-Fit Judge'
+      );
+    });
+
     it('neutralises a formula-injection proposedChange via csvEscape', () => {
       const csv = buildPackCsv(
         model({
@@ -312,6 +367,8 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                alternatives: [],
+                unresolvedBy: [],
                 judges: [
                   {
                     dimension: 'clarity',

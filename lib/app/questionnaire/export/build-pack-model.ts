@@ -143,6 +143,29 @@ export interface PackEvaluationTarget {
   counts: SeverityCounts;
   /** Distinct judges that flagged this target, in `(dimension, ordinal)` order. */
   judges: PackEvaluationJudgeView[];
+  /**
+   * Alternative phrasings that try to satisfy every judge above at once — the reconcile step that
+   * runs after the panel. Empty when the question was flagged by only one judge (there is nothing
+   * to reconcile), when the reconcile call failed, or when the run predates the step: in each case
+   * the judges' own suggestions above stand alone, exactly as they did before.
+   */
+  alternatives: PackEvaluationAlternative[];
+  /**
+   * Concerns no proposed phrasing resolves, by judge label — nearly always because the fix is
+   * structural (split the question, change its answer type) rather than a matter of wording.
+   * Printed, not swallowed: an alternative that silently drops a judge's point reads as consensus.
+   */
+  unresolvedBy: string[];
+}
+
+/** One reconciled phrasing, resolved for the pack — judge labels, not dimension keys. */
+export interface PackEvaluationAlternative {
+  /** The rewritten question, ready to drop into the structure. */
+  prompt: string;
+  /** The judges this phrasing satisfies, by display name. */
+  addresses: string[];
+  /** Why this wording, or what it trades away. */
+  note: string;
 }
 
 /** One judge's scoreboard line — the score without its findings, which live under the targets. */
@@ -214,6 +237,11 @@ function buildQuestionPromptMap(graph: VersionGraphView): Map<string, string> {
  * was said about). Findings appear ONLY under `targets`, so a question flagged by four judges is
  * printed once with four verdicts beneath it, not four times across four judge sections.
  *
+ * Each target also carries the run's reconciled `alternatives` for that question — the phrasings the
+ * post-panel reconcile step proposed to satisfy several judges at once — with dimension keys mapped
+ * to judge labels, because a pack is read by people who never learn the enum. A target with one
+ * judge, a failed reconcile call, or a run older than the step simply carries none.
+ *
  * Grouping is `groupFindingsByTarget` — the same pure function behind the admin run-detail view's
  * default "By question" mode, in questionnaire order. Sharing it is deliberate: the pack and the
  * console must not disagree about what counts as one subject (drafted questions splitting into
@@ -233,6 +261,11 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
     };
   });
 
+  // Reconciled alternatives are addressed at a target key; index once rather than scanning per group.
+  const reconciledByKey = new Map(run.reconciled.map((r) => [r.targetKey, r]));
+  const judgeLabel = (dimension: EvaluationDimension): string =>
+    EVALUATION_DIMENSION_SPECS[dimension].label;
+
   const targets: PackEvaluationTarget[] = groupFindingsByTarget(run.findings, 'natural').map(
     (group) => ({
       key: group.key,
@@ -244,13 +277,19 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
       counts: group.counts,
       judges: group.findings.map((f) => ({
         dimension: f.dimension,
-        label: EVALUATION_DIMENSION_SPECS[f.dimension].label,
+        label: judgeLabel(f.dimension),
         severity: f.severity,
         status: f.status,
         proposedChange: f.proposedChange,
         rationale: f.rationale,
         sourceQuote: f.sourceQuote,
       })),
+      alternatives: (reconciledByKey.get(group.key)?.alternatives ?? []).map((alt) => ({
+        prompt: alt.prompt,
+        addresses: alt.addresses.map(judgeLabel),
+        note: alt.note,
+      })),
+      unresolvedBy: (reconciledByKey.get(group.key)?.unresolved ?? []).map(judgeLabel),
     })
   );
 

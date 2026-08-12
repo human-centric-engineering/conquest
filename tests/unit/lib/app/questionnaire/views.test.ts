@@ -357,6 +357,7 @@ function makeEvaluationRunDetail(
     questionnaireId: 'q-1',
     error: null,
     findings: [makeEvaluationFindingView()],
+    reconciled: [],
     ...overrides,
   };
 }

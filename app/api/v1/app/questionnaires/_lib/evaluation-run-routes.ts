@@ -29,6 +29,7 @@ import {
   FINDING_REVIEW_STATUSES,
   coerceProposedEdit,
   parseAudienceShape,
+  parseReconciledSuggestions,
   versionStructureSchema,
   type EvaluationDimension,
   type JudgeVerdict,
@@ -323,6 +324,9 @@ export async function persistEvaluationRun(args: {
         totalFindings: panel.summary.totalFindings,
         dimensionSummary: jsonInput(dimensionSummary),
         structureSnapshot: jsonInput(structure),
+        // Empty when nothing was contested or the reconcile call failed — both mean "this run has
+        // no merged alternatives", which is exactly what an empty array says on read.
+        reconciledSuggestions: jsonInput(panel.reconciled),
         // A run where every judge failed carries a note; partial/complete runs don't.
         error: status === 'failed' ? 'all_judges_failed' : null,
         startedAt,
@@ -475,6 +479,7 @@ export async function getEvaluationRunDetail(
     select: {
       ...RUN_HEADER_SELECT,
       structureSnapshot: true,
+      reconciledSuggestions: true,
       findings: {
         orderBy: [{ dimension: 'asc' }, { ordinal: 'asc' }],
         select: FINDING_SELECT,
@@ -509,6 +514,10 @@ export async function getEvaluationRunDetail(
     questionnaireId: row.questionnaireId,
     error: row.error,
     findings,
+    // Stored JSON is never trusted on the way out: a malformed blob degrades to `[]`, and a legacy
+    // run (written before the column existed) is `null`, which means "never reconciled" — not an
+    // error, and not something to backfill. Consumers fall back to the judges' own suggestions.
+    reconciled: parseReconciledSuggestions(row.reconciledSuggestions),
   };
 }
 

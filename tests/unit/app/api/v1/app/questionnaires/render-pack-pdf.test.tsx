@@ -115,6 +115,24 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   startedAt: '2026-08-10T00:00:00.000Z',
   completedAt: '2026-08-10T00:00:05.000Z',
   createdAt: '2026-08-10T00:00:00.000Z',
+  reconciled: [
+    {
+      targetKey: 'q1',
+      alternatives: [
+        {
+          prompt: 'How would you describe your role?',
+          addresses: ['clarity', 'audience_match'],
+          note: 'One ask, plain language.',
+        },
+        {
+          prompt: 'What is your role, in your own words?',
+          addresses: ['clarity'],
+          note: 'Shorter, loses the seniority nuance.',
+        },
+      ],
+      unresolved: ['type_fit'],
+    },
+  ],
   findings: [
     {
       id: 'f1',

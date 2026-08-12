@@ -369,6 +369,8 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                alternatives: [],
+                unresolvedBy: [],
                 judges: [
                   {
                     dimension: 'clarity',
@@ -410,6 +412,101 @@ describe('buildPackMarkdown', () => {
       expect(md).toContain('- **Audience-Match Judge** [minor · declined] — Drop the jargon');
     });
 
+    it('prints the reconciled rewording after the verdicts it reconciles', () => {
+      const md = buildPackMarkdown(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 2,
+            scores: [],
+            targets: [
+              {
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 1, info: 0, total: 2 },
+                alternatives: [
+                  {
+                    prompt: 'How engaged do you feel at work?',
+                    addresses: ['Clarity Judge', 'Audience-Match Judge'],
+                    note: 'One ask, plain language.',
+                  },
+                ],
+                unresolvedBy: ['Type-Fit Judge'],
+                judges: [
+                  {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
+                    severity: 'major',
+                    status: 'pending',
+                    proposedChange: 'Split into two questions',
+                    rationale: 'Asks two things at once',
+                    sourceQuote: null,
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+
+      expect(md).toContain('**Suggested rewording** (addressing the judges above):');
+      expect(md).toContain('- How engaged do you feel at work?');
+      expect(md).toContain(
+        '_Addresses: Clarity Judge, Audience-Match Judge._ One ask, plain language.'
+      );
+      // The concern wording cannot fix is printed, not swallowed — otherwise the rewrite reads as
+      // consensus the panel never reached.
+      expect(md).toContain('Not resolved by rewording: Type-Fit Judge');
+
+      // Order matters: the reconciliation only makes sense after the disagreement it resolves.
+      expect(md.indexOf('Split into two questions')).toBeLessThan(
+        md.indexOf('How engaged do you feel at work?')
+      );
+    });
+
+    it('omits the rewording block entirely for a target with no alternatives', () => {
+      const md = buildPackMarkdown(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 1,
+            scores: [],
+            targets: [
+              {
+                key: 'q1',
+                context: null,
+                label: 'A question',
+                questionType: null,
+                gap: false,
+                removed: false,
+                counts: { major: 0, minor: 1, info: 0, total: 1 },
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [
+                  {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
+                    severity: 'minor',
+                    status: 'pending',
+                    proposedChange: 'Tighten it',
+                    rationale: 'Wordy',
+                    sourceQuote: null,
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+      expect(md).not.toContain('Suggested rewording');
+    });
+
     it('flags a target that no longer exists in the questionnaire', () => {
       const md = buildPackMarkdown(
         model({
@@ -427,6 +524,8 @@ describe('buildPackMarkdown', () => {
                 gap: false,
                 removed: true,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                alternatives: [],
+                unresolvedBy: [],
                 judges: [
                   {
                     dimension: 'duplicates',

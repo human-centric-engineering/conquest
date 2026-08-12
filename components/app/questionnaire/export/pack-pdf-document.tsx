@@ -27,6 +27,10 @@ const COLORS = {
   faint: '#9ca3af',
   accent: PACK_BRAND.brandMarigold,
   hairline: '#e5e7eb',
+  // A very pale warm wash for the reconciled-wording panel. Deliberately near-white: it has to
+  // separate the resolution from the verdicts above it without competing with the marigold rule,
+  // and it has to stay legible when the pack is printed in greyscale.
+  tint: '#fbf7ee',
 } as const;
 
 const styles = StyleSheet.create({
@@ -201,6 +205,31 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: 'Helvetica-Bold',
     marginTop: 10,
+  },
+  // The reconciled wording — tinted and ruled so it reads as the resolution of the verdicts
+  // above it rather than one more opinion among them.
+  evaluationAlternatives: {
+    marginTop: 6,
+    padding: 6,
+    backgroundColor: COLORS.tint,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.accent,
+  },
+  evaluationAlternativesLabel: {
+    fontSize: 7,
+    color: COLORS.faint,
+    fontFamily: 'Helvetica-Bold',
+    letterSpacing: 0.6,
+  },
+  evaluationAlternativePrompt: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 3,
+  },
+  evaluationAlternativeNote: {
+    fontSize: 8,
+    color: COLORS.muted,
+    marginTop: 1,
   },
   evaluationFinding: {
     marginTop: 6,
@@ -496,6 +525,30 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                           <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
                         </View>
                       ))}
+                      {/* Last, after the verdicts it reconciles — it reads as an answer only once
+                          the reader has seen the disagreement. */}
+                      {target.alternatives.length > 0 && (
+                        <View style={styles.evaluationAlternatives}>
+                          <Text style={styles.evaluationAlternativesLabel}>
+                            {target.alternatives.length === 1
+                              ? 'SUGGESTED REWORDING'
+                              : 'SUGGESTED REWORDINGS'}
+                          </Text>
+                          {target.alternatives.map((alt, i) => (
+                            <View key={i} wrap={false}>
+                              <Text style={styles.evaluationAlternativePrompt}>{alt.prompt}</Text>
+                              <Text style={styles.evaluationAlternativeNote}>
+                                {`Addresses: ${alt.addresses.join(', ')}. ${alt.note}`}
+                              </Text>
+                            </View>
+                          ))}
+                          {target.unresolvedBy.length > 0 && (
+                            <Text style={styles.evaluationAlternativeNote}>
+                              {`Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change.`}
+                            </Text>
+                          )}
+                        </View>
+                      )}
                     </View>
                   ))
                 )}

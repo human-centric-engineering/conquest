@@ -21,12 +21,22 @@ import type { Logger } from '@/lib/logging';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities';
 
-import { EVALUATE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
-import type { EvaluateStructureData } from '@/lib/app/questionnaire/capabilities';
+import {
+  EVALUATE_STRUCTURE_CAPABILITY_SLUG,
+  RECONCILE_SUGGESTIONS_CAPABILITY_SLUG,
+  RECONCILER_AGENT_SLUG,
+} from '@/lib/app/questionnaire/constants';
+import type {
+  EvaluateStructureData,
+  ReconcileSuggestionsData,
+} from '@/lib/app/questionnaire/capabilities';
 import {
   EVALUATION_DIMENSION_SPECS,
+  MAX_RECONCILED_TARGETS,
   type EvaluationDimension,
   type JudgeVerdict,
+  type ReconciledSuggestion,
+  type ReconcileTargetInput,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation';
 
@@ -49,6 +59,13 @@ export interface EvaluationPanelSummary {
 export interface EvaluationPanelResult {
   results: DimensionResult[];
   summary: EvaluationPanelSummary;
+  /**
+   * Alternative phrasings for the questions more than one judge flagged — one extra call after the
+   * panel (see `reconcile-schema.ts`). Empty when nothing was contested, when the reconciler agent
+   * is unseeded, or when the call failed: it is an enhancement over the judges' own suggestions,
+   * never a precondition for them.
+   */
+  reconciled: ReconciledSuggestion[];
 }
 
 /**
@@ -62,6 +79,93 @@ export interface JudgeAgentRef {
   provider: string | null;
   model: string | null;
   fallbackProviders: unknown;
+}
+
+/**
+ * Pick the questions worth reconciling, richest-first, and render them as reconciler input.
+ *
+ * Three filters, each load-bearing:
+ *
+ *  - **More than one judge.** A question one judge flagged already has that judge's rewrite; there
+ *    is no disagreement to resolve and no reason to spend a second call on it.
+ *  - **Resolves to a real question.** Findings against the `goal`, the `audience`, or a section are
+ *    not phrasings to rewrite. This also excludes the Coverage judge's drafted new questions, which
+ *    are addressed at `goal` by convention — a question that does not exist yet cannot be rephrased.
+ *  - **Capped at {@link MAX_RECONCILED_TARGETS}**, most-contested first (major findings, then total).
+ *    The caller logs what fell off the end: a reconciliation that silently covered 15 of 30 contested
+ *    questions would read as "the other 15 were fine".
+ */
+function selectContestedTargets(
+  results: DimensionResult[],
+  structure: VersionStructureInput
+): { targets: ReconcileTargetInput[]; contestedTotal: number } {
+  // Index the structure once: key → the question and where it sits, for the prompt and the chip.
+  const questions = new Map<
+    string,
+    { prompt: string; type: string | null; sectionTitle: string; position: number }
+  >();
+  let position = 0;
+  for (const section of structure.sections) {
+    for (const question of section.questions) {
+      position += 1;
+      questions.set(question.key, {
+        prompt: question.prompt,
+        type: question.type ?? null,
+        sectionTitle: section.title,
+        position,
+      });
+    }
+  }
+
+  const byKey = new Map<string, { judges: ReconcileTargetInput['judges']; major: number }>();
+  for (const result of results) {
+    if (!result.verdict) continue;
+    const spec = EVALUATION_DIMENSION_SPECS[result.dimension];
+    for (const finding of result.verdict.findings) {
+      if (!questions.has(finding.targetKey)) continue;
+      let entry = byKey.get(finding.targetKey);
+      if (!entry) {
+        entry = { judges: [], major: 0 };
+        byKey.set(finding.targetKey, entry);
+      }
+      entry.judges.push({
+        dimension: result.dimension,
+        label: spec.label,
+        severity: finding.severity,
+        proposedChange: finding.proposedChange,
+        rationale: finding.rationale,
+      });
+      if (finding.severity === 'major') entry.major += 1;
+    }
+  }
+
+  // Two *judges*, not two findings: one judge raising two points about a question is still one
+  // perspective, and reconciling a perspective with itself proposes nothing.
+  const contested = [...byKey.entries()].filter(
+    ([, entry]) => new Set(entry.judges.map((j) => j.dimension)).size >= 2
+  );
+
+  const ranked = contested.sort(([keyA, a], [keyB, b]) => {
+    if (b.major !== a.major) return b.major - a.major;
+    if (b.judges.length !== a.judges.length) return b.judges.length - a.judges.length;
+    // Positional tiebreak keeps the batch (and therefore the cost) reproducible run to run.
+    return (questions.get(keyA)?.position ?? 0) - (questions.get(keyB)?.position ?? 0);
+  });
+
+  const targets: ReconcileTargetInput[] = ranked
+    .slice(0, MAX_RECONCILED_TARGETS)
+    .map(([key, entry]) => {
+      const question = questions.get(key);
+      return {
+        key,
+        prompt: question?.prompt ?? key,
+        questionType: question?.type ?? null,
+        context: question ? `Q${question.position} · ${question.sectionTitle}` : null,
+        judges: entry.judges,
+      };
+    });
+
+  return { targets, contestedTotal: contested.length };
 }
 
 /**
@@ -156,6 +260,16 @@ export async function runEvaluationPanel(args: {
   const dimensionsRun = results.filter((r) => r.verdict !== undefined).length;
   const totalFindings = results.reduce((sum, r) => sum + (r.verdict?.findings.length ?? 0), 0);
 
+  const reconciled = await reconcileContested({
+    results,
+    structure,
+    questionnaireId,
+    versionId,
+    agentBySlug,
+    adminId,
+    log,
+  });
+
   return {
     results,
     summary: {
@@ -164,5 +278,103 @@ export async function runEvaluationPanel(args: {
       dimensionsFailed: dimensions.length - dimensionsRun,
       totalFindings,
     },
+    reconciled,
   };
+}
+
+/**
+ * The reconcile step: one call after the panel, over the questions several judges flagged.
+ *
+ * **Fail-soft in every direction**, like the panel it follows. Nothing contested, no reconciler
+ * agent seeded, a failed dispatch, a thrown fault — each returns `[]` and the run completes with
+ * the judges' own suggestions intact. This step makes a good result better; it must never be able
+ * to turn a good result into no result, and an admin who has just paid for seven judge calls should
+ * not lose them because an eighth call failed.
+ */
+async function reconcileContested(args: {
+  results: DimensionResult[];
+  structure: VersionStructureInput;
+  questionnaireId: string;
+  versionId: string;
+  agentBySlug: Map<string, JudgeAgentRef>;
+  adminId: string;
+  log: Logger;
+}): Promise<ReconciledSuggestion[]> {
+  const { results, structure, questionnaireId, versionId, agentBySlug, adminId, log } = args;
+
+  const { targets, contestedTotal } = selectContestedTargets(results, structure);
+  if (targets.length === 0) return [];
+
+  // No silent caps: if the panel contested more questions than one call covers, say so, so the
+  // absence of an alternative is never read as "the panel was happy with this one".
+  if (contestedTotal > targets.length) {
+    log.info('Reconciling the most contested questions only', {
+      questionnaireId,
+      versionId,
+      contested: contestedTotal,
+      reconciled: targets.length,
+    });
+  }
+
+  const agent = agentBySlug.get(RECONCILER_AGENT_SLUG);
+  if (!agent) {
+    log.warn('Reconciler agent missing; returning judge suggestions unreconciled', {
+      questionnaireId,
+      versionId,
+      slug: RECONCILER_AGENT_SLUG,
+    });
+    return [];
+  }
+
+  let dispatch;
+  try {
+    dispatch = await capabilityDispatcher.dispatch(
+      RECONCILE_SUGGESTIONS_CAPABILITY_SLUG,
+      {
+        targets,
+        goal: structure.goal ?? null,
+        audience: structure.audience ?? null,
+        versionId,
+      },
+      {
+        userId: adminId,
+        agentId: agent.id,
+        entityContext: {
+          reconcilerAgent: {
+            provider: agent.provider,
+            model: agent.model,
+            fallbackProviders: agent.fallbackProviders,
+          },
+        },
+      }
+    );
+  } catch (err) {
+    log.error('Reconcile dispatch threw; returning judge suggestions unreconciled', {
+      questionnaireId,
+      versionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+
+  if (dispatch.success && dispatch.data) {
+    // The envelope is `unknown` at this seam, so treat a shapeless payload as "nothing reconciled"
+    // rather than trusting the cast — a run must not fall over because the capability returned a
+    // shape it should not have.
+    const suggestions = (dispatch.data as Partial<ReconcileSuggestionsData>).suggestions ?? [];
+    log.info('Reconciled cross-judge suggestions', {
+      questionnaireId,
+      versionId,
+      targets: targets.length,
+      reconciled: suggestions.length,
+    });
+    return suggestions;
+  }
+
+  log.warn('Reconcile dispatch failed; returning judge suggestions unreconciled', {
+    questionnaireId,
+    versionId,
+    code: dispatch.error?.code,
+  });
+  return [];
 }
