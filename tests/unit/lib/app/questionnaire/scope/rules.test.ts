@@ -42,6 +42,56 @@ describe('scopeRuleMatches — presence', () => {
   });
 });
 
+describe('scopeRuleMatches — not_exists (the veto operator)', () => {
+  const veto = rule({ operator: 'not_exists', action: 'exclude', topicKey: 'ai_automation' });
+
+  it('matches when the slot was never filled at all', () => {
+    // The whole point, and the one deliberate exception to "an unfilled slot never matches": a veto
+    // is a statement about something the respondent did NOT say, so absence is what it tests.
+    expect(scopeRuleMatches(veto, undefined)).toBe(true);
+  });
+
+  it('matches an empty fill, by every definition of empty the evaluator uses', () => {
+    expect(scopeRuleMatches(veto, fill({ value: null, paraphrase: '   ' }))).toBe(true);
+    expect(scopeRuleMatches(veto, fill({ value: '' }))).toBe(true);
+    expect(scopeRuleMatches(veto, fill({ value: [], paraphrase: null }))).toBe(true);
+  });
+
+  it('does NOT match once the respondent has answered', () => {
+    expect(scopeRuleMatches(veto, fill())).toBe(false);
+    expect(scopeRuleMatches(veto, fill({ value: 0, paraphrase: null }))).toBe(false);
+    expect(scopeRuleMatches(veto, fill({ value: false, paraphrase: null }))).toBe(false);
+  });
+
+  it('ignores any operand it is given', () => {
+    // The admin form hides the operand field for this operator; a legacy or hand-edited rule
+    // carrying one must not change the answer.
+    expect(scopeRuleMatches({ ...veto, value: 'anything' }, undefined)).toBe(true);
+  });
+
+  it('vetoes a topic through the full rule pass when the slot is absent', () => {
+    // Merlin5's G02, end to end: route AI & Automation only if a commercial outcome was named.
+    const rules = [
+      rule({
+        id: 'g02',
+        dataSlotKey: 'commercial_outcome',
+        operator: 'not_exists',
+        action: 'exclude',
+        topicKey: 'ai_automation',
+      }),
+    ];
+    const noOutcome = evaluateScopeRules(rules, [
+      { key: 'challenges', value: 'we need an AI plan', paraphrase: null },
+    ]);
+    expect([...noOutcome.exclude]).toEqual(['ai_automation']);
+
+    const outcomeNamed = evaluateScopeRules(rules, [
+      { key: 'commercial_outcome', value: 'cut the sales cycle by 20%', paraphrase: null },
+    ]);
+    expect([...outcomeNamed.exclude]).toEqual([]);
+  });
+});
+
 describe('scopeRuleMatches — equals', () => {
   it('compares case- and whitespace-insensitively', () => {
     const r = rule({ operator: 'equals', value: '  Healthcare ' });

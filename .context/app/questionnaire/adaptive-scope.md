@@ -129,6 +129,14 @@ Three tiers, in order — and the order is the design.
    are independent assertions about different topics, so stopping at the first would silently drop
    the rest). **Exclude beats include** — an author's "never" is a line drawn, and a second rule they
    forgot must not cross it.
+
+   `not_exists` is the one operator that matches on ABSENCE, and the one exception to "an unfilled
+   slot never matches". It exists because the most valuable hard rules are **vetoes** — "never score
+   them on AI readiness when they never named an outcome they want it to move" — and a veto is a
+   statement about something the respondent did _not_ say. Without it that rule could only be
+   written as prose criteria, which is exactly the failure hard rules exist to prevent: a constraint
+   obeyed most of the time.
+
 2. **The judgement** (`scope/planner.ts`). One call over the author's criteria and what the
    respondent actually said. Skipped entirely when there is nothing to decide.
 3. **Guardrails** (`scope/guardrails.ts`). The cap, the blind-spot check, the fallback.

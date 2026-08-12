@@ -70,9 +70,20 @@ function isFilled(fill: ScopeFill): boolean {
 
 /** Whether one rule matches the fill for its slot. */
 export function scopeRuleMatches(rule: ScopeRule, fill: ScopeFill | undefined): boolean {
+  const filled = Boolean(fill) && isFilled(fill as ScopeFill);
+
+  // `not_exists` is the ONE operator that matches on absence, so it is evaluated before — and is
+  // the deliberate exception to — the unfilled-slot guard below. It exists for vetoes: "never score
+  // them on AI readiness when they never named an outcome they want it to move" is a statement
+  // about what the respondent did NOT say, and there is no way to write it with the positive
+  // operators. Handling it here rather than inside the switch is what keeps the guard's rule
+  // ("an unfilled slot never matches") true of everything else — and narrows the operator union,
+  // so the switch below stays exhaustive without a `not_exists` case that could never run.
+  if (rule.operator === 'not_exists') return !filled;
+
   // A rule about a slot the respondent never filled cannot match — including `exists`, whose whole
   // purpose is to test for presence.
-  if (!fill || !isFilled(fill)) return false;
+  if (!fill || !filled) return false;
 
   switch (rule.operator) {
     case 'exists':

@@ -112,7 +112,14 @@ export type TopicSource = (typeof TOPIC_SOURCES)[number];
  * cases an author is certain about, and a flat list is legible at a glance in a way a boolean tree
  * is not. Anything richer is what the planner's plain-English criteria are for.
  */
-export const SCOPE_RULE_OPERATORS = ['equals', 'contains', 'gt', 'lt', 'exists'] as const;
+export const SCOPE_RULE_OPERATORS = [
+  'equals',
+  'contains',
+  'gt',
+  'lt',
+  'exists',
+  'not_exists',
+] as const;
 export type ScopeRuleOperator = (typeof SCOPE_RULE_OPERATORS)[number];
 
 /** Human labels for the operator select. */
@@ -122,10 +129,27 @@ export const SCOPE_RULE_OPERATOR_LABELS: Record<ScopeRuleOperator, string> = {
   gt: 'is greater than',
   lt: 'is less than',
   exists: 'has any answer',
+  not_exists: 'was never answered',
 };
 
 /** Operators that ignore `value` — the admin form hides the operand field for these. */
-export const VALUELESS_SCOPE_OPERATORS: readonly ScopeRuleOperator[] = ['exists'];
+export const VALUELESS_SCOPE_OPERATORS: readonly ScopeRuleOperator[] = ['exists', 'not_exists'];
+
+/**
+ * The one operator that matches on ABSENCE, and therefore the one exception to "an unfilled slot
+ * never matches".
+ *
+ * It exists because the most valuable hard rules are vetoes — "never score them on AI readiness
+ * when they never named an outcome they want it to move" — and a veto is a statement about
+ * something the respondent did NOT say. Without it, that rule can only be written as prose criteria
+ * for the planner to weigh, which is precisely the failure mode hard rules exist to avoid: a
+ * constraint obeyed most of the time.
+ *
+ * Named as a constant rather than inlined because two places have to agree about it — the evaluator
+ * (which must let it past the unfilled-slot guard) and the admin form (which must not ask for an
+ * operand).
+ */
+export const NEGATIVE_SCOPE_OPERATOR: ScopeRuleOperator = 'not_exists';
 
 /**
  * What a matching rule does. `include` forces a conditional topic in; `exclude` forces it out.

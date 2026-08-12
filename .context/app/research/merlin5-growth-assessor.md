@@ -1,6 +1,6 @@
 ---
 title: Merlin5 Growth Assessor — conceptual requirements and solution options
-status: research — the CAPABILITIES are now built (P17 Adaptive Scope); the instrument is not
+status: research — superseded by P17 Adaptive Scope + F17.7 (the instrument is authored)
 source: Merlin5_Growth_Assessor_Question_Set_v3.xlsx (5 tabs, 70 question rows), 2026-08-12
 audience: whoever scopes the build; the client, in the "What the client is asking for" section
 ---
@@ -22,10 +22,11 @@ audience: whoever scopes the build; the client, in the "What the client is askin
 > covers the G04 case only), **C7 (time as a budget — the biggest remaining gap; the cap is a topic
 > count, not seconds)**, C8's cross-scale normalisation, and C9's open-vs-close reconciliation.
 >
-> **The instrument itself does not exist in this repo.** The 70-row item bank lives only in
-> `Merlin5_Growth_Assessor_Question_Set_v3.xlsx`, which is not committed here. Authoring it is an
-> upload-and-review job through the product — ingest the workbook, then run the Routing Analyst over
-> it — not a code change.
+> **The instrument is authored** by `npm run author:merlin5 -- <workbook.xlsx>` (F17.7) — a
+> deterministic mapping from the workbook's own columns, so the client's 70 rows never enter this
+> repo. Guardrail G02 required a new hard-rule operator (`not_exists`); see
+> [`../planning/features/f17.7.md`](../planning/features/f17.7.md) for what was verified and what
+> the script prints as still-missing.
 
 ---
 
