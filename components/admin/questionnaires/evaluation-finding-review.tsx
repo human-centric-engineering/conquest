@@ -42,6 +42,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
+import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tip } from '@/components/ui/tooltip';
@@ -70,7 +71,13 @@ import {
   findingReviewStatusBadge,
   findingSeverityBadge,
 } from '@/components/admin/questionnaires/evaluation-status-badge';
-import { FieldLabel, LabelledField } from '@/components/admin/questionnaires/evaluation-field';
+import {
+  FieldLabel,
+  LabelledField,
+  PROSE_MEASURE,
+  QUESTION_FACE,
+  QuotedProse,
+} from '@/components/admin/questionnaires/evaluation-field';
 
 /**
  * Kinds whose `label` is real content — a question's prompt, a section's title — and so earn their
@@ -354,7 +361,7 @@ export function FindingReviewCard({
             {/* The full context, not just the kind — "Question 4 · Business Execution" — because
                 this eyebrow replaces the badge-row chip rather than sitting alongside it. */}
             <FieldLabel>{targetContext(finding)}</FieldLabel>
-            <p className="mt-0.5 text-sm font-semibold">
+            <p className={cn(QUESTION_FACE, 'mt-0.5 max-w-[54ch] text-base')}>
               {namedTarget.kind === 'question' ? `“${namedTarget.label}”` : namedTarget.label}
               {namedTarget.questionType && (
                 <span className="text-muted-foreground font-normal">
@@ -373,16 +380,28 @@ export function FindingReviewCard({
       {/* Body — the judge's advice, every block named so no sentence has to be decoded. */}
       <div className="space-y-2.5 p-3">
         <LabelledField label="Suggestion">
-          <p className="text-sm font-medium">{finding.proposedChange}</p>
+          {/* Not bold. The quoted wording inside it already changes face and slants; bolding the
+              sentence carrying it just makes a page of suggestions heavier to read. */}
+          <p className={cn(PROSE_MEASURE, 'text-sm')}>
+            <QuotedProse text={finding.proposedChange} />
+          </p>
         </LabelledField>
 
         <LabelledField label="Rationale">
-          <p className="text-muted-foreground text-sm">{finding.rationale}</p>
+          <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-sm')}>
+            <QuotedProse text={finding.rationale} />
+          </p>
         </LabelledField>
 
         {finding.sourceQuote && !quoteRestatesTarget(finding.sourceQuote, finding.target) && (
           <LabelledField label="Evidence">
-            <blockquote className="text-muted-foreground border-l-2 pl-3 text-xs italic">
+            <blockquote
+              className={cn(
+                QUESTION_FACE,
+                PROSE_MEASURE,
+                'text-muted-foreground border-l-2 pl-3 text-xs italic'
+              )}
+            >
               {finding.sourceQuote}
             </blockquote>
           </LabelledField>
@@ -404,9 +423,11 @@ export function FindingReviewCard({
         {addOp && (
           <div className="bg-background rounded-md border p-2.5">
             <FieldLabel>Suggested new question · {questionTypeLabel(addOp.type)}</FieldLabel>
-            <p className="mt-0.5 text-sm font-medium">{addOp.prompt}</p>
+            <p className={cn(QUESTION_FACE, 'mt-0.5 max-w-[54ch] text-base')}>{addOp.prompt}</p>
             {addOp.guidelines && (
-              <p className="text-muted-foreground mt-1 text-xs">{addOp.guidelines}</p>
+              <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-1 text-xs')}>
+                {addOp.guidelines}
+              </p>
             )}
           </div>
         )}

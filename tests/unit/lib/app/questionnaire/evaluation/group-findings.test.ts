@@ -13,7 +13,7 @@ import {
   tallySeverities,
   groupContextLabel,
   type FindingGroup,
-} from '@/components/admin/questionnaires/evaluation-grouping';
+} from '@/lib/app/questionnaire/evaluation/group-findings';
 import type { EvaluationFindingView, FindingTargetView } from '@/lib/app/questionnaire/views';
 import type { FindingSeverity } from '@/lib/app/questionnaire/evaluation';
 

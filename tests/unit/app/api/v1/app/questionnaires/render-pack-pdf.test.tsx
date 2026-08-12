@@ -115,6 +115,24 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   startedAt: '2026-08-10T00:00:00.000Z',
   completedAt: '2026-08-10T00:00:05.000Z',
   createdAt: '2026-08-10T00:00:00.000Z',
+  reconciled: [
+    {
+      targetKey: 'q1',
+      alternatives: [
+        {
+          prompt: 'How would you describe your role?',
+          addresses: ['clarity', 'audience_match'],
+          note: 'One ask, plain language.',
+        },
+        {
+          prompt: 'What is your role, in your own words?',
+          addresses: ['clarity'],
+          note: 'Shorter, loses the seniority nuance.',
+        },
+      ],
+      unresolved: ['type_fit'],
+    },
+  ],
   findings: [
     {
       id: 'f1',
@@ -140,6 +158,37 @@ const EVALUATION_RUN: EvaluationRunDetail = {
       editedOverride: null,
       decidedByUserId: null,
       decidedAt: null,
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'manual',
+    },
+    // A second judge on the SAME question, so the render exercises the by-target block that
+    // stacks several verdicts under one printed prompt — the shape the pack now emits.
+    {
+      id: 'f2',
+      dimension: 'audience_match',
+      ordinal: 0,
+      targetKey: 'q1',
+      target: {
+        kind: 'question',
+        key: 'q1',
+        label: 'Prompt for q1',
+        sectionTitle: 'Background',
+        position: 1,
+        sectionPosition: 1,
+        questionType: 'single_choice',
+        removed: false,
+      },
+      severity: 'minor',
+      proposedChange: 'Drop the jargon for a non-technical audience',
+      rationale: 'The stated audience would not know the term',
+      sourceQuote: 'engagement quotient',
+      status: 'declined',
+      proposedEdit: null,
+      editedOverride: null,
+      decidedByUserId: 'admin-1',
+      decidedAt: '2026-08-10T00:01:00.000Z',
       appliedAt: null,
       appliedToVersionId: null,
       stale: false,
@@ -284,7 +333,8 @@ describe('renderPackPdf', () => {
       hasRun: false,
       runAt: null,
       totalFindings: 0,
-      dimensions: [],
+      scores: [],
+      targets: [],
     });
 
     const pdf = await renderPackPdf(model);

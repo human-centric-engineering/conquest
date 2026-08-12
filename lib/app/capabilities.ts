@@ -22,6 +22,7 @@ import {
   AppComposeQuestionnaireCapability,
   AppDetectContradictionsCapability,
   AppEvaluateStructureCapability,
+  AppReconcileSuggestionsCapability,
   AppExtractAnswerSlotsCapability,
   AppExtractQuestionnaireStructureCapability,
   AppGenerateDataSlotsCapability,
@@ -60,6 +61,10 @@ export function initAppCapabilities(): void {
 
   // F5.1 — design-time structure evaluation. Dispatched by the evaluate-preview route.
   registerAppCapability(new AppEvaluateStructureCapability());
+
+  // Cross-judge reconciliation — runs once after the panel, over the questions more than one
+  // judge flagged. Dispatched by `runEvaluationPanel`.
+  registerAppCapability(new AppReconcileSuggestionsCapability());
 
   // Ingest verify + repair — the extraction critic + scales/matrix repair specialist that run
   // between extract and persist on the streaming ingest surface. Dispatched by the orchestrator.

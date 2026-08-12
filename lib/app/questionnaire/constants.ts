@@ -601,6 +601,60 @@ export const EVALUATE_STRUCTURE_FUNCTION_DEFINITION: CapabilityFunctionDefinitio
   },
 };
 
+/**
+ * Slug for the cross-judge reconciliation capability — the step that runs after the judge
+ * panel and proposes wording satisfying several judges at once. Shared by the
+ * `BaseCapability` subclass, its `AiCapability` seed row, and `runEvaluationPanel`.
+ */
+export const RECONCILE_SUGGESTIONS_CAPABILITY_SLUG = 'app_reconcile_suggestions';
+
+/**
+ * Slug of the seeded reconciler agent. Unlike the judges (whose slugs live in the dimension
+ * registry) there is exactly one, so it lives here beside its capability.
+ */
+export const RECONCILER_AGENT_SLUG = 'app-questionnaire-suggestion-reconciler';
+
+/** `AiCapability.executionHandler` for the reconciler — must match the registered class name. */
+export const RECONCILE_SUGGESTIONS_HANDLER = 'AppReconcileSuggestionsCapability';
+
+/**
+ * The reconciler's OpenAI-compatible function definition — one source of truth shared by the
+ * capability class and the seed row. Dispatched programmatically by `runEvaluationPanel` after
+ * the panel returns; never exposed to a chat tool loop. `targets` is passed as an opaque array
+ * (the pure DTO from `reconcile-prompt.ts`) and validated with Zod at execute time.
+ */
+export const RECONCILE_SUGGESTIONS_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: RECONCILE_SUGGESTIONS_CAPABILITY_SLUG,
+  description:
+    "Reconcile several independent judges' verdicts about the same questionnaire question into one or two alternative phrasings that satisfy as many of their concerns as possible, naming the concerns each phrasing resolves and any that wording alone cannot. Dispatched once per evaluation run over the questions more than one judge flagged; persists nothing.",
+  parameters: {
+    type: 'object',
+    properties: {
+      targets: {
+        type: 'array',
+        description:
+          'The contested questions — each { key, prompt, questionType, context, judges[] } where every judge carries its dimension, label, severity, proposedChange and rationale.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      goal: {
+        type: 'string',
+        description:
+          "The questionnaire's stated goal, as framing the alternatives must stay inside.",
+      },
+      audience: {
+        type: 'object',
+        description: 'The stated audience shape, as framing the alternatives must stay inside.',
+        additionalProperties: true,
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['targets'],
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Ingest verify + repair — the extraction critic + scales/matrix repair specialist
 // that run between extract and persist on the streaming ingest surface. Both are

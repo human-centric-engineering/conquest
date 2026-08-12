@@ -4,6 +4,7 @@ import {
   EVALUATION_DIMENSIONS,
   buildJudgePrompt,
   buildJudgeRetryMessage,
+  MAX_FINDINGS_PER_JUDGE,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation';
 
@@ -46,6 +47,57 @@ describe('buildJudgePrompt', () => {
     expect(messages).toHaveLength(2);
     expect(messages[0].role).toBe('system');
     expect(messages[1].role).toBe('user');
+  });
+
+  it('states the schema findings cap in the prompt, taken from the schema constant', () => {
+    // The cap is only enforced by Zod after the fact: a judge that emits 51 findings fails
+    // validation and its whole verdict is thrown away. Stating the same number the schema
+    // enforces — and reading it from that constant so the two cannot drift — turns a hard
+    // failure into a bounded answer. Every dimension carries it, not just clarity.
+    for (const dimension of ['clarity', 'coverage', 'type_fit'] as const) {
+      const system = buildJudgePrompt(dimension, STRUCTURE)[0].content;
+      expect(system).toContain(`at most ${MAX_FINDINGS_PER_JUDGE} findings`);
+      expect(system).toContain('most severe first');
+    }
+  });
+
+  it('tells every judge to lead with the alternative, not the complaint', () => {
+    // A critique the admin cannot act on is a to-do, not a finding. Every dimension carries the
+    // instruction, and it names `proposedChange` as the place the alternative goes — the field
+    // the review queue and the pack actually render.
+    for (const dimension of EVALUATION_DIMENSIONS) {
+      const system = buildJudgePrompt(dimension, STRUCTURE)[0].content;
+      expect(system).toContain('Lead with the fix, not the complaint');
+      expect(system).toContain('"proposedChange" must BE that alternative');
+    }
+  });
+
+  it('lets a judge diagnose without an alternative when it cannot responsibly propose one', () => {
+    // The escape hatch has to stay open: a judge pressed to always rewrite will invent facts it
+    // cannot see. The rule is "prefer an alternative", not "never report what you cannot fix".
+    const system = buildJudgePrompt('clarity', STRUCTURE)[0].content;
+    expect(system).toContain('Only diagnose without an alternative when you genuinely cannot');
+  });
+
+  it('asks judges to prefer a structured edit rather than only permitting one', () => {
+    // The old wording ("attach ONLY when ... you are confident of every field") read as a
+    // discouragement and left applicable fixes as prose the admin had to retype.
+    const system = buildJudgePrompt('clarity', STRUCTURE)[0].content;
+    expect(system).toContain('Prefer attaching "proposedEdit"');
+    // The guard against invention survives the softening.
+    expect(system).toContain('never invent a key, section title, or type');
+  });
+
+  it('has the delete-first judges offer a salvage before a deletion', () => {
+    // Duplicates and Goal-Match are the two dimensions whose natural op removes a question.
+    // Both should reach for a rewrite that keeps the slot when one exists.
+    const duplicates = buildJudgePrompt('duplicates', STRUCTURE)[0].content;
+    expect(duplicates).toContain('prefer salvaging over deleting');
+    expect(duplicates).toContain('replace_prompt');
+
+    const goalMatch = buildJudgePrompt('goal_match', STRUCTURE)[0].content;
+    expect(goalMatch).toContain('prefer the refocus');
+    expect(goalMatch).toContain('replace_prompt');
   });
 
   it('splices a dimension-specific rubric into the system message', () => {
@@ -158,5 +210,14 @@ describe('buildJudgeRetryMessage', () => {
   it('falls back to a generic message with no paths', () => {
     const msg = buildJudgeRetryMessage([]);
     expect(msg).toContain('not valid JSON');
+  });
+
+  it('asks for brevity when there are no paths, since the likely cause is truncation', () => {
+    // No issue paths means the first response never parsed — usually a fence or an answer cut
+    // off at the token cap. The retry reuses the same cap, so "be shorter" is the only advice
+    // that can actually clear it; the path-named branch must NOT carry that advice, because a
+    // schema-invalid response needs the field fixed, not shortened.
+    expect(buildJudgeRetryMessage([])).toContain('Keep the response short');
+    expect(buildJudgeRetryMessage(['score'])).not.toContain('Keep the response short');
   });
 });

@@ -51,6 +51,12 @@ export {
 } from '@/lib/app/questionnaire/capabilities/evaluate-structure';
 
 export {
+  AppReconcileSuggestionsCapability,
+  type ReconcileSuggestionsArgs,
+  type ReconcileSuggestionsData,
+} from '@/lib/app/questionnaire/capabilities/reconcile-suggestions';
+
+export {
   AppVerifyExtractionStructureCapability,
   type VerifyExtractionStructureArgs,
   type VerifyExtractionStructureData,

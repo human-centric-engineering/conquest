@@ -297,7 +297,7 @@ describe('buildPackMarkdown', () => {
     it('renders after Definitions, right before the closing "About ConQuest" blurb', () => {
       const md = buildPackMarkdown(
         model({
-          evaluations: { hasRun: false, runAt: null, totalFindings: 0, dimensions: [] },
+          evaluations: { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
         })
       );
       const definitionsIdx = md.indexOf('## Definitions');
@@ -311,83 +311,243 @@ describe('buildPackMarkdown', () => {
     it('renders the "no run yet" fallback when hasRun is false', () => {
       const md = buildPackMarkdown(
         model({
-          evaluations: { hasRun: false, runAt: null, totalFindings: 0, dimensions: [] },
+          evaluations: { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
         })
       );
       expect(md).toContain('## Evaluation');
       expect(md).toContain('_No evaluation has been run for this version yet._');
     });
 
-    it('renders each dimension as an H3 with its score, and a diagnostic line when the judge failed', () => {
+    it('renders the judge scoreboard, with a diagnostic line when a judge failed', () => {
       const md = buildPackMarkdown(
         model({
           evaluations: {
             hasRun: true,
             runAt: '2026-08-10T00:00:05.000Z',
             totalFindings: 0,
-            dimensions: [
+            scores: [
               {
                 dimension: 'clarity',
                 label: 'Clarity Judge',
                 score: 0.82,
                 diagnostic: null,
-                findings: [],
+                findingCount: 0,
               },
               {
                 dimension: 'coverage',
                 label: 'Coverage Judge',
                 score: null,
                 diagnostic: 'judge_error',
-                findings: [],
+                findingCount: 0,
               },
             ],
+            targets: [],
           },
         })
       );
-      expect(md).toContain('### Clarity Judge');
-      expect(md).toContain('Score: 82%');
-      expect(md).toContain('### Coverage Judge');
-      expect(md).toContain('_Judge unavailable: judge_error_');
+      expect(md).toContain('### Judge scores');
+      expect(md).toContain('- **Clarity Judge** — 82% · 0 finding(s)');
+      expect(md).toContain('- **Coverage Judge** — _unavailable: judge_error_');
+      // Nothing was flagged, so there is no per-question section at all.
+      expect(md).toContain('_No findings raised._');
     });
 
-    it('renders "No findings raised" for a clean dimension, and a bullet per finding otherwise', () => {
+    it('prints a contested question ONCE, as one H3, with a bullet per judge beneath it', () => {
       const md = buildPackMarkdown(
         model({
           evaluations: {
             hasRun: true,
             runAt: 'now',
-            totalFindings: 1,
-            dimensions: [
+            totalFindings: 2,
+            scores: [],
+            targets: [
               {
-                dimension: 'clarity',
-                label: 'Clarity Judge',
-                score: 0.5,
-                diagnostic: null,
-                findings: [
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 1, info: 0, total: 2 },
+                judgeCount: 2,
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [
                   {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
                     severity: 'major',
                     status: 'pending',
-                    targetLabel: 'Q1 · Background',
+                    proposedChange: 'Split into two questions',
+                    rationale: 'Asks two things at once',
+                    sourceQuote: 'engaged and satisfied',
+                  },
+                  {
+                    dimension: 'audience_match',
+                    label: 'Audience-Match Judge',
+                    severity: 'minor',
+                    status: 'declined',
+                    proposedChange: 'Drop the jargon',
+                    rationale: 'Too technical for this audience',
+                    sourceQuote: null,
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+
+      // The question is the heading, named once — the old by-judge layout printed it under
+      // every judge that flagged it.
+      const occurrences = md.split('Are you engaged and satisfied?').length - 1;
+      expect(occurrences).toBe(1);
+      expect(md).toContain('### Q1 · Background — Are you engaged and satisfied?');
+      expect(md).toContain('_Type: free_text · 2 judge(s) · 1 major_');
+
+      // Each judge is a bullet under that one heading, named (the missing fact under a
+      // question heading is *which judge said this*).
+      expect(md).toContain('- **Clarity Judge** [major · pending] — Split into two questions');
+      expect(md).toContain('  Asks two things at once');
+      expect(md).toContain('  > engaged and satisfied');
+      expect(md).toContain('- **Audience-Match Judge** [minor · declined] — Drop the jargon');
+    });
+
+    it('prints the reconciled rewording after the verdicts it reconciles', () => {
+      const md = buildPackMarkdown(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 2,
+            scores: [],
+            targets: [
+              {
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 1, info: 0, total: 2 },
+                judgeCount: 1,
+                alternatives: [
+                  {
+                    prompt: 'How engaged do you feel at work?',
+                    addresses: ['Clarity Judge', 'Audience-Match Judge'],
+                    note: 'One ask, plain language.',
+                  },
+                ],
+                unresolvedBy: ['Type-Fit Judge'],
+                judges: [
+                  {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
+                    severity: 'major',
+                    status: 'pending',
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: null,
                   },
                 ],
               },
+            ],
+          },
+        })
+      );
+
+      expect(md).toContain('**Suggested rewording** (addressing the judges above):');
+      expect(md).toContain('- How engaged do you feel at work?');
+      expect(md).toContain(
+        '_Addresses: Clarity Judge, Audience-Match Judge._ One ask, plain language.'
+      );
+      // The concern wording cannot fix is printed, not swallowed — otherwise the rewrite reads as
+      // consensus the panel never reached.
+      expect(md).toContain('Not resolved by rewording: Type-Fit Judge');
+
+      // Order matters: the reconciliation only makes sense after the disagreement it resolves.
+      expect(md.indexOf('Split into two questions')).toBeLessThan(
+        md.indexOf('How engaged do you feel at work?')
+      );
+    });
+
+    it('omits the rewording block entirely for a target with no alternatives', () => {
+      const md = buildPackMarkdown(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 1,
+            scores: [],
+            targets: [
               {
-                dimension: 'ordering',
-                label: 'Ordering Judge',
-                score: 1,
-                diagnostic: null,
-                findings: [],
+                key: 'q1',
+                context: null,
+                label: 'A question',
+                questionType: null,
+                gap: false,
+                removed: false,
+                counts: { major: 0, minor: 1, info: 0, total: 1 },
+                judgeCount: 1,
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [
+                  {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
+                    severity: 'minor',
+                    status: 'pending',
+                    proposedChange: 'Tighten it',
+                    rationale: 'Wordy',
+                    sourceQuote: null,
+                  },
+                ],
               },
             ],
           },
         })
       );
-      expect(md).toContain('- **[major · pending] Q1 · Background** — Split into two questions');
-      expect(md).toContain('  Asks two things at once');
-      expect(md).toContain('_No findings raised._');
+      expect(md).not.toContain('Suggested rewording');
+    });
+
+    it('flags a target that no longer exists in the questionnaire', () => {
+      const md = buildPackMarkdown(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 1,
+            scores: [],
+            targets: [
+              {
+                key: 'gone',
+                context: null,
+                label: 'gone',
+                questionType: null,
+                gap: false,
+                removed: true,
+                counts: { major: 0, minor: 1, info: 0, total: 1 },
+                judgeCount: 1,
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [
+                  {
+                    dimension: 'duplicates',
+                    label: 'Duplicates Judge',
+                    severity: 'minor',
+                    status: 'pending',
+                    proposedChange: 'Merge with q1',
+                    rationale: 'Covers the same ground',
+                    sourceQuote: null,
+                  },
+                ],
+              },
+            ],
+          },
+        })
+      );
+      expect(md).toContain('### gone');
+      expect(md).toContain('no longer in the questionnaire');
     });
   });
 });

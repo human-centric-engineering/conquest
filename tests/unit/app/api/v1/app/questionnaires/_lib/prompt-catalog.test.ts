@@ -18,8 +18,10 @@ import {
   QUESTIONNAIRE_ANSWER_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
+  RECONCILER_AGENT_SLUG,
   TURN_EVALUATOR_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
+import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { EVALUATION_DIMENSIONS } from '@/lib/app/questionnaire/evaluation/types';
 
 const catalog = buildPromptCatalog();
@@ -30,13 +32,18 @@ describe('buildPromptCatalog', () => {
     expect(stages).toEqual(new Set(['authoring', 'live', 'evaluation']));
   });
 
-  it('includes one judge entry per evaluation dimension, alongside the turn evaluator', () => {
+  it('includes one judge entry per evaluation dimension, alongside the two non-judges', () => {
     const evaluationStage = catalog.filter((e) => e.stage === 'evaluation');
-    // The turn evaluator is an evaluation-stage agent but NOT a per-dimension design judge,
-    // so it sits alongside the one-per-dimension judge panel rather than counting toward it.
-    const judges = evaluationStage.filter((e) => e.slug !== TURN_EVALUATOR_AGENT_SLUG);
+    // Two evaluation-stage agents are NOT per-dimension design judges and must not be counted as
+    // one: the turn evaluator (a live-conversation critic) and the suggestion reconciler (which
+    // runs after the panel and scores nothing). Identify the judges by their registry slugs rather
+    // than by "everything else in the stage", so a future non-judge cannot quietly pass as one.
+    const judgeSlugs = new Set(EVALUATION_JUDGE_SLUGS);
+    const judges = evaluationStage.filter((e) => judgeSlugs.has(e.slug));
     expect(judges).toHaveLength(EVALUATION_DIMENSIONS.length);
-    expect(evaluationStage).toHaveLength(EVALUATION_DIMENSIONS.length + 1);
+
+    const nonJudges = evaluationStage.filter((e) => !judgeSlugs.has(e.slug)).map((e) => e.slug);
+    expect(nonJudges.sort()).toEqual([RECONCILER_AGENT_SLUG, TURN_EVALUATOR_AGENT_SLUG].sort());
   });
 
   it('uses unique, non-empty agent slugs', () => {

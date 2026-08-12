@@ -88,6 +88,168 @@ useful result. `severity` is `info | minor | major`. These findings are what F5.
 review queue will become; `targetKey` is a free string reconciled fail-cleanly at apply
 time (the pure core has no live graph), the F2.3 revert-planner posture.
 
+**Judges lead with the alternative, not the complaint.** The prompt requires `proposedChange` to _be_
+the fix wherever one is feasible — the rewritten question, the better type, the position to move to —
+and reserves diagnosis-only findings for cases where proposing one would mean inventing facts the
+judge cannot see (a policy, a definition, what the author meant); the judge then says what it would
+need, in `rationale`. `proposedEdit` follows the same posture: **prefer** attaching the structured op
+(it is what makes a suggestion one-click applicable) rather than the older "attach only when
+confident of every field", which read as a discouragement and left applicable fixes stranded as prose
+the admin had to retype. The guard that survives the softening is the one that matters — never invent
+a key, section title, or type that is not in the structure.
+
+This changes the two **delete-first** dimensions most. Duplicates now prefers salvaging a partial
+overlap (`replace_prompt` narrowing the weaker question to the part the other misses) over removing
+it, and Goal-Match prefers a refocus over a deletion where the question can be pointed back at the
+goal. Both keep `delete_question` for the genuinely redundant and the genuinely off-mission — the
+change is which one they reach for first.
+
+## Cross-judge reconciliation — the step after the panel
+
+The panel's independence is the source of its credibility and the source of its most annoying
+output. Every judge scores blind to the others, so a question that four of them flag comes back with
+four rewrites, each fixing one dimension and quietly undoing another: apply the Clarity judge's
+wording and the jargon the Audience judge objected to can come back; apply the Audience judge's and
+the double-barrel returns. Nothing in the panel can fix that, because no judge is allowed to see
+another's verdict.
+
+So one more agent runs after the fan-in. The **Suggestion Reconciler**
+(`app-questionnaire-suggestion-reconciler` → `app_reconcile_suggestions`) takes the questions **more
+than one judge flagged** and proposes one or two phrasings that satisfy as many of their concerns as
+possible at once.
+
+| Aspect         | Choice                                                                                  |
+| -------------- | --------------------------------------------------------------------------------------- |
+| What it reads  | The contested questions, their current wording, every judge verdict, plus goal/audience |
+| What it writes | Nothing — a proposer, like the judges; the admin accepts, edits, or ignores             |
+| Batching       | ONE call for the whole run, not one per question                                        |
+| Scope          | Question targets only, 2+ **judges** (not 2+ findings), capped at 15 most-contested     |
+| Persistence    | `reconciledSuggestions` (nullable JSON) on the run row                                  |
+| When it runs   | Persisted runs only, and only if the judges left wall-clock for it (below)              |
+
+**Why "more than one judge" and not "more than one finding".** One judge raising two points about a
+question is still one perspective, and reconciling a perspective with itself proposes nothing worth
+paying for.
+
+**Why the preview does not reconcile.** `runEvaluationPanel` takes an explicit `reconcile: boolean`
+— required, not defaulted, so a new caller has to decide rather than inherit. The run route passes
+`true`; the preview route passes `false`, because it returns `{ results, summary }` ephemerally and
+has nowhere to put the alternatives. Billing an extra reasoning call for a payload that is dropped
+on the way out is not a cheaper preview, it is a more expensive one.
+
+**Why it can be skipped on a slow run.** The step is serial: it starts after the fan-in. A judge
+costs up to `JUDGE_TIMEOUT_MS` and `runStructuredCompletion` gives its one retry a _fresh_ timeout,
+so the concurrent fan-out is 180s at worst; reconciliation is another 180s on the same arithmetic.
+360s overruns the routes' `maxDuration = 300`, and a function killed there throws away seven judge
+calls the admin has already paid for. So `runEvaluationPanel` checks the clock before it starts:
+under `PANEL_BUDGET_MS` (285s, leaving a reserve for the structure build and the run's persistence)
+it needs `RECONCILE_TIMEOUT_MS × 2` still unspent, or it logs a warning and stands down. Skipping
+degrades to exactly what a failed reconcile degrades to — the judges' own suggestions — which is
+what every surface showed before this step existed. Raising the ceiling was not an option: 300 is
+already the highest `maxDuration` in the codebase.
+
+**Why question targets only.** Findings against the `goal`, the `audience`, or a section are not
+phrasings to rewrite. This also excludes the Coverage judge's drafted new questions, which are
+addressed at `goal` by convention — a question that does not exist yet cannot be rephrased.
+
+**Why the cap logs.** Fifteen is a bound on cost and on one shared token budget, and targets go in
+most-contested-first (major findings, then judge count, then position — so the batch is reproducible
+run to run). When more questions were contested than fit, `runEvaluationPanel` logs how many were
+left out. A silent cap is the dangerous version: an admin reading 15 reconciled questions would take
+the other 5 for questions the panel was happy with.
+
+**`addresses` and `unresolved` are the honest half of the contract.** Each alternative names the
+dimensions it genuinely resolves, and `unresolved` names concerns no wording can fix — nearly always
+because the real fix is structural (split the question, change its answer type), which this step is
+not allowed to make. A reconciliation that silently dropped a judge's point would be worse than none
+at all: it would read as consensus that was never reached.
+
+**Fail-soft in the strong sense.** Nothing contested, no reconciler agent seeded, a failed dispatch,
+a thrown fault, or a success payload of the wrong shape — every one returns `[]` and the run
+completes with all seven judges' own suggestions intact. An admin who has just paid for seven judge
+calls must not lose them because an eighth failed. Legacy runs, written before the column existed,
+read as `null` → `[]` via `parseReconciledSuggestions`: not missing data to backfill, but a true
+statement that the run was never reconciled.
+
+The alternatives reach the [Questionnaire Pack](./questionnaire-pack.md) through
+`EvaluationRunDetail.reconciled`, rendered under the question they belong to with dimension keys
+mapped to judge labels — and the run-detail page reads the same field (below).
+
+### The verdict band — what the reviewer sees first
+
+A by-question card leads with the **verb**, not the evidence: reword / move / delete / change the
+answer type, derived from the findings' effective ops by the pure `summariseGroupActions`
+(`evaluation/group-actions.ts`), followed by the reconciled wording and only then — on expand — the
+individual judgements. The page used to open at the evidence and leave the reviewer to infer the
+verb by reading four suggestions per question.
+
+Three rules hold it honest:
+
+- **Never manufacture a consensus.** The primary action is the one with the most judges behind it;
+  every dissenting action is printed beside it ("· 1 judge says delete this question instead"). The
+  reviewer is arbitrating, and needs both halves to do it.
+- **Ties break by consequence, not by order.** One judge saying delete and one saying reword surfaces
+  the deletion. Not because it is likelier to be right, but because it is the harder change to undo
+  and a collapsed card must never hide it.
+- **The verb follows `editedOverride ?? proposedEdit`** — what apply actually runs. A header reading
+  "Reword it" above a button that deletes the question would be lying about its own control.
+
+The backing count's denominator is the judges that **flagged this question**, not the seven on the
+panel: the other five had nothing to say about it, and counting them as absent votes would read as
+weaker support than the panel actually gave. Who flagged it at all is answered by the judge chips
+once the card is open.
+
+**One card open at a time.** These cards are tall when open (several finding cards, each with its own
+apply controls), so two at once means scrolling past finished work to reach unfinished work. The
+accordion also matches how the reviewing goes: fix one, move to the next.
+
+### Reading it: a column, a header band, an indent, and two faces
+
+The page is a queue of prose decisions, and it was drowning in its own text. Four fixes, all in
+service of one thing — the reviewer being able to tell, at any scroll position, _which question am I
+looking at_ and _whose words are these_.
+
+**A capped, left-aligned reading column.** The admin shell is full-bleed, which suits a table and
+not this page: on a wide monitor an uncapped column ran lines past 200 characters, where the eye
+loses the start of the next line on the return sweep. The run page caps itself at `max-w-5xl` and
+paragraph blocks cap again at `PROSE_MEASURE` (68ch), because a card also holds badges and buttons
+that legitimately want the extra width. Left-aligned rather than centred: the workspace chrome
+directly above (title, status, tab bar) is itself full-bleed and left-aligned, and a centred column
+visibly detaches from it at 2560px.
+
+**One filled surface per group, and everything about it is indented.** The group used to be a
+bordered card holding a tinted header holding a tinted verdict panel holding bordered finding
+cards — four nested frames, which reads as clutter and flattens the hierarchy the frames were meant
+to express. Now the disclosure band is the only thing filled; the group itself has no border, the
+verdict hangs off a hairline rule in its action tone rather than sitting in a tinted panel, and the
+whole body steps in from the left edge. With the frames gone, the indent and the space between
+groups (`space-y-8` — generous, not tidy) are what carry the structure. Finding cards keep their
+border: they are a list of discrete items each with its own apply controls, and at the deepest level
+that boundary is information rather than decoration.
+
+**Weight is not one of the signals.** The question and the proposed wordings are set at regular
+weight. They already carry a face change, a size step, and (for the heading) a filled band behind
+them; adding bold on top made a page of long questions heavier to read rather than easier. The one
+thing still bold is the verdict's verb — two words, and the only anchor the eye needs per group.
+
+**Two faces, one rule: the questionnaire's own words are set in the ConQuest display serif**
+(`QUESTION_FACE` in `evaluation-field.tsx`). That covers the card heading, the reconciled wording, a
+drafted new question, the evidence quote, and — via `QuotedProse` — any span a judge put in quotes
+inside a sentence. On the run this was built against, 27 of 40 suggestions were of the shape "Add a
+direct question on runway, such as: “If your main income stopped tomorrow…”", where the wording
+being proposed was buried mid-sentence in the same face as the advice around it; it now changes face
+and slants, and can be found without reading the sentence carrying it.
+
+Two constraints on that:
+
+- **It marks what the text says about itself.** `QuotedProse` restyles quoted spans only. It never
+  guesses that an unquoted sentence "looks like a question" and restyles the whole of it — that
+  would misattribute a judge's own advice to the questionnaire, which is the exact confusion the
+  treatment exists to prevent.
+- **Never the only signal.** Block-level question text keeps its curly quotes, and inline spans
+  render as `<q>` so the quotation marks come back from the UA stylesheet. A font swap is invisible
+  to a screen reader and to anyone whose webfont failed to load.
+
 ## Gating & limits
 
 - Always on — no flag to check. The route is admin-only paid LLM work, gated only by auth
@@ -97,6 +259,20 @@ time (the pure core has no live graph), the F2.3 revert-planner posture.
 - **Fail-soft per judge**: a dimension whose judge errors or is unseeded returns a
   `diagnostic` instead of a verdict; the other six still return. Only _zero_ judges
   seeded is a 404 (`run db:seed`).
+- **Per-judge budget**: `JUDGE_MAX_TOKENS` 8,192 output tokens, `JUDGE_TIMEOUT_MS` 90s,
+  and `maxDuration = 300` on both panel routes (the judges fan out concurrently, so the
+  request costs one slow judge, not seven — 180s of one, since the retry gets a fresh
+  timeout). Size the token cap for Clarity, not the
+  average: it attaches a full rewritten prompt to every finding, and on OpenAI's
+  reasoning families (`o*`, `gpt-5*`) the cap is sent as `max_completion_tokens`, so
+  hidden reasoning tokens come out of the same budget. At the original 2,048 the Clarity
+  judge was cut off mid-JSON on real questionnaires.
+- **Reading a judge failure**: a truncated response and a contract violation both end as
+  `evaluation_failed`, but they need opposite fixes, so the capability distinguishes them.
+  `parseableJson: false` in the error log (message says _"not parseable JSON … most likely
+  truncated"_) means the budget ran out — raise `JUDGE_MAX_TOKENS`. `parseableJson: true`
+  with populated `issuePaths` means the model broke the contract at those fields — a
+  prompt or schema problem. An empty `issuePaths` alone tells you nothing; read the flag.
 
 ## Seeds
 
@@ -123,8 +299,9 @@ migration.)
 
 Shared dispatch — `lib/app/questionnaire/evaluation/run-panel.ts`. The F5.1 fan-out was
 extracted into `runEvaluationPanel(...)` (Prisma-free: agents + structure passed in,
-returns `{ results, summary }`, fail-soft per judge). Both the preview route and the new
-run route call it; the preview returns it ephemerally, the run route persists it.
+returns `{ results, summary, reconciled }`, fail-soft per judge). Both the preview route and
+the new run route call it; the preview returns it ephemerally (and passes `reconcile: false`),
+the run route persists it.
 
 Models (`prisma/schema/app-questionnaire.prisma`):
 
@@ -358,7 +535,11 @@ run-detail page offers two groupings over one set of findings and one set of rev
 
 By-question sorts three ways — `natural` (questionnaire order), `major` (worst-first), `findings`
 (busiest-first) — via the pure `groupFindingsByTarget` in
-`components/admin/questionnaires/evaluation-grouping.ts`. Both count sorts fall back to natural
+`lib/app/questionnaire/evaluation/group-findings.ts`. It lives in `lib/` rather than beside the
+components because the **Questionnaire Pack export shares it**: the pack groups its evaluation
+appendix by question for the same reason this page defaults to it, and a printed document has no
+toggle to fall back on. Two copies of "what counts as one subject" (the gap-group split especially)
+would drift. Both count sorts fall back to natural
 order, so equally-severe targets stay in a stable, meaningful sequence. Each card leads with the
 question prompt (the subject under review), names the judges that flagged it, and tallies severity;
 `FindingReviewCard` takes a `lead` prop that swaps its leading chip from the target to the judge,

@@ -32,6 +32,7 @@ import {
   EVALUATION_DIMENSION_SPECS,
   type EvaluationDimension,
 } from '@/lib/app/questionnaire/evaluation';
+import { RECONCILER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { runEvaluationPanel } from '@/lib/app/questionnaire/evaluation/run-panel';
 import { buildEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/evaluation-structure';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -40,6 +41,20 @@ import {
   listEvaluationRuns,
   persistEvaluationRun,
 } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
+
+/**
+ * Wall-clock ceiling for the whole panel. The seven judges fan out concurrently, so the run costs
+ * one slow judge — but that judge is a reasoning model reading a long instrument and writing a
+ * rewritten prompt per finding, and `runStructuredCompletion` gives its retry a *fresh* 90s
+ * timeout, so one judge is 180s at worst. That is well past the platform's 60s default, and a
+ * function killed mid-fan-out gives the admin a blank failure with nothing in the logs.
+ *
+ * 300 is the ceiling, not a target: the reconcile step that follows the fan-in is serial and can
+ * cost another 180s, which would overrun. `runEvaluationPanel` keeps the run inside this budget by
+ * skipping reconciliation when the judges have already spent it — see `PANEL_BUDGET_MS`. Matches
+ * the report-preview route's ceiling.
+ */
+export const maxDuration = 300;
 
 const bodySchema = z.object({
   /** Which dimensions to run; defaults to the whole panel. Deduped at use. */
@@ -73,15 +88,20 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
 
     // Load the judge agents for the requested dimensions in one query.
     const wantedSlugs = dimensions.map((d) => EVALUATION_DIMENSION_SPECS[d].slug);
+    // The reconciler rides along in the same query: it is not a judge (no dimension, no score),
+    // so it needs its own OR arm rather than joining the `kind: 'judge'` filter. Its absence is
+    // fail-soft inside the panel — the run still returns, just without merged alternatives.
     const agents = await prisma.aiAgent.findMany({
-      where: { slug: { in: wantedSlugs }, kind: 'judge' },
+      where: {
+        OR: [{ slug: { in: wantedSlugs }, kind: 'judge' }, { slug: RECONCILER_AGENT_SLUG }],
+      },
       select: { slug: true, id: true, provider: true, model: true, fallbackProviders: true },
     });
     const agentBySlug = new Map(agents.map((a) => [a.slug, a]));
 
     // Every judge missing means the seed never ran — a config problem, not a per-run
     // failure. A subset missing is fail-soft per dimension inside the panel.
-    if (agentBySlug.size === 0) {
+    if (wantedSlugs.every((slug) => !agentBySlug.has(slug))) {
       log.error('No design-evaluation judge agents found; run db:seed', { wantedSlugs });
       throw new NotFoundError('Questionnaire design-time evaluation is not configured');
     }
@@ -95,6 +115,7 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
       agentBySlug,
       adminId,
       log,
+      reconcile: true,
     });
     const completedAt = new Date();
 

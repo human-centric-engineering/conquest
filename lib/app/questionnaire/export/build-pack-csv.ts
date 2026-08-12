@@ -121,55 +121,90 @@ export function buildPackCsv(model: PackModel): string {
   }
 
   if (model.evaluations) {
-    // One row per finding; a dimension with zero findings still gets one row (blank finding
-    // columns) so its score/diagnostic isn't lost. `!hasRun` yields zero dimensions, so the block
-    // degrades to header-only — the same "nothing here" shape empty dataSlots/sections use.
-    const evaluationRows = model.evaluations.dimensions.flatMap((dim) =>
-      dim.findings.length === 0
-        ? [
-            row([
-              dim.dimension,
-              dim.label,
-              dim.score !== null ? String(dim.score) : '',
-              dim.diagnostic ?? '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-            ]),
-          ]
-        : dim.findings.map((finding) =>
-            row([
-              dim.dimension,
-              dim.label,
-              dim.score !== null ? String(dim.score) : '',
-              dim.diagnostic ?? '',
-              finding.severity,
-              finding.status,
-              finding.targetLabel,
-              finding.proposedChange,
-              finding.rationale,
-              finding.sourceQuote ?? '',
-            ])
-          )
+    // Two blocks, mirroring the model's split: the judge scoreboard, then the findings.
+    blocks.push([
+      '# Judge scores',
+      row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
+      ...model.evaluations.scores.map((judge) =>
+        row([
+          judge.dimension,
+          judge.label,
+          judge.score !== null ? String(judge.score) : '',
+          judge.diagnostic ?? '',
+          String(judge.findingCount),
+        ])
+      ),
+    ]);
+
+    // One row per (target, judge) pair, in questionnaire order, target columns first — so the
+    // block sorts and pivots by the thing under review rather than by which judge spoke.
+    //
+    // The target's text DOES repeat down the rows of a contested question, unlike the PDF and
+    // Markdown packs. That is deliberate: a CSV row has to stand alone to survive a sort, a
+    // filter, or a pivot, and blanking the continuation rows would break all three. The
+    // "name the question once" rule is about the documents a person reads top to bottom.
+    // `!hasRun` yields zero targets, so the block degrades to header-only — the same "nothing
+    // here" shape empty dataSlots/sections use.
+    const findingRows = model.evaluations.targets.flatMap((target) =>
+      target.judges.map((judge) =>
+        row([
+          target.key,
+          target.context ?? '',
+          target.label,
+          target.questionType ?? '',
+          judge.dimension,
+          judge.label,
+          judge.severity,
+          judge.status,
+          judge.proposedChange,
+          judge.rationale,
+          judge.sourceQuote ?? '',
+        ])
+      )
     );
+    // Alternatives are their own block: one row per proposed phrasing. Folding them into the
+    // findings rows would either duplicate every judge row or leave most of them blank.
+    const alternativeRows = model.evaluations.targets.flatMap((target) =>
+      target.alternatives.map((alt) =>
+        row([
+          target.key,
+          target.label,
+          alt.prompt,
+          alt.addresses.join('; '),
+          alt.note,
+          target.unresolvedBy.join('; '),
+        ])
+      )
+    );
+    blocks.push([
+      '# Suggested rewordings',
+      row([
+        'target_key',
+        'current_wording',
+        'suggested_wording',
+        'addresses',
+        'note',
+        'unresolved',
+      ]),
+      ...alternativeRows,
+    ]);
+
     blocks.push([
       '# Evaluation',
       row([
+        'target_key',
+        'target_context',
+        'target',
+        'target_type',
         'dimension',
         'judge',
-        'score',
-        'diagnostic',
         'severity',
         'status',
-        'target',
         'proposed_change',
         'rationale',
         'source_quote',
       ]),
-      ...evaluationRows,
+      ...findingRows,
     ]);
   }
 

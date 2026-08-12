@@ -27,6 +27,10 @@ const COLORS = {
   faint: '#9ca3af',
   accent: PACK_BRAND.brandMarigold,
   hairline: '#e5e7eb',
+  // A very pale warm wash for the reconciled-wording panel. Deliberately near-white: it has to
+  // separate the resolution from the verdicts above it without competing with the marigold rule,
+  // and it has to stay legible when the pack is printed in greyscale.
+  tint: '#fbf7ee',
 } as const;
 
 const styles = StyleSheet.create({
@@ -172,16 +176,59 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica-Oblique',
     marginTop: 2,
   },
-  evaluationDimension: {
-    marginTop: 10,
+  // The judge scoreboard — one compact line per dimension, no findings.
+  evaluationScore: {
+    fontSize: 9,
+    marginTop: 2,
   },
-  evaluationDimensionLabel: {
+  // One flagged subject: the question printed once, with its judges beneath.
+  evaluationTarget: {
+    marginTop: 12,
+  },
+  evaluationTargetContext: {
+    fontSize: 7,
+    color: COLORS.faint,
+    fontFamily: 'Helvetica-Bold',
+    letterSpacing: 0.6,
+  },
+  evaluationTargetLabel: {
     fontSize: 10,
     fontFamily: 'Helvetica-Bold',
+    marginTop: 1,
   },
-  evaluationDimensionScore: {
+  evaluationTargetMeta: {
     fontSize: 8,
     color: COLORS.faint,
+    marginTop: 1,
+  },
+  evaluationSubheading: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 10,
+  },
+  // The reconciled wording — tinted and ruled so it reads as the resolution of the verdicts
+  // above it rather than one more opinion among them.
+  evaluationAlternatives: {
+    marginTop: 6,
+    padding: 6,
+    backgroundColor: COLORS.tint,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.accent,
+  },
+  evaluationAlternativesLabel: {
+    fontSize: 7,
+    color: COLORS.faint,
+    fontFamily: 'Helvetica-Bold',
+    letterSpacing: 0.6,
+  },
+  evaluationAlternativePrompt: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 3,
+  },
+  evaluationAlternativeNote: {
+    fontSize: 8,
+    color: COLORS.muted,
     marginTop: 1,
   },
   evaluationFinding: {
@@ -436,28 +483,76 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
             {!model.evaluations.hasRun ? (
               <Text style={styles.empty}>No evaluation has been run for this version yet.</Text>
             ) : (
-              model.evaluations.dimensions.map((dim) => (
-                <View key={dim.dimension} style={styles.evaluationDimension}>
-                  <Text style={styles.evaluationDimensionLabel}>{dim.label}</Text>
-                  <Text style={styles.evaluationDimensionScore}>
-                    {dim.diagnostic
-                      ? `Judge unavailable: ${dim.diagnostic}`
-                      : `Score: ${dim.score !== null ? `${Math.round(dim.score * 100)}%` : 'n/a'}`}
+              <>
+                {/* The scoreboard. Findings are not repeated here — they print once, under the
+                    question they are about, so a contested question reads as one item. */}
+                <Text style={styles.evaluationSubheading}>Judge scores</Text>
+                {model.evaluations.scores.map((judge) => (
+                  <Text key={judge.dimension} style={styles.evaluationScore}>
+                    {judge.diagnostic
+                      ? `${judge.label} — unavailable: ${judge.diagnostic}`
+                      : `${judge.label} — ${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`}
                   </Text>
-                  {dim.findings.length === 0 ? (
-                    <Text style={styles.empty}>No findings raised.</Text>
-                  ) : (
-                    dim.findings.map((finding, i) => (
-                      <View key={i} style={styles.evaluationFinding} wrap={false}>
-                        <Text
-                          style={styles.evaluationFindingHeader}
-                        >{`[${finding.severity} · ${finding.status}]  ${finding.targetLabel} — ${finding.proposedChange}`}</Text>
-                        <Text style={styles.evaluationFindingBody}>{finding.rationale}</Text>
-                      </View>
-                    ))
-                  )}
-                </View>
-              ))
+                ))}
+
+                {model.evaluations.targets.length === 0 ? (
+                  <Text style={styles.empty}>No findings raised.</Text>
+                ) : (
+                  model.evaluations.targets.map((target) => (
+                    <View key={target.key} style={styles.evaluationTarget}>
+                      {target.context && (
+                        <Text style={styles.evaluationTargetContext}>
+                          {target.context.toUpperCase()}
+                        </Text>
+                      )}
+                      <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
+                      <Text style={styles.evaluationTargetMeta}>
+                        {[
+                          target.questionType ? `Type: ${target.questionType}` : null,
+                          `${target.judgeCount} judge(s)`,
+                          target.counts.major > 0 ? `${target.counts.major} major` : null,
+                          target.removed ? 'no longer in the questionnaire' : null,
+                        ]
+                          .filter(Boolean)
+                          .join('  ·  ')}
+                      </Text>
+                      {target.judges.map((judge, i) => (
+                        <View key={i} style={styles.evaluationFinding} wrap={false}>
+                          <Text
+                            style={styles.evaluationFindingHeader}
+                          >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                          <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
+                          <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
+                        </View>
+                      ))}
+                      {/* Last, after the verdicts it reconciles — it reads as an answer only once
+                          the reader has seen the disagreement. */}
+                      {target.alternatives.length > 0 && (
+                        <View style={styles.evaluationAlternatives}>
+                          <Text style={styles.evaluationAlternativesLabel}>
+                            {target.alternatives.length === 1
+                              ? 'SUGGESTED REWORDING'
+                              : 'SUGGESTED REWORDINGS'}
+                          </Text>
+                          {target.alternatives.map((alt, i) => (
+                            <View key={i} wrap={false}>
+                              <Text style={styles.evaluationAlternativePrompt}>{alt.prompt}</Text>
+                              <Text style={styles.evaluationAlternativeNote}>
+                                {`Addresses: ${alt.addresses.join(', ')}. ${alt.note}`}
+                              </Text>
+                            </View>
+                          ))}
+                          {target.unresolvedBy.length > 0 && (
+                            <Text style={styles.evaluationAlternativeNote}>
+                              {`Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change.`}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  ))
+                )}
+              </>
             )}
           </View>
         )}

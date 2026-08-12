@@ -101,7 +101,9 @@ interface ChatScript {
 function makeProvider(scripts: ChatScript[]) {
   let turn = 0;
   return {
-    chat: vi.fn(async () => {
+    // Params are declared (and unused) so a test can assert on the request options the
+    // capability sends — the token/timeout budget is itself a regression surface here.
+    chat: vi.fn(async (_messages: unknown, _options: unknown) => {
       const script = scripts[turn] ?? scripts[scripts.length - 1];
       turn++;
       return {
@@ -357,6 +359,40 @@ describe('AppEvaluateStructureCapability — dispatch', () => {
     expect(result.error?.code).toBe('evaluation_failed');
     // The diagnostic should name the offending field, not just "invalid".
     expect(result.error?.message).toContain('score');
+  });
+
+  it('blames truncation, not the schema, when no attempt parsed as JSON', async () => {
+    // The prod Clarity failure: the judge is cut off mid-object, so `JSON.parse` never
+    // succeeds and no Zod issue is ever produced. The old message said "not valid against
+    // the schema" with an empty issue-path list, which read as a contract bug rather than
+    // an exhausted token budget. Both attempts truncate — the retry reuses the same cap.
+    const truncated =
+      '{"score":0.6,"findings":[{"targetKey":"q_role","severity":"minor","proposedChange":"Split the';
+    (getProvider as Mock).mockResolvedValue(
+      makeProvider([{ content: truncated }, { content: truncated }])
+    );
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('evaluation_failed');
+    expect(result.error?.message).toContain('truncated');
+    expect(result.error?.message).toContain('8192');
+    expect(result.error?.message).not.toContain('not valid against the schema');
+  });
+
+  it('asks the provider for a budget that survives a reasoning model on a long instrument', async () => {
+    // Regression guard on the numbers themselves. On OpenAI's reasoning families this cap is
+    // sent as `max_completion_tokens`, covering hidden reasoning AND visible output — at the
+    // old 2,048 the Clarity judge (a full rewritten prompt per finding) ran out mid-JSON.
+    const provider = makeProvider([{ content: VALID_JSON }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    const options = provider.chat.mock.calls[0][1] as { maxTokens: number; timeoutMs: number };
+    expect(options.maxTokens).toBe(8_192);
+    expect(options.timeoutMs).toBe(90_000);
   });
 
   it('omits agentId and versionId from cost metadata when absent', async () => {

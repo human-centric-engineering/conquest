@@ -8,11 +8,22 @@
  * its own seeded agent, so they render as individual nodes wrapped in a "Judge panel" box. Per-judge
  * failure is fail-soft: a missing or flaky judge degrades to a diagnostic for that one dimension
  * while the other six still return.
+ *
+ * One more agent runs after the fan-in. The judges are blind to each other by design — that is what
+ * keeps their scores independent — so a question several of them flag comes back with several
+ * rewrites that each fix one dimension and undo another. The **Suggestion Reconciler** takes those
+ * contested questions and proposes wording that satisfies as many judges at once as it can. It is
+ * fail-soft too, and in the strong sense: if it is unseeded or its call fails, the run still returns
+ * every judge's own suggestion.
  */
 
 import type { WorkflowStep } from '@/types/orchestration';
 
-import { EVALUATE_STRUCTURE_CAPABILITY_SLUG } from '@/lib/app/questionnaire/constants';
+import {
+  EVALUATE_STRUCTURE_CAPABILITY_SLUG,
+  RECONCILE_SUGGESTIONS_CAPABILITY_SLUG,
+  RECONCILER_AGENT_SLUG,
+} from '@/lib/app/questionnaire/constants';
 import { EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/evaluation/dimensions';
 import { EVALUATION_DIMENSIONS } from '@/lib/app/questionnaire/evaluation/types';
 
@@ -79,17 +90,36 @@ export const designEvaluationWorkflow = diagram({
       description:
         'Reduce the per-dimension verdicts to one panel result — how many dimensions ran vs failed, and the total findings across the panel — so a partial panel still returns a usable score.',
       meta: { note: 'Reduce to { results, summary }: dimensionsRun / failed, totalFindings.' },
+      next: ['reconcile'],
+    }),
+    node({
+      id: 'reconcile',
+      name: 'Suggestion Reconciler',
+      type: 'agent_call',
+      x: 1140,
+      y: 0,
+      description:
+        'For each question MORE THAN ONE judge flagged, propose one or two alternative phrasings that satisfy as many of their concerns as possible at once — so the admin makes one decision instead of choosing between rewrites that undo each other.',
+      meta: {
+        agentSlug: RECONCILER_AGENT_SLUG,
+        promptCatalogSlug: RECONCILER_AGENT_SLUG,
+        promptSpecimenId: `${RECONCILER_AGENT_SLUG}.reconcile`,
+        capabilitySlugs: [RECONCILE_SUGGESTIONS_CAPABILITY_SLUG],
+        note: 'One batched call over the contested questions only (a question one judge flagged already has that judge’s rewrite). Names the concerns each phrasing resolves, and any that wording alone cannot. Fail-soft: unseeded or failed, the run still returns every judge’s own suggestion.',
+      },
       next: ['findings'],
     }),
     node({
       id: 'findings',
       name: 'Persist run + findings',
       type: 'report',
-      x: 1140,
+      x: 1360,
       y: 0,
       description:
-        'Persist the evaluation run and surface each dimension’s findings as proposed edits the admin can review and apply with one click.',
-      meta: { note: 'Persist the run; findings become one-click applicable edits.' },
+        'Persist the evaluation run, its findings, and the reconciled alternatives — findings become one-click applicable edits, and the review queue, the run detail page and the Questionnaire Pack all read the same reconciled wording.',
+      meta: {
+        note: 'Persist the run + findings + reconciledSuggestions; findings become one-click applicable edits.',
+      },
     }),
   ],
   applicability: () => applies('The judge panel can score this version’s design.'),

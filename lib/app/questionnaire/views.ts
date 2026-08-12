@@ -29,6 +29,7 @@ import type {
   FindingReviewStatus,
   FindingApplicability,
   ProposedEdit,
+  ReconciledSuggestion,
 } from '@/lib/app/questionnaire/evaluation';
 // Ref-lookup turns carry their full inspector call trace so the admin evaluator can show the raw
 // prompt of every call (same shape the preview drawer / diagnostics render).
@@ -301,6 +302,13 @@ export interface EvaluationRunDetail extends EvaluationRunListItem {
   error: string | null;
   /** All findings across dimensions, ordered by (dimension, ordinal). */
   findings: EvaluationFindingView[];
+  /**
+   * Cross-judge alternatives for the questions MORE THAN ONE judge flagged — one or two phrasings
+   * that try to satisfy every judge at once, each naming the dimensions it resolves and any it
+   * cannot. Empty when nothing was contested, when the reconcile call failed, or when the run
+   * predates reconciliation entirely; consumers then show the judges' own suggestions unchanged.
+   */
+  reconciled: ReconciledSuggestion[];
 }
 
 /**

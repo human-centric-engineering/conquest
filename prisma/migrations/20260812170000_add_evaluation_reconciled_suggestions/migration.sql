@@ -1,0 +1,14 @@
+-- Cross-judge reconciliation on a design-evaluation run.
+--
+-- Holds `ReconciledSuggestion[]`: one or two alternative phrasings for each question that MORE THAN
+-- ONE judge flagged, produced by a single `app_reconcile_suggestions` call after the judge panel.
+-- Validated on read by `parseReconciledSuggestions` (never trust a stored JSON blob's shape).
+--
+-- Deliberately additive and nullable, with no backfill. Every run made before this column existed
+-- reads as NULL, which is not a missing value but a true statement — that run was never reconciled —
+-- and both the review queue and the Questionnaire Pack fall back to the judges' own suggestions
+-- exactly as they did before. Nothing needs rewriting in place.
+--
+-- Hand-written rather than generated: this dev database carries migrations from other branches, so
+-- `prisma migrate dev` would have demanded a reset it does not need for one additive column.
+ALTER TABLE "app_questionnaire_evaluation_run" ADD COLUMN "reconciledSuggestions" JSONB;

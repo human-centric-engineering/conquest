@@ -35,7 +35,7 @@ import type {
 import {
   tallySeverities,
   type SeverityCounts,
-} from '@/components/admin/questionnaires/evaluation-grouping';
+} from '@/lib/app/questionnaire/evaluation/group-findings';
 import {
   JudgeFailureIcon,
   RetryJudgeButton,

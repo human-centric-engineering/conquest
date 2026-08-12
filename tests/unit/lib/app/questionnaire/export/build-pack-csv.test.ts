@@ -193,40 +193,94 @@ describe('buildPackCsv', () => {
       expect(csv).not.toContain('# Evaluation');
     });
 
-    it('renders after Definitions, with the fixed header row, even with zero dimensions (no run yet)', () => {
+    it('renders both blocks after Definitions, with fixed headers, even with no run yet', () => {
       const csv = buildPackCsv(
-        model({ evaluations: { hasRun: false, runAt: null, totalFindings: 0, dimensions: [] } })
+        model({
+          evaluations: { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] },
+        })
       );
       const definitionsIdx = csv.indexOf('# Definitions');
+      const scoresIdx = csv.indexOf('# Judge scores');
       const evaluationIdx = csv.indexOf('# Evaluation');
       expect(definitionsIdx).toBeGreaterThan(-1);
-      expect(definitionsIdx).toBeLessThan(evaluationIdx);
+      expect(definitionsIdx).toBeLessThan(scoresIdx);
+      expect(scoresIdx).toBeLessThan(evaluationIdx);
+      expect(csv).toContain('dimension,judge,score,diagnostic,finding_count');
       expect(csv).toContain(
-        'dimension,judge,score,diagnostic,severity,status,target,proposed_change,rationale,source_quote'
+        'target_key,target_context,target,target_type,dimension,judge,severity,status,proposed_change,rationale,source_quote'
       );
     });
 
-    it('emits one row per finding, with the dimension score/diagnostic repeated on each', () => {
+    it('puts each judge score on its own row in the scoreboard block', () => {
       const csv = buildPackCsv(
         model({
           evaluations: {
             hasRun: true,
             runAt: 'now',
-            totalFindings: 1,
-            dimensions: [
+            totalFindings: 0,
+            scores: [
               {
                 dimension: 'clarity',
                 label: 'Clarity Judge',
                 score: 0.75,
                 diagnostic: null,
-                findings: [
+                findingCount: 2,
+              },
+              {
+                dimension: 'coverage',
+                label: 'Coverage Judge',
+                score: null,
+                diagnostic: 'judge_error',
+                findingCount: 0,
+              },
+            ],
+            targets: [],
+          },
+        })
+      );
+      expect(csv).toContain('clarity,Clarity Judge,0.75,,2');
+      // A failed judge keeps its row: blank score, diagnostic carried.
+      expect(csv).toContain('coverage,Coverage Judge,,judge_error,0');
+    });
+
+    it('emits one row per (target, judge) with the target columns first', () => {
+      const csv = buildPackCsv(
+        model({
+          evaluations: {
+            hasRun: true,
+            runAt: 'now',
+            totalFindings: 2,
+            scores: [],
+            targets: [
+              {
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 1, info: 0, total: 2 },
+                judgeCount: 2,
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [
                   {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
                     severity: 'major',
                     status: 'pending',
-                    targetLabel: 'Q1',
                     proposedChange: 'Split into two questions',
                     rationale: 'Asks two things at once',
                     sourceQuote: 'both engaged and satisfied',
+                  },
+                  {
+                    dimension: 'audience_match',
+                    label: 'Audience-Match Judge',
+                    severity: 'minor',
+                    status: 'declined',
+                    proposedChange: 'Drop the jargon',
+                    rationale: 'Too technical',
+                    sourceQuote: null,
                   },
                 ],
               },
@@ -235,52 +289,67 @@ describe('buildPackCsv', () => {
         })
       );
       expect(csv).toContain(
-        'clarity,Clarity Judge,0.75,,major,pending,Q1,Split into two questions,Asks two things at once,both engaged and satisfied'
+        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,clarity,Clarity Judge,major,pending,Split into two questions,Asks two things at once,both engaged and satisfied'
+      );
+      // Unlike the PDF/Markdown packs, the target text DOES repeat per row — a CSV row has to
+      // survive a sort or a pivot on its own, so blanking continuation rows would break it.
+      expect(csv).toContain(
+        'q1,Q1 · Background,Are you engaged and satisfied?,free_text,audience_match,Audience-Match Judge,minor,declined,Drop the jargon,Too technical,'
       );
     });
 
-    it('emits one summary-only row (blank finding columns) for a clean dimension with zero findings', () => {
+    it('emits the reconciled rewordings as their own block, one row per phrasing', () => {
       const csv = buildPackCsv(
         model({
           evaluations: {
             hasRun: true,
             runAt: 'now',
-            totalFindings: 0,
-            dimensions: [
+            totalFindings: 1,
+            scores: [],
+            targets: [
               {
-                dimension: 'ordering',
-                label: 'Ordering Judge',
-                score: 1,
-                diagnostic: null,
-                findings: [],
+                key: 'q1',
+                context: 'Q1 · Background',
+                label: 'Are you engaged and satisfied?',
+                questionType: 'free_text',
+                gap: false,
+                removed: false,
+                counts: { major: 1, minor: 0, info: 0, total: 1 },
+                judgeCount: 1,
+                alternatives: [
+                  {
+                    prompt: 'How engaged do you feel at work?',
+                    addresses: ['Clarity Judge', 'Audience-Match Judge'],
+                    note: 'One ask.',
+                  },
+                ],
+                unresolvedBy: ['Type-Fit Judge'],
+                judges: [
+                  {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
+                    severity: 'major',
+                    status: 'pending',
+                    proposedChange: 'Split it',
+                    rationale: 'Two asks',
+                    sourceQuote: null,
+                  },
+                ],
               },
             ],
           },
         })
       );
-      expect(csv).toContain('ordering,Ordering Judge,1,,,,,,,');
-    });
 
-    it('leaves the score column blank and carries the diagnostic when a judge failed', () => {
-      const csv = buildPackCsv(
-        model({
-          evaluations: {
-            hasRun: true,
-            runAt: 'now',
-            totalFindings: 0,
-            dimensions: [
-              {
-                dimension: 'coverage',
-                label: 'Coverage Judge',
-                score: null,
-                diagnostic: 'judge_error',
-                findings: [],
-              },
-            ],
-          },
-        })
+      // Its own block, not extra columns on the findings rows — folding them together would
+      // duplicate every judge row or leave most of them blank.
+      expect(csv).toContain('# Suggested rewordings');
+      expect(csv).toContain(
+        'target_key,current_wording,suggested_wording,addresses,note,unresolved'
       );
-      expect(csv).toContain('coverage,Coverage Judge,,judge_error,,,,,,');
+      expect(csv).toContain(
+        'q1,Are you engaged and satisfied?,How engaged do you feel at work?,Clarity Judge; Audience-Match Judge,One ask.,Type-Fit Judge'
+      );
     });
 
     it('neutralises a formula-injection proposedChange via csvEscape', () => {
@@ -290,17 +359,25 @@ describe('buildPackCsv', () => {
             hasRun: true,
             runAt: 'now',
             totalFindings: 1,
-            dimensions: [
+            scores: [],
+            targets: [
               {
-                dimension: 'clarity',
-                label: 'Clarity Judge',
-                score: 0.5,
-                diagnostic: null,
-                findings: [
+                key: 'q1',
+                context: null,
+                label: 'Q1',
+                questionType: null,
+                gap: false,
+                removed: false,
+                counts: { major: 0, minor: 1, info: 0, total: 1 },
+                judgeCount: 1,
+                alternatives: [],
+                unresolvedBy: [],
+                judges: [
                   {
+                    dimension: 'clarity',
+                    label: 'Clarity Judge',
                     severity: 'minor',
                     status: 'pending',
-                    targetLabel: 'Q1',
                     proposedChange: '=HYPERLINK("evil")',
                     rationale: 'r',
                     sourceQuote: null,

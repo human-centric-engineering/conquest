@@ -134,28 +134,68 @@ export function buildPackMarkdown(model: PackModel): string {
       lines.push('');
     } else {
       lines.push(
-        `Last run ${model.evaluations.runAt} · ${model.evaluations.totalFindings} finding(s) across ${model.evaluations.dimensions.length} judges`
+        `Last run ${model.evaluations.runAt} · ${model.evaluations.totalFindings} finding(s) across ${model.evaluations.targets.length} flagged item(s)`
       );
       lines.push('');
-      for (const dim of model.evaluations.dimensions) {
-        lines.push(`### ${dim.label}`);
-        lines.push(
-          dim.diagnostic
-            ? `_Judge unavailable: ${dim.diagnostic}_`
-            : `Score: ${dim.score !== null ? `${Math.round(dim.score * 100)}%` : 'n/a'}`
-        );
+
+      // The scoreboard: how each judge rated the version. Findings are deliberately NOT repeated
+      // here — they belong under the question they are about, below.
+      lines.push('### Judge scores');
+      lines.push('');
+      for (const judge of model.evaluations.scores) {
+        const verdict = judge.diagnostic
+          ? `_unavailable: ${judge.diagnostic}_`
+          : `${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`;
+        lines.push(`- **${judge.label}** — ${verdict}`);
+      }
+      lines.push('');
+
+      if (model.evaluations.targets.length === 0) {
+        lines.push('_No findings raised._');
         lines.push('');
-        if (dim.findings.length === 0) {
-          lines.push('_No findings raised._');
-        } else {
-          for (const finding of dim.findings) {
+      } else {
+        for (const target of model.evaluations.targets) {
+          // The subject, named once: context chip, the prompt itself, then the judges beneath it.
+          const heading = target.context
+            ? `${target.context} — ${cell(target.label)}`
+            : cell(target.label);
+          lines.push(`### ${heading}`);
+          const facts = [
+            target.questionType ? `Type: ${target.questionType}` : null,
+            `${target.judgeCount} judge(s)`,
+            target.counts.major > 0 ? `${target.counts.major} major` : null,
+            target.removed ? 'no longer in the questionnaire' : null,
+          ].filter((f): f is string => f !== null);
+          lines.push(`_${facts.join(' · ')}_`);
+          lines.push('');
+          for (const judge of target.judges) {
             lines.push(
-              `- **[${finding.severity} · ${finding.status}] ${cell(finding.targetLabel)}** — ${finding.proposedChange}`
+              `- **${judge.label}** [${judge.severity} · ${judge.status}] — ${judge.proposedChange}`
             );
-            lines.push(`  ${finding.rationale}`);
+            lines.push(`  ${judge.rationale}`);
+            if (judge.sourceQuote) lines.push(`  > ${cell(judge.sourceQuote)}`);
           }
+          // The reconciled wording goes LAST, after the verdicts that produced it — it only makes
+          // sense once a reader has seen what it is reconciling.
+          if (target.alternatives.length > 0) {
+            lines.push('');
+            lines.push(
+              target.alternatives.length === 1
+                ? '**Suggested rewording** (addressing the judges above):'
+                : '**Suggested rewordings** (addressing the judges above):'
+            );
+            for (const alt of target.alternatives) {
+              lines.push(`- ${cell(alt.prompt)}`);
+              lines.push(`  _Addresses: ${alt.addresses.join(', ')}._ ${alt.note}`);
+            }
+            if (target.unresolvedBy.length > 0) {
+              lines.push(
+                `- _Not resolved by rewording: ${target.unresolvedBy.join(', ')} — these need a structural change._`
+              );
+            }
+          }
+          lines.push('');
         }
-        lines.push('');
       }
     }
   }

@@ -16,6 +16,10 @@
  * `severity` used to be display-only, which left "show me what blocks launch" — the whole point of
  * the `major` level — impossible to ask.
  *
+ * By-question cards behave as an **accordion** — one open at a time — and lead with the panel's
+ * consolidated verdict (the verb, its backing, any dissent, and the reconciled wording) rather than
+ * with the individual judgements, which are the drill-down.
+ *
  * Findings live in component state so a review action updates its card in place. When an apply
  * forks a launched version the returned meta raises a banner pointing at the new draft.
  *
@@ -34,7 +38,6 @@ import { cn } from '@/lib/utils';
 import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   EVALUATION_DIMENSION_SPECS,
   FINDING_REVIEW_STATUSES,
@@ -61,7 +64,11 @@ import {
   GROUP_SORTS,
   GROUP_SORT_LABELS,
   type GroupSort,
-} from '@/components/admin/questionnaires/evaluation-grouping';
+} from '@/lib/app/questionnaire/evaluation/group-findings';
+import {
+  summariseGroupActions,
+  type GroupActionSummary,
+} from '@/lib/app/questionnaire/evaluation/group-actions';
 
 interface ForkNotice {
   versionId: string;
@@ -87,6 +94,45 @@ const VIEW_MODES: { value: ViewMode; label: string }[] = [
 const STATUS_FILTERS: ('all' | FindingReviewStatus)[] = ['all', ...FINDING_REVIEW_STATUSES];
 const SEVERITY_FILTERS: ('all' | FindingSeverity)[] = ['all', ...FINDING_SEVERITIES];
 
+/**
+ * A labelled select for the filter row.
+ *
+ * Shared rather than repeated so the three controls cannot drift in height or type scale — the row
+ * reads as one instrument only while they match exactly.
+ */
+function ControlSelect({
+  label,
+  ariaLabel,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  /** Fuller accessible name when the visible label is too terse on its own ("Sort" → what?). */
+  ariaLabel?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground font-medium">{label}</span>
+      <select
+        value={value}
+        aria-label={ariaLabel ?? label}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-background focus-visible:ring-ring rounded-md border px-2 py-1 text-xs focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function EvaluationRunDetail({
   run,
   questionnaireId,
@@ -105,6 +151,10 @@ export function EvaluationRunDetail({
 
   const [mode, setMode] = useState<ViewMode>('question');
   const [sort, setSort] = useState<GroupSort>('natural');
+  // Exactly one question card open at a time. These cards are tall when open — several finding
+  // cards, each with its own apply controls — so two at once means scrolling past finished work to
+  // reach unfinished work. Clicking the open one closes it, leaving a scannable index.
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const [status, setStatus] = useState<'all' | FindingReviewStatus>('all');
   const [severity, setSeverity] = useState<'all' | FindingSeverity>('all');
   const [dimension, setDimension] = useState<EvaluationDimension | null>(null);
@@ -163,6 +213,31 @@ export function EvaluationRunDetail({
   );
 
   const groups = useMemo(() => groupFindingsByTarget(visible, sort), [visible, sort]);
+
+  // The verdict band describes what the *panel* said about a question, so it is derived from every
+  // finding on that target — not from the filtered set the cards below render.
+  //
+  // Filtering the verdict would let the filter manufacture the consensus `group-actions` is built
+  // never to manufacture: narrow to Severity = Major on a question that Clarity wants reworded
+  // (major) and Duplicates wants deleted (minor), and the band would read "Reword it · 1 judge"
+  // with no dissent line — reporting agreement that does not exist and hiding the deletion. Same
+  // reasoning as the headline above: a filter changes what you are *looking at*, never what the
+  // panel *found*.
+  const verdictByKey = useMemo(() => {
+    const map = new Map<string, GroupActionSummary>();
+    for (const group of groupFindingsByTarget(findings)) {
+      map.set(group.key, summariseGroupActions(group));
+    }
+    return map;
+  }, [findings]);
+
+  // The run's cross-judge alternatives, indexed for the card that renders them. Empty for a run
+  // made before reconciliation existed, or one where nothing was contested — in both cases the
+  // cards fall back to the judges' own suggestions, which is what they showed before.
+  const reconciledByKey = useMemo(
+    () => new Map(run.reconciled.map((r) => [r.targetKey, r])),
+    [run.reconciled]
+  );
 
   // The headline describes the *run*, so it counts every finding regardless of filter. Only the
   // number of distinct targets is needed, so count keys directly rather than grouping and sorting.
@@ -224,9 +299,14 @@ export function EvaluationRunDetail({
         </div>
       )}
 
-      {/* Sticky so the filters stay reachable while working down a long queue. */}
-      <div className="bg-background/95 sticky top-0 z-10 -mx-1 space-y-2 px-1 py-2 backdrop-blur">
-        <div className="flex flex-wrap items-center gap-3">
+      {/* Sticky so the filters stay reachable while working down a long queue.
+          ONE row, not two. This row used to carry eleven buttons — five status, four severity, the
+          mode toggle and the sort — which is more control surface than a page whose actual content
+          is a queue of decisions can afford. The two filters that are set once per session and then
+          forgotten became selects; the mode toggle, which is switched constantly, stayed a
+          one-click segmented control. */}
+      <div className="bg-background/95 sticky top-0 z-10 -mx-1 px-1 py-2 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="bg-muted inline-flex items-center rounded-lg p-1">
             {VIEW_MODES.map((m) => (
               <button
@@ -247,60 +327,34 @@ export function EvaluationRunDetail({
           </div>
 
           {mode === 'question' && (
-            <label className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground font-medium">Sort</span>
-              <select
-                value={sort}
-                aria-label="Sort questions"
-                onChange={(e) => setSort(e.target.value as GroupSort)}
-                className="bg-background rounded border px-2 py-1 text-sm"
-              >
-                {GROUP_SORTS.map((s) => (
-                  <option key={s} value={s}>
-                    {GROUP_SORT_LABELS[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ControlSelect
+              label="Sort"
+              ariaLabel="Sort questions"
+              value={sort}
+              onChange={(v) => setSort(v as GroupSort)}
+              options={GROUP_SORTS.map((s) => ({ value: s, label: GROUP_SORT_LABELS[s] }))}
+            />
           )}
 
-          <span className="text-muted-foreground ml-auto text-xs tabular-nums">
-            {visible.length} of {findings.length} shown
-          </span>
-        </div>
+          <ControlSelect
+            label="Status"
+            value={status}
+            onChange={(v) => setStatus(v as 'all' | FindingReviewStatus)}
+            options={STATUS_FILTERS.map((s) => ({
+              value: s,
+              label: s === 'all' ? 'Any status' : s[0].toUpperCase() + s.slice(1),
+            }))}
+          />
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="text-muted-foreground mr-1 text-xs font-medium">Status</span>
-            {STATUS_FILTERS.map((s) => (
-              <Button
-                key={s}
-                size="sm"
-                variant={status === s ? 'secondary' : 'ghost'}
-                onClick={() => setStatus(s)}
-                aria-pressed={status === s}
-                className="text-xs capitalize"
-              >
-                {s}
-              </Button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="text-muted-foreground mr-1 text-xs font-medium">Severity</span>
-            {SEVERITY_FILTERS.map((s) => (
-              <Button
-                key={s}
-                size="sm"
-                variant={severity === s ? 'secondary' : 'ghost'}
-                onClick={() => setSeverity(s)}
-                aria-pressed={severity === s}
-                className="text-xs capitalize"
-              >
-                {s}
-              </Button>
-            ))}
-          </div>
+          <ControlSelect
+            label="Severity"
+            value={severity}
+            onChange={(v) => setSeverity(v as 'all' | FindingSeverity)}
+            options={SEVERITY_FILTERS.map((s) => ({
+              value: s,
+              label: s === 'all' ? 'Any severity' : s[0].toUpperCase() + s.slice(1),
+            }))}
+          />
 
           {dimension && (
             <Badge variant="outline" className="gap-1 text-xs">
@@ -315,6 +369,10 @@ export function EvaluationRunDetail({
               </button>
             </Badge>
           )}
+
+          <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+            {visible.length} of {findings.length} shown
+          </span>
         </div>
       </div>
 
@@ -326,6 +384,10 @@ export function EvaluationRunDetail({
           runId={run.id}
           canApply={canApply}
           dataSlotsAvailable={dataSlotsAvailable}
+          reconciledByKey={reconciledByKey}
+          verdictByKey={verdictByKey}
+          openKey={openKey}
+          onToggle={(key) => setOpenKey((prev) => (prev === key ? null : key))}
           onUpdate={handleUpdate}
         />
       ) : (

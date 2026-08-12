@@ -23,6 +23,7 @@
 
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
+import { MAX_FINDINGS_PER_JUDGE } from '@/lib/app/questionnaire/evaluation/judge-schema';
 import type {
   EvaluationDimension,
   VersionStructureInput,
@@ -93,7 +94,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
     ignore:
       'Gaps (Coverage), wording (Clarity), and ordering. Score redundancy only — what is REPEATED.',
     editGuidance:
-      'When two questions overlap, target the weaker/later one by its key and attach `"proposedEdit": { "op": "delete_question" }` to remove it. There is no merge op — delete the redundant one and, if wording from it should survive, say so in `proposedChange`.',
+      'Where the two questions only PARTLY overlap — each asks something the other misses — prefer salvaging over deleting: target the weaker/later one and attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<narrowed to the part the other does not cover>" }`, so the distinct half survives. ' +
+      'Attach `"proposedEdit": { "op": "delete_question" }` when the question is genuinely redundant and nothing about it is worth keeping. There is no merge op, so when wording from the deleted question should survive in the one you keep, put that wording in `proposedChange`.',
   },
   type_fit: {
     focus:
@@ -143,7 +145,8 @@ const DIMENSION_RUBRICS: Record<EvaluationDimension, DimensionRubric> = {
     ignore:
       'Gaps (Coverage judges what is missing), wording (Clarity), type, ordering. Score whether existing questions belong.',
     editGuidance:
-      'For an off-mission question, target it by its key and attach `"proposedEdit": { "op": "delete_question" }`. If the goal itself is mis-stated, target `"goal"` with `{ "op": "edit_goal", "goal": "<the corrected goal>" }`.',
+      'For an off-mission question, first ask whether it can be pointed back at the goal. If it can, prefer the refocus: attach `"proposedEdit": { "op": "replace_prompt", "prompt": "<the refocused question>" }` so the admin keeps the slot and loses only the drift. Attach `{ "op": "delete_question" }` when nothing about the question serves the goal and no rewording would change that. ' +
+      'If the goal itself is mis-stated, target `"goal"` with `{ "op": "edit_goal", "goal": "<the corrected goal>" }`.',
   },
 };
 
@@ -213,13 +216,16 @@ ${rubric.ignore}
 
 FINDINGS
 - Emit a finding for each concrete issue you would fix on this dimension. A clean questionnaire yields an empty findings array — do not invent problems.
+- Emit at most ${MAX_FINDINGS_PER_JUDGE} findings, ordered most severe first, and keep each one tight (one rewritten question, one or two sentences of rationale). Your whole answer has a token budget: a long tail of minor findings costs you the important ones.
+- **Lead with the fix, not the complaint.** Wherever an alternative is feasible, "proposedChange" must BE that alternative — the actual rewritten question, the better answer type, the position to move to — not a description of what is wrong with the current one. "This question is double-barrelled" is a complaint; "Split into: 'What is your role?' and 'How long have you been in it?'" is a finding. Save the diagnosis for "rationale".
+- Only diagnose without an alternative when you genuinely cannot propose one — the fix depends on facts you cannot see in the structure (a policy, a definition, what the author meant). Say what you would need, in "rationale". Prefer a concrete, imperfect alternative the admin can edit over a correct complaint they have to solve from scratch.
 - Address each finding's "targetKey" precisely: a question by its key exactly as shown (e.g. "q_role"), a section as "section:<title>", or the version-level "goal" / "audience".
 - "severity": "major" (fix before launch), "minor" (real but not blocking), or "info" (nice-to-have).
 - "proposedChange": the specific edit to make, in plain prose. "rationale": why, in one or two sentences. "sourceQuote": the offending text, when the finding points at a specific phrase.
 
 STRUCTURED EDIT (optional)
 ${rubric.editGuidance}
-Attach "proposedEdit" ONLY when the fix maps cleanly to the op above and you are confident of every field; otherwise omit it entirely and rely on "proposedChange" prose. Never guess a key, section title, or type you cannot see in the structure.
+Prefer attaching "proposedEdit" whenever the fix maps to the op above — it is what lets the admin apply your suggestion in one click instead of retyping it. Omit it when no op fits the fix, or when a field would have to be guessed: never invent a key, section title, or type you cannot see in the structure. A prose-only finding is still worth making; it just costs the admin more work, so reach for it second.
 
 OUTPUT — respond with ONLY this JSON object, no prose around it and no code fences:
 {
@@ -255,10 +261,15 @@ export function buildJudgePrompt(
  * named fields.
  */
 export function buildJudgeRetryMessage(issuePaths: string[]): string {
+  // With no issue paths, the first response never parsed as JSON — usually a code fence or
+  // an answer cut off at the token cap. Ask for brevity as well as shape: a shorter answer is
+  // the one thing that can actually clear a truncation on the retry, which reuses the same cap.
   const detail =
     issuePaths.length > 0
       ? ` The previous response was invalid at: ${issuePaths.join('; ')}.`
-      : ' The previous response was not valid JSON for the required schema.';
+      : ' The previous response was not valid JSON for the required schema. Keep the response short —' +
+        ' emit only your most important findings, with brief rationales — so the JSON object closes' +
+        ' well within the token limit.';
   return (
     `Return ONLY the JSON object with a numeric "score" in [0, 1] and a "findings" array ` +
     `(each finding with "targetKey", "severity", "proposedChange", "rationale", an ` +
