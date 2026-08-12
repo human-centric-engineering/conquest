@@ -30,6 +30,7 @@ import type {
   EvaluateStructureData,
   ReconcileSuggestionsData,
 } from '@/lib/app/questionnaire/capabilities';
+import { RECONCILE_TIMEOUT_MS } from '@/lib/app/questionnaire/capabilities/reconcile-suggestions';
 import {
   EVALUATION_DIMENSION_SPECS,
   MAX_RECONCILED_TARGETS,
@@ -39,6 +40,27 @@ import {
   type ReconcileTargetInput,
   type VersionStructureInput,
 } from '@/lib/app/questionnaire/evaluation';
+
+/**
+ * The wall-clock the panel may spend on LLM work, held below both routes' `maxDuration = 300`.
+ *
+ * The 15s reserve is for everything that is not a judge call: building the structure DTO, and (on
+ * the run route) persisting the run and its findings. A function killed at the ceiling gives the
+ * admin a blank failure with nothing in the logs — the exact outcome `maxDuration` was raised to
+ * prevent — so the panel has to stay inside the budget itself rather than hope.
+ */
+const PANEL_BUDGET_MS = 285_000;
+
+/**
+ * What the reconcile step can cost at worst: the call plus its one retry, which
+ * `runStructuredCompletion` gives a *fresh* `AbortSignal.timeout`.
+ *
+ * The judges are the same shape (90s each, retried), and they fan out concurrently — so the panel's
+ * own worst case is one slow judge at 180s. Adding this serially after it reaches 360s, past the
+ * 300s ceiling. Hence the check below rather than a bigger number: 300 is what the platform gives
+ * us, and it is already the highest ceiling in the codebase.
+ */
+const RECONCILE_WORST_CASE_MS = RECONCILE_TIMEOUT_MS * 2;
 
 /** One dimension's outcome: a verdict, or a diagnostic when its judge failed/was absent. */
 export interface DimensionResult {
@@ -104,8 +126,13 @@ function selectContestedTargets(
     string,
     { prompt: string; type: string | null; sectionTitle: string; position: number }
   >();
-  let position = 0;
   for (const section of structure.sections) {
+    // Numbered within the section, not across the questionnaire: the chip the reconciler is given
+    // has to be the chip the admin reads on the card, and every other surface derives it from
+    // `indexInSection + 1` (see `resolveFindingTarget`). A global counter made the prompt say
+    // "Q13 · Background" for the question the UI labels "Q1 · Background", so an alternative whose
+    // note cited the number contradicted the card carrying it.
+    let position = 0;
     for (const question of section.questions) {
       position += 1;
       questions.set(question.key, {
@@ -179,6 +206,12 @@ function selectContestedTargets(
  * @param agentBySlug     Loaded judge agents keyed by slug (from the route's `aiAgent` query).
  * @param adminId         The admin who owns the run/spend — passed as the dispatch `userId`.
  * @param log             Route-scoped logger; per-judge failures are warned/errored here.
+ * @param reconcile       Whether to run the cross-judge reconcile step after the fan-in. Required
+ *                        rather than defaulted: it is an extra billed reasoning call on top of the
+ *                        seven judges, so a new caller has to decide, not inherit. The persisted
+ *                        run passes `true`; the ephemeral preview passes `false`, because it has
+ *                        nowhere to put the result and an admin should not be charged for a payload
+ *                        that is discarded on the way out.
  */
 export async function runEvaluationPanel(args: {
   dimensions: EvaluationDimension[];
@@ -188,8 +221,19 @@ export async function runEvaluationPanel(args: {
   agentBySlug: Map<string, JudgeAgentRef>;
   adminId: string;
   log: Logger;
+  reconcile: boolean;
 }): Promise<EvaluationPanelResult> {
-  const { dimensions, structure, questionnaireId, versionId, agentBySlug, adminId, log } = args;
+  const {
+    dimensions,
+    structure,
+    questionnaireId,
+    versionId,
+    agentBySlug,
+    adminId,
+    log,
+    reconcile,
+  } = args;
+  const startedAt = Date.now();
 
   // Flush capability handlers before the fan-out — this panel may be the first capability touch
   // on a fresh process (the dispatcher does not lazy-register). Idempotent, one-shot; registering
@@ -260,15 +304,37 @@ export async function runEvaluationPanel(args: {
   const dimensionsRun = results.filter((r) => r.verdict !== undefined).length;
   const totalFindings = results.reduce((sum, r) => sum + (r.verdict?.findings.length ?? 0), 0);
 
-  const reconciled = await reconcileContested({
-    results,
-    structure,
-    questionnaireId,
-    versionId,
-    agentBySlug,
-    adminId,
-    log,
-  });
+  // Reconcile only if the judges left room for its worst case. They fan out concurrently but a
+  // slow one can retry up to 180s, and this step runs serially after them — together that exceeds
+  // the routes' 300s ceiling, and being killed here would throw away seven judge calls the admin
+  // has already paid for. Skipping degrades to exactly what a failed reconcile degrades to: the
+  // judges' own suggestions, which is what the surfaces showed before this step existed.
+  const elapsedMs = Date.now() - startedAt;
+  const budgetLeftMs = PANEL_BUDGET_MS - elapsedMs;
+  const affordable = budgetLeftMs >= RECONCILE_WORST_CASE_MS;
+
+  if (reconcile && !affordable) {
+    log.warn('Skipping cross-judge reconciliation: panel left too little wall-clock', {
+      questionnaireId,
+      versionId,
+      elapsedMs,
+      budgetLeftMs,
+      requiredMs: RECONCILE_WORST_CASE_MS,
+    });
+  }
+
+  const reconciled =
+    reconcile && affordable
+      ? await reconcileContested({
+          results,
+          structure,
+          questionnaireId,
+          versionId,
+          agentBySlug,
+          adminId,
+          log,
+        })
+      : [];
 
   return {
     results,

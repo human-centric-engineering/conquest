@@ -505,6 +505,49 @@ describe('EvaluationRunDetail review queue', () => {
     );
   });
 
+  it('keeps the verdict describing the panel when a filter narrows the findings', async () => {
+    // The band reports what the *panel* said, so it must survive the filter row. Deriving it from
+    // the filtered set let a filter manufacture the consensus `group-actions` exists never to
+    // manufacture: narrow to Major here and the band would read "Delete this question · 1 judge"
+    // with no dissent — telling the reviewer the panel agreed, and hiding the rewording.
+    render(
+      <EvaluationRunDetail
+        run={run([
+          finding({
+            id: 'f1',
+            dimension: 'duplicates',
+            severity: 'major',
+            proposedChange: 'Remove the duplicate question.',
+            proposedEdit: { op: 'delete_question' },
+          }),
+          finding({
+            id: 'f2',
+            dimension: 'clarity',
+            severity: 'minor',
+            proposedChange: 'Reword the double-barrelled ask.',
+            proposedEdit: { op: 'replace_prompt', prompt: 'How engaged do you feel?' },
+          }),
+        ])}
+        questionnaireId="qn1"
+        versionId="v1"
+        canApply
+        dataSlotsAvailable={false}
+      />
+    );
+
+    // Unfiltered: the deletion leads, the rewording is printed beside it as dissent.
+    expect(screen.getByText('Delete this question')).toBeInTheDocument();
+    expect(screen.getByText('1 of 2 judges')).toBeInTheDocument();
+    expect(screen.getByText('· 1 judge says reword it instead')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Severity'), 'major');
+
+    // The clarity finding is filtered out of the list below, but the verdict is unchanged.
+    await waitFor(() => expect(screen.getByText('1 of 2 judges')).toBeInTheDocument());
+    expect(screen.getByText('Delete this question')).toBeInTheDocument();
+    expect(screen.getByText('· 1 judge says reword it instead')).toBeInTheDocument();
+  });
+
   it('separates the record-only actions from Apply with a group label', async () => {
     await renderQueue([finding()]);
     // "Apply" and "Accept" read as near-synonyms on their own; the label is what says the second

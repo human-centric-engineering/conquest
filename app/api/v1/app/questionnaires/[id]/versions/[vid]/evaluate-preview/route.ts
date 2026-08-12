@@ -41,9 +41,12 @@ import { designEvaluationLimiter } from '@/app/api/v1/app/questionnaires/_lib/ra
 /**
  * Wall-clock ceiling for the whole panel. The seven judges fan out concurrently, so the run
  * costs one slow judge — but that judge is a reasoning model reading a long instrument and
- * writing a rewritten prompt per finding, which its own 90s cap allows for. That is past the
- * platform's 60s default, and a function killed mid-fan-out gives the admin a blank failure
- * with nothing in the logs. Matches the report-preview route's ceiling.
+ * writing a rewritten prompt per finding, and `runStructuredCompletion` gives its retry a *fresh*
+ * 90s timeout, so one judge is 180s at worst. That is past the platform's 60s default, and a
+ * function killed mid-fan-out gives the admin a blank failure with nothing in the logs.
+ *
+ * The preview does not reconcile (`reconcile: false` below), so the fan-out is all it pays for.
+ * Matches the report-preview route's ceiling.
  */
 export const maxDuration = 300;
 
@@ -110,6 +113,9 @@ const handleEvaluatePreview = withAdminAuth<{ id: string; vid: string }>(
       agentBySlug,
       adminId,
       log,
+      // The preview is ephemeral and returns `{ results, summary }` only, so a reconcile call here
+      // would be billed and then dropped on the floor. The persisted run route does reconcile.
+      reconcile: false,
     });
 
     log.info('Questionnaire design-evaluation preview', {

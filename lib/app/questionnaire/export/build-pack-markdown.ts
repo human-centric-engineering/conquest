@@ -162,7 +162,7 @@ export function buildPackMarkdown(model: PackModel): string {
           lines.push(`### ${heading}`);
           const facts = [
             target.questionType ? `Type: ${target.questionType}` : null,
-            `${target.judges.length} judge(s)`,
+            `${target.judgeCount} judge(s)`,
             target.counts.major > 0 ? `${target.counts.major} major` : null,
             target.removed ? 'no longer in the questionnaire' : null,
           ].filter((f): f is string => f !== null);

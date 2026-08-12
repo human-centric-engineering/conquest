@@ -73,6 +73,16 @@ describe('QuotedProse', () => {
     expect(container.textContent).toBe(text);
   });
 
+  it('marks a single-character option instead of the prose between two of them', () => {
+    // A lazy `{2,}?` floor did not skip a one-character span, it swallowed it: the only match on
+    // this sentence became ` or `, so the connective prose was set as the questionnaire's wording
+    // and the two options the judge actually proposed were not.
+    render(<QuotedProse text={'Offer "y" or "n" as the options'} />);
+
+    const quotes = screen.getAllByText((_, el) => el?.tagName === 'Q');
+    expect(quotes.map((q) => q.textContent)).toEqual(['y', 'n']);
+  });
+
   it('does not treat an unpaired quote as a span', () => {
     const text = 'The 5" screen size is ambiguous.';
     const { container } = render(

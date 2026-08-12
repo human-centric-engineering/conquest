@@ -260,6 +260,7 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 1, info: 0, total: 2 },
+                judgeCount: 2,
                 alternatives: [],
                 unresolvedBy: [],
                 judges: [
@@ -314,6 +315,7 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 1, minor: 0, info: 0, total: 1 },
+                judgeCount: 1,
                 alternatives: [
                   {
                     prompt: 'How engaged do you feel at work?',
@@ -367,6 +369,7 @@ describe('buildPackCsv', () => {
                 gap: false,
                 removed: false,
                 counts: { major: 0, minor: 1, info: 0, total: 1 },
+                judgeCount: 1,
                 alternatives: [],
                 unresolvedBy: [],
                 judges: [

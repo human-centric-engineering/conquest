@@ -8,6 +8,10 @@
  * Covers the happy path, the arg guard that keeps single-judge questions out, the hallucinated-key
  * filter, and the two failure messages (truncation vs contract violation) that the Clarity judge
  * incident taught us to keep apart.
+ *
+ * The second block covers what the panel does when its surroundings misbehave: a binding the
+ * dispatch context supplied in the wrong shape, a provider that resolves but will not load, and an
+ * accounting write that rejects mid-run.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -42,6 +46,7 @@ const { prisma } = await import('@/lib/db/client');
 const { getProvider } = await import('@/lib/orchestration/llm/provider-manager');
 const { resolveAgentProviderAndModel } = await import('@/lib/orchestration/llm/agent-resolver');
 const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
+const { logger } = await import('@/lib/logging');
 const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/dispatcher');
 const { AppReconcileSuggestionsCapability } =
   await import('@/lib/app/questionnaire/capabilities/reconcile-suggestions');
@@ -294,5 +299,171 @@ describe('AppReconcileSuggestionsCapability — dispatch', () => {
     const options = provider.chat.mock.calls[0][1] as { maxTokens: number; timeoutMs: number };
     expect(options.maxTokens).toBe(8_192);
     expect(options.timeoutMs).toBe(90_000);
+  });
+});
+
+describe('AppReconcileSuggestionsCapability — degraded surroundings', () => {
+  beforeEach(() => {
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_RESPONSE }]));
+    // `vi.clearAllMocks()` clears call history but keeps implementations, so the rejecting
+    // `logCost` below would otherwise leak into whichever test ran after it.
+    (logCost as Mock).mockResolvedValue(null);
+  });
+
+  /** The binding the capability handed the resolver on the run that just dispatched. */
+  function resolvedBinding() {
+    return (resolveAgentProviderAndModel as Mock).mock.calls[0][0] as {
+      provider: string;
+      model: string;
+      fallbackProviders: string[];
+    };
+  }
+
+  it('asks for the system default when the dispatch context carries no reconciler binding', async () => {
+    // An unbound capability is the normal case before an admin picks an agent, not an error: the
+    // empty binding is what tells the resolver "choose the reasoning-tier default".
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      baseContext({ entityContext: {} })
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolvedBinding()).toEqual({ provider: '', model: '', fallbackProviders: [] });
+  });
+
+  it('asks for the system default when the binding is present but not an object', async () => {
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      baseContext({ entityContext: { reconcilerAgent: 'gpt-5.4' } })
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolvedBinding()).toEqual({ provider: '', model: '', fallbackProviders: [] });
+  });
+
+  it('drops binding fields that came through in the wrong type rather than forwarding them', async () => {
+    // `entityContext` is untyped JSON off a DB row, so a number where a slug belongs is a shape the
+    // reader has to survive. Blanking the field falls back to the default; forwarding `42` as a
+    // provider slug would fail the lookup further down with a much less obvious message.
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      baseContext({
+        entityContext: {
+          reconcilerAgent: { provider: 42, model: null, fallbackProviders: 'openai' },
+        },
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolvedBinding()).toEqual({ provider: '', model: '', fallbackProviders: [] });
+  });
+
+  it('keeps the string fallbacks in a mixed fallback list and drops the rest', async () => {
+    const result = await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs(),
+      baseContext({
+        entityContext: {
+          reconcilerAgent: {
+            provider: 'openai',
+            model: 'gpt-5.4',
+            fallbackProviders: ['anthropic', 7, null, 'groq'],
+          },
+        },
+      })
+    );
+
+    expect(result.success).toBe(true);
+    expect(resolvedBinding()).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.4',
+      fallbackProviders: ['anthropic', 'groq'],
+    });
+  });
+
+  it('fails closed with its own code when the provider resolves but will not load', async () => {
+    // Distinct from `no_provider_configured`: the binding was fine and a provider was named, so the
+    // fix is on the provider (missing key, disabled row), not on the agent's configuration.
+    (getProvider as Mock).mockRejectedValue(new Error('provider disabled'));
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('provider_unavailable');
+    expect(result.error?.message).toContain('provider disabled');
+  });
+
+  it('reports a non-Error rejection as its string form instead of losing it', async () => {
+    // An SDK that rejects with a bare string would otherwise surface as "undefined" — the message
+    // is the only thing the admin sees on a failed run.
+    (resolveAgentProviderAndModel as Mock).mockRejectedValue('upstream said no');
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('no_provider_configured');
+    expect(result.error?.message).toBe('upstream said no');
+  });
+
+  it('still returns the reconciliation when the cost write rejects', async () => {
+    // Cost is fire-and-forget by design: an accounting failure must not throw away LLM work the
+    // admin has already paid for. It is logged, not swallowed silently.
+    (logCost as Mock).mockRejectedValue(new Error('cost table unreachable'));
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(true);
+    await vi.waitFor(() => {
+      expect(logger.error).toHaveBeenCalledWith(
+        'reconcile_suggestions: logCost rejected',
+        expect.objectContaining({ error: 'cost table unreachable' })
+      );
+    });
+  });
+
+  it('omits the optional cost dimensions rather than logging them as undefined', async () => {
+    // A run dispatched outside an agent, on a version-less preview, must not write `agentId: undefined`
+    // into the cost row — an absent key and a present-but-empty one read differently in the ledger.
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ versionId: undefined }),
+      baseContext({ agentId: undefined })
+    );
+
+    const call = (logCost as Mock).mock.calls[0][0];
+    expect(call).not.toHaveProperty('agentId');
+    expect(call.metadata).not.toHaveProperty('versionId');
+    expect(call.metadata.targetCount).toBe(1);
+  });
+
+  it('tells the model the goal and audience are missing rather than sending an empty field', async () => {
+    const provider = makeProvider([{ content: VALID_RESPONSE }]);
+    (getProvider as Mock).mockResolvedValue(provider);
+
+    await capabilityDispatcher.dispatch(
+      SLUG,
+      baseArgs({ goal: undefined, audience: undefined }),
+      baseContext()
+    );
+
+    const messages = provider.chat.mock.calls[0][0] as { role: string; content: string }[];
+    const user = messages.find((m) => m.role === 'user')?.content ?? '';
+    expect(user).toContain('(no goal specified)');
+    expect(user).toContain('(no audience specified)');
+  });
+
+  it('says "(root)" when the response is the wrong shape entirely, not an empty path', async () => {
+    // A bare scalar parses as JSON, so this is a contract violation rather than truncation — and the
+    // failing path is the document itself. Reporting it as `` would read as "invalid at: ".
+    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: '5' }, { content: '5' }]));
+
+    const result = await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toContain('not valid against the schema');
+    expect(result.error?.message).toContain('(root)');
   });
 });

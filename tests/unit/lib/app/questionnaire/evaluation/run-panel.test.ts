@@ -105,6 +105,7 @@ describe('runEvaluationPanel', () => {
       agentBySlug: allAgents(),
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
 
     expect(dispatchMock.capabilityDispatcher.dispatch).toHaveBeenCalledTimes(dimensions.length);
@@ -140,6 +141,7 @@ describe('runEvaluationPanel', () => {
       ]),
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
     const [, , ctx] = dispatchMock.capabilityDispatcher.dispatch.mock.calls[0];
     expect(ctx).toMatchObject({
@@ -162,6 +164,7 @@ describe('runEvaluationPanel', () => {
       agentBySlug: agents,
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
     const ordering = result.results.find((r) => r.dimension === 'ordering');
     expect(ordering?.diagnostic).toBe('judge_not_configured');
@@ -188,6 +191,7 @@ describe('runEvaluationPanel', () => {
       agentBySlug: allAgents(),
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
     const coverage = result.results.find((r) => r.dimension === 'coverage');
     const clarity = result.results.find((r) => r.dimension === 'clarity');
@@ -211,6 +215,7 @@ describe('runEvaluationPanel', () => {
       agentBySlug: allAgents(),
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
     const coverage = result.results.find((r) => r.dimension === 'coverage');
     expect(coverage?.diagnostic).toBe('dispatch_error');
@@ -229,6 +234,7 @@ describe('runEvaluationPanel', () => {
       agentBySlug: allAgents(),
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
     expect(result.results[0].diagnostic).toBe('evaluation_failed');
   });
@@ -245,6 +251,7 @@ describe('runEvaluationPanel', () => {
       agentBySlug: allAgents(),
       adminId: 'admin-1',
       log,
+      reconcile: false,
     });
     expect(result.results[0].verdict).toBeUndefined();
     expect(result.results[0].diagnostic).toBe('evaluation_failed');

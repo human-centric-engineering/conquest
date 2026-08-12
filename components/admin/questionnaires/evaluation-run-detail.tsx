@@ -65,6 +65,10 @@ import {
   GROUP_SORT_LABELS,
   type GroupSort,
 } from '@/lib/app/questionnaire/evaluation/group-findings';
+import {
+  summariseGroupActions,
+  type GroupActionSummary,
+} from '@/lib/app/questionnaire/evaluation/group-actions';
 
 interface ForkNotice {
   versionId: string;
@@ -209,6 +213,23 @@ export function EvaluationRunDetail({
   );
 
   const groups = useMemo(() => groupFindingsByTarget(visible, sort), [visible, sort]);
+
+  // The verdict band describes what the *panel* said about a question, so it is derived from every
+  // finding on that target — not from the filtered set the cards below render.
+  //
+  // Filtering the verdict would let the filter manufacture the consensus `group-actions` is built
+  // never to manufacture: narrow to Severity = Major on a question that Clarity wants reworded
+  // (major) and Duplicates wants deleted (minor), and the band would read "Reword it · 1 judge"
+  // with no dissent line — reporting agreement that does not exist and hiding the deletion. Same
+  // reasoning as the headline above: a filter changes what you are *looking at*, never what the
+  // panel *found*.
+  const verdictByKey = useMemo(() => {
+    const map = new Map<string, GroupActionSummary>();
+    for (const group of groupFindingsByTarget(findings)) {
+      map.set(group.key, summariseGroupActions(group));
+    }
+    return map;
+  }, [findings]);
 
   // The run's cross-judge alternatives, indexed for the card that renders them. Empty for a run
   // made before reconciliation existed, or one where nothing was contested — in both cases the
@@ -364,6 +385,7 @@ export function EvaluationRunDetail({
           canApply={canApply}
           dataSlotsAvailable={dataSlotsAvailable}
           reconciledByKey={reconciledByKey}
+          verdictByKey={verdictByKey}
           openKey={openKey}
           onToggle={(key) => setOpenKey((prev) => (prev === key ? null : key))}
           onUpdate={handleUpdate}

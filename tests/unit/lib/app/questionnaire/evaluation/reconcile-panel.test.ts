@@ -56,6 +56,27 @@ function structureOf(count: number): VersionStructureInput {
   };
 }
 
+/** Two sections, so section-relative and questionnaire-global numbering disagree. */
+function twoSectionStructure(): VersionStructureInput {
+  return {
+    goal: 'Understand onboarding friction.',
+    audience: null,
+    sections: [
+      {
+        title: 'Background',
+        questions: [
+          { key: 'q1', prompt: 'Prompt 1?', type: 'free_text', required: true },
+          { key: 'q2', prompt: 'Prompt 2?', type: 'free_text', required: true },
+        ],
+      },
+      {
+        title: 'Working life',
+        questions: [{ key: 'q3', prompt: 'Prompt 3?', type: 'free_text', required: true }],
+      },
+    ],
+  };
+}
+
 function agentFor(dimension: EvaluationDimension): JudgeAgentRef {
   return {
     slug: EVALUATION_DIMENSION_SPECS[dimension].slug,
@@ -155,6 +176,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     const reconcile = calls.find((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG);
@@ -178,6 +200,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     const reconcile = calls.find((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG);
@@ -207,6 +230,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(false);
@@ -224,6 +248,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(false);
@@ -244,6 +269,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(false);
@@ -265,6 +291,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     const reconcile = calls.find((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG);
@@ -318,6 +345,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     const reconcile = calls.find((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG);
@@ -339,6 +367,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: judgesOnly,
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(false);
@@ -363,6 +392,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(result.reconciled).toEqual([]);
@@ -383,6 +413,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(result.reconciled).toEqual([]);
@@ -406,6 +437,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     expect(result.reconciled).toEqual([]);
@@ -423,6 +455,7 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
       agentBySlug: agentsWithReconciler(TWO),
       adminId: 'admin-1',
       log,
+      reconcile: true,
     });
 
     const call = dispatchMock.capabilityDispatcher.dispatch.mock.calls.find(
@@ -435,5 +468,127 @@ describe('runEvaluationPanel — cross-judge reconciliation', () => {
     expect(context.agentId).toBe('agent-reconciler');
     expect(context.entityContext.reconcilerAgent.model).toBe('gpt-5.4');
     expect(calls.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runEvaluationPanel — reconciliation is gated, not assumed', () => {
+  it('numbers a question within its section, matching the chip the admin reads', async () => {
+    // Every other surface derives the chip from `indexInSection + 1` (`resolveFindingTarget`). A
+    // counter running across sections made the reconciler's prompt say "Q3 · Working life" for the
+    // question the card labels "Q1 · Working life", so an alternative whose note cited the number
+    // contradicted the card carrying it.
+    const calls = wireDispatch({ judgeTargets: { clarity: ['q3'], audience_match: ['q3'] } });
+
+    await runEvaluationPanel({
+      dimensions: TWO,
+      structure: twoSectionStructure(),
+      questionnaireId: 'qn1',
+      versionId: 'v1',
+      agentBySlug: agentsWithReconciler(TWO),
+      adminId: 'admin-1',
+      log,
+      reconcile: true,
+    });
+
+    const reconcile = calls.find((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG);
+    const targets = reconcile?.args.targets as { key: string; context: string }[];
+    expect(targets[0].context).toBe('Q1 · Working life');
+  });
+
+  it('does not dispatch the reconciler at all when the caller opts out', async () => {
+    // The preview route pays for the panel and returns `{ results, summary }` only, so a reconcile
+    // call there is billed and then dropped on the floor.
+    const calls = wireDispatch({ judgeTargets: { clarity: ['q1'], audience_match: ['q1'] } });
+
+    const result = await runEvaluationPanel({
+      dimensions: TWO,
+      structure: structureOf(2),
+      questionnaireId: 'qn1',
+      versionId: 'v1',
+      agentBySlug: agentsWithReconciler(TWO),
+      adminId: 'admin-1',
+      log,
+      reconcile: false,
+    });
+
+    expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(false);
+    expect(result.reconciled).toEqual([]);
+    // The judges still ran and still returned — opting out costs nothing else.
+    expect(result.summary.totalFindings).toBe(2);
+  });
+
+  it('skips reconciliation when the judges have already spent the run’s wall-clock', async () => {
+    // Judges fan out concurrently but a slow one can retry to 180s, and reconcile runs serially
+    // after them for up to another 180s — past both routes' 300s `maxDuration`. Being killed there
+    // would throw away seven judge calls the admin has already paid for, so the step stands down.
+    const calls = wireDispatch({ judgeTargets: { clarity: ['q1'], audience_match: ['q1'] } });
+
+    const realNow = Date.now.bind(Date);
+    const t0 = realNow();
+    let first = true;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+      if (first) {
+        first = false;
+        return t0; // panel start
+      }
+      return t0 + 200_000; // the judges took 200s, leaving 85s of a 285s budget
+    });
+
+    try {
+      const result = await runEvaluationPanel({
+        dimensions: TWO,
+        structure: structureOf(2),
+        questionnaireId: 'qn1',
+        versionId: 'v1',
+        agentBySlug: agentsWithReconciler(TWO),
+        adminId: 'admin-1',
+        log,
+        reconcile: true,
+      });
+
+      expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(false);
+      // Degrades exactly as a failed reconcile does: the judges' own suggestions stand.
+      expect(result.reconciled).toEqual([]);
+      expect(result.summary.totalFindings).toBe(2);
+      expect(logFns.warn).toHaveBeenCalledWith(
+        'Skipping cross-judge reconciliation: panel left too little wall-clock',
+        expect.objectContaining({ elapsedMs: 200_000 })
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('still reconciles when the judges came back quickly', async () => {
+    const calls = wireDispatch({ judgeTargets: { clarity: ['q1'], audience_match: ['q1'] } });
+
+    const realNow = Date.now.bind(Date);
+    const t0 = realNow();
+    let first = true;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+      if (first) {
+        first = false;
+        return t0;
+      }
+      return t0 + 40_000; // 40s in — the ordinary case
+    });
+
+    try {
+      const result = await runEvaluationPanel({
+        dimensions: TWO,
+        structure: structureOf(2),
+        questionnaireId: 'qn1',
+        versionId: 'v1',
+        agentBySlug: agentsWithReconciler(TWO),
+        adminId: 'admin-1',
+        log,
+        reconcile: true,
+      });
+
+      expect(calls.some((c) => c.slug === RECONCILE_SUGGESTIONS_CAPABILITY_SLUG)).toBe(true);
+      expect(result.reconciled).toHaveLength(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

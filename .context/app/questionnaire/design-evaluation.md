@@ -125,10 +125,28 @@ possible at once.
 | Batching       | ONE call for the whole run, not one per question                                        |
 | Scope          | Question targets only, 2+ **judges** (not 2+ findings), capped at 15 most-contested     |
 | Persistence    | `reconciledSuggestions` (nullable JSON) on the run row                                  |
+| When it runs   | Persisted runs only, and only if the judges left wall-clock for it (below)              |
 
 **Why "more than one judge" and not "more than one finding".** One judge raising two points about a
 question is still one perspective, and reconciling a perspective with itself proposes nothing worth
 paying for.
+
+**Why the preview does not reconcile.** `runEvaluationPanel` takes an explicit `reconcile: boolean`
+— required, not defaulted, so a new caller has to decide rather than inherit. The run route passes
+`true`; the preview route passes `false`, because it returns `{ results, summary }` ephemerally and
+has nowhere to put the alternatives. Billing an extra reasoning call for a payload that is dropped
+on the way out is not a cheaper preview, it is a more expensive one.
+
+**Why it can be skipped on a slow run.** The step is serial: it starts after the fan-in. A judge
+costs up to `JUDGE_TIMEOUT_MS` and `runStructuredCompletion` gives its one retry a _fresh_ timeout,
+so the concurrent fan-out is 180s at worst; reconciliation is another 180s on the same arithmetic.
+360s overruns the routes' `maxDuration = 300`, and a function killed there throws away seven judge
+calls the admin has already paid for. So `runEvaluationPanel` checks the clock before it starts:
+under `PANEL_BUDGET_MS` (285s, leaving a reserve for the structure build and the run's persistence)
+it needs `RECONCILE_TIMEOUT_MS × 2` still unspent, or it logs a warning and stands down. Skipping
+degrades to exactly what a failed reconcile degrades to — the judges' own suggestions — which is
+what every surface showed before this step existed. Raising the ceiling was not an option: 300 is
+already the highest `maxDuration` in the codebase.
 
 **Why question targets only.** Findings against the `goal`, the `audience`, or a section are not
 phrasings to rewrite. This also excludes the Coverage judge's drafted new questions, which are
@@ -243,7 +261,8 @@ Two constraints on that:
   seeded is a 404 (`run db:seed`).
 - **Per-judge budget**: `JUDGE_MAX_TOKENS` 8,192 output tokens, `JUDGE_TIMEOUT_MS` 90s,
   and `maxDuration = 300` on both panel routes (the judges fan out concurrently, so the
-  request costs one slow judge, not seven). Size the token cap for Clarity, not the
+  request costs one slow judge, not seven — 180s of one, since the retry gets a fresh
+  timeout). Size the token cap for Clarity, not the
   average: it attaches a full rewritten prompt to every finding, and on OpenAI's
   reasoning families (`o*`, `gpt-5*`) the cap is sent as `max_completion_tokens`, so
   hidden reasoning tokens come out of the same budget. At the original 2,048 the Clarity
@@ -280,8 +299,9 @@ migration.)
 
 Shared dispatch — `lib/app/questionnaire/evaluation/run-panel.ts`. The F5.1 fan-out was
 extracted into `runEvaluationPanel(...)` (Prisma-free: agents + structure passed in,
-returns `{ results, summary }`, fail-soft per judge). Both the preview route and the new
-run route call it; the preview returns it ephemerally, the run route persists it.
+returns `{ results, summary, reconciled }`, fail-soft per judge). Both the preview route and
+the new run route call it; the preview returns it ephemerally (and passes `reconcile: false`),
+the run route persists it.
 
 Models (`prisma/schema/app-questionnaire.prisma`):
 

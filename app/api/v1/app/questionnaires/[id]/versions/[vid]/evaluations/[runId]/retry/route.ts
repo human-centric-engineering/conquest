@@ -103,6 +103,10 @@ const handleRetryJudge = withAdminAuth<{ id: string; vid: string; runId: string 
       agentBySlug: new Map(agents.map((a) => [a.slug, a])),
       adminId,
       log,
+      // One dimension, so nothing here can be contested — reconciliation needs two *judges* on the
+      // same target, and this panel has one. (The run's existing alternatives are left alone; see
+      // the staleness note on `mergeJudgeRetry`.)
+      reconcile: false,
     });
 
     // Exactly one dimension was requested, so the panel returns exactly one result. Guarded

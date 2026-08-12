@@ -141,8 +141,21 @@ export interface PackEvaluationTarget {
   removed: boolean;
   /** Severity tallies across the judges below — the "how contested is this" number. */
   counts: SeverityCounts;
-  /** Distinct judges that flagged this target, in `(dimension, ordinal)` order. */
+  /**
+   * Every verdict on this target, in `(dimension, ordinal)` order — one entry per *finding*, so a
+   * judge that raised two points about the same question appears twice. Render them all; count
+   * judges with `judgeCount`, never with `judges.length`.
+   */
   judges: PackEvaluationJudgeView[];
+  /**
+   * How many *distinct* judges flagged this target — the "how contested is this" headline.
+   *
+   * Separate from `judges.length` because that is a finding count: one judge raising two points is
+   * one perspective, and printing "3 judge(s)" over two judges overstates the consensus a reader
+   * is being asked to act on. Same distinction `selectContestedTargets` draws before it decides a
+   * question is worth reconciling at all.
+   */
+  judgeCount: number;
   /**
    * Alternative phrasings that try to satisfy every judge above at once — the reconcile step that
    * runs after the panel. Empty when the question was flagged by only one judge (there is nothing
@@ -275,6 +288,7 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
       gap: group.gap,
       removed: group.removed,
       counts: group.counts,
+      judgeCount: group.dimensions.length,
       judges: group.findings.map((f) => ({
         dimension: f.dimension,
         label: judgeLabel(f.dimension),

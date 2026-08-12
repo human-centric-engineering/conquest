@@ -33,8 +33,6 @@
  * list, so a clean question is absent by construction rather than shown as a pass.
  */
 
-import { useMemo } from 'react';
-
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { questionTypeLabel } from '@/lib/app/questionnaire/types';
@@ -45,7 +43,10 @@ import {
   groupContextLabel,
   type FindingGroup,
 } from '@/lib/app/questionnaire/evaluation/group-findings';
-import { summariseGroupActions } from '@/lib/app/questionnaire/evaluation/group-actions';
+import {
+  summariseGroupActions,
+  type GroupActionSummary,
+} from '@/lib/app/questionnaire/evaluation/group-actions';
 import { FieldLabel, QUESTION_FACE } from '@/components/admin/questionnaires/evaluation-field';
 import {
   EvaluationGroupVerdict,
@@ -67,6 +68,14 @@ interface Props {
   dataSlotsAvailable: boolean;
   /** The run's cross-judge alternatives, keyed by target — empty for runs that predate the step. */
   reconciledByKey: Map<string, ReconciledSuggestion>;
+  /**
+   * The panel's verdict per target, derived upstream from *every* finding on it.
+   *
+   * Passed in rather than computed from `group` because `group` holds only the findings that
+   * survived the filter, and a verdict computed from those would report a consensus the panel never
+   * reached — see the note at its construction in `evaluation-run-detail`.
+   */
+  verdictByKey: Map<string, GroupActionSummary>;
   /** The single expanded card's key; `null` when all are closed. */
   openKey: string | null;
   onToggle: (key: string) => void;
@@ -108,6 +117,7 @@ function GroupCard({
   canApply,
   dataSlotsAvailable,
   reconciledByKey,
+  verdictByKey,
   onToggle,
   onUpdate,
 }: CardProps) {
@@ -117,7 +127,9 @@ function GroupCard({
   );
 
   const context = groupContextLabel(group);
-  const summary = useMemo(() => summariseGroupActions(group), [group]);
+  // Falls back to the filtered group only if the map has no entry for this key, which cannot happen
+  // while both derive from the same finding list — the `??` is a type-level floor, not a real case.
+  const summary = verdictByKey.get(group.key) ?? summariseGroupActions(group);
   const reconciled = reconciledByKey.get(group.key);
 
   // `key` is a raw targetKey — a `section:<title>` carries spaces and a colon. `aria-controls` is

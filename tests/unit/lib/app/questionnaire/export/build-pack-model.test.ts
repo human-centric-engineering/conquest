@@ -557,6 +557,40 @@ describe('buildPackModel', () => {
       });
       expect(q1[0].judges.map((j) => j.dimension)).toEqual(['clarity', 'audience_match']);
       expect(q1[0].judges.map((j) => j.label)).toEqual(['Clarity Judge', 'Audience-Match Judge']);
+      expect(q1[0].judgeCount).toBe(2);
+    });
+
+    it('counts distinct judges, not findings, when one judge raises two points', () => {
+      // `judges` is one entry per finding — render them all — but the serialisers print
+      // "N judge(s)" from it, and one judge raising two points is one perspective. Counting
+      // findings there overstates the consensus the admin is being asked to act on.
+      const twice = {
+        ...EVALUATION_RUN,
+        findings: [
+          ...EVALUATION_RUN.findings,
+          {
+            ...EVALUATION_RUN.findings[0],
+            id: 'f4',
+            ordinal: 1,
+            proposedChange: 'Also drop the leading clause',
+            rationale: 'A second, separate clarity point about the same question',
+          },
+        ],
+      };
+
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        twice,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+
+      const q1 = model.evaluations?.targets.find((t) => t.key === 'q1');
+      expect(q1?.judges).toHaveLength(3);
+      expect(q1?.judgeCount).toBe(2);
     });
 
     it('carries each judge view whole — suggestion, rationale, quote, severity and review status', () => {

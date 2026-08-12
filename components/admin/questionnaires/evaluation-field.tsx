@@ -85,15 +85,20 @@ export const QUESTION_FACE = 'font-[family-name:var(--font-display-cq)]';
 export const PROSE_MEASURE = 'max-w-[68ch]';
 
 /**
- * Matches a double-quoted span — straight or curly. Two characters minimum, so a bare `""` is not
- * a quote.
+ * Matches a double-quoted span — straight or curly. One character minimum, so a bare `""` is not a
+ * quote but a single-character option is.
+ *
+ * The floor is 1 and not 2 because a lazy `{2,}?` does not skip a short span, it *swallows* it: on
+ * `Offer "y" or "n"` the two-character floor makes the only match the ` or ` between them, so the
+ * connective prose gets set as the questionnaire's wording and the proposed options do not. One
+ * character is a legitimate thing to propose — a scale label, a code, an option letter.
  *
  * Built per call rather than shared: a `g`-flagged regex carries a `lastIndex` cursor, so a
  * module-level one would make the second read of the same string skip its first quote — and
  * mutating it during render is exactly the shared state React's compiler forbids.
  */
 function quotedSpans(text: string): { text: string; quoted: boolean }[] {
-  const re = /[“"]([^”"]{2,}?)[”"]/g;
+  const re = /[“"]([^”"]+?)[”"]/g;
   const parts: { text: string; quoted: boolean }[] = [];
   let last = 0;
   let match: RegExpExecArray | null;

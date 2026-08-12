@@ -43,11 +43,16 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
 
 /**
- * Wall-clock ceiling for the whole panel. The seven judges fan out concurrently, so the run
- * costs one slow judge — but that judge is a reasoning model reading a long instrument and
- * writing a rewritten prompt per finding, which its own 90s cap allows for. That is past the
- * platform's 60s default, and a function killed mid-fan-out gives the admin a blank failure
- * with nothing in the logs. Matches the report-preview route's ceiling.
+ * Wall-clock ceiling for the whole panel. The seven judges fan out concurrently, so the run costs
+ * one slow judge — but that judge is a reasoning model reading a long instrument and writing a
+ * rewritten prompt per finding, and `runStructuredCompletion` gives its retry a *fresh* 90s
+ * timeout, so one judge is 180s at worst. That is well past the platform's 60s default, and a
+ * function killed mid-fan-out gives the admin a blank failure with nothing in the logs.
+ *
+ * 300 is the ceiling, not a target: the reconcile step that follows the fan-in is serial and can
+ * cost another 180s, which would overrun. `runEvaluationPanel` keeps the run inside this budget by
+ * skipping reconciliation when the judges have already spent it — see `PANEL_BUDGET_MS`. Matches
+ * the report-preview route's ceiling.
  */
 export const maxDuration = 300;
 
@@ -110,6 +115,7 @@ const handleCreateRun = withAdminAuth<{ id: string; vid: string }>(
       agentBySlug,
       adminId,
       log,
+      reconcile: true,
     });
     const completedAt = new Date();
 

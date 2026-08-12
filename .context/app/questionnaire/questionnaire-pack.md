@@ -44,7 +44,10 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   the seven-judge scoreboard (score/diagnostic/finding count, no findings) and `targets` is the work —
   one entry per flagged subject, in questionnaire order, with every judge's verdict beneath it. A
   question that four judges flagged is printed **once** with four verdicts under it, where the
-  by-judge layout printed it four times, pages apart. This is the same reasoning that made "By
+  by-judge layout printed it four times, pages apart. The "N judge(s)" line over a target reads
+  `judgeCount` (distinct judges) and never `judges.length` (one entry per _finding_) — one judge
+  raising two points is one perspective, and counting findings there overstates the consensus the
+  reader is being asked to act on. This is the same reasoning that made "By
   question" the default in the admin run-detail view (see
   [design-evaluation.md](./design-evaluation.md#reading-a-run--two-views-over-the-same-findings)) —
   and it matters more in a document, which has no toggle to switch. Grouping is the shared pure

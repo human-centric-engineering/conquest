@@ -67,8 +67,14 @@ const SLUG = RECONCILE_SUGGESTIONS_CAPABILITY_SLUG;
  */
 const RECONCILE_MAX_TOKENS = 8_192;
 
-/** One reconcile call over a batch; a reasoning model rewriting 15 questions needs the room. */
-const RECONCILE_TIMEOUT_MS = 90_000;
+/**
+ * One reconcile call over a batch; a reasoning model rewriting 15 questions needs the room.
+ *
+ * Exported because `run-panel` has to budget for it: `runStructuredCompletion` gives its retry a
+ * *fresh* `AbortSignal.timeout(timeoutMs)`, so the real worst case for this step is twice this
+ * value, and the caller decides whether the run's remaining wall-clock can afford it.
+ */
+export const RECONCILE_TIMEOUT_MS = 90_000;
 
 const judgeInputSchema = z.object({
   dimension: z.enum(EVALUATION_DIMENSIONS),
