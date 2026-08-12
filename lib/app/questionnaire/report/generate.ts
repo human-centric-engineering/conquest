@@ -29,6 +29,7 @@ import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants'
 import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
+import type { NotAssessedTopic } from '@/lib/app/questionnaire/scope/types';
 import { buildAnswerPanelView } from '@/lib/app/questionnaire/panel/answer-panel';
 import {
   narrowRespondentReportSettings,
@@ -161,6 +162,51 @@ function coverageRules(answered: number, total: number, unansweredBlock: string)
 }
 
 /**
+ * The framing for topics the interview never asked about — Adaptive Scope (P17).
+ *
+ * Deliberately SEPARATE from {@link coverageRules}, which lists questions the respondent was asked
+ * and skipped. These are questions nobody put to them. Collapsing the two would be a lie in both
+ * directions: it would imply a respondent declined to answer things they were never shown, and it
+ * would hide that the instrument narrowed itself.
+ *
+ * The writer is given both halves because they license different sentences. A SKIPPED topic invites
+ * "you may want to come back to this". A NOT ASKED one does not — the interview decided it did not
+ * apply, and telling the respondent to go and complete it contradicts the decision they were told
+ * about. And a SAMPLED topic is the subtlest of the three: there IS information, it is just too
+ * thin to score on, so the writer may use it as a signal and must not present it as an assessment.
+ */
+function notAssessedRules(topics: readonly NotAssessedTopic[]): string {
+  const skipped = topics.filter((t) => !t.partial);
+  const sampled = topics.filter((t) => t.partial);
+  const parts: string[] = [
+    'SCOPE OF THIS INTERVIEW. This questionnaire adapts to the respondent: it decided, from what ' +
+      'they said early on, which areas were worth their time. The areas below were therefore NOT ' +
+      'part of their interview. They did not decline to answer — they were never asked.',
+  ];
+  if (skipped.length > 0) {
+    parts.push(
+      'NOT ASSESSED — you know nothing whatsoever about this respondent in these areas. Do not ' +
+        'write about them, do not infer their position, and do not suggest they "complete" them: ' +
+        'the interview judged them not to apply, and the respondent was told so. You MAY note in ' +
+        'passing that the assessment did not cover an area, if the reader would otherwise assume ' +
+        'it had.\n' +
+        skipped.map((t) => `- ${t.label} (${t.questionCount} questions)`).join('\n')
+    );
+  }
+  if (sampled.length > 0) {
+    parts.push(
+      'SAMPLED ONLY — these areas were touched on lightly, as a check, not assessed in depth. Any ' +
+        'answers you have from them are a signal, not a measurement. You may use them to raise a ' +
+        'possibility, and you must not present a conclusion about these areas with the same ' +
+        'confidence as the areas that were assessed properly. Say plainly that they were only ' +
+        'sampled if you draw on them at all.\n' +
+        sampled.map((t) => `- ${t.label} (${t.questionCount} questions not asked)`).join('\n')
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/**
  * Paragraph guidance for agent 1 — layout is the Report Formatter second pass's job, so agent 1
  * focuses on well-organised substance rather than exact spacing.
  */
@@ -274,6 +320,11 @@ function buildReportMessages(opts: {
    */
   coverage?: { answered: number; total: number; unansweredBlock: string };
   /**
+   * Adaptive Scope (P17): topics this interview did not cover, or covered only as a sample. Empty
+   * or absent for every non-adaptive session, in which case no scope block is emitted at all.
+   */
+  notAssessed?: readonly NotAssessedTopic[];
+  /**
    * Definitions / glossary (P16): the version's whole accepted set, as `"- <term>: <definition>"`
    * lines. Unlike the per-turn seams this is NOT relevance-filtered — generation runs once per
    * session, so filtering would only risk withholding a term the writer needs, for no per-turn
@@ -290,6 +341,7 @@ function buildReportMessages(opts: {
     research,
     includesAppendedData,
     coverage,
+    notAssessed,
     glossary,
   } = opts;
   const gen = settings.generation;
@@ -315,6 +367,9 @@ function buildReportMessages(opts: {
   // did NOT answer, fenced so the list reads as context and never as questions to answer.
   if (coverage && coverage.unansweredBlock.trim())
     system.push(coverageRules(coverage.answered, coverage.total, coverage.unansweredBlock.trim()));
+  // Immediately after it, the other kind of gap: what nobody asked. Ordering is deliberate — the
+  // writer reads "skipped" and "never asked" side by side, which is the only way to keep them apart.
+  if (notAssessed && notAssessed.length > 0) system.push(notAssessedRules(notAssessed));
   if (includesAppendedData) system.push(APPENDED_DATA_RULES);
   // Contextual data-slot understanding + the weighting that balances it against the direct answers.
   // Only present when the version has data slots — otherwise the report is answers-only, as before.
@@ -419,6 +474,12 @@ export interface ReportGenerationInputs {
    * answered, produces the same prompt as before.
    */
   coverage?: { answered: number; total: number; unansweredBlock: string };
+  /**
+   * Adaptive Scope (P17): the topics this respondent's interview deliberately did not cover, and
+   * the ones it only sampled. Comes straight off `loadSessionExport`. Absent/empty for every
+   * non-adaptive session, which produces exactly the prompt this did before P17.
+   */
+  notAssessed?: NotAssessedTopic[];
   /** Attributed client for optional KB grounding; null disables it (e.g. preview). */
   demoClientId: string | null;
   /** The session id (or a `preview:<vid>` sentinel) — used for research logging + KB warnings. */
@@ -527,6 +588,9 @@ export async function generateRespondentReportWithSettings(
     demoClientId: meta.version.questionnaire?.demoClientId ?? null,
     sessionId,
     ...(glossary.length > 0 ? { glossary } : {}),
+    // What the interview never asked about. The honest half of an adaptive instrument's record: a
+    // report that silently omits what it skipped is a report that implies it looked everywhere.
+    ...((loaded.notAssessed?.length ?? 0) > 0 ? { notAssessed: loaded.notAssessed } : {}),
   });
 }
 
@@ -548,6 +612,7 @@ export async function generateReportFromInputs(
     demoClientId,
     sessionId,
     coverage,
+    notAssessed,
     preview = false,
   } = inputs;
 
@@ -563,6 +628,15 @@ export async function generateReportFromInputs(
     unansweredListed: countListedQuestions(coverage?.unansweredBlock ?? ''),
     confidenceWeighted: settings.generation.discountLowConfidence,
     usedDataSlots: dataSlotContext.trim().length > 0,
+    ...(notAssessed && notAssessed.length > 0
+      ? {
+          notAssessed: notAssessed.map((t) => ({
+            label: t.label,
+            questionCount: t.questionCount,
+            partial: t.partial,
+          })),
+        }
+      : {}),
   });
   const coverageFenced = Boolean(coverage && coverage.unansweredBlock.trim());
   recorder.recordPass('coverageFence', coverageFenced);
@@ -698,6 +772,7 @@ export async function generateReportFromInputs(
       return includes.questions || includes.dataSlots;
     })(),
     ...(coverage ? { coverage } : {}),
+    ...(notAssessed && notAssessed.length > 0 ? { notAssessed } : {}),
     ...(inputs.glossary && inputs.glossary.length > 0 ? { glossary: inputs.glossary } : {}),
   });
   const result = await runStructuredCompletion<RespondentReportContent>({

@@ -44,11 +44,18 @@ function normalise(bands: ScoringBand[], scaleKey: string, raw: number): number 
  * (question/data-slot key) to its numeric value; `bounds` supplies likert min/max per ref for
  * reverse-scoring (a ref without bounds is not reversed). Only scales with at least one answered item
  * appear in the result.
+ *
+ * `inScopeRefs` — Adaptive Scope (P17) — is the set of item refs this respondent's interview
+ * actually covered. It does NOT change any arithmetic: an item outside scope has no answer, so it
+ * was already being skipped. What it changes is the *record*, by separating "they were asked and
+ * did not answer" from "the instrument never asked them". Omit it (or pass null) and every item
+ * counts as asked, which is the truth for every non-adaptive session.
  */
 export function scoreSession(
   schema: ScoringSchemaContent,
   answers: Map<string, number>,
-  bounds: Map<string, ItemBounds>
+  bounds: Map<string, ItemBounds>,
+  inScopeRefs?: ReadonlySet<string> | null
 ): RespondentScores {
   const result: RespondentScores = {};
 
@@ -57,8 +64,10 @@ export function scoreSession(
     let weightedSum = 0;
     let weightTotal = 0;
     let itemCount = 0;
+    let assessedItemCount = 0;
 
     for (const item of items) {
+      if (!inScopeRefs || inScopeRefs.has(item.ref)) assessedItemCount += 1;
       const value = answers.get(item.ref);
       if (value === undefined || !Number.isFinite(value)) continue;
       let v = value;
@@ -81,6 +90,8 @@ export function scoreSession(
       normalised: normalise(schema.bands, scale.key, raw),
       band: bandFor(schema.bands, scale.key, raw),
       itemCount,
+      assessedItemCount,
+      totalItemCount: items.length,
     };
     result[scale.key] = score;
   }

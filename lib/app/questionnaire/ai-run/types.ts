@@ -80,6 +80,17 @@ export const APP_AI_RUN_KINDS = [
    * trends stay clean.
    */
   'scope_plan',
+  /**
+   * Routing analysis (P17.4) — the topic set and hard rules the analyst read out of an uploaded
+   * instrument, and the span of the document each was drawn from.
+   *
+   * Recorded because a human acts on the verdict (the admin reviews every proposal before it goes
+   * live) and because an accepted proposal changes durable config — it decides which parts of the
+   * questionnaire a respondent is ever asked. Kept even when the admin discards the proposal: "we
+   * ran the analyst and it found nothing routable in this document" is a real answer, and losing it
+   * means paying for the same call again to learn the same thing.
+   */
+  'routing_analysis',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

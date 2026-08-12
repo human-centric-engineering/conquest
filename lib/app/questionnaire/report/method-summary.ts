@@ -67,6 +67,11 @@ export function allowedNumbers(record: ReportMethodRecord): Set<number> {
     answers.total,
     answers.completionPct,
     answers.unansweredListed,
+    // Adaptive Scope (P17): the summariser may state how many areas the interview left out, so
+    // those counts have to be admitted here — otherwise the honesty check rejects the one sentence
+    // that tells the reader the assessment was narrowed.
+    (answers.notAssessed ?? []).filter((t) => !t.partial).length,
+    (answers.notAssessed ?? []).filter((t) => t.partial).length,
     knowledge.documentsInScope,
     knowledge.documentsUsed.length,
     knowledge.snippetCount,
@@ -123,6 +128,11 @@ function recordDigest(record: ReportMethodRecord): string {
         unansweredQuestionsShownAsGaps: answers.unansweredListed,
         usedBackgroundFromConversation: answers.usedDataSlots,
         lowConfidenceAnswersDownWeighted: answers.confidenceWeighted,
+        // Counts, never labels: the topic names are the author's prose and would be one more
+        // untrusted string in a prompt whose output is shown to the respondent as a statement about
+        // our own system. The panel renders the names itself, from the record, verbatim.
+        areasNotAskedAbout: (answers.notAssessed ?? []).filter((t) => !t.partial).length,
+        areasSampledOnly: (answers.notAssessed ?? []).filter((t) => t.partial).length,
       },
       organisationDocuments: {
         searched: knowledge.consulted,

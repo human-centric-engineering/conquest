@@ -1,16 +1,31 @@
 ---
 title: Merlin5 Growth Assessor — conceptual requirements and solution options
-status: research — nothing here is built
+status: research — the CAPABILITIES are now built (P17 Adaptive Scope); the instrument is not
 source: Merlin5_Growth_Assessor_Question_Set_v3.xlsx (5 tabs, 70 question rows), 2026-08-12
 audience: whoever scopes the build; the client, in the "What the client is asking for" section
 ---
 
 # Merlin5 Growth Assessor — conceptual requirements and solution options
 
-> **Status: research.** This document describes what the client's question set _requires_, in
-> ConQuest vocabulary, and lays out the ways we could build it. No code exists for any of it. It is
-> deliberately written so the requirements section stands on its own — a reader who never gets to
-> the options section still knows what the product has to do.
+> **Status: partly superseded.** This document describes what the client's question set _requires_,
+> in ConQuest vocabulary, and lays out the ways we could build it. It is deliberately written so the
+> requirements section stands on its own — a reader who never gets to the options section still
+> knows what the product has to do.
+>
+> **Option C — the recommended shape — shipped as P17 Adaptive Scope.** See
+> [`../questionnaire/adaptive-scope.md`](../questionnaire/adaptive-scope.md). Of the eleven
+> capabilities in §2, **C1, C3, C4, C5, C10 and C11 are now built**, and the Routing Analyst (F17.4)
+> reads the Read Me / Routing / Guardrails tabs this document describes. Open question 7 — should a
+> respondent be able to override the plan — was answered as recommended and shipped as F17.6.
+>
+> **Still not built:** C6 (sub-section item injection at arbitrary granularity — the blind-spot check
+> covers the G04 case only), **C7 (time as a budget — the biggest remaining gap; the cap is a topic
+> count, not seconds)**, C8's cross-scale normalisation, and C9's open-vs-close reconciliation.
+>
+> **The instrument itself does not exist in this repo.** The 70-row item bank lives only in
+> `Merlin5_Growth_Assessor_Question_Set_v3.xlsx`, which is not committed here. Authoring it is an
+> upload-and-review job through the product — ingest the workbook, then run the Routing Analyst over
+> it — not a code change.
 
 ---
 

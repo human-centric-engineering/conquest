@@ -10,6 +10,8 @@
 import { prisma } from '@/lib/db/client';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { scoreSession, type ItemBounds } from '@/lib/app/questionnaire/scoring/score';
+import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import type { RespondentScores, ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 import type { Prisma } from '@prisma/client';
 
@@ -109,9 +111,71 @@ export async function scoreSessions(
     if (key && num !== null) get(f.sessionId).set(key, num);
   }
 
+  // Adaptive Scope (P17): which items each session's interview actually covered. Only fetched when
+  // at least one of these sessions runs on a version that opted in — on a fresh install that is
+  // never, so the common path costs one cheap query and no scope resolution at all.
+  const inScopeBySession = await loadInScopeRefs(sessionIds);
+
   for (const sessionId of sessionIds) {
-    const scores = scoreSession(schema, get(sessionId), inputs.bounds);
+    const scores = scoreSession(
+      schema,
+      get(sessionId),
+      inputs.bounds,
+      inScopeBySession.get(sessionId) ?? null
+    );
     if (Object.keys(scores).length > 0) out.set(sessionId, scores);
+  }
+  return out;
+}
+
+/**
+ * The item refs each session's interview covered — question keys and data-slot keys in one set,
+ * because a scoring item's `ref` addresses either.
+ *
+ * Absent from the map means "everything was asked", which is the answer for every session on a
+ * version that never opted into Adaptive Scope — and, deliberately, for one whose scope resolved
+ * inert. Resolving scope is per session because the plan is; the settings are resolved once per
+ * version so a cohort of hundreds on one instrument does not re-narrow the same blob each time.
+ *
+ * A session with no plan on an ENABLED version is not "everything was asked": it is the pre-planner
+ * state, where only the always-run phases are in scope. `buildSessionScope` already models that, so
+ * this passes the null plan through rather than special-casing it into full scope.
+ */
+async function loadInScopeRefs(sessionIds: string[]): Promise<Map<string, ReadonlySet<string>>> {
+  const out = new Map<string, ReadonlySet<string>>();
+  if (sessionIds.length === 0) return out;
+
+  const sessions = await prisma.appQuestionnaireSession.findMany({
+    where: { id: { in: sessionIds } },
+    select: {
+      id: true,
+      versionId: true,
+      interviewPlan: true,
+      version: { select: { config: { select: { adaptiveScope: true } } } },
+    },
+  });
+  if (sessions.length === 0) return out;
+
+  const settingsByVersion = new Map<string, ReturnType<typeof narrowAdaptiveScopeSettings>>();
+  for (const session of sessions) {
+    if (!settingsByVersion.has(session.versionId)) {
+      settingsByVersion.set(
+        session.versionId,
+        narrowAdaptiveScopeSettings(session.version.config?.adaptiveScope)
+      );
+    }
+  }
+
+  for (const session of sessions) {
+    const settings = settingsByVersion.get(session.versionId);
+    if (!settings?.enabled) continue;
+    const { scope } = await buildSessionScope(prisma, {
+      versionId: session.versionId,
+      settings,
+      interviewPlan: session.interviewPlan,
+    });
+    if (!scope.active) continue;
+    out.set(session.id, new Set([...scope.questionKeys, ...scope.dataSlotKeys]));
   }
   return out;
 }

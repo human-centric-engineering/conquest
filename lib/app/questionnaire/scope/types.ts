@@ -217,6 +217,77 @@ export interface Topic {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The Routing Analyst's proposal                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One topic as the Routing Analyst proposes it — a {@link Topic} with the two things a REVIEWER
+ * needs and a live topic does not.
+ *
+ * `rationale` is the analyst's account of why; `sourceQuote` is the span of the uploaded document
+ * that says so. Both exist because the admin's job here is adjudication, not authorship: a proposal
+ * they cannot trace back to the instrument's own words is one they must re-derive from scratch,
+ * which is more work than writing the topic themselves.
+ */
+export interface ProposedTopic {
+  key: string;
+  label: string;
+  phase: TopicPhase;
+  criteria: string | null;
+  depth: TopicDepth;
+  members: TopicMembers;
+  /** Why the analyst judged this a topic, and this phase. Never shown to a respondent. */
+  rationale: string;
+  /** The span of the source document this was drawn from, when the document actually says it. */
+  sourceQuote?: string;
+  /** True when a live topic already carries this key — the review surface shows it as a change. */
+  replacesExisting?: boolean;
+}
+
+/** One hard rule as the analyst proposes it. Same shape as {@link ScopeRule}, plus the provenance. */
+export interface ProposedScopeRule {
+  dataSlotKey: string;
+  operator: ScopeRuleOperator;
+  value: string | null;
+  action: ScopeRuleAction;
+  topicKey: string;
+  rationale: string;
+  sourceQuote?: string;
+}
+
+/**
+ * The reviewable proposal stored on `AppQuestionnaireTopicDraft.topics`.
+ *
+ * Topics and rules travel together on purpose: the analyst reads a document's routing instructions
+ * as one piece of prose ("ask about pricing only for companies over 50 staff — and never score
+ * enterprise accounts on self-serve onboarding"), and splitting that across two review surfaces
+ * would make each half un-reviewable on its own.
+ */
+export interface ProposedTopicSet {
+  v: 1;
+  topics: ProposedTopic[];
+  rules: ProposedScopeRule[];
+  /**
+   * The topic limit the document itself implies, when it states one ("no more than three areas per
+   * session"). Absent when the document says nothing about breadth — proposing a default here
+   * would put the analyst's guess where the author's silence was.
+   */
+  maxConditionalTopics?: number;
+  /** What the analyst found, in a sentence or two. The first thing the reviewer reads. */
+  summary: string;
+  /**
+   * Whether the source document actually contained routing instructions.
+   *
+   * False means the analyst inferred everything from the questionnaire's own structure, which is a
+   * materially weaker proposal and must be labelled as one. "I read your routing rules" and "I
+   * guessed from your section headings" are different claims.
+   */
+  fromDocument: boolean;
+  /** ISO timestamp of the run. */
+  generatedAt: string;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Hard rules                                                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -343,6 +414,30 @@ export interface PlannedTopic {
   rationale: string;
 }
 
+/**
+ * A topic the RESPONDENT asked for after the plan was made — Adaptive Scope (P17.6).
+ *
+ * Recorded alongside the topic's entry in {@link InterviewPlan.topics} (which carries
+ * `source: 'respondent'`) rather than instead of it, because the two answer different questions:
+ * the topic entry says what the interview covered, this says when and why it changed.
+ *
+ * `atTurn` exists so the acknowledgement gets exactly one outing, the same mechanism
+ * `decidedAtTurn` gives the original announcement. Without it the interviewer would re-acknowledge
+ * the request every turn for the rest of the interview.
+ */
+export interface PlanAmendment {
+  /** The topic key that was added. */
+  key: string;
+  /** The topic's label at the time, so the record reads even after a rename. */
+  label: string;
+  /** The respondent's own words, trimmed — what they actually asked for. */
+  request: string;
+  /** Turn ordinal the amendment was made at. */
+  atTurn: number;
+  /** ISO timestamp. */
+  at: string;
+}
+
 /** One topic the planner considered and left out, with the reason. */
 export interface ExcludedTopic {
   key: string;
@@ -380,6 +475,15 @@ export interface InterviewPlan {
   decidedAtTurn: number;
   /** ISO timestamp. */
   decidedAt: string;
+  /**
+   * Topics the respondent asked for after the fact (P17.6). Absent on a plan nobody amended, which
+   * is nearly all of them — and on every plan written before amendments shipped.
+   *
+   * These are deliberately visible to routing-quality analytics as a SEPARATE signal: a respondent
+   * correcting the plan is evidence *about* the planner, not an example of it working, and counting
+   * an amended topic as a successful selection would make the planner look better the worse it got.
+   */
+  amendments?: PlanAmendment[];
 }
 
 /**
@@ -566,10 +670,31 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
 
   const checkTopicKey = asText(value.checkTopicKey, TOPIC_KEY_MAX_LENGTH, '');
 
+  const amendments: PlanAmendment[] = Array.isArray(value.amendments)
+    ? value.amendments.flatMap((a): PlanAmendment[] => {
+        if (!isRecord(a)) return [];
+        const key = asText(a.key, TOPIC_KEY_MAX_LENGTH, '');
+        if (key.length === 0) return [];
+        return [
+          {
+            key,
+            label: asText(a.label, TOPIC_LABEL_MAX_LENGTH, key),
+            request: asText(a.request, RESPONDENT_MESSAGE_MAX_LENGTH, ''),
+            atTurn: Math.round(asNumber(a.atTurn, 0, 100_000, 0)),
+            at: asText(a.at, 40, ''),
+          },
+        ];
+      })
+    : [];
+
   return {
     v: 1,
     topics,
     excluded,
+    // Omitted entirely when empty rather than stored as `[]`, so "nobody amended this plan" and
+    // "this plan predates amendments" stay indistinguishable — as they should be, since neither
+    // says anything about the planner.
+    ...(amendments.length > 0 ? { amendments } : {}),
     checkTopicKey: checkTopicKey.length > 0 ? checkTopicKey : null,
     confidence: asNumber(value.confidence, 0, 1, 0),
     source: narrowToEnum(
@@ -580,5 +705,93 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
     respondentMessage: asText(value.respondentMessage, RESPONDENT_MESSAGE_MAX_LENGTH, ''),
     decidedAtTurn: Math.round(asNumber(value.decidedAtTurn, 0, 100_000, 0)),
     decidedAt: asText(value.decidedAt, 40, ''),
+  };
+}
+
+/**
+ * Project a stored `AppQuestionnaireTopicDraft.topics` Json onto a {@link ProposedTopicSet}, or null.
+ *
+ * Null on absent, malformed, or unknown-version input — and null means "no pending proposal", which
+ * is the right direction for a draft: an unreadable proposal must read as *nothing to review*, never
+ * as a half-parsed set an admin might accept without noticing what fell out of it.
+ */
+export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null {
+  if (!isRecord(value)) return null;
+  if (value.v !== 1) return null;
+
+  const topics: ProposedTopic[] = Array.isArray(value.topics)
+    ? value.topics.flatMap((t): ProposedTopic[] => {
+        if (!isRecord(t)) return [];
+        const key = asText(t.key, TOPIC_KEY_MAX_LENGTH, '');
+        const label = asText(t.label, TOPIC_LABEL_MAX_LENGTH, '');
+        if (key.length === 0 || label.length === 0) return [];
+        const criteria = asText(t.criteria, TOPIC_CRITERIA_MAX_LENGTH, '');
+        const sourceQuote = asText(t.sourceQuote, TOPIC_CRITERIA_MAX_LENGTH, '');
+        return [
+          {
+            key,
+            label,
+            phase: narrowToEnum(typeof t.phase === 'string' ? t.phase : '', TOPIC_PHASES, 'core'),
+            criteria: criteria.length > 0 ? criteria : null,
+            depth: narrowToEnum(typeof t.depth === 'string' ? t.depth : '', TOPIC_DEPTHS, 'full'),
+            members: narrowTopicMembers(t.members),
+            rationale: asText(t.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
+            ...(sourceQuote.length > 0 ? { sourceQuote } : {}),
+            ...(t.replacesExisting === true ? { replacesExisting: true } : {}),
+          },
+        ];
+      })
+    : [];
+
+  const rules: ProposedScopeRule[] = Array.isArray(value.rules)
+    ? value.rules.flatMap((r): ProposedScopeRule[] => {
+        if (!isRecord(r)) return [];
+        const dataSlotKey = asText(r.dataSlotKey, TOPIC_KEY_MAX_LENGTH, '');
+        const topicKey = asText(r.topicKey, TOPIC_KEY_MAX_LENGTH, '');
+        if (dataSlotKey.length === 0 || topicKey.length === 0) return [];
+        const rawValue = asText(r.value, SCOPE_RULE_VALUE_MAX_LENGTH, '');
+        const sourceQuote = asText(r.sourceQuote, TOPIC_CRITERIA_MAX_LENGTH, '');
+        return [
+          {
+            dataSlotKey,
+            operator: narrowToEnum(
+              typeof r.operator === 'string' ? r.operator : '',
+              SCOPE_RULE_OPERATORS,
+              'exists'
+            ),
+            value: rawValue.length > 0 ? rawValue : null,
+            action: narrowToEnum(
+              typeof r.action === 'string' ? r.action : '',
+              SCOPE_RULE_ACTIONS,
+              'include'
+            ),
+            topicKey,
+            rationale: asText(r.rationale, SCOPE_RATIONALE_MAX_LENGTH, ''),
+            ...(sourceQuote.length > 0 ? { sourceQuote } : {}),
+          },
+        ];
+      })
+    : [];
+
+  const cap =
+    typeof value.maxConditionalTopics === 'number'
+      ? Math.round(
+          asNumber(
+            value.maxConditionalTopics,
+            MIN_CONDITIONAL_TOPICS,
+            MAX_CONDITIONAL_TOPICS_CEILING,
+            DEFAULT_ADAPTIVE_SCOPE_SETTINGS.maxConditionalTopics
+          )
+        )
+      : null;
+
+  return {
+    v: 1,
+    topics,
+    rules,
+    ...(cap !== null ? { maxConditionalTopics: cap } : {}),
+    summary: asText(value.summary, SCOPE_RATIONALE_MAX_LENGTH, ''),
+    fromDocument: asBool(value.fromDocument, false),
+    generatedAt: asText(value.generatedAt, 40, ''),
   };
 }

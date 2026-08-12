@@ -9,11 +9,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const findManyAnswers = vi.fn();
 const findManyFills = vi.fn();
+const findManySessions = vi.fn();
+const findManyTopics = vi.fn();
 
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     appAnswerSlot: { findMany: (...a: unknown[]) => findManyAnswers(...a) },
     appDataSlotFill: { findMany: (...a: unknown[]) => findManyFills(...a) },
+    // Adaptive Scope (P17): `scoreSessions` reads each session's plan to separate "not answered"
+    // from "never asked". Default returns no sessions, which is the pre-P17 behaviour.
+    appQuestionnaireSession: { findMany: (...a: unknown[]) => findManySessions(...a) },
+    appQuestionnaireTopic: { findMany: (...a: unknown[]) => findManyTopics(...a) },
   },
 }));
 
@@ -38,6 +44,8 @@ const inputs: ScoringInputs = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  findManySessions.mockResolvedValue([]);
+  findManyTopics.mockResolvedValue([]);
 });
 
 describe('scoreSessions', () => {
@@ -73,5 +81,83 @@ describe('scoreSessions', () => {
     const none = await scoreSessions({ ...schema, items: [] }, ['s1'], inputs);
     expect(none.size).toBe(0);
     expect(findManyAnswers).toHaveBeenCalledTimes(1); // not called for the itemless schema
+  });
+});
+
+describe('scoreSessions — Adaptive Scope (P17)', () => {
+  /** A session on a version that opted in, with a plan covering only the `core_a` topic. */
+  function adaptiveSession() {
+    findManySessions.mockResolvedValue([
+      {
+        id: 's1',
+        versionId: 'v1',
+        interviewPlan: {
+          v: 1,
+          topics: [{ key: 'chosen', depth: 'full', source: 'llm', rationale: '' }],
+          excluded: [{ key: 'skipped', source: 'llm', rationale: '' }],
+          checkTopicKey: null,
+          confidence: 0.9,
+          source: 'llm',
+          respondentMessage: '',
+          decidedAtTurn: 2,
+          decidedAt: '2026-08-12T00:00:00.000Z',
+        },
+        version: { config: { adaptiveScope: { enabled: true } } },
+      },
+    ]);
+    findManyTopics.mockResolvedValue([
+      {
+        id: 't1',
+        key: 'chosen',
+        label: 'Chosen',
+        description: null,
+        phase: 'conditional',
+        criteria: 'x',
+        depth: 'full',
+        members: { questionKeys: ['q1'], dataSlotKeys: [] },
+        ordinal: 0,
+        source: 'manual',
+      },
+      {
+        id: 't2',
+        key: 'skipped',
+        label: 'Skipped',
+        description: null,
+        phase: 'conditional',
+        criteria: 'y',
+        depth: 'full',
+        members: { questionKeys: [], dataSlotKeys: ['risk'] },
+        ordinal: 1,
+        source: 'manual',
+      },
+    ]);
+  }
+
+  it('reports how many of a scale’s items the interview actually asked', async () => {
+    // The arithmetic is unchanged — an out-of-scope item has no answer either way. What changes is
+    // the record: 1 of 2 items was PUT to this respondent, so a band drawn from it is not the same
+    // measurement as one drawn from the whole scale.
+    adaptiveSession();
+    findManyAnswers.mockResolvedValue([{ sessionId: 's1', questionSlotId: 'qs1', value: 4 }]);
+    findManyFills.mockResolvedValue([]);
+
+    const out = await scoreSessions(schema, ['s1'], inputs);
+
+    expect(out.get('s1')?.open.raw).toBe(4);
+    expect(out.get('s1')?.open.itemCount).toBe(1);
+    expect(out.get('s1')?.open.assessedItemCount).toBe(1);
+    expect(out.get('s1')?.open.totalItemCount).toBe(2);
+  });
+
+  it('counts every item as asked when the version never opted in', async () => {
+    findManyAnswers.mockResolvedValue([{ sessionId: 's1', questionSlotId: 'qs1', value: 4 }]);
+    findManyFills.mockResolvedValue([]);
+
+    const out = await scoreSessions(schema, ['s1'], inputs);
+
+    // The distinction only exists for an adaptive instrument. Everywhere else, unanswered means
+    // unanswered — and reporting a narrowed instrument would be a claim nobody made.
+    expect(out.get('s1')?.open.assessedItemCount).toBe(2);
+    expect(out.get('s1')?.open.totalItemCount).toBe(2);
   });
 });

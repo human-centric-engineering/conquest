@@ -11,6 +11,15 @@ import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-
 import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
 import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
 import { loadTopics } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import {
+  acceptTopicDraft,
+  loadTopicDraft,
+  saveTopicDraft,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import {
+  ANALYSE_ROUTING_CAPABILITY_SLUG,
+  QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
+} from '@/lib/app/questionnaire/constants';
 
 function ok(label: string, cond: boolean, detail = '') {
   console.log(`${cond ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -210,6 +219,89 @@ async function main() {
       select: { id: true, isActive: true },
     });
     ok('scope planner agent is seeded and active', Boolean(agent?.isActive));
+
+    // 8. The Routing Analyst (F17.4) is wired end to end — agent, capability, and the draft round
+    // trip. The analysis CALL itself is not smoked (it costs a reasoning-model run over a whole
+    // document); what is smoked is everything around it that a missing seed would break silently.
+    const analyst = await prisma.aiAgent.findUnique({
+      where: { slug: QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG },
+      select: { isActive: true },
+    });
+    ok('routing analyst agent is seeded and active', Boolean(analyst?.isActive));
+
+    const analystCapability = await prisma.aiCapability.findUnique({
+      where: { slug: ANALYSE_ROUTING_CAPABILITY_SLUG },
+      select: { isActive: true, executionHandler: true },
+    });
+    ok(
+      'routing analysis capability is seeded and points at its handler',
+      analystCapability?.isActive === true &&
+        analystCapability.executionHandler === 'AppAnalyseRoutingCapability'
+    );
+
+    await saveTopicDraft(v.id, {
+      v: 1,
+      topics: [
+        {
+          key: 'proposed_pipeline',
+          label: 'Pipeline',
+          phase: 'conditional',
+          criteria: 'They named deals stalling.',
+          depth: 'full',
+          members: { questionKeys: ['pipe_1'], dataSlotKeys: [] },
+          rationale: 'The routing tab restricts this to sales-led businesses.',
+          sourceQuote: 'Only cover pipeline for sales-led businesses.',
+        },
+      ],
+      rules: [],
+      summary: 'smoke',
+      fromDocument: true,
+      generatedAt: new Date().toISOString(),
+    });
+    const draft = await loadTopicDraft(v.id);
+    ok(
+      'topic draft round-trips through the Json column with its evidence intact',
+      draft?.topics[0]?.sourceQuote === 'Only cover pipeline for sales-led businesses.' &&
+        draft.fromDocument === true
+    );
+
+    // Persist a real settings blob first, so the next assertion tests what it claims: that accept
+    // leaves `enabled` exactly as it found it, rather than merely defaulting to false.
+    await prisma.appQuestionnaireConfig.upsert({
+      where: { versionId: v.id },
+      update: { adaptiveScope: { enabled: true } },
+      create: { versionId: v.id, adaptiveScope: { enabled: true } },
+    });
+
+    // The accept is the transaction that matters: topics live, draft gone, in one step. A
+    // half-applied accept would leave an admin reviewing work already done.
+    const accepted = await acceptTopicDraft(v.id, {
+      topics: [
+        {
+          key: 'proposed_pipeline',
+          label: 'Pipeline',
+          description: null,
+          phase: 'conditional',
+          criteria: 'They named deals stalling.',
+          depth: 'full',
+          questionKeys: ['pipe_1'],
+          dataSlotKeys: [],
+        },
+      ],
+      rules: [],
+    });
+    ok(
+      'accepting the draft writes the topics live, stamped as the analyst’s',
+      accepted.topics.length === 1 && accepted.topics[0]?.source === 'analyst'
+    );
+    ok(
+      'accepting the draft clears it in the same transaction',
+      (await loadTopicDraft(v.id)) === null
+    );
+    ok(
+      'accepting a proposal leaves the master switch exactly as it found it',
+      accepted.settings.enabled === true
+    );
   } finally {
     await prisma.appQuestionnaire.delete({ where: { id: q.id } });
     console.log('🧹 scratch questionnaire removed');

@@ -1414,3 +1414,60 @@ describe('generateRespondentReport — method record', () => {
     expect(record.passes.coverageFence).toBe(true);
   });
 });
+
+describe('generateRespondentReport — Adaptive Scope (P17) not-assessed topics', () => {
+  async function systemPromptWith(notAssessed: unknown): Promise<string> {
+    (loadSessionExport as Mock).mockResolvedValue({ ...loadedExport(), notAssessed });
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+    await generateRespondentReport('sess-1');
+    return (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    )!.content;
+  }
+
+  it('emits no scope block at all for a non-adaptive session', async () => {
+    const system = await systemPromptWith([]);
+    expect(system).not.toContain('SCOPE OF THIS INTERVIEW');
+  });
+
+  it('tells the writer the respondent was never asked, not that they declined', async () => {
+    // The distinction the whole block exists for. Reported as a skipped question, a topic nobody
+    // put to the respondent becomes a criticism of them.
+    const system = await systemPromptWith([
+      { key: 'talent', label: 'Talent', questionCount: 7, partial: false },
+    ]);
+    expect(system).toContain('SCOPE OF THIS INTERVIEW');
+    expect(system).toContain('They did not decline to answer — they were never asked.');
+    expect(system).toContain('- Talent (7 questions)');
+  });
+
+  it('forbids recommending that the respondent go and complete a skipped area', async () => {
+    // The interview TOLD them it was not relevant. Telling them to complete it contradicts the
+    // decision they were given and makes the adaptation look like a malfunction.
+    const system = await systemPromptWith([
+      { key: 'talent', label: 'Talent', questionCount: 7, partial: false },
+    ]);
+    expect(system).toContain('do not suggest they "complete" them');
+  });
+
+  it('separates a sampled topic from a skipped one', async () => {
+    const system = await systemPromptWith([
+      { key: 'talent', label: 'Talent', questionCount: 7, partial: false },
+      { key: 'ops', label: 'Operations', questionCount: 5, partial: true },
+    ]);
+    expect(system).toContain('NOT ASSESSED');
+    expect(system).toContain('SAMPLED ONLY');
+    expect(system).toContain('- Operations (5 questions not asked)');
+    // "We looked lightly" and "we did not look" are different claims about a respondent, and the
+    // writer is licensed to use one and not the other.
+    expect(system).toContain('a signal, not a measurement');
+  });
+
+  it('omits the sampled block entirely when nothing was sampled', async () => {
+    const system = await systemPromptWith([
+      { key: 'talent', label: 'Talent', questionCount: 7, partial: false },
+    ]);
+    expect(system).not.toContain('SAMPLED ONLY');
+  });
+});

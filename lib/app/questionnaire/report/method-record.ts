@@ -78,6 +78,16 @@ export interface ReportMethodAnswers {
   confidenceWeighted: boolean;
   /** True when contextual data-slot understanding fed the report. */
   usedDataSlots: boolean;
+  /**
+   * Adaptive Scope (P17): the topics this interview never asked about, and the ones it only
+   * sampled. Absent for every non-adaptive session.
+   *
+   * Recorded on the method record — not merely fed to the writer — because "how this report was
+   * created" is exactly where a reader goes to find out what it is based on. A narrowed interview
+   * that reads like a full assessment is the failure mode this whole feature has to avoid, and a
+   * method panel that omits the narrowing is the last place it could have been caught.
+   */
+  notAssessed?: { label: string; questionCount: number; partial: boolean }[];
 }
 
 /** One knowledge-base document that actually contributed a retrieved snippet. */
@@ -302,6 +312,18 @@ function plural(n: number, one: string, many: string): string {
  * agent's output is checked against. It is deliberately plain: it states only what the record holds,
  * in the order the pipeline ran, with no reassurance the facts don't earn.
  */
+/** Join topic labels into readable prose: "A", "A and B", "A, B and C". */
+function topicList(topics: readonly { label: string }[]): string {
+  const labels = topics.map((t) => t.label);
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/** Sentence-case a phrase that opens a sentence. */
+function sentenceCase(value: string): string {
+  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 export function renderMethodSummaryTemplate(record: ReportMethodRecord): string {
   const parts: string[] = [];
   const { answers, knowledge, research, passes } = record;
@@ -326,6 +348,26 @@ export function renderMethodSummaryTemplate(record: ReportMethodRecord): string 
           'noted as gaps, so nothing was assumed about them.'
       );
     }
+  }
+
+  // Adaptive Scope (P17), stated before the sources and the checks: what the assessment covered is
+  // more load-bearing to a reader than how it was written, and burying it under the method detail
+  // would let a narrowed interview read as a full one for the whole first paragraph.
+  const notAssessed = answers.notAssessed ?? [];
+  const skippedTopics = notAssessed.filter((t) => !t.partial);
+  const sampledTopics = notAssessed.filter((t) => t.partial);
+  if (skippedTopics.length > 0) {
+    parts.push(
+      'This questionnaire adapts to you, so it did not ask about ' +
+        `${topicList(skippedTopics)}. Nothing here is a judgement about ` +
+        `${skippedTopics.length === 1 ? 'that area' : 'those areas'}.`
+    );
+  }
+  if (sampledTopics.length > 0) {
+    parts.push(
+      `${sentenceCase(topicList(sampledTopics))} ${sampledTopics.length === 1 ? 'was' : 'were'} ` +
+        'touched on lightly as a check rather than assessed in depth.'
+    );
   }
 
   if (answers.usedDataSlots) {
@@ -418,6 +460,18 @@ export function narrowMethodRecord(value: unknown): ReportMethodRecord | null {
       unansweredListed: asInt(answers.unansweredListed),
       confidenceWeighted: asBool(answers.confidenceWeighted),
       usedDataSlots: asBool(answers.usedDataSlots),
+      // Adaptive Scope (P17). Absent on every record written before this shipped, and on every
+      // non-adaptive session — the field is left off entirely in that case rather than defaulted to
+      // `[]`, so a surface can tell "nothing was skipped" from "we did not record it".
+      ...(Array.isArray(answers.notAssessed) && answers.notAssessed.length > 0
+        ? {
+            notAssessed: answers.notAssessed.filter(isRecord).map((t) => ({
+              label: asStr(t.label, 200),
+              questionCount: asInt(t.questionCount),
+              partial: asBool(t.partial),
+            })),
+          }
+        : {}),
     },
     knowledge: {
       consulted: asBool(knowledge.consulted),

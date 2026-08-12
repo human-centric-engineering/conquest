@@ -20,6 +20,8 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 import type {
   EvaluationRunDetail,
   EvaluationSeed,
@@ -80,6 +82,32 @@ export const getVersionDataSlotCountCached = cache(
     } catch (err) {
       logger.error('workspace: data slot count fetch failed', err);
       return 0;
+    }
+  }
+);
+
+/**
+ * Adaptive Scope topics + settings + coherence findings + key inventory for the selected version.
+ *
+ * `cache()`-wrapped so the Overview tab (which needs only the error count for its launch row) and
+ * the Topics tab (which needs all of it) share one fetch. Degrades to "feature off, nothing to
+ * say" on any failure — a transient error must not make the Overview claim a version is
+ * incoherent, and the server re-checks on the launch PATCH, which is the real gate.
+ */
+export const getVersionTopicsCached = cache(
+  async (id: string, versionId: string): Promise<TopicsPayload> => {
+    const empty: TopicsPayload = {
+      ...EMPTY_TOPICS_PAYLOAD,
+      settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    };
+    try {
+      const res = await serverFetch(API.APP.QUESTIONNAIRES.versionTopics(id, versionId));
+      if (!res.ok) return empty;
+      const body = await parseApiResponse<TopicsPayload>(res);
+      return body.success ? body.data : empty;
+    } catch (err) {
+      logger.error('workspace: topics fetch failed', err);
+      return empty;
     }
   }
 );

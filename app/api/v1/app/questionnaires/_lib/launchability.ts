@@ -19,6 +19,11 @@ import {
 } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { slotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/slot-embeddings';
 import { dataSlotEmbeddingCoverage } from '@/app/api/v1/app/questionnaires/_lib/data-slot-embeddings';
+import {
+  loadAdaptiveScopeSettings,
+  loadTopics,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
 
 export interface VersionLaunchReadiness {
   ready: boolean;
@@ -35,6 +40,31 @@ export interface LaunchReadinessOptions {
 }
 
 /**
+ * How many `error`-severity Adaptive Scope findings a version has.
+ *
+ * Deliberately re-reads the topics and key inventory rather than taking them from the caller: this
+ * runs only when the feature is ON, which is a small minority of versions, and paying three extra
+ * queries there is cheaper than making every launch check carry topic data it will not use.
+ */
+async function countAdaptiveScopeErrors(
+  versionId: string,
+  settings: Awaited<ReturnType<typeof loadAdaptiveScopeSettings>>
+): Promise<number> {
+  const [topics, questionKeys, dataSlotKeys] = await Promise.all([
+    loadTopics(versionId),
+    prisma.appQuestionSlot.findMany({ where: { versionId }, select: { key: true } }),
+    prisma.appDataSlot.findMany({ where: { versionId }, select: { key: true } }),
+  ]);
+  const issues = validateAdaptiveScope({
+    topics,
+    settings,
+    allQuestionKeys: questionKeys.map((q) => q.key),
+    allDataSlotKeys: dataSlotKeys.map((d) => d.key),
+  });
+  return issues.filter((i) => i.severity === 'error').length;
+}
+
+/**
  * Resolve a version's launch readiness — the same criteria the launch gate enforces (goal,
  * audience, ≥1 section, ≥1 question, a saved config, generated data slots, and — for an `adaptive`
  * version — embedded question slots). `ready` is true when every check passes.
@@ -45,7 +75,7 @@ export async function loadLaunchReadiness(
 ): Promise<VersionLaunchReadiness> {
   const includeEmbeddings = options.includeEmbeddings ?? true;
 
-  const [version, sectionCount, questionCount, scaleSlots, config, dataSlotCount] =
+  const [version, sectionCount, questionCount, scaleSlots, config, dataSlotCount, scopeSettings] =
     await Promise.all([
       prisma.appQuestionnaireVersion.findUnique({
         where: { id: versionId },
@@ -65,7 +95,15 @@ export async function loadLaunchReadiness(
         select: { selectionStrategy: true },
       }),
       prisma.appDataSlot.count({ where: { versionId } }),
+      loadAdaptiveScopeSettings(versionId),
     ]);
+
+  // Adaptive Scope coherence is only a launch concern once the version opted in — while it is off,
+  // `validateAdaptiveScope` reports the same orphans as WARNINGS on the Topics tab, which is where
+  // an admin wants to see them BEFORE flipping the switch, not as a gate on an unrelated launch.
+  const adaptiveScopeErrorCount = scopeSettings.enabled
+    ? await countAdaptiveScopeErrors(versionId, scopeSettings)
+    : 0;
 
   // Question embeddings are a launch requirement only for an adaptive version — otherwise adaptive
   // degrades to weighted at runtime and embeddings are irrelevant.
@@ -103,6 +141,8 @@ export async function loadLaunchReadiness(
     dataSlotEmbeddingsRequired,
     dataSlotEmbeddingsReady:
       dataSlotCoverage !== null && dataSlotCoverage.total > 0 && dataSlotCoverage.missing === 0,
+    adaptiveScopeEnabled: scopeSettings.enabled,
+    adaptiveScopeErrorCount,
   });
 
   return { ready: checks.every((c) => c.ok), checks };

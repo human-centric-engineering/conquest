@@ -74,6 +74,8 @@ import {
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
 import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
+import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
+import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing';
@@ -309,6 +311,13 @@ async function handleMessage(
               'Name the areas in their language. Never mention that a decision was made about them.',
           ]
         : [];
+
+    // Adaptive Scope (P17.6): the acknowledgement for a topic the respondent asked for on the
+    // PREVIOUS turn. Same one-outing mechanic as the announcement above — `atTurn` was stamped with
+    // that turn's `selectionRound`, so this matches exactly once and never repeats.
+    const scopeAmendmentNotice: string[] = (scopePlan?.amendments ?? [])
+      .filter((a) => a.atTurn === loaded.base.selectionRound)
+      .map(amendmentBriefingLine);
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -837,8 +846,10 @@ async function handleMessage(
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
-            ...(dsBriefing.length > 0 || scopeAnnouncement.length > 0
-              ? { briefing: [...scopeAnnouncement, ...dsBriefing] }
+            ...(dsBriefing.length > 0 ||
+            scopeAnnouncement.length > 0 ||
+            scopeAmendmentNotice.length > 0
+              ? { briefing: [...scopeAnnouncement, ...scopeAmendmentNotice, ...dsBriefing] }
               : {}),
             ...(dsGlossary.length > 0 ? { glossary: dsGlossary } : {}),
             ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
@@ -911,8 +922,10 @@ async function handleMessage(
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
-            ...(qBriefing.length > 0 || scopeAnnouncement.length > 0
-              ? { briefing: [...scopeAnnouncement, ...qBriefing] }
+            ...(qBriefing.length > 0 ||
+            scopeAnnouncement.length > 0 ||
+            scopeAmendmentNotice.length > 0
+              ? { briefing: [...scopeAnnouncement, ...scopeAmendmentNotice, ...qBriefing] }
               : {}),
             ...(qGlossary.length > 0 ? { glossary: qGlossary } : {}),
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
@@ -1017,6 +1030,25 @@ async function handleMessage(
           sessionId,
           source: planned.plan.source,
           topicKeys: planned.plan.topics.map((t) => t.key),
+        });
+      }
+
+      // Adaptive Scope (P17.6): "actually, ask me about talent". Runs only when a plan already
+      // exists, so it can never race the decision it amends — and after `maybePlanScope`, so a turn
+      // that both completes the opening AND asks for something is planned before it is amended.
+      // Never throws; an unhonoured request is the same outcome as the feature being off.
+      const amended = await maybeAmendPlan({
+        sessionId,
+        message: body.message ?? '',
+        // Stamped with the turn count AFTER this turn persists — the same convention
+        // `decidedAtTurn` uses — so it equals the NEXT turn's `selectionRound` exactly once, which
+        // is what gives the acknowledgement its single outing.
+        atTurn: state.selectionRound + 1,
+      });
+      if (amended.kind === 'amended') {
+        log.info('Adaptive scope amended by the respondent', {
+          sessionId,
+          topicKey: amended.amendment.key,
         });
       }
 

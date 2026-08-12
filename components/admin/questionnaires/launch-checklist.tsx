@@ -70,6 +70,10 @@ export interface LaunchChecklistProps {
   matrixCount?: number;
   /** How many matrix questions are misconfigured (no rows / unlabelled scale) — launch requires 0. */
   misconfiguredMatrixCount?: number;
+  /** True when `adaptiveScope.enabled` — the coherence row shows only for a version that opted in. */
+  adaptiveScopeEnabled?: boolean;
+  /** How many `error`-severity Adaptive Scope findings the version has (launch requires 0). */
+  adaptiveScopeErrorCount?: number;
 }
 
 interface LaunchCheck {
@@ -122,6 +126,8 @@ export function LaunchChecklist({
   unlabelledLikertCount = 0,
   matrixCount = 0,
   misconfiguredMatrixCount = 0,
+  adaptiveScopeEnabled = false,
+  adaptiveScopeErrorCount = 0,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -146,6 +152,7 @@ export function LaunchChecklist({
     embeddings: `${base}/settings`,
     dataSlots: `${base}/data-slots`,
     dataSlotEmbeddings: `${base}/data-slots`,
+    adaptiveScope: `${base}/topics`,
   };
   const checks: LaunchCheck[] = launchReadinessChecks({
     goal,
@@ -163,6 +170,8 @@ export function LaunchChecklist({
     embeddingsReady,
     dataSlotEmbeddingsRequired,
     dataSlotEmbeddingsReady,
+    adaptiveScopeEnabled,
+    adaptiveScopeErrorCount,
   }).map((c) => ({ ok: c.ok, label: c.label, href: hrefByKey[c.key] }));
   const ready = checks.every((c) => c.ok);
   const remaining = checks.filter((c) => !c.ok).length;

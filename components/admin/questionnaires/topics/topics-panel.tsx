@@ -1,0 +1,181 @@
+'use client';
+
+/**
+ * The Topics tab's client shell — everything Adaptive Scope needs in one place.
+ *
+ * Owns the one mutation runner with the workspace's fork-on-launch discipline (the same shape as
+ * `version-settings-panel.tsx`): editing a launched version forks a new draft, surfaces the notice,
+ * and redirects to that draft's Topics tab. A declined fork (`ForkCancelledError`) writes nothing
+ * and shows no error.
+ *
+ * Two saves, two endpoints, deliberately: the topic set is a PUT that replaces the set, the
+ * settings are a PATCH of one blob. Merging them into a single "save everything" button would mean
+ * an admin fixing one typo in a topic also rewrites their rules, and a partial failure would leave
+ * them unable to tell which half landed.
+ */
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+import {
+  authoringMutate,
+  ForkCancelledError,
+} from '@/components/admin/questionnaires/authoring-mutate';
+import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
+import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
+import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
+import {
+  TopicListEditor,
+  type DraftTopic,
+} from '@/components/admin/questionnaires/topics/topic-list-editor';
+import { API } from '@/lib/api/endpoints';
+import type { AdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
+
+export interface TopicsPanelProps {
+  questionnaireId: string;
+  versionId: string;
+  payload: TopicsPayload;
+}
+
+export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanelProps) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [forkNotice, setForkNotice] = useState<number | null>(null);
+
+  // Release the busy lock once the refreshed payload arrives — closing the window where a second
+  // save could fire against the pre-fork version id.
+  useEffect(() => {
+    setBusy(false);
+  }, [payload]);
+
+  const endpoint = API.APP.QUESTIONNAIRES.versionTopics(questionnaireId, versionId);
+
+  const run = async (method: 'PUT' | 'PATCH', body: unknown): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { meta } = await authoringMutate(method, endpoint, body);
+      if (meta?.forked) {
+        setForkNotice(meta.versionNumber);
+        router.replace(`/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/topics`);
+      }
+      router.refresh();
+      return true;
+    } catch (err) {
+      // The admin declined the fork confirmation → nothing was written; resync, no error banner.
+      if (err instanceof ForkCancelledError) {
+        router.refresh();
+        setBusy(false);
+        return false;
+      }
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+      router.refresh();
+      setBusy(false);
+      return false;
+    }
+  };
+
+  const saveTopics = (drafts: DraftTopic[]) =>
+    run('PUT', {
+      topics: drafts.map((d) => ({
+        key: d.key.trim(),
+        label: d.label.trim(),
+        description: d.description.trim().length > 0 ? d.description.trim() : null,
+        phase: d.phase,
+        criteria: d.criteria.trim().length > 0 ? d.criteria.trim() : null,
+        depth: d.depth,
+        questionKeys: d.questionKeys,
+        dataSlotKeys: d.dataSlotKeys,
+      })),
+    });
+
+  const saveSettings = (settings: AdaptiveScopeSettings) =>
+    run('PATCH', {
+      enabled: settings.enabled,
+      maxConditionalTopics: settings.maxConditionalTopics,
+      includeCheckTopic: settings.includeCheckTopic,
+      checkTopicPreference: settings.checkTopicPreference,
+      minConfidence: settings.minConfidence,
+      fallbackTopicKeys: settings.fallbackTopicKeys,
+      announce: settings.announce,
+      allowRespondentAmendment: settings.allowRespondentAmendment,
+      plannerInstructions: settings.plannerInstructions,
+      rules: settings.rules.map((r) => ({
+        id: r.id,
+        dataSlotKey: r.dataSlotKey,
+        operator: r.operator,
+        value: r.value,
+        action: r.action,
+        topicKey: r.topicKey,
+      })),
+    });
+
+  return (
+    <div className="space-y-5">
+      {forkNotice !== null && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          You edited a launched version — your changes were saved to a new draft (v{forkNotice}).
+          You are now editing that draft.
+        </div>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm"
+        >
+          {error}
+        </div>
+      )}
+
+      <ScopeIssues issues={payload.issues} enabled={payload.settings.enabled} />
+
+      {/* The analyst leads: on a freshly-ingested instrument its proposal IS the starting point,
+          and an admin who scrolled past it to hand-author the same topics has wasted their time. */}
+      <RoutingAnalystCard
+        // Remount when the server payload changes so a discard or accept elsewhere in the workspace
+        // cannot leave a stale proposal on screen.
+        key={`analyst-${payload.draft?.generatedAt ?? 'none'}`}
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        initialDraft={payload.draft}
+        questionKeys={payload.inventory.questions.map((q) => q.key)}
+        liveTopicCount={payload.topics.length}
+        disabled={busy}
+      />
+
+      <ScopeSettingsCard
+        // Remount the card when the server payload changes so a save's normalised result (clamped
+        // numbers, dropped blanks, sorted rules) replaces the local draft rather than being hidden
+        // behind it — the admin must see what a later read will actually produce.
+        key={`settings-${payload.settings.rules.length}-${payload.settings.enabled}`}
+        settings={payload.settings}
+        topics={payload.topics}
+        dataSlots={payload.inventory.dataSlots}
+        onSave={saveSettings}
+        busy={busy}
+      />
+
+      <section className="space-y-3">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Topics</h2>
+          <p className="text-muted-foreground text-sm">
+            A topic is the unit adaptive scope decides about: a named group of questions and data
+            slots with a phase and, when it is conditional, your criteria for when it applies. Size
+            is not significant — a one-question topic is how you express a fine-grained “only ask
+            this if…”.
+          </p>
+        </div>
+        <TopicListEditor
+          key={`topics-${payload.topics.map((t) => t.key).join('|')}`}
+          topics={payload.topics}
+          inventory={payload.inventory}
+          onSave={saveTopics}
+          busy={busy}
+          enabled={payload.settings.enabled}
+        />
+      </section>
+    </div>
+  );
+}

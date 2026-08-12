@@ -3,7 +3,8 @@
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/topics
  *   Admin-only: the version's topics, its resolved `adaptiveScope` settings, the coherence
- *   findings, and the key inventory the editor needs to offer membership pickers.
+ *   findings, the key inventory the editor needs to offer membership pickers, and the Routing
+ *   Analyst's pending proposal when one is waiting for review (`draft`, else null).
  *
  * PUT /api/v1/app/questionnaires/:id/versions/:vid/topics
  *   Admin-only: replace the topic set with the reviewed one. Forks a new draft first if the
@@ -38,6 +39,7 @@ import {
   patchAdaptiveScopeSettings,
   replaceTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { loadTopicDraft } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
 
 /** The version's question + data-slot keys, for the membership pickers and the orphan check. */
 async function loadKeyInventory(versionId: string) {
@@ -71,10 +73,11 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
     }
 
-    const [topics, settings, inventory] = await Promise.all([
+    const [topics, settings, inventory, draft] = await Promise.all([
       loadTopics(vid),
       loadAdaptiveScopeSettings(vid),
       loadKeyInventory(vid),
+      loadTopicDraft(vid),
     ]);
 
     const issues = validateAdaptiveScope({
@@ -84,7 +87,7 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       allDataSlotKeys: inventory.dataSlots.map((d) => d.key),
     });
 
-    return successResponse({ topics, settings, issues, inventory });
+    return successResponse({ topics, settings, issues, inventory, draft });
   }
 );
 

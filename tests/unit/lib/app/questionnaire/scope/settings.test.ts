@@ -5,6 +5,7 @@ import {
   MAX_CONDITIONAL_TOPICS_CEILING,
   narrowAdaptiveScopeSettings,
   narrowInterviewPlan,
+  narrowProposedTopicSet,
   narrowTopicMembers,
 } from '@/lib/app/questionnaire/scope/types';
 
@@ -170,5 +171,132 @@ describe('narrowInterviewPlan', () => {
       topics: [{ key: 'x', depth: 'deep', source: 'vibes', rationale: '' }],
     });
     expect(p?.topics[0]).toMatchObject({ depth: 'full', source: 'llm' });
+  });
+});
+
+describe('narrowProposedTopicSet', () => {
+  /** A stored draft as the analysis route writes it. */
+  function stored(overrides: Record<string, unknown> = {}) {
+    return {
+      v: 1,
+      topics: [
+        {
+          key: 'pipeline',
+          label: 'Pipeline',
+          phase: 'conditional',
+          criteria: 'They named deals stalling.',
+          depth: 'full',
+          members: { questionKeys: ['q1'], dataSlotKeys: ['d1'] },
+          rationale: 'The routing tab restricts this to sales-led businesses.',
+          sourceQuote: 'Only cover pipeline for sales-led businesses.',
+          replacesExisting: true,
+        },
+      ],
+      rules: [
+        {
+          dataSlotKey: 'headcount',
+          operator: 'gt',
+          value: '50',
+          action: 'include',
+          topicKey: 'pipeline',
+          rationale: 'Stated on the guardrails tab.',
+        },
+      ],
+      maxConditionalTopics: 3,
+      summary: 'Read from the routing tab.',
+      fromDocument: true,
+      generatedAt: '2026-08-12T10:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('round-trips a well-formed draft', () => {
+    const set = narrowProposedTopicSet(stored());
+
+    expect(set).not.toBeNull();
+    expect(set?.topics[0]?.key).toBe('pipeline');
+    expect(set?.topics[0]?.members.questionKeys).toEqual(['q1']);
+    expect(set?.topics[0]?.sourceQuote).toBe('Only cover pipeline for sales-led businesses.');
+    expect(set?.topics[0]?.replacesExisting).toBe(true);
+    expect(set?.rules[0]?.operator).toBe('gt');
+    expect(set?.maxConditionalTopics).toBe(3);
+    expect(set?.fromDocument).toBe(true);
+  });
+
+  it.each([null, undefined, 'nonsense', 42, [], { v: 2, topics: [] }])(
+    'resolves %p to null — no proposal, never a half-parsed one',
+    (input) => {
+      // An unreadable draft must read as "nothing to review". A partially-parsed set is the
+      // dangerous outcome: the admin accepts it without noticing what silently fell out.
+      expect(narrowProposedTopicSet(input)).toBeNull();
+    }
+  );
+
+  it('drops a topic with no key or no label rather than keeping an unaddressable row', () => {
+    const set = narrowProposedTopicSet(
+      stored({
+        topics: [
+          { key: '', label: 'Nameless', phase: 'core', rationale: 'x' },
+          { key: 'ok', label: '', phase: 'core', rationale: 'x' },
+          { key: 'kept', label: 'Kept', phase: 'core', rationale: 'x' },
+        ],
+      })
+    );
+    expect(set?.topics.map((t) => t.key)).toEqual(['kept']);
+  });
+
+  it('omits sourceQuote entirely when the analyst inferred the topic', () => {
+    // Presence of the quote is what tells a reviewer the document actually said this. An empty
+    // string rendering as a blockquote would claim evidence that does not exist.
+    const set = narrowProposedTopicSet(
+      stored({
+        topics: [{ key: 'x', label: 'X', phase: 'core', rationale: 'inferred', sourceQuote: '' }],
+      })
+    );
+    expect(set?.topics[0]).not.toHaveProperty('sourceQuote');
+  });
+
+  it('omits the breadth limit when the document stated none', () => {
+    const { maxConditionalTopics, ...withoutCap } = stored();
+    void maxConditionalTopics;
+    expect(narrowProposedTopicSet(withoutCap)).not.toHaveProperty('maxConditionalTopics');
+  });
+
+  it('falls back to fromDocument=false when the claim is missing or not a boolean', () => {
+    // The weaker claim is the safe default: labelling a guess as document-read is the one failure
+    // that gets an invented topic set accepted as the author's intent.
+    expect(narrowProposedTopicSet(stored({ fromDocument: 'yes' }))?.fromDocument).toBe(false);
+    expect(narrowProposedTopicSet(stored({ fromDocument: undefined }))?.fromDocument).toBe(false);
+  });
+
+  it('drops a rule naming no data slot or no topic', () => {
+    const set = narrowProposedTopicSet(
+      stored({
+        rules: [
+          { dataSlotKey: '', operator: 'exists', action: 'include', topicKey: 'p', rationale: 'x' },
+          { dataSlotKey: 'd', operator: 'exists', action: 'include', topicKey: '', rationale: 'x' },
+        ],
+      })
+    );
+    expect(set?.rules).toEqual([]);
+  });
+
+  it('narrows an unknown operator or action to the safe default', () => {
+    const set = narrowProposedTopicSet(
+      stored({
+        rules: [
+          {
+            dataSlotKey: 'd',
+            operator: 'matches_regex',
+            value: 'x',
+            action: 'demolish',
+            topicKey: 'p',
+            rationale: 'x',
+          },
+        ],
+      })
+    );
+    expect(set?.rules[0]?.operator).toBe('exists');
+    expect(set?.rules[0]?.action).toBe('include');
   });
 });

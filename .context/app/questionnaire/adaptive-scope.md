@@ -9,8 +9,9 @@ not-applicable, and any long instrument that should not ask all of itself to eve
 same requirement — and before P17 the only way to express it was to split the questionnaire into
 several, which costs cross-section scoring and cohort analysis.
 
-> **Status:** F17.1–F17.3 shipped (model, runtime, planner). The admin authoring surface, the
-> Routing Analyst, and the report/scoring awareness are tracked in `planning/features/f17.*.md`.
+> **Status:** F17.1–F17.6 shipped — the model, the runtime, the planner, the Topics authoring
+> surface, the Routing Analyst, report/scoring awareness, and respondent amendment. The Merlin5
+> instrument itself is not built: it needs its source workbook, which is not in this repo.
 
 ---
 
@@ -146,6 +147,24 @@ rule excludes ─> rule includes ─> the cap ─> the blind-spot check ─> the
         truncate an author's "always"
 ```
 
+### The respondent may add, never remove (F17.6)
+
+`allowRespondentAmendment` honours "actually, ask me about talent" by bringing an excluded
+conditional topic into scope at `full` depth. Three tiers again, cheapest first: a regex **cue gate**
+(nearly every turn is an answer, not a request, and this rules those out before any query), a
+deterministic **label match**, and only then a small **routing-tier model call** to resolve
+"can we cover hiring?" against a topic called "People & capability".
+
+**It only ever adds.** A respondent declining a topic the instrument requires is a different feature
+with different consequences — partial scoring, an incomparable cohort — and quietly allowing it here
+would make every completed assessment mean something slightly different.
+
+The amendment is recorded on the plan (`InterviewPlan.amendments`) _and_ the added topic carries
+`source: 'respondent'`. Routing analytics must be able to tell the two apart from a planner success:
+**a correction is evidence about the planner, not an example of it working**, and counting an amended
+topic as a good selection would make the planner look better the worse it got. The acknowledgement
+rides the same one-turn briefing seam as the original announcement, matched on `atTurn`.
+
 ### The blind-spot check
 
 One conditional topic that was **not** selected, sampled at `light` depth (its highest-weight
@@ -178,6 +197,58 @@ what you've said I want to go deeper on pipeline and forecasting" reads as the s
 talking, where a prepended paragraph reads as a system notice.
 
 ---
+
+## The Routing Analyst (F17.4)
+
+Structure extraction reads an uploaded document for its **questions** and discards everything else.
+Real instruments carry pages it throws away — "Routing", "Guardrails", "How to use this", facilitator
+notes — and those pages are the author stating which parts apply to whom. The analyst reads exactly
+the pages the extractor ignored, and proposes the topic set, the criteria and the hard rules they
+describe.
+
+It is a **proposer**. Everything lands in `AppQuestionnaireTopicDraft` for review — the same not-live
+contract as `AppDataSlotDraft`. The analysis route does **not** fork a launched version (a proposal
+is inert); the accept does.
+
+### Grounding is the hard part, not generation
+
+A model asked "what are the topics?" will confidently invent a clean taxonomy from the section
+headings, and that answer is worse than useless: **it looks authored, so an admin accepts it, and the
+instrument now routes on the model's guess rather than the author's rule.** So the contract makes the
+analyst declare which it did:
+
+- **`sourceQuote`** per topic and per rule — the exact span the criteria came from, and **absent
+  entirely** when the analyst inferred it. A proposal an admin cannot trace back is one they have to
+  re-derive, at which point writing it by hand was less work.
+- **`fromDocument`** on the whole set. The review surface renders a different banner for each: "read
+  from the document's own routing instructions" versus "inferred from the questionnaire's structure".
+- **`maxConditionalTopics`** only when the document states a breadth limit ("no more than three
+  areas"). Omitted otherwise — a default here would put the analyst's guess where the author's
+  silence was.
+
+Uncovered questions are counted **server-side** before the accept, never trusted from the model.
+
+## Reports and scoring (F17.5)
+
+The `notAssessed` list on the session export is what makes an adaptive instrument honest downstream.
+
+- **The report prompt** carries a scope block that is deliberately **separate** from the
+  unanswered-questions block. They license different sentences: a _skipped_ question invites "you may
+  want to come back to this"; a _not asked_ topic does not — the interview decided it did not apply
+  and told the respondent so, and recommending they complete it contradicts the decision they were
+  given. A _sampled_ topic is the subtlest: there is information, it is just too thin to score on.
+- **The method record** carries the topics too, so "how this report was created" names them. A
+  narrowed interview that reads like a full assessment is the failure this feature exists to avoid,
+  and the method panel is the last place it could have been caught. The deterministic template states
+  it as well as the agent-written summary, so it survives the explainer being off.
+- **Scoring** gains `assessedItemCount` / `totalItemCount` on every `ScaleScore`. No arithmetic
+  changes — an out-of-scope item had no answer either way — but the _record_ now separates "asked and
+  not answered" from "never asked". `isPartiallyAssessed()` is the question every surface rendering a
+  band must be able to ask: **a band from three of eight items is not the same measurement as one from
+  all eight**, and a cohort chart that puts them in the same column is comparing two instruments.
+- **The admin session viewer** renders the plan above the transcript — what was covered, what was
+  not, and what the respondent was told. A conversation that never touched an area reads as an
+  oversight until you know it was a decision.
 
 ## Auditability
 
@@ -212,12 +283,19 @@ _before_ flipping the switch.
 | `lib/app/questionnaire/scope/rules.ts`                              | Hard-rule evaluator                                                                                                                                                               |
 | `lib/app/questionnaire/scope/guardrails.ts`                         | Cap, check topic, fallback                                                                                                                                                        |
 | `lib/app/questionnaire/scope/planner.ts`                            | The model call; never throws                                                                                                                                                      |
+| `lib/app/questionnaire/scope/amendment.ts`                          | Cue gate, label match, plan mutation (F17.6) — pure                                                                                                                               |
+| `lib/app/questionnaire/scope/analysis-schema.ts`                    | The Routing Analyst's output contract                                                                                                                                             |
+| `lib/app/questionnaire/scope/analysis-prompt.ts`                    | Its rubric — mostly about quoting versus inferring                                                                                                                                |
+| `lib/app/questionnaire/capabilities/analyse-routing.ts`             | The analyst capability                                                                                                                                                            |
 | `lib/app/questionnaire/scope/seed.ts`                               | One topic per section, pure                                                                                                                                                       |
 | `lib/app/questionnaire/scope/validate.ts`                           | Coherence findings                                                                                                                                                                |
 | `app/api/v1/app/questionnaires/_lib/session-scope.ts`               | The DB seam                                                                                                                                                                       |
 | `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
 | `app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`          | The post-turn trigger                                                                                                                                                             |
 | `app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/route.ts` | GET / PUT / PATCH                                                                                                                                                                 |
+| `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`  | Run the analyst (SSE) · accept or discard its proposal                                                                                                                            |
+| `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`          | The amendment trigger                                                                                                                                                             |
+| `components/admin/questionnaires/topics/**`                         | The Topics tab: settings card, rules, topic editor, analyst review                                                                                                                |
 
 ## Related
 

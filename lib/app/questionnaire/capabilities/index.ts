@@ -122,3 +122,9 @@ export {
   type AnalyseGlossaryTermsArgs,
   type AnalyseGlossaryTermsData,
 } from '@/lib/app/questionnaire/capabilities/analyse-glossary-terms';
+
+export {
+  AppAnalyseRoutingCapability,
+  type AnalyseRoutingArgs,
+  type AnalyseRoutingData,
+} from '@/lib/app/questionnaire/capabilities/analyse-routing';

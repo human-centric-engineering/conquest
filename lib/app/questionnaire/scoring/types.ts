@@ -66,6 +66,33 @@ export interface ScaleScore {
   band: string | null;
   /** How many items contributed (answered). */
   itemCount: number;
+  /**
+   * How many of the scale's items this respondent was actually ASKED — Adaptive Scope (P17).
+   *
+   * Equal to {@link totalItemCount} for every non-adaptive session, and for an adaptive one whose
+   * plan happened to cover the whole scale. Lower when the interview deliberately skipped part of
+   * it.
+   *
+   * Optional so a score row written before P17 still narrows: absent reads as "everything was
+   * asked", which is exactly what was true then.
+   */
+  assessedItemCount?: number;
+  /** How many items the schema defines for this scale, regardless of scope or answers. */
+  totalItemCount?: number;
+}
+
+/**
+ * Whether a scale score was computed over a NARROWED instrument — Adaptive Scope (P17).
+ *
+ * The load-bearing distinction for any comparison. A band derived from three of a scale's eight
+ * items is not the same measurement as one derived from all eight, and a cohort chart that puts
+ * them in the same column is comparing two different instruments while looking like it is not.
+ * Every surface that renders a band must be able to ask this question, so it lives beside the type
+ * rather than being re-derived at each one.
+ */
+export function isPartiallyAssessed(score: ScaleScore): boolean {
+  if (score.assessedItemCount === undefined || score.totalItemCount === undefined) return false;
+  return score.assessedItemCount < score.totalItemCount;
 }
 
 /** A respondent's scores keyed by scale, stored in `AppRespondentScore.scores`. */
