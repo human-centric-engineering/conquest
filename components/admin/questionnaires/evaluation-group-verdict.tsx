@@ -29,6 +29,7 @@ import type {
   GroupActionSummary,
 } from '@/lib/app/questionnaire/evaluation/group-actions';
 import type { ReconciledSuggestion } from '@/lib/app/questionnaire/evaluation/reconcile-schema';
+import { PROSE_MEASURE, QUESTION_FACE } from '@/components/admin/questionnaires/evaluation-field';
 
 /** Judge names read better without the noun — "Clarity, Audience-Match", not "Clarity Judge, …". */
 function judgeName(dimension: EvaluationDimension): string {
@@ -40,19 +41,25 @@ function judgeNames(dimensions: EvaluationDimension[]): string {
 }
 
 /**
- * Accent per verb. Colour carries a hint, never the message — every action also states itself in
- * words, so this survives greyscale, colour-blindness, and a reviewer skimming at speed.
+ * Accent per verb, as a rule down the left edge rather than a fill.
+ *
+ * It used to be a tinted, rounded panel — a box inside the group's box inside the page, which read
+ * as clutter and made the verdict compete with the header band above it for "the filled thing you
+ * look at first". A hairline keeps the tone and stops being a frame.
+ *
+ * Colour carries a hint, never the message — every action also states itself in words, so this
+ * survives greyscale, colour-blindness, and a reviewer skimming at speed.
  */
 const ACTION_TONE: Record<GroupActionKind, string> = {
-  delete: 'border-destructive/40 bg-destructive/5',
-  retype: 'border-amber-500/40 bg-amber-500/5',
-  move: 'border-amber-500/40 bg-amber-500/5',
-  add: 'border-emerald-500/40 bg-emerald-500/5',
-  reword: 'border-primary/30 bg-primary/5',
-  guidance: 'border-primary/30 bg-primary/5',
-  goal: 'border-primary/30 bg-primary/5',
-  audience: 'border-primary/30 bg-primary/5',
-  review: 'border-border bg-muted/40',
+  delete: 'border-destructive/50',
+  retype: 'border-amber-500/60',
+  move: 'border-amber-500/60',
+  add: 'border-emerald-500/60',
+  reword: 'border-primary/40',
+  guidance: 'border-primary/40',
+  goal: 'border-primary/40',
+  audience: 'border-primary/40',
+  review: 'border-border',
 };
 
 /**
@@ -88,7 +95,7 @@ export function EvaluationGroupVerdict({ summary, reconciled, expanded }: Props)
   const hidden = alternatives.length - shown.length;
 
   return (
-    <div className={cn('rounded-lg border-l-2 px-3 py-2.5', ACTION_TONE[primary.kind])}>
+    <div className={cn('border-l-2 py-0.5 pl-4', ACTION_TONE[primary.kind])}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-sm font-semibold tracking-tight">{primary.label}</span>
         <span className="text-muted-foreground text-xs tabular-nums">
@@ -112,11 +119,18 @@ export function EvaluationGroupVerdict({ summary, reconciled, expanded }: Props)
         <div className="mt-2 space-y-2">
           {shown.map((alt, i) => (
             <div key={i}>
-              {/* Selectable: this is the string a reviewer copies into the editor. */}
-              <p className="text-foreground text-sm leading-snug font-medium text-pretty">
+              {/* Selectable: this is the string a reviewer copies into the editor. Set in the
+                  questionnaire's own face, because that is exactly what it is — proposed wording,
+                  not advice about wording. */}
+              <p
+                className={cn(
+                  QUESTION_FACE,
+                  'text-foreground max-w-[60ch] text-base leading-snug text-pretty'
+                )}
+              >
                 “{alt.prompt}”
               </p>
-              <p className="text-muted-foreground mt-0.5 text-xs">
+              <p className={cn(PROSE_MEASURE, 'text-muted-foreground mt-0.5 text-xs')}>
                 Satisfies {judgeNames(alt.addresses)}
                 {alt.note && expanded ? ` — ${alt.note}` : ''}
               </p>
@@ -130,7 +144,7 @@ export function EvaluationGroupVerdict({ summary, reconciled, expanded }: Props)
           )}
 
           {reconciled && reconciled.unresolved.length > 0 && (
-            <p className="text-muted-foreground text-xs">
+            <p className={cn(PROSE_MEASURE, 'text-muted-foreground text-xs')}>
               {`${judgeNames(reconciled.unresolved)} ${
                 reconciled.unresolved.length === 1 ? 'is' : 'are'
               } not resolved by rewording — that needs a structural change.`}

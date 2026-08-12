@@ -17,6 +17,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { EvaluationRunDetail } from '@/components/admin/questionnaires/evaluation-run-detail';
+import { QUESTION_FACE } from '@/components/admin/questionnaires/evaluation-field';
 import type {
   EvaluationFindingView,
   EvaluationRunDetail as EvaluationRunDetailView,
@@ -117,6 +118,21 @@ async function switchToJudgeView() {
  */
 async function expandGroup(match: RegExp) {
   await userEvent.click(screen.getByRole('button', { name: match }));
+}
+
+/**
+ * Matches a paragraph of judge prose across the element boundary the quoted-wording treatment
+ * introduces.
+ *
+ * A suggestion like `Define "recommend".` renders as `Define <q>recommend</q>.` — one fixture
+ * string, three DOM nodes — so an exact-string query misses it. The quotation marks come from the
+ * UA stylesheet rather than the text, so they are absent from `textContent` too. Scoped to `<p>`
+ * so an ancestor card is not matched instead.
+ */
+function prose(text: string) {
+  const flattened = text.replace(/["“”]/g, '');
+  return (_content: string, el: Element | null) =>
+    el?.tagName === 'P' && el.textContent?.replace(/\s+/g, ' ').trim() === flattened;
 }
 
 const Q_ROLE = /What is your role and tenure\?/;
@@ -1060,6 +1076,29 @@ describe('EvaluationRunDetail by-question view', () => {
     );
   });
 
+  it('sets the question under review apart from the prose about it', async () => {
+    renderCrossJudge();
+
+    // The card's subject is in the questionnaire's own face, and it is a heading — so a reviewer
+    // scrolling a long open card can find *which question this is* without reading paragraphs.
+    const heading = screen.getByRole('heading', { name: '“Would you recommend us?”' });
+    expect(heading.className).toContain(QUESTION_FACE);
+
+    // The disclosure that owns it is the group's one filled surface — that is what makes it read
+    // as a header rather than as the first of several similar-looking blocks.
+    const header = screen.getByRole('button', { name: Q_NPS });
+    expect(header.className).toMatch(/bg-muted/);
+
+    // ...and the group itself is not a box around it. Nesting a tinted header inside a bordered
+    // card inside the page flattens the very hierarchy the tint is expressing.
+    const group = header.parentElement as HTMLElement;
+    expect(group.tagName).toBe('SECTION');
+    expect(group.className).not.toMatch(/\bborder\b|\brounded-xl\b|\bbg-card\b/);
+
+    // Everything belonging to that question sits indented beneath it instead.
+    expect(group.querySelector('div[class*="pl-"]')).not.toBeNull();
+  });
+
   it('shows the severity tally per question', () => {
     renderCrossJudge();
     expect(screen.getByText('1 major')).toBeInTheDocument(); // q_role
@@ -1103,14 +1142,14 @@ describe('EvaluationRunDetail by-question view', () => {
   it('filters by severity across the whole run, not just the open question', async () => {
     renderCrossJudge();
     await expandGroup(Q_NPS);
-    expect(screen.getByText('Define "recommend".')).toBeInTheDocument();
+    expect(screen.getByText(prose('Define "recommend".'))).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText('Severity'), 'major');
 
     await waitFor(() => {
       // The open question keeps only its major finding...
       expect(screen.getByText('Ask why, not just whether.')).toBeInTheDocument();
-      expect(screen.queryByText('Define "recommend".')).not.toBeInTheDocument();
+      expect(screen.queryByText(prose('Define "recommend".'))).not.toBeInTheDocument();
     });
 
     // ...and the filter reached the closed question too, which still shows a major tally.

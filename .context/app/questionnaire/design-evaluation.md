@@ -185,6 +185,53 @@ once the card is open.
 apply controls), so two at once means scrolling past finished work to reach unfinished work. The
 accordion also matches how the reviewing goes: fix one, move to the next.
 
+### Reading it: a column, a header band, an indent, and two faces
+
+The page is a queue of prose decisions, and it was drowning in its own text. Four fixes, all in
+service of one thing — the reviewer being able to tell, at any scroll position, _which question am I
+looking at_ and _whose words are these_.
+
+**A capped, left-aligned reading column.** The admin shell is full-bleed, which suits a table and
+not this page: on a wide monitor an uncapped column ran lines past 200 characters, where the eye
+loses the start of the next line on the return sweep. The run page caps itself at `max-w-5xl` and
+paragraph blocks cap again at `PROSE_MEASURE` (68ch), because a card also holds badges and buttons
+that legitimately want the extra width. Left-aligned rather than centred: the workspace chrome
+directly above (title, status, tab bar) is itself full-bleed and left-aligned, and a centred column
+visibly detaches from it at 2560px.
+
+**One filled surface per group, and everything about it is indented.** The group used to be a
+bordered card holding a tinted header holding a tinted verdict panel holding bordered finding
+cards — four nested frames, which reads as clutter and flattens the hierarchy the frames were meant
+to express. Now the disclosure band is the only thing filled; the group itself has no border, the
+verdict hangs off a hairline rule in its action tone rather than sitting in a tinted panel, and the
+whole body steps in from the left edge. With the frames gone, the indent and the space between
+groups (`space-y-8` — generous, not tidy) are what carry the structure. Finding cards keep their
+border: they are a list of discrete items each with its own apply controls, and at the deepest level
+that boundary is information rather than decoration.
+
+**Weight is not one of the signals.** The question and the proposed wordings are set at regular
+weight. They already carry a face change, a size step, and (for the heading) a filled band behind
+them; adding bold on top made a page of long questions heavier to read rather than easier. The one
+thing still bold is the verdict's verb — two words, and the only anchor the eye needs per group.
+
+**Two faces, one rule: the questionnaire's own words are set in the ConQuest display serif**
+(`QUESTION_FACE` in `evaluation-field.tsx`). That covers the card heading, the reconciled wording, a
+drafted new question, the evidence quote, and — via `QuotedProse` — any span a judge put in quotes
+inside a sentence. On the run this was built against, 27 of 40 suggestions were of the shape "Add a
+direct question on runway, such as: “If your main income stopped tomorrow…”", where the wording
+being proposed was buried mid-sentence in the same face as the advice around it; it now changes face
+and slants, and can be found without reading the sentence carrying it.
+
+Two constraints on that:
+
+- **It marks what the text says about itself.** `QuotedProse` restyles quoted spans only. It never
+  guesses that an unquoted sentence "looks like a question" and restyles the whole of it — that
+  would misattribute a judge's own advice to the questionnaire, which is the exact confusion the
+  treatment exists to prevent.
+- **Never the only signal.** Block-level question text keeps its curly quotes, and inline spans
+  render as `<q>` so the quotation marks come back from the UA stylesheet. A font swap is invisible
+  to a screen reader and to anyone whose webfont failed to load.
+
 ## Gating & limits
 
 - Always on — no flag to check. The route is admin-only paid LLM work, gated only by auth

@@ -46,7 +46,7 @@ import {
   type FindingGroup,
 } from '@/lib/app/questionnaire/evaluation/group-findings';
 import { summariseGroupActions } from '@/lib/app/questionnaire/evaluation/group-actions';
-import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
+import { FieldLabel, QUESTION_FACE } from '@/components/admin/questionnaires/evaluation-field';
 import {
   EvaluationGroupVerdict,
   JudgeChips,
@@ -125,21 +125,25 @@ function GroupCard({
   const bodyId = `eval-group-${group.key.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
   return (
-    <section
-      className={cn(
-        'bg-card overflow-hidden rounded-xl border transition-shadow',
-        open && 'ring-primary/15 shadow-sm ring-1',
-        allTerminal && 'opacity-70'
-      )}
-    >
+    // Not a card. The group used to be a bordered box holding a tinted header box holding a tinted
+    // verdict box holding bordered finding boxes — four nested frames, which reads as clutter and
+    // flattens the hierarchy it was meant to express. Only one thing is filled now (the header
+    // band); everything else is positioned by indent and by the space between groups.
+    <section className={cn(allTerminal && 'opacity-60')}>
       {/* The disclosure covers the identity of the question, not the verdict beneath it: the
-          reconciled wording has to stay selectable, and text inside a button is not. */}
+          reconciled wording has to stay selectable, and text inside a button is not.
+
+          The only filled surface in the group, which is what makes it read as a *header* while the
+          reviewer scrolls a long open card looking for "which question is this again?". */}
       <button
         type="button"
         onClick={() => onToggle(group.key)}
         aria-expanded={open}
         aria-controls={bodyId}
-        className="hover:bg-accent/40 flex w-full flex-col gap-2 p-4 pb-2 text-left transition-colors"
+        className={cn(
+          'bg-muted hover:bg-accent flex w-full flex-col gap-2 rounded-md px-4 py-3 text-left transition-colors',
+          open && 'ring-border ring-1'
+        )}
       >
         <div className="flex w-full flex-wrap items-center gap-2">
           {context && <FieldLabel>{context}</FieldLabel>}
@@ -169,8 +173,12 @@ function GroupCard({
           </div>
         </div>
 
-        {/* The subject under review — the loudest thing on the card. */}
-        <h3 className="text-base leading-snug font-semibold text-pretty">
+        {/* The subject under review — the only thing in the questionnaire's own face. Set at
+            regular weight: it is already a serif on a filled band at 18px, and stacking bold on top
+            of three other signals made a page of long questions harder to read, not easier. Capped
+            at a heading measure, because a one-line question stretched across a 2560px display is
+            not a heading, it is a rule with words on it. */}
+        <h3 className={cn(QUESTION_FACE, 'max-w-[54ch] text-lg leading-snug text-pretty')}>
           {group.kind === 'question' ? `“${group.label}”` : group.label}
         </h3>
 
@@ -184,7 +192,10 @@ function GroupCard({
         )}
       </button>
 
-      <div className="px-4 pb-4">
+      {/* Indented under the header, on the page's own ground rather than in a box. Everything in
+          here is *about* the question above it — the panel's verdict, then the judgements behind
+          it — and with the frames gone the step in from the left edge is what says so. */}
+      <div className="pt-3 pr-1 pl-6 sm:pl-12">
         <EvaluationGroupVerdict summary={summary} reconciled={reconciled} expanded={open} />
 
         {open && (
@@ -226,7 +237,10 @@ export function EvaluationByQuestion({ groups, openKey, ...rest }: Props) {
   }
 
   return (
-    <div className="space-y-3">
+    // Generous, not tidy. With the group boxes gone, the gap between one question and the next is
+    // the only thing separating them — at `space-y-3` two headers a few lines apart read as one
+    // continuous list of paragraphs.
+    <div className="space-y-8">
       {groups.map((group) => (
         // Keyed on the target, not its sorted slot, so re-sorting reorders cards without
         // collapsing the one the reviewer has open.

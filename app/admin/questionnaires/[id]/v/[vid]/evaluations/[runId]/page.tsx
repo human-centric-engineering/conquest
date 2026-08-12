@@ -55,7 +55,16 @@ export default async function EvaluationRunTab({ params }: PageProps) {
   const dataSlotsAvailable = (await getVersionDataSlotCountCached(id, vid)) > 0;
 
   return (
-    <div className="space-y-4">
+    // Capped to a reading column. The admin shell is full-bleed, which suits a table but not this
+    // page — its content is prose (a question, a verdict, four judges' reasoning), and on a wide
+    // display an uncapped column ran lines past 200 characters, where the eye loses the start of
+    // the next one on every return sweep.
+    //
+    // Left-aligned, not centred: the workspace chrome directly above (title, status, tab bar) is
+    // itself full-bleed and left-aligned, and a centred column visibly detaches from it on a wide
+    // monitor. The cap sits on the page rather than inside the component so the "back to
+    // Evaluations" link stays flush with the cards beneath it.
+    <div className="w-full max-w-5xl space-y-4">
       <div className="flex items-center gap-3">
         <Link
           href={`${workspaceVersionBase(id, vid)}/evaluations`}
