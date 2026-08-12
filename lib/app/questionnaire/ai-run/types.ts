@@ -69,6 +69,17 @@ export const APP_AI_RUN_KINDS = [
    * question worth being able to answer months later.
    */
   'glossary_analysis',
+  /**
+   * Adaptive Scope planning (P17) — which conditional topics a respondent's interview covers, and
+   * why each was chosen or left out.
+   *
+   * Recorded for EVERY plan, including the ones no model produced (a hard rule, the fallback, or an
+   * interview with nothing to decide). "Why did this respondent get those topics" is the question
+   * an admin will ask about an adaptive instrument months later, and a deterministic answer is as
+   * worth defending as an inferred one — `provider`/`model` read `deterministic` on those, so cost
+   * trends stay clean.
+   */
+  'scope_plan',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

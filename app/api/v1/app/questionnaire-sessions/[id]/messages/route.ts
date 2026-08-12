@@ -73,6 +73,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
+import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing';
@@ -287,6 +288,27 @@ async function handleMessage(
     // conversation targets data slots; questions fill in the background).
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlots.length > 0;
+
+    // Adaptive Scope (P17): the plan's handover line, on the ONE turn that follows the decision.
+    //
+    // Delivered as a briefing line rather than a prepended string so the interviewer weaves it in
+    // its own voice — "based on what you've said I want to go deeper on pipeline and forecasting"
+    // reads as the same person still talking, where a bolted-on paragraph reads as a system notice.
+    //
+    // `decidedAtTurn` was stamped with the completed-turn count, so it equals this turn's
+    // `selectionRound` exactly once: the turn immediately after planning. That is the announcement's
+    // only outing, which is what stops it repeating for the rest of the interview.
+    const scopePlan = loaded.scope.plan;
+    const scopeAnnouncement: string[] =
+      scopePlan &&
+      scopePlan.respondentMessage &&
+      scopePlan.decidedAtTurn === loaded.base.selectionRound
+        ? [
+            'Before your next question, tell the respondent — warmly, in your own words, in one or ' +
+              `two sentences — what you now want to go deeper on: "${scopePlan.respondentMessage}" ` +
+              'Name the areas in their language. Never mention that a decision was made about them.',
+          ]
+        : [];
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -815,7 +837,9 @@ async function handleMessage(
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
-            ...(dsBriefing.length > 0 ? { briefing: dsBriefing } : {}),
+            ...(dsBriefing.length > 0 || scopeAnnouncement.length > 0
+              ? { briefing: [...scopeAnnouncement, ...dsBriefing] }
+              : {}),
             ...(dsGlossary.length > 0 ? { glossary: dsGlossary } : {}),
             ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
@@ -887,7 +911,9 @@ async function handleMessage(
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
-            ...(qBriefing.length > 0 ? { briefing: qBriefing } : {}),
+            ...(qBriefing.length > 0 || scopeAnnouncement.length > 0
+              ? { briefing: [...scopeAnnouncement, ...qBriefing] }
+              : {}),
             ...(qGlossary.length > 0 ? { glossary: qGlossary } : {}),
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
             ...sensitivityPhraserInput,
@@ -976,6 +1002,21 @@ async function handleMessage(
           scope: 'persist',
           stage: 'persist_turn',
           error: err,
+        });
+      }
+
+      // Adaptive Scope (P17): once the turn's fills are on the row, decide the interview plan if the
+      // opening has just completed. Runs here — after persistence, before the next turn — so the
+      // plan exists by the time `buildTurnContext` next resolves scope, and the announcement lands
+      // immediately before the first deeper question rather than trailing the opening answer.
+      // Fail-soft by construction: `maybePlanScope` never throws, and an unplanned session simply
+      // runs the always-run topics.
+      const planned = await maybePlanScope(sessionId);
+      if (planned.kind === 'planned') {
+        log.info('Adaptive scope planned', {
+          sessionId,
+          source: planned.plan.source,
+          topicKeys: planned.plan.topics.map((t) => t.key),
         });
       }
 

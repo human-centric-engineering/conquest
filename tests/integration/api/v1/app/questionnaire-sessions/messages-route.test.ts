@@ -20,6 +20,16 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/rate-limit', () => rateMoc
 const ctxMock = vi.hoisted(() => ({ buildTurnContext: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaires/_lib/turn-context', () => ctxMock);
 
+// Adaptive Scope (P17): the post-turn planner trigger. Mocked to a no-op skip — it never throws in
+// production either, and its own behaviour is covered in `scope/planner.test.ts`.
+const planScopeMock = vi.hoisted(() => ({
+  maybePlanScope: vi.fn(async () => ({
+    kind: 'skipped' as const,
+    reason: 'adaptive scope is off',
+  })),
+}));
+vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope', () => planScopeMock);
+
 const invokersMock = vi.hoisted(() => ({ buildTurnInvokers: vi.fn() }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers', () => invokersMock);
 
@@ -169,6 +179,23 @@ function loadedContext(over: Record<string, unknown> = {}) {
     activeQuestionKey: null,
     byId: new Map(),
     meta: {},
+    // Adaptive Scope (P17): inert by default — every version that never opted in.
+    scope: {
+      scope: {
+        active: false,
+        topicKeys: new Set<string>(),
+        questionKeys: new Set<string>(),
+        dataSlotKeys: new Set<string>(),
+        notAskedQuestionKeys: new Set<string>(),
+        notAskedDataSlotKeys: new Set<string>(),
+        topicByQuestionKey: new Map<string, string>(),
+        topicByDataSlotKey: new Map<string, string>(),
+        depthByTopicKey: new Map<string, string>(),
+      },
+      topics: [],
+      settings: {},
+      plan: null,
+    },
     ...over,
   };
 }
