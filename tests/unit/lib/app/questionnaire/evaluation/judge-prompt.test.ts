@@ -61,6 +61,45 @@ describe('buildJudgePrompt', () => {
     }
   });
 
+  it('tells every judge to lead with the alternative, not the complaint', () => {
+    // A critique the admin cannot act on is a to-do, not a finding. Every dimension carries the
+    // instruction, and it names `proposedChange` as the place the alternative goes — the field
+    // the review queue and the pack actually render.
+    for (const dimension of EVALUATION_DIMENSIONS) {
+      const system = buildJudgePrompt(dimension, STRUCTURE)[0].content;
+      expect(system).toContain('Lead with the fix, not the complaint');
+      expect(system).toContain('"proposedChange" must BE that alternative');
+    }
+  });
+
+  it('lets a judge diagnose without an alternative when it cannot responsibly propose one', () => {
+    // The escape hatch has to stay open: a judge pressed to always rewrite will invent facts it
+    // cannot see. The rule is "prefer an alternative", not "never report what you cannot fix".
+    const system = buildJudgePrompt('clarity', STRUCTURE)[0].content;
+    expect(system).toContain('Only diagnose without an alternative when you genuinely cannot');
+  });
+
+  it('asks judges to prefer a structured edit rather than only permitting one', () => {
+    // The old wording ("attach ONLY when ... you are confident of every field") read as a
+    // discouragement and left applicable fixes as prose the admin had to retype.
+    const system = buildJudgePrompt('clarity', STRUCTURE)[0].content;
+    expect(system).toContain('Prefer attaching "proposedEdit"');
+    // The guard against invention survives the softening.
+    expect(system).toContain('never invent a key, section title, or type');
+  });
+
+  it('has the delete-first judges offer a salvage before a deletion', () => {
+    // Duplicates and Goal-Match are the two dimensions whose natural op removes a question.
+    // Both should reach for a rewrite that keeps the slot when one exists.
+    const duplicates = buildJudgePrompt('duplicates', STRUCTURE)[0].content;
+    expect(duplicates).toContain('prefer salvaging over deleting');
+    expect(duplicates).toContain('replace_prompt');
+
+    const goalMatch = buildJudgePrompt('goal_match', STRUCTURE)[0].content;
+    expect(goalMatch).toContain('prefer the refocus');
+    expect(goalMatch).toContain('replace_prompt');
+  });
+
   it('splices a dimension-specific rubric into the system message', () => {
     const clarity = buildJudgePrompt('clarity', STRUCTURE)[0].content;
     const coverage = buildJudgePrompt('coverage', STRUCTURE)[0].content;

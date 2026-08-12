@@ -28,7 +28,7 @@ import { FindingReviewCard } from '@/components/admin/questionnaires/evaluation-
 import {
   groupContextLabel,
   type FindingGroup,
-} from '@/components/admin/questionnaires/evaluation-grouping';
+} from '@/lib/app/questionnaire/evaluation/group-findings';
 import { FieldLabel } from '@/components/admin/questionnaires/evaluation-field';
 
 interface ApplyMeta {

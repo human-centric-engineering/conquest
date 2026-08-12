@@ -34,12 +34,29 @@ menu; the Pack is additionally promoted to a header button (below). Neither repl
   and abuse thresholds, admin-only debugging) renders only when the admin ticks **Technical & tuning
   settings**, a sub-option nested under this section in the dialog.
 - **Evaluation findings** (opt-in, off by default) — the [F5.1–F5.3 judge panel](./design-evaluation.md)'s
-  most recent run for this version: each of the seven dimensions' score/diagnostic plus every finding
-  it raised, **including findings still `pending` review** — this is a record of what the panel said,
-  not a curated review outcome. Renders last, as an appendix, right before the closing "About
-  ConQuest" blurb. `null` (not an empty state) when the version has never been evaluated is rendered
-  as a "no evaluation has been run yet" line rather than an omitted section, so the toggle's meaning
-  stays predictable regardless of whether a run exists.
+  most recent run for this version, **including findings still `pending` review** — this is a record of
+  what the panel said, not a curated review outcome. Renders last, as an appendix, right before the
+  closing "About ConQuest" blurb. `null` (not an empty state) when the version has never been evaluated
+  is rendered as a "no evaluation has been run yet" line rather than an omitted section, so the
+  toggle's meaning stays predictable regardless of whether a run exists.
+
+  **The appendix is grouped by question, not by judge**, and the model splits accordingly: `scores` is
+  the seven-judge scoreboard (score/diagnostic/finding count, no findings) and `targets` is the work —
+  one entry per flagged subject, in questionnaire order, with every judge's verdict beneath it. A
+  question that four judges flagged is printed **once** with four verdicts under it, where the
+  by-judge layout printed it four times, pages apart. This is the same reasoning that made "By
+  question" the default in the admin run-detail view (see
+  [design-evaluation.md](./design-evaluation.md#reading-a-run--two-views-over-the-same-findings)) —
+  and it matters more in a document, which has no toggle to switch. Grouping is the shared pure
+  `groupFindingsByTarget` from `lib/app/questionnaire/evaluation/group-findings.ts`, deliberately the
+  same function the console uses: the pack and the console must not disagree about what counts as one
+  subject.
+
+  **CSV is the exception.** It emits two blocks — `# Judge scores` and `# Evaluation` (one row per
+  target-judge pair, target columns first) — and the target text _does_ repeat down the rows of a
+  contested question. A CSV row has to survive a sort, a filter, or a pivot on its own, so blanking
+  continuation rows would break all three. "Name the question once" is a rule about documents a
+  person reads top to bottom.
 
 Each section is independently toggleable; an excluded section is `null` on the shared `PackModel`
 so every serialiser skips it the same way.

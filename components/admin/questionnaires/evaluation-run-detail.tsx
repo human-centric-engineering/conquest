@@ -61,7 +61,7 @@ import {
   GROUP_SORTS,
   GROUP_SORT_LABELS,
   type GroupSort,
-} from '@/components/admin/questionnaires/evaluation-grouping';
+} from '@/lib/app/questionnaire/evaluation/group-findings';
 
 interface ForkNotice {
   versionId: string;

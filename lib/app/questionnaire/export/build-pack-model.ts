@@ -32,6 +32,11 @@ import {
   type FindingSeverity,
 } from '@/lib/app/questionnaire/evaluation';
 import {
+  groupContextLabel,
+  groupFindingsByTarget,
+  type SeverityCounts,
+} from '@/lib/app/questionnaire/evaluation/group-findings';
+import {
   buildInstrumentModel,
   type InstrumentSection,
 } from '@/lib/app/questionnaire/export/build-instrument-model';
@@ -94,26 +99,61 @@ export interface PackDataSlot {
 /** One row of the experience-setup summary — re-exported so the serialisers have one import site. */
 export type { PackSetupItem };
 
-/** One judge finding, resolved for the pack — `targetLabel` is the finding's subject, not its raw key. */
-export interface PackEvaluationFinding {
+/**
+ * What ONE judge said about ONE target. The subject it addresses is not repeated here — it is the
+ * enclosing {@link PackEvaluationTarget}, named once.
+ */
+export interface PackEvaluationJudgeView {
+  dimension: EvaluationDimension;
+  /** The judge's display name ("Clarity Judge"), so a reader needn't know the dimension keys. */
+  label: string;
   severity: FindingSeverity;
   /** Review lifecycle: `pending` | `accepted` | `declined` | `applied` — shown so a reader can tell
    *  a raw suggestion apart from one the admin has already acted on. */
   status: FindingReviewStatus;
-  targetLabel: string;
   proposedChange: string;
   rationale: string;
   sourceQuote: string | null;
 }
 
-/** One judge's outcome on the latest run — a score/diagnostic plus that judge's findings. */
-export interface PackEvaluationDimension {
+/**
+ * One flagged subject — a question, a section, the goal, the audience, or the coverage-gap group —
+ * with every judge's view of it gathered underneath.
+ *
+ * This is the pack's unit of reading, and the reason is the same one that made **by question** the
+ * default in the admin run-detail view: grouped by judge, a question that three judges flagged is
+ * printed three times, pages apart, with nothing tying the three verdicts together — and a printed
+ * document has no toggle to fix that. Grouped by target, the strongest signal in a run (several
+ * judges converging on one question) is the thing the layout makes obvious.
+ */
+export interface PackEvaluationTarget {
+  /** `target.key` when resolved, else the raw `targetKey`; `gap:new-questions` for drafted questions. */
+  key: string;
+  /** Short positional chip — "Q3 · Background", "Section 2", "Goal"; `null` when there is none. */
+  context: string | null;
+  /** The question prompt / section title / "Questionnaire goal" — the subject, printed once. */
+  label: string;
+  /** The answer type for a question target; `null` otherwise (and for gap groups). */
+  questionType: string | null;
+  /** Drafted new questions rather than judgements about something that exists — see `group-findings`. */
+  gap: boolean;
+  /** The target is gone from the live structure (named from the run's snapshot). */
+  removed: boolean;
+  /** Severity tallies across the judges below — the "how contested is this" number. */
+  counts: SeverityCounts;
+  /** Distinct judges that flagged this target, in `(dimension, ordinal)` order. */
+  judges: PackEvaluationJudgeView[];
+}
+
+/** One judge's scoreboard line — the score without its findings, which live under the targets. */
+export interface PackEvaluationScore {
   dimension: EvaluationDimension;
   label: string;
   /** Score in [0, 1]; `null` when the judge failed (see `diagnostic`). */
   score: number | null;
   diagnostic: string | null;
-  findings: PackEvaluationFinding[];
+  /** How many findings this judge contributed across all targets. */
+  findingCount: number;
 }
 
 /** The design-evaluation appendix — the latest run for this version, if one has ever been made. */
@@ -123,8 +163,10 @@ export interface PackEvaluations {
   /** ISO timestamp the run finished (or started, if still incomplete); `null` when `!hasRun`. */
   runAt: string | null;
   totalFindings: number;
-  /** All seven dimensions, in `EVALUATION_DIMENSIONS` order; `[]` when `!hasRun`. */
-  dimensions: PackEvaluationDimension[];
+  /** All seven judges' scores, in `EVALUATION_DIMENSIONS` order; `[]` when `!hasRun`. */
+  scores: PackEvaluationScore[];
+  /** One entry per flagged subject, in questionnaire order; `[]` when `!hasRun` or nothing flagged. */
+  targets: PackEvaluationTarget[];
 }
 
 /** The full Questionnaire Pack model the serialisers render. */
@@ -166,35 +208,58 @@ function buildQuestionPromptMap(graph: VersionGraphView): Map<string, string> {
  * "excluded"; that's `buildPackModel`'s job via `include.evaluations`. Deliberately carries every
  * finding regardless of `status` (`pending` included) — the appendix is a record of what the panel
  * said, not a curated review outcome.
+ *
+ * Two shapes come out, and the split is the point: `scores` is the per-judge scoreboard (how each
+ * dimension rated the version) and `targets` is the work (what was said, gathered under the thing it
+ * was said about). Findings appear ONLY under `targets`, so a question flagged by four judges is
+ * printed once with four verdicts beneath it, not four times across four judge sections.
+ *
+ * Grouping is `groupFindingsByTarget` — the same pure function behind the admin run-detail view's
+ * default "By question" mode, in questionnaire order. Sharing it is deliberate: the pack and the
+ * console must not disagree about what counts as one subject (drafted questions splitting into
+ * their own gap group is exactly the kind of rule that would drift if written twice).
  */
 function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluations {
-  if (!run) return { hasRun: false, runAt: null, totalFindings: 0, dimensions: [] };
+  if (!run) return { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] };
 
-  const dimensions: PackEvaluationDimension[] = EVALUATION_DIMENSIONS.map((dimension) => {
+  const scores: PackEvaluationScore[] = EVALUATION_DIMENSIONS.map((dimension) => {
     const summary = run.dimensionSummary.find((s) => s.dimension === dimension) ?? null;
     return {
       dimension,
       label: EVALUATION_DIMENSION_SPECS[dimension].label,
       score: summary?.score ?? null,
       diagnostic: summary?.diagnostic ?? null,
-      findings: run.findings
-        .filter((f) => f.dimension === dimension)
-        .map((f) => ({
-          severity: f.severity,
-          status: f.status,
-          targetLabel: f.target?.label ?? f.targetKey,
-          proposedChange: f.proposedChange,
-          rationale: f.rationale,
-          sourceQuote: f.sourceQuote,
-        })),
+      findingCount: run.findings.filter((f) => f.dimension === dimension).length,
     };
   });
+
+  const targets: PackEvaluationTarget[] = groupFindingsByTarget(run.findings, 'natural').map(
+    (group) => ({
+      key: group.key,
+      context: groupContextLabel(group),
+      label: group.label,
+      questionType: group.questionType,
+      gap: group.gap,
+      removed: group.removed,
+      counts: group.counts,
+      judges: group.findings.map((f) => ({
+        dimension: f.dimension,
+        label: EVALUATION_DIMENSION_SPECS[f.dimension].label,
+        severity: f.severity,
+        status: f.status,
+        proposedChange: f.proposedChange,
+        rationale: f.rationale,
+        sourceQuote: f.sourceQuote,
+      })),
+    })
+  );
 
   return {
     hasRun: true,
     runAt: run.completedAt ?? run.startedAt,
     totalFindings: run.totalFindings,
-    dimensions,
+    scores,
+    targets,
   };
 }
 

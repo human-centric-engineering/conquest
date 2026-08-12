@@ -167,6 +167,37 @@ const EVALUATION_RUN: EvaluationRunDetail = {
       stale: false,
       applicable: 'manual',
     },
+    // A SECOND judge on q1. The whole point of the by-target shape is that this does not
+    // reprint the question — q1 appears once, with two verdicts under it.
+    {
+      id: 'f3',
+      dimension: 'audience_match',
+      ordinal: 0,
+      targetKey: 'q1',
+      target: {
+        kind: 'question',
+        key: 'q1',
+        label: 'Prompt for q1',
+        sectionTitle: 'Background',
+        position: 1,
+        sectionPosition: 1,
+        questionType: 'free_text',
+        removed: false,
+      },
+      severity: 'minor',
+      proposedChange: 'Drop the jargon for a non-technical audience',
+      rationale: 'The stated audience would not know the term',
+      sourceQuote: null,
+      status: 'pending',
+      proposedEdit: null,
+      editedOverride: null,
+      decidedByUserId: null,
+      decidedAt: null,
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'manual',
+    },
   ],
 };
 
@@ -427,11 +458,12 @@ describe('buildPackModel', () => {
         hasRun: false,
         runAt: null,
         totalFindings: 0,
-        dimensions: [],
+        scores: [],
+        targets: [],
       });
     });
 
-    it('carries all seven dimensions, in EVALUATION_DIMENSIONS order, even ones the run never mentions', () => {
+    it('carries all seven judge scores, in EVALUATION_DIMENSIONS order, even ones the run never mentions', () => {
       const model = buildPackModel(
         'T',
         graphOf(SECTIONS),
@@ -441,7 +473,7 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
-      expect(model.evaluations?.dimensions.map((d) => d.dimension)).toEqual([
+      expect(model.evaluations?.scores.map((d) => d.dimension)).toEqual([
         'clarity',
         'coverage',
         'duplicates',
@@ -462,18 +494,19 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
-      const byDimension = new Map(model.evaluations?.dimensions.map((d) => [d.dimension, d]));
+      const byDimension = new Map(model.evaluations?.scores.map((d) => [d.dimension, d]));
       expect(byDimension.get('clarity')).toMatchObject({
         label: 'Clarity Judge',
         score: 0.4,
         diagnostic: null,
+        findingCount: 1,
       });
       expect(byDimension.get('coverage')).toMatchObject({ score: null, diagnostic: 'judge_error' });
       // `duplicates` has a finding but no dimensionSummary entry in the fixture — still n/a, not 0.
       expect(byDimension.get('duplicates')).toMatchObject({ score: null, diagnostic: null });
     });
 
-    it('groups findings under their own dimension, resolving targetLabel from target.label and falling back to targetKey', () => {
+    it('carries no findings on the scoreboard — they belong to the target they are about', () => {
       const model = buildPackModel(
         'T',
         graphOf(SECTIONS),
@@ -483,29 +516,73 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
-      const byDimension = new Map(model.evaluations?.dimensions.map((d) => [d.dimension, d]));
-      expect(byDimension.get('clarity')?.findings).toEqual([
-        {
-          severity: 'major',
-          status: 'pending',
-          targetLabel: 'Prompt for q1',
-          proposedChange: 'Split into two questions',
-          rationale: 'This question asks two things at once',
-          sourceQuote: 'both engaged and satisfied',
-        },
-      ]);
-      // f2's `target` is null (an unresolved key) — targetLabel falls back to the raw targetKey.
-      expect(byDimension.get('duplicates')?.findings).toEqual([
-        {
-          severity: 'minor',
-          status: 'declined',
-          targetLabel: 'deleted-question',
-          proposedChange: 'Merge with q1',
-          rationale: 'Covers the same ground',
-          sourceQuote: null,
-        },
-      ]);
-      expect(byDimension.get('ordering')?.findings).toEqual([]);
+      // A score line is a tally, not a place findings are printed a second time.
+      for (const score of model.evaluations?.scores ?? []) {
+        expect(score).not.toHaveProperty('findings');
+      }
+    });
+
+    it('names a contested question ONCE, with every judge that flagged it beneath it', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        EVALUATION_RUN,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+      // Two judges flagged q1 (clarity + audience_match). Grouped by judge that printed the
+      // question twice; grouped by target it is one entry carrying both verdicts.
+      const q1 = model.evaluations?.targets.filter((t) => t.key === 'q1') ?? [];
+      expect(q1).toHaveLength(1);
+      expect(q1[0]).toMatchObject({
+        label: 'Prompt for q1',
+        context: 'Q1 · Background',
+        questionType: 'free_text',
+        counts: { major: 1, minor: 1, info: 0, total: 2 },
+      });
+      expect(q1[0].judges.map((j) => j.dimension)).toEqual(['clarity', 'audience_match']);
+      expect(q1[0].judges.map((j) => j.label)).toEqual(['Clarity Judge', 'Audience-Match Judge']);
+    });
+
+    it('carries each judge view whole — suggestion, rationale, quote, severity and review status', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        EVALUATION_RUN,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+      const q1 = model.evaluations?.targets.find((t) => t.key === 'q1');
+      expect(q1?.judges[0]).toEqual({
+        dimension: 'clarity',
+        label: 'Clarity Judge',
+        severity: 'major',
+        status: 'pending',
+        proposedChange: 'Split into two questions',
+        rationale: 'This question asks two things at once',
+        sourceQuote: 'both engaged and satisfied',
+      });
+    });
+
+    it('falls back to the raw targetKey when the target could not be resolved', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        EVALUATION_RUN,
+        { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+        'now'
+      );
+      // f2 addresses a question that no longer resolves — it still gets its own group rather
+      // than being dropped, labelled with the key so the reader can see what was meant.
+      const orphan = model.evaluations?.targets.find((t) => t.key === 'deleted-question');
+      expect(orphan).toMatchObject({ label: 'deleted-question', questionType: null });
+      expect(orphan?.judges.map((j) => j.dimension)).toEqual(['duplicates']);
     });
 
     it('includes pending findings — the appendix is a record of the panel, not a curated review outcome', () => {
@@ -518,9 +595,7 @@ describe('buildPackModel', () => {
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
-      const statuses = model.evaluations?.dimensions.flatMap((d) =>
-        d.findings.map((f) => f.status)
-      );
+      const statuses = model.evaluations?.targets.flatMap((t) => t.judges.map((j) => j.status));
       expect(statuses).toContain('pending');
       expect(statuses).toContain('declined');
     });
@@ -537,6 +612,8 @@ describe('buildPackModel', () => {
       );
       expect(model.evaluations?.hasRun).toBe(true);
       expect(model.evaluations?.runAt).toBe('2026-08-10T00:00:05.000Z');
+      // Read straight off the run row, not recounted from `findings` — the pack reports what
+      // the run recorded.
       expect(model.evaluations?.totalFindings).toBe(2);
     });
 

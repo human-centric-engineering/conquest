@@ -172,17 +172,35 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica-Oblique',
     marginTop: 2,
   },
-  evaluationDimension: {
-    marginTop: 10,
+  // The judge scoreboard — one compact line per dimension, no findings.
+  evaluationScore: {
+    fontSize: 9,
+    marginTop: 2,
   },
-  evaluationDimensionLabel: {
+  // One flagged subject: the question printed once, with its judges beneath.
+  evaluationTarget: {
+    marginTop: 12,
+  },
+  evaluationTargetContext: {
+    fontSize: 7,
+    color: COLORS.faint,
+    fontFamily: 'Helvetica-Bold',
+    letterSpacing: 0.6,
+  },
+  evaluationTargetLabel: {
     fontSize: 10,
     fontFamily: 'Helvetica-Bold',
+    marginTop: 1,
   },
-  evaluationDimensionScore: {
+  evaluationTargetMeta: {
     fontSize: 8,
     color: COLORS.faint,
     marginTop: 1,
+  },
+  evaluationSubheading: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 10,
   },
   evaluationFinding: {
     marginTop: 6,
@@ -436,28 +454,52 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
             {!model.evaluations.hasRun ? (
               <Text style={styles.empty}>No evaluation has been run for this version yet.</Text>
             ) : (
-              model.evaluations.dimensions.map((dim) => (
-                <View key={dim.dimension} style={styles.evaluationDimension}>
-                  <Text style={styles.evaluationDimensionLabel}>{dim.label}</Text>
-                  <Text style={styles.evaluationDimensionScore}>
-                    {dim.diagnostic
-                      ? `Judge unavailable: ${dim.diagnostic}`
-                      : `Score: ${dim.score !== null ? `${Math.round(dim.score * 100)}%` : 'n/a'}`}
+              <>
+                {/* The scoreboard. Findings are not repeated here — they print once, under the
+                    question they are about, so a contested question reads as one item. */}
+                <Text style={styles.evaluationSubheading}>Judge scores</Text>
+                {model.evaluations.scores.map((judge) => (
+                  <Text key={judge.dimension} style={styles.evaluationScore}>
+                    {judge.diagnostic
+                      ? `${judge.label} — unavailable: ${judge.diagnostic}`
+                      : `${judge.label} — ${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`}
                   </Text>
-                  {dim.findings.length === 0 ? (
-                    <Text style={styles.empty}>No findings raised.</Text>
-                  ) : (
-                    dim.findings.map((finding, i) => (
-                      <View key={i} style={styles.evaluationFinding} wrap={false}>
-                        <Text
-                          style={styles.evaluationFindingHeader}
-                        >{`[${finding.severity} · ${finding.status}]  ${finding.targetLabel} — ${finding.proposedChange}`}</Text>
-                        <Text style={styles.evaluationFindingBody}>{finding.rationale}</Text>
-                      </View>
-                    ))
-                  )}
-                </View>
-              ))
+                ))}
+
+                {model.evaluations.targets.length === 0 ? (
+                  <Text style={styles.empty}>No findings raised.</Text>
+                ) : (
+                  model.evaluations.targets.map((target) => (
+                    <View key={target.key} style={styles.evaluationTarget}>
+                      {target.context && (
+                        <Text style={styles.evaluationTargetContext}>
+                          {target.context.toUpperCase()}
+                        </Text>
+                      )}
+                      <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
+                      <Text style={styles.evaluationTargetMeta}>
+                        {[
+                          target.questionType ? `Type: ${target.questionType}` : null,
+                          `${target.judges.length} judge(s)`,
+                          target.counts.major > 0 ? `${target.counts.major} major` : null,
+                          target.removed ? 'no longer in the questionnaire' : null,
+                        ]
+                          .filter(Boolean)
+                          .join('  ·  ')}
+                      </Text>
+                      {target.judges.map((judge, i) => (
+                        <View key={i} style={styles.evaluationFinding} wrap={false}>
+                          <Text
+                            style={styles.evaluationFindingHeader}
+                          >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                          <Text style={styles.evaluationFindingBody}>{judge.proposedChange}</Text>
+                          <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ))
+                )}
+              </>
             )}
           </View>
         )}

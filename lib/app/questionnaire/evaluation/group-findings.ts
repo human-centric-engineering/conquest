@@ -16,7 +16,7 @@
  * Pure — findings in, groups out. No React, no Prisma, no fetching.
  */
 
-import type { EvaluationDimension, ProposedEdit } from '@/lib/app/questionnaire/evaluation';
+import type { EvaluationDimension, ProposedEdit } from '@/lib/app/questionnaire/evaluation/types';
 import type {
   EvaluationFindingView,
   FindingTargetKind,

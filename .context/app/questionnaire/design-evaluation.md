@@ -88,6 +88,22 @@ useful result. `severity` is `info | minor | major`. These findings are what F5.
 review queue will become; `targetKey` is a free string reconciled fail-cleanly at apply
 time (the pure core has no live graph), the F2.3 revert-planner posture.
 
+**Judges lead with the alternative, not the complaint.** The prompt requires `proposedChange` to _be_
+the fix wherever one is feasible — the rewritten question, the better type, the position to move to —
+and reserves diagnosis-only findings for cases where proposing one would mean inventing facts the
+judge cannot see (a policy, a definition, what the author meant); the judge then says what it would
+need, in `rationale`. `proposedEdit` follows the same posture: **prefer** attaching the structured op
+(it is what makes a suggestion one-click applicable) rather than the older "attach only when
+confident of every field", which read as a discouragement and left applicable fixes stranded as prose
+the admin had to retype. The guard that survives the softening is the one that matters — never invent
+a key, section title, or type that is not in the structure.
+
+This changes the two **delete-first** dimensions most. Duplicates now prefers salvaging a partial
+overlap (`replace_prompt` narrowing the weaker question to the part the other misses) over removing
+it, and Goal-Match prefers a refocus over a deletion where the question can be pointed back at the
+goal. Both keep `delete_question` for the genuinely redundant and the genuinely off-mission — the
+change is which one they reach for first.
+
 ## Gating & limits
 
 - Always on — no flag to check. The route is admin-only paid LLM work, gated only by auth
@@ -371,7 +387,11 @@ run-detail page offers two groupings over one set of findings and one set of rev
 
 By-question sorts three ways — `natural` (questionnaire order), `major` (worst-first), `findings`
 (busiest-first) — via the pure `groupFindingsByTarget` in
-`components/admin/questionnaires/evaluation-grouping.ts`. Both count sorts fall back to natural
+`lib/app/questionnaire/evaluation/group-findings.ts`. It lives in `lib/` rather than beside the
+components because the **Questionnaire Pack export shares it**: the pack groups its evaluation
+appendix by question for the same reason this page defaults to it, and a printed document has no
+toggle to fall back on. Two copies of "what counts as one subject" (the gap-group split especially)
+would drift. Both count sorts fall back to natural
 order, so equally-severe targets stay in a stable, meaningful sequence. Each card leads with the
 question prompt (the subject under review), names the judges that flagged it, and tallies severity;
 `FindingReviewCard` takes a `lead` prop that swaps its leading chip from the target to the judge,

@@ -885,7 +885,7 @@ describe('EvaluationRunDetail by-question view', () => {
     expect(screen.getByText('2 major')).toBeInTheDocument(); // q_nps
   });
 
-  // Ordering *logic* is covered exhaustively in evaluation-grouping.test.ts; this asserts only
+  // Ordering *logic* is covered exhaustively in group-findings.test.ts; this asserts only
   // that the control is wired to it — that changing the select re-orders the rendered cards.
   it('re-orders the cards when the sort control changes', async () => {
     renderCrossJudge();
