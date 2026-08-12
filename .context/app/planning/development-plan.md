@@ -147,6 +147,22 @@ The build moves from scaffolding → ingestion → admin manage → demo brandin
 | **P8**   | Admin analytics, exports, anonymous mode        | done   | Dashboards, CSV/JSON export, anonymous-mode handling. All three features merged: F8.1 admin analytics dashboards (#53); F8.2 result exports (#54); F8.3 anonymous-mode hardening (#55).                                                                                                                                                                                                                                                                               |
 | **P9**   | Hardening + forking docs                        | done   | Concurrent-session sanity, flag inventory, runbook, `forking.md`. F9.1 production hardening (#56) + F9.4 demo-content seed (#57) done; F9.2 operational runbook road-tested and shipped; F9.3 forking docs done (#58).                                                                                                                                                                                                                                                |
 
+> **This plan stops at P9.** Work has continued through **P17** — Experiences (P15), Definitions &
+> Glossary (P16), Adaptive Scope (P17) and the phases between — and none of it is described above.
+> Those phases are tracked in [`features/`](./features/) (one `fX.Y.md` tracker per feature, written
+> after the code) plus the domain docs under
+> [`../questionnaire/`](../questionnaire/). The [[#Work completed to date]] log below is also stale:
+> its newest entry is 2026-06-28.
+>
+> So a reader asking "is X planned?" for anything post-P9 will not find the answer here. The two
+> phase-level records of what remains open are
+> [`features/f15-followups.md`](./features/f15-followups.md) and
+> [`features/f17-followups.md`](./features/f17-followups.md).
+>
+> Bringing P10–P17 into this document is real, unscheduled work. Recorded here rather than left for
+> the next reader to discover, per this plan's own rule that it is allowed to be wrong as long as
+> the reframe is written down.
+
 ---
 
 ## P0 — Foundations
