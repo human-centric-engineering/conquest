@@ -516,6 +516,50 @@ export const SETTING_DESCRIPTORS = {
       { label: 'Question selection', value: SELECTION_STRATEGY_LABELS[c.selectionStrategy] },
     ],
   },
+  adaptiveScope: {
+    group: 'Questioning & completion',
+    tier: 'standard',
+    rows: (c) => {
+      // Off is the default and the pre-P17 behaviour: every topic runs, so the only honest row is
+      // the switch itself. The rest of the block only describes an interview that is actually
+      // being narrowed.
+      if (!c.adaptiveScope.enabled) {
+        return [{ label: 'Adaptive scope', value: 'Disabled' }];
+      }
+      return [
+        { label: 'Adaptive scope', value: 'Enabled' },
+        {
+          label: 'Conditional topics per interview',
+          value: `Up to ${c.adaptiveScope.maxConditionalTopics}`,
+        },
+        {
+          label: 'Unraised-area check topic',
+          value: yesNo(c.adaptiveScope.includeCheckTopic),
+        },
+        { label: 'Chosen topics announced', value: yesNo(c.adaptiveScope.announce) },
+        {
+          label: 'Respondent can request a topic',
+          value: yesNo(c.adaptiveScope.allowRespondentAmendment),
+        },
+        {
+          label: 'Scope rules',
+          value: c.adaptiveScope.rules.length
+            ? `${c.adaptiveScope.rules.length} rule${c.adaptiveScope.rules.length === 1 ? '' : 's'}`
+            : 'None',
+        },
+        {
+          label: 'Planner confidence floor',
+          tier: 'technical',
+          value: asPercent(c.adaptiveScope.minConfidence),
+        },
+        {
+          label: 'Planner instructions',
+          tier: 'technical',
+          value: setOrNot(c.adaptiveScope.plannerInstructions),
+        },
+      ];
+    },
+  },
   maxQuestionsPerSession: {
     group: 'Questioning & completion',
     tier: 'standard',

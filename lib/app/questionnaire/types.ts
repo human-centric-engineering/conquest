@@ -5,6 +5,11 @@
  * needs alongside the models and capabilities it introduces.
  */
 
+import {
+  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  type AdaptiveScopeSettings,
+} from '@/lib/app/questionnaire/scope/types';
+
 /**
  * Narrow a stored string to one of a `const`-tuple enum's members, falling back to
  * `fallback` when the value isn't a member. The boundary guard for reading a plain
@@ -1273,6 +1278,11 @@ export type QuestionnaireConfigShape = {
    * {@link IntroSettings}. Off by default.
    */
   intro: IntroSettings;
+  /**
+   * Adaptive Scope (P17): which parts of this questionnaire apply to a given respondent, and who
+   * decides. Off by default — see {@link DEFAULT_ADAPTIVE_SCOPE_SETTINGS}.
+   */
+  adaptiveScope: AdaptiveScopeSettings;
 };
 
 /**
@@ -1354,4 +1364,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,
+  adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
 };

@@ -40,8 +40,20 @@ const tx = {
   appQuestionnaireSection: {
     create: vi.fn(async () => ({ id: `sec-${++sectionSeq}` })),
     deleteMany: vi.fn(async () => ({ count: 0 })),
+    findMany: vi.fn(async () => []),
   },
-  appQuestionSlot: { createMany: vi.fn(async () => ({ count: 0 })) },
+  appQuestionSlot: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+    findMany: vi.fn(async () => []),
+  },
+  // Adaptive Scope (P17): ingest seeds one topic per section inside the same transaction.
+  appDataSlot: { findMany: vi.fn(async () => []) },
+  appQuestionnaireTopic: {
+    findMany: vi.fn(async () => []),
+    createMany: vi.fn(async () => ({ count: 0 })),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    update: vi.fn(async () => ({})),
+  },
   appQuestionnaireExtractionChange: {
     createMany: vi.fn(async () => ({ count: 0 })),
     deleteMany: vi.fn(async () => ({ count: 0 })),

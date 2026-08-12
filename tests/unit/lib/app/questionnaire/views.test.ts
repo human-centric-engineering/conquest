@@ -36,6 +36,7 @@ import type {
   RefLookupTurn,
   RefLookupResult,
 } from '@/lib/app/questionnaire/views';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 // ---------------------------------------------------------------------------
 // Helpers — build representative instances of each interface shape.
@@ -258,6 +259,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
       },
     },
     intro: { enabled: false, background: '', buttonLabel: '', videoUrl: '' },
+    adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     ...overrides,
   };
 }

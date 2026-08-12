@@ -33,6 +33,7 @@ import {
   writeSourceDocument,
   type IngestionSourceInput,
 } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { reconcileTopicsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-topics';
 
 /**
  * The version stopped being a `draft` between the route's pre-check and this
@@ -126,6 +127,11 @@ export async function reingestVersion(input: ReingestVersionInput): Promise<Rein
 
     const counts = await writeGraph(tx, versionId, extraction);
     await writeSourceDocument(tx, versionId, source);
+
+    // Adaptive Scope (P17): re-ingest replaces the whole graph, so topic membership is reconciled
+    // against the new keys — surviving topics keep their criteria, emptied ones go, uncovered
+    // sections are seeded. See `seed-topics.ts` for why this is not delete-and-reseed.
+    await reconcileTopicsForVersion(tx, versionId);
 
     return {
       versionId,

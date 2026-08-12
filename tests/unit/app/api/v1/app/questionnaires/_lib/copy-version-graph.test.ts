@@ -89,6 +89,9 @@ function buildTx() {
       createMany: vi.fn(async () => ({ count: 0 })),
       findMany: vi.fn(async () => [] as Array<{ id: string; key: string }>),
     },
+    appQuestionnaireTopic: {
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
     appDataSlotQuestion: {
       createMany: vi.fn(async () => ({ count: 0 })),
     },
@@ -157,6 +160,17 @@ const MINIMAL_SOURCE = {
       edited: boolean;
       ordinal: number;
     }>;
+  }>,
+  topics: [] as Array<{
+    key: string;
+    label: string;
+    description: string | null;
+    phase: string;
+    criteria: string | null;
+    depth: string;
+    members: unknown;
+    ordinal: number;
+    source: string;
   }>,
   glossaryDocument: null as {
     fileName: string;
@@ -396,6 +410,7 @@ describe('copyVersionGraph — positive branches (tags + data slots)', () => {
       scoringSchema: null,
       glossaryTerms: [],
       glossaryDocument: null,
+      topics: [],
       tags: [
         {
           id: 'oldtag-1',
@@ -661,6 +676,80 @@ describe('copyVersionGraph — with config and scoring schema', () => {
  * no ids, and the join back is the per-version-unique `normalizedTerm`. Get that wrong and the
  * copy lands with orphaned or cross-linked definitions.
  */
+describe('adaptive scope topics', () => {
+  let tx: ReturnType<typeof buildTx>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tx = buildTx();
+    tx.appQuestionSlot.findMany.mockResolvedValue([]);
+  });
+
+  function topicSource() {
+    return {
+      ...MINIMAL_SOURCE,
+      topics: [
+        {
+          key: 'pipeline',
+          label: 'Pipeline Management',
+          description: null,
+          phase: 'conditional',
+          criteria: 'They describe deals stalling or going dark.',
+          depth: 'full',
+          members: { questionKeys: ['q1', 'q2'], dataSlotKeys: ['pipeline_health'] },
+          ordinal: 0,
+          source: 'analyst',
+        },
+      ],
+    };
+  }
+
+  it('copies topics verbatim — membership is keys, so nothing needs re-linking', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(topicSource());
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appQuestionnaireTopic.createMany).toHaveBeenCalledTimes(1);
+    const { data } = (tx.appQuestionnaireTopic.createMany as Mock).mock.calls[0][0] as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(data).toHaveLength(1);
+    expect(data[0]).toMatchObject({
+      versionId: 'tgt-v',
+      key: 'pipeline',
+      phase: 'conditional',
+      criteria: 'They describe deals stalling or going dark.',
+      depth: 'full',
+      ordinal: 0,
+      source: 'analyst',
+    });
+    // The keys point at the COPIED questions automatically, because a copy carries keys 1:1.
+    expect(data[0]?.members).toEqual({
+      questionKeys: ['q1', 'q2'],
+      dataSlotKeys: ['pipeline_health'],
+    });
+  });
+
+  it('omits a null description rather than writing it as null', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue(topicSource());
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const { data } = (tx.appQuestionnaireTopic.createMany as Mock).mock.calls[0][0] as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(data[0]).not.toHaveProperty('description');
+  });
+
+  it('writes nothing when the source version has no topics', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({ ...MINIMAL_SOURCE });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    expect(tx.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
+  });
+});
+
 describe('copyVersionGraph — glossary', () => {
   let tx: ReturnType<typeof buildTx>;
 

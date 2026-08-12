@@ -60,6 +60,7 @@ import {
   getVersionEmbeddingCoverageCached,
   getVersionDataSlotEmbeddingCoverageCached,
 } from '@/lib/app/questionnaire/workspace-data';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 // ─── Factories ────────────────────────────────────────────────────────────────
 
@@ -146,6 +147,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
+      adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     },
     ...over,
   };
