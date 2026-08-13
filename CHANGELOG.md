@@ -360,6 +360,17 @@ release process.
 
 ### Changed
 
+- **`.gitignore` now denies `.env*` by default** and allowlists only
+  `.env.example` and `.env.development`. The previous form enumerated names, so
+  `.env.production`, `.env.staging` and `.env.test` were all freely
+  committable. That matters more than it looks: Next's standalone build copies
+  `.env` and `.env.production` into the build output and the server loads them
+  at boot, so a committed `.env.production` would ship its contents inside the
+  production image as well as into git. **A fork that deliberately commits an
+  env file other than those two must add its own negation** — an
+  already-tracked file keeps being tracked, so nothing breaks silently, but new
+  changes to it will stop being picked up.
+
 - **`.env.production` is no longer baked into the production image.**
   **Action required if you keep runtime configuration there.** `.dockerignore`
   excluded `.env` and the four `.env.*.local` names but nothing matched
@@ -373,8 +384,9 @@ release process.
   configuration must supply those values another way — compose `env_file`,
   `docker run --env-file`, or the platform's environment settings — or they
   will read as `undefined` in a container that otherwise starts cleanly.
-  Note `.env.production` is **not** in `.gitignore` either, so check you have
-  not committed one (#583).
+  `.gitignore` used to have the same hole; it is closed in the same release
+  (see the `.gitignore` entry above), but that does not untrack a file already
+  committed — check you have not committed one (#583).
 
 - **The production runtime image no longer contains the Prisma CLI** — nor the
   schema, the migrations, or `prisma.config.ts`. **Action required if you run Prisma inside

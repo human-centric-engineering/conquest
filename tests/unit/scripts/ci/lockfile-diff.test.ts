@@ -188,6 +188,145 @@ describe('diffLockfiles', () => {
 
       expect(diffLockfiles(nested, twoCopies).lostNativeMetadata).toEqual([]);
     });
+
+    it('does not fire when a duplicate is deduped away and the survivor predates it', () => {
+      // The false positive this guard exists for, taken from a real run: a
+      // `react-email` bump deleted the whole nested `@react-email/ui` subtree,
+      // including a copy of `@img/sharp-wasm32` that declared `cpu`. A
+      // top-level copy of the same package survived — but it was already there
+      // before, unchanged, and had never declared `cpu`.
+      //
+      // Nothing moved and nothing was stripped: a duplicate went away. Matching
+      // the removed path against a pre-existing survivor reported it as a
+      // hoist-with-loss and sent two people reading lockfile diffs (#583/#589).
+      // A hoist means the surviving path is NEW; if every survivor predates the
+      // removal, this is a deduplication.
+      const bothCopies: Lockfile = {
+        packages: {
+          'node_modules/sharp-wasm32': { version: '0.35.3' },
+          'node_modules/ui/node_modules/sharp-wasm32': { version: '0.34.5', cpu: ['wasm32'] },
+        },
+      };
+      const dedupedToTheExistingCopy: Lockfile = {
+        packages: { 'node_modules/sharp-wasm32': { version: '0.35.3' } },
+      };
+
+      const diff = diffLockfiles(bothCopies, dedupedToTheExistingCopy);
+
+      expect(diff.lostNativeMetadata).toEqual([]);
+      expect(hasRisk(diff)).toBe(false);
+      // Still reported as removed — the tree did change, it just lost nothing.
+      expect(diff.removed).toContain('node_modules/ui/node_modules/sharp-wasm32');
+    });
+
+    it('still fires on a hoist AND upgrade in one operation', () => {
+      // `npm update` does both at once, which is why the header calls it the
+      // operation this rule exists to catch. Keying the dedup guard on the
+      // version alone skipped it — the upgraded copy is at a new path with a
+      // new version, so no same-version survivor exists — and the same-path
+      // loop never sees it either, because the path changed. The loss was
+      // invisible in every field of the diff.
+      const base: Lockfile = {
+        packages: {
+          'node_modules/pdf/node_modules/sharp-linux-x64': {
+            version: '0.33.5',
+            os: ['linux'],
+            cpu: ['x64'],
+            libc: ['musl'],
+          },
+        },
+      };
+      const hoistedUpgradedStripped: Lockfile = {
+        packages: {
+          'node_modules/sharp-linux-x64': { version: '0.34.0', os: ['linux'], cpu: ['x64'] },
+        },
+      };
+
+      const diff = diffLockfiles(base, hoistedUpgradedStripped);
+
+      expect(diff.lostNativeMetadata).toEqual([
+        { name: 'node_modules/pdf/node_modules/sharp-linux-x64', keys: ['libc'] },
+      ]);
+      expect(hasRisk(diff)).toBe(true);
+    });
+
+    it('still fires when the SAME version is deduped into an un-annotated copy', () => {
+      // The dedup guard must key on the removed *resolution*, not on its path
+      // having pre-existed. Here 1.0.0 was in the tree twice with `libc` and
+      // once without; after the dedupe it is in the tree only without. That is
+      // a genuine loss of platform filtering for whatever resolved to the
+      // nested copies — the #571 failure mode exactly — and a path-membership
+      // guard silently skips it.
+      const partiallyAnnotated: Lockfile = {
+        packages: {
+          'node_modules/foo': { version: '1.0.0' },
+          'node_modules/a/node_modules/foo': { version: '1.0.0', libc: ['musl'] },
+          'node_modules/b/node_modules/foo': { version: '1.0.0', libc: ['musl'] },
+        },
+      };
+      const dedupedToTheUnannotatedCopy: Lockfile = {
+        packages: { 'node_modules/foo': { version: '1.0.0' } },
+      };
+
+      const diff = diffLockfiles(partiallyAnnotated, dedupedToTheUnannotatedCopy);
+
+      expect(diff.lostNativeMetadata).toEqual([
+        { name: 'node_modules/a/node_modules/foo', keys: ['libc'] },
+        { name: 'node_modules/b/node_modules/foo', keys: ['libc'] },
+      ]);
+      expect(hasRisk(diff)).toBe(true);
+    });
+
+    it('still fires when a hoist upgrades into a pre-existing un-annotated path', () => {
+      // `npm update` under npm < 11.11.0: the top-level entry is rewritten to
+      // the nested copy's version and loses `libc` on the way. The surviving
+      // path pre-existed, so path-membership suppresses it — but the version
+      // that only ever existed WITH libc is now in the tree WITHOUT it.
+      const before: Lockfile = {
+        packages: {
+          'node_modules/sharp-linux-x64': { version: '0.33.0', os: ['linux'], cpu: ['x64'] },
+          'node_modules/pdfkit/node_modules/sharp-linux-x64': {
+            version: '0.34.0',
+            os: ['linux'],
+            cpu: ['x64'],
+            libc: ['musl'],
+          },
+        },
+      };
+      const after: Lockfile = {
+        packages: {
+          'node_modules/sharp-linux-x64': { version: '0.34.0', os: ['linux'], cpu: ['x64'] },
+        },
+      };
+
+      const diff = diffLockfiles(before, after);
+
+      expect(diff.lostNativeMetadata).toEqual([
+        { name: 'node_modules/pdfkit/node_modules/sharp-linux-x64', keys: ['libc'] },
+      ]);
+      expect(hasRisk(diff)).toBe(true);
+    });
+
+    it('still fires when the survivor is new, even alongside an untouched copy', () => {
+      // Guards the fix from over-correcting: one survivor predates the move and
+      // one is new. A genuine hoist is hiding in here and must still be caught.
+      const before: Lockfile = {
+        packages: {
+          'node_modules/keeper/node_modules/canvas-linux-x64': { version: '1.0.3' },
+          'node_modules/pdf/node_modules/canvas-linux-x64': { ...NATIVE },
+        },
+      };
+      const after: Lockfile = {
+        packages: {
+          'node_modules/keeper/node_modules/canvas-linux-x64': { version: '1.0.3' },
+          'node_modules/canvas-linux-x64': { version: '1.0.3', os: ['linux'], cpu: ['x64'] },
+        },
+      };
+
+      expect(diffLockfiles(before, after).lostNativeMetadata).toEqual([
+        { name: 'node_modules/pdf/node_modules/canvas-linux-x64', keys: ['libc'] },
+      ]);
+    });
   });
 
   it('ignores metadata being gained', () => {

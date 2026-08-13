@@ -242,26 +242,65 @@ export function diffLockfiles(
   // `node_modules/foo` is a remove plus an add, so the loop above never
   // compares it. This lockfile has 77 native-metadata entries at nested paths,
   // so the hole covered precisely the packages most likely to move.
-  const headByPackageName = new Map<string, LockPackage[]>();
-  for (const [key, entry] of Object.entries(headPackages)) {
-    const short = packageNameOf(key);
+  const headByPackageName = new Map<string, { path: string; entry: LockPackage }[]>();
+  for (const [path, entry] of Object.entries(headPackages)) {
+    const short = packageNameOf(path);
     if (short === null) continue;
     const bucket = headByPackageName.get(short);
-    if (bucket) bucket.push(entry);
-    else headByPackageName.set(short, [entry]);
+    if (bucket) bucket.push({ path, entry });
+    else headByPackageName.set(short, [{ path, entry }]);
   }
 
   for (const name of baseNames) {
     if (name in headPackages) continue; // same-path case, handled above
     const short = packageNameOf(name);
     if (short === null) continue;
-    const moved = headByPackageName.get(short);
-    if (moved === undefined) continue; // genuinely removed, not moved
+    const survivors = headByPackageName.get(short);
+    if (survivors === undefined) continue; // genuinely removed, not moved
+
+    // Only compare against survivors that are the SAME RESOLUTION. If the
+    // version that was removed is no longer installed anywhere, the metadata
+    // that went with it described something the tree no longer contains, and
+    // an unrelated copy at a different version is not evidence of a loss.
+    //
+    // Without this, a `react-email` bump that deleted a nested
+    // `@react-email/ui` subtree got matched against a top-level copy of
+    // `@img/sharp-wasm32` at a *different* version, which had predated it and
+    // had never declared `cpu` — reported as "lost cpu". A check that cries
+    // wolf on a dependency simply going away is worse than no check, because
+    // the next real loss reads the same (#589).
+    //
+    // Keyed on the version and NOT on "did this path already exist", which was
+    // the first attempt and was far too broad: it also silenced the case where
+    // a package is annotated on some copies and not others — precisely the
+    // state d5b913fb left this repo in — and the annotated copy is deduped into
+    // the un-annotated one. That takes the tree from partly guarded to not
+    // guarded at all, which is the #571 failure mode, and it must still gate.
+    //
+    // An entry with no `version` cannot be matched, so it falls through to the
+    // check below rather than being skipped: for a supply-chain guard, the safe
+    // default is to report.
+    //
+    // Two independent reasons to keep looking, because keying on the version
+    // ALONE was the second wrong answer here: `npm update` bumps and
+    // restructures in one operation, so a nested native package that is
+    // upgraded while being hoisted has no same-version survivor and was skipped
+    // entirely — silencing the exact signature the header calls "the operation
+    // this rule exists to catch". A survivor at a path that did not exist in
+    // the base is movement, whatever the version says.
+    const removedVersion = basePackages[name].version;
+    const sameResolutionSurvives =
+      removedVersion !== undefined &&
+      survivors.some(({ entry }) => entry.version === removedVersion);
+    const landedSomewhereNew = survivors.some(({ path }) => !(path in basePackages));
+    if (!sameResolutionSurvives && !landedSomewhereNew) continue;
 
     // Lost only if EVERY surviving copy lacks the key — one intact copy means
-    // the metadata is still in the tree.
+    // the metadata is still in the tree. Deliberately still spans *all*
+    // survivors, not just the new ones: an old copy that kept the key is proof
+    // the tree did not lose it.
     const lost = nativeKeysOf(basePackages[name])
-      .filter((key) => moved.every((entry) => entry[key] === undefined))
+      .filter((key) => survivors.every(({ entry }) => entry[key] === undefined))
       .sort();
     if (lost.length > 0) lostNativeMetadata.push({ name, keys: lost });
   }
