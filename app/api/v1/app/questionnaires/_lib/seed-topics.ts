@@ -12,7 +12,7 @@
 
 import { logger } from '@/lib/logging';
 import { executeTransaction } from '@/lib/db/utils';
-import { planSeededTopics } from '@/lib/app/questionnaire/scope/seed';
+import { planDataSlotAttachment, planSeededTopics } from '@/lib/app/questionnaire/scope/seed';
 import { narrowTopicMembers } from '@/lib/app/questionnaire/scope/types';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
@@ -100,6 +100,68 @@ export async function seedTopicsForVersion(tx: Tx, versionId: string): Promise<n
 }
 
 /**
+ * Attach every unclaimed data slot to the topic that owns most of its questions.
+ *
+ * The fix for an ordering problem that would otherwise be permanent. Topics are seeded during
+ * INGEST, and ingest creates no data slots — those are generated afterwards, by a separate admin
+ * step. So every seeded topic is born with `dataSlotKeys: []`, and nothing else ever revisits
+ * membership: not a later structure-replace (whose seeder skips sections that are already covered),
+ * not the data-slot generator, not the authoring routes. The slot set and the topic set would simply
+ * never meet.
+ *
+ * Calling this wherever data slots are written is what makes the authoring order stop mattering.
+ *
+ * **Additive, idempotent, and never a move** — see `planDataSlotAttachment`. Only topics that gain
+ * something are written, so the common case (nothing to do) costs two reads and no writes.
+ *
+ * Returns how many topics were updated, for the caller's logging.
+ */
+export async function attachDataSlotsForVersion(tx: Tx, versionId: string): Promise<number> {
+  const [topics, dataSlots] = await Promise.all([
+    tx.appQuestionnaireTopic.findMany({
+      where: { versionId },
+      select: { id: true, key: true, ordinal: true, members: true },
+      orderBy: { ordinal: 'asc' },
+    }),
+    tx.appDataSlot.findMany({
+      where: { versionId },
+      select: {
+        key: true,
+        questions: { select: { questionSlot: { select: { key: true } } } },
+      },
+      orderBy: { ordinal: 'asc' },
+    }),
+  ]);
+  if (topics.length === 0 || dataSlots.length === 0) return 0;
+
+  const narrowed = topics.map((t) => ({ ...t, members: narrowTopicMembers(t.members) }));
+  const additions = planDataSlotAttachment({
+    topics: narrowed.map((t) => ({ key: t.key, ordinal: t.ordinal, members: t.members })),
+    dataSlots: dataSlots.map((d) => ({
+      key: d.key,
+      mappedQuestionKeys: d.questions.map((q) => q.questionSlot.key),
+    })),
+  });
+  if (additions.size === 0) return 0;
+
+  for (const topic of narrowed) {
+    const add = additions.get(topic.key);
+    if (!add || add.length === 0) continue;
+    await tx.appQuestionnaireTopic.update({
+      where: { id: topic.id },
+      data: {
+        members: jsonInput({
+          questionKeys: topic.members.questionKeys,
+          dataSlotKeys: [...topic.members.dataSlotKeys, ...add],
+        }),
+      },
+    });
+  }
+
+  return additions.size;
+}
+
+/**
  * Reconcile topics against a graph that has just been REWRITTEN (structure replace, re-ingest).
  *
  * A rewrite deletes the section/slot graph and lays down new rows with new keys, so a topic's
@@ -161,6 +223,9 @@ export async function reconcileTopicsForVersion(tx: Tx, versionId: string): Prom
   }
 
   await seedTopicsForVersion(tx, versionId);
+  // After the seed, because a topic created moments ago is as entitled to its data slots as one
+  // that survived the rewrite.
+  await attachDataSlotsForVersion(tx, versionId);
 }
 
 /**

@@ -9,6 +9,7 @@ import type { Prisma } from '@prisma/client';
 
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
+import { attachDataSlotsForVersion } from '@/app/api/v1/app/questionnaires/_lib/seed-topics';
 import { slugifyKey, nextAvailableKey } from '@/lib/app/questionnaire/authoring/key';
 import {
   generatedDataSlotSchema,
@@ -211,6 +212,16 @@ export async function replaceDataSlots(
         await tx.appDataSlotQuestion.createMany({ data: mappings });
       }
     }
+
+    // Adaptive Scope (P17): give the freshly-written slots a home among the version's topics.
+    // Topics are seeded during ingest, which creates no data slots — so without this, every slot
+    // would belong to no topic forever, and switching adaptive scope on would leave the
+    // conversation with nothing to target. Inside the transaction and after the mappings, because
+    // the attribution rule reads them. Additive and idempotent: an admin's own placements stand.
+    //
+    // No behavioural effect while adaptive scope is off, which is almost always — `resolveScope`
+    // short-circuits on `!enabled` and never reads a topic row.
+    await attachDataSlotsForVersion(tx, versionId);
   });
 
   return loadDataSlots(versionId);

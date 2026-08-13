@@ -745,7 +745,13 @@ describe('buildTurnContext — Adaptive Scope (P17)', () => {
     return (sessionGraph() as unknown as { version: Record<string, unknown> }).version;
   }
 
-  function topicRow(key: string, phase: string, questionKeys: string[], depth = 'full') {
+  function topicRow(
+    key: string,
+    phase: string,
+    questionKeys: string[],
+    depth = 'full',
+    dataSlotKeys: string[] = []
+  ) {
     return {
       id: `t-${key}`,
       key,
@@ -754,9 +760,39 @@ describe('buildTurnContext — Adaptive Scope (P17)', () => {
       phase,
       criteria: null,
       depth,
-      members: { questionKeys, dataSlotKeys: [] },
+      members: { questionKeys, dataSlotKeys },
       ordinal: 0,
       source: 'seeded',
+    };
+  }
+
+  /** A version carrying two data slots, so scope has something to filter. */
+  function versionWithDataSlots(): Record<string, unknown> {
+    return {
+      ...baseVersion(),
+      config: scopedConfig(),
+      dataSlots: [
+        {
+          id: 'ds-role',
+          key: 'role_fit',
+          name: 'Role fit',
+          description: 'd',
+          theme: 'People',
+          ordinal: 0,
+          weight: 1,
+          questions: [{ questionSlot: { key: 'role' } }],
+        },
+        {
+          id: 'ds-team',
+          key: 'team_shape',
+          name: 'Team shape',
+          description: 'd',
+          theme: 'People',
+          ordinal: 1,
+          weight: 1,
+          questions: [{ questionSlot: { key: 'team' } }],
+        },
+      ],
     };
   }
 
@@ -791,6 +827,76 @@ describe('buildTurnContext — Adaptive Scope (P17)', () => {
 
       expect(loaded!.base.questions.map((q) => q.key)).toEqual(['role', 'team']);
       expect(loaded!.scope.scope.active).toBe(false);
+    });
+  });
+
+  /**
+   * Data-slot membership is the half of a topic that decides what the CONVERSATION targets — the
+   * questions decide what is recorded, the slots decide what is talked about. Phase 1 of the
+   * data-slot/scope work exists to populate this field, so it needs a test proving the field does
+   * something once populated. Before that work, every topic's `dataSlotKeys` was `[]` on every
+   * version, and so was every fixture here.
+   */
+  describe('data-slot membership', () => {
+    it('withholds the data slots of a topic that is out of scope', async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionGraph({ version: versionWithDataSlots() })
+      );
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+        topicRow('core', 'core', ['role'], 'full', ['role_fit']),
+        // Conditional and unplanned, so neither its question nor its slot is offered.
+        topicRow('later', 'conditional', ['team'], 'full', ['team_shape']),
+      ]);
+
+      const loaded = await buildTurnContext('sess-1');
+
+      expect(loaded!.base.dataSlots?.map((d) => d.key)).toEqual(['role_fit']);
+      expect(loaded!.base.questions.map((q) => q.key)).toEqual(['role']);
+    });
+
+    it('offers a topic’s data slots once the plan selects it', async () => {
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionGraph({
+          version: versionWithDataSlots(),
+          interviewPlan: {
+            v: 1,
+            topics: [{ key: 'later', depth: 'full', source: 'llm', rationale: 'r' }],
+            excluded: [],
+            checkTopicKey: null,
+            confidence: 0.9,
+            source: 'llm',
+            respondentMessage: '',
+            decidedAtTurn: 1,
+            decidedAt: '2026-08-13T00:00:00.000Z',
+          },
+        })
+      );
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+        topicRow('core', 'core', ['role'], 'full', ['role_fit']),
+        topicRow('later', 'conditional', ['team'], 'full', ['team_shape']),
+      ]);
+
+      const loaded = await buildTurnContext('sess-1');
+
+      expect(loaded!.base.dataSlots?.map((d) => d.key)).toEqual(['role_fit', 'team_shape']);
+    });
+
+    it('leaves every slot in scope when a topic carries none — the pre-attachment state', async () => {
+      // A version seeded before data slots existed: topics hold questions only. Scope must not
+      // read "no slots listed" as "no slots allowed", or an instrument in that state would have
+      // nothing to talk about at all.
+      (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+        sessionGraph({ version: versionWithDataSlots() })
+      );
+      (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+        topicRow('core', 'core', ['role', 'team']),
+      ]);
+
+      const loaded = await buildTurnContext('sess-1');
+
+      // Documents the CURRENT behaviour: an unclaimed slot is filtered out, which is exactly the
+      // failure Phase 1's attachment pass prevents at the source.
+      expect(loaded!.base.dataSlots ?? []).toEqual([]);
     });
   });
 
