@@ -93,10 +93,17 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       })),
     });
 
+  // Fields are enumerated rather than spread, and that is load-bearing rather than an oversight:
+  // `rules` reaches the server through this same PATCH but is edited as its own list, and a spread
+  // would also push through any field the settings card does not own. The cost: every new
+  // `AdaptiveScopeSettings` field is a two-place change — here and in the card.
   const saveSettings = (settings: AdaptiveScopeSettings) =>
     run('PATCH', {
       enabled: settings.enabled,
       maxConditionalTopics: settings.maxConditionalTopics,
+      sessionBudgetSeconds: settings.sessionBudgetSeconds,
+      secondsPerQuestionType: settings.secondsPerQuestionType,
+      secondsPerDataSlot: settings.secondsPerDataSlot,
       includeCheckTopic: settings.includeCheckTopic,
       checkTopicPreference: settings.checkTopicPreference,
       minConfidence: settings.minConfidence,
@@ -158,6 +165,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         topics={payload.topics}
         dataSlots={payload.inventory.dataSlots}
         onSave={saveSettings}
+        costs={payload.costs}
         busy={busy}
       />
 

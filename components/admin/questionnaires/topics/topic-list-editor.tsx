@@ -69,6 +69,8 @@ import {
   type TopicDepth,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
+import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
+import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 import { cn } from '@/lib/utils';
 
@@ -85,6 +87,29 @@ interface DraftTopic {
   dataSlotKeys: string[];
   /** Where the topic came from, so an untouched auto-seed reads as one. */
   source: Topic['source'] | 'new';
+}
+
+/**
+ * What a draft topic costs a respondent, in seconds (C7).
+ *
+ * Computed here rather than read off `costs.byTopicKey` on purpose: the server's per-topic figures
+ * describe the SAVED set, and this row is showing an unsaved draft. Add three questions to a topic
+ * and a server-sourced number would sit there unchanged, which is worse than showing none.
+ *
+ * It selects members through `membersAtDepth` — the same resolver the interview uses — so a `light`
+ * topic is costed as the sample it will actually ask. No weights are passed, which is exactly the
+ * resolver's own no-weights fallback (authored order); the server, which has them, may pick two
+ * different members for a light topic and land a few seconds apart. Both are estimates, and the
+ * alternative is duplicating the weighting rule in the browser.
+ */
+function draftSeconds(draft: DraftTopic, itemCost: ReadonlyMap<string, number>): number {
+  const keys = [
+    ...membersAtDepth(draft.questionKeys, draft.depth, undefined),
+    ...membersAtDepth(draft.dataSlotKeys, draft.depth, undefined),
+  ];
+  let total = 0;
+  for (const key of keys) total += itemCost.get(key) ?? 0;
+  return total;
 }
 
 const SOURCE_BADGE: Record<DraftTopic['source'], { label: string; hint: string }> = {
@@ -144,6 +169,17 @@ export function TopicListEditor({
   busy,
   enabled,
 }: TopicListEditorProps) {
+  // Per-item seconds, keyed once. The route priced every question and data slot against this
+  // version's own overrides, so the browser never re-derives a per-type estimate.
+  const itemCost = useMemo(
+    () =>
+      new Map<string, number>([
+        ...inventory.questions.map((q) => [q.key, q.estimatedSeconds] as const),
+        ...inventory.dataSlots.map((d) => [d.key, d.estimatedSeconds] as const),
+      ]),
+    [inventory]
+  );
+
   const [drafts, setDrafts] = useState<DraftTopic[]>(() => topics.map(toDraft));
   const [dirty, setDirty] = useState(false);
   const [filter, setFilter] = useState<TopicFilter>('all');
@@ -499,6 +535,8 @@ export function TopicListEditor({
                           {draft.questionKeys.length === 1 ? 'question' : 'questions'} ·{' '}
                           {draft.dataSlotKeys.length}{' '}
                           {draft.dataSlotKeys.length === 1 ? 'data slot' : 'data slots'}
+                          {' · ~'}
+                          {formatSeconds(draftSeconds(draft, itemCost))}
                           {draft.phase === 'conditional' && draft.criteria.trim().length > 0 && (
                             <> · when {draft.criteria.trim()}</>
                           )}

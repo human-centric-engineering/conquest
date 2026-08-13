@@ -281,6 +281,58 @@ months later, and a deterministic answer is as worth defending as an inferred on
 
 ---
 
+## Breadth and duration are different bounds (C7)
+
+`maxConditionalTopics` caps **how many areas** an interview may cover. It was also being used, by
+whoever set it, to mean **how long** — and it cannot carry that.
+
+The client instruction it came from is arithmetic, not preference: a 600-second session, minus what
+every respondent gets regardless, leaves an allowance that a certain number of routed topics happens
+to fill. "Three" is the answer for one instrument at one budget. Stored as a count, the answer
+survives and the question does not — so a client who says "make it fifteen minutes" needs a code
+change, and a topic of ten ratings counts the same as a topic of three.
+
+**`sessionBudgetSeconds` is the second bound, not a replacement.** Both apply. `0` means no budget
+and is the default, so nothing changes for a version that never sets one. Deliberately, the narrowing
+does **not** clamp a small value up to the floor — `5` reads as `0`, because inventing a budget
+nobody asked for would quietly start dropping topics.
+
+### Pricing
+
+`scope/budget.ts` is pure and prices per item type, overridable per version via
+`secondsPerQuestionType` (data slots are priced as open questions via `secondsPerDataSlot`).
+
+|                                                |                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The anchors are the client's**               | 8s a likert, 45s free text. Everything else is interpolated by how much of a decision the type asks for.                                                                                                                                                                            |
+| **A matrix is priced per ROW**                 | It is N ratings wearing one prompt. Costing it as one item is how a 12-row grid ends up looking cheaper than the three likerts beside it.                                                                                                                                           |
+| **An unknown type prices as free text**        | The most expensive guess. Under-costing an unknown is how a budget silently over-fills.                                                                                                                                                                                             |
+| **An unusable override is DROPPED**            | Not defaulted to 0 — a type costed at nothing makes every topic using it look free, the one failure a time budget cannot survive.                                                                                                                                                   |
+| **`light` is priced through `membersAtDepth`** | The same resolver the interview uses, so a light topic costs the sample it will actually ask. Duplicating "top two by weight" is how a cost model and a resolver drift apart unnoticed — and the blind-spot check's cost is exactly the number the client's own arithmetic forgets. |
+
+These are **estimates and say so**: real durations vary by respondent and by how much someone wants
+to talk. The job is to make relative cost visible and the fit decidable, not to predict a stopwatch.
+
+### Where the arithmetic lives
+
+Server-side, in the topics route, shipped on the payload as `costs` — the same reasoning as `issues`:
+one implementation, so the number an author reads and the number the planner will work to cannot
+disagree. The settings card states it plainly ("about 4m 26s goes to the questions every respondent
+gets, leaving ~5m 34s for conditional topics"), which is what turns "no more than three sections"
+from folklore into something an author can check.
+
+The one exception is the per-topic `~Ns` on a collapsed topic row, which the browser computes from
+the per-item seconds the route already sent. That row shows an **unsaved draft**: a server-sourced
+figure would sit there unchanged while an author added three questions, which is worse than none.
+It calls the same exported `membersAtDepth`, without weights — the resolver's own fallback — so a
+`light` topic may land a few seconds from the server's figure.
+
+**Nothing is enforced yet.** A budget today is a number an author can see, not one the planner obeys;
+the fit stage is F17.9. Two coherence checks do fire, because a budget below the floor is not a tight
+interview but a broken one: `budget_below_floor` (error) and `budget_admits_no_topic` (warning).
+
+---
+
 ## Coherence checks
 
 `validateAdaptiveScope` runs on read (the Topics page, the launch checklist) rather than blocking

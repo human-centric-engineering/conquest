@@ -32,21 +32,68 @@ import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { ScopeRulesEditor } from '@/components/admin/questionnaires/topics/scope-rules-editor';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type AdaptiveScopeSettings,
   type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
+import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
+import { cn } from '@/lib/utils';
 
 export interface ScopeSettingsCardProps {
   settings: AdaptiveScopeSettings;
   topics: readonly Topic[];
   dataSlots: TopicsPayload['inventory']['dataSlots'];
+  /**
+   * The version's time arithmetic (C7), computed server-side: what the always-run questions cost
+   * and what a budget therefore leaves for routed topics.
+   */
+  costs: TopicsPayload['costs'];
   /** Saves the settings patch. Resolving `false` means it did not land (error or declined fork). */
   onSave: (settings: AdaptiveScopeSettings) => Promise<boolean>;
   busy: boolean;
+}
+
+/**
+ * The arithmetic behind a session budget, stated rather than left implicit.
+ *
+ * Without this an author sets "600" and has no way to know that most of it is already spent — the
+ * questions every respondent gets come out of the same budget, and what is left is the only number
+ * that decides how much routing is possible. This is the line that turns a client's "no more than
+ * three sections" from folklore into something an author can check.
+ *
+ * Reads the SAVED figures, so it lags an unsaved topic edit by one save. Stated in the copy rather
+ * than hidden, because a number that silently described a different instrument would be worse.
+ */
+function BudgetReadout({
+  budgetSeconds,
+  costs,
+}: {
+  budgetSeconds: number;
+  costs: TopicsPayload['costs'];
+}) {
+  if (budgetSeconds <= 0) return null;
+  const allowance = Math.max(0, budgetSeconds - costs.alwaysSeconds);
+  const overspent = costs.alwaysSeconds >= budgetSeconds;
+  return (
+    <p className={cn('text-xs', overspent ? 'text-amber-600' : 'text-muted-foreground')}>
+      {overspent ? (
+        <>
+          The questions every respondent gets already take about{' '}
+          {formatSeconds(costs.alwaysSeconds)}, which is over this budget. No conditional topic can
+          fit.
+        </>
+      ) : (
+        <>
+          About {formatSeconds(costs.alwaysSeconds)} goes to the questions every respondent gets,
+          leaving ~{formatSeconds(allowance)} for conditional topics.
+        </>
+      )}
+    </p>
+  );
 }
 
 /**
@@ -84,6 +131,7 @@ export function ScopeSettingsCard({
   settings,
   topics,
   dataSlots,
+  costs,
   onSave,
   busy,
 }: ScopeSettingsCardProps) {
@@ -184,6 +232,53 @@ export function ScopeSettingsCard({
         <div className="space-y-3 border-t pt-4">
           <SectionLabel step={2}>How much the agent may cover</SectionLabel>
           <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Session length budget{' '}
+                <FieldHelp title="Session length budget">
+                  <p>
+                    Duration control: roughly how long one interview may take. Leave at 0 for no
+                    limit.
+                  </p>
+                  <p>
+                    Separate from the topic limit beside it, because they bound different things.
+                    Three topics is not a length — one topic can be ten ratings and another three —
+                    and “under ten minutes” says nothing about how many areas to cover. Both apply.
+                  </p>
+                  <p>
+                    Estimated from question types (a rating is quick, an open question is not), so
+                    it is a planning figure rather than a stopwatch.
+                  </p>
+                </FieldHelp>
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={MAX_SESSION_BUDGET_SECONDS}
+                  step={30}
+                  value={draft.sessionBudgetSeconds}
+                  onChange={(e) =>
+                    set({
+                      sessionBudgetSeconds: boundedInt(
+                        e.target.value,
+                        0,
+                        MAX_SESSION_BUDGET_SECONDS,
+                        draft.sessionBudgetSeconds
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {draft.sessionBudgetSeconds > 0
+                    ? formatSeconds(draft.sessionBudgetSeconds)
+                    : 'no limit'}
+                </span>
+              </div>
+              <BudgetReadout budgetSeconds={draft.sessionBudgetSeconds} costs={costs} />
+            </div>
+
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
                 Most conditional topics per interview{' '}
