@@ -31,7 +31,9 @@ import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import {
+  MAX_ANSWERS_IN_PLANNER_PROMPT,
   MAX_FILLS_IN_PLANNER_PROMPT,
+  PLANNER_ANSWER_CHARS,
   PLANNER_FILL_CHARS,
   SCOPE_PLANNER_AGENT_SLUG,
   SCOPE_PLANNER_MAX_TOKENS,
@@ -56,12 +58,37 @@ const plannerSchema = z.object({
   respondentMessage: z.string(),
 });
 
+/**
+ * One answered question, as the prompt reads it.
+ *
+ * The `prompt` is not decoration: an answer without the question it answers is not evidence. "About
+ * two years" means nothing until you know it answered "how long has this been a problem?".
+ */
+export interface ScopeAnswer {
+  /** The question's key. */
+  key: string;
+  /** What the question asked. */
+  prompt: string;
+  /** The stored answer — a mapped form value (a choice slug, a scale point) for typed questions. */
+  value: unknown;
+  /** The living natural-language account of what they conveyed, when the answer has one. */
+  paraphrase: string | null;
+}
+
 export interface PlanScopeParams {
   sessionId: string;
   /** Every topic in the version. */
   topics: readonly Topic[];
-  /** The opening data-slot fills — what the respondent actually conveyed. */
+  /** The data-slot fills — what the extractor captured from what the respondent said. */
   fills: readonly ScopeFill[];
+  /**
+   * The questions answered so far, in the respondent's own words, most relevant first.
+   *
+   * The primary evidence. `fills` are extractions FROM these words, not additional information —
+   * and an instrument whose opening asks questions without data slots behind them produces no
+   * fills at all, which used to leave the planner deciding on an empty prompt.
+   */
+  answers?: readonly ScopeAnswer[];
   /** An optional LLM-written summary of the opening, when the caller has one. */
   briefing?: string | null;
   /** The questionnaire's stated goal, for framing. */
@@ -82,8 +109,47 @@ export interface PlanScopeResult {
   outputSnapshot: unknown;
 }
 
-function renderFills(fills: readonly ScopeFill[], briefing: string | null | undefined): string {
-  const lines = fills.slice(0, MAX_FILLS_IN_PLANNER_PROMPT).map((f) => {
+/** A readable rendering of a stored answer value, or null when there is nothing worth printing. */
+function answerText(answer: ScopeAnswer): string | null {
+  // Paraphrase first, always. It is the natural-language account of what they conveyed; `value`
+  // holds the MAPPED form value for a typed question — a choice slug like `gt3` — and feeding form
+  // codes to a model that is reading for meaning is noise at best.
+  if (answer.paraphrase && answer.paraphrase.trim() !== '') return answer.paraphrase.trim();
+  if (typeof answer.value === 'string' && answer.value.trim() !== '') return answer.value.trim();
+  if (typeof answer.value === 'number' || typeof answer.value === 'boolean') {
+    return String(answer.value);
+  }
+  if (Array.isArray(answer.value) && answer.value.length > 0) {
+    return answer.value.map((v) => String(v)).join(', ');
+  }
+  return null;
+}
+
+function renderAnswers(answers: readonly ScopeAnswer[]): string[] {
+  const lines: string[] = [];
+  for (const answer of answers) {
+    if (lines.length >= MAX_ANSWERS_IN_PLANNER_PROMPT) break;
+    const text = answerText(answer);
+    if (!text) continue;
+    lines.push(`- Asked: ${answer.prompt}\n  Answered: ${text.slice(0, PLANNER_ANSWER_CHARS)}`);
+  }
+  return lines;
+}
+
+/**
+ * The evidence block: what they said, then what was captured from it.
+ *
+ * Their own words come first because that is what they are — the primary record. A fill is an
+ * extraction from those words, so it can be thin, stale, or simply absent, and a planner that reads
+ * only fills is reading a summary of a conversation it was never shown.
+ */
+function renderConveyed(
+  fills: readonly ScopeFill[],
+  answers: readonly ScopeAnswer[],
+  briefing: string | null | undefined
+): string {
+  const answerLines = renderAnswers(answers);
+  const fillLines = fills.slice(0, MAX_FILLS_IN_PLANNER_PROMPT).map((f) => {
     const text =
       typeof f.value === 'string' && f.value.trim() !== ''
         ? f.value
@@ -91,9 +157,12 @@ function renderFills(fills: readonly ScopeFill[], briefing: string | null | unde
     return `- [${f.key}] ${text.slice(0, PLANNER_FILL_CHARS)}`;
   });
 
-  const parts = [lines.join('\n') || '(nothing was captured in the opening)'];
-  if (briefing) parts.push(`\nSummary of the conversation so far:\n${briefing}`);
-  return parts.join('\n');
+  const parts: string[] = [];
+  if (answerLines.length > 0) parts.push(`In their own words:\n${answerLines.join('\n')}`);
+  if (fillLines.length > 0) parts.push(`Captured from what they said:\n${fillLines.join('\n')}`);
+  if (parts.length === 0) parts.push('(nothing was captured in the opening)');
+  if (briefing) parts.push(`Summary of the conversation so far:\n${briefing}`);
+  return parts.join('\n\n');
 }
 
 function renderCandidates(candidates: readonly Topic[]): string {
@@ -172,6 +241,9 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
           'account of when the topic is right, and it outranks your general judgement.',
         'Read for what the respondent MEANS, not the words they used. Someone describing deals that ' +
           '"go dark at procurement" has named a pipeline problem without using the word pipeline.',
+        'What they said in their own words is the primary evidence. The captured items beneath it ' +
+          'were extracted from those same words — they are a summary, not extra information — so ' +
+          'where the two disagree, go with what the respondent actually said.',
         'A topic whose criteria require something the respondent did not supply is NOT a match, ' +
           'however much the surrounding subject seems related.',
         '`topicKey` MUST be one of the candidate keys exactly. Never invent one.',
@@ -184,7 +256,10 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
           'Never mention keys, scores, confidence, criteria, or that a decision was made about them.'
       )
     ),
-    section('what_the_respondent_conveyed', renderFills(params.fills, params.briefing)),
+    section(
+      'what_the_respondent_conveyed',
+      renderConveyed(params.fills, params.answers ?? [], params.briefing)
+    ),
     section('candidate_topics', renderCandidates(candidates)),
     ...(params.goal ? [section('questionnaire_goal', params.goal)] : []),
     ...(params.settings.plannerInstructions

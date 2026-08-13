@@ -157,6 +157,34 @@ Three tiers, in order — and the order is the design.
 > system prompt are obeyed _most_ of the time, which is the worst possible failure mode — plausible
 > plans that quietly break the limit an author set, with nothing to catch them.
 
+### What the judgement reads
+
+Two things, in this order: **what the respondent said**, and **what was captured from it**.
+
+The words come first because that is what they are — the primary record. A data-slot fill is an
+_extraction_ from those same words, so it can be thin, stale, or simply absent; a planner reading
+only fills is reading a summary of a conversation it was never shown. The prompt says so, in the
+rule that stops the model treating a fill as corroboration of the answer it was derived from.
+
+Fills alone was the original design, and it had a hole an author could fall into without ever being
+told: **an opening built from questions with no data slots behind them produces no fills**, so the
+prompt read `(nothing was captured in the opening)` and the planner chose sections from nothing.
+Reading the answers closes that, and makes the opening work however the author set up the
+extraction.
+
+Each answer carries the question it answered — "about two years" is not evidence until you know it
+answered "how long has this been a problem?". The **paraphrase** is preferred over the stored value,
+because for a typed question the value is the mapped form code (`gt3`), and feeding form codes to a
+model reading for meaning is noise. An answer with neither is dropped rather than printed empty.
+
+The block is capped (`MAX_ANSWERS_IN_PLANNER_PROMPT`), and the caller orders the **opening's**
+answers first: the plan is a judgement about the opening, and a core topic with forty questions must
+not push the answers the decision rests on out of the prompt.
+
+> The `AppAiRun` prompt snapshot therefore now holds the respondent's answers verbatim, where it
+> previously held only fill paraphrases. That is the same class of content and the same retention,
+> but it is more of it — worth knowing before pointing anything new at those snapshots.
+
 ### Guardrail order
 
 ```

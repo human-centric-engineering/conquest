@@ -337,6 +337,122 @@ describe('planScope — hard rules reach the prompt correctly', () => {
   });
 });
 
+/**
+ * What the planner is allowed to read.
+ *
+ * The judgement used to see only data-slot fills — extractions from what the respondent said, never
+ * the words themselves. An instrument whose opening asks questions without data slots behind them
+ * therefore produced no evidence at all, and the planner chose sections from an empty prompt.
+ */
+describe('planScope — the evidence in the prompt', () => {
+  function systemPrompt(): string {
+    const call = (mocks.runStructuredCompletion as Mock).mock.calls[0][0] as {
+      messages: Array<{ content: string }>;
+    };
+    return call.messages[0].content;
+  }
+
+  it("puts the respondent's own words in the prompt, with the question they answered", async () => {
+    await planScope(
+      params({
+        answers: [
+          {
+            key: 'q_situation',
+            prompt: 'What is getting in the way right now?',
+            value: null,
+            paraphrase: 'Deals stall the moment procurement gets involved.',
+          },
+        ],
+      })
+    );
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain('What is getting in the way right now?');
+    expect(prompt).toContain('Deals stall the moment procurement gets involved.');
+    expect(prompt).toContain('In their own words');
+  });
+
+  it('prefers the paraphrase over the mapped form value', async () => {
+    // `value` holds the form code for a typed question. Feeding `gt3` to a model reading for
+    // meaning is noise; the paraphrase is the account the respondent would recognise.
+    await planScope(
+      params({
+        answers: [
+          {
+            key: 'q_tenure',
+            prompt: 'How long has this been going on?',
+            value: 'gt3',
+            paraphrase: 'A bit over three years, since the reorg.',
+          },
+        ],
+      })
+    );
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain('A bit over three years, since the reorg.');
+    expect(prompt).not.toContain('gt3');
+  });
+
+  it('falls back to the value when a typed answer has no paraphrase', async () => {
+    await planScope(
+      params({
+        answers: [
+          { key: 'q_score', prompt: 'How confident are you?', value: 4, paraphrase: null },
+          { key: 'q_blank', prompt: 'Anything else?', value: null, paraphrase: null },
+        ],
+      })
+    );
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain('How confident are you?');
+    expect(prompt).toContain('Answered: 4');
+    // Nothing to say is not evidence — the question is dropped rather than printed empty.
+    expect(prompt).not.toContain('Anything else?');
+  });
+
+  it('keeps the fills too, labelled as extractions rather than separate evidence', async () => {
+    await planScope(
+      params({
+        fills: [{ key: 'open_ds', value: null, paraphrase: 'Procurement is the blocker.' }],
+        answers: [
+          {
+            key: 'q_situation',
+            prompt: 'What is getting in the way?',
+            value: null,
+            paraphrase: 'Deals stall at procurement.',
+          },
+        ],
+      })
+    );
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain('Captured from what they said');
+    expect(prompt).toContain('[open_ds]');
+    // The rule that stops the model double-counting an extraction as corroboration.
+    expect(prompt).toContain('primary evidence');
+  });
+
+  it('caps how many answers it inlines', async () => {
+    const answers = Array.from({ length: 40 }, (_, i) => ({
+      key: `q${i}`,
+      prompt: `Question number ${i}?`,
+      value: null,
+      paraphrase: `Answer number ${i}.`,
+    }));
+
+    await planScope(params({ answers }));
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain('Question number 0?');
+    expect(prompt).not.toContain('Question number 39?');
+  });
+
+  it('still says so plainly when there is nothing at all', async () => {
+    await planScope(params({ fills: [], answers: [] }));
+    expect(systemPrompt()).toContain('(nothing was captured in the opening)');
+  });
+});
+
 describe('isOpeningComplete', () => {
   it('is false until every opening data slot is filled', () => {
     const topics = [

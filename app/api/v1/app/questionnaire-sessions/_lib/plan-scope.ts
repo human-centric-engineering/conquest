@@ -39,7 +39,11 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
-import { isOpeningComplete, planScope } from '@/lib/app/questionnaire/scope/planner';
+import {
+  isOpeningComplete,
+  planScope,
+  type ScopeAnswer,
+} from '@/lib/app/questionnaire/scope/planner';
 import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
   narrowAdaptiveScopeSettings,
@@ -83,11 +87,18 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
             dataSlot: { select: { key: true } },
           },
         },
-        // The opening gate's other half. "Answered" is the presence of a row, which is what every
-        // other consumer of coverage means by it (`answeredQuestionIds` in selection/context.ts) —
-        // a second definition here would let the gate and the progress bar disagree about whether
-        // the opening had finished.
-        answers: { select: { questionSlot: { select: { key: true } } } },
+        // Two jobs. The gate's other half — "answered" is the presence of a row, which is what
+        // every other consumer of coverage means by it (`answeredQuestionIds` in
+        // selection/context.ts), and a second definition here would let the gate and the progress
+        // bar disagree about whether the opening had finished. And the planner's primary evidence:
+        // what the respondent actually said, which until now it never saw.
+        answers: {
+          select: {
+            value: true,
+            paraphrase: true,
+            questionSlot: { select: { key: true, prompt: true } },
+          },
+        },
         _count: { select: { turns: true } },
       },
     });
@@ -155,10 +166,24 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       paraphrase: f.paraphrase,
     }));
 
+    // What the respondent actually said. Ordered opening-first because the prompt is capped and the
+    // opening is what the plan is a judgement about — a core topic with forty questions must not
+    // push the answers the decision rests on out of the prompt.
+    const openingKeys = new Set(openingQuestionKeys);
+    const answers: ScopeAnswer[] = session.answers
+      .map((a) => ({
+        key: a.questionSlot.key,
+        prompt: a.questionSlot.prompt,
+        value: a.value,
+        paraphrase: a.paraphrase,
+      }))
+      .sort((a, b) => Number(openingKeys.has(b.key)) - Number(openingKeys.has(a.key)));
+
     const result = await planScope({
       sessionId,
       topics,
       fills,
+      answers,
       goal: session.version.goal,
       settings,
       decidedAtTurn: session._count.turns,

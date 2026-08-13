@@ -25,3 +25,15 @@ export const MAX_FILLS_IN_PLANNER_PROMPT = 40;
 
 /** Per-fill character cap in the prompt. */
 export const PLANNER_FILL_CHARS = 600;
+
+/**
+ * How many answered questions to inline, in the respondent's own words.
+ *
+ * Smaller than the fill budget on purpose: an answer carries its question with it, so each entry
+ * costs roughly twice a fill, and the ones that matter are the opening's — which the caller orders
+ * first for exactly this reason.
+ */
+export const MAX_ANSWERS_IN_PLANNER_PROMPT = 20;
+
+/** Per-answer character cap in the prompt. */
+export const PLANNER_ANSWER_CHARS = 800;

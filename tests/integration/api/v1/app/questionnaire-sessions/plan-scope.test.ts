@@ -76,7 +76,11 @@ function session(over: { answers?: string[]; fills?: string[] } = {}) {
       provenanceLabel: 'direct',
       dataSlot: { key },
     })),
-    answers: (over.answers ?? []).map((key) => ({ questionSlot: { key } })),
+    answers: (over.answers ?? []).map((key) => ({
+      value: null,
+      paraphrase: `what they said about ${key}`,
+      questionSlot: { key, prompt: `the question behind ${key}?` },
+    })),
     _count: { turns: 1 },
   };
 }
@@ -180,5 +184,55 @@ describe('maybePlanScope — the opening gate', () => {
 
     expect((await maybePlanScope('s1')).kind).toBe('planned');
     expect(mocks.prisma.appQuestionSlot.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('maybePlanScope — the evidence it hands the planner', () => {
+  it("passes the respondent's answers through, not only the extracted fills", async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'] })
+    );
+
+    await maybePlanScope('s1');
+
+    const passed = mocks.planScope.mock.calls[0][0];
+    expect(passed.answers).toEqual([
+      {
+        key: 'q1',
+        prompt: 'the question behind q1?',
+        value: null,
+        paraphrase: 'what they said about q1',
+      },
+      {
+        key: 'q2',
+        prompt: 'the question behind q2?',
+        value: null,
+        paraphrase: 'what they said about q2',
+      },
+    ]);
+  });
+
+  it('orders the opening answers first, so a large core topic cannot crowd them out', async () => {
+    // The prompt is capped. The opening is what the plan is a judgement about, so it goes first.
+    mocks.prisma.appQuestionnaireTopic.findMany.mockResolvedValue([
+      topicRow('open', 'opening', { questionKeys: ['q1'] }),
+      topicRow('spine', 'core', { questionKeys: ['c1', 'c2'] }),
+      topicRow('pipeline', 'conditional', { questionKeys: ['p1'] }),
+    ]);
+    mocks.prisma.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'q1' },
+      { key: 'c1' },
+      { key: 'c2' },
+      { key: 'p1' },
+    ]);
+    // The core answers land first in DB order; the opening answer must still lead.
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['c1', 'c2', 'q1'] })
+    );
+
+    await maybePlanScope('s1');
+
+    const passed = mocks.planScope.mock.calls[0][0];
+    expect(passed.answers.map((a: { key: string }) => a.key)).toEqual(['q1', 'c1', 'c2']);
   });
 });
