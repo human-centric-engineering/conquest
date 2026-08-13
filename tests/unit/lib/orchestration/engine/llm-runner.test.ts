@@ -35,6 +35,7 @@ import { runLlmCall, interpolatePrompt } from '@/lib/orchestration/engine/llm-ru
 import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolver';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { ProviderError, toProviderError } from '@/lib/orchestration/llm/provider';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import type { ExecutionContext } from '@/lib/orchestration/engine/context';
 
@@ -187,6 +188,100 @@ describe('runLlmCall', () => {
       code: 'llm_call_failed',
       stepId: 's3',
     });
+  });
+
+  it('marks a deterministic provider failure non-retriable so the step stops re-issuing it', async () => {
+    // `responseFormat` reaches provider.chat from `llm_call` step config, so a
+    // truncated structured extraction surfaces here as a non-retriable
+    // ProviderError. Wrapping it at ExecutorError's optimistic default let a
+    // step's `retry` strategy re-run it for the whole retryCount, each attempt
+    // billing a full cap of output against the identical wall (#587).
+    vi.mocked(getModel).mockReturnValue({ provider: 'openai' } as any);
+    vi.mocked(getProvider).mockResolvedValue({
+      chat: vi.fn().mockRejectedValue(
+        new ProviderError('hit max_completion_tokens before a complete structured response', {
+          code: 'truncated_no_output',
+          retriable: false,
+        })
+      ),
+    } as any);
+
+    const ctx = makeCtx();
+    await expect(
+      runLlmCall(ctx, { stepId: 's4', prompt: 'test', modelOverride: 'gpt-5' })
+    ).rejects.toMatchObject({
+      name: 'ExecutorError',
+      code: 'llm_call_failed',
+      retriable: false,
+    });
+  });
+
+  it("carries the vendor's billed tokens through to the ExecutorError", async () => {
+    // The engine accumulates `err.tokensUsed`/`costUsd` into the step trace
+    // and the execution total. A truncation is a full cap of billed output —
+    // the priciest attempt a step makes — so leaving these 0 under-reports
+    // exactly the call that cost the most (#587).
+    vi.mocked(getModel).mockReturnValue({ provider: 'openai' } as any);
+    vi.mocked(calculateCost).mockReturnValue({
+      inputCostUsd: 0.001,
+      outputCostUsd: 0.05,
+      totalCostUsd: 0.051,
+    } as never);
+    vi.mocked(getProvider).mockResolvedValue({
+      chat: vi.fn().mockRejectedValue(
+        new ProviderError('hit max_completion_tokens', {
+          code: 'truncated_no_output',
+          retriable: false,
+          usage: { inputTokens: 300, outputTokens: 2048 },
+        })
+      ),
+    } as any);
+
+    const ctx = makeCtx();
+    await expect(
+      runLlmCall(ctx, { stepId: 's7', prompt: 'test', modelOverride: 'gpt-5' })
+    ).rejects.toMatchObject({
+      name: 'ExecutorError',
+      tokensUsed: 2348,
+      costUsd: 0.051,
+    });
+  });
+
+  it('leaves a status-less transport failure retriable', async () => {
+    // The regression guard. A dropped connection or read timeout reaches
+    // `toProviderError` with no HTTP status, so it becomes `provider_error`
+    // with `retriable: false` — and `withRetry` inside the adapter declines
+    // it too, making the STEP retry the only backstop. Keying this wrap on
+    // the `retriable` flag rather than the error code silently removed that.
+    vi.mocked(getModel).mockReturnValue({ provider: 'openai' } as any);
+    vi.mocked(getProvider).mockResolvedValue({
+      chat: vi
+        .fn()
+        .mockRejectedValue(toProviderError(new Error('Connection error.'), 'chat request failed')),
+    } as any);
+
+    const ctx = makeCtx();
+    await expect(
+      runLlmCall(ctx, { stepId: 's6', prompt: 'test', modelOverride: 'gpt-5' })
+    ).rejects.toMatchObject({ name: 'ExecutorError', retriable: true });
+  });
+
+  it('leaves a transient provider failure retriable', async () => {
+    // The other half: an upstream 503 is exactly what the retry strategy is
+    // for, so the optimistic default must survive.
+    vi.mocked(getModel).mockReturnValue({ provider: 'openai' } as any);
+    vi.mocked(getProvider).mockResolvedValue({
+      chat: vi
+        .fn()
+        .mockRejectedValue(
+          new ProviderError('upstream busy', { code: 'http_503', retriable: true })
+        ),
+    } as any);
+
+    const ctx = makeCtx();
+    await expect(
+      runLlmCall(ctx, { stepId: 's5', prompt: 'test', modelOverride: 'gpt-5' })
+    ).rejects.toMatchObject({ name: 'ExecutorError', retriable: true });
   });
 
   it('pushes a telemetry entry to ctx.stepTelemetry on successful call', async () => {

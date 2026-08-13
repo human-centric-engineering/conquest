@@ -209,6 +209,7 @@ const { emitHookEvent } = await import('@/lib/orchestration/hooks/registry');
 const { streamChat } = await import('@/lib/orchestration/chat/streaming-handler');
 const { CostOperation } = await import('@/types/orchestration');
 const { getBreaker } = await import('@/lib/orchestration/llm/circuit-breaker');
+const { ProviderError } = await import('@/lib/orchestration/llm/provider');
 const { scanForInjection } = await import('@/lib/orchestration/chat/input-guard');
 const { registerGuardFloorContributor, __resetGuardFloorContributorsForTests } =
   await import('@/lib/orchestration/chat/guard-floor');
@@ -2077,6 +2078,231 @@ describe('StreamingChatHandler', () => {
       expect(mockBreaker.recordFailure).toHaveBeenCalledTimes(1);
       // And success exactly once for the recovered stream
       expect(mockBreaker.recordSuccess).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not fail over or trip the breaker on a request-fault provider error', async () => {
+      // A truncation is about the agent's `maxTokens`, not the provider's
+      // health: the cap travels with the request, so every fallback rejects
+      // it identically. Failing over would bill three full-cap calls and show
+      // the visitor two `content_reset` wipes; recording a breaker failure
+      // per attempt would open the provider for every OTHER agent using it
+      // (`failureThreshold: 5`) over one agent's misconfiguration. #587
+      // made this reachable on the OpenAI-compatible adapter.
+      const failingProvider = {
+        name: 'failing',
+        isLocal: false,
+        chat: vi.fn(),
+        embed: vi.fn(),
+        listModels: vi.fn(),
+        testConnection: vi.fn(),
+        // eslint-disable-next-line require-yield
+        chatStream: vi.fn(async function* () {
+          throw new ProviderError('hit max_completion_tokens before a complete response', {
+            code: 'truncated_no_output',
+            retriable: false,
+          });
+        }),
+      };
+      const fallbackProvider = mockProvider([
+        [
+          { type: 'text', content: 'OK' },
+          { type: 'done', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'stop' },
+        ],
+      ]);
+
+      const mockBreaker = { recordSuccess: vi.fn(), recordFailure: vi.fn() };
+      (getBreaker as ReturnType<typeof vi.fn>).mockReturnValue(mockBreaker);
+
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ fallbackProviders: ['openai'] })
+      );
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider: failingProvider,
+        usedSlug: 'anthropic',
+      });
+      (getProvider as ReturnType<typeof vi.fn>).mockResolvedValue(fallbackProvider);
+
+      const events = await collect(streamChat(baseRequest));
+
+      const typed = events as Array<{ type: string; code?: string; reason?: string }>;
+      expect(mockBreaker.recordFailure).not.toHaveBeenCalled();
+      expect(fallbackProvider.chatStream).not.toHaveBeenCalled();
+      expect(typed.some((e) => e.type === 'warning' && e.code === 'provider_retry')).toBe(false);
+      // Surfaces as an error rather than silently ending the turn.
+      expect(typed.some((e) => e.type === 'error')).toBe(true);
+      // And wipes whatever fragment was streamed, so the live view agrees
+      // with the error marker a reload will show.
+      expect(typed.some((e) => e.type === 'content_reset' && e.reason === 'request_fault')).toBe(
+        true
+      );
+    });
+
+    it('keeps error markers out of the prompt on the next turn', async () => {
+      // The marker exists so the CLIENT can render a failed turn. Feeding
+      // "[An error occurred...]" back to the model burns context and invites
+      // imitation for the rest of the conversation — and now that every
+      // ProviderError persists one, it would happen on ordinary 429/503
+      // exhaustion too, where previously no row existed at all.
+      (prisma.aiMessage.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: 'm1',
+          role: 'user',
+          content: 'first question',
+          metadata: null,
+          createdAt: new Date(),
+        },
+        {
+          id: 'm2',
+          role: 'assistant',
+          content: '[An error occurred and the response could not be completed.]',
+          metadata: { error: true, errorCode: 'truncated_no_output' },
+          createdAt: new Date(),
+        },
+      ]);
+
+      const provider = mockProvider([
+        [
+          { type: 'text', content: 'ok' },
+          { type: 'done', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'stop' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+
+      await collect(streamChat(baseRequest));
+
+      const sent = (provider.chatStream as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Array<{
+        content: string;
+      }>;
+      expect(sent.some((m) => String(m.content).includes('An error occurred'))).toBe(false);
+      // The genuine turn is still there — this filters markers, not history.
+      expect(sent.some((m) => String(m.content).includes('first question'))).toBe(true);
+    });
+
+    it('cost-logs a truncated turn the vendor already billed', async () => {
+      // The `done` chunk normally carries usage and never arrives here, so
+      // the turn was charged and AiCostLog showed nothing. The guard attaches
+      // what the provider reported; this asserts it reaches logCost.
+      const failingProvider = {
+        name: 'failing',
+        isLocal: false,
+        chat: vi.fn(),
+        embed: vi.fn(),
+        listModels: vi.fn(),
+        testConnection: vi.fn(),
+        // eslint-disable-next-line require-yield
+        chatStream: vi.fn(async function* () {
+          throw new ProviderError('hit max_completion_tokens', {
+            code: 'truncated_no_output',
+            retriable: false,
+            usage: { inputTokens: 320, outputTokens: 2048 },
+          });
+        }),
+      };
+
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ fallbackProviders: [] })
+      );
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider: failingProvider,
+        usedSlug: 'anthropic',
+      });
+
+      await collect(streamChat(baseRequest));
+
+      expect(logCost).toHaveBeenCalledWith(
+        expect.objectContaining({ inputTokens: 320, outputTokens: 2048 })
+      );
+    });
+
+    it('persists an error marker so a request fault does not orphan the user turn', async () => {
+      // The user message is persisted up front, and this path returns early.
+      // Without a marker the conversation reloads as a question with no
+      // answer at all — the exact thing the generic crash path already
+      // guards against ("no orphaned user message with no response").
+      const failingProvider = {
+        name: 'failing',
+        isLocal: false,
+        chat: vi.fn(),
+        embed: vi.fn(),
+        listModels: vi.fn(),
+        testConnection: vi.fn(),
+        // eslint-disable-next-line require-yield
+        chatStream: vi.fn(async function* () {
+          throw new ProviderError('hit max_completion_tokens', {
+            code: 'truncated_no_output',
+            retriable: false,
+          });
+        }),
+      };
+
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ fallbackProviders: [] })
+      );
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider: failingProvider,
+        usedSlug: 'anthropic',
+      });
+
+      await collect(streamChat(baseRequest));
+
+      const created = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+      const marker = created.find(
+        (c) => (c[0] as { data?: { role?: string } })?.data?.role === 'assistant'
+      );
+      expect(marker).toBeDefined();
+      expect(
+        (marker?.[0] as { data: { metadata: Record<string, unknown> } }).data.metadata
+      ).toMatchObject({ error: true, errorCode: 'truncated_no_output' });
+    });
+
+    it('still fails over on a non-retriable error that IS about the provider', async () => {
+      // The guard above is a code list, not the `retriable` flag, precisely
+      // so this keeps working: `toProviderError` marks every 4xx
+      // non-retriable, and routing around a provider whose key has gone stale
+      // is exactly what a fallback is for.
+      const failingProvider = {
+        name: 'failing',
+        isLocal: false,
+        chat: vi.fn(),
+        embed: vi.fn(),
+        listModels: vi.fn(),
+        testConnection: vi.fn(),
+        // eslint-disable-next-line require-yield
+        chatStream: vi.fn(async function* () {
+          throw new ProviderError('invalid api key', {
+            code: 'http_401',
+            status: 401,
+            retriable: false,
+          });
+        }),
+      };
+      const fallbackProvider = mockProvider([
+        [
+          { type: 'text', content: 'OK' },
+          { type: 'done', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'stop' },
+        ],
+      ]);
+
+      const mockBreaker = { recordSuccess: vi.fn(), recordFailure: vi.fn() };
+      (getBreaker as ReturnType<typeof vi.fn>).mockReturnValue(mockBreaker);
+
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ fallbackProviders: ['openai'] })
+      );
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider: failingProvider,
+        usedSlug: 'anthropic',
+      });
+      (getProvider as ReturnType<typeof vi.fn>).mockResolvedValue(fallbackProvider);
+
+      const events = await collect(streamChat(baseRequest));
+
+      const typed = events as Array<{ type: string; code?: string }>;
+      expect(mockBreaker.recordFailure).toHaveBeenCalledTimes(1);
+      expect(typed.some((e) => e.type === 'warning' && e.code === 'provider_retry')).toBe(true);
     });
 
     it('does not retry on AbortError — rethrows immediately', async () => {

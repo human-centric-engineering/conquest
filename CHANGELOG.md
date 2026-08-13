@@ -202,6 +202,27 @@ release process.
   in its place (#559).
 ### Added
 
+- **`ProviderError.usage`** — tokens the provider billed for the call an error
+  ended, populated by the four truncation guards. A truncation is a full cap's
+  worth of output, the most expensive shape a turn has, and it used to vanish
+  with the response when the guard threw: the vendor charged and `AiCostLog`
+  recorded nothing. `streamChat` now costs it on that path, and
+  `runStructuredCompletion` folds it into the totals it returns. Absent for
+  errors raised before the model produced anything (#587).
+
+- **`isRequestFault()`** on `@/lib/orchestration/llm/provider` — is this
+  `ProviderError` a fault in the request rather than the provider, i.e. one
+  that re-running, re-routing or failing over cannot fix? Used by `streamChat`
+  to skip provider failover and by the engine's executors to mark the step
+  non-retriable. Currently `truncated_no_output` only (#587).
+
+- **`StructuredCompletionResult.finishReason`** — the finish reason of the
+  attempt that produced the value. Worth checking for `'length'` even on
+  success: a lenient `parse` can accept content that happened to be well-formed
+  where it was cut off, and a truncated array of results reads as a complete
+  short one. The failure path throws, so this field is the only place that case
+  is visible (#587).
+
 - **`migrator` and `seeder` Dockerfile stages**, and a profile-gated `seeder`
   compose service. Both derive from `deps`, so they duplicate no layers and cost
   a normal `docker build` nothing — BuildKit only materialises the stages the
@@ -360,6 +381,66 @@ release process.
 
 ### Changed
 
+- **A structured extraction cut off at the token cap is now an error on the
+  OpenAI-compatible adapter, not partial JSON.** It already was on Anthropic
+  and on the empty-content case; what changes is `finish_reason: 'length'` with
+  **non-empty** content when `responseFormat` is a `json_schema` and the turn
+  has no tools — on both the streaming and non-streaming paths. Such a call
+  previously returned (or streamed) a fragment of an object; it now raises
+  `ProviderError('truncated_no_output')`. **Fork-facing:** any caller that was
+  salvaging partial JSON from a truncated extraction will now see a thrown
+  error instead — raise `maxTokens`. A turn that carries tools is unaffected:
+  a `length` stop there is the ordinary partial-output case.
+  `runStructuredCompletion` keeps its retry on a truncation and now absorbs the
+  adapter's throw to get there — the stricter temp-0 retry prompt is a real
+  remedy for the commonest truncation of all, a model spending the budget on a
+  preamble before starting the JSON. Once both attempts are spent it does
+  **not** consult the caller's `onFinalFailure` hook, which exists to phrase
+  "the model broke my contract" — a premise that is false here (#587).
+
+- **A chat stream no longer fails over to another provider when the fault is in
+  the request.** A `truncated_no_output` `ProviderError` now ends the turn
+  instead of retrying against each configured fallback and recording a
+  circuit-breaker failure for every one. The token cap comes from the agent's
+  config, so a fallback rejects it identically; the old path billed a full-cap
+  call per provider, wiped the visitor's screen with a `content_reset` each
+  time, and could open a healthy provider's breaker for every other agent using
+  it. Deliberately a one-entry code list and **not** the `retriable` flag:
+  `toProviderError` marks every 4xx non-retriable, and failing over on a `401`
+  from a provider with a stale key is exactly what fallbacks are for. That path
+  also now persists an error-marker assistant message, so a failed turn no
+  longer reloads as a user question with no answer (#587).
+
+- **Error-marker assistant messages are no longer replayed into the prompt.**
+  `loadHistory` returned them like any other turn, so
+  `[An error occurred and the response could not be completed.]` became a
+  permanent part of the model's context — burning tokens and inviting
+  imitation — for the rest of the conversation. They are persisted for the
+  *client*, so a failed turn renders instead of an unanswered question, and are
+  now filtered out of prompt rebuilding. Pre-existing, but newly common: this
+  release persists a marker for every `ProviderError` reaching the outer catch,
+  where previously an exhausted 429/503 left no row at all (#587).
+
+- **A workflow step's failed LLM attempt now reports what it cost.** `llm_call`,
+  `chat_turn` and `agent_call` wrapped a `provider.chat()` throw with
+  `tokensUsed`/`costUsd` left at 0 — the very fields the engine's retry
+  accumulator folds into the step trace and the execution total. A truncation
+  is a full cap's worth of billed output, so the priciest attempt a step made
+  was the one missing from its totals. They now carry `ProviderError.usage`
+  when the provider reported it (#587).
+
+- **A request-fault provider failure is no longer retried by workflow steps.**
+  `ExecutorError` defaults to `retriable: true`, and `llm_call`, `chat_turn`
+  and `agent_call` all wrapped a `provider.chat()` throw at that default — so a
+  step with a `retry` error strategy re-issued a truncation for its whole
+  `retryCount`, each attempt billing a full cap's worth of output to hit the
+  identical wall. They now mark it non-retriable via the shared
+  `isRequestFault()`. Note this keys on the error **code**, not on
+  `ProviderError.retriable`: that flag is only set when `toProviderError` can
+  read a retriable HTTP status, so a connection reset or read timeout carries
+  `retriable: false`, and gating on it would have stopped steps retrying
+  ordinary network blips (#587).
+
 - **`.gitignore` now denies `.env*` by default** and allowlists only
   `.env.example` and `.env.development`. The previous form enumerated names, so
   `.env.production`, `.env.staging` and `.env.test` were all freely
@@ -462,6 +543,35 @@ release process.
   explicitly (#509).
 
 ### Fixed
+
+- **A truncated response is no longer reported as a schema failure on the
+  `runStructuredCompletion` and provider-adapter paths.**
+  `runStructuredCompletion` never read `finishReason`, so a response cut off at
+  the token cap arrived as text its `parse` rejected — indistinguishable, from
+  the content alone, from a model that ignored the schema. Both attempts burned
+  and the caller was told the contract was broken, which sent operators to edit
+  a schema that was never wrong. Reported from a fork whose production judge
+  failed with `"Judge response was not valid against the schema after one
+  retry"` and an empty issue list — reading as "no schema problems found"
+  rather than "we never got JSON" — when the real fault was a 2048-token cap on
+  a reasoning model, where the cap covers hidden reasoning tokens as well as
+  visible output. The error now names the truncation and the cap on the three
+  routes that can detect it: both provider adapters and the runner, which
+  raises it once both attempts are spent. **Two in-repo paths are not covered**
+  and are tracked separately: evaluation judge agents go through
+  `drainStreamChat`, whose `done` event carries no finish reason, and the
+  orchestrator planner uses `json_object` rather than `json_schema` (#594)
+  (#587).
+
+- **`truncated_no_output` gains user-facing chat copy.** It had no `ERROR_MAP`
+  entry, so `getUserFacingError` fell through to the generic "Something went
+  wrong" — the actionable detail reached the server log and the trace but never
+  the person who could act on it. The copy is deliberately vaguer than the
+  underlying `ProviderError`, because this registry is rendered by whatever
+  client is attached, a fork's end-user surface included. Note the bundled
+  embed widget does **not** consult it — it renders a fixed
+  `'Something went wrong.'` for every error event — so this reaches the admin
+  chat interface and any client that calls `getUserFacingError` (#587).
 
 - **`CI_NODE_HEAP_MB` now reaches the Docker build.** A workflow-level `env:`
   does not cross into a container build, so raising the variable moved

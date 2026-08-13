@@ -25,6 +25,7 @@ import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolver';
 import type { ExecutionContext } from '@/lib/orchestration/engine/context';
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
+import { isRequestFault, ProviderError } from '@/lib/orchestration/llm/provider';
 import { interpolatePrompt } from '@/lib/orchestration/engine/interpolate-prompt';
 import {
   GEN_AI_OPERATION_NAME,
@@ -144,11 +145,26 @@ export async function runLlmCall(
           signal: ctx.signal,
         });
       } catch (err) {
+        // Honour a deterministic provider verdict. `responseFormat` reaches
+        // here from `llm_call` step config, so a truncated structured
+        // extraction lands as a non-retriable `truncated_no_output` — and the
+        // step's `retry` strategy would otherwise re-issue it at the same cap
+        // until `retryCount` ran out.
+        const billed = err instanceof ProviderError ? err.usage : undefined;
+        // Carry what the vendor billed before it gave up. A truncation is a
+        // full cap's worth of output — the most expensive attempt a step can
+        // make — and `ExecutorError`'s `tokensUsed`/`costUsd` are exactly the
+        // slots the engine's retry accumulator reads (orchestration-engine.ts).
+        // Leaving them 0 under-reports the execution total for the priciest
+        // call it made. Same hole `streamChat` closes on its own error path.
         throw new ExecutorError(
           params.stepId,
           'llm_call_failed',
           err instanceof Error ? err.message : 'LLM call failed',
-          err
+          err,
+          !isRequestFault(err),
+          billed ? billed.inputTokens + billed.outputTokens : 0,
+          billed ? calculateCost(modelId, billed.inputTokens, billed.outputTokens).totalCostUsd : 0
         );
       }
       const callDurationMs = Date.now() - callStarted;
