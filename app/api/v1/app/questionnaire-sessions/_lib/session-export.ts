@@ -22,6 +22,7 @@ import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/sc
 import {
   narrowAdaptiveScopeSettings,
   type NotAssessedTopic,
+  type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
 import { logger } from '@/lib/logging';
 import {
@@ -91,6 +92,18 @@ export interface LoadedSessionExport {
    * it did not assess, and by the exports so a blank cell reads as *not asked*.
    */
   notAssessed: NotAssessedTopic[];
+  /**
+   * Adaptive Scope (P17): which topic PHASE each in-scope key belongs to — `opening`, `core`,
+   * `conditional` or `closing`. Empty for a version with no topics authored.
+   *
+   * Exposed for the report's open-vs-close reconciliation (C9), which needs to tell an opening
+   * question from a closing one without the admin naming every key. Deliberately the phase rather
+   * than the topic: a consumer asking "what did they say at the start?" cares about position in the
+   * interview, and topics are the thing that moves between versions.
+   */
+  phaseByQuestionKey: Map<string, TopicPhase>;
+  /** The same, per data-slot key. */
+  phaseByDataSlotKey: Map<string, TopicPhase>;
   /** The version this session ran on — the seam resolves the version-scoped glossary from it. */
   versionId: string;
   /** The version's `glossaryReportAppendix` switch: does the RESPONDENT's copy carry the glossary? */
@@ -313,12 +326,24 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     }
     const fill = fillBySlotId.get(ds.id);
     group.slots.push({
+      key: ds.key,
       name: ds.name,
       description: ds.description,
       value: fill?.paraphrase ?? null,
       rationale: fill?.rationale ?? null,
       confidence: fill?.confidence ?? null,
     });
+  }
+
+  // Topic phase per key — the report's reconciliation reads it to find the opening and closing ends
+  // of the interview when the admin has not named them. Built from the topics rather than the plan:
+  // a question's phase is a property of how the instrument was authored, not of what this
+  // respondent's interview chose.
+  const phaseByQuestionKey = new Map<string, TopicPhase>();
+  const phaseByDataSlotKey = new Map<string, TopicPhase>();
+  for (const topic of scoped.topics) {
+    for (const key of topic.members.questionKeys) phaseByQuestionKey.set(key, topic.phase);
+    for (const key of topic.members.dataSlotKeys) phaseByDataSlotKey.set(key, topic.phase);
   }
 
   const demoClient = row.version.questionnaire.demoClient;
@@ -346,6 +371,8 @@ export async function loadSessionExport(sessionId: string): Promise<LoadedSessio
     answers,
     dataSlotGroups,
     notAssessed,
+    phaseByQuestionKey,
+    phaseByDataSlotKey,
     versionId: row.versionId,
     glossaryReportAppendix:
       row.version.config?.glossaryReportAppendix ??

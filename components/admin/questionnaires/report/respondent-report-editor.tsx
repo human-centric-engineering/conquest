@@ -157,6 +157,20 @@ export function RespondentReportEditor({
     }
     patch(next);
   }
+  /**
+   * Split a comma/whitespace-separated ref list into keys.
+   *
+   * Kept forgiving on the separator (commas, newlines, spaces all work) because these are keys
+   * copied out of the Structure editor, and an admin pasting a column of them should not have to
+   * reformat it. Empties are dropped; the server narrows again on save.
+   */
+  function parseRefs(raw: string): string[] {
+    return raw
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   function patchGeneration(next: Partial<RespondentReportSettings['generation']>) {
     setValue((v) => ({ ...v, generation: { ...v.generation, ...next } }));
     setSavedOk(false);
@@ -454,6 +468,105 @@ export function RespondentReportEditor({
                   placeholder="e.g. This is a quarterly engagement pulse. Low autonomy scores usually point to process friction; emphasise practical, low-effort actions."
                   onChange={(e) => patchGeneration({ backgroundContext: e.target.value })}
                 />
+              </div>
+
+              {/* C9 — hold the close against the open. Placed after structure/background because it
+                  is a claim about what the report SAYS, not about how it reads. */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={value.generation.reconciliation.enabled}
+                    onCheckedChange={(v) =>
+                      patchGeneration({
+                        reconciliation: { ...value.generation.reconciliation, enabled: v },
+                      })
+                    }
+                    disabled={isSaving || !usesAgent}
+                    id="rr-reconciliation"
+                  />
+                  <Label htmlFor="rr-reconciliation" className="flex items-center gap-1">
+                    Compare what they said they wanted with what was measured
+                    <FieldHelp title="Stated need vs measured result">
+                      <p>
+                        Holds three things against each other in the report: what the respondent
+                        said they needed at the start, what they asked for at the end, and what
+                        their answers actually scored. Where those disagree is usually the most
+                        useful thing the exercise produces, and the writer is told to name the gap
+                        rather than smooth it over.
+                      </p>
+                      <p>
+                        The scores come from this version&rsquo;s scoring schema, computed fresh. If
+                        there is no schema, the comparison runs on the respondent&rsquo;s own words
+                        alone and no score is invented.
+                      </p>
+                      <p>Off by default.</p>
+                    </FieldHelp>
+                  </Label>
+                </div>
+                {value.generation.reconciliation.enabled && (
+                  <div className="grid gap-3 pl-10 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rr-goal-refs" className="flex items-center gap-1">
+                        Where they state what they need
+                        <FieldHelp title="Opening keys">
+                          <p>
+                            Comma-separated question or data-slot keys — e.g.{' '}
+                            <code>0.2, primary_goal</code>.
+                          </p>
+                          <p>
+                            Leave empty and the report uses the free-text answers under your
+                            <em> opening </em> topics instead. That needs no setup, but it cannot
+                            tell &ldquo;what do you want to achieve?&rdquo; from any other opening
+                            question — name the key when precision matters.
+                          </p>
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        id="rr-goal-refs"
+                        value={value.generation.reconciliation.statedGoalRefs.join(', ')}
+                        disabled={isSaving || !usesAgent}
+                        placeholder="Leave empty to use opening topics"
+                        onChange={(e) =>
+                          patchGeneration({
+                            reconciliation: {
+                              ...value.generation.reconciliation,
+                              statedGoalRefs: parseRefs(e.target.value),
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rr-ask-refs" className="flex items-center gap-1">
+                        Where they say what they want done
+                        <FieldHelp title="Closing keys">
+                          <p>
+                            Comma-separated question or data-slot keys — e.g.{' '}
+                            <code>15.1, 15.2</code>.
+                          </p>
+                          <p>
+                            Leave empty to use the free-text answers under your <em>closing</em>{' '}
+                            topics.
+                          </p>
+                        </FieldHelp>
+                      </Label>
+                      <Input
+                        id="rr-ask-refs"
+                        value={value.generation.reconciliation.askedForRefs.join(', ')}
+                        disabled={isSaving || !usesAgent}
+                        placeholder="Leave empty to use closing topics"
+                        onChange={(e) =>
+                          patchGeneration({
+                            reconciliation: {
+                              ...value.generation.reconciliation,
+                              askedForRefs: parseRefs(e.target.value),
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3">

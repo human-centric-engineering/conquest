@@ -125,6 +125,17 @@ export function buildReportMethodView(
       value: String(sampledTopics.length),
     });
   }
+  // C9: stated-vs-measured. A reader who is about to be contradicted should be able to see that the
+  // measured half came from fixed rules, not the writer's reading of their transcript.
+  if (answers.reconciliation) {
+    facts.push({
+      key: 'reconciliation',
+      label: 'What you said, checked against what was measured',
+      value: answers.reconciliation.scored
+        ? `${answers.reconciliation.scales} measure(s)`
+        : 'Your own words only',
+    });
+  }
   if (knowledge.consulted) {
     facts.push({
       key: 'documents',

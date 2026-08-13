@@ -99,7 +99,12 @@ are there — normalise each item to 0–1 against its own bounds before combini
 
 ---
 
-## 4. Open-vs-close reconciliation (G05 / C9) · **~1 day** · _the client's headline output_
+## 4. Open-vs-close reconciliation (G05 / C9) · **DONE** — see [`f17.11.md`](./f17.11.md)
+
+> Shipped 2026-08-13. `generation.reconciliation` (off by default) names the two ends by key, or
+> derives them from Adaptive Scope topic phases, and puts freshly-computed scores in the writer's
+> prompt for the first time. The prompt block instructs the writer to name the disagreement, and
+> forbids manufacturing one.
 
 The workbook is unusually direct about this one:
 

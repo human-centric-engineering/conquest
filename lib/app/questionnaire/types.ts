@@ -827,6 +827,27 @@ export type RespondentReportSettings = {
      * agent, which is instructed to give low-confidence items less weight and disregard the unreliable.
      */
     discountLowConfidence: boolean;
+    /**
+     * Hold what the respondent SAID they needed against what the instrument MEASURED (C9 / G05).
+     *
+     * A diagnostic asks for a goal at the start, asks what the respondent wants done at the end, and
+     * scores the ground in between. Where those three disagree is the most useful thing the exercise
+     * produces — and the writer cannot find it unaided, because the transcript flattens the opening
+     * and closing answers into undifferentiated Q&A lines and the scores are not in the prompt at
+     * all. This block names the two ends and turns the comparison on.
+     *
+     * `statedGoalRefs` / `askedForRefs` are question keys or data-slot keys. Leave either empty and
+     * the ends are derived from Adaptive Scope's topic phases instead (free-text answers under
+     * `opening` topics, and under `closing` ones) — which is why an instrument with topics authored
+     * needs no configuration at all, and one without them needs the keys.
+     */
+    reconciliation: {
+      enabled: boolean;
+      /** Keys that captured what the respondent said they needed. Empty ⇒ derive from opening topics. */
+      statedGoalRefs: string[];
+      /** Keys that captured what they asked for. Empty ⇒ derive from closing topics. */
+      askedForRefs: string[];
+    };
   };
   delivery: {
     /** Show the report on the completion screen. */
@@ -897,6 +918,9 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
     useClientKnowledge: false,
     dataSlotInfluence: DEFAULT_DATA_SLOT_INFLUENCE,
     discountLowConfidence: true,
+    // Off: an instrument that never asks what the respondent wants has nothing to reconcile, and a
+    // report that invents the comparison anyway would be manufacturing a disagreement.
+    reconciliation: { enabled: false, statedGoalRefs: [], askedForRefs: [] },
   },
   delivery: { onScreen: true, download: true, explainMethod: false },
   research: {

@@ -524,6 +524,7 @@ export async function synthesiseSampleReportInputs(
       groups.push(group);
     }
     group.slots.push({
+      key: ds.key,
       name: ds.name,
       description: ds.description,
       value: fill.value,

@@ -397,6 +397,10 @@ describe('buildSessionExportPdfModel', () => {
     return {
       session: { id: 'sess-1', respondentUserId: 'user-1' },
       questionnaireId: 'q-1',
+      // C9: topic phase per key, so the report can find the opening and closing ends of an
+      // interview without the admin naming every key. Empty here — no topics on this fixture.
+      phaseByQuestionKey: new Map(),
+      phaseByDataSlotKey: new Map(),
       // Definitions / glossary (P16): the version the seam resolves the glossary from, and the
       // switch that decides whether the RESPONDENT's copy carries it.
       versionId: 'ver-1',

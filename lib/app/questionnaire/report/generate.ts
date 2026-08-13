@@ -28,7 +28,10 @@ import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { RESPONDENT_REPORT_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
 import { formatReportContent } from '@/lib/app/questionnaire/report/format';
 import type { RespondentReportSettings } from '@/lib/app/questionnaire/types';
-import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
+import {
+  loadSessionExport,
+  type LoadedSessionExport,
+} from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
 import type { NotAssessedTopic } from '@/lib/app/questionnaire/scope/types';
 import { buildAnswerPanelView } from '@/lib/app/questionnaire/panel/answer-panel';
 import {
@@ -57,6 +60,14 @@ import {
   MethodRecorder,
   type ReportMethodRecord,
 } from '@/lib/app/questionnaire/report/method-record';
+import {
+  buildReconciliation,
+  reconciliationRules,
+  type ReconciliationInput,
+} from '@/lib/app/questionnaire/report/reconciliation';
+import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring/schema-validation';
+import { buildScoringInputs, scoreSessions } from '@/lib/app/questionnaire/scoring/compute';
+import type { RespondentScores } from '@/lib/app/questionnaire/scoring/types';
 import { summariseReportMethod } from '@/lib/app/questionnaire/report/method-summary';
 import { logAppLlmCost } from '@/lib/app/questionnaire/llm/log-app-cost';
 
@@ -325,6 +336,11 @@ function buildReportMessages(opts: {
    */
   notAssessed?: readonly NotAssessedTopic[];
   /**
+   * Open-vs-close reconciliation (C9): the three views of the interview the writer is asked to hold
+   * against each other. Absent → no block, and the prompt is exactly as it was before.
+   */
+  reconciliation?: ReconciliationInput;
+  /**
    * Definitions / glossary (P16): the version's whole accepted set, as `"- <term>: <definition>"`
    * lines. Unlike the per-turn seams this is NOT relevance-filtered — generation runs once per
    * session, so filtering would only risk withholding a term the writer needs, for no per-turn
@@ -342,6 +358,7 @@ function buildReportMessages(opts: {
     includesAppendedData,
     coverage,
     notAssessed,
+    reconciliation,
     glossary,
   } = opts;
   const gen = settings.generation;
@@ -370,6 +387,11 @@ function buildReportMessages(opts: {
   // Immediately after it, the other kind of gap: what nobody asked. Ordering is deliberate — the
   // writer reads "skipped" and "never asked" side by side, which is the only way to keep them apart.
   if (notAssessed && notAssessed.length > 0) system.push(notAssessedRules(notAssessed));
+  // And then the comparison those two gaps bound: what they said they needed, what they asked for,
+  // and what was actually measured. Seated after the scope blocks on purpose — the writer must know
+  // which areas were never assessed BEFORE being asked to reconcile, or it will read a missing
+  // measurement as a poor one.
+  if (reconciliation) system.push(reconciliationRules(reconciliation));
   if (includesAppendedData) system.push(APPENDED_DATA_RULES);
   // Contextual data-slot understanding + the weighting that balances it against the direct answers.
   // Only present when the version has data slots — otherwise the report is answers-only, as before.
@@ -480,6 +502,15 @@ export interface ReportGenerationInputs {
    * non-adaptive session, which produces exactly the prompt this did before P17.
    */
   notAssessed?: NotAssessedTopic[];
+  /**
+   * Open-vs-close reconciliation (C9): what the respondent said they needed, what they asked for,
+   * and what the assessment measured, held apart so the writer can be told to compare them.
+   *
+   * Absent when the setting is off, when neither end could be identified, or on a version with no
+   * scoring schema AND nothing said at either end — in which case the prompt is exactly what it was
+   * before this existed.
+   */
+  reconciliation?: ReconciliationInput;
   /** Attributed client for optional KB grounding; null disables it (e.g. preview). */
   demoClientId: string | null;
   /** The session id (or a `preview:<vid>` sentinel) — used for research logging + KB warnings. */
@@ -516,6 +547,67 @@ export async function generateRespondentReport(sessionId: string): Promise<Gener
   if (!meta?.version) throw new Error(`Session ${sessionId} not found for report generation`);
   const settings = narrowRespondentReportSettings(meta.version.config?.respondentReport);
   return generateRespondentReportWithSettings(sessionId, settings);
+}
+
+/**
+ * Assemble the open-vs-close reconciliation for one real session (C9), or null when there is nothing
+ * to reconcile.
+ *
+ * The scores are computed FRESH rather than read from `AppRespondentScore`. That table is only
+ * written when a schema is saved, so for most sessions the row is either absent or was computed
+ * against an older schema — and a report that contradicts a respondent using a stale number is
+ * worse than one that does not contradict them at all. `scoreSessions` is the same path the cohort
+ * report takes, so the two surfaces cannot disagree.
+ *
+ * Deliberately best-effort: a reconciliation block is an enhancement, and a scoring schema that
+ * fails to load must not cost the respondent their whole report.
+ */
+async function buildSessionReconciliation(
+  sessionId: string,
+  versionId: string,
+  settings: RespondentReportSettings,
+  loaded: LoadedSessionExport
+): Promise<ReconciliationInput | null> {
+  const cfg = settings.generation.reconciliation;
+  if (!cfg.enabled) return null;
+
+  let scores: RespondentScores | null = null;
+  const scaleNames = new Map<string, string>();
+  try {
+    const row = await prisma.appScoringSchema.findUnique({
+      where: { versionId },
+      select: { content: true },
+    });
+    if (row) {
+      const schema = narrowScoringSchemaContent(row.content);
+      for (const scale of schema.scales) scaleNames.set(scale.key, scale.name);
+      if (schema.items.length > 0) {
+        const inputs = await buildScoringInputs(versionId);
+        const scored = await scoreSessions(schema, [sessionId], inputs);
+        scores = scored.get(sessionId) ?? null;
+      }
+    }
+  } catch (err) {
+    logger.warn('respondent report: reconciliation scoring failed', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return buildReconciliation({
+    statedGoalRefs: cfg.statedGoalRefs,
+    askedForRefs: cfg.askedForRefs,
+    sections: loaded.sections,
+    answers: loaded.answers,
+    dataSlots: loaded.dataSlotGroups.flatMap((g) =>
+      g.slots.map((s) => ({ key: s.key, name: s.name, value: s.value }))
+    ),
+    phaseByQuestionKey: loaded.phaseByQuestionKey,
+    phaseByDataSlotKey: loaded.phaseByDataSlotKey,
+    scores,
+    scaleNames,
+    notAssessedLabels: loaded.notAssessed.map((t) => t.label),
+  });
 }
 
 /**
@@ -571,6 +663,15 @@ export async function generateRespondentReportWithSettings(
   const completionPct =
     panel.totalCount > 0 ? Math.round((panel.answeredCount / panel.totalCount) * 100) : 100;
 
+  // What they said they needed, what they asked for, what was measured — pulled apart so the writer
+  // can be told to compare them. Null unless the admin turned it on and an end could be identified.
+  const reconciliation = await buildSessionReconciliation(
+    sessionId,
+    meta.versionId,
+    settings,
+    loaded
+  );
+
   return generateReportFromInputs({
     settings,
     goal: loaded.goal,
@@ -591,6 +692,7 @@ export async function generateRespondentReportWithSettings(
     // What the interview never asked about. The honest half of an adaptive instrument's record: a
     // report that silently omits what it skipped is a report that implies it looked everywhere.
     ...((loaded.notAssessed?.length ?? 0) > 0 ? { notAssessed: loaded.notAssessed } : {}),
+    ...(reconciliation ? { reconciliation } : {}),
   });
 }
 
@@ -613,6 +715,7 @@ export async function generateReportFromInputs(
     sessionId,
     coverage,
     notAssessed,
+    reconciliation,
     preview = false,
   } = inputs;
 
@@ -635,6 +738,15 @@ export async function generateReportFromInputs(
             questionCount: t.questionCount,
             partial: t.partial,
           })),
+        }
+      : {}),
+    ...(reconciliation
+      ? {
+          reconciliation: {
+            ran: true as const,
+            scored: reconciliation.scored.length > 0,
+            scales: reconciliation.scored.length,
+          },
         }
       : {}),
   });
@@ -773,6 +885,7 @@ export async function generateReportFromInputs(
     })(),
     ...(coverage ? { coverage } : {}),
     ...(notAssessed && notAssessed.length > 0 ? { notAssessed } : {}),
+    ...(reconciliation ? { reconciliation } : {}),
     ...(inputs.glossary && inputs.glossary.length > 0 ? { glossary: inputs.glossary } : {}),
   });
   const result = await runStructuredCompletion<RespondentReportContent>({

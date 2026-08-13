@@ -119,11 +119,12 @@ describe('renderSessionPdf', () => {
             theme: 'Working style',
             slots: [
               {
+                key: 'focus_needs',
                 name: 'Focus needs',
                 description: null,
                 value: 'Prefers deep, uninterrupted blocks.',
               },
-              { name: 'Collaboration', description: null, value: null },
+              { key: 'collaboration', name: 'Collaboration', description: null, value: null },
             ],
           },
         ],

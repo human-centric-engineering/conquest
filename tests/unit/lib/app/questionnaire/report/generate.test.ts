@@ -15,7 +15,13 @@ vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionnaireSession: { findUnique: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
+    // C9: the reconciliation block computes scores fresh from the version's schema.
+    appScoringSchema: { findUnique: vi.fn() },
   },
+}));
+vi.mock('@/lib/app/questionnaire/scoring/compute', () => ({
+  buildScoringInputs: vi.fn(),
+  scoreSessions: vi.fn(),
 }));
 vi.mock('@/lib/logging', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
 vi.mock('@/lib/app/questionnaire/report/format', () => ({ formatReportContent: vi.fn() }));
@@ -44,9 +50,13 @@ import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manag
 import { searchKnowledge } from '@/lib/orchestration/knowledge/search';
 import { resolveClientKnowledgeDocumentIds } from '@/lib/app/questionnaire/report/client-knowledge';
 import { loadSessionExport } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-export';
+import { buildScoringInputs, scoreSessions } from '@/lib/app/questionnaire/scoring/compute';
 import { runReportResearch } from '@/lib/app/questionnaire/report/research';
 import { synthesiseReportAppendix } from '@/lib/app/questionnaire/report/appendix';
-import { generateRespondentReport } from '@/lib/app/questionnaire/report/generate';
+import {
+  generateRespondentReport,
+  generateRespondentReportWithSettings,
+} from '@/lib/app/questionnaire/report/generate';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -110,6 +120,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(sessionMeta());
   (loadSessionExport as Mock).mockResolvedValue(loadedExport());
+  (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue(null);
+  (buildScoringInputs as Mock).mockResolvedValue({
+    bounds: new Map(),
+    questionKeyById: new Map(),
+    dataSlotKeyById: new Map(),
+  });
+  (scoreSessions as Mock).mockResolvedValue(new Map());
   (prisma.aiAgent.findUnique as Mock).mockResolvedValue({
     provider: 'openai',
     model: 'test-model',
@@ -1469,5 +1486,182 @@ describe('generateRespondentReport — Adaptive Scope (P17) not-assessed topics'
       { key: 'talent', label: 'Talent', questionCount: 7, partial: false },
     ]);
     expect(system).not.toContain('SAMPLED ONLY');
+  });
+});
+
+/**
+ * C9 — open-vs-close reconciliation.
+ *
+ * The wiring is the risk here, not the prose: the block is assembled from three sources that had
+ * never met (the export's answers, the version's topic phases, and freshly-computed scores), and the
+ * failure mode is that it silently does not reach the prompt at all.
+ */
+describe('generateRespondentReport — open-vs-close reconciliation (C9)', () => {
+  const RECONCILIATION_SETTINGS = {
+    enabled: true,
+    mode: 'narrative' as const,
+    rawIncludes: { dataSlots: false, questionsAsPresented: false },
+    generation: {
+      narrativeStyle: 'flowing' as const,
+      instructions: '',
+      structure: '',
+      backgroundContext: '',
+      useClientKnowledge: false,
+      dataSlotInfluence: 50,
+      discountLowConfidence: false,
+      reconciliation: { enabled: true, statedGoalRefs: ['q1'], askedForRefs: ['q2'] },
+    },
+    delivery: { onScreen: true, download: true, explainMethod: false },
+    research: {
+      enabled: false,
+      timing: 'before' as const,
+      rounds: 1,
+      maxResults: 5,
+      before: { instructions: '' },
+      after: { instructions: '' },
+      display: 'list' as const,
+      informNarrative: true,
+      appendix: false,
+    },
+  };
+
+  /** The loaded export with both ends of the comparison answered. */
+  function exportWithBothEnds() {
+    const base = loadedExport();
+    return {
+      ...base,
+      sections: [
+        {
+          sectionId: 's1',
+          title: 'Wellbeing',
+          slots: [
+            { slotKey: 'q1', prompt: 'What do you need?', type: 'free_text', required: false },
+            { slotKey: 'q2', prompt: 'What should we do?', type: 'free_text', required: false },
+          ],
+        },
+      ],
+      answers: [
+        { ...base.answers[0], slotKey: 'q1', value: 'A predictable revenue engine' },
+        { ...base.answers[0], slotKey: 'q2', value: 'Fix our pipeline' },
+      ],
+      phaseByQuestionKey: new Map(),
+      phaseByDataSlotKey: new Map(),
+      dataSlotGroups: [],
+      notAssessed: [],
+    };
+  }
+
+  async function systemPromptFor(loaded: unknown, settings = RECONCILIATION_SETTINGS) {
+    (loadSessionExport as Mock).mockResolvedValue(loaded);
+    const { provider, chat } = fakeProvider(VALID_RESPONSE);
+    (getProviderWithFallbacks as Mock).mockResolvedValue({ provider, usedSlug: 'openai' });
+    const result = await generateRespondentReportWithSettings('sess-1', settings);
+    const system = (chat.mock.calls[0][0] as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'system'
+    )!.content;
+    return { system, result };
+  }
+
+  it('emits no block at all when the setting is off', async () => {
+    const off = {
+      ...RECONCILIATION_SETTINGS,
+      generation: {
+        ...RECONCILIATION_SETTINGS.generation,
+        reconciliation: { enabled: false, statedGoalRefs: [], askedForRefs: [] },
+      },
+    };
+    const { system } = await systemPromptFor(exportWithBothEnds(), off);
+    expect(system).not.toContain('WHAT THEY SAID vs WHAT WAS MEASURED');
+  });
+
+  it('puts both ends in the prompt, addressed by key', async () => {
+    const { system } = await systemPromptFor(exportWithBothEnds());
+    expect(system).toContain('WHAT THEY SAID vs WHAT WAS MEASURED');
+    expect(system).toContain('A predictable revenue engine');
+    expect(system).toContain('Fix our pipeline');
+  });
+
+  it('puts real computed scores in the prompt', async () => {
+    // The half config alone could never supply: the writer sees the scoring engine's output rather
+    // than re-deriving an impression from raw likert values in the transcript.
+    (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue({
+      content: {
+        scales: [{ key: 'data', name: 'Data maturity' }],
+        items: [{ source: 'question', ref: 'q3', scaleKey: 'data', weight: 1, reverse: false }],
+        bands: [],
+        method: 'mean',
+      },
+    });
+    (scoreSessions as Mock).mockResolvedValue(
+      new Map([
+        [
+          'sess-1',
+          {
+            data: {
+              raw: 2.1,
+              normalised: null,
+              band: 'Low',
+              itemCount: 3,
+              assessedItemCount: 3,
+              totalItemCount: 3,
+            },
+          },
+        ],
+      ])
+    );
+    const { system, result } = await systemPromptFor(exportWithBothEnds());
+    expect(system).toContain('Data maturity: 2.10 — Low');
+    expect(result.methodRecord?.answers.reconciliation).toEqual({
+      ran: true,
+      scored: true,
+      scales: 1,
+    });
+  });
+
+  it('still reconciles the two ends when the version has no scoring schema', async () => {
+    const { system, result } = await systemPromptFor(exportWithBothEnds());
+    expect(system).toContain('WHAT THEY SAID vs WHAT WAS MEASURED');
+    expect(system).toContain('Do NOT invent a score');
+    expect(result.methodRecord?.answers.reconciliation).toEqual({
+      ran: true,
+      scored: false,
+      scales: 0,
+    });
+  });
+
+  it('does not fail the report when scoring throws', async () => {
+    // A reconciliation block is an enhancement. A scoring schema that will not load must not cost
+    // the respondent their whole report.
+    (prisma.appScoringSchema.findUnique as Mock).mockRejectedValue(new Error('db down'));
+    const { system, result } = await systemPromptFor(exportWithBothEnds());
+    expect(result.content.summary).toBe('You are engaged.');
+    expect(system).toContain('WHAT THEY SAID vs WHAT WAS MEASURED');
+  });
+
+  it('emits nothing when neither end could be identified', async () => {
+    const empty = { ...exportWithBothEnds(), answers: [] };
+    const { system, result } = await systemPromptFor(empty);
+    expect(system).not.toContain('WHAT THEY SAID vs WHAT WAS MEASURED');
+    expect(result.methodRecord?.answers.reconciliation).toBeUndefined();
+  });
+
+  it('derives the ends from topic phases when no refs are configured', async () => {
+    const derived = {
+      ...exportWithBothEnds(),
+      phaseByQuestionKey: new Map([
+        ['q1', 'opening'],
+        ['q2', 'closing'],
+      ]),
+    };
+    const noRefs = {
+      ...RECONCILIATION_SETTINGS,
+      generation: {
+        ...RECONCILIATION_SETTINGS.generation,
+        reconciliation: { enabled: true, statedGoalRefs: [], askedForRefs: [] },
+      },
+    };
+    const { system } = await systemPromptFor(derived, noRefs);
+    expect(system).toContain('A predictable revenue engine');
+    expect(system).toContain('Fix our pipeline');
   });
 });

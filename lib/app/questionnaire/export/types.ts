@@ -31,6 +31,12 @@ export interface ExportRespondent {
 
 /** One captured data-slot value in the "Captured information" appendix (respondent-facing). */
 export interface ExportDataSlotEntry {
+  /**
+   * The slot's stable key. Carried so a consumer can ADDRESS a particular slot — the report's
+   * open-vs-close reconciliation (C9) is configured by key, and without this the group carried only
+   * display text, which is renamable and therefore not something config can point at.
+   */
+  key: string;
   /** The slot's short name (the label shown to the respondent). */
   name: string;
   /** The slot's description, or null. */

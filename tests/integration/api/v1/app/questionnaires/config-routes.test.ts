@@ -318,6 +318,7 @@ describe('upsert + response', () => {
         useClientKnowledge: true,
         dataSlotInfluence: 60,
         discountLowConfidence: false,
+        reconciliation: { enabled: true, statedGoalRefs: ['0.2'], askedForRefs: ['15.1'] },
       },
       delivery: { onScreen: true, download: true, explainMethod: true },
       research: {

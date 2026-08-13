@@ -227,6 +227,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
         structure: '',
         backgroundContext: '',
         useClientKnowledge: false,
+        reconciliation: { enabled: false, statedGoalRefs: [], askedForRefs: [] },
         dataSlotInfluence: 50,
         discountLowConfidence: true,
       },

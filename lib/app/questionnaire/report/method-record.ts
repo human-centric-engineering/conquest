@@ -88,6 +88,16 @@ export interface ReportMethodAnswers {
    * method panel that omits the narrowing is the last place it could have been caught.
    */
   notAssessed?: { label: string; questionCount: number; partial: boolean }[];
+  /**
+   * Open-vs-close reconciliation (C9): whether the report was asked to hold what the respondent said
+   * they needed against what was measured, and whether real scores were part of that comparison.
+   *
+   * Recorded because the comparison is the most confrontational thing a report does. A reader told
+   * "you asked for X but the evidence points at Y" is owed the fact that the second half came from
+   * fixed scoring rules rather than the writer's impression — and when `scored` is false, that it
+   * did not.
+   */
+  reconciliation?: { ran: true; scored: boolean; scales: number };
 }
 
 /** One knowledge-base document that actually contributed a retrieved snippet. */
@@ -370,6 +380,17 @@ export function renderMethodSummaryTemplate(record: ReportMethodRecord): string 
     );
   }
 
+  if (answers.reconciliation) {
+    parts.push(
+      answers.reconciliation.scored
+        ? 'What you said you wanted at the start was compared against what your answers actually ' +
+            `scored across ${plural(answers.reconciliation.scales, 'measure', 'measures')}, and ` +
+            'the report says where those two disagree.'
+        : 'What you said you wanted at the start was compared against what you asked for at the ' +
+            'end, and the report says where those two disagree.'
+    );
+  }
+
   if (answers.usedDataSlots) {
     parts.push(
       'Background you shared during the conversation was taken into account alongside your answers.'
@@ -470,6 +491,17 @@ export function narrowMethodRecord(value: unknown): ReportMethodRecord | null {
               questionCount: asInt(t.questionCount),
               partial: asBool(t.partial),
             })),
+          }
+        : {}),
+      // C9. Absent unless the comparison actually ran, for the same reason as `notAssessed` above:
+      // a surface must be able to tell "it did not run" from "we did not record whether it did".
+      ...(isRecord(answers.reconciliation)
+        ? {
+            reconciliation: {
+              ran: true as const,
+              scored: asBool(answers.reconciliation.scored),
+              scales: asInt(answers.reconciliation.scales),
+            },
           }
         : {}),
     },

@@ -320,6 +320,62 @@ To feed the data-slot rationale + confidence, `loadSessionExport` loads them ont
 `ExportDataSlotGroup` slot (`rationale` / `confidence`, additive — the respondent-facing "Captured
 information" appendix ignores them).
 
+## What they said vs what was measured (C9)
+
+`generation.reconciliation` (**off by default**) holds three views of the same interview against each
+other and instructs the writer to **name where they disagree**: what the respondent said they needed
+at the start, what they asked to have done at the end, and what their answers actually scored. The
+workbook this came from is blunt about why — _"disagreement between what they say they need and what
+the scores show is the most valuable output the tool produces."_
+
+**Why it is code and not just a config instruction.** An admin can already write "compare their goal
+with their scores" into `generation.instructions`. It cannot work, for two reasons that live in the
+inputs rather than the prompt:
+
+- The user message is `buildAnswerTranscript` — answered slots, flattened, **`slotKey` dropped**. The
+  goal answer and the closing ask arrive as two undifferentiated lines among however many others.
+- **Scores were never in the prompt.** No respondent-report code read `AppRespondentScore` or called
+  `scoreSessions`. Told to compare, the writer could only re-derive an impression from raw likert
+  values in the transcript — blind to reverse-scored items, weights, band cutoffs and (C8)
+  normalisation, which is the entire reason scoring is a separate deterministic layer.
+
+So C9 is three inputs the engine did not have, plus one rules block.
+
+**Identifying the two ends**, per end, in priority order:
+
+|                     |                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Configured refs** | `statedGoalRefs` / `askedForRefs` — question or data-slot keys. Precise, and the only option on a version with no Adaptive Scope topics. A configured ref that matches nothing does **not** fall back: an admin who named a key meant that key, and substituting the whole opening phase would produce a comparison they did not ask for and cannot see is wrong.   |
+| **Topic phases**    | Empty refs ⇒ derive from Adaptive Scope: free-text answers under `opening` topics against those under `closing` ones. Needs no setup, which matters because a feature nobody switches on produces nothing. Free text **only** — a likert under an opening topic is a rating, not a stated goal, and quoting "4" as what someone needs is worse than saying nothing. |
+
+`loadSessionExport` exposes `phaseByQuestionKey` / `phaseByDataSlotKey` for the derivation, and
+`ExportDataSlotEntry` now carries `key` so a named slot can be addressed at all (it previously carried
+only renamable display text, which config cannot point at).
+
+**Scores are computed fresh** via `buildScoringInputs` + `scoreSessions` — the same path the cohort
+report takes — not read from `AppRespondentScore`. That table is only written when a schema is saved,
+so for most sessions the row is absent or was computed against an older schema, and a report that
+contradicts a respondent using a stale number is worse than one that does not contradict them at all.
+The whole step is best-effort: a scoring schema that will not load costs the block, never the report.
+
+**What the prompt block does and does not license.** It tells the writer to say the disagreement
+plainly and early — every other rule in that prompt pushes toward caution, and a writer under that
+much restraint reconciles by finding agreement. It equally forbids **manufacturing** one, forbids
+inventing a score when no schema exists, marks a partially-assessed scale as a weaker basis for
+contradicting the respondent, and states that an area which was never assessed has no score and its
+absence is **not** a poor result. That last one is the specific slip a comparison invites.
+
+Output lands in the existing `sections[]` — no new key on `RespondentReportContent`, so no renderer or
+PDF change. The [method record](#method-record-how-this-report-was-created) records
+`answers.reconciliation = { ran, scored, scales }`, because a reader about to be told "you asked for X
+but the evidence points at Y" is owed the fact that the second half came from fixed rules — or, when
+`scored` is false, that it did not.
+
+**Not covered:** the config preview (below) does not render the block. A synthesised respondent has no
+typed answers to score, so a preview could only ever show the statements half and would print "no
+scores were computed" for a version that does have a schema — misleading about the admin's own
+configuration. `generateRunReport` (F15.4b) does not pass it either; it already drops `notAssessed`.
+
 ## Config preview (AI-synthesised)
 
 The Generation tab's **Preview report** button lets an admin see how the configured report will read

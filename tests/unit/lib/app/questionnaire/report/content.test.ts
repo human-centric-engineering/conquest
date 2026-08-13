@@ -391,19 +391,34 @@ describe('buildDataSlotContextBlock', () => {
       theme: 'Motivation',
       slots: [
         {
+          key: 'primary_driver',
           name: 'Primary driver',
           description: null,
           value: 'Career growth',
           rationale: 'Said so twice',
           confidence: 0.72,
         },
-        { name: 'Blocker', description: null, value: null, rationale: null, confidence: null }, // unfilled → skipped
+        {
+          key: 'blocker',
+          name: 'Blocker',
+          description: null,
+          value: null,
+          rationale: null,
+          confidence: null,
+        }, // unfilled → skipped
       ],
     },
     {
       theme: '',
       slots: [
-        { name: 'Tenure', description: null, value: '3 years', rationale: null, confidence: 0.5 },
+        {
+          key: 'tenure',
+          name: 'Tenure',
+          description: null,
+          value: '3 years',
+          rationale: null,
+          confidence: 0.5,
+        },
       ],
     },
   ];
@@ -430,7 +445,7 @@ describe('buildDataSlotContextBlock', () => {
     expect(buildDataSlotContextBlock(undefined)).toBe('');
     expect(
       buildDataSlotContextBlock([
-        { theme: 'T', slots: [{ name: 'X', description: null, value: null }] },
+        { theme: 'T', slots: [{ key: 'x', name: 'X', description: null, value: null }] },
       ])
     ).toBe('');
   });
