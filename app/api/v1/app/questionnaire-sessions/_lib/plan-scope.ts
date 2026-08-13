@@ -11,6 +11,15 @@
  * generator, and it puts the announcement in exactly the right place: immediately before the first
  * deeper question, rather than trailing the opening answer it was derived from.
  *
+ * ## The opening gate
+ *
+ * Planning waits until every member of every opening topic is covered — its data slots filled AND
+ * its questions answered. Both halves matter: an opening topic built only from questions used to
+ * read as complete before it had been asked, which put the decision on turn one with nothing
+ * captured. The cost is not only a less-informed judgement. Hard rules are evaluated at that same
+ * moment, and `not_exists` matches on ABSENCE, so an early gate fires every veto an author wrote
+ * for every respondent — and the resulting plan looks entirely reasonable.
+ *
  * ## Fail-soft, always
  *
  * Every failure leaves the session with no plan, which resolves to the always-run topics. A
@@ -74,6 +83,11 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
             dataSlot: { select: { key: true } },
           },
         },
+        // The opening gate's other half. "Answered" is the presence of a row, which is what every
+        // other consumer of coverage means by it (`answeredQuestionIds` in selection/context.ts) —
+        // a second definition here would let the gate and the progress bar disagree about whether
+        // the opening had finished.
+        answers: { select: { questionSlot: { select: { key: true } } } },
         _count: { select: { turns: true } },
       },
     });
@@ -108,7 +122,30 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
         )
         .map((f) => f.dataSlot.key)
     );
-    if (!isOpeningComplete(topics, filledKeys)) {
+    // The version's question keys, needed only to tell a genuinely-unanswered opening question from
+    // a member key that no longer resolves. Fetched only when an opening topic actually names
+    // questions, so the ordinary session pays nothing for it.
+    const openingQuestionKeys = topics
+      .filter((t) => t.phase === 'opening')
+      .flatMap((t) => t.members.questionKeys);
+    const knownQuestionKeys =
+      openingQuestionKeys.length === 0
+        ? new Set<string>()
+        : new Set(
+            (
+              await prisma.appQuestionSlot.findMany({
+                where: { versionId: session.versionId },
+                select: { key: true },
+              })
+            ).map((q) => q.key)
+          );
+
+    if (
+      !isOpeningComplete(topics, filledKeys, {
+        answered: new Set(session.answers.map((a) => a.questionSlot.key)),
+        known: knownQuestionKeys,
+      })
+    ) {
       return { kind: 'skipped', reason: 'opening still in progress' };
     }
 

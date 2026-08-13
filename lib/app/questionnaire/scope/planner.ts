@@ -359,20 +359,52 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
   };
 }
 
-/** Whether the opening is complete enough to plan — every always-run opening topic is covered. */
+/** What the caller knows about the session's question answers, for the opening gate. */
+export interface OpeningQuestionCoverage {
+  /** Question keys this session already holds an answer for. */
+  answered: ReadonlySet<string>;
+  /**
+   * Every question key the version actually has.
+   *
+   * An opening topic may name a key that no longer resolves — a question deleted after the topic
+   * was authored — and that key can never be answered. Unresolvable member keys are silently
+   * skipped everywhere else in this feature; skipping them here too is what stops a stale member
+   * from holding every interview in its opening forever.
+   */
+  known: ReadonlySet<string>;
+}
+
+/**
+ * Whether the opening is complete enough to plan — every opening topic's members are covered.
+ *
+ * Both kinds of member count. Judging the opening on its data slots alone made an opening topic
+ * built only from questions complete before it had been asked, so the planner ran on the first turn
+ * with nothing captured: a judgement over an empty transcript, and — worse — every `not_exists`
+ * hard rule matching, because absence is exactly what a veto tests for. A veto meant for a few
+ * respondents applied to all of them, in a plan that looks entirely plausible.
+ *
+ * `questions` is optional so a caller that genuinely has no answer data still gets the data-slot
+ * gate rather than nothing. The direction on everything unjudgeable stays as it was: planning
+ * slightly early costs a less-informed plan, while never planning strands the interview in its
+ * opening forever.
+ */
 export function isOpeningComplete(
   topics: readonly Topic[],
-  filledDataSlotKeys: ReadonlySet<string>
+  filledDataSlotKeys: ReadonlySet<string>,
+  questions?: OpeningQuestionCoverage
 ): boolean {
   const opening = alwaysTopics(topics).filter((t) => t.phase === 'opening');
   if (opening.length === 0) return true;
 
-  const required = opening.flatMap((t) => t.members.dataSlotKeys);
-  // An opening topic built only from question slots (no data slots) cannot be judged this way; the
-  // caller's question-coverage check governs there. Returning true is the safe direction — planning
-  // slightly early costs a less-informed plan, while never planning strands the interview in its
-  // opening forever.
-  if (required.length === 0) return true;
+  const requiredSlots = opening.flatMap((t) => t.members.dataSlotKeys);
+  if (!requiredSlots.every((key) => filledDataSlotKeys.has(key))) return false;
 
-  return required.every((key) => filledDataSlotKeys.has(key));
+  if (questions) {
+    const requiredQuestions = opening
+      .flatMap((t) => t.members.questionKeys)
+      .filter((key) => questions.known.has(key));
+    if (!requiredQuestions.every((key) => questions.answered.has(key))) return false;
+  }
+
+  return true;
 }

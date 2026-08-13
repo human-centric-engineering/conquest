@@ -113,6 +113,14 @@ const ALLOWED: Array<{ file: string; because: string }> = [
     because: 'cross-respondent results grid; every column must exist for every row',
   },
 
+  // ── Reads that PRECEDE the scope they would be filtered by ──────────────────────────────────
+  {
+    file: 'questionnaire-sessions/_lib/plan-scope.ts',
+    because:
+      'runs BEFORE the plan exists and reads question KEYS only, to tell an unanswered opening ' +
+      'question from a member key that no longer resolves; scoping it would be circular',
+  },
+
   // ── Write seams whose scope enforcement lives in the route that calls them ───────────────────
   {
     file: 'questionnaire-sessions/_lib/form-answers.ts',

@@ -353,9 +353,52 @@ describe('isOpeningComplete', () => {
     expect(isOpeningComplete([topic('pipeline')], new Set())).toBe(true);
   });
 
-  it('is true when the opening topic holds only question slots', () => {
-    // Planning slightly early costs a less-informed plan; never planning would strand the
-    // interview in its opening forever. The safe direction is to proceed.
+  it('is false until every opening QUESTION is answered too', () => {
+    // The gate that was missing. An opening built only from questions read as complete before it
+    // had been asked, so the planner decided on turn one with nothing captured — and every
+    // `not_exists` hard rule matched, because absence is what a veto tests for.
+    const topics = [
+      topic('open', 'opening', { members: { dataSlotKeys: [], questionKeys: ['q1', 'q2'] } }),
+    ];
+    const known = new Set(['q1', 'q2']);
+
+    expect(isOpeningComplete(topics, new Set(), { answered: new Set(), known })).toBe(false);
+    expect(isOpeningComplete(topics, new Set(), { answered: new Set(['q1']), known })).toBe(false);
+    expect(isOpeningComplete(topics, new Set(), { answered: new Set(['q1', 'q2']), known })).toBe(
+      true
+    );
+  });
+
+  it('requires both halves — a filled slot does not excuse an unanswered question', () => {
+    const topics = [
+      topic('open', 'opening', { members: { dataSlotKeys: ['situation'], questionKeys: ['q1'] } }),
+    ];
+    const known = new Set(['q1']);
+
+    expect(isOpeningComplete(topics, new Set(['situation']), { answered: new Set(), known })).toBe(
+      false
+    );
+    expect(isOpeningComplete(topics, new Set(), { answered: new Set(['q1']), known })).toBe(false);
+    expect(
+      isOpeningComplete(topics, new Set(['situation']), { answered: new Set(['q1']), known })
+    ).toBe(true);
+  });
+
+  it('ignores an opening member whose question no longer exists', () => {
+    // A stale member key can never be answered. Unresolvable keys are skipped everywhere else in
+    // this feature; skipping them here is what stops one from holding every interview in its
+    // opening forever.
+    const topics = [
+      topic('open', 'opening', { members: { dataSlotKeys: [], questionKeys: ['q1', 'deleted'] } }),
+    ];
+
+    expect(
+      isOpeningComplete(topics, new Set(), { answered: new Set(['q1']), known: new Set(['q1']) })
+    ).toBe(true);
+  });
+
+  it('falls back to the data-slot gate when the caller has no answer data', () => {
+    // Optional on purpose: a caller without answers gets the half it can judge rather than nothing.
     const topics = [
       topic('open', 'opening', { members: { dataSlotKeys: [], questionKeys: ['q1'] } }),
     ];

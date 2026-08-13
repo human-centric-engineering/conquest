@@ -211,6 +211,22 @@ topics the fallback did not choose, and saying it would be a lie.
 guarded on `interviewPlan` still being null, so a retry or double-tap cannot move a plan the
 interview is already acting on.
 
+### The opening gate
+
+Planning waits until every member of every opening topic is covered — its data slots filled **and**
+its questions answered. Both halves, because judging the opening on its data slots alone made an
+opening topic built only from questions read as complete before it had been asked: the plan was
+decided on turn one, over an empty transcript.
+
+The cost of deciding early is not only a less-informed judgement. **The hard rules are evaluated at
+that same moment**, and `not_exists` matches on absence — so an early gate fires every veto an
+author wrote, for every respondent, and the resulting plan looks entirely reasonable. That is the
+same failure the reachability checks below catch at authoring time; this is the runtime half of it.
+
+An opening member naming a question that no longer exists is skipped, not waited for. Unresolvable
+keys are skipped everywhere in this feature, and here the alternative is a stale member holding
+every interview of that version in its opening forever.
+
 The announcement rides the existing **briefing** seam into the phraser, on the one turn following the
 decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its own voice — "based on
 what you've said I want to go deeper on pipeline and forecasting" reads as the same person still
@@ -343,6 +359,27 @@ The check that matters is **`orphaned_questions`**: with scope active, a questio
 topic can never be asked, and nothing else in the system would report it. It is an `error` when the
 feature is on and a `warning` when it is off — the second being exactly what an admin needs to see
 _before_ flipping the switch.
+
+### Hard-rule reachability
+
+Rules are evaluated at exactly one moment: when the opening completes and the planner runs. A rule
+reading a slot the interview has not gathered by then is not a rule that fires later — and only the
+**opening** is reliably gathered by then. `core` runs alongside it in an order nothing guarantees;
+`conditional` and `closing` topics are, by construction, not in scope until the plan exists.
+
+| Code                       | Severity                   | When                                                                                            |
+| -------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `rule_slot_unreachable`    | warning                    | No opening topic gathers the slot — the rule never matches                                      |
+| `rule_slot_not_in_opening` | warning                    | A `core` topic gathers it — whether it has been asked yet is not something the rule can rely on |
+| `rule_veto_always_fires`   | error (on) / warning (off) | A `not_exists` rule reading a slot no opening topic gathers                                     |
+
+**The veto case is the one worth an error.** Absence is what `not_exists` matches on, so an
+ungathered slot does not make the rule inert — it makes it fire for everybody. An author who wrote
+"never score them on AI readiness when they never named an outcome" gets that applied to every
+respondent, and every plan it produces is plausible. Nothing downstream would ever report it.
+
+All three are silent when the version has no opening topic at all: `no_opening_topic` is the finding
+to fix first, and one reachability warning per rule on top of it buries the cause.
 
 ---
 

@@ -236,6 +236,118 @@ describe('validateAdaptiveScope', () => {
     });
   });
 
+  /**
+   * Hard-rule reachability.
+   *
+   * Rules are evaluated at exactly one moment — when the opening completes and the planner runs.
+   * The findings below are about a rule that reads a slot the interview has not gathered by then,
+   * and the `not_exists` case is the one worth the error: absence is what a veto matches on, so an
+   * ungathered slot does not make the rule inert. It makes it fire for everybody.
+   */
+  describe('hard-rule reachability', () => {
+    /** An opening that gathers `situation`, a core that gathers `headcount`. */
+    function reachable() {
+      return {
+        ...healthy(),
+        topics: [
+          topic('open', 'opening', {
+            members: { dataSlotKeys: ['situation'], questionKeys: ['open_q'] },
+          }),
+          topic('spine', 'core', {
+            members: { dataSlotKeys: ['headcount'], questionKeys: ['spine_q'] },
+          }),
+          topic('cond_a', 'conditional', {
+            members: { dataSlotKeys: ['partners'], questionKeys: ['cond_a_q'] },
+          }),
+          topic('cond_b', 'conditional'),
+          topic('cond_c', 'conditional'),
+        ],
+        allDataSlotKeys: ['situation', 'headcount', 'partners'],
+      };
+    }
+
+    it('says nothing about a rule reading a slot the opening gathers', () => {
+      const found = codes({
+        ...reachable(),
+        settings: settings({ rules: [rule({ dataSlotKey: 'situation' })] }),
+      });
+      expect(found).not.toContain('rule_slot_unreachable');
+      expect(found).not.toContain('rule_slot_not_in_opening');
+      expect(found).not.toContain('rule_veto_always_fires');
+    });
+
+    it('warns when a rule reads a slot only a conditional topic gathers', () => {
+      // `partners` is gathered by cond_a, which is not in scope until the plan exists — so the rule
+      // deciding whether cond_a runs is reading something only cond_a could have produced.
+      expect(
+        codes({
+          ...reachable(),
+          settings: settings({ rules: [rule({ dataSlotKey: 'partners' })] }),
+        })
+      ).toContain('rule_slot_unreachable');
+    });
+
+    it('warns when a rule reads a slot the core gathers — the order is not guaranteed', () => {
+      const found = codes({
+        ...reachable(),
+        settings: settings({ rules: [rule({ dataSlotKey: 'headcount' })] }),
+      });
+      expect(found).toContain('rule_slot_not_in_opening');
+      expect(found).not.toContain('rule_slot_unreachable');
+    });
+
+    it('ERRORS on a veto reading an ungathered slot — it excludes every respondent', () => {
+      const issues = validateAdaptiveScope({
+        ...reachable(),
+        settings: settings({
+          rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists', action: 'exclude' })],
+        }),
+      });
+
+      const veto = issues.find((i) => i.code === 'rule_veto_always_fires');
+      expect(veto?.severity).toBe('error');
+      expect(veto?.message).toContain('every respondent');
+      // Not also reported as unreachable: a veto that always matches is the opposite complaint.
+      expect(issues.map((i) => i.code)).not.toContain('rule_slot_unreachable');
+    });
+
+    it('downgrades the veto finding to a warning while the feature is off', () => {
+      const issues = validateAdaptiveScope({
+        ...reachable(),
+        settings: settings({
+          enabled: false,
+          rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists' })],
+        }),
+      });
+      expect(issues.find((i) => i.code === 'rule_veto_always_fires')?.severity).toBe('warning');
+    });
+
+    it('stays quiet when there is no opening topic at all', () => {
+      // `no_opening_topic` is the finding to fix first; one reachability warning per rule on top of
+      // it would bury the thing that caused them.
+      const base = reachable();
+      const found = codes({
+        ...base,
+        topics: base.topics.filter((t) => t.phase !== 'opening'),
+        settings: settings({
+          rules: [rule({ dataSlotKey: 'partners', operator: 'not_exists' })],
+        }),
+      });
+      expect(found).toContain('no_opening_topic');
+      expect(found).not.toContain('rule_veto_always_fires');
+      expect(found).not.toContain('rule_slot_unreachable');
+    });
+
+    it('does not pile a reachability finding onto a slot that no longer exists', () => {
+      const found = codes({
+        ...reachable(),
+        settings: settings({ rules: [rule({ dataSlotKey: 'vanished' })] }),
+      });
+      expect(found).toContain('rule_unknown_data_slot');
+      expect(found).not.toContain('rule_slot_unreachable');
+    });
+  });
+
   it('orders errors before warnings', () => {
     const issues = validateAdaptiveScope({
       ...healthy(),
