@@ -114,23 +114,41 @@ export interface CohortDataSlots {
 export interface CohortScaleSummary {
   scaleKey: string;
   scaleName: string;
-  /** Respondents with this scale scored. */
+  /**
+   * Respondents this scale is reported over — those asked ALL of its items.
+   *
+   * Adaptive Scope (P17): a respondent whose interview covered part of the scale is NOT counted
+   * here and contributes to neither the mean nor the band counts. Their score is a measurement of a
+   * different, shorter instrument, and averaging the two produces a number that describes nobody.
+   */
   respondents: number;
-  /** Mean raw score, or null when suppressed (too few). */
+  /** Mean raw score, or null when suppressed (too few) or nobody was assessed on the whole scale. */
   mean: number | null;
   /** Count of respondents per band label (empty when suppressed). */
   bandCounts: { label: string; count: number }[];
   /** True when `0 < respondents < kThreshold` (mean + band detail withheld). */
   suppressed: boolean;
+  /**
+   * Respondents who scored on this scale but were asked only part of it — excluded from every
+   * figure above (P17).
+   *
+   * Reported rather than merely dropped: an aggregate that quietly discards respondents is its own
+   * kind of dishonesty, and this count is the reader's only signal that the instrument narrowed
+   * underneath the chart. `0` for every non-adaptive version, which is most of them.
+   */
+  partiallyAssessed: number;
 }
 
 /** One scale's mean for one segment of a dimension. */
 export interface CohortScaleSegmentValue {
   value: string;
   label: string;
+  /** Respondents in this segment asked the WHOLE scale — see {@link CohortScaleSummary.respondents}. */
   respondents: number;
   mean: number | null;
   suppressed: boolean;
+  /** Segment members asked only part of the scale, excluded from `mean` (P17). */
+  partiallyAssessed: number;
 }
 
 /** One scale compared across a dimension's segments. */

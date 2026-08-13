@@ -152,7 +152,13 @@ that needs care, since spending the probe on an already-routable answer is the f
 
 ---
 
-## 6. Cohort reporting ignores partial assessment · **~half a day** · _a correctness trap_
+## 6. Cohort reporting ignores partial assessment · **DONE** — see [`f17.13.md`](./f17.13.md)
+
+> Shipped 2026-08-13. `buildCohortDataset` now computes every scale mean and band distribution over
+> respondents asked the **whole** scale, counts the rest as `partiallyAssessed`, and states the
+> exclusion in the writer's digest. A scale partial for everyone reports "not reportable" rather
+> than borrowing k-anonymity's "too few respondents" — different facts, and only one of them is
+> fixed by a bigger cohort.
 
 `ScaleScore` now carries `assessedItemCount` / `totalItemCount` and `isPartiallyAssessed()` exists,
 but **no cohort chart or segment table reads them**. A band computed from three of a scale's eight

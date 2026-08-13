@@ -378,6 +378,157 @@ describe('buildCohortDataset — scoring path (F14.4)', () => {
     expect(scale.bandCounts).toEqual([]);
   });
 
+  it('excludes a partly-assessed respondent from the mean, and reports the exclusion (P17)', async () => {
+    // The correctness trap: a band from 3 of 8 items and one from all 8 otherwise land in the same
+    // column, and the chart looks exactly as confident either way. Six respondents scored 3.0; a
+    // seventh scored 9.0 on a narrowed instrument. A mean of 3.0 is the honest answer; 3.86 is not.
+    findUniqueConfig.mockResolvedValue({
+      anonymousMode: false,
+      profileFields: [],
+      cohortReport: { generation: { scoringEnabled: true } },
+    });
+    findManySessions.mockResolvedValue(
+      Array.from({ length: 8 }, (_, i) => session({ id: `a${i}` }))
+    );
+    findUniqueScoringSchema.mockResolvedValue({
+      content: {
+        scales: [{ key: 'wellbeing', name: 'Wellbeing' }],
+        items: [
+          { source: 'question', ref: 'q1', scaleKey: 'wellbeing', weight: 1, reverse: false },
+        ],
+        bands: [],
+        method: 'mean',
+      },
+    });
+    vi.mocked(buildScoringInputs).mockResolvedValue({
+      bounds: new Map(),
+      questionKeyById: new Map(),
+      dataSlotKeyById: new Map(),
+    });
+    const scoreMap = new Map();
+    for (let i = 0; i < 6; i++) {
+      scoreMap.set(`a${i}`, {
+        wellbeing: {
+          raw: 3.0,
+          normalised: null,
+          band: 'Steady',
+          itemCount: 8,
+          assessedItemCount: 8,
+          totalItemCount: 8,
+        },
+      });
+    }
+    scoreMap.set('a6', {
+      wellbeing: {
+        raw: 9.0,
+        normalised: null,
+        band: 'Strong',
+        itemCount: 3,
+        assessedItemCount: 3,
+        totalItemCount: 8,
+      },
+    });
+    vi.mocked(scoreSessions).mockResolvedValue(scoreMap);
+
+    const ds = await buildCohortDataset(params);
+
+    const scale = ds.scoring!.scales[0];
+    expect(scale.respondents).toBe(6);
+    expect(scale.mean).toBeCloseTo(3.0);
+    expect(scale.partiallyAssessed).toBe(1);
+    // The narrowed respondent's band must not appear either — a distribution counts people the
+    // mean excluded is a distribution of a different instrument.
+    expect(scale.bandCounts).toEqual([{ label: 'Steady', count: 6 }]);
+  });
+
+  it('reports nothing rather than a confident wrong number when every score is partial', async () => {
+    // Suppression here is the honest output: no respondent was measured on the scale as authored.
+    findUniqueConfig.mockResolvedValue({
+      anonymousMode: false,
+      profileFields: [],
+      cohortReport: { generation: { scoringEnabled: true } },
+    });
+    findManySessions.mockResolvedValue(
+      Array.from({ length: 8 }, (_, i) => session({ id: `a${i}` }))
+    );
+    findUniqueScoringSchema.mockResolvedValue({
+      content: {
+        scales: [{ key: 'wellbeing', name: 'Wellbeing' }],
+        items: [
+          { source: 'question', ref: 'q1', scaleKey: 'wellbeing', weight: 1, reverse: false },
+        ],
+        bands: [],
+        method: 'mean',
+      },
+    });
+    vi.mocked(buildScoringInputs).mockResolvedValue({
+      bounds: new Map(),
+      questionKeyById: new Map(),
+      dataSlotKeyById: new Map(),
+    });
+    const scoreMap = new Map();
+    for (let i = 0; i < 6; i++) {
+      scoreMap.set(`a${i}`, {
+        wellbeing: {
+          raw: 3.5,
+          normalised: null,
+          band: null,
+          itemCount: 2,
+          assessedItemCount: 2,
+          totalItemCount: 8,
+        },
+      });
+    }
+    vi.mocked(scoreSessions).mockResolvedValue(scoreMap);
+
+    const ds = await buildCohortDataset(params);
+
+    const scale = ds.scoring!.scales[0];
+    expect(scale.respondents).toBe(0);
+    expect(scale.mean).toBeNull();
+    expect(scale.partiallyAssessed).toBe(6);
+  });
+
+  it('counts a fully-assessed respondent normally when the score predates P17', async () => {
+    // A row written before `assessedItemCount` existed: absent reads as "everything was asked",
+    // which is exactly what was true then. A retrospective exclusion would empty every old chart.
+    findUniqueConfig.mockResolvedValue({
+      anonymousMode: false,
+      profileFields: [],
+      cohortReport: { generation: { scoringEnabled: true } },
+    });
+    findManySessions.mockResolvedValue(
+      Array.from({ length: 8 }, (_, i) => session({ id: `a${i}` }))
+    );
+    findUniqueScoringSchema.mockResolvedValue({
+      content: {
+        scales: [{ key: 'wellbeing', name: 'Wellbeing' }],
+        items: [
+          { source: 'question', ref: 'q1', scaleKey: 'wellbeing', weight: 1, reverse: false },
+        ],
+        bands: [],
+        method: 'mean',
+      },
+    });
+    vi.mocked(buildScoringInputs).mockResolvedValue({
+      bounds: new Map(),
+      questionKeyById: new Map(),
+      dataSlotKeyById: new Map(),
+    });
+    const scoreMap = new Map();
+    for (let i = 0; i < 6; i++) {
+      scoreMap.set(`a${i}`, {
+        wellbeing: { raw: 3.5, normalised: null, band: null, itemCount: 1 },
+      });
+    }
+    vi.mocked(scoreSessions).mockResolvedValue(scoreMap);
+
+    const ds = await buildCohortDataset(params);
+
+    expect(ds.scoring!.scales[0].respondents).toBe(6);
+    expect(ds.scoring!.scales[0].partiallyAssessed).toBe(0);
+  });
+
   it('returns scoring with a computed mean when respondents meet the k-anonymity threshold', async () => {
     // 6 of 8 sessions produce a wellbeing score → 6 ≥ K_ANONYMITY_THRESHOLD (5): mean surfaced.
     findUniqueConfig.mockResolvedValue({

@@ -245,13 +245,28 @@ export function buildCohortDatasetDigest(dataset: CohortDataset): string {
   if (dataset.scoring && dataset.scoring.scales.length > 0) {
     lines.push('', 'SCORING (deterministic scales):');
     for (const scale of dataset.scoring.scales) {
+      // Adaptive Scope (P17): the excluded respondents are stated, never silently dropped. A writer
+      // told only the mean would describe it as the cohort's, and for a narrowed instrument it is
+      // the mean of the part of the cohort that was asked the whole scale.
+      const excluded =
+        scale.partiallyAssessed > 0
+          ? ` [excludes ${scale.partiallyAssessed} respondent(s) asked only part of this scale]`
+          : '';
+      if (scale.respondents === 0 && scale.partiallyAssessed > 0) {
+        // Not "too few" — a different fact, and one the writer must not paraphrase as small-sample
+        // caution. Nobody was measured on this scale as authored, so there is nothing to report.
+        lines.push(
+          `  ${scale.scaleName}: [not reportable — every respondent was asked only part of this scale (${scale.partiallyAssessed})]`
+        );
+        continue;
+      }
       if (scale.suppressed || scale.mean === null) {
-        lines.push(`  ${scale.scaleName}: [hidden — too few respondents]`);
+        lines.push(`  ${scale.scaleName}: [hidden — too few respondents]${excluded}`);
         continue;
       }
       const bands = scale.bandCounts.map((b) => `${b.label}=${b.count}`).join(', ');
       lines.push(
-        `  ${scale.scaleName}: mean ${scale.mean.toFixed(2)} (n=${scale.respondents})${bands ? ` — ${bands}` : ''}`
+        `  ${scale.scaleName}: mean ${scale.mean.toFixed(2)} (n=${scale.respondents})${bands ? ` — ${bands}` : ''}${excluded}`
       );
     }
     for (const dim of dataset.scoring.byDimension) {
@@ -260,7 +275,9 @@ export function buildCohortDatasetDigest(dataset: CohortDataset): string {
           .filter((s) => !s.suppressed && s.mean !== null)
           .map((s) => `${s.label}=${s.mean!.toFixed(2)}`);
         if (parts.length > 0) {
-          lines.push(`  ${scale.scaleName} by ${dim.dimensionLabel}: ${parts.join(', ')}`);
+          const partial = scale.segments.reduce((n, s) => n + s.partiallyAssessed, 0);
+          const note = partial > 0 ? ` [excludes ${partial} partly-assessed respondent(s)]` : '';
+          lines.push(`  ${scale.scaleName} by ${dim.dimensionLabel}: ${parts.join(', ')}${note}`);
         }
       }
     }

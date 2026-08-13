@@ -317,6 +317,13 @@ The `notAssessed` list on the session export is what makes an adaptive instrumen
   not answered" from "never asked". `isPartiallyAssessed()` is the question every surface rendering a
   band must be able to ask: **a band from three of eight items is not the same measurement as one from
   all eight**, and a cohort chart that puts them in the same column is comparing two instruments.
+- **Cohort statistics exclude a partly-assessed respondent** (F17.13). A scale's mean and band
+  distribution are computed only over respondents asked **all** of its items; the rest are counted
+  as `partiallyAssessed` and reported beside the figure. Excluding rather than flagging is the
+  point: a flagged-but-included score still moves the mean, and a reader who sees a mean does not
+  go looking for a footnote before believing it. Where a scale was partial for everyone, the output
+  is "not reportable" — deliberately different wording from k-anonymity's "too few respondents",
+  because a bigger cohort would not produce the missing number.
 - **The PDF export prints the list itself** (F17.12), under "What this interview did not cover",
   skipped and sampled kept apart. Not gated on any `include` switch: every listing in that document
   is already filtered to what was in scope, so without the note it narrows **silently** and reads as

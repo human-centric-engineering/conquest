@@ -166,6 +166,62 @@ describe('buildCohortDatasetDigest', () => {
   });
 });
 
+describe('buildCohortDatasetDigest — narrowed instruments (P17)', () => {
+  /** A dataset whose scale was fully assessed for six people and partial for two more. */
+  function withScoring(over: {
+    respondents: number;
+    mean: number | null;
+    partiallyAssessed: number;
+    suppressed?: boolean;
+  }) {
+    return buildCohortDatasetDigest({
+      ...dataset,
+      scoring: {
+        scales: [
+          {
+            scaleKey: 'wellbeing',
+            scaleName: 'Wellbeing',
+            respondents: over.respondents,
+            mean: over.mean,
+            bandCounts: over.mean === null ? [] : [{ label: 'Steady', count: over.respondents }],
+            suppressed: over.suppressed ?? false,
+            partiallyAssessed: over.partiallyAssessed,
+          },
+        ],
+        byDimension: [],
+      },
+    });
+  }
+
+  it('tells the writer how many respondents the mean leaves out', () => {
+    // A writer given only a mean will describe it as the cohort's. For a narrowed instrument it is
+    // the mean of the people who were asked the whole scale, and the difference is the report's.
+    const digest = withScoring({ respondents: 6, mean: 3.0, partiallyAssessed: 2 });
+
+    expect(digest).toContain('mean 3.00 (n=6)');
+    expect(digest).toContain('excludes 2 respondent(s) asked only part of this scale');
+  });
+
+  it('says nothing about exclusions when nobody was narrowed', () => {
+    const digest = withScoring({ respondents: 6, mean: 3.0, partiallyAssessed: 0 });
+    expect(digest).toContain('mean 3.00 (n=6)');
+    expect(digest).not.toContain('excludes');
+  });
+
+  it('separates "not reportable" from "too few respondents"', () => {
+    // Different facts, and a writer must not paraphrase the first as small-sample caution: nobody
+    // was measured on the scale as authored, so there is no number waiting behind a bigger cohort.
+    const digest = withScoring({ respondents: 0, mean: null, partiallyAssessed: 6 });
+    const scaleLine = digest.split('\n').find((l) => l.includes('Wellbeing')) ?? '';
+
+    expect(scaleLine).toContain('not reportable');
+    expect(scaleLine).toContain('every respondent was asked only part of this scale (6)');
+    // The digest's other "too few" lines are about suppressed QUESTIONS; this scale must not
+    // borrow that wording, because a bigger cohort would not produce the missing number.
+    expect(scaleLine).not.toContain('too few');
+  });
+});
+
 describe('buildChartCatalogText', () => {
   it('lists the exact question ids and dimension keys the agent may reference', () => {
     const catalog = buildChartCatalogText(dataset);
