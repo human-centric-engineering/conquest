@@ -57,7 +57,7 @@ const LAUNCH_MISSING_MESSAGE: Record<LaunchCheckKey, string> = {
   dataSlots: 'Generate data slots before launch',
   dataSlotEmbeddings: 'Generate data-slot embeddings before launching adaptive data-slot selection',
   adaptiveScope:
-    'Fix the adaptive-scope problems on the Topics tab before launch — most often a question that belongs to no topic, which could never be asked',
+    'Fix the adaptive-scope problems on the Adaptive scope tab before launch — most often a question that belongs to no topic, which could never be asked',
 };
 
 /**

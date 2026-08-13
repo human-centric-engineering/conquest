@@ -8,11 +8,16 @@
  * across two tabs, an admin would be picking from a list they cannot see.
  *
  * Everything on this card is one PATCH of the `adaptiveScope` blob. The order of the fields follows
- * the order of the decision itself — the switch, then the cap the model cannot exceed, then the
- * blind-spot check, then what happens when the model cannot decide, then what the respondent is
- * told.
+ * the order of the decision itself, and the steps are numbered to say so: the hard rules that run
+ * before the agent, then the cap the model cannot exceed, the blind-spot check, what happens when
+ * the model cannot decide, and what the respondent is told.
+ *
+ * Numbering them is not decoration. The failure this card exists to prevent is an admin reading the
+ * cap as a request the model tries to honour; seeing it sit *after* the agent's turn in a sequence
+ * they cannot reorder is the cheapest way to say that it is enforced.
  */
 
+import type React from 'react';
 import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 
@@ -42,6 +47,30 @@ export interface ScopeSettingsCardProps {
   /** Saves the settings patch. Resolving `false` means it did not land (error or declined fork). */
   onSave: (settings: AdaptiveScopeSettings) => Promise<boolean>;
   busy: boolean;
+}
+
+/**
+ * A numbered step heading inside the card.
+ *
+ * The numbers are the DECISION ORDER, not a wizard: hard rules really are evaluated before the
+ * agent, and the agent's answer really is filtered by the limits that follow. Ordering the controls
+ * the way the runtime orders them is what stops an admin reading the cap as something the model
+ * merely tries to respect. `step` is omitted for the aside that has no place in that sequence.
+ */
+function SectionLabel({ step, children }: { step?: number; children: React.ReactNode }) {
+  return (
+    <p className="text-muted-foreground flex items-center gap-2 text-[11px] font-semibold tracking-wide uppercase">
+      {step !== undefined && (
+        <span
+          aria-hidden="true"
+          className="bg-muted text-foreground/70 flex h-5 w-5 items-center justify-center rounded-full text-[10px] tabular-nums"
+        >
+          {step}
+        </span>
+      )}
+      {children}
+    </p>
+  );
 }
 
 /** Parse a bounded integer out of a text input, falling back rather than rejecting a keystroke. */
@@ -84,7 +113,36 @@ export function ScopeSettingsCard({
           <ShieldCheck className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1 space-y-0.5">
-          <CardTitle className="text-sm font-semibold">Adaptive scope</CardTitle>
+          <CardTitle className="flex items-center gap-1.5 text-sm font-semibold">
+            How the decision is made
+            <FieldHelp title="The decision, in order">
+              <p>
+                Once the opening completes, the interview&rsquo;s scope is settled in one pass and
+                never revisited:
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-4">
+                <li>
+                  Your <strong>hard rules</strong> run first. A “never include” can never be undone
+                  by anything below it.
+                </li>
+                <li>
+                  The <strong>agent</strong> judges each remaining conditional topic against its
+                  criteria and what the respondent said.
+                </li>
+                <li>
+                  Your <strong>limits</strong> are applied to the result — the cap, the confidence
+                  floor, the blind-spot check.
+                </li>
+                <li>
+                  If nothing usable survives, the <strong>fallback</strong> applies. It never fails
+                  and never hangs.
+                </li>
+              </ol>
+              <p className="mt-2">
+                The model proposes; it never gets the last word on a limit you set.
+              </p>
+            </FieldHelp>
+          </CardTitle>
           <CardDescription className="text-xs leading-relaxed">
             Decide which conditional topics each respondent’s interview covers, once, when the
             opening completes. Off by default — while it is off every topic is asked and nothing
@@ -112,70 +170,86 @@ export function ScopeSettingsCard({
           </p>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Most conditional topics per interview{' '}
-              <FieldHelp title="Topic limit">
-                Breadth control: how many conditional topics one interview may cover. The agent
-                proposes; this caps, deterministically — a limit obeyed “most of the time” is the
-                worst kind. Length and cost are governed separately by the question cap and budget.
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={MIN_CONDITIONAL_TOPICS}
-              max={MAX_CONDITIONAL_TOPICS_CEILING}
-              value={draft.maxConditionalTopics}
-              onChange={(e) =>
-                set({
-                  maxConditionalTopics: boundedInt(
-                    e.target.value,
-                    MIN_CONDITIONAL_TOPICS,
-                    MAX_CONDITIONAL_TOPICS_CEILING,
-                    draft.maxConditionalTopics
-                  ),
-                })
-              }
-              disabled={busy}
-            />
-            {conditionalCount > 0 && draft.maxConditionalTopics >= conditionalCount && (
-              <p className="text-xs text-amber-600">
-                You have {conditionalCount} conditional{' '}
-                {conditionalCount === 1 ? 'topic' : 'topics'}, so this limit selects all of them
-                every time.
-              </p>
-            )}
-          </div>
+        <div className="space-y-3">
+          <SectionLabel step={1}>The cases you are certain about</SectionLabel>
+          <ScopeRulesEditor
+            rules={draft.rules}
+            onChange={(next: ScopeRule[]) => set({ rules: next })}
+            topics={topics}
+            dataSlots={dataSlots}
+            disabled={busy}
+          />
+        </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Confidence needed{' '}
-              <FieldHelp title="Confidence floor">
-                Below this, the agent’s plan is discarded and the fallback set applies instead. 0
-                accepts any answer; 1 accepts only certainty.
-              </FieldHelp>
-            </Label>
-            <Input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={draft.minConfidence}
-              onChange={(e) => {
-                const parsed = Number.parseFloat(e.target.value);
-                set({
-                  minConfidence: Number.isFinite(parsed)
-                    ? Math.min(1, Math.max(0, parsed))
-                    : draft.minConfidence,
-                });
-              }}
-              disabled={busy}
-            />
+        <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={2}>How much the agent may cover</SectionLabel>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Most conditional topics per interview{' '}
+                <FieldHelp title="Topic limit">
+                  Breadth control: how many conditional topics one interview may cover. The agent
+                  proposes; this caps, deterministically — a limit obeyed “most of the time” is the
+                  worst kind. Length and cost are governed separately by the question cap and
+                  budget.
+                </FieldHelp>
+              </Label>
+              <Input
+                type="number"
+                min={MIN_CONDITIONAL_TOPICS}
+                max={MAX_CONDITIONAL_TOPICS_CEILING}
+                value={draft.maxConditionalTopics}
+                onChange={(e) =>
+                  set({
+                    maxConditionalTopics: boundedInt(
+                      e.target.value,
+                      MIN_CONDITIONAL_TOPICS,
+                      MAX_CONDITIONAL_TOPICS_CEILING,
+                      draft.maxConditionalTopics
+                    ),
+                  })
+                }
+                disabled={busy}
+              />
+              {conditionalCount > 0 && draft.maxConditionalTopics >= conditionalCount && (
+                <p className="text-xs text-amber-600">
+                  You have {conditionalCount} conditional{' '}
+                  {conditionalCount === 1 ? 'topic' : 'topics'}, so this limit selects all of them
+                  every time.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Confidence needed{' '}
+                <FieldHelp title="Confidence floor">
+                  Below this, the agent’s plan is discarded and the fallback set applies instead. 0
+                  accepts any answer; 1 accepts only certainty.
+                </FieldHelp>
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={draft.minConfidence}
+                onChange={(e) => {
+                  const parsed = Number.parseFloat(e.target.value);
+                  set({
+                    minConfidence: Number.isFinite(parsed)
+                      ? Math.min(1, Math.max(0, parsed))
+                      : draft.minConfidence,
+                  });
+                }}
+                disabled={busy}
+              />
+            </div>
           </div>
         </div>
 
         <div className="space-y-2 border-t pt-4">
+          <SectionLabel step={3}>Guard against a narrow result</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-check-topic" className="text-sm font-medium">
@@ -222,8 +296,9 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-1.5 border-t pt-4">
+          <SectionLabel step={4}>When the agent cannot decide</SectionLabel>
           <Label className="text-sm font-medium">
-            When the agent cannot decide, ask{' '}
+            Ask these instead{' '}
             <FieldHelp title="Fallback topics">
               Used when the planner errored, returned nothing usable, or came in under the
               confidence floor. Empty means “the always-run topics only” — always coherent, if thin.
@@ -242,6 +317,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={5}>What the respondent is told</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-announce" className="text-sm font-medium">
@@ -270,9 +346,11 @@ export function ScopeSettingsCard({
               <Label htmlFor="scope-amendment" className="text-sm font-medium">
                 Let the respondent ask for a topic{' '}
                 <FieldHelp title="Respondent amendment">
-                  Honours “actually, ask me about talent” by adding that topic to the plan. The
-                  amendment is recorded and excluded from routing-quality analytics — a correction
-                  is signal <em>about</em> the planner, not an example of it working.
+                  Honours “actually, can we cover training too?” by adding that topic to the plan,
+                  whether or not the agent chose it. Matched against your topic names, so names that
+                  describe the subject are what make this work. The amendment is recorded and
+                  excluded from routing-quality analytics — a correction is signal <em>about</em>{' '}
+                  the planner, not an example of it working.
                 </FieldHelp>
               </Label>
               <p className="text-muted-foreground text-xs">
@@ -289,8 +367,9 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-1.5 border-t pt-4">
+          <SectionLabel>Extra guidance (optional)</SectionLabel>
           <Label className="text-sm font-medium">
-            Extra guidance for the agent{' '}
+            Anything the criteria cannot say{' '}
             <FieldHelp title="Planner instructions">
               Appended to the planner prompt. Use it for judgement the topics’ own criteria cannot
               express — “prefer breadth over depth for first-time respondents”. It cannot override
@@ -304,16 +383,6 @@ export function ScopeSettingsCard({
             }
             placeholder="Optional"
             rows={2}
-            disabled={busy}
-          />
-        </div>
-
-        <div className="border-t pt-4">
-          <ScopeRulesEditor
-            rules={draft.rules}
-            onChange={(next: ScopeRule[]) => set({ rules: next })}
-            topics={topics}
-            dataSlots={dataSlots}
             disabled={busy}
           />
         </div>

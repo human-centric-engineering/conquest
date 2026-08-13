@@ -279,8 +279,8 @@ export function RoutingAnalystCard({
                 Where are the routing rules? (optional){' '}
                 <FieldHelp title="Steering the analyst">
                   A one-line pointer saves the analyst hunting: “the routing rules are on the
-                  Guardrails tab”, or “sections 4–7 only apply to enterprise accounts”. It is used
-                  for this run only and is not saved.
+                  Guardrails tab”, or “sections 4–7 only apply to people who manage a team”. It is
+                  used for this run only and is not saved.
                 </FieldHelp>
               </Label>
               <Input

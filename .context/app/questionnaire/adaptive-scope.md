@@ -9,9 +9,21 @@ not-applicable, and any long instrument that should not ask all of itself to eve
 same requirement — and before P17 the only way to express it was to split the questionnaire into
 several, which costs cross-section scoring and cohort analysis.
 
-> **Status:** F17.1–F17.6 shipped — the model, the runtime, the planner, the Topics authoring
+> **Status:** F17.1–F17.6 shipped — the model, the runtime, the planner, the authoring
 > surface, the Routing Analyst, report/scoring awareness, and respondent amendment. The Merlin5
 > instrument itself is not built: it needs its source workbook, which is not in this repo.
+
+### The tab is called "Adaptive scope"; the URL segment is still `topics`
+
+The capability is what an admin is looking for in the tab bar, and "Topics" named only the unit it
+edits — a noun that collides with the data-slot `theme` and with the orchestration analytics
+"topics" page, and that says nothing about conditionality. The label now matches the vocabulary
+every other surface already used (the settings card, the launch-checklist item, the session viewer,
+this document).
+
+The route stayed `…/v/[vid]/topics`: renaming it would break bookmarks and the launch checklist's
+deep link for no behavioural gain. Component and payload names (`TopicsPanel`, `TopicsPayload`,
+`getVersionTopicsCached`) follow the route, not the label.
 
 ---
 
@@ -303,7 +315,37 @@ _before_ flipping the switch.
 | `app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/route.ts` | GET / PUT / PATCH                                                                                                                                                                 |
 | `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`  | Run the analyst (SSE) · accept or discard its proposal                                                                                                                            |
 | `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`          | The amendment trigger                                                                                                                                                             |
-| `components/admin/questionnaires/topics/**`                         | The Topics tab: settings card, rules, topic editor, analyst review                                                                                                                |
+| `components/admin/questionnaires/topics/**`                         | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review                                                                                                  |
+
+## The authoring surface
+
+Three things about the tab are load-bearing rather than cosmetic.
+
+**The page teaches an order the controls cannot.** Adaptive scope only works if it is authored in a
+sequence — group every question into a topic, mark the conditional ones, pin the certainties, then
+switch on — and an admin who flips the switch first gets a questionnaire that behaves exactly as it
+did before, with nothing on screen explaining why. `ScopeExplainer` states that sequence at the top
+of the page. It is dismissible and remembered per browser, not per questionnaire: the mechanism is
+the same everywhere, so re-teaching it on the next instrument is noise.
+
+**The settings card is ordered by the runtime, and numbered to say so.** Hard rules sit first
+because they really are evaluated before the agent; the cap and the confidence floor sit after
+because they really are applied to the agent's answer. The failure this ordering prevents is an
+admin reading the cap as a request the model tries to honour — seeing it sit downstream of the
+model's turn, in a sequence they cannot reorder, is the cheapest way to say it is enforced.
+
+**Topic rows collapse.** Ingest seeds one topic per section, so the common first sight of the page
+is fifteen-plus topics; as fifteen open forms it is a page you scroll rather than read. The
+collapsed line carries what a skim is actually for — name, phase, size, criteria — plus everything
+wrong with the row (no criteria on a conditional topic, a duplicate key, a member key that no
+longer resolves), so a problem is never hidden behind a chevron. Reordering is disabled while a
+filter is applied, because "move up" means "swap with the row above" and with rows hidden the row
+above on screen is not the row above in the set.
+
+The copy throughout is deliberately client-neutral. The capability was generalised from one client's
+routing requirement, and examples drawn from that instrument would read as the intended shape;
+every illustration on the page is instead drawn from a different kind of instrument — a screener, a
+compliance audit, a role-specific survey.
 
 ## Related
 

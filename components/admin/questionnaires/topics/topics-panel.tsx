@@ -22,12 +22,14 @@ import {
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
+import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import {
   TopicListEditor,
   type DraftTopic,
 } from '@/components/admin/questionnaires/topics/topic-list-editor';
+import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import type { AdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
@@ -114,6 +116,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
 
   return (
     <div className="space-y-5">
+      <ScopeExplainer />
+
       {forkNotice !== null && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           You edited a launched version — your changes were saved to a new draft (v{forkNotice}).
@@ -159,12 +163,29 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
 
       <section className="space-y-3">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Topics</h2>
+          <h2 className="flex items-center gap-1.5 text-lg font-semibold">
+            Topics
+            <FieldHelp title="What a topic is">
+              <p>
+                The unit adaptive scope decides about: a named group of questions and data slots,
+                with a phase saying when it runs and — if it is conditional — your criteria for when
+                it applies.
+              </p>
+              <p className="mt-2">
+                <strong>Every question should belong to exactly one topic.</strong> A question no
+                topic claims can never be asked once you switch on, and nothing else in the system
+                would tell you.
+              </p>
+              <p className="mt-2">
+                <strong>Size is not significant.</strong> A one-question topic is how you express a
+                fine-grained “only ask this if…”, so there is no second rule language to learn.
+              </p>
+            </FieldHelp>
+          </h2>
           <p className="text-muted-foreground text-sm">
-            A topic is the unit adaptive scope decides about: a named group of questions and data
-            slots with a phase and, when it is conditional, your criteria for when it applies. Size
-            is not significant — a one-question topic is how you express a fine-grained “only ask
-            this if…”.
+            Group the questions, then decide which groups are conditional. Uploading a document
+            seeds one always-asked topic per section, so a fresh questionnaire starts with a
+            complete set that changes nothing about how it runs.
           </p>
         </div>
         <TopicListEditor

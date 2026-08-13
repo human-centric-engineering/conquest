@@ -13,10 +13,12 @@
  * admin unable to see — let alone remove — the thing the checklist is complaining about.
  */
 
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { FieldHelp } from '@/components/ui/field-help';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -40,6 +42,12 @@ export interface KeyPickerProps {
   disabled?: boolean;
   /** Copy for the empty state inside the popover. */
   emptyText?: string;
+  /**
+   * Contextual help for the ⓘ beside the label. Membership is the least self-evident control on
+   * the topic editor — "N of M" says nothing about what happens to the other M−N — so the caller
+   * supplies the explanation rather than the picker guessing at one.
+   */
+  help?: ReactNode;
 }
 
 export function KeyPicker({
@@ -49,6 +57,7 @@ export function KeyPicker({
   onChange,
   disabled = false,
   emptyText = 'Nothing to pick from.',
+  help,
 }: KeyPickerProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -72,6 +81,11 @@ export function KeyPicker({
       <div className="flex items-center gap-2">
         <Label className="text-muted-foreground text-xs">
           {label} ({selected.length} of {options.length})
+          {help && (
+            <FieldHelp title={label} className="ml-1">
+              {help}
+            </FieldHelp>
+          )}
         </Label>
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
