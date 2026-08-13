@@ -16,13 +16,15 @@
  * three cost a respondent wildly different amounts of attention, so a count is not a length — and a
  * client who says "make it fifteen minutes" needs a code change rather than a setting.
  *
- * This module prices the instrument so the arithmetic can be shown (and, once C7b lands, enforced).
+ * This module prices the instrument so the arithmetic can be shown, and — since C7b (F17.9) —
+ * enforced: `scope/guardrails.ts` fits the plan to what is left of the budget using these numbers.
  * It is deliberately estimation, not measurement: real durations vary by respondent, question
  * difficulty and how much someone wants to talk. The estimate's job is to make relative cost
  * visible and the fit decidable, not to predict a stopwatch.
  */
 
 import { QUESTION_TYPES, type QuestionType } from '@/lib/app/questionnaire/types';
+import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
 import {
   ALWAYS_PHASES,
@@ -105,6 +107,20 @@ function secondsForQuestion(question: PricedQuestion, settings: AdaptiveScopeSet
   return perItem * rows;
 }
 
+/**
+ * How many rows a matrix asks a respondent to rate, from its stored `typeConfig`.
+ *
+ * Lives beside the pricing rather than at either call site: the topics route reads it to show an
+ * author what a grid costs, and the planner reads it to decide whether one fits. Two copies of
+ * "what counts as a row" is two answers to the same question.
+ */
+export function matrixRowCount(typeConfig: unknown): number {
+  const parsed = typeConfigSchemaFor('matrix').safeParse(typeConfig);
+  if (!parsed.success) return 1;
+  const cfg = parsed.data as { rows?: unknown[] };
+  return Array.isArray(cfg.rows) ? Math.max(1, cfg.rows.length) : 1;
+}
+
 /** An unrecognised stored type prices as free text — the most expensive guess, deliberately. */
 function asQuestionType(value: string): QuestionType {
   return (QUESTION_TYPES as readonly string[]).includes(value)
@@ -159,6 +175,27 @@ export function estimateTopicCosts(
 }
 
 /**
+ * What a set of seated topics costs at the depths they were seated at.
+ *
+ * The plan's own arithmetic — `light` and `full` are priced differently, which is the entire reason
+ * a count could not do this job. A topic with no entry in `costs` contributes nothing: an unpriced
+ * topic is one that resolves to no members, and charging a guess for it would drop a real topic to
+ * make room for an imaginary one.
+ */
+export function plannedSeconds(
+  planned: readonly { key: string; depth: TopicDepth }[],
+  costs: ReadonlyMap<string, TopicCost>
+): number {
+  let total = 0;
+  for (const topic of planned) {
+    const cost = costs.get(topic.key);
+    if (!cost) continue;
+    total += topic.depth === 'light' ? cost.light : cost.full;
+  }
+  return total;
+}
+
+/**
  * The mandatory floor: what every interview costs before a single routing decision is taken.
  *
  * The always-run phases (`opening`, `core`, `closing`) are not optional, so their cost is not
@@ -187,7 +224,7 @@ export function routedAllowanceSeconds(budgetSeconds: number, alwaysSeconds: num
  * Render seconds the way an author reads them: `"8s"`, `"1m 40s"`, `"10m"`.
  *
  * Lives here rather than in the component because the same string appears in the topic list, the
- * settings readout and (C7b) the plan record, and three formatters would drift.
+ * settings readout and the plan record, and three formatters would drift.
  */
 export function formatSeconds(total: number): string {
   const seconds = Math.max(0, Math.round(total));

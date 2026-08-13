@@ -188,12 +188,19 @@ not push the answers the decision rests on out of the prompt.
 ### Guardrail order
 
 ```
-rule excludes ─> rule includes ─> the cap ─> the blind-spot check ─> the fallback
-                      ▲                            ▲                      ▲
-        seated BEFORE the cap so a          drawn from what did      only when nothing
-        model's enthusiasm cannot            NOT make the cut         at all was seated
-        truncate an author's "always"
+rule excludes ─> rule includes ─> the cap ─> the fallback ─> the fit ─> the blind-spot check
+                      ▲                          ▲              ▲              ▲
+        seated BEFORE the cap so a         only when      drops what the   drawn from what
+        model's enthusiasm cannot          nothing at     budget cannot     did NOT make
+        truncate an author's "always"      all was        pay for, in       the cut
+                                           seated         seconds
 ```
+
+The fit is seated where it is for three reasons. **After the rules**, so an author's "always ask
+about compliance" is never costed away — if the rules alone bust the budget the interview runs long
+and the settings tab has already said so. **After the fallback**, so a safety net cannot smuggle in
+an interview nobody has time for. **Before the check topic**, so the check's own seconds are
+_reserved_ rather than treated as free.
 
 ### The respondent may add, never remove (F17.6)
 
@@ -371,9 +378,31 @@ figure would sit there unchanged while an author added three questions, which is
 It calls the same exported `membersAtDepth`, without weights — the resolver's own fallback — so a
 `light` topic may land a few seconds from the server's figure.
 
-**Nothing is enforced yet.** A budget today is a number an author can see, not one the planner obeys;
-the fit stage is F17.9. Two coherence checks do fire, because a budget below the floor is not a tight
-interview but a broken one: `budget_below_floor` (error) and `budget_admits_no_topic` (warning).
+Two coherence checks fire on the settings, because a budget below the floor is not a tight interview
+but a broken one: `budget_below_floor` (error) and `budget_admits_no_topic` (warning).
+
+### The fit (F17.9)
+
+`applyGuardrails` takes an optional `budget` — the seconds available and every topic's price at both
+depths — and drops from the bottom of the plan until it fits. No budget means no fit stage and a plan
+identical to the one the same inputs produced before budgets existed, which is what makes this safe
+to ship to instruments already running.
+
+|                                     |                                                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Lowest-ranked goes first**        | The last thing seated — the planner's own least confident pick, or the last fallback. The model ordered them; the budget takes them back in reverse.                                                                |
+| **A rule-seated topic never drops** | The arithmetic does not get to overrule an author's "always". The plan may exceed the budget for this reason and only this reason.                                                                                  |
+| **The check topic is reserved**     | It is chosen from what did _not_ make the cut, so its cost is unknown until the drops settle — hence a re-evaluation each pass. Treating it as free is the omission the client's own arithmetic makes.              |
+| **An unpriced topic costs nothing** | A topic with no entry resolves to no members. Charging a guess would drop a real topic to make room for an imaginary one.                                                                                           |
+| **The reason is recorded**          | A dropped topic lands in `excluded` with `source: 'budget'` — "there was no time for this" points an author at the setting; "the agent did not pick it" points them at the criteria, and only one of them is true.  |
+| **The plan carries the arithmetic** | `budgetSeconds` and `estimatedSeconds` are written onto the plan (and the `AppAiRun` detail), never recomputed on read: the instrument can be edited afterwards, and today's prices answer a question nobody asked. |
+
+An amendment still overrides it. A respondent who asks to be covered on something gets it at `full`
+depth whatever the budget says — the same way it already overrides the topic count, and for the same
+reason: they are the one spending the time.
+
+The trigger prices the version at planning time (`loadPlanBudget` in `plan-scope.ts`) — two extra
+queries, and only for a version whose author set a budget.
 
 ---
 
@@ -418,7 +447,8 @@ to fix first, and one reachability warning per rule on top of it buries the caus
 | `lib/app/questionnaire/scope/types.ts`                              | Vocabulary, settings, plan shape, narrowers. A **leaf** — it carries its own `narrowToEnum` copy so `types.ts` can hold an `AdaptiveScopeSettings` without a runtime import cycle |
 | `lib/app/questionnaire/scope/resolve.ts`                            | The pure filter                                                                                                                                                                   |
 | `lib/app/questionnaire/scope/rules.ts`                              | Hard-rule evaluator                                                                                                                                                               |
-| `lib/app/questionnaire/scope/guardrails.ts`                         | Cap, check topic, fallback                                                                                                                                                        |
+| `lib/app/questionnaire/scope/guardrails.ts`                         | Cap, fallback, the time fit, check topic                                                                                                                                          |
+| `lib/app/questionnaire/scope/budget.ts`                             | What an interview costs in seconds — per-type pricing, per-topic cost at both depths, the floor and the allowance                                                                 |
 | `lib/app/questionnaire/scope/planner.ts`                            | The model call; never throws                                                                                                                                                      |
 | `lib/app/questionnaire/scope/amendment.ts`                          | Cue gate, label match, plan mutation (F17.6) — pure                                                                                                                               |
 | `lib/app/questionnaire/scope/analysis-schema.ts`                    | The Routing Analyst's output contract                                                                                                                                             |

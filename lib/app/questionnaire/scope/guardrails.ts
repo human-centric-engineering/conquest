@@ -13,9 +13,13 @@
  *  2. **Rule includes** — an author's "always" is absolute too, and must be seated BEFORE the cap
  *     so it cannot be truncated away by a model's enthusiasm.
  *  3. **The cap** — trim the model's picks to what is left of the limit.
- *  4. **The check topic** — chosen from what did NOT make the cut, so it is always genuinely
+ *  4. **The fallback** — only when steps 1–3 produced nothing at all.
+ *  5. **The fit** (C7b) — drop from the bottom until what is seated costs no more than the session
+ *     budget leaves. AFTER the rules, so an author's "always" is never costed away; after the
+ *     fallback, so a safety net cannot smuggle in an interview nobody has time for; and BEFORE the
+ *     check topic, so the check's own seconds are reserved rather than treated as free.
+ *  6. **The check topic** — chosen from what did NOT make the cut, so it is always genuinely
  *     something the interview would otherwise have missed.
- *  5. **The fallback** — only when steps 1–3 produced nothing at all.
  *
  * Every function here is data-in/data-out and exhaustively unit-testable by hand.
  */
@@ -29,12 +33,33 @@ import {
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { RuleOutcome } from '@/lib/app/questionnaire/scope/rules';
+import {
+  alwaysTopicSeconds,
+  formatSeconds,
+  plannedSeconds,
+  routedAllowanceSeconds,
+  type TopicCost,
+} from '@/lib/app/questionnaire/scope/budget';
 
 /** One topic the planner proposed, before any guardrail has touched it. */
 export interface ProposedTopic {
   key: string;
   /** The planner's own account of why — kept verbatim so an admin reads the model's reasoning. */
   rationale: string;
+}
+
+/**
+ * What the fit stage (C7b) needs to price a plan: the budget, and what every topic costs.
+ *
+ * Passed in rather than derived here because pricing needs each question's TYPE, which lives in the
+ * database and this module never touches. The caller resolves it once per session with
+ * `scope/budget.ts`; the arithmetic itself stays pure.
+ */
+export interface PlanBudget {
+  /** The whole session's allowance, in seconds. `0` means no budget, and the fit does nothing. */
+  budgetSeconds: number;
+  /** Every topic's cost at both depths — {@link estimateTopicCosts}, over the SAME topic set. */
+  costs: ReadonlyMap<string, TopicCost>;
 }
 
 export interface ApplyGuardrailsInput {
@@ -55,6 +80,14 @@ export interface ApplyGuardrailsInput {
   decidedAtTurn: number;
   /** ISO timestamp — passed in because this module has no clock. */
   decidedAt: string;
+  /**
+   * The session time budget and the topic prices, when the version sets one (C7b).
+   *
+   * Absent — which is the default and therefore most versions — means no fit stage runs and the
+   * plan is exactly what it was before budgets existed. That silence is the point: enforcement
+   * that switched itself on would change what every existing instrument asks.
+   */
+  budget?: PlanBudget;
 }
 
 /**
@@ -125,7 +158,7 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     seat(proposal.key, input.source, proposal.rationale);
   }
 
-  // 5. The fallback — only when nothing at all was seated. An interview of just the always-run
+  // 4. The fallback — only when nothing at all was seated. An interview of just the always-run
   // topics is coherent, if thin, so an empty fallback list is a legitimate configuration.
   let source = input.source;
   if (planned.length === 0 && settings.fallbackTopicKeys.length > 0) {
@@ -137,7 +170,10 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     }
   }
 
-  // 4. The blind-spot check, from what did NOT make the cut.
+  // 5. The fit (C7b) — the seconds the plan actually costs, against the seconds it may spend.
+  const droppedForBudget = fitToBudget({ planned, seen, topics, settings, budget: input.budget });
+
+  // 6. The blind-spot check, from what did NOT make the cut.
   const check = chooseCheckTopic(topics, seen, settings);
   if (check) {
     seen.add(check.key);
@@ -155,13 +191,20 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
 
   const excluded: ExcludedTopic[] = conditional
     .filter((t) => !seen.has(t.key))
-    .map((t) => ({
-      key: t.key,
-      source: input.rules.exclude.has(t.key) ? ('rule' as const) : ('llm' as const),
-      rationale:
-        input.rules.reasonByTopic.get(t.key) ??
-        'Not selected — nothing in the opening pointed at this area.',
-    }));
+    .map((t) => {
+      // A topic the budget took back is NOT "not selected". It was chosen, and then there was no
+      // time for it — which is a different answer to the only question this record exists to
+      // answer, and the one that points an author at the setting rather than at the agent.
+      const overBudget = droppedForBudget.get(t.key);
+      if (overBudget) return { key: t.key, source: 'budget' as const, rationale: overBudget };
+      return {
+        key: t.key,
+        source: input.rules.exclude.has(t.key) ? ('rule' as const) : ('llm' as const),
+        rationale:
+          input.rules.reasonByTopic.get(t.key) ??
+          'Not selected — nothing in the opening pointed at this area.',
+      };
+    });
 
   return {
     v: 1,
@@ -173,7 +216,86 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
     respondentMessage: settings.announce ? input.respondentMessage : '',
     decidedAtTurn: input.decidedAtTurn,
     decidedAt: input.decidedAt,
+    // Recorded on the plan, not recomputed on read: the instrument can be edited afterwards, and a
+    // figure derived from today's questions would answer a question nobody asked.
+    ...(input.budget && input.budget.budgetSeconds > 0
+      ? {
+          budgetSeconds: input.budget.budgetSeconds,
+          estimatedSeconds:
+            alwaysTopicSeconds(topics, input.budget.costs) +
+            plannedSeconds(planned, input.budget.costs),
+        }
+      : {}),
   };
+}
+
+/**
+ * Drop the lowest-ranked topics until the plan fits the budget. Mutates `planned` and `seen`.
+ *
+ * Returns the reason each dropped topic was dropped, keyed by topic key — so the plan can say
+ * "there was no time for this" rather than the untrue "the agent did not pick it".
+ *
+ * Three decisions worth stating, because each is a place a reasonable implementation differs:
+ *
+ * - **A rule-seated topic is never dropped.** An author's "always ask about compliance" is not a
+ *   preference the arithmetic gets to overrule; if the rules alone bust the budget, the interview
+ *   runs long and the settings tab has already said so (`budget_below_floor`).
+ * - **The lowest-ranked goes first** — the last thing seated, which is the planner's own least
+ *   confident pick, or the last fallback. The model ordered them; the budget takes them back in
+ *   reverse.
+ * - **The check topic's seconds are reserved before anything is judged to fit.** It is chosen from
+ *   what did NOT make the cut, so its cost is not known until the drops are settled — hence the
+ *   re-evaluation each pass. Treating it as free is exactly the omission the Merlin5 workbook's own
+ *   arithmetic makes, and it is how a plan lands 14 seconds over the number it just promised.
+ */
+function fitToBudget(args: {
+  planned: PlannedTopic[];
+  seen: Set<string>;
+  topics: readonly Topic[];
+  settings: AdaptiveScopeSettings;
+  budget: PlanBudget | undefined;
+}): Map<string, string> {
+  const { planned, seen, topics, settings, budget } = args;
+  const dropped = new Map<string, string>();
+  if (!budget || budget.budgetSeconds <= 0) return dropped;
+
+  const allowance = routedAllowanceSeconds(
+    budget.budgetSeconds,
+    alwaysTopicSeconds(topics, budget.costs)
+  );
+  const reason =
+    `Chosen, then dropped: the interview's ${formatSeconds(budget.budgetSeconds)} budget was ` +
+    'already spent on the topics ranked above it.';
+
+  // The blind-spot check is chosen AFTER this stage, from whatever is left over — so what it will
+  // cost depends on what this loop drops, and has to be re-asked each pass.
+  const reserveForCheck = (): number => {
+    const check = chooseCheckTopic(topics, seen, settings);
+    return check ? (budget.costs.get(check.key)?.light ?? 0) : 0;
+  };
+
+  while (plannedSeconds(planned, budget.costs) + reserveForCheck() > allowance) {
+    // The last droppable entry — `findLastIndex` by hand, since a rule-seated topic in the middle
+    // must be stepped over rather than ending the search.
+    let index = -1;
+    for (let i = planned.length - 1; i >= 0; i -= 1) {
+      if (planned[i]?.source !== 'rule') {
+        index = i;
+        break;
+      }
+    }
+    // Nothing left that may be dropped: the rules alone are over budget. The author's instructions
+    // win, and the interview runs long — a topic the author said to always ask is not the planner's
+    // to take away.
+    if (index < 0) break;
+
+    const [removed] = planned.splice(index, 1);
+    if (!removed) break;
+    seen.delete(removed.key);
+    dropped.set(removed.key, reason);
+  }
+
+  return dropped;
 }
 
 /**

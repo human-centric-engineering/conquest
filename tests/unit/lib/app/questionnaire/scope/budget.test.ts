@@ -20,9 +20,12 @@ import {
   estimateTopicCosts,
   formatSeconds,
   itemSeconds,
+  matrixRowCount,
+  plannedSeconds,
   routedAllowanceSeconds,
   topicSeconds,
 } from '@/lib/app/questionnaire/scope/budget';
+import { applyGuardrails } from '@/lib/app/questionnaire/scope/guardrails';
 import {
   DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
   narrowAdaptiveScopeSettings,
@@ -259,5 +262,84 @@ describe('a worked example: floor, allowance, and what fits', () => {
     expect(check).toBe(DEFAULT_SECONDS_PER_TYPE.likert * 2);
     const three = costs.get('big1')!.full + costs.get('big2')!.full + costs.get('big3')!.full;
     expect(three + check).toBeGreaterThan(allowance);
+  });
+
+  it('and the guardrails act on it: the third topic is dropped to pay for the check', () => {
+    // The cost model and the enforcement, end to end (C7b). The planner asked for all three
+    // expensive topics; they fit the allowance on their own and stop fitting the moment the
+    // blind-spot check is priced in — so the lowest-ranked one goes.
+    const plan = applyGuardrails({
+      topics,
+      proposed: [
+        { key: 'big1', rationale: 'a' },
+        { key: 'big2', rationale: 'b' },
+        { key: 'big3', rationale: 'c' },
+      ],
+      rules: { include: new Set(), exclude: new Set(), reasonByTopic: new Map() },
+      settings: { ...budgeted, enabled: true, maxConditionalTopics: 3, includeCheckTopic: true },
+      confidence: 0.9,
+      source: 'llm',
+      respondentMessage: '',
+      decidedAtTurn: 3,
+      decidedAt: '2026-08-13T00:00:00.000Z',
+      budget: { budgetSeconds: 490, costs },
+    });
+
+    expect(plan.topics.filter((t) => t.source === 'llm').map((t) => t.key)).toEqual([
+      'big1',
+      'big2',
+    ]);
+    expect(plan.checkTopicKey).toBe('big3');
+    expect(plan.excluded.find((e) => e.key === 'big3')).toBeUndefined();
+    expect(plan.estimatedSeconds).toBeLessThanOrEqual(490);
+  });
+});
+
+describe('matrixRowCount', () => {
+  it('counts the rows a grid asks a respondent to rate', () => {
+    const rows = matrixRowCount({
+      rows: [
+        { key: 'a', label: 'A' },
+        { key: 'b', label: 'B' },
+        { key: 'c', label: 'C' },
+      ],
+      scale: { min: 1, max: 5 },
+    });
+    expect(rows).toBe(3);
+  });
+
+  it.each([null, undefined, {}, { rows: 'nonsense' }, 42])(
+    'falls back to one row for %p rather than pricing the grid at nothing',
+    (config) => {
+      expect(matrixRowCount(config)).toBe(1);
+    }
+  );
+});
+
+describe('plannedSeconds', () => {
+  const costs = new Map([
+    ['pipeline', { full: 100, light: 10 }],
+    ['talent', { full: 60, light: 8 }],
+  ]);
+
+  it('prices each seated topic at the depth it was seated at', () => {
+    // The whole reason the plan carries a depth: a light topic is a sample, not the area.
+    expect(
+      plannedSeconds(
+        [
+          { key: 'pipeline', depth: 'full' },
+          { key: 'talent', depth: 'light' },
+        ],
+        costs
+      )
+    ).toBe(108);
+  });
+
+  it('charges nothing for a topic it has no price for', () => {
+    expect(plannedSeconds([{ key: 'invented', depth: 'full' }], costs)).toBe(0);
+  });
+
+  it('is zero for an interview that seated nothing conditional', () => {
+    expect(plannedSeconds([], costs)).toBe(0);
   });
 });

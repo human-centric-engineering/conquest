@@ -44,6 +44,7 @@ import {
   applyGuardrails,
   alwaysTopics,
   plannerCandidates,
+  type PlanBudget,
   type ProposedTopic,
 } from '@/lib/app/questionnaire/scope/guardrails';
 import type {
@@ -96,6 +97,14 @@ export interface PlanScopeParams {
   settings: AdaptiveScopeSettings;
   /** Turn ordinal the plan is being decided at. */
   decidedAtTurn: number;
+  /**
+   * The session time budget and what each topic costs (C7b), when the version sets one.
+   *
+   * Priced by the caller, which has the question types this module never loads. Absent means no
+   * budget, which is the default: the plan is then bounded by the topic count alone, exactly as it
+   * was before budgets existed.
+   */
+  budget?: PlanBudget;
 }
 
 /** The plan plus what producing it cost, so the caller can bill and audit it. */
@@ -353,6 +362,10 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
     settings: params.settings,
     decidedAtTurn: params.decidedAtTurn,
     decidedAt,
+    // Carried on EVERY path, including the ones that never call a model: a fallback plan is still
+    // an interview someone has to sit through, and a rule-only plan is the one most likely to be
+    // long. A budget that applied only to the model's picks would be a budget with a hole in it.
+    budget: params.budget,
   };
 
   // Nothing to choose between: the rules (or the absence of candidates) already settled it.

@@ -55,6 +55,15 @@ export interface AdminInterviewPlanView {
   respondentMessage: string;
   decidedAtTurn: number;
   decidedAt: string;
+  /**
+   * The time budget this plan was fitted to and what it was estimated to cost (C7b), in seconds.
+   *
+   * Both null unless the version set a budget — the default. When they are present, "why is this
+   * topic missing" has an arithmetic answer, and the viewer can show it beside the topic the budget
+   * took back rather than leaving an admin to infer it from a badge.
+   */
+  budgetSeconds: number | null;
+  estimatedSeconds: number | null;
 }
 
 /** Metadata for the admin session viewer — gates the surface and renders its header. */
@@ -179,6 +188,8 @@ async function resolvePlanView(
     respondentMessage: plan.respondentMessage,
     decidedAtTurn: plan.decidedAtTurn,
     decidedAt: plan.decidedAt,
+    budgetSeconds: plan.budgetSeconds ?? null,
+    estimatedSeconds: plan.estimatedSeconds ?? null,
   };
 }
 

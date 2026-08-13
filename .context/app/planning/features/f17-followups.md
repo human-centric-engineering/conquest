@@ -15,9 +15,9 @@ reconstruct it by reading seven trackers, the Merlin5 research doc's capability 
 authoring script's stdout.
 
 **Nothing below is blocking.** Adaptive Scope works end to end without any of it, and the Merlin5
-Growth Assessor runs. What the first four items block is a **faithful** Merlin5 — the workbook
-specifies behaviour we cannot yet express, and §1 and §4 are the two an operator can trip over
-without being told.
+Growth Assessor runs. What the first four items blocked was a **faithful** Merlin5 — three of them
+(§1, §3, §4) have since shipped, leaving §2 and the guardrail in §5 as the workbook behaviour we
+cannot yet express.
 
 Ordered by value. Each heading carries a rough size, so a follow-up can tell a half-hour job from a
 phase without reading the whole entry.
@@ -30,7 +30,19 @@ phase without reading the whole entry.
 
 ---
 
-## 1. Time as a budget (C7) · **~2–3 days** · _the largest gap_
+## 1. Time as a budget (C7) · **DONE** — see [`f17.8.md`](./f17.8.md) and [`f17.9.md`](./f17.9.md)
+
+> Shipped 2026-08-13, in two halves. `f17.8` prices the instrument in seconds and shows an author the
+> arithmetic (`sessionBudgetSeconds`, per-type costs, the floor and the allowance, two coherence
+> checks); `f17.9` makes the planner obey it — a fit stage in `guardrails.ts` that drops the
+> lowest-ranked topic that does not fit, seated after the rules and the fallback and **before** the
+> blind-spot check, whose seconds it reserves rather than treating as free. The count survives
+> alongside it: `maxConditionalTopics` bounds breadth, the budget bounds duration, and neither
+> implies the other.
+>
+> Two things named below are still open, and deliberately: nothing prices the interviewer's own
+> turns (see §5, G03), and a running interview is never re-planned — the budget bounds what is
+> asked, not what is spent.
 
 **What the client specified:** a 600-second session, item-level time estimates (8s per likert, 45s
 per free-text, 40s per opening question), and a planner that fits the plan to the seconds remaining.
@@ -56,7 +68,8 @@ and **before** the blind-spot check.
 
 **One finding to carry in:** the workbook's own arithmetic does not account for G04's two blind-spot
 items (16s). The worst-case plan comes to 348s against a 334s allowance — trivial in practice, but
-the budget must count the check topic rather than treating it as free.
+the budget must count the check topic rather than treating it as free. _(It does: the reserve is
+re-asked on every pass of the fit, because the check is chosen from what the fit drops.)_
 
 ---
 

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     appQuestionnaireSession: { findUnique: vi.fn(), updateMany: vi.fn() },
     appQuestionnaireTopic: { findMany: vi.fn() },
     appQuestionSlot: { findMany: vi.fn() },
+    appDataSlot: { findMany: vi.fn() },
   },
   planScope: vi.fn(),
   recordAiRun: vi.fn(async () => undefined),
@@ -117,6 +118,7 @@ beforeEach(() => {
     { key: 'q2' },
     { key: 'p1' },
   ]);
+  mocks.prisma.appDataSlot.findMany.mockResolvedValue([]);
 });
 
 describe('maybePlanScope — the opening gate', () => {
@@ -234,5 +236,77 @@ describe('maybePlanScope — the evidence it hands the planner', () => {
 
     const passed = mocks.planScope.mock.calls[0][0];
     expect(passed.answers.map((a: { key: string }) => a.key)).toEqual(['q1', 'c1', 'c2']);
+  });
+});
+
+/**
+ * The time budget (C7b). The fit itself is unit-tested in `guardrails.test.ts`; what this protects
+ * is the wiring — that the trigger PRICES the version and hands the planner the numbers. A fit
+ * stage that never receives costs does not fail, it simply never fires, and the symptom is an
+ * instrument that quietly ignores the budget its author set.
+ */
+describe('maybePlanScope — the time budget', () => {
+  /** A session whose version sets a budget. */
+  function budgeted(seconds: number) {
+    return {
+      ...session({ answers: ['q1', 'q2'] }),
+      version: {
+        goal: 'find the constraint',
+        config: { adaptiveScope: { enabled: true, sessionBudgetSeconds: seconds } },
+      },
+    };
+  }
+
+  it('prices the version and hands the planner the budget', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(budgeted(600));
+    mocks.prisma.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'q1', type: 'free_text', typeConfig: null, weight: 1 },
+      { key: 'q2', type: 'free_text', typeConfig: null, weight: 1 },
+      { key: 'p1', type: 'likert', typeConfig: null, weight: 1 },
+    ]);
+
+    await maybePlanScope('s1');
+
+    const passed = mocks.planScope.mock.calls[0][0];
+    expect(passed.budget.budgetSeconds).toBe(600);
+    // The opening's two free-text questions at 45s; the conditional topic's single likert at 8s.
+    expect(passed.budget.costs.get('open')?.full).toBe(90);
+    expect(passed.budget.costs.get('pipeline')?.full).toBe(8);
+  });
+
+  it('prices a matrix per row, so a grid does not read as one question', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(budgeted(600));
+    mocks.prisma.appQuestionSlot.findMany.mockResolvedValue([
+      { key: 'q1', type: 'free_text', typeConfig: null, weight: 1 },
+      { key: 'q2', type: 'free_text', typeConfig: null, weight: 1 },
+      {
+        key: 'p1',
+        type: 'matrix',
+        typeConfig: {
+          rows: [
+            { key: 'a', label: 'A' },
+            { key: 'b', label: 'B' },
+            { key: 'c', label: 'C' },
+          ],
+          scale: { min: 1, max: 5, minLabel: 'Never', maxLabel: 'Always' },
+        },
+        weight: 1,
+      },
+    ]);
+
+    await maybePlanScope('s1');
+
+    expect(mocks.planScope.mock.calls[0][0].budget.costs.get('pipeline')?.full).toBe(24);
+  });
+
+  it('loads nothing extra for a version with no budget — the default', async () => {
+    mocks.prisma.appQuestionnaireSession.findUnique.mockResolvedValue(
+      session({ answers: ['q1', 'q2'] })
+    );
+
+    await maybePlanScope('s1');
+
+    expect(mocks.planScope.mock.calls[0][0].budget).toBeUndefined();
+    expect(mocks.prisma.appDataSlot.findMany).not.toHaveBeenCalled();
   });
 });

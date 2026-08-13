@@ -382,3 +382,198 @@ describe('plannerCandidates', () => {
     expect(plannerCandidates(TOPICS, rules).map((t) => t.key)).toContain('data');
   });
 });
+
+/**
+ * The fit stage (C7b) — what a count could never do.
+ *
+ * Costs are handed in rather than derived from questions, exactly as `applyGuardrails` takes them,
+ * so each case states its own arithmetic: a topic is "60 seconds", not "eight likerts and a free
+ * text I have to add up to know what this test asserts".
+ */
+describe('applyGuardrails — the time budget', () => {
+  /** Every topic the same price at full depth, a tenth of it light — so drops are legible. */
+  function costs(over: Record<string, { full: number; light: number }> = {}) {
+    const base: Record<string, { full: number; light: number }> = {
+      open: { full: 60, light: 60 },
+      spine: { full: 40, light: 40 },
+      close: { full: 20, light: 20 },
+      pipeline: { full: 100, light: 10 },
+      forecast: { full: 100, light: 10 },
+      talent: { full: 100, light: 10 },
+      data: { full: 100, light: 10 },
+    };
+    return new Map(Object.entries({ ...base, ...over }));
+  }
+
+  // The floor is open + spine + close = 120s. Everything below spends against `budget - 120`.
+  const FLOOR = 120;
+
+  const allFour = [
+    { key: 'pipeline', rationale: 'a' },
+    { key: 'forecast', rationale: 'b' },
+    { key: 'talent', rationale: 'c' },
+    { key: 'data', rationale: 'd' },
+  ];
+
+  it('does nothing at all when the version sets no budget', () => {
+    // The load-bearing default: an instrument that never opted in must plan exactly as it did.
+    const plan = applyGuardrails(
+      input({ proposed: allFour, settings: settings({ maxConditionalTopics: 4 }) })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast', 'talent', 'data']);
+    expect(plan.budgetSeconds).toBeUndefined();
+    expect(plan.estimatedSeconds).toBeUndefined();
+  });
+
+  it('drops the lowest-ranked picks until the plan fits', () => {
+    // 320s budget − 120s floor = 200s for routing, which pays for two 100s topics and no more.
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 320, costs: costs() },
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast']);
+    expect(plan.estimatedSeconds).toBe(FLOOR + 200);
+    expect(plan.budgetSeconds).toBe(320);
+  });
+
+  it('takes them back in reverse — the model’s least confident pick goes first', () => {
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 420, costs: costs() },
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast', 'talent']);
+  });
+
+  it('prices topics individually — a cheap fourth topic fits where an expensive one did not', () => {
+    // The whole point of seconds over a count: `data` at 20s is not the same decision as `data`
+    // at 100s, and a topic limit cannot tell them apart.
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 440, costs: costs({ data: { full: 20, light: 10 } }) },
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast', 'talent', 'data']);
+    expect(plan.estimatedSeconds).toBe(FLOOR + 320);
+  });
+
+  it('records a dropped topic as over-budget, NOT as one the agent passed over', () => {
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 320, costs: costs() },
+      })
+    );
+
+    const dropped = plan.excluded.filter((e) => e.source === 'budget').map((e) => e.key);
+    expect(dropped).toEqual(['talent', 'data']);
+    expect(plan.excluded.find((e) => e.key === 'talent')?.rationale).toContain('5m 20s');
+  });
+
+  it('never drops a rule-included topic — an author’s “always” outranks the arithmetic', () => {
+    const plan = applyGuardrails(
+      input({
+        proposed: [{ key: 'pipeline', rationale: 'a' }],
+        rules: {
+          include: new Set(['talent']),
+          exclude: new Set(),
+          reasonByTopic: new Map([['talent', 'headcount > 500']]),
+        },
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 200, costs: costs() },
+      })
+    );
+
+    // 200s − 120s floor = 80s, less than either topic. The rule survives; the model's pick does not.
+    expect(plan.topics.map((t) => t.key)).toEqual(['talent']);
+    expect(plan.estimatedSeconds).toBeGreaterThan(200);
+  });
+
+  it('fits the fallback too — a safety net is not a licence to run long', () => {
+    const plan = applyGuardrails(
+      input({
+        proposed: [],
+        settings: settings({ maxConditionalTopics: 4, fallbackTopicKeys: ['data', 'talent'] }),
+        budget: { budgetSeconds: 240, costs: costs() },
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['data']);
+    expect(plan.source).toBe('fallback');
+  });
+
+  it('reserves the blind-spot check’s seconds rather than treating them as free', () => {
+    // 340s − 120s floor = 220s. Two 100s topics fit (200s), but only if the 10s check is ignored —
+    // which is exactly the omission the Merlin5 workbook's own arithmetic makes.
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4, includeCheckTopic: true }),
+        budget: { budgetSeconds: 340, costs: costs({ talent: { full: 100, light: 100 } }) },
+      })
+    );
+
+    // `talent` is the cheapest-ranked survivor of the fit, but its light sample costs 100s, so the
+    // plan can afford only one full topic beside it.
+    expect(plan.topics.filter((t) => t.source !== 'check').map((t) => t.key)).toEqual(['pipeline']);
+    expect(plan.checkTopicKey).toBe('forecast');
+    expect(plan.estimatedSeconds).toBeLessThanOrEqual(340);
+  });
+
+  it('counts the check topic in the estimate it records', () => {
+    const plan = applyGuardrails(
+      input({
+        proposed: [{ key: 'pipeline', rationale: 'a' }],
+        settings: settings({ maxConditionalTopics: 4, includeCheckTopic: true }),
+        budget: { budgetSeconds: 400, costs: costs() },
+      })
+    );
+
+    // floor 120 + pipeline 100 + the light check 10.
+    expect(plan.estimatedSeconds).toBe(230);
+  });
+
+  it('seats nothing conditional when the floor alone exceeds the budget', () => {
+    // A broken configuration rather than a tight one — and the settings tab says so
+    // (`budget_below_floor`). The interview still runs; it just stops adapting.
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 60, costs: costs() },
+      })
+    );
+
+    expect(plan.topics).toEqual([]);
+    expect(plan.excluded.every((e) => e.source === 'budget')).toBe(true);
+  });
+
+  it('charges nothing for a topic it has no price for', () => {
+    // An unpriced topic resolves to no members. Charging a guess for it would drop a real topic to
+    // make room for an imaginary one.
+    const unpriced = costs();
+    unpriced.delete('forecast');
+
+    const plan = applyGuardrails(
+      input({
+        proposed: allFour,
+        settings: settings({ maxConditionalTopics: 4 }),
+        budget: { budgetSeconds: 320, costs: unpriced },
+      })
+    );
+
+    expect(plan.topics.map((t) => t.key)).toEqual(['pipeline', 'forecast', 'talent']);
+  });
+});

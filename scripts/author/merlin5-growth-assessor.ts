@@ -582,12 +582,20 @@ async function main() {
   );
   log('   · fallback Business Execution / Data / Management (R12) · G02 as a deterministic veto');
   log('');
+  log('   · a 600-second budget the planner fits the plan to (C7), enforced in the guardrails');
+  log('');
   log(`⚠️  Not expressible today, and deliberately not faked:`);
-  log('   G03 (one probe maximum across the opening) — there is no per-session probe budget.');
-  log('   G05 (hold the close against the opening) — the report has no open-vs-close comparison.');
-  log('   G06 (normalise 1–6 against 1–5) — scoring has no cross-scale normalisation, so do not');
-  log('        build a composite across Section 14 and the rest until it does.');
-  log('   The 10-minute time budget — the cap is a topic COUNT, not seconds (research doc §C7).');
+  log('   G03 (one probe maximum across the opening) — there is no per-session probe budget, and');
+  log("        nothing prices the interviewer's own turns against the 600s budget above.");
+  log('');
+  log('ℹ️  Built since, but OFF for this instrument — turn them on deliberately, not by habit:');
+  log('   G05 (hold the close against the opening) — set `generation.reconciliation` on the');
+  log('        version config to put the stated goal, the asks and the scores in one prompt.');
+  log('   G06 (normalise 1–6 against 1–5) — `ScoringSchemaContent.normalise` puts every item on a');
+  log(
+    '        0–1 ruler. This instrument still ships with NO scoring schema, so a composite across'
+  );
+  log('        Section 14 and the rest needs that flag set when one is authored.');
 }
 
 main()

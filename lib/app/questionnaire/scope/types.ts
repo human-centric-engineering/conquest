@@ -179,6 +179,7 @@ export const SCOPE_DECISION_SOURCES = [
   'fallback',
   'check',
   'respondent',
+  'budget',
 ] as const;
 export type ScopeDecisionSource = (typeof SCOPE_DECISION_SOURCES)[number];
 
@@ -190,6 +191,9 @@ export const SCOPE_DECISION_SOURCE_LABELS: Record<ScopeDecisionSource, string> =
   fallback: 'Safe default',
   check: 'Blind-spot check',
   respondent: 'Respondent asked for it',
+  // Only ever appears on an EXCLUDED topic. The agent chose this one and the time budget took it
+  // back, which is a different answer to "why was I not asked about that" than "it was not chosen".
+  budget: 'Dropped — over the time budget',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -564,6 +568,18 @@ export interface InterviewPlan {
   /** ISO timestamp. */
   decidedAt: string;
   /**
+   * What this interview was estimated to cost the respondent, in seconds — the always-run topics
+   * plus everything the plan seated, priced by `scope/budget.ts` at the moment of the decision.
+   *
+   * Absent when the version has no session budget, which is the default and therefore most plans.
+   * Recorded rather than recomputed on read because the instrument can be edited afterwards: a
+   * figure derived from today's questions would answer "what would this interview cost now",
+   * which is not the question an admin holding a challenged report is asking.
+   */
+  estimatedSeconds?: number;
+  /** The budget the estimate was fitted to, in seconds. Absent alongside {@link estimatedSeconds}. */
+  budgetSeconds?: number;
+  /**
    * Topics the respondent asked for after the fact (P17.6). Absent on a plan nobody amended, which
    * is nearly all of them — and on every plan written before amendments shipped.
    *
@@ -797,6 +813,12 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
 
   const checkTopicKey = asText(value.checkTopicKey, TOPIC_KEY_MAX_LENGTH, '');
 
+  // The two budget figures travel together or not at all — an estimate with no budget beside it
+  // cannot be read (is 400s tight or generous?), and a budget with no estimate says nothing about
+  // what happened. Bounded generously: these are estimates in seconds, not durations to enforce.
+  const budgetSeconds = Math.round(asNumber(value.budgetSeconds, 0, 100_000, 0));
+  const estimatedSeconds = Math.round(asNumber(value.estimatedSeconds, 0, 100_000, 0));
+
   const amendments: PlanAmendment[] = Array.isArray(value.amendments)
     ? value.amendments.flatMap((a): PlanAmendment[] => {
         if (!isRecord(a)) return [];
@@ -832,6 +854,10 @@ export function narrowInterviewPlan(value: unknown): InterviewPlan | null {
     respondentMessage: asText(value.respondentMessage, RESPONDENT_MESSAGE_MAX_LENGTH, ''),
     decidedAtTurn: Math.round(asNumber(value.decidedAtTurn, 0, 100_000, 0)),
     decidedAt: asText(value.decidedAt, 40, ''),
+    // Omitted when absent, exactly like `amendments`: a plan made without a budget and a plan made
+    // before budgets existed are the same plan, and inventing a `0` here would read on the admin
+    // surface as "fitted to a budget of nothing".
+    ...(budgetSeconds > 0 ? { budgetSeconds, estimatedSeconds } : {}),
   };
 }
 

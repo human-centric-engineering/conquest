@@ -19,6 +19,7 @@
 import { Compass } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import {
   SCOPE_DECISION_SOURCE_LABELS,
   TOPIC_DEPTH_LABELS,
@@ -48,6 +49,15 @@ export function InterviewPlanCard({ plan }: InterviewPlanCardProps) {
         {plan.source === 'llm' && (
           <span className="text-muted-foreground text-xs">
             confidence {Math.round(plan.confidence * 100)}%
+          </span>
+        )}
+        {/* Only for a version that set a budget. Named an estimate in the summary itself: this is
+            what the plan was PRICED at, not how long the respondent actually took, and the two are
+            different enough that an unlabelled number would be read as a measurement. */}
+        {plan.budgetSeconds !== null && plan.estimatedSeconds !== null && (
+          <span className="text-muted-foreground text-xs">
+            est. {formatSeconds(plan.estimatedSeconds)} of a {formatSeconds(plan.budgetSeconds)}{' '}
+            budget
           </span>
         )}
       </summary>

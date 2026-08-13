@@ -176,6 +176,30 @@ describe('narrowInterviewPlan', () => {
     });
     expect(p?.topics[0]).toMatchObject({ depth: 'full', source: 'llm' });
   });
+
+  it('keeps a budget-dropped exclusion as its own reason, not as an agent decision', () => {
+    // The distinction the record exists for: "there was no time" points an author at the setting,
+    // "the agent did not pick it" points them at the criteria.
+    const p = narrowInterviewPlan({
+      ...valid,
+      excluded: [{ key: 'talent', source: 'budget', rationale: 'over budget' }],
+    });
+    expect(p?.excluded[0]?.source).toBe('budget');
+  });
+
+  it('round-trips the budget the plan was fitted to and what it cost (C7b)', () => {
+    const p = narrowInterviewPlan({ ...valid, budgetSeconds: 600, estimatedSeconds: 548 });
+    expect(p).toMatchObject({ budgetSeconds: 600, estimatedSeconds: 548 });
+  });
+
+  it('omits both figures on a plan made without a budget', () => {
+    // Absent, never `0`: a plan that predates budgets and a plan fitted to nothing must not read
+    // the same on the admin surface.
+    expect(narrowInterviewPlan(valid)).not.toHaveProperty('budgetSeconds');
+    expect(narrowInterviewPlan({ ...valid, estimatedSeconds: 548 })).not.toHaveProperty(
+      'estimatedSeconds'
+    );
+  });
 });
 
 describe('narrowProposedTopicSet', () => {

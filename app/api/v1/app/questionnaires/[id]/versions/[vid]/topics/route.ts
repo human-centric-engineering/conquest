@@ -25,11 +25,11 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { prisma } from '@/lib/db/client';
-import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import {
   alwaysTopicSeconds,
   estimateTopicCosts,
   itemSeconds,
+  matrixRowCount,
   routedAllowanceSeconds,
 } from '@/lib/app/questionnaire/scope/budget';
 import type { AdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
@@ -102,14 +102,6 @@ async function loadKeyInventory(versionId: string, settings: AdaptiveScopeSettin
       byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
     },
   };
-}
-
-/** How many rows a matrix asks a respondent to rate — each row is a rating, so each row costs. */
-function matrixRowCount(typeConfig: unknown): number {
-  const parsed = typeConfigSchemaFor('matrix').safeParse(typeConfig);
-  if (!parsed.success) return 1;
-  const cfg = parsed.data as { rows?: unknown[] };
-  return Array.isArray(cfg.rows) ? Math.max(1, cfg.rows.length) : 1;
 }
 
 const handleList = withAdminAuth<{ id: string; vid: string }>(
