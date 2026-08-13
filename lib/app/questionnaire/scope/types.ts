@@ -209,6 +209,30 @@ export const SCOPE_RATIONALE_MAX_LENGTH = 1_000;
 export const MIN_CONDITIONAL_TOPICS = 1;
 export const MAX_CONDITIONAL_TOPICS_CEILING = 20;
 
+/**
+ * Bounds on a session's time budget, in seconds. `0` means "no budget" and is the default, so
+ * nothing changes for a version that never sets one.
+ *
+ * The ceiling is four hours — absurd for a conversational questionnaire, which is the point: it
+ * exists to stop a stored blob carrying nonsense, not to express a view about how long an interview
+ * should be. The floor of 30s is one free-text answer.
+ */
+export const MIN_SESSION_BUDGET_SECONDS = 30;
+export const MAX_SESSION_BUDGET_SECONDS = 14_400;
+
+/** Bounds on a per-question-type time estimate, in seconds. */
+export const MIN_SECONDS_PER_ITEM = 1;
+export const MAX_SECONDS_PER_ITEM = 600;
+
+/**
+ * Seconds one data slot costs a respondent, by default.
+ *
+ * Priced as an open question rather than by type, because a data slot is filled from conversation:
+ * the respondent talks, and the extractor listens. 40s is the Merlin5 workbook's own estimate for
+ * an opening question, which is exactly the shape of thing data slots capture.
+ */
+export const DEFAULT_SECONDS_PER_DATA_SLOT = 40;
+
 /** Bounds on the planner confidence threshold. 0 accepts any answer; 1 accepts only certainty. */
 export const MIN_SCOPE_CONFIDENCE_FLOOR = 0;
 export const MIN_SCOPE_CONFIDENCE_CEILING = 1;
@@ -407,6 +431,42 @@ export interface AdaptiveScopeSettings {
   /** Admin-authored guidance appended to the planner prompt. */
   plannerInstructions: string;
 
+  /**
+   * How long one interview may take, in seconds. **`0` means no budget**, which is the default.
+   *
+   * The honest form of what {@link maxConditionalTopics} approximates. A count cannot see that one
+   * topic is ten likerts and another is three, so "at most three topics" is not a length — it is a
+   * proxy that happens to be right for the instrument it was derived from and wrong for the next
+   * one. Set this and an author can say "make it ten minutes" and have the arithmetic done for
+   * them.
+   *
+   * Both constraints apply: the count remains a hard ceiling on breadth, and this bounds duration.
+   * They answer different questions and neither implies the other.
+   */
+  sessionBudgetSeconds: number;
+
+  /**
+   * Seconds one item of each question type costs a respondent, keyed by `QuestionType`, overriding
+   * `DEFAULT_SECONDS_PER_TYPE` (in `scope/budget.ts`) per version.
+   *
+   * Per version because instruments differ more than types do: a likert battery in a familiar
+   * domain moves faster than one asking a CFO to rate things they have never been asked about.
+   * Partial — an absent type falls back to the default rather than to zero, because a type costed
+   * at nothing would quietly make a topic free.
+   *
+   * Typed `Record<string, number>` rather than `Partial<Record<QuestionType, number>>` on purpose:
+   * this module is a pure leaf that `lib/app/questionnaire/types.ts` imports FROM, so importing
+   * `QuestionType` back would be a value-level cycle. `scope/budget.ts` sits above both and does the
+   * type-aware lookup; an unrecognised key here is simply never asked for.
+   */
+  secondsPerQuestionType: Record<string, number>;
+
+  /**
+   * Seconds one data slot costs. Data slots are filled from conversation rather than asked as a
+   * form field, so they are priced as an open question rather than by type.
+   */
+  secondsPerDataSlot: number;
+
   /** The hard rules, evaluated before the planner. */
   rules: ScopeRule[];
 }
@@ -422,6 +482,10 @@ export const DEFAULT_ADAPTIVE_SCOPE_SETTINGS: AdaptiveScopeSettings = {
   announce: true,
   allowRespondentAmendment: true,
   plannerInstructions: '',
+  // 0 = no budget. Every version that predates this behaves exactly as it did.
+  sessionBudgetSeconds: 0,
+  secondsPerQuestionType: {},
+  secondsPerDataSlot: DEFAULT_SECONDS_PER_DATA_SLOT,
   rules: [],
 };
 
@@ -542,6 +606,32 @@ function asNumber(value: unknown, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * Narrow a session budget: `0` (or anything unusable) means no budget; otherwise clamp to the
+ * legal range. Deliberately NOT a plain clamp — see the call site.
+ */
+function asBudgetSeconds(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  const rounded = Math.round(value);
+  if (rounded <= 0) return 0;
+  return Math.min(MAX_SESSION_BUDGET_SECONDS, Math.max(MIN_SESSION_BUDGET_SECONDS, rounded));
+}
+
+/**
+ * Narrow a per-type seconds override. Unusable entries are DROPPED rather than defaulted to zero:
+ * a type costed at nothing makes every topic using it look free, which is the one failure a time
+ * budget cannot afford.
+ */
+function asSecondsMap(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) continue;
+    out[key] = Math.min(MAX_SECONDS_PER_ITEM, Math.max(MIN_SECONDS_PER_ITEM, Math.round(raw)));
+  }
+  return out;
+}
+
 /** Trimmed, de-duplicated, bounded string list. Drops blanks — an empty key is never a key. */
 function asKeyList(value: unknown, max = 64): string[] {
   if (!Array.isArray(value)) return [];
@@ -636,6 +726,19 @@ export function narrowAdaptiveScopeSettings(value: unknown): AdaptiveScopeSettin
       obj.plannerInstructions,
       PLANNER_INSTRUCTIONS_MAX_LENGTH,
       d.plannerInstructions
+    ),
+    // 0 is the only value below the floor that survives, and it means "no budget". Clamping a
+    // fat-fingered 5 up to 30 would silently create a budget nobody asked for, so anything that is
+    // not a usable duration reads as off.
+    sessionBudgetSeconds: asBudgetSeconds(obj.sessionBudgetSeconds, d.sessionBudgetSeconds),
+    secondsPerQuestionType: asSecondsMap(obj.secondsPerQuestionType),
+    secondsPerDataSlot: Math.round(
+      asNumber(
+        obj.secondsPerDataSlot,
+        MIN_SECONDS_PER_ITEM,
+        MAX_SECONDS_PER_ITEM,
+        d.secondsPerDataSlot
+      )
     ),
     rules,
   };

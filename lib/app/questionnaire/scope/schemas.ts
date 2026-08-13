@@ -14,7 +14,11 @@ import { z } from 'zod';
 
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_SECONDS_PER_ITEM,
+  MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
+  MIN_SECONDS_PER_ITEM,
+  MIN_SESSION_BUDGET_SECONDS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   SCOPE_RULE_ACTIONS,
   SCOPE_RULE_OPERATORS,
@@ -97,6 +101,27 @@ export const adaptiveScopeSettingsSchema = z.object({
   announce: z.boolean().optional(),
   allowRespondentAmendment: z.boolean().optional(),
   plannerInstructions: z.string().trim().max(PLANNER_INSTRUCTIONS_MAX_LENGTH).optional(),
+  // C7 — the time budget. `0` is explicitly allowed alongside the legal range because 0 is how an
+  // author turns the budget OFF; a bare `.min(MIN_SESSION_BUDGET_SECONDS)` would make "no budget"
+  // unexpressible through the API.
+  sessionBudgetSeconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_SESSION_BUDGET_SECONDS)
+    .refine((v) => v === 0 || v >= MIN_SESSION_BUDGET_SECONDS, {
+      message: `A budget must be 0 (no budget) or at least ${MIN_SESSION_BUDGET_SECONDS} seconds`,
+    })
+    .optional(),
+  secondsPerQuestionType: z
+    .record(z.string(), z.number().int().min(MIN_SECONDS_PER_ITEM).max(MAX_SECONDS_PER_ITEM))
+    .optional(),
+  secondsPerDataSlot: z
+    .number()
+    .int()
+    .min(MIN_SECONDS_PER_ITEM)
+    .max(MAX_SECONDS_PER_ITEM)
+    .optional(),
   rules: z.array(scopeRuleInputSchema).max(100).optional(),
 });
 

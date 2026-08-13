@@ -135,7 +135,7 @@ function fullScope(input: ScopeInput): ResolvedScope {
  * authored order is still a valid sample, whereas refusing to resolve without weights would make
  * the blind-spot check depend on the caller remembering to pass a map.
  */
-function membersAtDepth(
+export function membersAtDepth(
   keys: readonly string[],
   depth: TopicDepth,
   weights: ReadonlyMap<string, number> | undefined

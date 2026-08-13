@@ -48,7 +48,11 @@ import ExcelJS from 'exceljs';
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
-import type { AdaptiveScopeSettings, ScopeRule } from '@/lib/app/questionnaire/scope/types';
+import {
+  DEFAULT_SECONDS_PER_DATA_SLOT,
+  type AdaptiveScopeSettings,
+  type ScopeRule,
+} from '@/lib/app/questionnaire/scope/types';
 
 /* -------------------------------------------------------------------------- */
 /* The mapping                                                                */
@@ -527,7 +531,15 @@ async function main() {
     // ── Adaptive Scope settings — the Guardrails tab, as configuration ────────────────────────
     const settings: AdaptiveScopeSettings = {
       enabled: true,
-      // G01. The workbook derives three from a 600-second budget; we can only express the count.
+      // G01, as the workbook actually derives it: a 600-second session, from which the mandatory
+      // floor (S0 + S1 + S4 + S15) is spent before any routing decision, leaving ~334s. The count
+      // below is kept as the breadth ceiling it always was — the two constraints answer different
+      // questions, and three topics is not a length.
+      sessionBudgetSeconds: 600,
+      // Default per-type estimates already carry the workbook's own anchors (8s likert, 45s free
+      // text), so this version needs no override.
+      secondsPerQuestionType: {},
+      secondsPerDataSlot: DEFAULT_SECONDS_PER_DATA_SLOT,
       maxConditionalTopics: 3,
       // G04.
       includeCheckTopic: true,

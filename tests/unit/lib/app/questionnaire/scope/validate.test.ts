@@ -248,3 +248,75 @@ describe('validateAdaptiveScope', () => {
     expect(lastError).toBeLessThan(firstWarning);
   });
 });
+
+/**
+ * C7 — budget coherence.
+ *
+ * A budget that cannot cover the mandatory floor is not a tight interview, it is a broken one: the
+ * planner has nothing to spend, so the instrument silently stops adapting and every respondent gets
+ * the always-on questions alone. These are the findings that make that visible before launch.
+ */
+describe('validateAdaptiveScope — time budget (C7)', () => {
+  const topics: Topic[] = [
+    topic('opening', 'opening', { members: { questionKeys: ['q0'], dataSlotKeys: [] } }),
+    topic('data', 'conditional', { members: { questionKeys: ['q1'], dataSlotKeys: [] } }),
+    topic('people', 'conditional', { members: { questionKeys: ['q2'], dataSlotKeys: [] } }),
+  ];
+  const base = {
+    topics,
+    allQuestionKeys: ['q0', 'q1', 'q2'],
+    allDataSlotKeys: [] as string[],
+  };
+
+  it('says nothing about time when no budget is set', () => {
+    const issues = validateAdaptiveScope({
+      ...base,
+      settings: settings({ enabled: true, sessionBudgetSeconds: 0 }),
+      seconds: { always: 500, cheapestConditional: 100 },
+    });
+    expect(issues.map((i) => i.code)).not.toContain('budget_below_floor');
+  });
+
+  it('errors when the always-on questions already exceed the budget', () => {
+    const issues = validateAdaptiveScope({
+      ...base,
+      settings: settings({ enabled: true, sessionBudgetSeconds: 200 }),
+      seconds: { always: 260, cheapestConditional: 40 },
+    });
+    const found = issues.find((i) => i.code === 'budget_below_floor');
+    expect(found?.severity).toBe('error');
+    expect(found?.message).toContain('260s');
+  });
+
+  it('warns when the leftover cannot fit even the cheapest topic', () => {
+    // Not an error: the configuration is coherent, it just never routes. An author may be mid-edit.
+    const issues = validateAdaptiveScope({
+      ...base,
+      settings: settings({ enabled: true, sessionBudgetSeconds: 300 }),
+      seconds: { always: 280, cheapestConditional: 40 },
+    });
+    const found = issues.find((i) => i.code === 'budget_admits_no_topic');
+    expect(found?.severity).toBe('warning');
+    expect(found?.message).toContain('20s is left');
+  });
+
+  it('is quiet when the budget comfortably admits topics', () => {
+    const issues = validateAdaptiveScope({
+      ...base,
+      settings: settings({ enabled: true, sessionBudgetSeconds: 600 }),
+      seconds: { always: 260, cheapestConditional: 40 },
+    });
+    expect(issues.map((i) => i.code)).not.toContain('budget_below_floor');
+    expect(issues.map((i) => i.code)).not.toContain('budget_admits_no_topic');
+  });
+
+  it('says nothing about time when the caller supplied no costs', () => {
+    // The module is pure and cannot price questions itself; a caller without types still gets every
+    // other finding rather than a wrong one.
+    const issues = validateAdaptiveScope({
+      ...base,
+      settings: settings({ enabled: true, sessionBudgetSeconds: 60 }),
+    });
+    expect(issues.map((i) => i.code)).not.toContain('budget_below_floor');
+  });
+});

@@ -52,6 +52,7 @@ import {
   type SelectionStrategy,
   type ToneDimensionKey,
 } from '@/lib/app/questionnaire/types';
+import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 
 /* ── Tiers & groups ───────────────────────────────────────────────────────── */
@@ -531,6 +532,15 @@ export const SETTING_DESCRIPTORS = {
         {
           label: 'Conditional topics per interview',
           value: `Up to ${c.adaptiveScope.maxConditionalTopics}`,
+        },
+        {
+          // C7. Listed beside the count, not instead of it: they bound different things, and an
+          // operator reading this needs to know which of the two actually stopped an interview.
+          label: 'Session length budget',
+          value:
+            c.adaptiveScope.sessionBudgetSeconds > 0
+              ? formatSeconds(c.adaptiveScope.sessionBudgetSeconds)
+              : 'No limit',
         },
         {
           label: 'Unraised-area check topic',

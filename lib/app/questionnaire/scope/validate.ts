@@ -44,6 +44,16 @@ export interface ValidateScopeInput {
   allQuestionKeys: readonly string[];
   /** Every data-slot key in the version — for the rule and orphan checks. */
   allDataSlotKeys?: readonly string[];
+  /**
+   * The time arithmetic (C7), when the caller has it: what the always-run phases cost, and the
+   * cheapest routed topic. Optional because this module is pure and pricing needs question types —
+   * a caller without them still gets every other finding.
+   */
+  seconds?: {
+    always: number;
+    /** The cheapest conditional topic at full depth, or 0 when there are none. */
+    cheapestConditional: number;
+  };
 }
 
 /**
@@ -132,6 +142,29 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         message: `You allow up to ${settings.maxConditionalTopics} conditional topics but only have ${conditionalCount}, so every one is always selected. Lower the limit to make the choice meaningful.`,
       });
     }
+    // ── The time budget (C7) ───────────────────────────────────────────────────────────────
+    // A budget that cannot cover the mandatory floor is not a tight interview, it is a broken one:
+    // no routed topic can ever be seated, and the symptom is an instrument that quietly stops
+    // adapting. Reported as an ERROR because there is no configuration in which it is what the
+    // author meant.
+    const budget = settings.sessionBudgetSeconds;
+    if (budget > 0 && input.seconds) {
+      const { always, cheapestConditional } = input.seconds;
+      if (always >= budget) {
+        issues.push({
+          severity: 'error',
+          code: 'budget_below_floor',
+          message: `The questions every respondent gets already take about ${always}s, which is at or over your ${budget}s budget. No routed topic can ever fit, so the interview would never adapt.`,
+        });
+      } else if (cheapestConditional > 0 && budget - always < cheapestConditional) {
+        issues.push({
+          severity: 'warning',
+          code: 'budget_admits_no_topic',
+          message: `After the questions every respondent gets (~${always}s), ${budget - always}s is left — less than your cheapest conditional topic (~${cheapestConditional}s). Every interview will run the always-on questions alone.`,
+        });
+      }
+    }
+
     if (settings.includeCheckTopic && conditionalCount < 2) {
       issues.push({
         severity: 'warning',

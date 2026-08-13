@@ -25,6 +25,14 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { prisma } from '@/lib/db/client';
+import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
+import {
+  alwaysTopicSeconds,
+  estimateTopicCosts,
+  itemSeconds,
+  routedAllowanceSeconds,
+} from '@/lib/app/questionnaire/scope/budget';
+import type { AdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
 
 import {
   adaptiveScopeSettingsSchema,
@@ -41,28 +49,67 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadTopicDraft } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
 
-/** The version's question + data-slot keys, for the membership pickers and the orphan check. */
-async function loadKeyInventory(versionId: string) {
+/**
+ * The version's question + data-slot keys, for the membership pickers and the orphan check — plus
+ * everything the time arithmetic needs (C7): each question's `type` and, for a matrix, how many
+ * rows it asks the respondent to rate. `weight` rides along because a `light` topic asks its
+ * highest-weight members, so the cost of one depends on it.
+ */
+async function loadKeyInventory(versionId: string, settings: AdaptiveScopeSettings) {
   const [questions, dataSlots] = await Promise.all([
     prisma.appQuestionSlot.findMany({
       where: { versionId },
       orderBy: { ordinal: 'asc' },
-      select: { key: true, prompt: true, section: { select: { title: true, ordinal: true } } },
+      select: {
+        key: true,
+        prompt: true,
+        type: true,
+        typeConfig: true,
+        weight: true,
+        section: { select: { title: true, ordinal: true } },
+      },
     }),
     prisma.appDataSlot.findMany({
       where: { versionId },
       orderBy: { ordinal: 'asc' },
-      select: { key: true, name: true, theme: true },
+      select: { key: true, name: true, theme: true, weight: true },
     }),
   ]);
+
+  const seconds = itemSeconds(
+    questions.map((q) => ({ key: q.key, type: q.type, rowCount: matrixRowCount(q.typeConfig) })),
+    dataSlots.map((d) => d.key),
+    settings
+  );
+
   return {
     questions: questions.map((q) => ({
       key: q.key,
       prompt: q.prompt,
       sectionTitle: q.section.title,
+      type: q.type,
+      estimatedSeconds: seconds.byQuestionKey.get(q.key) ?? 0,
     })),
-    dataSlots: dataSlots.map((d) => ({ key: d.key, name: d.name, theme: d.theme })),
+    dataSlots: dataSlots.map((d) => ({
+      key: d.key,
+      name: d.name,
+      theme: d.theme,
+      estimatedSeconds: seconds.byDataSlotKey.get(d.key) ?? 0,
+    })),
+    seconds,
+    weights: {
+      byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
+      byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
+    },
   };
+}
+
+/** How many rows a matrix asks a respondent to rate — each row is a rating, so each row costs. */
+function matrixRowCount(typeConfig: unknown): number {
+  const parsed = typeConfigSchemaFor('matrix').safeParse(typeConfig);
+  if (!parsed.success) return 1;
+  const cfg = parsed.data as { rows?: unknown[] };
+  return Array.isArray(cfg.rows) ? Math.max(1, cfg.rows.length) : 1;
 }
 
 const handleList = withAdminAuth<{ id: string; vid: string }>(
@@ -73,21 +120,48 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       return errorResponse('Questionnaire version not found', { code: 'NOT_FOUND', status: 404 });
     }
 
-    const [topics, settings, inventory, draft] = await Promise.all([
+    // Settings first: the key inventory prices itself against this version's per-type overrides.
+    const settings = await loadAdaptiveScopeSettings(vid);
+    const [topics, inventory, draft] = await Promise.all([
       loadTopics(vid),
-      loadAdaptiveScopeSettings(vid),
-      loadKeyInventory(vid),
+      loadKeyInventory(vid, settings),
       loadTopicDraft(vid),
     ]);
+
+    // The time arithmetic (C7), computed here for the same reason `issues` is: one implementation,
+    // so the number an author reads and the number the planner works to cannot disagree.
+    const byTopicKey = estimateTopicCosts(topics, inventory.seconds, inventory.weights);
+    const alwaysSeconds = alwaysTopicSeconds(topics, byTopicKey);
+    const conditionalCosts = topics
+      .filter((t) => t.phase === 'conditional')
+      .map((t) => byTopicKey.get(t.key)?.full ?? 0)
+      .filter((s) => s > 0);
 
     const issues = validateAdaptiveScope({
       topics,
       settings,
       allQuestionKeys: inventory.questions.map((q) => q.key),
       allDataSlotKeys: inventory.dataSlots.map((d) => d.key),
+      seconds: {
+        always: alwaysSeconds,
+        cheapestConditional: conditionalCosts.length > 0 ? Math.min(...conditionalCosts) : 0,
+      },
     });
+    const costs = {
+      budgetSeconds: settings.sessionBudgetSeconds,
+      alwaysSeconds,
+      routedAllowanceSeconds: routedAllowanceSeconds(settings.sessionBudgetSeconds, alwaysSeconds),
+      byTopicKey: Object.fromEntries(byTopicKey),
+    };
 
-    return successResponse({ topics, settings, issues, inventory, draft });
+    return successResponse({
+      topics,
+      settings,
+      issues,
+      inventory: { questions: inventory.questions, dataSlots: inventory.dataSlots },
+      costs,
+      draft,
+    });
   }
 );
 

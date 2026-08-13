@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 
 import {
   DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  DEFAULT_SECONDS_PER_DATA_SLOT,
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_SECONDS_PER_ITEM,
+  MAX_SESSION_BUDGET_SECONDS,
+  MIN_SESSION_BUDGET_SECONDS,
   narrowAdaptiveScopeSettings,
   narrowInterviewPlan,
   narrowProposedTopicSet,
@@ -298,5 +302,69 @@ describe('narrowProposedTopicSet', () => {
     );
     expect(set?.rules[0]?.operator).toBe('exists');
     expect(set?.rules[0]?.action).toBe('include');
+  });
+});
+
+/**
+ * C7 — the session time budget.
+ *
+ * These settings decide how long a respondent is asked to spend, from a stored JSON blob nobody
+ * validates on the way in. The narrowing is the only thing between a fat-fingered value and an
+ * interview that silently stops adapting.
+ */
+describe('narrowAdaptiveScopeSettings — time budget (C7)', () => {
+  it('defaults to no budget, so nothing changes for a version that predates it', () => {
+    const s = narrowAdaptiveScopeSettings({});
+    expect(s.sessionBudgetSeconds).toBe(0);
+    expect(s.secondsPerQuestionType).toEqual({});
+    expect(s.secondsPerDataSlot).toBe(DEFAULT_SECONDS_PER_DATA_SLOT);
+  });
+
+  it('reads 0 as OFF rather than clamping it up to the floor', () => {
+    // The distinction the whole setting turns on. Clamping 0 up to 30s would invent a budget the
+    // author never asked for and start dropping topics.
+    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 0 }).sessionBudgetSeconds).toBe(0);
+    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: -5 }).sessionBudgetSeconds).toBe(0);
+  });
+
+  it('clamps a real budget into the legal range', () => {
+    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 5 }).sessionBudgetSeconds).toBe(
+      MIN_SESSION_BUDGET_SECONDS
+    );
+    expect(
+      narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 999_999 }).sessionBudgetSeconds
+    ).toBe(MAX_SESSION_BUDGET_SECONDS);
+    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 600.4 }).sessionBudgetSeconds).toBe(
+      600
+    );
+  });
+
+  it('falls back to no budget for a value that is not a number at all', () => {
+    expect(narrowAdaptiveScopeSettings({ sessionBudgetSeconds: 'ten' }).sessionBudgetSeconds).toBe(
+      0
+    );
+  });
+
+  it('DROPS an unusable per-type override rather than costing that type at nothing', () => {
+    // A type costed at zero makes every topic using it look free, which is the one failure a time
+    // budget cannot survive.
+    const s = narrowAdaptiveScopeSettings({
+      secondsPerQuestionType: { likert: 0, free_text: -3, numeric: 'x', matrix: 12 },
+    });
+    expect(s.secondsPerQuestionType).toEqual({ matrix: 12 });
+  });
+
+  it('clamps and rounds the per-type overrides it keeps', () => {
+    const s = narrowAdaptiveScopeSettings({
+      secondsPerQuestionType: { likert: 8.6, free_text: 99_999 },
+    });
+    expect(s.secondsPerQuestionType.likert).toBe(9);
+    expect(s.secondsPerQuestionType.free_text).toBe(MAX_SECONDS_PER_ITEM);
+  });
+
+  it('ignores a non-object override map', () => {
+    expect(
+      narrowAdaptiveScopeSettings({ secondsPerQuestionType: [1, 2] }).secondsPerQuestionType
+    ).toEqual({});
   });
 });

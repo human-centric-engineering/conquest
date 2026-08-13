@@ -8,6 +8,7 @@
  * Pure: no Prisma, no Next. Safe to import from client components.
  */
 
+import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
 import type {
   AdaptiveScopeSettings,
   ProposedTopicSet,
@@ -20,6 +21,10 @@ export interface TopicQuestionRef {
   key: string;
   prompt: string;
   sectionTitle: string;
+  /** The question type — what its time estimate is derived from (C7). */
+  type: string;
+  /** Estimated seconds this question costs a respondent. */
+  estimatedSeconds: number;
 }
 
 /** One data slot the membership picker can offer. */
@@ -27,6 +32,27 @@ export interface TopicDataSlotRef {
   key: string;
   name: string;
   theme: string;
+  /** Estimated seconds this slot costs a respondent (C7). */
+  estimatedSeconds: number;
+}
+
+/**
+ * What this version's interview costs, in seconds (C7).
+ *
+ * Computed server-side for the same reason `issues` is: the arithmetic that decides whether a plan
+ * fits must have exactly one implementation, or the number an author reads on the Topics tab and
+ * the number the planner works to will disagree — and the whole point of showing it is that an
+ * author can trust it.
+ */
+export interface TopicsCostView {
+  /** The version's budget in seconds, or 0 when none is set. */
+  budgetSeconds: number;
+  /** What the always-run phases cost — spent before any routing decision is taken. */
+  alwaysSeconds: number;
+  /** What is left for routed topics: `budgetSeconds - alwaysSeconds`, floored at 0. */
+  routedAllowanceSeconds: number;
+  /** Per-topic cost at each depth, keyed by topic key. A plain object — this crosses the wire. */
+  byTopicKey: Record<string, TopicCost>;
 }
 
 /**
@@ -46,6 +72,12 @@ export interface TopicsPayload {
     dataSlots: TopicDataSlotRef[];
   };
   /**
+   * The time arithmetic (C7): what each topic costs, what the mandatory floor is, and what is left
+   * to allocate. Always present — with no budget set, `budgetSeconds` is 0 and the per-topic costs
+   * still describe the instrument, which is the half an author benefits from either way.
+   */
+  costs: TopicsCostView;
+  /**
    * The Routing Analyst's pending proposal, or null.
    *
    * Carried in the same payload as the live set rather than fetched separately, because the review
@@ -60,5 +92,6 @@ export const EMPTY_TOPICS_PAYLOAD: Omit<TopicsPayload, 'settings'> = {
   topics: [],
   issues: [],
   inventory: { questions: [], dataSlots: [] },
+  costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
   draft: null,
 };
