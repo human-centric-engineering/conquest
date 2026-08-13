@@ -164,7 +164,12 @@ different instruments.
 
 ---
 
-## 7. The PDF export narrows silently · **~an hour**
+## 7. The PDF export narrows silently · **DONE** — see [`f17.12.md`](./f17.12.md)
+
+> Shipped 2026-08-13. "What this interview did not cover" prints after the answer record, in every
+> report mode and behind no `include` switch — the listings are already filtered to what was in
+> scope, so the note is what stops the document reading as a complete assessment. Skipped and
+> sampled stay apart, each line carrying its question count.
 
 `loadSessionExport` already filters sections to the interview's scope, so an unasked question does
 not appear — but the export does not print the `notAssessed` list the session-export builds. A

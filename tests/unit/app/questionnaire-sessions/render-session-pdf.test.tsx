@@ -108,6 +108,27 @@ describe('renderSessionPdf', () => {
     expect(startsWithPdfMagic(pdf)).toBe(true);
   }, 20000);
 
+  it('renders the scope note on a narrowed interview without throwing (P17)', async () => {
+    // A narrative deliverable with no appended Q&A: the listing that would show the gaps is off,
+    // which is exactly when the reader most needs telling the interview was narrowed.
+    const pdf = await renderSessionPdf(
+      model({
+        narrative: true,
+        includeQuestions: false,
+        notAssessed: [
+          { key: 'pricing', label: 'Pricing', questionCount: 4, partial: false },
+          { key: 'talent', label: 'Talent', questionCount: 6, partial: true },
+        ],
+        insights: {
+          summary: 'Your story so far.',
+          sections: [{ heading: 'Where you are now', body: 'Woven prose.' }],
+          actions: ['Try this next'],
+        },
+      })
+    );
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
   it('renders a narrative report with the captured data-slot appendix without throwing', async () => {
     const pdf = await renderSessionPdf(
       model({

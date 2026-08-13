@@ -434,6 +434,10 @@ export async function buildSessionExportPdfModel(
     sections: loaded.sections,
     answers: loaded.answers,
     dataSlotGroups: loaded.dataSlotGroups,
+    // Adaptive Scope (P17): what the interview left out. Not gated on a config switch — the
+    // section listing above is ALREADY filtered to what was in scope, so without this the document
+    // narrows silently and reads as a complete assessment of a shorter instrument.
+    notAssessed: loaded.notAssessed,
     // Definitions / glossary (P16): the respondent's copy carries it only when the admin opted in
     // — it changes a delivered document, so the switch, not the mere existence of terms, decides.
     glossary: buildGlossaryAppendix(

@@ -28,6 +28,7 @@ import { resolveTheme, type DemoClientTheme } from '@/lib/app/questionnaire/them
 import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 import type { ExportDataSlotGroup, SessionExportModel } from '@/lib/app/questionnaire/export/types';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import type { NotAssessedTopic } from '@/lib/app/questionnaire/scope/types';
 
 /** The plain inputs the DB seam hands the builder. */
 export interface SessionExportInput {
@@ -69,6 +70,13 @@ export interface SessionExportInput {
   glossary?: GlossaryAppendixView | null;
   /** Captured data-slot values grouped by theme (rendered when `includeDataSlots`). */
   dataSlotGroups?: ExportDataSlotGroup[];
+  /**
+   * Adaptive Scope (P17): areas the interview did not cover, or sampled only. Absent for a
+   * non-adaptive session. Rendered unconditionally when non-empty — unlike the Q&A listing and the
+   * data-slot appendix, this is not an appendix an author opts into: it is the caveat that stops
+   * the rest of the document being read as a complete assessment.
+   */
+  notAssessed?: NotAssessedTopic[];
 }
 
 /**
@@ -124,6 +132,7 @@ export function buildSessionExportModel(input: SessionExportInput): SessionExpor
     includeQuestions: input.includeQuestions ?? true,
     includeDataSlots: input.includeDataSlots ?? false,
     dataSlots: input.dataSlotGroups ?? [],
+    notAssessed: input.notAssessed ?? [],
     glossary: input.glossary ?? null,
   };
 }

@@ -548,6 +548,21 @@ describe('buildSessionExportPdfModel', () => {
     expect(mocks.logger.warn).toHaveBeenCalledOnce();
   });
 
+  it('carries the not-assessed topics onto the model (P17)', async () => {
+    // The wiring the whole §7 fix is: `loadSessionExport` has always built this list, and the
+    // document could not print what it was never handed.
+    const model = await buildSessionExportPdfModel(
+      loaded({
+        notAssessed: [
+          { key: 'pricing', label: 'Pricing', questionCount: 4, partial: false },
+          { key: 'talent', label: 'Talent', questionCount: 6, partial: true },
+        ],
+      })
+    );
+
+    expect(model.notAssessed.map((t) => t.key)).toEqual(['pricing', 'talent']);
+  });
+
   it('drops the logo and warns on a network error', async () => {
     stubFetch(async () => {
       throw new Error('network down');

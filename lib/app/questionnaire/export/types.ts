@@ -23,6 +23,7 @@ import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/type
 import type { PanelSectionView } from '@/lib/app/questionnaire/panel/types';
 import type { ProfileValues } from '@/lib/app/questionnaire/profile/profile-values';
 import type { RespondentReportContent } from '@/lib/app/questionnaire/report/content';
+import type { NotAssessedTopic } from '@/lib/app/questionnaire/scope/types';
 
 /** The respondent identity shown in the PDF header (name only — never email). */
 export interface ExportRespondent {
@@ -150,4 +151,14 @@ export interface SessionExportModel {
   glossary: GlossaryAppendixView | null;
   /** The captured data-slot values, grouped by theme — rendered when {@link includeDataSlots}. */
   dataSlots: ExportDataSlotGroup[];
+  /**
+   * Adaptive Scope (P17): the areas this interview did not cover, or covered only as a sample.
+   * Empty for every non-adaptive session, which is most of them.
+   *
+   * The document prints them because **it already narrows silently**: the section listing is
+   * filtered to what was in scope, so an area the interview decided not to ask about simply is not
+   * there, and a reader cannot tell a short instrument from a narrowed one. The report's method
+   * panel says it; a downloaded PDF outlives the panel and is the thing that gets forwarded.
+   */
+  notAssessed: NotAssessedTopic[];
 }

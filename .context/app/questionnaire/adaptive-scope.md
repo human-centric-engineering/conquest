@@ -317,6 +317,13 @@ The `notAssessed` list on the session export is what makes an adaptive instrumen
   not answered" from "never asked". `isPartiallyAssessed()` is the question every surface rendering a
   band must be able to ask: **a band from three of eight items is not the same measurement as one from
   all eight**, and a cohort chart that puts them in the same column is comparing two instruments.
+- **The PDF export prints the list itself** (F17.12), under "What this interview did not cover",
+  skipped and sampled kept apart. Not gated on any `include` switch: every listing in that document
+  is already filtered to what was in scope, so without the note it narrows **silently** and reads as
+  a complete assessment of a shorter instrument. The method panel says it on screen; a downloaded
+  file outlives the panel, and is the artifact that gets forwarded. The wording is a pure function
+  (`export/not-assessed-view.ts`) because React-PDF emits a binary buffer, and a claim this
+  consequential must be assertable without parsing a PDF.
 - **The admin session viewer** renders the plan above the transcript — what was covered, what was
   not, and what the respondent was told. A conversation that never touched an area reads as an
   oversight until you know it was a decision.

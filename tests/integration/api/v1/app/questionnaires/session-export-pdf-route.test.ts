@@ -81,6 +81,7 @@ function model(over: Partial<SessionExportModel> = {}): SessionExportModel {
     includeQuestions: true,
     includeDataSlots: false,
     dataSlots: [],
+    notAssessed: [],
     ...over,
   };
 }
