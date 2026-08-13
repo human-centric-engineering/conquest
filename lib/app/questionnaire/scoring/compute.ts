@@ -1,8 +1,8 @@
 /**
  * Scoring computation (report kind `cohort`, F14.4) — the I/O layer around the pure {@link scoreSession}.
  *
- * Loads a version's scoring inputs (the likert bounds per question/data-slot key, for reverse-scoring)
- * and a set of sessions' numeric answers, then scores each session. Used two ways: by the cohort
+ * Loads a version's scoring inputs (the numeric bounds per question key, used for reverse-scoring and
+ * for C8's common ruler) and a set of sessions' numeric answers, then scores each session. Used two ways: by the cohort
  * dataset to aggregate scores per segment (in-memory, no side effects), and by the recompute path to
  * persist `AppRespondentScore` rows for reuse. Server-side (touches Prisma).
  */
@@ -17,7 +17,7 @@ import type { Prisma } from '@prisma/client';
 
 /** Version-level scoring inputs: the keys' numeric bounds + the id→key maps, computed once. */
 export interface ScoringInputs {
-  /** Likert min/max per question/data-slot key, for reverse-scoring. */
+  /** Min/max per question key, for reverse-scoring and (under `normalise`) the common ruler. */
   bounds: Map<string, ItemBounds>;
   /** questionSlot.id → key. */
   questionKeyById: Map<string, string>;
@@ -34,13 +34,25 @@ function asFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-/** Read a question's likert bounds from its stored typeConfig, or null when not a bounded likert. */
-function likertBounds(type: string, typeConfig: unknown): ItemBounds | null {
-  if (type !== 'likert') return null;
-  const parsed = typeConfigSchemaFor('likert').safeParse(typeConfig);
+/**
+ * Read a question's numeric bounds from its stored typeConfig, or null when it has none.
+ *
+ * Two types can supply them. A `likert` always can — bounds are the type. A `numeric` can only when
+ * the author set both ends, which is optional on that type: an unbounded "how many reps?" has no
+ * ruler to be placed on, and inventing one would be worse than admitting it.
+ *
+ * `matrix` is deliberately absent despite carrying a shared scale at `typeConfig.scale`. A matrix
+ * answer is a composite object (`{ rowKey: point }`), which {@link asFiniteNumber} rejects, so a
+ * matrix item contributes nothing to a scale today whether or not it has bounds. Returning bounds
+ * for one would imply a capability that does not exist.
+ */
+export function itemBounds(type: string, typeConfig: unknown): ItemBounds | null {
+  if (type !== 'likert' && type !== 'numeric') return null;
+  const parsed = typeConfigSchemaFor(type).safeParse(typeConfig ?? {});
   if (!parsed.success) return null;
-  const cfg = parsed.data as { min?: number; max?: number };
-  if (typeof cfg.min !== 'number' || typeof cfg.max !== 'number') return null;
+  const cfg = parsed.data as { min?: number; max?: number } | null;
+  if (!cfg || typeof cfg.min !== 'number' || typeof cfg.max !== 'number') return null;
+  if (cfg.max <= cfg.min) return null;
   return { min: cfg.min, max: cfg.max };
 }
 
@@ -58,7 +70,7 @@ export async function buildScoringInputs(versionId: string): Promise<ScoringInpu
   const questionKeyById = new Map<string, string>();
   for (const s of slots) {
     questionKeyById.set(s.id, s.key);
-    const b = likertBounds(s.type, s.typeConfig);
+    const b = itemBounds(s.type, s.typeConfig);
     if (b) bounds.set(s.key, b);
   }
   const dataSlotKeyById = new Map<string, string>();

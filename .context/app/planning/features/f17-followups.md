@@ -77,7 +77,12 @@ opposed to authoring the two items as their own topic, which works today.
 
 ---
 
-## 3. Cross-scale normalisation (G06 / C8) · **~half a day** · _a correctness trap_
+## 3. Cross-scale normalisation (G06 / C8) · **DONE** — see [`f17.10.md`](./f17.10.md)
+
+> Shipped 2026-08-13, and wider than recorded below: the trap is not confined to Merlin5's 1–6
+> section. Nothing constrains a scoring item's type, so a `numeric` ranged 0–50 could already sit in
+> a scale beside 1–5 likerts and decide it outright. `ScoringSchemaContent.normalise` (off by
+> default) puts every item on a 0–1 ruler; the save is refused when band cutoffs no longer match it.
 
 **The trap:** Merlin5's Section 14 runs a **1–6** agreement scale; Sections 1–13 run **1–5** extent.
 `scoreSession` combines raw item values by weighted sum or mean with no normalisation, so a

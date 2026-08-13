@@ -46,6 +46,25 @@ export interface ScoringSchemaContent {
   bands: ScoringBand[];
   /** How each scale combines its items: weighted sum or weighted mean. */
   method: ScoringMethod;
+  /**
+   * Put every item on the same ruler before combining it — map each answer to its 0–1 position
+   * within its OWN question's bounds (C8 / guardrail G06).
+   *
+   * Off by default, and that default is load-bearing: turning it on changes what `raw` means, so
+   * every schema authored before this existed keeps its values exactly. Turn it on when one scale
+   * draws items from questions with different ranges — a 1–6 agreement battery beside a 1–5 extent
+   * one, or a 0–50 numeric beside either. Without it, `scoreSession` averages the numbers as
+   * written: a 4 out of 5 (75% of the way up) and a 4 out of 6 (60%) are treated as the same
+   * quantity, and a 0–50 numeric swamps the likerts it sits with. The result is a number, and
+   * nothing about it says it is meaningless.
+   *
+   * Two consequences the author must know, both surfaced rather than absorbed:
+   * an item whose question has no numeric bounds cannot be placed on the ruler and is DROPPED from
+   * the scale (see `scoreSession`); and `raw` lands in 0–1 under `mean`, so band cutoffs written in
+   * the old units match nothing — {@link scoringSchemaContentSchema} rejects those rather than
+   * letting every band silently read `null`.
+   */
+  normalise?: boolean;
 }
 
 /** Empty schema — the lazy default when none is authored. */
@@ -54,6 +73,7 @@ export const EMPTY_SCORING_SCHEMA: ScoringSchemaContent = {
   items: [],
   bands: [],
   method: 'mean',
+  normalise: false,
 };
 
 /** One scale's computed result for a respondent. */

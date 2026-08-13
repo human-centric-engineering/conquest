@@ -23,7 +23,11 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-import { scoreSessions, type ScoringInputs } from '@/lib/app/questionnaire/scoring/compute';
+import {
+  itemBounds,
+  scoreSessions,
+  type ScoringInputs,
+} from '@/lib/app/questionnaire/scoring/compute';
 import type { ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 
 const schema: ScoringSchemaContent = {
@@ -159,5 +163,48 @@ describe('scoreSessions — Adaptive Scope (P17)', () => {
     // unanswered — and reporting a narrowed instrument would be a claim nobody made.
     expect(out.get('s1')?.open.assessedItemCount).toBe(2);
     expect(out.get('s1')?.open.totalItemCount).toBe(2);
+  });
+});
+
+/**
+ * C8 — which questions can supply a ruler at all.
+ *
+ * `itemBounds` decides whether an item can be reverse-scored and, under `normalise`, whether it can
+ * be scored at all. The `matrix` case is the one worth pinning: it carries a shared scale in its
+ * config, but a matrix answer is a composite object that never coerces to a number, so returning
+ * bounds for it would advertise a capability the engine does not have.
+ */
+describe('itemBounds (C8)', () => {
+  it('reads a likert scale bounds', () => {
+    expect(itemBounds('likert', { min: 1, max: 6, minLabel: 'No', maxLabel: 'Yes' })).toEqual({
+      min: 1,
+      max: 6,
+    });
+  });
+
+  it('reads a numeric question bounds when the author set both ends', () => {
+    expect(itemBounds('numeric', { min: 0, max: 50 })).toEqual({ min: 0, max: 50 });
+  });
+
+  it('returns null for a numeric with an open end — there is no ruler to place it on', () => {
+    expect(itemBounds('numeric', { min: 0 })).toBeNull();
+    expect(itemBounds('numeric', {})).toBeNull();
+    expect(itemBounds('numeric', null)).toBeNull();
+  });
+
+  it('returns null for a matrix, whose composite answer never reaches the engine', () => {
+    expect(
+      itemBounds('matrix', { rows: [{ key: 'r1', label: 'Row' }], scale: { min: 1, max: 5 } })
+    ).toBeNull();
+  });
+
+  it('returns null for the unbounded types', () => {
+    expect(itemBounds('free_text', null)).toBeNull();
+    expect(itemBounds('boolean', {})).toBeNull();
+    expect(itemBounds('single_choice', { choices: [{ value: 'a', label: 'A' }] })).toBeNull();
+  });
+
+  it('returns null for a degenerate range rather than a divide-by-zero waiting to happen', () => {
+    expect(itemBounds('numeric', { min: 3, max: 3 })).toBeNull();
   });
 });

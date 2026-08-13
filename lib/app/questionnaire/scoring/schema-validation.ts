@@ -58,6 +58,7 @@ export const scoringSchemaContentSchema = z
       )
       .max(200),
     method: z.enum(SCORING_METHODS),
+    normalise: z.boolean().optional(),
   })
   .strict()
   .superRefine((schema, ctx) => {
@@ -90,6 +91,31 @@ export const scoringSchemaContentSchema = z
         });
       }
     });
+
+    // C8: normalising rescales what `raw` means, so cutoffs written in the questions' own units
+    // stop matching anything. Left unchecked the author gets `band: null` on every respondent and
+    // an empty band breakdown in the cohort report, with nothing anywhere saying why. Rejecting the
+    // save is the only place that failure is still attributable to a cause.
+    if (schema.normalise) {
+      const itemsPerScale = new Map<string, number>();
+      for (const item of schema.items) {
+        itemsPerScale.set(item.scaleKey, (itemsPerScale.get(item.scaleKey) ?? 0) + 1);
+      }
+      schema.bands.forEach((band, i) => {
+        // Under `mean` every item lands in 0–1, so the mean does too. Under `sum` the ceiling is
+        // one per item, so it is the scale's item count.
+        const ceiling = schema.method === 'sum' ? (itemsPerScale.get(band.scaleKey) ?? 0) : 1;
+        if (band.min < 0 || band.max > ceiling) {
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              `With normalisation on, scores for this scale run 0–${ceiling}. Re-author this band's ` +
+              `cutoffs in that range (they are currently ${band.min}–${band.max}).`,
+            path: ['bands', i],
+          });
+        }
+      });
+    }
   });
 
 /**
@@ -153,5 +179,9 @@ export function narrowScoringSchemaContent(value: unknown): ScoringSchemaContent
 
   const method = value.method === 'sum' ? 'sum' : 'mean';
 
-  return { scales, items, bands, method };
+  // Absent reads as OFF, which is the truth for every schema authored before C8 existed — and the
+  // only reading that leaves their stored scores meaning what they meant when they were computed.
+  const normalise = value.normalise === true;
+
+  return { scales, items, bands, method, normalise };
 }

@@ -32,7 +32,12 @@ interface SchemaView {
   name: string;
   source: string;
   content: ScoringSchemaContent;
-  questions: Array<{ key: string; prompt: string; type: string }>;
+  questions: Array<{
+    key: string;
+    prompt: string;
+    type: string;
+    bounds: { min: number; max: number } | null;
+  }>;
   dataSlots: Array<{ key: string; name: string }>;
 }
 

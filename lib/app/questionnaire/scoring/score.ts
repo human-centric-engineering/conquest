@@ -15,7 +15,14 @@ import type {
   ScoringSchemaContent,
 } from '@/lib/app/questionnaire/scoring/types';
 
-/** The numeric bounds of an item's source question (for reverse-scoring). */
+/**
+ * The numeric bounds of an item's source question.
+ *
+ * Two jobs, and the second is why a missing entry matters more than it used to: reverse-scoring
+ * (`(min + max) - value`), and — when the schema sets `normalise` — placing the item on a common
+ * 0–1 ruler. An item with no bounds is simply not reversed; under `normalise` it cannot be placed
+ * at all, and is dropped.
+ */
 export interface ItemBounds {
   min: number;
   max: number;
@@ -30,7 +37,7 @@ function bandFor(bands: ScoringBand[], scaleKey: string, raw: number): string | 
 }
 
 /** The 0–1 position of `raw` within a scale's overall band span; null when the scale has no bands. */
-function normalise(bands: ScoringBand[], scaleKey: string, raw: number): number | null {
+function bandPosition(bands: ScoringBand[], scaleKey: string, raw: number): number | null {
   const scaleBands = bands.filter((b) => b.scaleKey === scaleKey);
   if (scaleBands.length === 0) return null;
   const lo = Math.min(...scaleBands.map((b) => b.min));
@@ -41,9 +48,18 @@ function normalise(bands: ScoringBand[], scaleKey: string, raw: number): number 
 
 /**
  * Score one respondent's answers against a scoring schema. `answers` maps an item `ref`
- * (question/data-slot key) to its numeric value; `bounds` supplies likert min/max per ref for
+ * (question/data-slot key) to its numeric value; `bounds` supplies min/max per ref for
  * reverse-scoring (a ref without bounds is not reversed). Only scales with at least one answered item
  * appear in the result.
+ *
+ * `schema.normalise` (C8) puts every item on a common ruler before combining: each value becomes its
+ * 0–1 position within its own question's bounds. Without it, a scale drawing on a 1–6 battery and a
+ * 1–5 one is arithmetic over two different rulers — a 4 of 5 and a 4 of 6 are not the same quantity,
+ * and a 0–50 numeric beside a likert decides the scale on its own. An item with no bounds cannot be
+ * placed on that ruler, so under `normalise` it is DROPPED rather than passed through in its raw
+ * units, which would silently reintroduce the exact mixing the flag exists to prevent. The drop is
+ * visible as `itemCount` falling short of `totalItemCount`, and the authoring route warns about it
+ * before a schema is saved.
  *
  * `inScopeRefs` — Adaptive Scope (P17) — is the set of item refs this respondent's interview
  * actually covered. It does NOT change any arithmetic: an item outside scope has no answer, so it
@@ -70,10 +86,15 @@ export function scoreSession(
       if (!inScopeRefs || inScopeRefs.has(item.ref)) assessedItemCount += 1;
       const value = answers.get(item.ref);
       if (value === undefined || !Number.isFinite(value)) continue;
+      const b = bounds.get(item.ref);
       let v = value;
-      if (item.reverse) {
-        const b = bounds.get(item.ref);
-        if (b) v = b.min + b.max - v;
+      // Reverse in the question's own units. The two orders happen to agree arithmetically —
+      // reversing then rescaling and rescaling then flipping both give (max - v) / (max - min) —
+      // so this order is chosen because reversal is *defined* in those units, not to fix a bug.
+      if (item.reverse && b) v = b.min + b.max - v;
+      if (schema.normalise) {
+        if (!b || b.max === b.min) continue;
+        v = (v - b.min) / (b.max - b.min);
       }
       const w = Number.isFinite(item.weight) ? item.weight : 1;
       weightedSum += w * v;
@@ -87,7 +108,7 @@ export function scoreSession(
       schema.method === 'sum' ? weightedSum : weightTotal !== 0 ? weightedSum / weightTotal : 0;
     const score: ScaleScore = {
       raw,
-      normalised: normalise(schema.bands, scale.key, raw),
+      normalised: bandPosition(schema.bands, scale.key, raw),
       band: bandFor(schema.bands, scale.key, raw),
       itemCount,
       assessedItemCount,

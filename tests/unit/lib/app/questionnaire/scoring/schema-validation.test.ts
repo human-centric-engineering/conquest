@@ -43,6 +43,9 @@ describe('narrowScoringSchemaContent', () => {
       items: [],
       bands: [],
       method: 'mean',
+      // C8: off, because the only safe reading of "nothing was said" is the behaviour every
+      // schema had before the flag existed.
+      normalise: false,
     });
   });
 });
@@ -80,5 +83,87 @@ describe('scoringSchemaContentSchema', () => {
       ],
     };
     expect(scoringSchemaContentSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+/**
+ * C8 — band cutoffs must follow the ruler.
+ *
+ * Turning normalisation on rescales what a score means. Left unchecked, cutoffs written in the
+ * questions' own units match nothing: every respondent gets `band: null` and the cohort report's
+ * band breakdown empties out, with nothing anywhere naming the cause. The save is the last place
+ * that failure is still attributable, so these assert it is refused there.
+ */
+describe('scoringSchemaContentSchema — normalise (C8)', () => {
+  const base = {
+    method: 'mean' as const,
+    scales: [{ key: 'open', name: 'Openness' }],
+    items: [
+      { source: 'question' as const, ref: 'q1', scaleKey: 'open', weight: 1, reverse: false },
+      { source: 'question' as const, ref: 'q2', scaleKey: 'open', weight: 1, reverse: false },
+    ],
+    bands: [{ scaleKey: 'open', min: 1, max: 5, label: 'All' }],
+  };
+
+  it('accepts the flag itself', () => {
+    const ok = { ...base, normalise: false };
+    expect(scoringSchemaContentSchema.safeParse(ok).success).toBe(true);
+  });
+
+  it('rejects raw-unit band cutoffs once normalisation is on', () => {
+    const bad = { ...base, normalise: true };
+    const result = scoringSchemaContentSchema.safeParse(bad);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toContain('0–1');
+    }
+  });
+
+  it('accepts 0–1 band cutoffs under mean', () => {
+    const ok = {
+      ...base,
+      normalise: true,
+      bands: [
+        { scaleKey: 'open', min: 0, max: 0.5, label: 'Low' },
+        { scaleKey: 'open', min: 0.5, max: 1, label: 'High' },
+      ],
+    };
+    expect(scoringSchemaContentSchema.safeParse(ok).success).toBe(true);
+  });
+
+  it('allows the ceiling to reach the item count under sum', () => {
+    // Two items, each contributing at most 1 once normalised, so the scale tops out at 2 — not 1.
+    const ok = {
+      ...base,
+      method: 'sum' as const,
+      normalise: true,
+      bands: [{ scaleKey: 'open', min: 0, max: 2, label: 'All' }],
+    };
+    expect(scoringSchemaContentSchema.safeParse(ok).success).toBe(true);
+
+    const bad = { ...ok, bands: [{ scaleKey: 'open', min: 0, max: 3, label: 'All' }] };
+    expect(scoringSchemaContentSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('leaves raw-unit bands alone when normalisation is off', () => {
+    expect(scoringSchemaContentSchema.safeParse(base).success).toBe(true);
+  });
+});
+
+describe('narrowScoringSchemaContent — normalise (C8)', () => {
+  it('reads an absent flag as off, so a pre-C8 schema keeps its values', () => {
+    const narrowed = narrowScoringSchemaContent({
+      scales: [{ key: 'open', name: 'Openness' }],
+      items: [],
+      bands: [],
+      method: 'mean',
+    });
+    expect(narrowed.normalise).toBe(false);
+  });
+
+  it('reads only a literal true as on', () => {
+    const base = { scales: [{ key: 'open', name: 'Openness' }], items: [], bands: [] };
+    expect(narrowScoringSchemaContent({ ...base, normalise: true }).normalise).toBe(true);
+    expect(narrowScoringSchemaContent({ ...base, normalise: 'yes' }).normalise).toBe(false);
   });
 });
