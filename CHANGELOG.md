@@ -581,6 +581,31 @@ release process.
 
 ### Fixed
 
+- **CI's changed-file detection no longer caps at 100 files, silently skipping
+  every gate.** The `config` job read `gh pr view --json files`, which goes
+  through GraphQL and pages `files(first: 100)` without following on —
+  **measured: 100 of 411** against a real PR. Every gate defaults to off and is
+  switched on by a matching path, and `ci-status` fails only on a literal
+  `failure`, so a skipped job passes: a PR over 100 files could go fully green
+  with type-check, lint, build, tests, the Docker stack smoke and the
+  `lockfile` supply-chain check never having run. A release PR is exactly the
+  large-diff case, and exactly when `package-lock.json` moves. PRs now use the
+  REST files endpoint with `--paginate` (cap 3000) and **cross-check the result
+  against the PR's own `changed_files` count**, so a future API change that
+  reintroduces a cap is caught rather than trusted. Pushes use the commits API with the same
+  flag — it caps at 300 *per page* but does paginate. **Both endpoints stop at a
+  hard 3000 files regardless**, returning a final empty page with HTTP 200, so
+  the push path treats reaching that cap as truncation (the PR path catches it
+  via the cross-check instead). The
+  truncation flag defaults to **true** and is cleared only by a positive numeric
+  match, so a comparison that merely errors cannot leave the gates switched off.
+  On any truncation the job runs **every** gate and emits a `::warning::`:
+  running too much on a huge diff is the cheap mistake. Two fixes to the gate itself:
+  `config` joins `ci-status`'s `needs` — every other job is gated on its
+  outputs, so a failure in change detection made them all `skipped` and reported
+  "CI passed" with nothing run — and `ci-status` now fails on anything that is
+  not `success` or `skipped`, so a `cancelled` job (a `timeout-minutes` kill, or
+  a cancelled run) no longer passes the required check (#591).
 - **A truncated evaluation judge no longer records a wrong verdict.** A judge
   agent runs as a streaming chat call, so it goes through `drainStreamChat`
   rather than `runStructuredCompletion`, and the seeded judges run at
