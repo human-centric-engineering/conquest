@@ -1,24 +1,25 @@
 /**
- * Author the Merlin5 Growth Assessor™ from its source workbook — deterministically.
+ * Author a questionnaire from a structured source workbook — deterministically.
  *
  * ```
- * npm run author:merlin5 -- ~/Downloads/Merlin5_Growth_Assessor_Question_Set_v3.xlsx [--replace]
+ * npm run author:workbook -- <workbook.xlsx> --title="<questionnaire title>" [--replace]
  * ```
  *
  * ## Why a script and not a seed
  *
- * This is a **client's instrument**, not platform data. Seeding it would create it on every
- * `db:seed` of every install and commit 70 rows of someone else's intellectual property to this
- * repo. Reading the workbook from a path at run time keeps the content out of git entirely — the
- * script encodes only the *mapping*, which is ours.
+ * The instruments this authors are **a client's**, not platform data. Seeding one would create it
+ * on every `db:seed` of every install and commit dozens of rows of someone else's intellectual
+ * property to this repo. Reading the workbook from a path at run time keeps the content out of git
+ * entirely — the script encodes only the *mapping*, which is ours. The title is passed in for the
+ * same reason: it is the client's name for their instrument, so it lives outside the repo too.
  *
  * ## Why a script and not the product's own ingest
  *
  * The product accepts `.xlsx` (`flattenWorkbook` → the extraction agent), and that is the right
- * path for a document that only implies its structure. This workbook does not imply it: it states
- * exact keys, types, scale bounds, per-point labels, weights, required flags and guidelines, in
- * columns. Putting an LLM between that and the database can only lose fidelity — a re-derived key
- * that differs by one character silently breaks every routing rule that names it.
+ * path for a document that only implies its structure. A workbook in this format does not imply it:
+ * it states exact keys, types, scale bounds, per-point labels, weights, required flags and
+ * guidelines, in columns. Putting an LLM between that and the database can only lose fidelity — a
+ * re-derived key that differs by one character silently breaks every routing rule that names it.
  *
  * So: extraction where structure must be inferred, this where it is declared.
  *
@@ -30,15 +31,18 @@
  * | ASK RULE column     | the topic's PHASE — opening / core / conditional / closing            |
  * | Routing tab         | each conditional topic's plain-English `criteria`, in the author's words |
  * | Guardrails G01      | `adaptiveScope.maxConditionalTopics = 3`                              |
- * | Guardrails G02      | a hard rule: `not_exists commercial_outcome` → EXCLUDE AI & Automation |
+ * | Guardrails G02      | a hard rule: `not_exists commercial_outcome` → EXCLUDE the named topic |
  * | Guardrails G04      | `includeCheckTopic` + `checkTopicPreference = [data, management]`      |
  * | Routing R12         | `fallbackTopicKeys = [business_execution, data, management]`           |
  * | Question 0.5        | `adaptiveScope.announce` — see {@link HANDOFF_KEY}                     |
  * | Guardrails G03, G05 | NOT built — reported at the end as what this instrument still needs    |
  *
- * Idempotent by refusal: it will not touch an existing Merlin5 questionnaire unless `--replace` is
- * passed, which deletes it first. Overwriting a launched instrument that has respondent sessions is
- * not something a convenience script should be able to do by accident.
+ * The section-to-topic mapping below is shaped around one workbook layout; a differently organised
+ * workbook needs its own mapping, not a flag.
+ *
+ * Idempotent by refusal: it will not touch an existing questionnaire of the same title unless
+ * `--replace` is passed, which deletes it first. Overwriting a launched instrument that has
+ * respondent sessions is not something a convenience script should be able to do by accident.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -57,8 +61,6 @@ import {
 /* -------------------------------------------------------------------------- */
 /* The mapping                                                                */
 /* -------------------------------------------------------------------------- */
-
-const TITLE = 'Merlin5 Growth Assessor™';
 
 /**
  * The workbook's bot-script row (0.5), which is NOT persisted as a question.
@@ -339,9 +341,13 @@ function log(message: string) {
 async function main() {
   const path = process.argv[2];
   const replace = process.argv.includes('--replace');
-  if (!path || path.startsWith('--')) {
+  // The title is the client's name for their instrument, so it is an argument rather than a
+  // constant — the same reason the workbook itself is read from a path instead of committed.
+  const titleArg = process.argv.find((a) => a.startsWith('--title='));
+  const title = titleArg?.slice('--title='.length).trim();
+  if (!path || path.startsWith('--') || !title) {
     console.error(
-      'Usage: npm run author:merlin5 -- <path-to-Merlin5_Growth_Assessor_Question_Set_v3.xlsx> [--replace]'
+      'Usage: npm run author:workbook -- <path-to-workbook.xlsx> --title="<questionnaire title>" [--replace]'
     );
     process.exitCode = 1;
     return;
@@ -392,12 +398,12 @@ async function main() {
   );
 
   const existing = await prisma.appQuestionnaire.findFirst({
-    where: { title: TITLE },
+    where: { title },
     select: { id: true },
   });
   if (existing && !replace) {
     console.error(
-      `❌ "${TITLE}" already exists (${existing.id}). Re-run with --replace to delete and re-author it.`
+      `❌ "${title}" already exists (${existing.id}). Re-run with --replace to delete and re-author it.`
     );
     process.exitCode = 1;
     return;
@@ -409,7 +415,7 @@ async function main() {
 
   const versionId = await executeTransaction(async (tx) => {
     const questionnaire = await tx.appQuestionnaire.create({
-      data: { title: TITLE, status: 'draft' },
+      data: { title, status: 'draft' },
       select: { id: true },
     });
     const version = await tx.appQuestionnaireVersion.create({
@@ -569,7 +575,7 @@ async function main() {
     return version.id;
   });
 
-  log(`✅ Authored "${TITLE}" — version ${versionId}`);
+  log(`✅ Authored "${title}" — version ${versionId}`);
   log(
     `   ${asked.length} questions across ${new Set(asked.map((q) => q.sectionNumber)).size} sections`
   );

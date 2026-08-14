@@ -68,24 +68,24 @@ describe('RenameQuestionnaire', () => {
   });
 
   it('PATCHes the trimmed title and refreshes on success', async () => {
-    vi.mocked(apiClient.patch).mockResolvedValue({ id: QN_ID, title: 'Merlin5 Questionnaire' });
+    vi.mocked(apiClient.patch).mockResolvedValue({ id: QN_ID, title: 'Acme Questionnaire' });
     const user = userEvent.setup();
     renderForm();
 
     const input = screen.getByRole('textbox');
     await user.clear(input);
-    await user.type(input, '  Merlin5 Questionnaire  ');
+    await user.type(input, '  Acme Questionnaire  ');
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => {
       expect(apiClient.patch).toHaveBeenCalledWith(`/api/v1/app/questionnaires/${QN_ID}`, {
-        body: { title: 'Merlin5 Questionnaire' },
+        body: { title: 'Acme Questionnaire' },
       });
     });
     expect(mockRefresh).toHaveBeenCalledOnce();
     // The field normalises to the trimmed, saved value (router.refresh then re-feeds
     // the matching currentTitle prop from the server in the real app).
-    expect(screen.getByRole('textbox')).toHaveValue('Merlin5 Questionnaire');
+    expect(screen.getByRole('textbox')).toHaveValue('Acme Questionnaire');
   });
 
   it('shows an inline error and does not refresh when the PATCH fails', async () => {
@@ -97,7 +97,7 @@ describe('RenameQuestionnaire', () => {
 
     const input = screen.getByRole('textbox');
     await user.clear(input);
-    await user.type(input, 'Merlin5 Questionnaire');
+    await user.type(input, 'Acme Questionnaire');
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     expect(await screen.findByText('Name already in use')).toBeInTheDocument();

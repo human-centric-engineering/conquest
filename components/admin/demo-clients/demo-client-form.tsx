@@ -408,7 +408,7 @@ export function DemoClientForm({ client, uploadEnabled = false }: DemoClientForm
           />
 
           {/* The requested device: a checkbox to paint a solid colour behind the logo —
-              for logos (like Merlin5's) drawn to sit on their brand backdrop. */}
+              for logos drawn to sit on their brand backdrop. */}
           <div className="space-y-3 rounded-md border px-3 py-3">
             <div className="flex items-center justify-between">
               <Label htmlFor="logoBackgroundEnabled" className="flex items-center gap-1">

@@ -70,7 +70,7 @@ describe('scopeRuleMatches — not_exists (the veto operator)', () => {
   });
 
   it('vetoes a topic through the full rule pass when the slot is absent', () => {
-    // Merlin5's G02, end to end: route AI & Automation only if a commercial outcome was named.
+    // The pilot workbook's G02, end to end: route AI & Automation only if a commercial outcome was named.
     const rules = [
       rule({
         id: 'g02',

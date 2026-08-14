@@ -7,7 +7,7 @@
  * with the same number of members can cost different amounts, that a `light` topic costs what it
  * will actually ask, and that the mandatory floor is subtracted before anything is allocated.
  *
- * The worked example at the end has the SHAPE of the Merlin5 derivation but invented item counts —
+ * The worked example at the end has the SHAPE of the pilot client derivation but invented item counts —
  * the real workbook is deliberately kept out of this repo, and reproducing its figures here would
  * mean fabricating the client's question set.
  */
@@ -196,7 +196,7 @@ describe('formatSeconds', () => {
 /**
  * A worked example: a budget that admits three topics and not a fourth.
  *
- * The shape of the Merlin5 derivation — a mandatory floor spent before any routing decision, then
+ * The shape of the pilot client derivation — a mandatory floor spent before any routing decision, then
  * an allowance that a specific number of routed topics happens to fit — but with **invented item
  * counts**, because the real workbook is deliberately kept out of this repo. So this asserts the
  * PROPERTIES the model must have, not that any particular instrument comes to any particular
