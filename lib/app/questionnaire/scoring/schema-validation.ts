@@ -97,14 +97,22 @@ export const scoringSchemaContentSchema = z
     // an empty band breakdown in the cohort report, with nothing anywhere saying why. Rejecting the
     // save is the only place that failure is still attributable to a cause.
     if (schema.normalise) {
-      const itemsPerScale = new Map<string, number>();
+      // Weight TOTAL per scale, not item count: `scoreSession` computes Σ(wᵢ·vᵢ), and with
+      // normalisation each vᵢ lands in 0–1, so the ceiling under `sum` is Σwᵢ — which equals the
+      // item count only when every weight is 1. Counting items instead rejected a correctly
+      // authored 0–2N band set on a scale whose items carry weight 2.
+      const weightPerScale = new Map<string, number>();
       for (const item of schema.items) {
-        itemsPerScale.set(item.scaleKey, (itemsPerScale.get(item.scaleKey) ?? 0) + 1);
+        weightPerScale.set(item.scaleKey, (weightPerScale.get(item.scaleKey) ?? 0) + item.weight);
       }
       schema.bands.forEach((band, i) => {
-        // Under `mean` every item lands in 0–1, so the mean does too. Under `sum` the ceiling is
-        // one per item, so it is the scale's item count.
-        const ceiling = schema.method === 'sum' ? (itemsPerScale.get(band.scaleKey) ?? 0) : 1;
+        // A scale with no items mapped yet has no knowable ceiling. Skip it rather than compute 0
+        // and reject every band: add-scale → add-band → map-items is the normal order in the
+        // ScoringBuilder, so failing there blocks authoring mid-flow for a schema that is merely
+        // unfinished. Once an item lands, the check applies.
+        const scaleWeight = weightPerScale.get(band.scaleKey);
+        if (schema.method === 'sum' && scaleWeight === undefined) return;
+        const ceiling = schema.method === 'sum' ? (scaleWeight ?? 0) : 1;
         if (band.min < 0 || band.max > ceiling) {
           ctx.addIssue({
             code: 'custom',

@@ -8,10 +8,12 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { scoreSession, type ItemBounds } from '@/lib/app/questionnaire/scoring/score';
-import { narrowAdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import { narrowAdaptiveScopeSettings, type Topic } from '@/lib/app/questionnaire/scope/types';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
+import { toTopic, TOPIC_SELECT } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import type { RespondentScores, ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 import type { Prisma } from '@prisma/client';
 
@@ -178,13 +180,50 @@ async function loadInScopeRefs(sessionIds: string[]): Promise<Map<string, Readon
     }
   }
 
+  // Topics and item weights belong to the VERSION, not the session, so a cohort of hundreds on one
+  // instrument reads them once. Only the plan is per session. Without this the loop below fired one
+  // topic query — and, for a version with a light-depth topic, two weight queries — per respondent.
+  const perVersion = new Map<
+    string,
+    {
+      topics: Topic[];
+      weightByQuestionKey: ReadonlyMap<string, number>;
+      weightByDataSlotKey: ReadonlyMap<string, number>;
+    }
+  >();
+  for (const [versionId, settings] of settingsByVersion) {
+    if (!settings.enabled) continue;
+    const [topicRows, questionWeights, dataSlotWeights] = await Promise.all([
+      prisma.appQuestionnaireTopic.findMany({
+        where: { versionId },
+        orderBy: { ordinal: 'asc' },
+        select: TOPIC_SELECT,
+      }),
+      prisma.appQuestionSlot.findMany({
+        where: { versionId },
+        select: { key: true, weight: true },
+      }),
+      prisma.appDataSlot.findMany({ where: { versionId }, select: { key: true, weight: true } }),
+    ]);
+    perVersion.set(versionId, {
+      topics: topicRows.map(toTopic),
+      weightByQuestionKey: new Map(questionWeights.map((q) => [q.key, q.weight])),
+      weightByDataSlotKey: new Map(dataSlotWeights.map((d) => [d.key, d.weight])),
+    });
+  }
+
   for (const session of sessions) {
     const settings = settingsByVersion.get(session.versionId);
     if (!settings?.enabled) continue;
+    const cached = perVersion.get(session.versionId);
+    if (!cached) continue;
     const { scope } = await buildSessionScope(prisma, {
       versionId: session.versionId,
       settings,
       interviewPlan: session.interviewPlan,
+      topics: cached.topics,
+      weightByQuestionKey: cached.weightByQuestionKey,
+      weightByDataSlotKey: cached.weightByDataSlotKey,
     });
     if (!scope.active) continue;
     out.set(session.id, new Set([...scope.questionKeys, ...scope.dataSlotKeys]));
@@ -206,11 +245,55 @@ export async function recomputeSessionScores(params: {
   const inputs = await buildScoringInputs(versionId);
   const scored = await scoreSessions(schema, sessionIds, inputs);
 
+  // A recompute can change an ALREADY-PUBLISHED number, and it is triggered by any schema save —
+  // including one that touched an unrelated scale. `itemBounds` accepting a bounded `numeric` (C8)
+  // is exactly such a case: an item carrying `reverse: true` on a numeric question was silently
+  // never reversed before, and is reversed now, so its stored score moves with no authoring action
+  // aimed at it. The new value is the correct one; the old silence was the defect. What was missing
+  // is anyone being told, so read the prior rows and say plainly which sessions moved.
+  const previous = await prisma.appRespondentScore.findMany({
+    where: { schemaId, sessionId: { in: [...scored.keys()] } },
+    select: { sessionId: true, scores: true },
+  });
+  const priorRawBySession = new Map<string, Record<string, number>>();
+  for (const row of previous) {
+    const raws: Record<string, number> = {};
+    const stored = row.scores as unknown;
+    if (stored && typeof stored === 'object') {
+      for (const [scaleKey, value] of Object.entries(stored as Record<string, unknown>)) {
+        const raw = (value as { raw?: unknown } | null)?.raw;
+        if (typeof raw === 'number') raws[scaleKey] = raw;
+      }
+    }
+    priorRawBySession.set(row.sessionId, raws);
+  }
+
+  const movedSessionIds: string[] = [];
   for (const [sessionId, scores] of scored) {
+    const prior = priorRawBySession.get(sessionId);
+    if (prior) {
+      const scaleKeys = new Set([...Object.keys(prior), ...Object.keys(scores)]);
+      for (const scaleKey of scaleKeys) {
+        if (prior[scaleKey] !== scores[scaleKey]?.raw) {
+          movedSessionIds.push(sessionId);
+          break;
+        }
+      }
+    }
     await prisma.appRespondentScore.upsert({
       where: { sessionId_schemaId: { sessionId, schemaId } },
       create: { sessionId, schemaId, scores: scores as unknown as Prisma.InputJsonValue },
       update: { scores: scores as unknown as Prisma.InputJsonValue },
+    });
+  }
+
+  if (movedSessionIds.length > 0) {
+    logger.warn('scoring: recompute changed already-stored respondent scores', {
+      versionId,
+      schemaId,
+      changedSessionCount: movedSessionIds.length,
+      totalScoredCount: scored.size,
+      sessionIds: movedSessionIds.slice(0, 20),
     });
   }
   return scored.size;

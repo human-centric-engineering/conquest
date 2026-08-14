@@ -136,7 +136,7 @@ describe('validation + scope', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(typeof body.error.code).toBe('string');
+    expect(body.error.code).toBe('VALIDATION_ERROR');
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
 
@@ -156,7 +156,7 @@ describe('validation + scope', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(typeof body.error.code).toBe('string');
+    expect(body.error.code).toBe('VALIDATION_ERROR');
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
 });

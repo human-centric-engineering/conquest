@@ -431,7 +431,7 @@ describe('AnalyticsTab', () => {
   });
 
   describe('graceful degradation on failed sub-fetches', () => {
-    it('renders with has-distributions=false and logs when distributions fetch returns !ok', async () => {
+    it('renders with has-distributions=false and does NOT log when distributions fetch returns !ok', async () => {
       // Arrange: distributions endpoint returns !ok; funnel, cost, and safeguarding succeed.
       // Keyed on URL so the order of the Promise.all does not affect which fixture each slot gets.
       apiMock.serverFetch.mockImplementation(async (url: string) =>
@@ -447,6 +447,9 @@ describe('AnalyticsTab', () => {
       // The other three endpoints succeeded — their slots are non-null.
       expect(view).toHaveAttribute('data-has-funnel', 'true');
       expect(view).toHaveAttribute('data-has-cost', 'true');
+      // A !ok response returns null silently — only a THROWN error is logged (covered below). This
+      // pins that asymmetry so a future "log on !ok" change is a deliberate edit, not a silent one.
+      expect(loggerMock.logger.error).not.toHaveBeenCalled();
     });
 
     it('renders with has-funnel=false when funnel parseApiResponse returns success:false', async () => {

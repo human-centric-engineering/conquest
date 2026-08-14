@@ -150,7 +150,12 @@ Three tiers, in order — and the order is the design.
    obeyed most of the time.
 
 2. **The judgement** (`scope/planner.ts`). One call over the author's criteria and what the
-   respondent actually said. Skipped entirely when there is nothing to decide.
+   respondent actually said. Skipped entirely when there is nothing to decide — no conditional
+   topics, or **every remaining candidate already force-included by a rule**. Rule-included topics
+   stay in the candidate list on purpose (a model proposing in ignorance of half the plan doubles up
+   on the same ground), but `applyGuardrails` seats them _before_ the model's picks, so when they are
+   all that is left every proposal could only land on a key already seated. Paying a reasoning-model
+   call — and up to 12s of a waiting respondent's time — for that is waste.
 3. **Guardrails** (`scope/guardrails.ts`). The cap, the blind-spot check, the fallback.
 
 > **The model proposes; it never gets the last word on a hard constraint.** Six numbered rules in a
@@ -226,6 +231,16 @@ One conditional topic that was **not** selected, sampled at `light` depth (its h
 members). A diagnostic that only asks about the problem the respondent already named can only
 confirm what they already believed; sampling one area they did not raise is what makes the result
 capable of surprising them.
+
+> **Which two members a `light` topic contains is a whole-system answer, not a per-caller one.**
+> `membersAtDepth` picks the top two by item weight when it is given the weight maps and the first
+> two authored when it is not — so a caller that omitted them disagreed with the interview about
+> what was asked. `buildSessionScope` therefore **loads the weights itself** when a light topic is in
+> play and the caller did not supply them. The form used to render the top-two-by-weight while the
+> answers guard admitted the first-two-authored, which failed a respondent's submission with
+> `QUESTION_NOT_IN_SCOPE` on a question they had just been shown; scoring had the same split, which
+> made `assessedItemCount` wrong and silently dropped that respondent from the cohort mean (F17.13).
+> A caller already holding the weights — the turn pipeline — still passes them and skips the load.
 
 Forced to `light` regardless of how the topic is authored — its job in _that_ interview is to sample,
 not to score — and every surface reporting it must say so. `NotAssessedTopic.partial` carries that
@@ -367,13 +382,14 @@ nobody asked for would quietly start dropping topics.
 `scope/budget.ts` is pure and prices per item type, overridable per version via
 `secondsPerQuestionType` (data slots are priced as open questions via `secondsPerDataSlot`).
 
-|                                                |                                                                                                                                                                                                                                                                                     |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **The anchors are the client's**               | 8s a likert, 45s free text. Everything else is interpolated by how much of a decision the type asks for.                                                                                                                                                                            |
-| **A matrix is priced per ROW**                 | It is N ratings wearing one prompt. Costing it as one item is how a 12-row grid ends up looking cheaper than the three likerts beside it.                                                                                                                                           |
-| **An unknown type prices as free text**        | The most expensive guess. Under-costing an unknown is how a budget silently over-fills.                                                                                                                                                                                             |
-| **An unusable override is DROPPED**            | Not defaulted to 0 — a type costed at nothing makes every topic using it look free, the one failure a time budget cannot survive.                                                                                                                                                   |
-| **`light` is priced through `membersAtDepth`** | The same resolver the interview uses, so a light topic costs the sample it will actually ask. Duplicating "top two by weight" is how a cost model and a resolver drift apart unnoticed — and the blind-spot check's cost is exactly the number the client's own arithmetic forgets. |
+|                                                |                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The anchors are the client's**               | 8s a likert, 45s free text. Everything else is interpolated by how much of a decision the type asks for.                                                                                                                                                                                                                                                                                                                                     |
+| **A matrix is priced per ROW**                 | It is N ratings wearing one prompt. Costing it as one item is how a 12-row grid ends up looking cheaper than the three likerts beside it.                                                                                                                                                                                                                                                                                                    |
+| **An unknown type prices as free text**        | The most expensive guess. Under-costing an unknown is how a budget silently over-fills.                                                                                                                                                                                                                                                                                                                                                      |
+| **An unusable override is DROPPED**            | Not defaulted to 0 — a type costed at nothing makes every topic using it look free, the one failure a time budget cannot survive.                                                                                                                                                                                                                                                                                                            |
+| **`light` is priced through `membersAtDepth`** | The same resolver the interview uses, so a light topic costs the sample it will actually ask. Duplicating "top two by weight" is how a cost model and a resolver drift apart unnoticed — and the blind-spot check's cost is exactly the number the client's own arithmetic forgets.                                                                                                                                                          |
+| **The floor honours depth too**                | `alwaysTopicSeconds` charges an always-run topic at its authored depth, not always at `full`. `resolveScope` applies `depth` to every phase and the editor offers the selector for every phase, so a `light` opening really does ask two items — charging it `full` overstated the mandatory floor, under-reported the routed allowance, and could raise a `budget_below_floor` that blocked launch on a budget that was in fact sufficient. |
 
 These are **estimates and say so**: real durations vary by respondent and by how much someone wants
 to talk. The job is to make relative cost visible and the fit decidable, not to predict a stopwatch.

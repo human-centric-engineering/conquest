@@ -368,8 +368,14 @@ export async function planScope(params: PlanScopeParams): Promise<PlanScopeResul
     budget: params.budget,
   };
 
-  // Nothing to choose between: the rules (or the absence of candidates) already settled it.
-  if (candidates.length === 0) {
+  // Nothing to choose between: no candidates at all, or every candidate already force-INCLUDED by a
+  // rule. `applyGuardrails` seats rule-included topics BEFORE the model's picks, so in that second
+  // case every proposal could only land on a key already seated — a foregone conclusion the
+  // respondent would still wait on. They stay in `candidates` on purpose (the model must know what
+  // is already in the interview to order the rest); it is only when there is nothing left for it to
+  // order that the call itself is waste.
+  const unsettled = candidates.filter((t) => !rules.include.has(t.key));
+  if (candidates.length === 0 || unsettled.length === 0) {
     return {
       plan: applyGuardrails({
         ...base,

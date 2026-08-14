@@ -418,8 +418,10 @@ function NotAssessedSection({ topics }: { topics: NotAssessedTopic[] }) {
       {skipped.length > 0 && (
         <View>
           <Text style={styles.insightsHeading}>Not asked about</Text>
-          {skipped.map((entry) => (
-            <Text key={entry} style={styles.scopeTopic}>
+          {skipped.map((entry, i) => (
+            // Keyed by index, not by the rendered line: two topics can share a label AND a question
+            // count (a fork, or a rename), and a colliding key drops one of them from the list.
+            <Text key={`skipped-${i}`} style={styles.scopeTopic}>
               {entry}
             </Text>
           ))}
@@ -428,8 +430,8 @@ function NotAssessedSection({ topics }: { topics: NotAssessedTopic[] }) {
       {sampled.length > 0 && (
         <View>
           <Text style={styles.insightsHeading}>Sampled, not assessed in depth</Text>
-          {sampled.map((entry) => (
-            <Text key={entry} style={styles.scopeTopic}>
+          {sampled.map((entry, i) => (
+            <Text key={`sampled-${i}`} style={styles.scopeTopic}>
               {entry}
             </Text>
           ))}

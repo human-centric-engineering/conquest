@@ -209,7 +209,13 @@ export function alwaysTopicSeconds(
   let total = 0;
   for (const topic of topics) {
     if (!ALWAYS_PHASES.includes(topic.phase)) continue;
-    total += costs.get(topic.key)?.full ?? 0;
+    // Honour the authored depth here too. `resolveScope` applies `depth` to always-run topics as
+    // well as routed ones, and the editor offers the selector for every phase — so charging `full`
+    // for a `light` opening overstated the mandatory floor, under-reported the routed allowance,
+    // dropped topics from `fitToBudget` that would have fitted, and could raise a
+    // `budget_below_floor` error that blocks launch on a budget that was in fact sufficient.
+    const cost = costs.get(topic.key);
+    total += (topic.depth === 'light' ? cost?.light : cost?.full) ?? 0;
   }
   return total;
 }

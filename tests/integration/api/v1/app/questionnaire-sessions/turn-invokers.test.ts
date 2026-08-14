@@ -901,20 +901,6 @@ describe('assessSeriousness — inspector trace', () => {
     expect(Array.isArray(trace.prompt)).toBe(true);
     expect(trace.prompt.length).toBe(2);
   });
-
-  it('wires anonymous + recordInspectorCall into the adaptive deps for selectNext', async () => {
-    // Line 485-487: the `...(anonymous ? { anonymous } : {})` and
-    // `...(recordInspectorCall ? { recordInspectorCall } : {})` spreads in selectNext.
-    const recordInspectorCall = vi.fn();
-    const inv = await invokers({
-      anonymous: true,
-      recordInspectorCall,
-    });
-    await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
-    expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith(
-      expect.objectContaining({ anonymous: true, recordInspectorCall })
-    );
-  });
 });
 
 describe('detectSensitivity', () => {
@@ -1229,6 +1215,19 @@ describe('extractAnswers — answer-fit resolver threading', () => {
 });
 
 describe('selectNext', () => {
+  it('wires anonymous + recordInspectorCall into the adaptive deps for selectNext', async () => {
+    // The `...(anonymous ? { anonymous } : {})` and `...(recordInspectorCall ? {
+    // recordInspectorCall } : {})` spreads in selectNext.
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({
+      anonymous: true,
+      recordInspectorCall,
+    });
+    await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
+    expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith(
+      expect.objectContaining({ anonymous: true, recordInspectorCall })
+    );
+  });
   it('runs the deterministic strategy and returns a decision', async () => {
     const inv = await invokers();
     const out = await inv.selectNext(state({ answered: [] }));

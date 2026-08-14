@@ -222,6 +222,60 @@ describe('buildCohortDatasetDigest — narrowed instruments (P17)', () => {
   });
 });
 
+describe('buildCohortDatasetDigest — every detail kind (summariseQuestion)', () => {
+  it('renders a distinct line for matrix, numeric, boolean, date, and free_text detail', () => {
+    // A fresh dataset built from the shared fixture — the shared `dataset` const is never mutated,
+    // only spread into a new object with a replacement `overall` list.
+    const withEveryKind: CohortDataset = {
+      ...dataset,
+      overall: [
+        q('qm', {
+          kind: 'matrix',
+          min: 1,
+          max: 5,
+          rows: [
+            { key: 'r1', label: 'Comfort', buckets: [], mean: 3.5 },
+            { key: 'r2', label: 'Speed', buckets: [], mean: 2.25 },
+          ],
+        }),
+        q('qn', {
+          kind: 'numeric',
+          summary: { count: 9, min: 2, max: 20, mean: 11.444, median: 11 },
+          histogram: [],
+        }),
+        q('qb', {
+          kind: 'boolean',
+          trueLabel: 'Yes',
+          falseLabel: 'No',
+          trueCount: 7,
+          falseCount: 3,
+        }),
+        q('qd', {
+          kind: 'date',
+          buckets: [
+            { label: '2026-01', count: 4 },
+            { label: '2026-02', count: 6 },
+          ],
+        }),
+        q('qf', { kind: 'free_text' }),
+      ],
+    };
+
+    const digest = buildCohortDatasetDigest(withEveryKind);
+
+    // matrix: one row-mean per row, each to 2dp — 3.5.toFixed(2)='3.50', 2.25.toFixed(2)='2.25'.
+    expect(digest).toContain('mean by row (1–5) Comfort=3.50, Speed=2.25');
+    // numeric: mean to 1dp — 11.444.toFixed(1)='11.4' (rounds down since the 2nd decimal is 4).
+    expect(digest).toContain('mean 11.4, range 2–20');
+    // boolean: raw true/false counts, unrounded.
+    expect(digest).toContain('Yes=7, No=3');
+    // date: raw bucket counts in order.
+    expect(digest).toContain('2026-01=4, 2026-02=6');
+    // free_text: never aggregated — a fixed, literal line regardless of the underlying answers.
+    expect(digest).toContain('[free text — not aggregated]');
+  });
+});
+
 describe('buildChartCatalogText', () => {
   it('lists the exact question ids and dimension keys the agent may reference', () => {
     const catalog = buildChartCatalogText(dataset);

@@ -262,6 +262,55 @@ describe('buildReportMethodView — summary', () => {
   });
 });
 
+describe('buildReportMethodView — C9 stated-vs-measured reconciliation', () => {
+  it('reports the scale count when the comparison was scored', () => {
+    const record = build((rec) =>
+      rec.recordAnswers({
+        answered: 34,
+        total: 40,
+        completionPct: 85,
+        unansweredListed: 6,
+        confidenceWeighted: true,
+        usedDataSlots: false,
+        reconciliation: { ran: true, scored: true, scales: 3 },
+      })
+    );
+
+    const fact = buildReportMethodView(record, 'respondent').facts.find(
+      (f) => f.key === 'reconciliation'
+    );
+    // The reader who is about to be contradicted needs to know the measured half came from fixed
+    // scoring rules, not the writer's impression — hence the scale count, not a generic label.
+    expect(fact?.label).toBe('What you said, checked against what was measured');
+    expect(fact?.value).toBe('3 measure(s)');
+  });
+
+  it('says "Your own words only" when the comparison ran but was not scored', () => {
+    const record = build((rec) =>
+      rec.recordAnswers({
+        answered: 34,
+        total: 40,
+        completionPct: 85,
+        unansweredListed: 6,
+        confidenceWeighted: true,
+        usedDataSlots: false,
+        reconciliation: { ran: true, scored: false, scales: 0 },
+      })
+    );
+
+    const fact = buildReportMethodView(record, 'respondent').facts.find(
+      (f) => f.key === 'reconciliation'
+    );
+    // scored:false must not print a scale count — there were no fixed rules behind this comparison.
+    expect(fact?.value).toBe('Your own words only');
+  });
+
+  it('omits the reconciliation fact entirely when the comparison never ran', () => {
+    const keys = buildReportMethodView(build(), 'respondent').facts.map((f) => f.key);
+    expect(keys).not.toContain('reconciliation');
+  });
+});
+
 describe('buildReportMethodView / renderMethodSummaryTemplate — Adaptive Scope (P17)', () => {
   /** A record for an adaptive session that skipped two areas and sampled one. */
   function adaptiveRecord(): ReportMethodRecord {

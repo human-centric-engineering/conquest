@@ -97,8 +97,10 @@ export interface ApplyGuardrailsInput {
  * they already believed. Sampling one area they did not raise is what makes the result capable of
  * surprising them — which is the entire value of assessing anything.
  *
- * Preference order: the author's nominated keys (predictable), then the highest-weight unselected
- * topic by authored ordinal (more informative). Returns null when there is nothing left to sample.
+ * Preference order: the author's nominated keys (predictable), then the first unselected conditional
+ * topic in authored order. Weight deliberately does NOT enter here — `fitToBudget` reserves seconds
+ * for whatever this returns, so a probe that moved between runs would make the budget unpredictable
+ * too. Returns null when there is nothing left to sample.
  */
 export function chooseCheckTopic(
   topics: readonly Topic[],

@@ -572,3 +572,100 @@ describe('buildCohortDataset — scoring path (F14.4)', () => {
     expect(scale.mean).toBeCloseTo(3.5);
   });
 });
+
+describe('buildCohortDataset — scoring byDimension (F17.13, per-segment)', () => {
+  /** A fully-assessed wellbeing score row — assessedItemCount === totalItemCount, so it counts. */
+  function fullScore(raw: number, band: string | null = 'Steady') {
+    return {
+      wellbeing: {
+        raw,
+        normalised: null,
+        band,
+        itemCount: 8,
+        assessedItemCount: 8,
+        totalItemCount: 8,
+      },
+    };
+  }
+
+  /** A partially-assessed wellbeing score row (P17) — must be excluded from every segment mean. */
+  function partialScore(raw: number, assessedItemCount: number, band: string | null = 'Strong') {
+    return {
+      wellbeing: {
+        raw,
+        normalised: null,
+        band,
+        itemCount: assessedItemCount,
+        assessedItemCount,
+        totalItemCount: 8,
+      },
+    };
+  }
+
+  it('excludes partially-assessed respondents from each segment mean, not just the overall one', async () => {
+    // Eng: 5 fully-assessed respondents score 4.0; a 6th was asked only part of the scale and scored
+    // 9.0. If that 6th slipped into the mean, Eng would read (4*5+9)/6 = 4.833 instead of 4.0.
+    // Sales: 5 fully-assessed respondents score 6,6,6,6,2 (mean 26/5=5.2); a 6th partial respondent
+    // scored 1.0 — if included, Sales would read (26+1)/6 = 4.5 instead of 5.2.
+    findUniqueConfig.mockResolvedValue({
+      anonymousMode: false,
+      profileFields: [
+        { key: 'team', label: 'Team', type: 'select', required: false, options: ['Eng', 'Sales'] },
+      ],
+      cohortReport: { generation: { scoringEnabled: true } },
+    });
+    findManySessions.mockResolvedValue([
+      ...['e0', 'e1', 'e2', 'e3', 'e4', 'e5'].map((id) =>
+        session({ id, profile: { team: 'Eng' } })
+      ),
+      ...['s0', 's1', 's2', 's3', 's4', 's5'].map((id) =>
+        session({ id, profile: { team: 'Sales' } })
+      ),
+    ]);
+    findUniqueScoringSchema.mockResolvedValue({
+      content: {
+        scales: [{ key: 'wellbeing', name: 'Wellbeing' }],
+        items: [
+          { source: 'question', ref: 'q1', scaleKey: 'wellbeing', weight: 1, reverse: false },
+        ],
+        bands: [],
+        method: 'mean',
+      },
+    });
+    vi.mocked(buildScoringInputs).mockResolvedValue({
+      bounds: new Map(),
+      questionKeyById: new Map(),
+      dataSlotKeyById: new Map(),
+    });
+
+    const scoreMap = new Map();
+    for (const id of ['e0', 'e1', 'e2', 'e3', 'e4']) scoreMap.set(id, fullScore(4.0));
+    scoreMap.set('e5', partialScore(9.0, 3));
+    scoreMap.set('s0', fullScore(6.0));
+    scoreMap.set('s1', fullScore(6.0));
+    scoreMap.set('s2', fullScore(6.0));
+    scoreMap.set('s3', fullScore(6.0));
+    scoreMap.set('s4', fullScore(2.0));
+    scoreMap.set('s5', partialScore(1.0, 2));
+    vi.mocked(scoreSessions).mockResolvedValue(scoreMap);
+
+    const ds = await buildCohortDataset(params);
+
+    const teamDim = ds.scoring!.byDimension.find((d) => d.dimensionKey === 'team')!;
+    const wellbeing = teamDim.scales.find((s) => s.scaleKey === 'wellbeing')!;
+    const eng = wellbeing.segments.find((s) => s.value === 'Eng')!;
+    const sales = wellbeing.segments.find((s) => s.value === 'Sales')!;
+
+    // Eng: mean(4,4,4,4,4) = 4.0 — the partial respondent (9.0) is excluded, not averaged in.
+    expect(eng.respondents).toBe(5);
+    expect(eng.mean).toBeCloseTo(4.0);
+    expect(eng.suppressed).toBe(false); // 5 >= K_ANONYMITY_THRESHOLD (5)
+    expect(eng.partiallyAssessed).toBe(1);
+
+    // Sales: mean(6,6,6,6,2) = 26/5 = 5.2 — the partial respondent (1.0) is excluded.
+    expect(sales.respondents).toBe(5);
+    expect(sales.mean).toBeCloseTo(5.2);
+    expect(sales.suppressed).toBe(false);
+    expect(sales.partiallyAssessed).toBe(1);
+  });
+});

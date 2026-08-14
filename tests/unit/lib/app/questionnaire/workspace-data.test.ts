@@ -6,6 +6,7 @@
  * - getQuestionnaireDetailCached: success, !res.ok, body.success=false, fetch throws
  * - getVersionGraphCached: success, !res.ok, body.success=false, fetch throws
  * - getVersionDataSlotCountCached: success (counts slots), !res.ok, body.success=false, fetch throws
+ * - getVersionTopicsCached: success, !res.ok, body.success=false, fetch throws
  *
  * @see lib/app/questionnaire/workspace-data.ts
  */
@@ -57,10 +58,12 @@ import {
   getQuestionnaireDetailCached,
   getVersionGraphCached,
   getVersionDataSlotCountCached,
+  getVersionTopicsCached,
   getVersionEmbeddingCoverageCached,
   getVersionDataSlotEmbeddingCoverageCached,
 } from '@/lib/app/questionnaire/workspace-data';
-import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS, type Topic } from '@/lib/app/questionnaire/scope/types';
+import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
 // ─── Factories ────────────────────────────────────────────────────────────────
 
@@ -515,6 +518,145 @@ describe('getVersionDataSlotCountCached', () => {
         'workspace: data slot count fetch failed',
         fetchError
       );
+    });
+  });
+});
+
+// ─── getVersionTopicsCached ────────────────────────────────────────────────────
+
+function makeTopic(over: Partial<Topic> = {}): Topic {
+  return {
+    id: 'topic-1',
+    key: 'pricing',
+    label: 'Pricing',
+    description: null,
+    phase: 'conditional',
+    criteria: 'Respondent raised budget or cost concerns',
+    depth: 'full',
+    members: { dataSlotKeys: [], questionKeys: ['q1'] },
+    ordinal: 0,
+    source: 'seeded',
+    ...over,
+  };
+}
+
+function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
+  return {
+    topics: [makeTopic()],
+    settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true },
+    issues: [],
+    inventory: { questions: [], dataSlots: [] },
+    costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
+    draft: null,
+    ...over,
+  };
+}
+
+describe('getVersionTopicsCached', () => {
+  describe('success path', () => {
+    it('returns the parsed TopicsPayload when the fetch succeeds and body.success=true', async () => {
+      // Arrange
+      const payload = makeTopicsPayload({
+        topics: [makeTopic({ key: 'onboarding', label: 'Onboarding' })],
+      });
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({ success: true, data: payload });
+
+      // Act
+      const result = await getVersionTopicsCached('qn-1', 'ver-1');
+
+      // Assert: the function unwraps body.data and returns it — not the "feature off" fallback
+      expect(result).toEqual(payload);
+    });
+
+    it('calls serverFetch with the versionTopics endpoint containing both id and versionId', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({ success: true, data: makeTopicsPayload() });
+
+      // Act
+      await getVersionTopicsCached('qn-abc', 'ver-xyz');
+
+      // Assert: both IDs are threaded into the endpoint path
+      expect(mockServerFetch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/api\/v1\/app\/questionnaires\/qn-abc\/versions\/ver-xyz\/topics/)
+      );
+    });
+  });
+
+  describe('!res.ok path', () => {
+    it('returns the empty payload with default settings when serverFetch responds with !ok', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+
+      // Act
+      const result = await getVersionTopicsCached('qn-1', 'ver-1');
+
+      // Assert: documented fallback is "feature off, nothing to say" — a transient error must not
+      // make the Overview claim a version is incoherent
+      expect(result).toEqual({
+        ...EMPTY_TOPICS_PAYLOAD,
+        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      });
+    });
+
+    it('does not call parseApiResponse when res.ok is false', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeErrorResponse());
+
+      // Act
+      await getVersionTopicsCached('qn-1', 'ver-1');
+
+      // Assert: parse never runs on a failed response
+      expect(mockParseApiResponse).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('body.success=false path', () => {
+    it('returns the empty payload with default settings when parseApiResponse returns success=false', async () => {
+      // Arrange
+      mockServerFetch.mockResolvedValueOnce(makeOkResponse());
+      mockParseApiResponse.mockResolvedValueOnce({
+        success: false,
+        error: { code: 'INTERNAL_ERROR' },
+      });
+
+      // Act
+      const result = await getVersionTopicsCached('qn-1', 'ver-1');
+
+      // Assert: body.success=false → the same "feature off" fallback as any other failure
+      expect(result).toEqual({
+        ...EMPTY_TOPICS_PAYLOAD,
+        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      });
+    });
+  });
+
+  describe('fetch throws path', () => {
+    it('returns the empty payload with default settings when serverFetch rejects', async () => {
+      // Arrange
+      mockServerFetch.mockRejectedValueOnce(new Error('Connection refused'));
+
+      // Act
+      const result = await getVersionTopicsCached('qn-1', 'ver-1');
+
+      // Assert: documented fallback on a thrown error is the same "feature off" payload
+      expect(result).toEqual({
+        ...EMPTY_TOPICS_PAYLOAD,
+        settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      });
+    });
+
+    it('logs the error via logger.error when serverFetch throws', async () => {
+      // Arrange
+      const fetchError = new Error('Connection refused');
+      mockServerFetch.mockRejectedValueOnce(fetchError);
+
+      // Act
+      await getVersionTopicsCached('qn-1', 'ver-1');
+
+      // Assert: error is surfaced through structured logging
+      expect(mockLogger.error).toHaveBeenCalledWith('workspace: topics fetch failed', fetchError);
     });
   });
 });

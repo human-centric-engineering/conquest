@@ -25,7 +25,7 @@ import {
 import { toTopic, TOPIC_SELECT } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 
 /** The minimal client surface this module needs — `prisma` or an interactive transaction client. */
-type Db = Pick<typeof prisma, 'appQuestionnaireTopic'>;
+type Db = Pick<typeof prisma, 'appQuestionnaireTopic' | 'appQuestionSlot' | 'appDataSlot'>;
 
 /** What a scope load resolved, with the raw pieces so callers can render "why". */
 export interface SessionScope {
@@ -53,7 +53,11 @@ export function inertScope(): SessionScope {
  * turn pipeline reads both in its one big query, so re-fetching them here would be waste.
  *
  * `weightByQuestionKey` / `weightByDataSlotKey` matter only for `light`-depth topics (the blind-spot
- * check), which pick their highest-weight members; omitting them falls back to authored order.
+ * check), which pick their highest-weight members. A caller that already holds the weights should
+ * pass them; a caller that omits them gets them loaded here rather than falling back to authored
+ * order. That fallback was the one way two surfaces could disagree about which two items a light
+ * topic contains — the form rendering the top-two-by-weight while a guard admitted the
+ * first-two-authored — so it is no longer reachable.
  */
 export async function buildSessionScope(
   db: Db,
@@ -65,6 +69,11 @@ export async function buildSessionScope(
     allDataSlotKeys?: readonly string[];
     weightByQuestionKey?: ReadonlyMap<string, number>;
     weightByDataSlotKey?: ReadonlyMap<string, number>;
+    /**
+     * The version's topics, when the caller already holds them. A cohort caller scoring hundreds of
+     * sessions on ONE version passes them once rather than re-reading the same rows per session.
+     */
+    topics?: readonly Topic[];
   }
 ): Promise<SessionScope> {
   // The short-circuit that keeps this free for everyone who never turned it on: an disabled
@@ -79,13 +88,47 @@ export async function buildSessionScope(
     };
   }
 
-  const rows = await db.appQuestionnaireTopic.findMany({
-    where: { versionId: input.versionId },
-    orderBy: { ordinal: 'asc' },
-    select: TOPIC_SELECT,
-  });
-  const topics = rows.map(toTopic);
+  const topics =
+    input.topics !== undefined
+      ? [...input.topics]
+      : (
+          await db.appQuestionnaireTopic.findMany({
+            where: { versionId: input.versionId },
+            orderBy: { ordinal: 'asc' },
+            select: TOPIC_SELECT,
+          })
+        ).map(toTopic);
   const plan = narrowInterviewPlan(input.interviewPlan);
+
+  // Weights only change the answer for a `light`-depth topic, and depth can come from the plan as
+  // well as the authored topic — so ask both before paying for the load. Everyone else (the common
+  // case: no light topic anywhere) skips these two queries entirely.
+  const needsWeights =
+    topics.some((t) => t.depth === 'light') ||
+    (plan?.topics.some((t) => t.depth === 'light') ?? false);
+
+  let weightByQuestionKey = input.weightByQuestionKey;
+  let weightByDataSlotKey = input.weightByDataSlotKey;
+  if (needsWeights && (!weightByQuestionKey || !weightByDataSlotKey)) {
+    const [questionWeights, dataSlotWeights] = await Promise.all([
+      weightByQuestionKey
+        ? Promise.resolve(null)
+        : db.appQuestionSlot.findMany({
+            where: { versionId: input.versionId },
+            select: { key: true, weight: true },
+          }),
+      weightByDataSlotKey
+        ? Promise.resolve(null)
+        : db.appDataSlot.findMany({
+            where: { versionId: input.versionId },
+            select: { key: true, weight: true },
+          }),
+    ]);
+    if (questionWeights)
+      weightByQuestionKey = new Map(questionWeights.map((q) => [q.key, q.weight]));
+    if (dataSlotWeights)
+      weightByDataSlotKey = new Map(dataSlotWeights.map((d) => [d.key, d.weight]));
+  }
 
   return {
     scope: resolveScope({
@@ -94,8 +137,8 @@ export async function buildSessionScope(
       settings: input.settings,
       ...(input.allQuestionKeys ? { allQuestionKeys: input.allQuestionKeys } : {}),
       ...(input.allDataSlotKeys ? { allDataSlotKeys: input.allDataSlotKeys } : {}),
-      ...(input.weightByQuestionKey ? { weightByQuestionKey: input.weightByQuestionKey } : {}),
-      ...(input.weightByDataSlotKey ? { weightByDataSlotKey: input.weightByDataSlotKey } : {}),
+      ...(weightByQuestionKey ? { weightByQuestionKey } : {}),
+      ...(weightByDataSlotKey ? { weightByDataSlotKey } : {}),
     }),
     topics,
     settings: input.settings,
