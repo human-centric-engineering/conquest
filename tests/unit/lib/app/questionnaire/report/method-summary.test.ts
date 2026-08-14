@@ -103,8 +103,28 @@ beforeEach(() => {
 describe('allowedNumbers', () => {
   it('admits every count the record actually observed', () => {
     const allowed = allowedNumbers(record());
-    // answered, total, completionPct, gaps, docs in scope, docs used, snippets, searches, sources
-    expect([...allowed].sort((a, b) => a - b)).toEqual([1, 2, 3, 6, 9, 34, 40, 85]);
+    // answered, total, completionPct, gaps, docs in scope, docs used, snippets, searches, sources —
+    // plus 0 for the two Adaptive Scope counts, which a non-adaptive record observed as zero.
+    expect([...allowed].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 6, 9, 34, 40, 85]);
+  });
+
+  it('admits the not-assessed and sampled counts so the summary may state the narrowing', () => {
+    // Without this the honesty check rejects the ONE sentence that tells a reader the assessment
+    // was narrowed — the summariser would be silently forbidden from being honest.
+    const base = record();
+    const allowed = allowedNumbers({
+      ...base,
+      answers: {
+        ...base.answers,
+        notAssessed: [
+          { label: 'Talent', questionCount: 7, partial: false },
+          { label: 'Pricing', questionCount: 4, partial: false },
+          { label: 'Operations', questionCount: 5, partial: true },
+        ],
+      },
+    });
+    expect(allowed.has(2)).toBe(true); // two areas not asked about
+    expect(allowed.has(1)).toBe(true); // one area sampled only
   });
 });
 

@@ -87,6 +87,10 @@ model AppQuestionnaireVersion {
   dataSlotDraft    AppDataSlotDraft?
   scoringSchema    AppScoringSchema?
   errors           AppQuestionnaireError[]
+  // Adaptive Scope (P17): the conditional units and the Routing Analyst's pending proposal.
+  // Both fork with the version, like tags / data slots / glossary terms.
+  topics           AppQuestionnaireTopic[]
+  topicDraft       AppQuestionnaireTopicDraft?
   // Definitions / glossary: the curated terms (with their candidate definitions) and the
   // optional authoritative definitions document. Both fork with the version.
   glossaryTerms    AppGlossaryTerm[]
@@ -353,6 +357,16 @@ model AppQuestionnaireConfig {
   // APP_QUESTIONNAIRES_COHORTS_ENABLED are on. Narrowed by narrowCohortReportSettings
   // (lib/.../cohort-report/settings.ts). (types.ts)
   cohortReport Json @default("{}")
+
+  // Adaptive Scope (P17): AdaptiveScopeSettings — how much of the questionnaire applies to a given
+  // respondent, and who decides. `{ enabled, maxConditionalTopics, includeCheckTopic,
+  // checkTopicPreference, minConfidence, fallbackTopicKeys, announce, allowRespondentAmendment,
+  // plannerInstructions, rules }`. Narrowed by narrowAdaptiveScopeSettings (lib/.../scope/settings.ts).
+  //
+  // OFF BY DEFAULT and inert by construction: with `enabled: false` — or before a session's plan
+  // exists — `resolveScope` short-circuits to "every topic in scope", which is byte-identical to the
+  // pre-P17 behaviour. A version that never opts in cannot reach a single new runtime code path.
+  adaptiveScope Json @default("{}")
 
   // Respondent intro / splash screen (IntroSettings — types.ts): an admin opt-in screen shown before
   // the questionnaire starts (enabled toggle, admin-authored "about this questionnaire" background
@@ -964,6 +978,16 @@ model AppQuestionnaireSession {
   // banner-shown this session — the orchestrator fires a threshold once, on first crossing, and never
   // again even if displayCoverage later dips (e.g. an answer is invalidated). Defaults to empty.
   raisedMilestones     Json     @default("[]")
+  // Adaptive Scope (P17): the INTERVIEW PLAN — which topics this respondent's interview covers,
+  // which were excluded and why, and what they were told (InterviewPlan — lib/.../scope/types.ts).
+  // Written ONCE by the Scope Planner when the opening topics are covered, then frozen apart from
+  // respondent amendments. Null means "no plan yet": every topic is in scope, which is both the
+  // pre-plan state of an adaptive session and the permanent state of every ordinary one.
+  //
+  // Deliberately a Json column rather than its own table, matching `AppExperienceRun.routingDecision`:
+  // the auditable record of HOW the plan was reached (prompt, model output, confidence, candidates)
+  // lives in the AppAiRun snapshot, so this column only has to carry the decision itself.
+  interviewPlan        Json?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1440,6 +1464,100 @@ model AppDataSlotFill {
   @@index([sessionId])
   @@index([dataSlotId])
   @@map("app_data_slot_fill")
+}
+
+/// A TOPIC — the unit of conditionality (Adaptive Scope, P17).
+///
+/// A named group of question slots and/or data slots that is included in a respondent's interview
+/// as a whole, or not at all. Answers "which parts of this questionnaire apply to this person?",
+/// which sits between the two intelligences that already exist: adaptive selection picks the next
+/// question from what is in scope, and the Experience switcher picks the next QUESTIONNAIRE.
+///
+/// SIZE IS NOT SIGNIFICANT. A topic may hold thirty questions or one — and a ONE-QUESTION topic is
+/// precisely how a fine-grained interdependency is expressed ("only ask about channel conflict if
+/// they sell through partners"). That is why there is no second `showIf` expression language: the
+/// coarse and fine cases are the same mechanism at different sizes, so an author learns one thing
+/// and we maintain one evaluator.
+///
+/// `criteria` is the load-bearing field — the author's plain-English account of when this topic
+/// matters, and the primary signal the Scope Planner reasons over. It is the direct analogue of
+/// `AppExperienceStep.selectionCriteria`, and for the same reason: the author's own words about
+/// when something applies outrank the model's general judgement.
+///
+/// `members` is `{ dataSlotKeys: string[], questionKeys: string[] }` — KEYS, never row ids, so a
+/// topic survives the version fork (`copyVersionGraph` re-keys nothing) and stays legible in an
+/// AppAiRun snapshot. Unresolvable keys are skipped and logged, never a crash: an author deleting a
+/// question must not break the interview.
+///
+/// NOT the same as `AppDataSlot.theme`. A theme is a display grouping (the respondent panel, the
+/// orchestrator's topic-local targeting); a topic is the conditional unit. They usually align — the
+/// ingest auto-seed makes them align — but they are different fields with different jobs.
+///
+/// AUTO-SEEDED at ingest: one `core` topic per extracted section, so a freshly-uploaded
+/// questionnaire has a complete, coherent topic set that changes nothing (every topic always asked,
+/// `adaptiveScope.enabled` false). Authoring is then editing, never creating from nothing.
+model AppQuestionnaireTopic {
+  id          String  @id @default(cuid())
+  versionId   String
+  key         String // slug, unique per version — how plans, rules and members address a topic
+  label       String // admin- and respondent-facing name ("Pipeline Management")
+  description String? // internal note for the author; NOT shown to the planner
+
+  /// TOPIC_PHASES (scope/types.ts): opening | core | conditional | closing.
+  /// `opening` runs first and is what the planner reads; `core` and `closing` always run;
+  /// only `conditional` topics are ever chosen or excluded.
+  phase String @default("core")
+
+  /// "Include this topic when…", in the author's own words. Null on a seeded topic that nobody has
+  /// authored yet — which is harmless, because a topic with no criteria should not be `conditional`
+  /// and the launch check says so.
+  criteria String?
+
+  /// TOPIC_DEPTHS (scope/types.ts): full | light. `light` includes only the highest-weight members
+  /// — the "sample one area they did not raise" check that stops a diagnostic from merely
+  /// confirming what the respondent already believed.
+  depth String @default("full")
+
+  /// `{ dataSlotKeys: string[], questionKeys: string[] }` — see the model docblock.
+  members Json @default("{\"dataSlotKeys\":[],\"questionKeys\":[]}")
+
+  ordinal Int @default(0)
+
+  /// TOPIC_SOURCES (scope/types.ts): seeded | manual | analyst — where this topic came from.
+  /// Read by the admin surface to mark which topics are still untouched auto-seeds.
+  source String @default("seeded")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, key])
+  @@index([versionId])
+  @@map("app_questionnaire_topic")
+}
+
+/// A PENDING topic proposal for a version — the Routing Analyst's reviewable DRAFT (P17).
+///
+/// Exactly the AppDataSlotDraft contract, for exactly the same reason: proposing topics runs a paid
+/// LLM call over the source document, and holding the result only in the admin's browser loses it
+/// on navigation. It is explicitly NOT live — the runtime scope resolver, the planner and the launch
+/// gate read only AppQuestionnaireTopic. Accepting the draft writes topic rows and clears this in
+/// one transaction; discarding deletes it. One pending draft per version; forks/cascades with it.
+///
+/// `topics` is a `ProposedTopic[]` snapshot (scope/types.ts) and may carry proposed hard rules
+/// alongside, since the analyst reads a document's routing instructions as one piece of prose and
+/// splitting the proposal across two review surfaces would make it un-reviewable.
+model AppQuestionnaireTopicDraft {
+  id        String   @id @default(cuid())
+  versionId String   @unique
+  topics    Json // ProposedTopicSet snapshot — the proposed, reviewable set (not live)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  version AppQuestionnaireVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@map("app_questionnaire_topic_draft")
 }
 
 /// A curated GLOSSARY TERM for one questionnaire version — a word or phrase the questionnaire

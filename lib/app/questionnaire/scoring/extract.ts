@@ -75,12 +75,16 @@ export async function extractScoringSchema(
       'questionnaire. Define the scales the document describes, map each item to the available ' +
       'question/data-slot below (use the exact key), set weight + reverse-scoring per item, choose ' +
       'the combine method (sum or mean), and define band cutoffs. Only use keys from this catalog; ' +
-      'omit anything you cannot map.',
+      'omit anything you cannot map. Set "normalise" to true ONLY when the document scores a scale ' +
+      'from questions that do not share one rating range (e.g. a 1–6 battery alongside 1–5 ones); ' +
+      'when it is true, band cutoffs must be written in the 0–1 range, because every item is ' +
+      'rescaled to its position within its own range before the items are combined.',
     catalog,
     'Respond with ONLY a JSON object of this exact shape (no prose, no code fence):\n' +
       '{"scales":[{"key":string,"name":string,"description"?:string}],' +
       '"items":[{"source":"question"|"dataSlot","ref":string,"scaleKey":string,"weight":number,"reverse":boolean}],' +
-      '"bands":[{"scaleKey":string,"min":number,"max":number,"label":string}],"method":"sum"|"mean"}',
+      '"bands":[{"scaleKey":string,"min":number,"max":number,"label":string}],"method":"sum"|"mean",' +
+      '"normalise":boolean}',
   ].join('\n\n');
 
   const result = await runStructuredCompletion<ScoringSchemaContent>({

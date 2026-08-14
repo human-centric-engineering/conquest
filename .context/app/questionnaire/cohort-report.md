@@ -205,6 +205,41 @@ versioned **`AppScoringSchema`** (1:1 with a version, forks on launch like confi
   agent (`scoring/extract.ts`) to PROPOSE a schema scoped to the version's real keys; the admin
   reviews it in the builder and saves through the same PATCH.
 
+### One ruler, or none (C8)
+
+`scoreSession` combines item values as written. Nothing constrains a scoring item to a likert
+question — the builder offers **every** question and data slot, and the schema Zod checks scale keys
+and band ranges but never types — so a scale can end up combining a 1–6 agreement battery with a 1–5
+extent one, or a 0–50 `numeric` with either. That is arithmetic over two rulers: a 4-of-5 (75% of the
+way up) and a 4-of-6 (60%) count as the same quantity, and an unbounded numeric decides the scale on
+its own. It produces a number, and nothing about the number says it is wrong.
+
+**`ScoringSchemaContent.normalise`** is the fix, and it is **off by default** — turning it on changes
+what `raw` means, so every schema authored before it existed keeps its values. When on, each value
+becomes its 0–1 position within **its own question's** bounds before weights and the combine method
+are applied. Reverse-scoring still happens in the question's own units first (the two orders agree
+arithmetically; that one is chosen because reversal is _defined_ there).
+
+Three consequences, each surfaced rather than absorbed:
+
+|                                       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bands must be re-authored**         | `raw` lands in 0–1 under `mean`; under `sum` the ceiling is **Σ of the scale's item weights**, not its item count — `scoreSession` computes Σ(wᵢ·vᵢ), so the two coincide only when every weight is 1. `scoringSchemaContentSchema` **rejects** a save whose cutoffs sit outside that range — without it every respondent silently gets `band: null` and the cohort band breakdown empties out. A scale with **no items mapped yet** is skipped rather than treated as ceiling 0: add-scale → add-band → map-items is the normal order in the builder, and rejecting there blocks authoring mid-flow over a schema that is merely unfinished. |
+| **Unbounded items are dropped**       | An item whose question has no numeric range cannot be placed on the ruler, so it leaves the scale. Passing it through raw would reintroduce the exact mixing the flag exists to prevent. The drop shows as `itemCount` falling short of `totalItemCount`.                                                                                                                                                                                                                                                                                                                                                                                     |
+| **The builder warns before you save** | The scoring-schema GET returns real `bounds` per key, and `ScoringBuilder` flags a scale that mixes ranges (when normalisation is off) or one that will lose items (when it is on).                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+**Which types carry bounds** — `itemBounds` (`scoring/compute.ts`): `likert` always; `numeric` only
+when the author set both ends. Admitting `numeric` has a consequence worth stating: an item carrying
+`reverse: true` on a bounded numeric question was previously never reversed (no bounds, no reversal),
+and now is. The new value is the correct one — the author asked for the reversal — but the change
+lands on a **stored** `AppRespondentScore` at the next `recomputeSessionScores`, which any schema
+save triggers, including one aimed at an unrelated scale. So the recompute reads the prior rows and
+logs `scoring: recompute changed already-stored respondent scores` naming the sessions that moved.
+A number someone may already have read does not get to change silently. `matrix` deliberately returns nothing: it carries a shared scale in
+its config, but a matrix answer is a composite `{rowKey: point}` object that never coerces to a
+number, so a matrix item contributes nothing to a scale regardless — returning bounds would advertise
+a capability the engine does not have.
+
 **Scored aggregation.** When `config.cohortReport.generation.scoringEnabled` is on and a schema
 exists, `buildCohortDataset` adds a `scoring` block: per-scale overall summaries (mean + band
 distribution) and per-dimension per-scale segment means — built from the same dimension groupings as

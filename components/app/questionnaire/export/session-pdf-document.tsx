@@ -21,6 +21,11 @@ import { formatSlotAnswer } from '@/lib/app/questionnaire/panel/format-slot-answ
 import { partialReportCaveat, splitReportParagraphs } from '@/lib/app/questionnaire/report/content';
 import { formatSessionRef } from '@/lib/app/questionnaire/session-ref';
 import type { PanelSlotView } from '@/lib/app/questionnaire/panel/types';
+import {
+  buildNotAssessedView,
+  NOT_ASSESSED_NOTE,
+} from '@/lib/app/questionnaire/export/not-assessed-view';
+import type { NotAssessedTopic } from '@/lib/app/questionnaire/scope/types';
 import type { SessionExportModel } from '@/lib/app/questionnaire/export/types';
 
 const COLORS = {
@@ -192,6 +197,19 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: COLORS.faint,
     marginBottom: 1,
+  },
+  // Adaptive Scope (P17): the "what this did not cover" note. Muted and italic like the partial-
+  // report caveat it is a sibling of — both say "read the rest of this document with this in mind".
+  scopeNote: {
+    fontSize: 9,
+    fontStyle: 'italic',
+    color: COLORS.muted,
+    marginBottom: 8,
+    lineHeight: 1.4,
+  },
+  scopeTopic: {
+    marginBottom: 3,
+    paddingLeft: 8,
   },
   footer: {
     position: 'absolute',
@@ -376,6 +394,53 @@ export interface SessionPdfDocumentProps {
 }
 
 /** The full session export document. Server-rendered to a buffer by the route. */
+/**
+ * What the interview deliberately did not ask about — Adaptive Scope (P17).
+ *
+ * The document's section listing is already filtered to what was in scope, so without this an
+ * adaptive interview renders as a complete assessment of a shorter instrument. Nobody reading it
+ * later could tell the difference, and the whole point of an adaptive instrument is that they need
+ * to be able to.
+ *
+ * Skipped and sampled are listed SEPARATELY. "We looked lightly" and "we did not look" are
+ * different claims about the person holding the document, and a single list would overstate one and
+ * understate the other. Question counts go with the labels because a topic name alone does not say
+ * how much was left — "Pricing" could be one question or twelve.
+ */
+function NotAssessedSection({ topics }: { topics: NotAssessedTopic[] }) {
+  const { skipped, sampled } = buildNotAssessedView(topics);
+  if (skipped.length === 0 && sampled.length === 0) return null;
+
+  return (
+    <View>
+      <Text style={styles.sectionTitle}>What this interview did not cover</Text>
+      <Text style={styles.scopeNote}>{NOT_ASSESSED_NOTE}</Text>
+      {skipped.length > 0 && (
+        <View>
+          <Text style={styles.insightsHeading}>Not asked about</Text>
+          {skipped.map((entry, i) => (
+            // Keyed by index, not by the rendered line: two topics can share a label AND a question
+            // count (a fork, or a rename), and a colliding key drops one of them from the list.
+            <Text key={`skipped-${i}`} style={styles.scopeTopic}>
+              {entry}
+            </Text>
+          ))}
+        </View>
+      )}
+      {sampled.length > 0 && (
+        <View>
+          <Text style={styles.insightsHeading}>Sampled, not assessed in depth</Text>
+          {sampled.map((entry, i) => (
+            <Text key={`sampled-${i}`} style={styles.scopeTopic}>
+              {entry}
+            </Text>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
   const accent = model.theme.accentColor;
   const respondentLabel = model.respondent ? model.respondent.name : 'Anonymous respondent';
@@ -485,6 +550,12 @@ export function SessionPdfDocument({ model }: SessionPdfDocumentProps) {
               ))}
             </View>
           ))}
+
+        {/* Adaptive Scope (P17). AFTER the answer record rather than before it: the reader has just
+            seen what was asked, and this is the sentence that stops them concluding it was
+            everything. Rendered whatever the report mode — a narrative with no appended Q&A narrows
+            just as silently, and the caveat is about the interview, not about the listing. */}
+        <NotAssessedSection topics={model.notAssessed} />
 
         {/* Definitions / glossary (P16). LAST, unlike the blank instrument: the respondent already
             had the definitions inline in the conversation, so here it is a reference the later

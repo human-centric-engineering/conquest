@@ -32,6 +32,11 @@ describe('narrowRespondentReportSettings', () => {
         useClientKnowledge: true,
         dataSlotInfluence: 70,
         discountLowConfidence: false,
+        reconciliation: {
+          enabled: true,
+          statedGoalRefs: ['0.2'],
+          askedForRefs: ['15.1', '15.2'],
+        },
       },
       delivery: { onScreen: false, download: true, explainMethod: true },
       research: {
@@ -234,5 +239,43 @@ describe('resolveReportRawIncludes', () => {
       settings({ mode: 'narrative', rawIncludes: { questionsAsPresented: true, dataSlots: true } })
     );
     expect(result).toEqual({ questions: false, dataSlots: true });
+  });
+});
+
+/**
+ * C9 — the reconciliation block's narrowing.
+ *
+ * These refs come from a free-text admin field and are stored as raw JSON, so the narrower is the
+ * only thing between "someone pasted a column of keys" and the report prompt.
+ */
+describe('narrowRespondentReportSettings — reconciliation (C9)', () => {
+  const reconciliationOf = (value: unknown) =>
+    narrowRespondentReportSettings({ generation: { reconciliation: value } }).generation
+      .reconciliation;
+
+  it('defaults to off with no refs', () => {
+    expect(reconciliationOf(undefined)).toEqual({
+      enabled: false,
+      statedGoalRefs: [],
+      askedForRefs: [],
+    });
+  });
+
+  it('trims, drops empties, and de-duplicates refs', () => {
+    expect(
+      reconciliationOf({ enabled: true, statedGoalRefs: [' 0.2 ', '', '0.2', 7, null] })
+        .statedGoalRefs
+    ).toEqual(['0.2']);
+  });
+
+  it('ignores a non-array ref list rather than throwing', () => {
+    expect(reconciliationOf({ enabled: true, askedForRefs: '15.1' }).askedForRefs).toEqual([]);
+  });
+
+  it('bounds how many refs a stored blob can carry', () => {
+    const many = Array.from({ length: 50 }, (_, i) => `q${i}`);
+    expect(reconciliationOf({ enabled: true, statedGoalRefs: many }).statedGoalRefs).toHaveLength(
+      20
+    );
   });
 });

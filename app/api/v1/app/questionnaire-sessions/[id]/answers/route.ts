@@ -43,6 +43,8 @@ import {
   reconcileDataSlotFills,
   type ManualAnswerOutcome,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/form-answers';
+import { loadSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
+import { isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
 
 async function handleGetAnswers(
   request: NextRequest,
@@ -141,6 +143,20 @@ async function handlePutAnswers(
     if (unknownKey !== undefined) {
       return errorResponse(`Unknown question key "${unknownKey}"`, {
         code: 'UNKNOWN_QUESTION',
+        status: 400,
+      });
+    }
+
+    // Adaptive Scope (P17): the form only RENDERS in-scope questions, so an out-of-scope key here
+    // is a crafted or stale request. Refuse it rather than storing an answer to something this
+    // interview never asked — the report and the scores would then include data the instrument
+    // itself reports as not assessed, which is the one inconsistency nothing downstream could
+    // explain.
+    const scoped = await loadSessionScope(sessionId);
+    const outOfScopeKey = keys.find((k) => !isQuestionInScope(scoped.scope, k));
+    if (outOfScopeKey !== undefined) {
+      return errorResponse(`Question "${outOfScopeKey}" is not part of this interview`, {
+        code: 'QUESTION_NOT_IN_SCOPE',
         status: 400,
       });
     }

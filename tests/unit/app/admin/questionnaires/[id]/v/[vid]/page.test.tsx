@@ -20,6 +20,7 @@ import type {
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 // ─── Navigation mocks ────────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ const workspaceDataMock = vi.hoisted(() => ({
   getVersionDataSlotCountCached: vi.fn<() => Promise<number>>(),
   getVersionEmbeddingCoverageCached: vi.fn(),
   getVersionDataSlotEmbeddingCoverageCached: vi.fn(),
+  // Adaptive Scope (P17): the Overview reads the topics payload for the draft launch row.
+  getVersionTopicsCached: vi.fn(),
 }));
 
 vi.mock('@/lib/app/questionnaire/workspace-data', () => workspaceDataMock);
@@ -169,6 +172,15 @@ beforeEach(() => {
   // resolved" so the launch checklist mounts without depending on embedding readiness here.
   workspaceDataMock.getVersionEmbeddingCoverageCached.mockResolvedValue(null);
   workspaceDataMock.getVersionDataSlotEmbeddingCoverageCached.mockResolvedValue(null);
+  // Adaptive Scope off — the state of every questionnaire that never opted in, and the one under
+  // which the Overview must render exactly as it did before P17.
+  workspaceDataMock.getVersionTopicsCached.mockResolvedValue({
+    topics: [],
+    settings: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+    issues: [],
+    inventory: { questions: [], dataSlots: [] },
+    draft: null,
+  });
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

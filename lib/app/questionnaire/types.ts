@@ -5,6 +5,11 @@
  * needs alongside the models and capabilities it introduces.
  */
 
+import {
+  DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+  type AdaptiveScopeSettings,
+} from '@/lib/app/questionnaire/scope/types';
+
 /**
  * Narrow a stored string to one of a `const`-tuple enum's members, falling back to
  * `fallback` when the value isn't a member. The boundary guard for reading a plain
@@ -822,6 +827,27 @@ export type RespondentReportSettings = {
      * agent, which is instructed to give low-confidence items less weight and disregard the unreliable.
      */
     discountLowConfidence: boolean;
+    /**
+     * Hold what the respondent SAID they needed against what the instrument MEASURED (C9 / G05).
+     *
+     * A diagnostic asks for a goal at the start, asks what the respondent wants done at the end, and
+     * scores the ground in between. Where those three disagree is the most useful thing the exercise
+     * produces — and the writer cannot find it unaided, because the transcript flattens the opening
+     * and closing answers into undifferentiated Q&A lines and the scores are not in the prompt at
+     * all. This block names the two ends and turns the comparison on.
+     *
+     * `statedGoalRefs` / `askedForRefs` are question keys or data-slot keys. Leave either empty and
+     * the ends are derived from Adaptive Scope's topic phases instead (free-text answers under
+     * `opening` topics, and under `closing` ones) — which is why an instrument with topics authored
+     * needs no configuration at all, and one without them needs the keys.
+     */
+    reconciliation: {
+      enabled: boolean;
+      /** Keys that captured what the respondent said they needed. Empty ⇒ derive from opening topics. */
+      statedGoalRefs: string[];
+      /** Keys that captured what they asked for. Empty ⇒ derive from closing topics. */
+      askedForRefs: string[];
+    };
   };
   delivery: {
     /** Show the report on the completion screen. */
@@ -892,6 +918,9 @@ export const DEFAULT_RESPONDENT_REPORT_SETTINGS: RespondentReportSettings = {
     useClientKnowledge: false,
     dataSlotInfluence: DEFAULT_DATA_SLOT_INFLUENCE,
     discountLowConfidence: true,
+    // Off: an instrument that never asks what the respondent wants has nothing to reconcile, and a
+    // report that invents the comparison anyway would be manufacturing a disagreement.
+    reconciliation: { enabled: false, statedGoalRefs: [], askedForRefs: [] },
   },
   delivery: { onScreen: true, download: true, explainMethod: false },
   research: {
@@ -1273,6 +1302,11 @@ export type QuestionnaireConfigShape = {
    * {@link IntroSettings}. Off by default.
    */
   intro: IntroSettings;
+  /**
+   * Adaptive Scope (P17): which parts of this questionnaire apply to a given respondent, and who
+   * decides. Off by default — see {@link DEFAULT_ADAPTIVE_SCOPE_SETTINGS}.
+   */
+  adaptiveScope: AdaptiveScopeSettings;
 };
 
 /**
@@ -1354,4 +1388,5 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,
+  adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
 };

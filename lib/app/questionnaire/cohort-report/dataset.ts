@@ -30,7 +30,7 @@ import {
 import { narrowCohortReportSettings } from '@/lib/app/questionnaire/cohort-report/settings';
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring/schema-validation';
 import { buildScoringInputs, scoreSessions } from '@/lib/app/questionnaire/scoring/compute';
-import type { RespondentScores } from '@/lib/app/questionnaire/scoring/types';
+import { isPartiallyAssessed, type RespondentScores } from '@/lib/app/questionnaire/scoring/types';
 import type {
   CohortScoring,
   CohortScaleSummary,
@@ -204,23 +204,41 @@ async function buildScoring(
     inputs
   );
 
-  /** Collect raw scores + band labels for a scale across a set of sessions. */
+  /**
+   * Collect raw scores + band labels for a scale across a set of sessions.
+   *
+   * **Partially-assessed respondents are excluded** — Adaptive Scope (P17). A band computed from
+   * three of a scale's eight items and one computed from all eight can otherwise land in the same
+   * column, and the chart looks exactly as confident either way. Averaging them produces a number
+   * that describes nobody: it is arithmetic over two different instruments.
+   *
+   * Excluding rather than flagging is deliberate. A flagged-but-included score still moves the
+   * mean, and a reader who sees a mean does not go looking for a footnote before believing it. The
+   * count comes back separately so the exclusion is *reported*, never silent — and where a scale
+   * was partial for everyone, the honest output is a suppressed figure rather than a confident
+   * wrong one.
+   */
   const collect = (scaleKey: string, sessionIds: string[]) => {
     const raws: number[] = [];
     const bands: (string | null)[] = [];
+    let partiallyAssessed = 0;
     for (const id of sessionIds) {
       const score: RespondentScores | undefined = scoresBySession.get(id);
       const scale = score?.[scaleKey];
       if (!scale) continue;
+      if (isPartiallyAssessed(scale)) {
+        partiallyAssessed += 1;
+        continue;
+      }
       raws.push(scale.raw);
       bands.push(scale.band);
     }
-    return { raws, bands };
+    return { raws, bands, partiallyAssessed };
   };
 
   const allIds = sessions.map((s) => s.id);
   const scales: CohortScaleSummary[] = schema.scales.map((scale) => {
-    const { raws, bands } = collect(scale.key, allIds);
+    const { raws, bands, partiallyAssessed } = collect(scale.key, allIds);
     const suppressed = isCohortSuppressed(raws.length);
     const bandCounts: { label: string; count: number }[] = [];
     if (!suppressed) {
@@ -237,6 +255,7 @@ async function buildScoring(
       mean: suppressed ? null : meanOf(raws),
       bandCounts,
       suppressed,
+      partiallyAssessed,
     };
   });
 
@@ -247,7 +266,7 @@ async function buildScoring(
       scaleKey: scale.key,
       scaleName: scale.name,
       segments: g.buckets.map((b) => {
-        const { raws } = collect(
+        const { raws, partiallyAssessed } = collect(
           scale.key,
           b.sessions.map((s) => s.id)
         );
@@ -258,6 +277,7 @@ async function buildScoring(
           respondents: raws.length,
           mean: suppressed ? null : meanOf(raws),
           suppressed,
+          partiallyAssessed,
         };
       }),
     })),

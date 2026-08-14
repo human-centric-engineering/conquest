@@ -13,6 +13,7 @@ import * as React from 'react';
 import { Plus, Trash2, Loader2, Upload } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { FieldHelp } from '@/components/ui/field-help';
 import { Input } from '@/components/ui/input';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
@@ -25,18 +26,74 @@ import type {
 } from '@/lib/app/questionnaire/scoring';
 import type { ScoringMethod } from '@/lib/app/questionnaire/types';
 
+/** The numeric range behind a key, or null when it has none (free text, a data slot, an open numeric). */
+interface RefBounds {
+  min: number;
+  max: number;
+}
+
 interface AvailableRef {
   key: string;
   label: string;
   source: 'question' | 'dataSlot';
+  bounds: RefBounds | null;
 }
 
 export interface ScoringBuilderProps {
   questionnaireId: string;
   versionId: string;
   initial: ScoringSchemaContent;
-  questions: Array<{ key: string; prompt: string; type: string }>;
+  questions: Array<{ key: string; prompt: string; type: string; bounds: RefBounds | null }>;
   dataSlots: Array<{ key: string; name: string }>;
+}
+
+/**
+ * What is wrong with the ruler this schema is built on — the C8 warnings, computed from the real
+ * bounds behind each key.
+ *
+ * Two failures, both silent without this. A scale combining a 1–6 item with a 1–5 one is arithmetic
+ * over two rulers: it produces a number, and nothing about the number says it is meaningless. And an
+ * item whose key has no numeric range at all cannot be put on a common ruler, so turning
+ * normalisation on drops it from the scale entirely. Neither is an error — an author may know
+ * exactly what they are doing — so both are stated, not enforced.
+ */
+function rulerWarnings(
+  items: ScoringItem[],
+  scales: ScoringScale[],
+  boundsByRef: Map<string, RefBounds | null>,
+  normalise: boolean
+): string[] {
+  const out: string[] = [];
+  const nameFor = (key: string) => scales.find((s) => s.key === key)?.name || key;
+
+  for (const scale of scales) {
+    const mine = items.filter((i) => i.scaleKey === scale.key);
+    if (mine.length === 0) continue;
+
+    const rulers = new Set(
+      mine
+        .map((i) => boundsByRef.get(i.ref))
+        .filter((b): b is RefBounds => !!b)
+        .map((b) => `${b.min}–${b.max}`)
+    );
+    if (rulers.size > 1 && !normalise) {
+      out.push(
+        `“${nameFor(scale.key)}” combines items measured on different ranges ` +
+          `(${[...rulers].join(', ')}). Their values are not comparable as written — turn on ` +
+          `“Put items on a common ruler” to score them together.`
+      );
+    }
+
+    const unbounded = mine.filter((i) => !boundsByRef.get(i.ref)).map((i) => i.ref);
+    if (unbounded.length > 0 && normalise) {
+      out.push(
+        `“${nameFor(scale.key)}” has ${unbounded.length} item(s) with no numeric range ` +
+          `(${unbounded.join(', ')}). With a common ruler on, they cannot be placed on it and are ` +
+          `left out of the score.`
+      );
+    }
+  }
+  return out;
 }
 
 export function ScoringBuilder({
@@ -50,6 +107,7 @@ export function ScoringBuilder({
   const [items, setItems] = React.useState<ScoringItem[]>(initial.items);
   const [bands, setBands] = React.useState<ScoringBand[]>(initial.bands);
   const [method, setMethod] = React.useState<ScoringMethod>(initial.method);
+  const [normalise, setNormalise] = React.useState<boolean>(initial.normalise === true);
   const [saving, setSaving] = React.useState(false);
   const [extracting, setExtracting] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
@@ -59,21 +117,26 @@ export function ScoringBuilder({
   const refs: AvailableRef[] = [
     ...questions.map((q) => ({
       key: q.key,
-      label: `${q.prompt} (${q.type})`,
+      label: `${q.prompt} (${q.type}${q.bounds ? ` ${q.bounds.min}–${q.bounds.max}` : ''})`,
       source: 'question' as const,
+      bounds: q.bounds,
     })),
     ...dataSlots.map((d) => ({
       key: d.key,
       label: `${d.name} (data slot)`,
       source: 'dataSlot' as const,
+      bounds: null,
     })),
   ];
+  const boundsByRef = new Map(refs.map((r) => [r.key, r.bounds]));
+  const warnings = rulerWarnings(items, scales, boundsByRef, normalise);
 
   function applySchema(s: ScoringSchemaContent) {
     setScales(s.scales);
     setItems(s.items);
     setBands(s.bands);
     setMethod(s.method);
+    setNormalise(s.normalise === true);
   }
 
   function addScale() {
@@ -126,7 +189,7 @@ export function ScoringBuilder({
     setMessage(null);
     try {
       await apiClient.patch(API.APP.QUESTIONNAIRES.scoringSchema(questionnaireId, versionId), {
-        body: { content: { scales, items, bands, method } },
+        body: { content: { scales, items, bands, method, normalise } },
       });
       setMessage('Scoring schema saved. Respondent scores recomputed.');
     } catch (err) {
@@ -197,10 +260,43 @@ export function ScoringBuilder({
             <option value="sum">Sum</option>
           </select>
         </label>
+        <label className="text-muted-foreground flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={normalise}
+            onChange={(e) => setNormalise(e.target.checked)}
+            className="border-input h-4 w-4 rounded border"
+          />
+          Put items on a common ruler
+          <FieldHelp title="Common ruler">
+            <p>
+              Rescales every answer to its position within its own question&apos;s range before the
+              items are combined. Turn this on when one scale draws on questions that are not all
+              measured the same way.
+            </p>
+            <p>
+              Without it, a 4 out of 5 and a 4 out of 6 count as the same quantity — they are not —
+              and a 0–50 numeric question decides the scale on its own.
+            </p>
+            <p>
+              Two things change when it is on. Scores land in 0–1, so band cutoffs must be
+              re-authored in that range (saving with the old ones is refused). And an item whose
+              question has no numeric range cannot be placed on the ruler, so it is left out of the
+              score.
+            </p>
+          </FieldHelp>
+        </label>
       </div>
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {message && <p className="text-sm text-emerald-600 dark:text-emerald-400">{message}</p>}
+      {warnings.length > 0 && (
+        <ul className="space-y-1 text-sm text-amber-700 dark:text-amber-400">
+          {warnings.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ul>
+      )}
 
       {/* Scales */}
       <section className="space-y-2">

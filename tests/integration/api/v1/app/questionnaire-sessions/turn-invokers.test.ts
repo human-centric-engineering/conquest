@@ -73,6 +73,7 @@ import {
 } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -157,6 +158,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
+      adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     },
     questions: [
       {
@@ -899,20 +901,6 @@ describe('assessSeriousness — inspector trace', () => {
     expect(Array.isArray(trace.prompt)).toBe(true);
     expect(trace.prompt.length).toBe(2);
   });
-
-  it('wires anonymous + recordInspectorCall into the adaptive deps for selectNext', async () => {
-    // Line 485-487: the `...(anonymous ? { anonymous } : {})` and
-    // `...(recordInspectorCall ? { recordInspectorCall } : {})` spreads in selectNext.
-    const recordInspectorCall = vi.fn();
-    const inv = await invokers({
-      anonymous: true,
-      recordInspectorCall,
-    });
-    await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
-    expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith(
-      expect.objectContaining({ anonymous: true, recordInspectorCall })
-    );
-  });
 });
 
 describe('detectSensitivity', () => {
@@ -1227,6 +1215,19 @@ describe('extractAnswers — answer-fit resolver threading', () => {
 });
 
 describe('selectNext', () => {
+  it('wires anonymous + recordInspectorCall into the adaptive deps for selectNext', async () => {
+    // The `...(anonymous ? { anonymous } : {})` and `...(recordInspectorCall ? {
+    // recordInspectorCall } : {})` spreads in selectNext.
+    const recordInspectorCall = vi.fn();
+    const inv = await invokers({
+      anonymous: true,
+      recordInspectorCall,
+    });
+    await inv.selectNext(state({ config: { ...state().config, selectionStrategy: 'adaptive' } }));
+    expect(adaptiveMock.buildAdaptiveDeps).toHaveBeenCalledWith(
+      expect.objectContaining({ anonymous: true, recordInspectorCall })
+    );
+  });
   it('runs the deterministic strategy and returns a decision', async () => {
     const inv = await invokers();
     const out = await inv.selectNext(state({ answered: [] }));

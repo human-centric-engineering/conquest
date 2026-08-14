@@ -107,6 +107,23 @@ export async function copyVersionGraph(
           uploadedBy: true,
         },
       },
+      // Adaptive Scope (P17): topics fork with the version. Their membership is KEYS, not row ids,
+      // so — unlike tags and data-slot links — there is nothing to re-link: a verbatim copy lands on
+      // the copied questions automatically, because those carry their keys over 1:1.
+      topics: {
+        orderBy: { ordinal: 'asc' },
+        select: {
+          key: true,
+          label: true,
+          description: true,
+          phase: true,
+          criteria: true,
+          depth: true,
+          members: true,
+          ordinal: true,
+          source: true,
+        },
+      },
       // Data Slots feature: the abstraction layer forks with the version (like tags).
       dataSlots: {
         orderBy: { ordinal: 'asc' },
@@ -169,6 +186,7 @@ export async function copyVersionGraph(
         cohortReport: jsonInput(source.config.cohortReport),
         intro: jsonInput(source.config.intro),
         milestoneBannerThresholds: jsonInput(source.config.milestoneBannerThresholds),
+        adaptiveScope: jsonInput(source.config.adaptiveScope),
       },
     });
   }
@@ -331,6 +349,26 @@ export async function copyVersionGraph(
   }
   if (newDataSlotQuestions.length > 0) {
     await tx.appDataSlotQuestion.createMany({ data: newDataSlotQuestions });
+  }
+
+  // Adaptive Scope (P17): one createMany, no re-linking. See the select above for why.
+  // The DRAFT is deliberately NOT copied: a fork is a new editing surface, and carrying an
+  // un-reviewed proposal into it would make the same proposal reviewable in two places at once.
+  if (source.topics.length > 0) {
+    await tx.appQuestionnaireTopic.createMany({
+      data: source.topics.map((topic) => ({
+        versionId: targetVersionId,
+        key: topic.key,
+        label: topic.label,
+        phase: topic.phase,
+        criteria: topic.criteria,
+        depth: topic.depth,
+        members: jsonInput(topic.members),
+        ordinal: topic.ordinal,
+        source: topic.source,
+        ...(topic.description !== null ? { description: topic.description } : {}),
+      })),
+    });
   }
 
   // Carry the data-slot embeddings over too (same rationale as the question slots:

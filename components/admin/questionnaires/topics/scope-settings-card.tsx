@@ -1,0 +1,494 @@
+'use client';
+
+/**
+ * The Adaptive Scope knobs — the master switch and everything that governs how the plan is decided.
+ *
+ * These live beside the topics rather than on the Settings tab because most of them *address*
+ * topics: the fallback set, the blind-spot preference and every hard rule name a topic key. Split
+ * across two tabs, an admin would be picking from a list they cannot see.
+ *
+ * Everything on this card is one PATCH of the `adaptiveScope` blob. The order of the fields follows
+ * the order of the decision itself, and the steps are numbered to say so: the hard rules that run
+ * before the agent, then the cap the model cannot exceed, the blind-spot check, what happens when
+ * the model cannot decide, and what the respondent is told.
+ *
+ * Numbering them is not decoration. The failure this card exists to prevent is an admin reading the
+ * cap as a request the model tries to honour; seeing it sit *after* the agent's turn in a sequence
+ * they cannot reorder is the cheapest way to say that it is enforced.
+ */
+
+import type React from 'react';
+import { useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FieldHelp } from '@/components/ui/field-help';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { MultiSelect } from '@/components/ui/multi-select';
+import { Switch } from '@/components/ui/switch';
+import { AutoTextarea } from '@/components/ui/auto-textarea';
+import { SaveButton } from '@/components/admin/questionnaires/save-button';
+import { ScopeRulesEditor } from '@/components/admin/questionnaires/topics/scope-rules-editor';
+import {
+  MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_SESSION_BUDGET_SECONDS,
+  MIN_CONDITIONAL_TOPICS,
+  PLANNER_INSTRUCTIONS_MAX_LENGTH,
+  type AdaptiveScopeSettings,
+  type ScopeRule,
+  type Topic,
+} from '@/lib/app/questionnaire/scope/types';
+import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
+import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
+import { cn } from '@/lib/utils';
+
+export interface ScopeSettingsCardProps {
+  settings: AdaptiveScopeSettings;
+  topics: readonly Topic[];
+  dataSlots: TopicsPayload['inventory']['dataSlots'];
+  /**
+   * The version's time arithmetic (C7), computed server-side: what the always-run questions cost
+   * and what a budget therefore leaves for routed topics.
+   */
+  costs: TopicsPayload['costs'];
+  /** Saves the settings patch. Resolving `false` means it did not land (error or declined fork). */
+  onSave: (settings: AdaptiveScopeSettings) => Promise<boolean>;
+  busy: boolean;
+}
+
+/**
+ * The arithmetic behind a session budget, stated rather than left implicit.
+ *
+ * Without this an author sets "600" and has no way to know that most of it is already spent — the
+ * questions every respondent gets come out of the same budget, and what is left is the only number
+ * that decides how much routing is possible. This is the line that turns a client's "no more than
+ * three sections" from folklore into something an author can check.
+ *
+ * Reads the SAVED figures, so it lags an unsaved topic edit by one save. Stated in the copy rather
+ * than hidden, because a number that silently described a different instrument would be worse.
+ */
+function BudgetReadout({
+  budgetSeconds,
+  costs,
+}: {
+  budgetSeconds: number;
+  costs: TopicsPayload['costs'];
+}) {
+  if (budgetSeconds <= 0) return null;
+  const allowance = Math.max(0, budgetSeconds - costs.alwaysSeconds);
+  const overspent = costs.alwaysSeconds >= budgetSeconds;
+  return (
+    <p className={cn('text-xs', overspent ? 'text-amber-600' : 'text-muted-foreground')}>
+      {overspent ? (
+        <>
+          The questions every respondent gets already take about{' '}
+          {formatSeconds(costs.alwaysSeconds)}, which is over this budget. No conditional topic can
+          fit.
+        </>
+      ) : (
+        <>
+          About {formatSeconds(costs.alwaysSeconds)} goes to the questions every respondent gets,
+          leaving ~{formatSeconds(allowance)} for conditional topics.
+        </>
+      )}
+    </p>
+  );
+}
+
+/**
+ * A numbered step heading inside the card.
+ *
+ * The numbers are the DECISION ORDER, not a wizard: hard rules really are evaluated before the
+ * agent, and the agent's answer really is filtered by the limits that follow. Ordering the controls
+ * the way the runtime orders them is what stops an admin reading the cap as something the model
+ * merely tries to respect. `step` is omitted for the aside that has no place in that sequence.
+ */
+function SectionLabel({ step, children }: { step?: number; children: React.ReactNode }) {
+  return (
+    <p className="text-muted-foreground flex items-center gap-2 text-[11px] font-semibold tracking-wide uppercase">
+      {step !== undefined && (
+        <span
+          aria-hidden="true"
+          className="bg-muted text-foreground/70 flex h-5 w-5 items-center justify-center rounded-full text-[10px] tabular-nums"
+        >
+          {step}
+        </span>
+      )}
+      {children}
+    </p>
+  );
+}
+
+/** Parse a bounded integer out of a text input, falling back rather than rejecting a keystroke. */
+function boundedInt(raw: string, min: number, max: number, fallback: number): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+export function ScopeSettingsCard({
+  settings,
+  topics,
+  dataSlots,
+  costs,
+  onSave,
+  busy,
+}: ScopeSettingsCardProps) {
+  const [draft, setDraft] = useState<AdaptiveScopeSettings>(settings);
+  const [dirty, setDirty] = useState(false);
+
+  const set = (patch: Partial<AdaptiveScopeSettings>) => {
+    setDirty(true);
+    setDraft((prev) => ({ ...prev, ...patch }));
+  };
+
+  const conditionalOptions = topics
+    .filter((t) => t.phase === 'conditional')
+    .map((t) => ({ value: t.key, label: t.label }));
+  const conditionalCount = conditionalOptions.length;
+
+  const save = async () => {
+    const ok = await onSave(draft);
+    if (ok) setDirty(false);
+    return ok;
+  };
+
+  return (
+    <Card className="overflow-hidden shadow-sm">
+      <CardHeader className="bg-muted/30 flex-row items-start gap-3 space-y-0 border-b p-4">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400">
+          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <CardTitle className="flex items-center gap-1.5 text-sm font-semibold">
+            How the decision is made
+            <FieldHelp title="The decision, in order">
+              <p>
+                Once the opening completes, the interview&rsquo;s scope is settled in one pass and
+                never revisited:
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-4">
+                <li>
+                  Your <strong>hard rules</strong> run first. A “never include” can never be undone
+                  by anything below it.
+                </li>
+                <li>
+                  The <strong>agent</strong> judges each remaining conditional topic against its
+                  criteria and what the respondent said.
+                </li>
+                <li>
+                  Your <strong>limits</strong> are applied to the result — the cap, the confidence
+                  floor, the blind-spot check.
+                </li>
+                <li>
+                  If nothing usable survives, the <strong>fallback</strong> applies. It never fails
+                  and never hangs.
+                </li>
+              </ol>
+              <p className="mt-2">
+                The model proposes; it never gets the last word on a limit you set.
+              </p>
+            </FieldHelp>
+          </CardTitle>
+          <CardDescription className="text-xs leading-relaxed">
+            Decide which conditional topics each respondent’s interview covers, once, when the
+            opening completes. Off by default — while it is off every topic is asked and nothing
+            below has any effect.
+          </CardDescription>
+        </div>
+        <div className="mt-0.5 flex shrink-0 items-center gap-2">
+          <Label htmlFor="adaptive-scope-enabled" className="text-xs font-medium">
+            {draft.enabled ? 'On' : 'Off'}
+          </Label>
+          <Switch
+            id="adaptive-scope-enabled"
+            checked={draft.enabled}
+            onCheckedChange={(v) => set({ enabled: v })}
+            disabled={busy}
+          />
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-5 p-4">
+        {draft.enabled && conditionalCount === 0 && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            No topic is conditional yet, so there is nothing to decide between — every respondent
+            gets the same interview. Set at least one topic to “Ask when it fits”.
+          </p>
+        )}
+
+        <div className="space-y-3">
+          <SectionLabel step={1}>The cases you are certain about</SectionLabel>
+          <ScopeRulesEditor
+            rules={draft.rules}
+            onChange={(next: ScopeRule[]) => set({ rules: next })}
+            topics={topics}
+            dataSlots={dataSlots}
+            disabled={busy}
+          />
+        </div>
+
+        <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={2}>How much the agent may cover</SectionLabel>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Session length budget{' '}
+                <FieldHelp title="Session length budget">
+                  <p>
+                    Duration control: roughly how long one interview may take. Leave at 0 for no
+                    limit.
+                  </p>
+                  <p>
+                    Separate from the topic limit beside it, because they bound different things.
+                    Three topics is not a length — one topic can be ten ratings and another three —
+                    and “under ten minutes” says nothing about how many areas to cover. Both apply.
+                  </p>
+                  <p>
+                    Estimated from question types (a rating is quick, an open question is not), so
+                    it is a planning figure rather than a stopwatch.
+                  </p>
+                </FieldHelp>
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={MAX_SESSION_BUDGET_SECONDS}
+                  step={30}
+                  value={draft.sessionBudgetSeconds}
+                  onChange={(e) =>
+                    set({
+                      sessionBudgetSeconds: boundedInt(
+                        e.target.value,
+                        0,
+                        MAX_SESSION_BUDGET_SECONDS,
+                        draft.sessionBudgetSeconds
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {draft.sessionBudgetSeconds > 0
+                    ? formatSeconds(draft.sessionBudgetSeconds)
+                    : 'no limit'}
+                </span>
+              </div>
+              <BudgetReadout budgetSeconds={draft.sessionBudgetSeconds} costs={costs} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Most conditional topics per interview{' '}
+                <FieldHelp title="Topic limit">
+                  Breadth control: how many conditional topics one interview may cover. The agent
+                  proposes; this caps, deterministically — a limit obeyed “most of the time” is the
+                  worst kind. Length and cost are governed separately by the question cap and
+                  budget.
+                </FieldHelp>
+              </Label>
+              <Input
+                type="number"
+                min={MIN_CONDITIONAL_TOPICS}
+                max={MAX_CONDITIONAL_TOPICS_CEILING}
+                value={draft.maxConditionalTopics}
+                onChange={(e) =>
+                  set({
+                    maxConditionalTopics: boundedInt(
+                      e.target.value,
+                      MIN_CONDITIONAL_TOPICS,
+                      MAX_CONDITIONAL_TOPICS_CEILING,
+                      draft.maxConditionalTopics
+                    ),
+                  })
+                }
+                disabled={busy}
+              />
+              {conditionalCount > 0 && draft.maxConditionalTopics >= conditionalCount && (
+                <p className="text-xs text-amber-600">
+                  You have {conditionalCount} conditional{' '}
+                  {conditionalCount === 1 ? 'topic' : 'topics'}, so this limit selects all of them
+                  every time.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Confidence needed{' '}
+                <FieldHelp title="Confidence floor">
+                  Below this, the agent’s plan is discarded and the fallback set applies instead. 0
+                  accepts any answer; 1 accepts only certainty.
+                </FieldHelp>
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={draft.minConfidence}
+                onChange={(e) => {
+                  const parsed = Number.parseFloat(e.target.value);
+                  set({
+                    minConfidence: Number.isFinite(parsed)
+                      ? Math.min(1, Math.max(0, parsed))
+                      : draft.minConfidence,
+                  });
+                }}
+                disabled={busy}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2 border-t pt-4">
+          <SectionLabel step={3}>Guard against a narrow result</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="scope-check-topic" className="text-sm font-medium">
+                Add a blind-spot check{' '}
+                <FieldHelp title="Blind-spot check">
+                  Includes one topic the agent did <strong>not</strong> choose, at light depth. A
+                  diagnostic that only asks about the problem the respondent already named can only
+                  confirm what they already believed; sampling one area they did not raise is what
+                  makes the result capable of surprising them. It is always light, whatever that
+                  topic’s own depth says — in this interview its job is to sample, not to score, and
+                  every report says so.
+                </FieldHelp>
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                Costs one extra topic at light depth, over and above the limit above.
+              </p>
+            </div>
+            <Switch
+              id="scope-check-topic"
+              checked={draft.includeCheckTopic}
+              onCheckedChange={(v) => set({ includeCheckTopic: v })}
+              disabled={busy}
+            />
+          </div>
+          {draft.includeCheckTopic && (
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground text-xs">
+                Prefer these topics for the check, best first{' '}
+                <FieldHelp title="Blind-spot preference">
+                  Leave empty for “whichever unselected topic carries the most weight”, which is the
+                  more informative default. Naming topics makes it predictable instead.
+                </FieldHelp>
+              </Label>
+              <MultiSelect
+                options={conditionalOptions}
+                value={draft.checkTopicPreference}
+                onChange={(next) => set({ checkTopicPreference: next })}
+                placeholder="Any unselected topic"
+                emptyText="No conditional topics yet"
+                disabled={busy}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1.5 border-t pt-4">
+          <SectionLabel step={4}>When the agent cannot decide</SectionLabel>
+          <Label className="text-sm font-medium">
+            Ask these instead{' '}
+            <FieldHelp title="Fallback topics">
+              Used when the planner errored, returned nothing usable, or came in under the
+              confidence floor. Empty means “the always-run topics only” — always coherent, if thin.
+              The planner never throws: every failure resolves to a plan, because a respondent has
+              just finished the opening and is waiting.
+            </FieldHelp>
+          </Label>
+          <MultiSelect
+            options={conditionalOptions}
+            value={draft.fallbackTopicKeys}
+            onChange={(next) => set({ fallbackTopicKeys: next })}
+            placeholder="Always-run topics only"
+            emptyText="No conditional topics yet"
+            disabled={busy}
+          />
+        </div>
+
+        <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={5}>What the respondent is told</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="scope-announce" className="text-sm font-medium">
+                Tell the respondent what was chosen{' '}
+                <FieldHelp title="Announce the plan">
+                  Not merely courtesy: naming the selection back proves the interview listened,
+                  justifies the time it is about to ask for, and gives the respondent their one
+                  chance to object before it is spent. The interviewer weaves it into its own next
+                  message rather than posting a system notice.
+                </FieldHelp>
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                Woven into the interviewer’s own voice on the turn after the decision.
+              </p>
+            </div>
+            <Switch
+              id="scope-announce"
+              checked={draft.announce}
+              onCheckedChange={(v) => set({ announce: v })}
+              disabled={busy}
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="scope-amendment" className="text-sm font-medium">
+                Let the respondent ask for a topic{' '}
+                <FieldHelp title="Respondent amendment">
+                  Honours “actually, can we cover training too?” by adding that topic to the plan,
+                  whether or not the agent chose it. Matched against your topic names, so names that
+                  describe the subject are what make this work. The amendment is recorded and
+                  excluded from routing-quality analytics — a correction is signal <em>about</em>{' '}
+                  the planner, not an example of it working.
+                </FieldHelp>
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                Only ever adds topics — a respondent can never remove one the instrument requires.
+              </p>
+            </div>
+            <Switch
+              id="scope-amendment"
+              checked={draft.allowRespondentAmendment}
+              onCheckedChange={(v) => set({ allowRespondentAmendment: v })}
+              disabled={busy}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1.5 border-t pt-4">
+          <SectionLabel>Extra guidance (optional)</SectionLabel>
+          <Label className="text-sm font-medium">
+            Guidance that applies across all topics{' '}
+            <FieldHelp title="Planner instructions">
+              Appended to the planner prompt. Each topic’s criteria say when that one topic applies;
+              this says how to judge the plan as a whole — “prefer breadth over depth for first-time
+              respondents”. It cannot override the limit, the rules, or the fallback: those are
+              enforced after the model answers.
+            </FieldHelp>
+          </Label>
+          <AutoTextarea
+            value={draft.plannerInstructions}
+            onChange={(e) =>
+              set({ plannerInstructions: e.target.value.slice(0, PLANNER_INSTRUCTIONS_MAX_LENGTH) })
+            }
+            placeholder="Optional"
+            rows={2}
+            disabled={busy}
+          />
+        </div>
+
+        <div className="flex justify-end border-t pt-4">
+          <SaveButton onSave={save} disabled={busy || !dirty} size="sm">
+            Save adaptive scope
+          </SaveButton>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

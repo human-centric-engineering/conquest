@@ -1,0 +1,284 @@
+/**
+ * Adaptive Scope coherence checks (P17) — pure.
+ *
+ * Saving an incoherent topic set is allowed: an admin mid-edit routinely has one, and a surface
+ * that refuses the save is a surface they fight. These checks run on READ instead — on the Topics
+ * page and in the launch checklist — so problems are visible where they can be fixed rather than
+ * blocking the keystroke that created them.
+ *
+ * The severity split is the whole point:
+ *
+ * - **`error`** — turning this on would make the questionnaire behave wrongly. Two matter most: the
+ *   orphaned-question check (with scope active, a question belonging to no topic can never be asked,
+ *   and nothing else in the system would ever tell you) and `rule_veto_always_fires` (a hard rule
+ *   testing for the absence of something the opening never gathers is not inert — it applies to
+ *   every respondent).
+ * - **`warning`** — it will run, but not as the author probably intends.
+ *
+ * Every check is inert while `enabled` is false, except the orphan check, which is reported as a
+ * warning then — it is exactly what an admin needs to see BEFORE they flip the switch.
+ */
+
+import {
+  ALWAYS_PHASES,
+  type AdaptiveScopeSettings,
+  type Topic,
+} from '@/lib/app/questionnaire/scope/types';
+
+/** How badly a finding bites. */
+export type ScopeIssueSeverity = 'error' | 'warning';
+
+/** One coherence finding, ready to render. */
+export interface ScopeIssue {
+  severity: ScopeIssueSeverity;
+  /** Stable slug for the finding type — lets the UI group and the tests assert without prose. */
+  code: string;
+  /** One sentence, addressed to the admin. */
+  message: string;
+  /** The topic key the finding is about, when it is about one. */
+  topicKey?: string;
+}
+
+export interface ValidateScopeInput {
+  topics: readonly Topic[];
+  settings: AdaptiveScopeSettings;
+  /** Every question key in the version — for the orphan check. */
+  allQuestionKeys: readonly string[];
+  /** Every data-slot key in the version — for the rule and orphan checks. */
+  allDataSlotKeys?: readonly string[];
+  /**
+   * The time arithmetic (C7), when the caller has it: what the always-run phases cost, and the
+   * cheapest routed topic. Optional because this module is pure and pricing needs question types —
+   * a caller without them still gets every other finding.
+   */
+  seconds?: {
+    always: number;
+    /** The cheapest conditional topic at full depth, or 0 when there are none. */
+    cheapestConditional: number;
+  };
+}
+
+/**
+ * Check a version's Adaptive Scope setup. Returns findings ordered errors-first.
+ *
+ * Pure and total: never throws, and an empty result means "nothing to say", not "not checked".
+ */
+export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
+  const { topics, settings } = input;
+  const issues: ScopeIssue[] = [];
+  const topicKeys = new Set(topics.map((t) => t.key));
+
+  // ── The orphan check ───────────────────────────────────────────────────────────────────────
+  // Reported whether or not the feature is on, because it is precisely what an admin needs to see
+  // BEFORE flipping the switch — afterwards, the symptom is a question that silently never appears.
+  const covered = new Set<string>();
+  for (const topic of topics) {
+    for (const key of topic.members.questionKeys) covered.add(key);
+  }
+  const orphans = input.allQuestionKeys.filter((k) => !covered.has(k));
+  if (orphans.length > 0 && topics.length > 0) {
+    issues.push({
+      severity: settings.enabled ? 'error' : 'warning',
+      code: 'orphaned_questions',
+      message: settings.enabled
+        ? `${orphans.length} question${orphans.length === 1 ? '' : 's'} belong to no topic, so ${orphans.length === 1 ? 'it is' : 'they are'} never asked while Adaptive Scope is on. Add ${orphans.length === 1 ? 'it' : 'them'} to a topic.`
+        : `${orphans.length} question${orphans.length === 1 ? '' : 's'} belong to no topic. That is harmless today, but ${orphans.length === 1 ? 'it' : 'they'} would never be asked if you turn Adaptive Scope on.`,
+    });
+  }
+
+  const orphanSlots = (input.allDataSlotKeys ?? []).filter((k) => {
+    for (const topic of topics) if (topic.members.dataSlotKeys.includes(k)) return false;
+    return true;
+  });
+  if (orphanSlots.length > 0 && topics.length > 0) {
+    issues.push({
+      severity: settings.enabled ? 'error' : 'warning',
+      code: 'orphaned_data_slots',
+      message: `${orphanSlots.length} data slot${orphanSlots.length === 1 ? '' : 's'} belong to no topic, so the conversation would never target ${orphanSlots.length === 1 ? 'it' : 'them'} while Adaptive Scope is on.`,
+    });
+  }
+
+  // ── Per-topic checks ──────────────────────────────────────────────────────────────────────
+  for (const topic of topics) {
+    if (topic.members.questionKeys.length === 0 && topic.members.dataSlotKeys.length === 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'empty_topic',
+        topicKey: topic.key,
+        message: `"${topic.label}" contains no questions or data slots, so selecting it would do nothing.`,
+      });
+    }
+    if (topic.phase === 'conditional' && !topic.criteria?.trim()) {
+      issues.push({
+        severity: settings.enabled ? 'error' : 'warning',
+        code: 'conditional_without_criteria',
+        topicKey: topic.key,
+        message: `"${topic.label}" is conditional but has no "include this when…" criteria, so the agent has nothing to judge it on.`,
+      });
+    }
+  }
+
+  // ── Whole-setup checks, only meaningful once the feature is on ────────────────────────────
+  if (settings.enabled) {
+    if (!topics.some((t) => t.phase === 'opening')) {
+      issues.push({
+        severity: 'error',
+        code: 'no_opening_topic',
+        message:
+          'No topic is marked as the opening, so nothing gathers the signal the agent needs before it can choose. Mark the topic that asks the opening questions.',
+      });
+    }
+    if (!topics.some((t) => t.phase === 'conditional')) {
+      issues.push({
+        severity: 'warning',
+        code: 'no_conditional_topics',
+        message:
+          'No topic is conditional, so every respondent gets the same questionnaire and Adaptive Scope has nothing to decide.',
+      });
+    }
+    const conditionalCount = topics.filter((t) => t.phase === 'conditional').length;
+    if (conditionalCount > 0 && settings.maxConditionalTopics >= conditionalCount) {
+      issues.push({
+        severity: 'warning',
+        code: 'cap_exceeds_candidates',
+        message: `You allow up to ${settings.maxConditionalTopics} conditional topics but only have ${conditionalCount}, so every one is always selected. Lower the limit to make the choice meaningful.`,
+      });
+    }
+    // ── The time budget (C7) ───────────────────────────────────────────────────────────────
+    // A budget that cannot cover the mandatory floor is not a tight interview, it is a broken one:
+    // no routed topic can ever be seated, and the symptom is an instrument that quietly stops
+    // adapting. Reported as an ERROR because there is no configuration in which it is what the
+    // author meant.
+    const budget = settings.sessionBudgetSeconds;
+    if (budget > 0 && input.seconds) {
+      const { always, cheapestConditional } = input.seconds;
+      if (always >= budget) {
+        issues.push({
+          severity: 'error',
+          code: 'budget_below_floor',
+          message: `The questions every respondent gets already take about ${always}s, which is at or over your ${budget}s budget. No routed topic can ever fit, so the interview would never adapt.`,
+        });
+      } else if (cheapestConditional > 0 && budget - always < cheapestConditional) {
+        issues.push({
+          severity: 'warning',
+          code: 'budget_admits_no_topic',
+          message: `After the questions every respondent gets (~${always}s), ${budget - always}s is left — less than your cheapest conditional topic (~${cheapestConditional}s). Every interview will run the always-on questions alone.`,
+        });
+      }
+    }
+
+    if (settings.includeCheckTopic && conditionalCount < 2) {
+      issues.push({
+        severity: 'warning',
+        code: 'check_topic_impossible',
+        message:
+          'The blind-spot check needs a conditional topic that was NOT selected to sample from, and there are too few to leave one out.',
+      });
+    }
+  }
+
+  // ── Dangling key references ───────────────────────────────────────────────────────────────
+  const dataSlotKeys = input.allDataSlotKeys ? new Set(input.allDataSlotKeys) : null;
+
+  // Hard-rule reachability. Rules are evaluated at exactly ONE moment — when the opening completes
+  // and the planner runs — so a rule testing a slot the interview has not gathered by then is not a
+  // rule that fires later. It is a rule that never fires at all. Only the opening is reliably
+  // gathered by then: `core` runs alongside it in an order nothing guarantees, and `conditional` and
+  // `closing` topics are, by construction, not in scope until after the plan exists.
+  //
+  // Reported only when there IS an opening topic. Without one the planner runs on the first turn
+  // and every rule is unreachable, which `no_opening_topic` already says once — repeating it per
+  // rule buries the finding that has to be fixed first.
+  const hasOpeningTopic = topics.some((t) => t.phase === 'opening');
+  const openingSlotKeys = new Set<string>();
+  const coreSlotKeys = new Set<string>();
+  for (const topic of topics) {
+    if (topic.phase === 'opening') {
+      for (const key of topic.members.dataSlotKeys) openingSlotKeys.add(key);
+    } else if (topic.phase === 'core') {
+      for (const key of topic.members.dataSlotKeys) coreSlotKeys.add(key);
+    }
+  }
+
+  for (const rule of settings.rules) {
+    if (!topicKeys.has(rule.topicKey)) {
+      issues.push({
+        severity: 'warning',
+        code: 'rule_unknown_topic',
+        message: `A rule points at the topic "${rule.topicKey}", which no longer exists. It can never match.`,
+      });
+    }
+    if (dataSlotKeys && !dataSlotKeys.has(rule.dataSlotKey)) {
+      issues.push({
+        severity: 'warning',
+        code: 'rule_unknown_data_slot',
+        message: `A rule tests the data slot "${rule.dataSlotKey}", which no longer exists. It can never match.`,
+      });
+      continue;
+    }
+    if (!hasOpeningTopic || openingSlotKeys.has(rule.dataSlotKey)) continue;
+
+    if (coreSlotKeys.has(rule.dataSlotKey)) {
+      issues.push({
+        severity: 'warning',
+        code: 'rule_slot_not_in_opening',
+        message: `A rule tests "${rule.dataSlotKey}", which is gathered by a topic that always runs but is not the opening. The rules are evaluated the moment the opening completes, so whether this has been asked by then is not something the rule can rely on. Move it into an opening topic.`,
+      });
+    } else if (rule.operator === 'not_exists') {
+      // The sharp one. `not_exists` matches on ABSENCE, so a slot that is never gathered before the
+      // planner runs is not an inert rule — it is one that fires for every respondent. An author
+      // who wrote a veto for the few gets it applied to all, and the plan looks entirely plausible.
+      issues.push({
+        severity: settings.enabled ? 'error' : 'warning',
+        code: 'rule_veto_always_fires',
+        message: `A rule tests "${rule.dataSlotKey}" for absence, but no opening topic gathers it — so it is always absent when the rules run, and the rule would ${rule.action} "${rule.topicKey}" for every respondent. Add the slot to an opening topic.`,
+      });
+    } else {
+      issues.push({
+        severity: 'warning',
+        code: 'rule_slot_unreachable',
+        message: `A rule tests "${rule.dataSlotKey}", but no opening topic gathers it, so it is never filled when the rules run and the rule can never match. Add the slot to an opening topic.`,
+      });
+    }
+  }
+  for (const key of settings.fallbackTopicKeys) {
+    if (!topicKeys.has(key)) {
+      issues.push({
+        severity: 'warning',
+        code: 'fallback_unknown_topic',
+        message: `The fallback names the topic "${key}", which no longer exists.`,
+      });
+    }
+  }
+  for (const key of settings.checkTopicPreference) {
+    if (!topicKeys.has(key)) {
+      issues.push({
+        severity: 'warning',
+        code: 'check_preference_unknown_topic',
+        message: `The blind-spot preference names the topic "${key}", which no longer exists.`,
+      });
+    }
+  }
+  // An always-run topic named as a fallback or blind-spot check is a no-op: both mechanisms choose
+  // among CONDITIONAL topics, and one that always runs is never available to be chosen.
+  const alwaysKeys = new Set(
+    topics.filter((t) => ALWAYS_PHASES.includes(t.phase)).map((t) => t.key)
+  );
+  for (const key of [...settings.fallbackTopicKeys, ...settings.checkTopicPreference]) {
+    if (alwaysKeys.has(key)) {
+      issues.push({
+        severity: 'warning',
+        code: 'always_topic_named_as_choice',
+        topicKey: key,
+        message: `"${key}" always runs, so naming it as a fallback or blind-spot check has no effect.`,
+      });
+    }
+  }
+
+  return issues.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1));
+}
+
+/** True when nothing would behave wrongly. Convenience for the launch checklist. */
+export function hasScopeErrors(issues: readonly ScopeIssue[]): boolean {
+  return issues.some((i) => i.severity === 'error');
+}

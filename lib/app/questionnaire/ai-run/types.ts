@@ -69,6 +69,28 @@ export const APP_AI_RUN_KINDS = [
    * question worth being able to answer months later.
    */
   'glossary_analysis',
+  /**
+   * Adaptive Scope planning (P17) — which conditional topics a respondent's interview covers, and
+   * why each was chosen or left out.
+   *
+   * Recorded for EVERY plan, including the ones no model produced (a hard rule, the fallback, or an
+   * interview with nothing to decide). "Why did this respondent get those topics" is the question
+   * an admin will ask about an adaptive instrument months later, and a deterministic answer is as
+   * worth defending as an inferred one — `provider`/`model` read `deterministic` on those, so cost
+   * trends stay clean.
+   */
+  'scope_plan',
+  /**
+   * Routing analysis (P17.4) — the topic set and hard rules the analyst read out of an uploaded
+   * instrument, and the span of the document each was drawn from.
+   *
+   * Recorded because a human acts on the verdict (the admin reviews every proposal before it goes
+   * live) and because an accepted proposal changes durable config — it decides which parts of the
+   * questionnaire a respondent is ever asked. Kept even when the admin discards the proposal: "we
+   * ran the analyst and it found nothing routable in this document" is a real answer, and losing it
+   * means paying for the same call again to learn the same thing.
+   */
+  'routing_analysis',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

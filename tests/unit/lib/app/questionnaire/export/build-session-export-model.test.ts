@@ -156,6 +156,30 @@ describe('buildSessionExportModel', () => {
     });
   });
 
+  describe('what the interview did not cover (P17)', () => {
+    it('defaults to empty, so a non-adaptive export says nothing about scope', () => {
+      // Every session that predates Adaptive Scope, and every one that never enabled it.
+      expect(buildSessionExportModel(input()).notAssessed).toEqual([]);
+    });
+
+    it('carries the topics through, sampled and skipped alike', () => {
+      // Not gated on any `include` switch, unlike the Q&A listing and the data-slot appendix: the
+      // section listing is already filtered to what was in scope, so without this the document
+      // narrows silently and reads as a complete assessment.
+      const model = buildSessionExportModel(
+        input({
+          notAssessed: [
+            { key: 'pricing', label: 'Pricing', questionCount: 4, partial: false },
+            { key: 'talent', label: 'Talent', questionCount: 6, partial: true },
+          ],
+        })
+      );
+
+      expect(model.notAssessed.map((t) => t.key)).toEqual(['pricing', 'talent']);
+      expect(model.notAssessed.find((t) => t.key === 'talent')?.partial).toBe(true);
+    });
+  });
+
   describe('header passthrough', () => {
     it('carries title, version, goal, and timestamps verbatim', () => {
       const model = buildSessionExportModel(input());

@@ -96,6 +96,10 @@ const tx = {
     createMany: vi.fn(async () => ({ count: 0 })),
     findMany: vi.fn(async () => [] as Array<{ id: string; key: string }>),
   },
+  // Adaptive Scope (P17): topics fork with the version (copy-version-graph).
+  appQuestionnaireTopic: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
   appDataSlotQuestion: {
     createMany: vi.fn(async () => ({ count: 0 })),
   },
@@ -195,6 +199,7 @@ function sourceGraph() {
     ],
     // Data Slots feature: none on this source (copy is exercised by data-slot-specific tests).
     dataSlots: [],
+    topics: [],
     // Definitions / glossary (P16): one accepted term with two senses, so the fork tests cover
     // that the curated vocabulary the questions were written against travels with them.
     glossaryTerms: [

@@ -17,6 +17,54 @@
 import { prisma } from '@/lib/db/client';
 import { SESSION_STATUSES, narrowToEnum, type SessionStatus } from '@/lib/app/questionnaire/types';
 import { normalizeSessionRef } from '@/lib/app/questionnaire/session-ref';
+import {
+  narrowInterviewPlan,
+  type ScopeDecisionSource,
+  type TopicDepth,
+} from '@/lib/app/questionnaire/scope/types';
+
+/** One topic on the plan, resolved to its label so the viewer never shows a bare key. */
+export interface AdminPlannedTopicView {
+  key: string;
+  /** The topic's label, or the key when the topic has since been deleted from the version. */
+  label: string;
+  depth?: TopicDepth;
+  source: ScopeDecisionSource;
+  rationale: string;
+}
+
+/**
+ * The interview plan as the admin viewer renders it — Adaptive Scope (P17).
+ *
+ * "Why did this respondent get those topics" is THE question an admin asks about an adaptive
+ * instrument, usually months later and usually because a client challenged a report. The plan
+ * answers it, so it belongs on the session viewer beside the transcript rather than only in the
+ * `AppAiRun` audit table, which no one reads by accident.
+ *
+ * The excluded topics matter as much as the selected ones: what an interview decided NOT to ask is
+ * exactly what a challenge is about.
+ */
+export interface AdminInterviewPlanView {
+  selected: AdminPlannedTopicView[];
+  excluded: AdminPlannedTopicView[];
+  /** The `light`-depth blind-spot check, when one was added. */
+  checkTopicKey: string | null;
+  confidence: number;
+  source: ScopeDecisionSource;
+  /** What the respondent was actually told at the handover. Empty when announcing was off. */
+  respondentMessage: string;
+  decidedAtTurn: number;
+  decidedAt: string;
+  /**
+   * The time budget this plan was fitted to and what it was estimated to cost (C7b), in seconds.
+   *
+   * Both null unless the version set a budget — the default. When they are present, "why is this
+   * topic missing" has an arithmetic answer, and the viewer can show it beside the topic the budget
+   * took back rather than leaving an admin to infer it from a badge.
+   */
+  budgetSeconds: number | null;
+  estimatedSeconds: number | null;
+}
 
 /** Metadata for the admin session viewer — gates the surface and renders its header. */
 export interface AdminSessionView {
@@ -33,6 +81,13 @@ export interface AdminSessionView {
   anonymous: boolean;
   /** Respondent display name — null in anonymous mode (never even queried), mirroring the export. */
   respondentName: string | null;
+  /**
+   * Adaptive Scope (P17): the plan this interview ran under, or null.
+   *
+   * Null for every ordinary session AND for an adaptive one whose opening never completed — both
+   * are "no decision was made", which is what the viewer says.
+   */
+  plan: AdminInterviewPlanView | null;
 }
 
 /**
@@ -49,6 +104,7 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
       publicRef: true,
       versionId: true,
       respondentUserId: true,
+      interviewPlan: true,
       version: {
         select: {
           versionNumber: true,
@@ -73,6 +129,8 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
     respondentName = user?.name ?? null;
   }
 
+  const plan = await resolvePlanView(row.versionId, row.interviewPlan);
+
   return {
     questionnaireId: row.version.questionnaireId,
     questionnaireTitle: row.version.questionnaire.title,
@@ -83,6 +141,55 @@ export async function loadAdminSessionView(sessionId: string): Promise<AdminSess
     publicRef: row.publicRef,
     anonymous,
     respondentName,
+    plan,
+  };
+}
+
+/**
+ * Resolve a stored plan into the viewer shape, labelling every topic key.
+ *
+ * The topic query is skipped entirely when there is no plan, which is every ordinary session — so
+ * this costs nothing for the surface as it existed before P17. A key the version no longer carries
+ * falls back to the key itself rather than being dropped: an admin investigating a challenged report
+ * needs to see that the interview covered something since deleted, which is precisely the case a
+ * silent drop would hide.
+ */
+async function resolvePlanView(
+  versionId: string,
+  stored: unknown
+): Promise<AdminInterviewPlanView | null> {
+  const plan = narrowInterviewPlan(stored);
+  if (!plan) return null;
+
+  const topics = await prisma.appQuestionnaireTopic.findMany({
+    where: { versionId },
+    select: { key: true, label: true },
+  });
+  const labelByKey = new Map(topics.map((t) => [t.key, t.label]));
+  const label = (key: string): string => labelByKey.get(key) ?? key;
+
+  return {
+    selected: plan.topics.map((t) => ({
+      key: t.key,
+      label: label(t.key),
+      depth: t.depth,
+      source: t.source,
+      rationale: t.rationale,
+    })),
+    excluded: plan.excluded.map((t) => ({
+      key: t.key,
+      label: label(t.key),
+      source: t.source,
+      rationale: t.rationale,
+    })),
+    checkTopicKey: plan.checkTopicKey,
+    confidence: plan.confidence,
+    source: plan.source,
+    respondentMessage: plan.respondentMessage,
+    decidedAtTurn: plan.decidedAtTurn,
+    decidedAt: plan.decidedAt,
+    budgetSeconds: plan.budgetSeconds ?? null,
+    estimatedSeconds: plan.estimatedSeconds ?? null,
   };
 }
 

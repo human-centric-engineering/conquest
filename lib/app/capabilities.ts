@@ -16,6 +16,7 @@
 import { registerAppCapability } from '@/lib/orchestration/capabilities/registry';
 import {
   AppAnalyseGlossaryTermsCapability,
+  AppAnalyseRoutingCapability,
   AppAssignDataSlotsCapability,
   AppAuthorIntroBackgroundCapability,
   AppComposeCompletionOfferCapability,
@@ -74,6 +75,11 @@ export function initAppCapabilities(): void {
   // Definitions / glossary (P16) — proposes ambiguous terms + candidate definitions for an admin
   // to adjudicate. Dispatched by the Definitions tab's analysis route.
   registerAppCapability(new AppAnalyseGlossaryTermsCapability());
+
+  // Adaptive Scope (P17.4) — the Routing Analyst. Reads the uploaded instrument's own instruction
+  // pages and proposes the topics + hard rules they describe. Dispatched by the Topics tab's
+  // analysis route; writes nothing live.
+  registerAppCapability(new AppAnalyseRoutingCapability());
 
   // Data Slots — the data-slot generator. Dispatched by the generate-data-slots route.
   registerAppCapability(new AppGenerateDataSlotsCapability());

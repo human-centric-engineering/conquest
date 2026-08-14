@@ -47,6 +47,37 @@ describe('hasAudience', () => {
   });
 });
 
+describe('launchReadinessChecks — adaptive scope', () => {
+  it('adds no row while the version has not opted in', () => {
+    // The overwhelming majority of questionnaires never turn Adaptive Scope on. A permanently-green
+    // row for a feature nobody enabled is noise on every one of them.
+    const checks = launchReadinessChecks({ ...READY, adaptiveScopeErrorCount: 3 });
+    expect(checks.map((c) => c.key)).not.toContain('adaptiveScope');
+  });
+
+  it('blocks launch when an enabled version has error-severity findings', () => {
+    const checks = launchReadinessChecks({
+      ...READY,
+      adaptiveScopeEnabled: true,
+      adaptiveScopeErrorCount: 1,
+    });
+    expect(checks.find((c) => c.key === 'adaptiveScope')?.ok).toBe(false);
+    expect(
+      isLaunchReady({ ...READY, adaptiveScopeEnabled: true, adaptiveScopeErrorCount: 1 })
+    ).toBe(false);
+  });
+
+  it('passes when an enabled version has only warnings', () => {
+    // Warnings mean "it will run, just not as you probably intend" — advisory, never a gate.
+    const checks = launchReadinessChecks({
+      ...READY,
+      adaptiveScopeEnabled: true,
+      adaptiveScopeErrorCount: 0,
+    });
+    expect(checks.find((c) => c.key === 'adaptiveScope')?.ok).toBe(true);
+  });
+});
+
 describe('launchReadinessChecks', () => {
   it('passes all five base checks for a ready version (no data-slots row when not required)', () => {
     const checks = launchReadinessChecks(READY);

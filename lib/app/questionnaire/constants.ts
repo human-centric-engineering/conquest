@@ -1140,3 +1140,78 @@ export const ANALYSE_GLOSSARY_TERMS_FUNCTION_DEFINITION: CapabilityFunctionDefin
     required: ['questions'],
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* Adaptive Scope — the Routing Analyst (P17.4)                               */
+/* -------------------------------------------------------------------------- */
+
+/** Slug of the routing-analysis capability — proposes topics, criteria and hard rules. */
+export const ANALYSE_ROUTING_CAPABILITY_SLUG = 'app_analyse_routing';
+
+/** `AiCapability.executionHandler` for the Routing Analyst — the class the dispatcher resolves. */
+export const ANALYSE_ROUTING_HANDLER = 'AppAnalyseRoutingCapability';
+
+/** Slug of the seeded Routing Analyst `AiAgent` (empty provider/model → dynamic resolution). */
+export const QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG = 'app-questionnaire-routing-analyst';
+
+/**
+ * The routing-analysis capability's OpenAI-compatible function definition — one source of truth
+ * shared by the `BaseCapability` subclass and the `AiCapability` seed, so they can't drift.
+ * Dispatched programmatically by the Topics tab's analysis route; persists nothing.
+ */
+export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: ANALYSE_ROUTING_CAPABILITY_SLUG,
+  description:
+    'Read an assessment instrument — especially the instruction pages structure extraction ignores, ' +
+    'the "Routing", "Guardrails" and "How to use this" tabs — and propose the TOPICS it implies: ' +
+    'which groups of questions always run, which are conditional, and the author’s own criteria for ' +
+    'when each conditional one applies, plus any hard rules the document states as certainties. ' +
+    'Returns a proposal for an administrator to review; persists nothing and changes no questions.',
+  parameters: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        description:
+          'The version’s questions — each { key, prompt, sectionTitle }. Every key must land in ' +
+          'exactly one proposed topic.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      goal: { type: 'string', description: 'What the questionnaire is for.' },
+      audience: {
+        type: 'object',
+        description: 'Who answers it — a strong signal for which areas are ever conditional.',
+        additionalProperties: true,
+      },
+      dataSlots: {
+        type: 'array',
+        description:
+          'The version’s data slots — each { key, name, theme }. The ONLY keys a proposed hard rule ' +
+          'may test.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      documentText: {
+        type: 'string',
+        description:
+          'Full text of the uploaded source instrument, including the instruction pages. The ' +
+          'primary source: this is where an author states which parts apply to whom.',
+      },
+      documentFileName: { type: 'string', description: 'Original file name (prompt context).' },
+      existingTopics: {
+        type: 'array',
+        description:
+          'Topics already on the version, so a re-run proposes a revision (reusing keys) rather ' +
+          'than a duplicate set.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      instructions: {
+        type: 'string',
+        description:
+          'The administrator’s free-text steer for this run ("the routing rules are on the ' +
+          'Guardrails tab").',
+      },
+      versionId: { type: 'string', description: 'Optional stable identity for cost-log metadata.' },
+    },
+    required: ['questions'],
+  },
+};

@@ -353,3 +353,20 @@ export const glossaryAnalysisLimiter = createRateLimiter({
   interval: GLOSSARY_ANALYSIS_RATE_LIMIT_INTERVAL_MS,
   maxRequests: GLOSSARY_ANALYSIS_RATE_LIMIT_MAX,
 });
+
+/**
+ * Routing-analysis sub-cap (Adaptive Scope, P17.4). One reasoning-model call carrying an ENTIRE
+ * source document — the largest single input any app capability takes, and correspondingly the
+ * priciest per call. Tighter than the glossary's 20/min for that reason alone: the honest loop here
+ * is analyse → review → accept, which an admin runs once or twice per instrument, not repeatedly.
+ * Keyed on the admin user id, who owns the spend.
+ */
+export const ROUTING_ANALYSIS_RATE_LIMIT_MAX = 8;
+
+/** Sliding-window length for {@link routingAnalysisLimiter}, in milliseconds. */
+export const ROUTING_ANALYSIS_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const routingAnalysisLimiter = createRateLimiter({
+  interval: ROUTING_ANALYSIS_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: ROUTING_ANALYSIS_RATE_LIMIT_MAX,
+});

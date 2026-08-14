@@ -19,6 +19,7 @@ on Sunrise. The **platform tier** (Sunrise itself) is documented separately at
 | [`planning/`](./planning/)           | The phased build plan, per-feature trackers (`features/`), and the `upstream-gaps.md` ledger            |
 | [`questionnaire/`](./questionnaire/) | Domain & technical docs for the questionnaire product — overview, schema, day-to-day development guide  |
 | [`marketing/`](./marketing/)         | Campaign subdomains and the admin Marketing section — segment landing pages, demo funnels, CRM/pipeline |
+| [`research/`](./research/)           | Pre-build research — client requirement analyses and solution-option write-ups. Nothing here is shipped |
 
 ### `planning/`
 
@@ -43,6 +44,17 @@ on Sunrise. The **platform tier** (Sunrise itself) is documented separately at
   comparison, the template library and the cost calculator. Covers the proxy-stays-lexical rule,
   the two config constraints that silently break capture, the non-`User` PII
   posture, and the demo-spend risk.
+
+### `research/`
+
+- [`merlin5-growth-assessor.md`](./research/merlin5-growth-assessor.md) — **research,
+  not shipped.** Conceptual requirements for an adaptive diagnostic: an unscored
+  opening that exists only to generate routing signal, an inference step that
+  assembles a per-respondent section set under a time budget and six guardrails,
+  and a report built on the disagreement between stated need and scored result.
+  Names the eleven capabilities, maps each onto what we already have, and compares
+  five build options (recommendation: one instrument + a first-class per-session
+  Assessment Plan; the Experience switcher stays for routing _between_ instruments).
 
 ### `questionnaire/`
 

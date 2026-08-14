@@ -22,6 +22,7 @@ import {
   getVersionDataSlotEmbeddingCoverageCached,
   getVersionEmbeddingCoverageCached,
   getVersionGraphCached,
+  getVersionTopicsCached,
 } from '@/lib/app/questionnaire/workspace-data';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { QuestionnaireVersionSummary } from '@/lib/app/questionnaire/views';
@@ -93,6 +94,14 @@ export default async function OverviewTab({ params }: PageProps) {
     (q) => !isMatrixLabelled(q.typeConfig)
   ).length;
 
+  // Adaptive Scope coherence: only a launch concern once the version opted in. An `error` finding
+  // means turning the feature on would make the questionnaire behave wrongly — most often a
+  // question belonging to no topic, which under active scope can never be asked at all.
+  const scope = isDraft ? await getVersionTopicsCached(id, vid) : null;
+  const adaptiveScopeEnabled = scope !== null && scope.settings.enabled;
+  const adaptiveScopeErrorCount =
+    scope === null ? 0 : scope.issues.filter((i) => i.severity === 'error').length;
+
   // Preview is available for a launched version OR a launchable draft (passes the same readiness
   // gate as launch — so an admin can rehearse before going live), and only when the live-sessions
   // surface is on. Shared with the workspace-header Preview button; the server
@@ -163,6 +172,8 @@ export default async function OverviewTab({ params }: PageProps) {
               unlabelledLikertCount={unlabelledLikertCount}
               matrixCount={matrixSlots.length}
               misconfiguredMatrixCount={misconfiguredMatrixCount}
+              adaptiveScopeEnabled={adaptiveScopeEnabled}
+              adaptiveScopeErrorCount={adaptiveScopeErrorCount}
               configSaved={graph.config.saved}
               dataSlotsRequired={true}
               dataSlotsReady={dataSlotCount > 0}

@@ -42,6 +42,7 @@ import { SessionDownloads } from '@/components/admin/questionnaires/sessions/ses
 import { SessionReportRerun } from '@/components/admin/questionnaires/sessions/session-report-rerun';
 import { Badge } from '@/components/ui/badge';
 import { loadAdminSessionView } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-session-view';
+import { InterviewPlanCard } from '@/components/admin/questionnaires/sessions/interview-plan-card';
 import { loadTranscript } from '@/app/api/v1/app/questionnaire-sessions/_lib/transcript';
 import { mintSessionToken } from '@/app/api/v1/app/questionnaire-sessions/_lib/session-access-token';
 import { loadAdminReportRerunPanel } from '@/app/api/v1/app/questionnaire-sessions/_lib/admin-report-rerun-view';
@@ -162,6 +163,11 @@ export default async function SessionViewerPage({ params }: PageProps) {
           <SessionDownloads questionnaireId={id} sessionId={sessionId} />
         </div>
       </div>
+
+      {/* Adaptive Scope (P17): why this respondent got these topics. Above the transcript, because
+          it is the frame the transcript has to be read in — a conversation that never touched an
+          area reads as an oversight until you know it was a decision. */}
+      {view.plan && <InterviewPlanCard plan={view.plan} />}
 
       <div className="min-h-0 flex-1">
         <SessionWorkspace

@@ -261,3 +261,105 @@ describe('buildReportMethodView — summary', () => {
     expect(buildReportMethodView(record, 'admin').admin?.summarySource).toBe('agent');
   });
 });
+
+describe('buildReportMethodView — C9 stated-vs-measured reconciliation', () => {
+  it('reports the scale count when the comparison was scored', () => {
+    const record = build((rec) =>
+      rec.recordAnswers({
+        answered: 34,
+        total: 40,
+        completionPct: 85,
+        unansweredListed: 6,
+        confidenceWeighted: true,
+        usedDataSlots: false,
+        reconciliation: { ran: true, scored: true, scales: 3 },
+      })
+    );
+
+    const fact = buildReportMethodView(record, 'respondent').facts.find(
+      (f) => f.key === 'reconciliation'
+    );
+    // The reader who is about to be contradicted needs to know the measured half came from fixed
+    // scoring rules, not the writer's impression — hence the scale count, not a generic label.
+    expect(fact?.label).toBe('What you said, checked against what was measured');
+    expect(fact?.value).toBe('3 measure(s)');
+  });
+
+  it('says "Your own words only" when the comparison ran but was not scored', () => {
+    const record = build((rec) =>
+      rec.recordAnswers({
+        answered: 34,
+        total: 40,
+        completionPct: 85,
+        unansweredListed: 6,
+        confidenceWeighted: true,
+        usedDataSlots: false,
+        reconciliation: { ran: true, scored: false, scales: 0 },
+      })
+    );
+
+    const fact = buildReportMethodView(record, 'respondent').facts.find(
+      (f) => f.key === 'reconciliation'
+    );
+    // scored:false must not print a scale count — there were no fixed rules behind this comparison.
+    expect(fact?.value).toBe('Your own words only');
+  });
+
+  it('omits the reconciliation fact entirely when the comparison never ran', () => {
+    const keys = buildReportMethodView(build(), 'respondent').facts.map((f) => f.key);
+    expect(keys).not.toContain('reconciliation');
+  });
+});
+
+describe('buildReportMethodView / renderMethodSummaryTemplate — Adaptive Scope (P17)', () => {
+  /** A record for an adaptive session that skipped two areas and sampled one. */
+  function adaptiveRecord(): ReportMethodRecord {
+    const rec = new MethodRecorder('narrative', false, () => 0);
+    rec.recordAnswers({
+      answered: 12,
+      total: 12,
+      completionPct: 100,
+      unansweredListed: 0,
+      confidenceWeighted: false,
+      usedDataSlots: false,
+      notAssessed: [
+        { label: 'Talent', questionCount: 7, partial: false },
+        { label: 'Pricing', questionCount: 4, partial: false },
+        { label: 'Operations', questionCount: 5, partial: true },
+      ],
+    });
+    return rec.build();
+  }
+
+  it('counts skipped and sampled areas as separate facts', () => {
+    const view = buildReportMethodView(adaptiveRecord(), 'respondent');
+    expect(view.facts.find((f) => f.key === 'notAssessed')?.value).toBe('2');
+    expect(view.facts.find((f) => f.key === 'sampled')?.value).toBe('1');
+  });
+
+  it('names the areas rather than only counting them', () => {
+    // "Three areas were not covered" leaves the reader unable to tell whether the one they care
+    // about was among them — which is the only thing they actually want to know.
+    const view = buildReportMethodView(adaptiveRecord(), 'respondent');
+    const checks = view.checks.join(' ');
+    expect(checks).toContain('Talent and Pricing');
+    expect(checks).toContain('Nothing in this report is a judgement about those areas.');
+    expect(checks).toContain('Operations');
+    expect(checks).toContain('touched on lightly as a check');
+  });
+
+  it('says nothing about scope for a non-adaptive record', () => {
+    const view = buildReportMethodView(build(), 'respondent');
+    expect(view.facts.some((f) => f.key === 'notAssessed')).toBe(false);
+    expect(view.facts.some((f) => f.key === 'sampled')).toBe(false);
+    expect(view.checks.join(' ')).not.toContain('adapts to you');
+  });
+
+  it('states the narrowing in the deterministic summary template too', () => {
+    // The template is what a reader gets whenever the explainer agent is off or failed, so the
+    // narrowing cannot be something only the AI-written summary mentions.
+    const text = renderMethodSummaryTemplate(adaptiveRecord());
+    expect(text).toContain('did not ask about Talent and Pricing');
+    expect(text).toContain('Operations was touched on lightly');
+  });
+});

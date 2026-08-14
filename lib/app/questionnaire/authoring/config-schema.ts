@@ -206,6 +206,16 @@ const respondentReportSettingsSchema = z
         // always sends the whole block, so this only widens what import/PATCH will accept.
         dataSlotInfluence: z.number().int().min(0).max(100).optional(),
         discountLowConfidence: z.boolean().optional(),
+        // C9 — open-vs-close reconciliation. Optional for the same backward-compat reason as the
+        // two knobs above; the refs are question/data-slot keys, so they are bounded like keys.
+        reconciliation: z
+          .object({
+            enabled: z.boolean(),
+            statedGoalRefs: z.array(z.string().trim().min(1).max(120)).max(20),
+            askedForRefs: z.array(z.string().trim().min(1).max(120)).max(20),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     delivery: z

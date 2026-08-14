@@ -64,6 +64,18 @@ export interface LaunchReadinessInput {
    * [[isMatrixLabelled]].
    */
   misconfiguredMatrixCount?: number;
+  /**
+   * True when this version has `adaptiveScope.enabled`. The Adaptive Scope row appears ONLY then:
+   * a version that never opted in has nothing to check, and showing a passing row for a feature
+   * nobody turned on is noise on every other questionnaire in the system.
+   */
+  adaptiveScopeEnabled?: boolean;
+  /**
+   * How many `error`-severity findings `validateAdaptiveScope` returns. Launch requires 0 —
+   * an orphaned question under active scope is a question that can never be asked, and nothing
+   * else in the system would report it. Warnings never block.
+   */
+  adaptiveScopeErrorCount?: number;
 }
 
 /** Stable identifier for each check — maps to the server `missing` detail and a UI configure link. */
@@ -76,7 +88,8 @@ export type LaunchCheckKey =
   | 'scaleLabels'
   | 'embeddings'
   | 'dataSlots'
-  | 'dataSlotEmbeddings';
+  | 'dataSlotEmbeddings'
+  | 'adaptiveScope';
 
 export interface LaunchReadinessCheck {
   key: LaunchCheckKey;
@@ -139,6 +152,15 @@ export function launchReadinessChecks(input: LaunchReadinessInput): LaunchReadin
             key: 'dataSlotEmbeddings' as const,
             ok: input.dataSlotEmbeddingsReady === true,
             label: 'Data slots embedded for adaptive selection',
+          },
+        ]
+      : []),
+    ...(input.adaptiveScopeEnabled
+      ? [
+          {
+            key: 'adaptiveScope' as const,
+            ok: (input.adaptiveScopeErrorCount ?? 0) === 0,
+            label: 'Adaptive scope topics are coherent',
           },
         ]
       : []),

@@ -73,6 +73,9 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/sessions';
 import { buildTurnInvokers } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-invokers';
 import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-run';
+import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
+import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
+import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing';
@@ -287,6 +290,34 @@ async function handleMessage(
     // conversation targets data slots; questions fill in the background).
     const dataSlots = loaded.base.dataSlots ?? [];
     const dataSlotMode = dataSlots.length > 0;
+
+    // Adaptive Scope (P17): the plan's handover line, on the ONE turn that follows the decision.
+    //
+    // Delivered as a briefing line rather than a prepended string so the interviewer weaves it in
+    // its own voice — "based on what you've said I want to go deeper on pipeline and forecasting"
+    // reads as the same person still talking, where a bolted-on paragraph reads as a system notice.
+    //
+    // `decidedAtTurn` was stamped with the completed-turn count, so it equals this turn's
+    // `selectionRound` exactly once: the turn immediately after planning. That is the announcement's
+    // only outing, which is what stops it repeating for the rest of the interview.
+    const scopePlan = loaded.scope.plan;
+    const scopeAnnouncement: string[] =
+      scopePlan &&
+      scopePlan.respondentMessage &&
+      scopePlan.decidedAtTurn === loaded.base.selectionRound
+        ? [
+            'Before your next question, tell the respondent — warmly, in your own words, in one or ' +
+              `two sentences — what you now want to go deeper on: "${scopePlan.respondentMessage}" ` +
+              'Name the areas in their language. Never mention that a decision was made about them.',
+          ]
+        : [];
+
+    // Adaptive Scope (P17.6): the acknowledgement for a topic the respondent asked for on the
+    // PREVIOUS turn. Same one-outing mechanic as the announcement above — `atTurn` was stamped with
+    // that turn's `selectionRound`, so this matches exactly once and never repeats.
+    const scopeAmendmentNotice: string[] = (scopePlan?.amendments ?? [])
+      .filter((a) => a.atTurn === loaded.base.selectionRound)
+      .map(amendmentBriefingLine);
 
     // Round Additional Context ("interviewer briefing"): load this round's entries for the running
     // version once per turn. `null` when the session isn't round-scoped or the round's per-round
@@ -815,7 +846,11 @@ async function handleMessage(
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
-            ...(dsBriefing.length > 0 ? { briefing: dsBriefing } : {}),
+            ...(dsBriefing.length > 0 ||
+            scopeAnnouncement.length > 0 ||
+            scopeAmendmentNotice.length > 0
+              ? { briefing: [...scopeAnnouncement, ...scopeAmendmentNotice, ...dsBriefing] }
+              : {}),
             ...(dsGlossary.length > 0 ? { glossary: dsGlossary } : {}),
             ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
             ...(r.isReask && currentUnderstanding ? { currentUnderstanding } : {}),
@@ -887,7 +922,11 @@ async function handleMessage(
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
-            ...(qBriefing.length > 0 ? { briefing: qBriefing } : {}),
+            ...(qBriefing.length > 0 ||
+            scopeAnnouncement.length > 0 ||
+            scopeAmendmentNotice.length > 0
+              ? { briefing: [...scopeAnnouncement, ...scopeAmendmentNotice, ...qBriefing] }
+              : {}),
             ...(qGlossary.length > 0 ? { glossary: qGlossary } : {}),
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
             ...sensitivityPhraserInput,
@@ -976,6 +1015,40 @@ async function handleMessage(
           scope: 'persist',
           stage: 'persist_turn',
           error: err,
+        });
+      }
+
+      // Adaptive Scope (P17): once the turn's fills are on the row, decide the interview plan if the
+      // opening has just completed. Runs here — after persistence, before the next turn — so the
+      // plan exists by the time `buildTurnContext` next resolves scope, and the announcement lands
+      // immediately before the first deeper question rather than trailing the opening answer.
+      // Fail-soft by construction: `maybePlanScope` never throws, and an unplanned session simply
+      // runs the always-run topics.
+      const planned = await maybePlanScope(sessionId);
+      if (planned.kind === 'planned') {
+        log.info('Adaptive scope planned', {
+          sessionId,
+          source: planned.plan.source,
+          topicKeys: planned.plan.topics.map((t) => t.key),
+        });
+      }
+
+      // Adaptive Scope (P17.6): "actually, ask me about talent". Runs only when a plan already
+      // exists, so it can never race the decision it amends — and after `maybePlanScope`, so a turn
+      // that both completes the opening AND asks for something is planned before it is amended.
+      // Never throws; an unhonoured request is the same outcome as the feature being off.
+      const amended = await maybeAmendPlan({
+        sessionId,
+        message: body.message ?? '',
+        // Stamped with the turn count AFTER this turn persists — the same convention
+        // `decidedAtTurn` uses — so it equals the NEXT turn's `selectionRound` exactly once, which
+        // is what gives the acknowledgement its single outing.
+        atTurn: state.selectionRound + 1,
+      });
+      if (amended.kind === 'amended') {
+        log.info('Adaptive scope amended by the respondent', {
+          sessionId,
+          topicKey: amended.amendment.key,
         });
       }
 

@@ -69,6 +69,18 @@ export type ReportMethodAudience = 'respondent' | 'admin';
  * always captured; only the agent-written prose is gated). That keeps a later opt-in truthful with no
  * regeneration and no backfill.
  */
+/** Join topic labels into readable prose: "A", "A and B", "A, B and C". */
+function listTopics(topics: readonly { label: string }[]): string {
+  const labels = topics.map((t) => t.label);
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/** Sentence-case a phrase that starts a check line. */
+function capitalise(value: string): string {
+  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 export function buildReportMethodView(
   record: ReportMethodRecord,
   audience: ReportMethodAudience
@@ -91,6 +103,37 @@ export function buildReportMethodView(
       key: 'gaps',
       label: 'Questions noted as unanswered',
       value: String(answers.unansweredListed),
+    });
+  }
+  // Adaptive Scope (P17): what the interview never asked about, kept SEPARATE from the unanswered
+  // count above. They are different claims about the same reader — one says they skipped something,
+  // the other says nobody put it to them — and a panel that merged them would misdescribe both.
+  const notAssessed = answers.notAssessed ?? [];
+  const skippedTopics = notAssessed.filter((t) => !t.partial);
+  const sampledTopics = notAssessed.filter((t) => t.partial);
+  if (skippedTopics.length > 0) {
+    facts.push({
+      key: 'notAssessed',
+      label: 'Areas this interview did not cover',
+      value: String(skippedTopics.length),
+    });
+  }
+  if (sampledTopics.length > 0) {
+    facts.push({
+      key: 'sampled',
+      label: 'Areas sampled but not assessed in depth',
+      value: String(sampledTopics.length),
+    });
+  }
+  // C9: stated-vs-measured. A reader who is about to be contradicted should be able to see that the
+  // measured half came from fixed rules, not the writer's reading of their transcript.
+  if (answers.reconciliation) {
+    facts.push({
+      key: 'reconciliation',
+      label: 'What you said, checked against what was measured',
+      value: answers.reconciliation.scored
+        ? `${answers.reconciliation.scales} measure(s)`
+        : 'Your own words only',
     });
   }
   if (knowledge.consulted) {
@@ -123,6 +166,20 @@ export function buildReportMethodView(
   }
   if (answers.confidenceWeighted) {
     checks.push('Less certain answers were given proportionally less weight.');
+  }
+  if (skippedTopics.length > 0) {
+    // Named, not merely counted. "Three areas were not covered" leaves the reader unable to tell
+    // whether the one they care about was among them, which is the only thing they want to know.
+    checks.push(
+      `This questionnaire adapts to you, so it did not ask about ${listTopics(skippedTopics)}. ` +
+        'Nothing in this report is a judgement about those areas.'
+    );
+  }
+  if (sampledTopics.length > 0) {
+    checks.push(
+      `${capitalise(listTopics(sampledTopics))} ${sampledTopics.length === 1 ? 'was' : 'were'} ` +
+        'touched on lightly as a check, not assessed in depth.'
+    );
   }
   // Gated on sources SURVIVING, not merely on research having run: a search round that returned
   // nothing would otherwise render "web sources were used…" beneath a panel showing zero sources.

@@ -29,6 +29,7 @@ import {
   narrowScoringSchemaContent,
   recomputeSessionScores,
 } from '@/lib/app/questionnaire/scoring';
+import { itemBounds } from '@/lib/app/questionnaire/scoring/compute';
 import { EMPTY_SCORING_SCHEMA } from '@/lib/app/questionnaire/scoring/types';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -46,7 +47,7 @@ async function buildSchemaView(versionId: string) {
     prisma.appQuestionSlot.findMany({
       where: { versionId },
       orderBy: [{ section: { ordinal: 'asc' } }, { ordinal: 'asc' }],
-      select: { key: true, prompt: true, type: true },
+      select: { key: true, prompt: true, type: true, typeConfig: true },
     }),
     prisma.appDataSlot.findMany({
       where: { versionId },
@@ -59,8 +60,16 @@ async function buildSchemaView(versionId: string) {
     name: schema?.name ?? 'Scoring',
     source: schema?.source ?? 'manual',
     content: schema ? narrowScoringSchemaContent(schema.content) : EMPTY_SCORING_SCHEMA,
-    questions: slots.map((s) => ({ key: s.key, prompt: s.prompt, type: s.type })),
-    dataSlots: dataSlots.map((d) => ({ key: d.key, name: d.name })),
+    // `bounds` is what makes C8 authorable rather than a leap of faith: the builder needs the real
+    // ruler behind each key to warn that a scale mixes 1–5 with 1–6, and that an unbounded key will
+    // be dropped once normalisation is on. Data slots never carry bounds — a fill is a free value.
+    questions: slots.map((s) => ({
+      key: s.key,
+      prompt: s.prompt,
+      type: s.type,
+      bounds: itemBounds(s.type, s.typeConfig),
+    })),
+    dataSlots: dataSlots.map((d) => ({ key: d.key, name: d.name, bounds: null })),
   };
 }
 
@@ -111,7 +120,11 @@ const handlePut = withAdminAuth<Params>(async (request, session, { params }) => 
     action: 'app_scoring_schema.update',
     entityType: 'app_scoring_schema',
     entityId: saved.id,
-    metadata: { versionId: editId, scales: body.content.scales.length },
+    metadata: {
+      versionId: editId,
+      scales: body.content.scales.length,
+      normalise: body.content.normalise === true,
+    },
     clientIp,
   });
 

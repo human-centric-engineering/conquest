@@ -1,0 +1,194 @@
+/**
+ * Respondent amendment (P17.6) — the pure half.
+ *
+ * Three properties carry the feature and are pinned directly here:
+ *
+ * - **The cue gate is a cost control.** It runs on every respondent turn, so what it does NOT match
+ *   matters more than what it does — an over-eager gate spends a model call on ordinary answers.
+ * - **An ambiguous label match is not a match.** Picking the first of two plausible topics is a coin
+ *   toss dressed as a decision, and the cost of getting it wrong is asking someone about something
+ *   they did not raise.
+ * - **An amendment only ever adds.** Nothing here may take a topic out of scope.
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import {
+  amendableTopics,
+  applyAmendment,
+  looksLikeTopicRequest,
+  matchTopicByLabel,
+} from '@/lib/app/questionnaire/scope/amendment';
+import type { InterviewPlan, Topic } from '@/lib/app/questionnaire/scope/types';
+
+function topic(key: string, label: string, phase: Topic['phase'] = 'conditional'): Topic {
+  return {
+    id: `id-${key}`,
+    key,
+    label,
+    description: null,
+    phase,
+    criteria: 'when it fits',
+    depth: 'full',
+    members: { questionKeys: [`${key}_q1`], dataSlotKeys: [] },
+    ordinal: 0,
+    source: 'manual',
+  };
+}
+
+function plan(overrides: Partial<InterviewPlan> = {}): InterviewPlan {
+  return {
+    v: 1,
+    topics: [{ key: 'pipeline', depth: 'full', source: 'llm', rationale: 'they named it' }],
+    excluded: [{ key: 'talent', source: 'llm', rationale: 'nothing pointed at it' }],
+    checkTopicKey: null,
+    confidence: 0.8,
+    source: 'llm',
+    respondentMessage: 'I want to go deeper on pipeline.',
+    decidedAtTurn: 3,
+    decidedAt: '2026-08-12T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('looksLikeTopicRequest', () => {
+  it.each([
+    'Actually, can we cover talent as well?',
+    'Ask me about pricing too',
+    'What about our operations?',
+    "Don't forget the hiring side",
+    'I would like to talk about retention',
+    'You should also discuss forecasting',
+  ])('matches a plain request: %s', (message) => {
+    expect(looksLikeTopicRequest(message)).toBe(true);
+  });
+
+  it.each([
+    'We hired four people last quarter and it went badly.',
+    'Pricing is roughly £40 a seat, about what our competitors charge.',
+    'It depends. Some months are fine, others are not.',
+    'Talent is our biggest problem right now.',
+    '',
+    '   ',
+  ])('does NOT match an ordinary answer: %s', (message) => {
+    // This is the cost control. "Talent is our biggest problem" is an ANSWER — matching it would
+    // spend a model call on nearly every turn of an interview that is going well.
+    expect(looksLikeTopicRequest(message)).toBe(false);
+  });
+
+  it('ignores a request buried past the scan window', () => {
+    const filler = 'x'.repeat(700);
+    expect(looksLikeTopicRequest(`${filler} can we cover talent`)).toBe(false);
+  });
+});
+
+describe('matchTopicByLabel', () => {
+  const candidates = [topic('talent', 'Talent'), topic('pricing', 'Pricing & packaging')];
+
+  it('resolves an exact label mention with no model call', () => {
+    expect(matchTopicByLabel('Ask me about talent too', candidates)?.key).toBe('talent');
+  });
+
+  it('requires every content token of a multi-word label', () => {
+    // "Pricing" alone must not claim "Pricing & packaging" — that label names a broader topic, and
+    // the difference is exactly what the judgement tier exists to settle.
+    expect(matchTopicByLabel('can we cover pricing and packaging', candidates)?.key).toBe(
+      'pricing'
+    );
+    expect(matchTopicByLabel('can we cover packaging', candidates)).toBeNull();
+  });
+
+  it('returns null when two labels both appear', () => {
+    expect(matchTopicByLabel('what about talent and pricing & packaging', candidates)).toBeNull();
+  });
+
+  it('returns null when nothing matches', () => {
+    expect(matchTopicByLabel('what about the weather', candidates)).toBeNull();
+  });
+});
+
+describe('amendableTopics', () => {
+  const topics = [
+    topic('pipeline', 'Pipeline'),
+    topic('talent', 'Talent'),
+    topic('always', 'Always asked', 'core'),
+    topic('never_considered', 'Never considered'),
+  ];
+
+  it('offers only conditional topics the plan actually excluded', () => {
+    expect(amendableTopics(plan(), topics).map((t) => t.key)).toEqual(['talent']);
+  });
+
+  it('never offers a topic already in scope', () => {
+    // A respondent asking for something the interview is about to cover needs no amendment, and
+    // recording one would report a planner correction that never happened.
+    const p = plan({
+      topics: [
+        { key: 'pipeline', depth: 'full', source: 'llm', rationale: '' },
+        { key: 'talent', depth: 'full', source: 'llm', rationale: '' },
+      ],
+    });
+    expect(amendableTopics(p, topics)).toEqual([]);
+  });
+
+  it('returns nothing when the plan excluded nothing', () => {
+    expect(amendableTopics(plan({ excluded: [] }), topics)).toEqual([]);
+  });
+});
+
+describe('applyAmendment', () => {
+  const at = {
+    request: 'Actually, ask me about talent',
+    atTurn: 5,
+    at: '2026-08-12T11:00:00.000Z',
+  };
+
+  it('adds the topic at FULL depth, whatever the topic itself says', () => {
+    // Someone who asks to be asked about something is asking to be assessed on it. Answering with a
+    // two-question sample would be a worse response than the exclusion they objected to.
+    const light: Topic = { ...topic('talent', 'Talent'), depth: 'light' };
+    const { plan: next } = applyAmendment(plan(), light, at);
+    expect(next.topics.find((t) => t.key === 'talent')?.depth).toBe('full');
+  });
+
+  it('marks the topic as the respondent’s, not the planner’s', () => {
+    // The whole point for analytics: a correction is evidence ABOUT the planner, and counting it as
+    // a successful selection would make the planner look better the worse it got.
+    const { plan: next } = applyAmendment(plan(), topic('talent', 'Talent'), at);
+    expect(next.topics.find((t) => t.key === 'talent')?.source).toBe('respondent');
+  });
+
+  it('moves the topic out of excluded rather than leaving it in both lists', () => {
+    const { plan: next } = applyAmendment(plan(), topic('talent', 'Talent'), at);
+    expect(next.excluded.map((t) => t.key)).not.toContain('talent');
+    expect(next.topics.map((t) => t.key)).toContain('talent');
+  });
+
+  it('records the amendment with the respondent’s own words and the turn', () => {
+    const { plan: next, amendment } = applyAmendment(plan(), topic('talent', 'Talent'), at);
+    expect(amendment).toMatchObject({ key: 'talent', label: 'Talent', atTurn: 5 });
+    expect(amendment.request).toBe('Actually, ask me about talent');
+    expect(next.amendments).toHaveLength(1);
+  });
+
+  it('never removes a topic that was already in scope', () => {
+    const { plan: next } = applyAmendment(plan(), topic('talent', 'Talent'), at);
+    expect(next.topics.map((t) => t.key)).toContain('pipeline');
+  });
+
+  it('accumulates a second amendment rather than replacing the first', () => {
+    const first = applyAmendment(plan(), topic('talent', 'Talent'), at);
+    const second = applyAmendment(first.plan, topic('ops', 'Operations'), { ...at, atTurn: 8 });
+    expect(second.plan.amendments?.map((a) => a.key)).toEqual(['talent', 'ops']);
+  });
+
+  it('leaves the original announcement and decision turn untouched', () => {
+    // The plan's own record of what it decided, and what the respondent was told at the time, is
+    // what makes a finished report defensible. An amendment adds to it; it must not rewrite it.
+    const before = plan();
+    const { plan: next } = applyAmendment(before, topic('talent', 'Talent'), at);
+    expect(next.respondentMessage).toBe(before.respondentMessage);
+    expect(next.decidedAtTurn).toBe(before.decidedAtTurn);
+    expect(next.source).toBe(before.source);
+  });
+});

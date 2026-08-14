@@ -495,6 +495,18 @@ export const API = {
       /** Pending generated data-slot draft for a version (DELETE — discard the proposal). */
       versionDataSlotsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/data-slots/draft`,
+      /**
+       * Adaptive Scope topics for a version (GET topics + settings + coherence findings +
+       * key inventory, PUT replace-set the reviewed topics, PATCH the settings blob).
+       */
+      versionTopics: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics`,
+      /** Run the Routing Analyst over a version (POST → SSE: reading → analysing → saving → done). */
+      versionTopicsAnalyseStream: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/analyse/stream`,
+      /** The analyst's pending topic proposal (POST accept the reviewed set, DELETE discard). */
+      versionTopicsDraft: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/draft`,
       /** Curated glossary for a version (GET terms + document, PUT replace-set the reviewed set). */
       versionGlossary: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary`,

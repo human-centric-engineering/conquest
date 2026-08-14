@@ -60,6 +60,27 @@ function asResearchTiming(value: unknown): ReportResearchTiming {
     : DEFAULT_RESPONDENT_REPORT_SETTINGS.research.timing;
 }
 
+/**
+ * How many refs one end of the reconciliation may name. A generous bound rather than a design
+ * statement — the point is that a stored blob cannot grow without limit, not that four is right.
+ */
+const MAX_RECONCILIATION_REFS = 20;
+/** Question/data-slot keys are slugs; anything longer is not one, whatever it is. */
+const MAX_REF_LENGTH = 120;
+
+/** Narrow a stored ref list to trimmed, non-empty, de-duplicated, bounded keys. */
+function asRefList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const key = entry.trim().slice(0, MAX_REF_LENGTH);
+    if (key) seen.add(key);
+    if (seen.size >= MAX_RECONCILIATION_REFS) break;
+  }
+  return [...seen];
+}
+
 function asResearchDisplay(value: unknown): ReportResearchDisplay {
   return typeof value === 'string' &&
     (REPORT_RESEARCH_DISPLAYS as readonly string[]).includes(value)
@@ -76,6 +97,7 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
   const rawIncludes = isRecord(obj.rawIncludes) ? obj.rawIncludes : {};
   const generation = isRecord(obj.generation) ? obj.generation : {};
   const delivery = isRecord(obj.delivery) ? obj.delivery : {};
+  const reconciliation = isRecord(generation.reconciliation) ? generation.reconciliation : {};
   const research = isRecord(obj.research) ? obj.research : {};
   const researchBefore = isRecord(research.before) ? research.before : {};
   const researchAfter = isRecord(research.after) ? research.after : {};
@@ -119,6 +141,11 @@ export function narrowRespondentReportSettings(value: unknown): RespondentReport
         generation.discountLowConfidence,
         d.generation.discountLowConfidence
       ),
+      reconciliation: {
+        enabled: asBool(reconciliation.enabled, d.generation.reconciliation.enabled),
+        statedGoalRefs: asRefList(reconciliation.statedGoalRefs),
+        askedForRefs: asRefList(reconciliation.askedForRefs),
+      },
     },
     delivery: {
       onScreen: asBool(delivery.onScreen, d.delivery.onScreen),

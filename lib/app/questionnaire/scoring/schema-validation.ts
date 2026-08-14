@@ -58,6 +58,7 @@ export const scoringSchemaContentSchema = z
       )
       .max(200),
     method: z.enum(SCORING_METHODS),
+    normalise: z.boolean().optional(),
   })
   .strict()
   .superRefine((schema, ctx) => {
@@ -90,6 +91,39 @@ export const scoringSchemaContentSchema = z
         });
       }
     });
+
+    // C8: normalising rescales what `raw` means, so cutoffs written in the questions' own units
+    // stop matching anything. Left unchecked the author gets `band: null` on every respondent and
+    // an empty band breakdown in the cohort report, with nothing anywhere saying why. Rejecting the
+    // save is the only place that failure is still attributable to a cause.
+    if (schema.normalise) {
+      // Weight TOTAL per scale, not item count: `scoreSession` computes Σ(wᵢ·vᵢ), and with
+      // normalisation each vᵢ lands in 0–1, so the ceiling under `sum` is Σwᵢ — which equals the
+      // item count only when every weight is 1. Counting items instead rejected a correctly
+      // authored 0–2N band set on a scale whose items carry weight 2.
+      const weightPerScale = new Map<string, number>();
+      for (const item of schema.items) {
+        weightPerScale.set(item.scaleKey, (weightPerScale.get(item.scaleKey) ?? 0) + item.weight);
+      }
+      schema.bands.forEach((band, i) => {
+        // A scale with no items mapped yet has no knowable ceiling. Skip it rather than compute 0
+        // and reject every band: add-scale → add-band → map-items is the normal order in the
+        // ScoringBuilder, so failing there blocks authoring mid-flow for a schema that is merely
+        // unfinished. Once an item lands, the check applies.
+        const scaleWeight = weightPerScale.get(band.scaleKey);
+        if (schema.method === 'sum' && scaleWeight === undefined) return;
+        const ceiling = schema.method === 'sum' ? (scaleWeight ?? 0) : 1;
+        if (band.min < 0 || band.max > ceiling) {
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              `With normalisation on, scores for this scale run 0–${ceiling}. Re-author this band's ` +
+              `cutoffs in that range (they are currently ${band.min}–${band.max}).`,
+            path: ['bands', i],
+          });
+        }
+      });
+    }
   });
 
 /**
@@ -153,5 +187,9 @@ export function narrowScoringSchemaContent(value: unknown): ScoringSchemaContent
 
   const method = value.method === 'sum' ? 'sum' : 'mean';
 
-  return { scales, items, bands, method };
+  // Absent reads as OFF, which is the truth for every schema authored before C8 existed — and the
+  // only reading that leaves their stored scores meaning what they meant when they were computed.
+  const normalise = value.normalise === true;
+
+  return { scales, items, bands, method, normalise };
 }

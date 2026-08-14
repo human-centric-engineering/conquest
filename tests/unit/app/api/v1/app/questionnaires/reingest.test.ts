@@ -39,9 +39,21 @@ const tx = {
   appQuestionnaireSection: {
     deleteMany: vi.fn(async () => ({ count: 0 })),
     create: vi.fn(async () => ({ id: `sec-${++sectionSeq}` })),
+    findMany: vi.fn(async () => []),
   },
   appQuestionTag: { deleteMany: vi.fn(async () => ({ count: 0 })) },
-  appQuestionSlot: { createMany: vi.fn(async () => ({ count: 0 })) },
+  appQuestionSlot: {
+    createMany: vi.fn(async () => ({ count: 0 })),
+    findMany: vi.fn(async () => []),
+  },
+  // Adaptive Scope (P17): re-ingest reconciles topics against the rewritten graph.
+  appDataSlot: { findMany: vi.fn(async () => []) },
+  appQuestionnaireTopic: {
+    findMany: vi.fn(async () => []),
+    createMany: vi.fn(async () => ({ count: 0 })),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    update: vi.fn(async () => ({})),
+  },
   appQuestionnaireSourceDocument: { create: vi.fn(async () => ({ id: 'src-1' })) },
 };
 
