@@ -56,8 +56,11 @@ async function countAdaptiveScopeErrors(
     prisma.appQuestionSlot.findMany({ where: { versionId }, select: { key: true } }),
     prisma.appDataSlot.findMany({ where: { versionId }, select: { key: true } }),
     // The comparability checks (F17.15) run here too, so the Topics tab and this gate cannot
-    // disagree. Only one of them is an `error` — a scale scoring a key that belongs to no topic —
-    // and it never blocks alone: the same key already raises `orphaned_questions`.
+    // disagree. Only one of them is an `error` — a scale scoring a key that EXISTS on the version
+    // but belongs to no topic — and it never blocks alone, because that same key already raises
+    // `orphaned_questions`. A scale scoring a key the version no longer has is a different finding
+    // (`scale_item_stale`) and only a warning: deleting a question does not prune the scoring
+    // schema, so blocking launch on it would strand the admin on a tab where the key is not shown.
     loadScoringSchemaContent(versionId),
   ]);
   const issues = validateAdaptiveScope({

@@ -41,6 +41,11 @@ function schema(items: ScoringItem[], scaleKeys = ['trust']): ScoringSchemaConte
   };
 }
 
+/** The version's real key inventory — what separates an unowned key from a stale one. */
+function inventory(questionKeys: string[], dataSlotKeys: string[] = []) {
+  return { questionKeys, dataSlotKeys };
+}
+
 function codes(...args: Parameters<typeof checkScaleComparability>): string[] {
   return checkScaleComparability(...args).map((i) => i.code);
 }
@@ -164,6 +169,75 @@ describe('checkScaleComparability', () => {
       ).toEqual(['scale_split_by_scope']);
     });
 
+    it('does not count rule-included topics against the cap', () => {
+      // `applyGuardrails` seats rule-includes BEFORE the cap and does not truncate them, so a plan
+      // can legitimately exceed `maxConditionalTopics`. Counting them here warned that no
+      // respondent is ever asked a scale every respondent is in fact asked in full.
+      const rules = [
+        {
+          id: 'r1',
+          dataSlotKey: 's',
+          operator: 'exists' as const,
+          value: null,
+          action: 'include' as const,
+          topicKey: 'cond_a',
+          ordinal: 0,
+        },
+        {
+          id: 'r2',
+          dataSlotKey: 's',
+          operator: 'exists' as const,
+          value: null,
+          action: 'include' as const,
+          topicKey: 'cond_b',
+          ordinal: 1,
+        },
+      ];
+
+      expect(
+        codes({
+          topics: [
+            topic('cond_a', 'conditional', ['q1']),
+            topic('cond_b', 'conditional', ['q2']),
+            topic('cond_c', 'conditional', ['q3']),
+          ],
+          settings: settings({ maxConditionalTopics: 1, rules }),
+          scoring: schema([item('q1'), item('q2'), item('q3')]),
+        })
+      ).toEqual(['scale_split_by_scope']);
+    });
+
+    it('counts a rule-included topic against the cap again when another rule vetoes it back out', () => {
+      const rules = [
+        {
+          id: 'r1',
+          dataSlotKey: 's',
+          operator: 'exists' as const,
+          value: null,
+          action: 'include' as const,
+          topicKey: 'cond_a',
+          ordinal: 0,
+        },
+        {
+          id: 'r2',
+          dataSlotKey: 's',
+          operator: 'not_exists' as const,
+          value: null,
+          action: 'exclude' as const,
+          topicKey: 'cond_a',
+          ordinal: 1,
+        },
+      ];
+
+      expect(
+        codes({
+          topics: [topic('cond_a', 'conditional', ['q1']), topic('cond_b', 'conditional', ['q2'])],
+          settings: settings({ maxConditionalTopics: 1, rules }),
+          scoring: schema([item('q1'), item('q2')]),
+        })
+      ).toEqual(['scale_never_whole']);
+    });
+
     it('counts only unavoidable topics, so a shared item never triggers a false alarm', () => {
       // q1 is claimed by three conditional topics, so ANY one of them asks it — a plan seating one
       // covers the whole scale. Counting the topics it touches (3) would exceed the cap of 1 and
@@ -183,26 +257,57 @@ describe('checkScaleComparability', () => {
   });
 
   describe('an item no topic asks', () => {
-    it('is an error while the feature is on', () => {
+    it('is an error while the feature is on, when the key really exists on the version', () => {
       const issues = checkScaleComparability({
         topics: [topic('spine', 'core', ['q1'])],
         settings: settings(),
-        scoring: schema([item('q1'), item('q_missing')]),
+        scoring: schema([item('q1'), item('q_orphan')]),
+        inventory: inventory(['q1', 'q_orphan']),
       });
 
       expect(issues).toHaveLength(1);
       expect(issues[0].code).toBe('scale_item_unowned');
       expect(issues[0].severity).toBe('error');
-      expect(issues[0].message).toContain('"q_missing"');
+      expect(issues[0].message).toContain('"q_orphan"');
     });
 
     it('is only a warning while the feature is off', () => {
       const issues = checkScaleComparability({
         topics: [topic('spine', 'core', ['q1'])],
         settings: settings({ enabled: false }),
-        scoring: schema([item('q_missing')]),
+        scoring: schema([item('q_orphan')]),
+        inventory: inventory(['q1', 'q_orphan']),
       });
 
+      expect(issues[0].severity).toBe('warning');
+    });
+
+    it('is a WARNING, not an error, when the key no longer exists on the version', () => {
+      // Deleting a question does not prune the scoring schema, so a stale ref is easy to acquire
+      // and impossible to fix from the Topics tab. An error here would block launch AND preview
+      // while pointing the admin at a surface where the key is not shown.
+      const issues = checkScaleComparability({
+        topics: [topic('spine', 'core', ['q1'])],
+        settings: settings(),
+        scoring: schema([item('q1'), item('q_deleted')]),
+        inventory: inventory(['q1']),
+      });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('scale_item_stale');
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].message).toContain('scoring schema');
+    });
+
+    it('falls back to the softer finding when no inventory is supplied to check against', () => {
+      // A caller that cannot prove the key exists must not raise a launch-blocking error about it.
+      const issues = checkScaleComparability({
+        topics: [topic('spine', 'core', ['q1'])],
+        settings: settings(),
+        scoring: schema([item('q_unknown')]),
+      });
+
+      expect(issues[0].code).toBe('scale_item_stale');
       expect(issues[0].severity).toBe('warning');
     });
 

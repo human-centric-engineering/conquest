@@ -185,7 +185,13 @@ The report's method panel says it; the export does not.
 
 ---
 
-## 8. Nothing reports on respondent amendments · **~half a day**
+## 8. Nothing reports on respondent amendments · **DONE** — see [`f17.16.md`](./f17.16.md)
+
+> Shipped 2026-08-14. `analytics/routing.ts` reads both records of an amendment and every plan
+> beside them, and states the four things the counts support — above all the two failures that were
+> invisible by nature: a criteria sentence that never fires, and one respondents keep correcting. A
+> correction is never counted as a selection, which is the whole reason the two records were kept
+> apart. Counts and topic keys only; the respondent's own words stay in the interview.
 
 Every amendment is recorded twice — on `InterviewPlan.amendments` and as a `source: 'respondent'`
 topic — specifically so routing quality can be measured. Nothing reads either.

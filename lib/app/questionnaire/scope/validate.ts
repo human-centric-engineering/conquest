@@ -150,7 +150,11 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
   ] as const) {
     const claimedBy = new Map<string, string[]>();
     for (const topic of topics) {
-      for (const key of topic.members[field]) {
+      // Deduped WITHIN a topic first: a membership list may legitimately carry the same key twice
+      // (nothing prunes it on the AI-proposal or import paths), and counting that as two claimants
+      // produces `"q1" belongs to both "Wellbeing" and "Wellbeing"`. One topic asking a question
+      // twice is not the double-billing this check is about.
+      for (const key of new Set(topic.members[field])) {
         const owners = claimedBy.get(key);
         if (owners) owners.push(topic.label);
         else claimedBy.set(key, [topic.label]);
@@ -335,6 +339,12 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         topics,
         settings,
         scoring: input.scoring,
+        // Lets the scale checks tell a key that exists but sits in no topic (fixable here, an
+        // error) from one the version no longer has at all (a stale scoring reference, a warning).
+        inventory: {
+          questionKeys: input.allQuestionKeys,
+          dataSlotKeys: input.allDataSlotKeys ?? [],
+        },
         seconds: byTopicKey
           ? {
               byTopicKey,

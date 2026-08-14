@@ -17,6 +17,7 @@
  */
 
 import type { QuestionType, AnswerProvenance, SessionStatus } from '@/lib/app/questionnaire/types';
+import type { ScopeDecisionSource, TopicPhase } from '@/lib/app/questionnaire/scope/types';
 import type { TagView } from '@/lib/app/questionnaire/views';
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector/types';
 
@@ -361,4 +362,95 @@ export interface InvitationDiagnosticsResult {
     errorCount: number;
   };
   identitySuppressed: boolean;
+}
+
+/* ── Routing quality (F17.16) ───────────────────────────────────────────── */
+
+/**
+ * One topic's routing record over the window.
+ *
+ * The load-bearing rule is that {@link selected} NEVER counts a respondent's own correction. A
+ * respondent asking for a topic is evidence *about* the planner, not an example of it working, and
+ * folding the two together would make a version's criteria look better the worse they got — the
+ * exact failure `InterviewPlan.amendments` was recorded separately to prevent.
+ */
+export interface RoutingTopicRow {
+  key: string;
+  /** The topic's label today, or the bare key when the topic has since been deleted. */
+  label: string;
+  /** The topic's phase today; `null` when it no longer exists on the version. */
+  phase: TopicPhase | null;
+  /** Plans that seated it at all, excluding respondent amendments. */
+  selected: number;
+  /**
+   * Plans where the ROUTING SETUP put it there — the agent judged the criteria a fit (`llm`), or a
+   * hard rule included it (`rule`).
+   *
+   * Split out from {@link selected} because the blind-spot check seats a topic for the opposite
+   * reason: precisely because nothing chose it. `chooseCheckTopic` is deterministic (author
+   * preference, else the first unselected conditional in authored order) and the check defaults ON,
+   * so one topic tends to be sampled in nearly every plan. Reading that as selection would suppress
+   * `criteria_never_fires` for exactly the topic it most needs to fire for, and raise
+   * `criteria_always_fires` in its place — advice to promote a topic whose criteria never matched.
+   */
+  chosen: number;
+  /** Plans where it was sampled as the `light`-depth blind-spot check — chosen by nothing. */
+  sampled: number;
+  /** {@link selected} split by the layer that decided it. */
+  bySource: Record<ScopeDecisionSource, number>;
+  /**
+   * Plans that considered it and left it out — and it stayed out. A topic the respondent later
+   * asked for is removed from the plan's `excluded` list by `applyAmendment`, so it is counted in
+   * {@link amended} instead. The two together are the topics the planner did not seat.
+   */
+  excluded: number;
+  /** Of {@link excluded}, how many the agent chose and the time budget took back. */
+  droppedByBudget: number;
+  /** Plans where the respondent asked for it after the fact. */
+  amended: number;
+  /** {@link chosen} over the plan count, 0–1 — how often the routing setup actually picked it. */
+  chosenRate: number;
+}
+
+/** What a routing finding is about. */
+export type RoutingFindingCode =
+  'criteria_never_fires' | 'criteria_always_fires' | 'respondents_keep_adding' | 'budget_decides';
+
+/**
+ * One observation about a version's criteria, stated with its sample size.
+ *
+ * Deliberately an observation rather than a verdict: routing quality is a judgement about intent
+ * that only the author can make — a topic that never fires may be a rare-case safety net working
+ * exactly as designed. Carrying the count in the message lets the reader weigh it.
+ */
+export interface RoutingFinding {
+  code: RoutingFindingCode;
+  topicKey: string;
+  message: string;
+}
+
+/** Routing quality for one version over the window (F17.16). */
+export interface RoutingAnalyticsResult {
+  versionId: string;
+  range: AnalyticsRange;
+  /** Non-preview sessions in the window that reached a plan. */
+  plans: number;
+  /** Plans the respondent corrected at least once. */
+  amendedPlans: number;
+  /** Plans produced by the fallback rather than a judgement — the planner declining to decide. */
+  fallbackPlans: number;
+  /** Plans that carried a blind-spot check topic. */
+  checkTopicPlans: number;
+  /** Mean planner confidence across plans, 0–1. */
+  meanConfidence: number;
+  /** One row per topic seen in any plan or on the version today, most-chosen first. */
+  topics: RoutingTopicRow[];
+  findings: RoutingFinding[];
+  suppressed: boolean;
+  /**
+   * True when the window held more plans than one read may carry, so the counts describe the most
+   * recent {@link ROUTING_PLAN_READ_CAP} rather than everything. Stated rather than absorbed: a
+   * silently truncated sample reads as a complete one.
+   */
+  truncated: boolean;
 }

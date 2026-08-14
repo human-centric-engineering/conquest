@@ -51,6 +51,19 @@ export interface ComparabilityInput {
   /** The version's scoring schema. An empty one produces no findings — there is nothing to compare. */
   scoring: ScoringSchemaContent;
   /**
+   * Every question / data-slot key the version actually has, when the caller knows them.
+   *
+   * Only used to separate two failures that look identical from the schema alone: a key that EXISTS
+   * but belongs to no topic (an authoring mistake, fixable on the Topics tab, and an error) from one
+   * that no longer exists at all (a stale scoring reference left behind by a deleted question, only
+   * fixable in the scoring schema, and a warning). Without them the finding degrades to the
+   * warning, because an error an admin cannot act on is worse than a warning they can.
+   */
+  inventory?: {
+    questionKeys: readonly string[];
+    dataSlotKeys: readonly string[];
+  };
+  /**
    * The time arithmetic (C7), when the caller priced it. Optional for the same reason
    * {@link ValidateScopeInput.seconds} is: pricing needs question types, and a caller without them
    * still gets the count-based findings.
@@ -61,6 +74,19 @@ export interface ComparabilityInput {
     /** What is left for routed topics after the always-run floor. */
     routedAllowance: number;
   };
+}
+
+/**
+ * Whether the version still HAS the key this item scores.
+ *
+ * With no inventory to check against, the answer is "assume it does not" — which routes the finding
+ * to the softer `scale_item_stale` warning. Guessing the other way would raise a launch-blocking
+ * error on a key nobody can prove is missing.
+ */
+function existsOnVersion(item: ScoringItem, inventory: ComparabilityInput['inventory']): boolean {
+  if (!inventory) return false;
+  const keys = item.source === 'question' ? inventory.questionKeys : inventory.dataSlotKeys;
+  return keys.includes(item.ref);
 }
 
 /** Every topic that would ask this item, whichever phase it sits in. */
@@ -83,12 +109,24 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
   if (scoring.items.length === 0 || scoring.scales.length === 0) return issues;
 
   const cap = settings.maxConditionalTopics;
+  // Topics a hard rule forces in (and no rule vetoes back out) — seated regardless of the cap.
+  const excluded = new Set(
+    settings.rules.filter((r) => r.action === 'exclude').map((r) => r.topicKey)
+  );
+  const ruleIncluded = new Set(
+    settings.rules
+      .filter((r) => r.action === 'include' && !excluded.has(r.topicKey))
+      .map((r) => r.topicKey)
+  );
 
   for (const scale of scoring.scales) {
     const items = scoring.items.filter((i) => i.scaleKey === scale.key);
     if (items.length === 0) continue;
 
+    /** Scored keys that exist on the version but sit in no topic — never asked while scope is on. */
     const unowned: string[] = [];
+    /** Scored keys the version no longer has at all — a stale schema reference. */
+    const stale: string[] = [];
     /** Conditional topics NO cover can omit — the item they own is owned by nothing else. */
     const unavoidable = new Set<string>();
     /** Every conditional topic the scale touches — the breadth of its exposure to routing. */
@@ -97,7 +135,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
     for (const item of items) {
       const owners = ownersOf(item, topics);
       if (owners.length === 0) {
-        unowned.push(item.ref);
+        (existsOnVersion(item, input.inventory) ? unowned : stale).push(item.ref);
         continue;
       }
       // An item in ANY always-run topic is asked of everyone, so it never puts the scale at risk —
@@ -117,16 +155,34 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
       });
     }
 
+    // Deliberately a WARNING even while the feature is on, and never an error. Deleting a question
+    // does not prune the scoring schema, so a stale reference is both easy to acquire and
+    // impossible to fix from the Topics tab — making it an error would block launch AND preview
+    // with a message pointing at a surface where the key cannot be found.
+    if (stale.length > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'scale_item_stale',
+        message: `"${scale.name}" scores ${formatKeys(stale)}, which no longer exist${stale.length === 1 ? 's' : ''} on this version. Remove ${stale.length === 1 ? 'it' : 'them'} from the scoring schema — nothing can ever fill ${stale.length === 1 ? 'it' : 'them'}.`,
+      });
+    }
+
     if (touched.size === 0) continue;
 
     // ── Can any plan cover the whole scale? ────────────────────────────────────────────────
     // Both tests use `unavoidable` rather than `touched`, so neither can fire on a scale that some
     // plan could in fact cover. See the module note on why the count is taken that way.
-    if (unavoidable.size > cap) {
+    //
+    // Rule-included topics are seated BEFORE the cap in `applyGuardrails` and are not truncated by
+    // it, so a plan can legitimately exceed `maxConditionalTopics`. Counting them against the cap
+    // would warn "no respondent is ever asked the whole scale" about a scale every respondent is
+    // asked in full — the exact false alarm this module promises not to raise.
+    const capBound = [...unavoidable].filter((key) => !ruleIncluded.has(key));
+    if (capBound.length > cap) {
       issues.push({
         severity: 'warning',
         code: 'scale_never_whole',
-        message: `"${scale.name}" draws on ${unavoidable.size} conditional topics, but a plan seats at most ${cap}. With Adaptive Scope on, no respondent is ever asked the whole scale — every score is partial and the cohort report has nothing to aggregate. Move the shared items into an always-run topic, or raise the limit to ${unavoidable.size}.`,
+        message: `"${scale.name}" draws on ${capBound.length} conditional topics your criteria must choose between, but a plan seats at most ${cap}. With Adaptive Scope on, no respondent is ever asked the whole scale — every score is partial and the cohort report has nothing to aggregate. Move the shared items into an always-run topic, or raise the limit to ${capBound.length}.`,
       });
       continue;
     }

@@ -354,6 +354,80 @@ The `notAssessed` list on the session export is what makes an adaptive instrumen
   not, and what the respondent was told. A conversation that never touched an area reads as an
   oversight until you know it was a decision.
 
+## Routing quality — what actually happened (F17.16)
+
+Every other Adaptive Scope surface is about **intent**: the criteria you wrote, the limits you set,
+what a plan would do against an opening you typed. `analytics/routing.ts` is the only account of what
+happened when real respondents met them, and it exists because the two failures that matter most
+were both invisible.
+
+**A criteria sentence that never fires** produces no error and no empty state. The topic simply never
+appears in anyone's interview, and the instrument quietly asks less than its author believes it asks.
+
+**A criteria sentence respondents keep correcting** produces a perfectly ordinary-looking plan. Yet a
+respondent asking for a topic the planner left out is the sharpest available evidence that a
+version's criteria are wrong — and it was sitting in a JSON column nobody queried.
+
+### A blind-spot sample is not a selection
+
+`chooseCheckTopic` is deterministic — the author's preference, else the **first unselected
+conditional topic in authored order** — and `includeCheckTopic` defaults on. So one topic tends to
+be seated as a `light` blind-spot check in nearly every plan, for the exact opposite reason to
+selection: _because nothing chose it_.
+
+Counting that as selection breaks both headline findings at once. `criteria_never_fires` could never
+fire for the one topic it most needs to, and `criteria_always_fires` fired in its place — advising
+the author to promote a topic whose criteria never matched to a full-depth always-run topic. So the
+row carries `chosen` (`llm` + `rule` — the routing setup decided) apart from `sampled` (`check`),
+and the findings read `chosen`. `fallback` counts as neither: it is what happens when there was no
+signal to judge on at all.
+
+### A correction is never a success
+
+`selected` excludes `source: 'respondent'` entirely and counts the amendment on its own axis. This is
+the reason amendments were recorded twice in the first place (on `InterviewPlan.amendments` **and**
+as a `source: 'respondent'` topic): folding a correction into the selection count would make a
+version's criteria look better the worse they got. The aggregator reads both records and unions
+them, because `amendments` is absent on plans written before it shipped, where the source tag is the
+only trace.
+
+`excluded` means "left out and **stayed** out". `applyAmendment` removes an amended topic from the
+plan's `excluded` list, so the two counts partition what the planner did not seat: `excluded` is the
+decisions that held, `amended` is the ones the respondent overturned.
+
+### Findings are observations, not verdicts
+
+| Code                      | When                                                                       |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `criteria_never_fires`    | Never included, and never asked for — the invisible failure                |
+| `criteria_always_fires`   | Included in every interview — it is an always-ask topic spending a slot    |
+| `respondents_keep_adding` | Respondents asked for it themselves in ≥20% of interviews (and at least 2) |
+| `budget_decides`          | Chosen by the agent and then dropped for time in most of its exclusions    |
+
+Each carries its sample size, because routing quality is a judgement about intent only the author
+can make — a topic that never fires may be a rare-case safety net working exactly as designed.
+Nothing is stated below `ROUTING_FINDING_MIN_PLANS` (5), and findings are only ever about
+**conditional topics that still exist**: an always-run topic has no criteria to be wrong, and a
+deleted one cannot be edited. That threshold is deliberately a separate constant from
+`K_ANONYMITY_THRESHOLD` despite sharing its value — one governs disclosure, the other inference, and
+sharing the constant would let a privacy change silently redefine what counts as evidence.
+
+### Bounded, and it says so
+
+The card fetches on mount, so this runs on an ordinary Topics-tab visit. `ROUTING_PLAN_READ_CAP`
+(2,000) bounds how many plan blobs one read pulls into memory, newest first — and `truncated` says
+when it bit, because a silently truncated sample reads as a complete one.
+
+### What never crosses the boundary
+
+A plan carries respondent free text twice — `amendments[].request` in their own words, and the
+`rationale` written from it. The aggregator reads neither. Counts and topic keys only, on the same
+principle F17.14 settled for the plan preview: an authoring surface is not a place to put respondent
+answers. Per-topic rows are withheld entirely below the k-anonymity floor, where a count describes
+individuals rather than a pattern. The cohort **size** survives suppression so the surface can say
+how far off the threshold it is: "3 interviews so far" identifies nobody, where "topic X was chosen
+in 3 of 3" would.
+
 ## Auditability
 
 Every plan is recorded as an `AppAiRun` of kind `scope_plan` — **including the ones no model
@@ -489,6 +563,10 @@ cohort report comes back empty, after the instrument has been fielded.
 | `scale_split_by_scope` | warning                    | The scale draws on conditional topics a plan _can_ cover, so some respondents are partial |
 | `scale_item_unowned`   | error (on) / warning (off) | The scale scores a key belonging to no topic, so it is never asked                        |
 
+**A stale reference is never an error.** Deleting a question does not prune `AppScoringSchema.content`, so a scoring item pointing at a key the version no longer has is easy to acquire — and impossible to fix from the Topics tab. Making it launch-blocking would strand the admin: the gate would point at a surface where the key is not shown. `scale_item_unowned` stays an error precisely because its key _does_ still exist and _can_ be re-homed there — which is also why it never blocks alone, since the same key already raises `orphaned_questions`. The two are separated by the version's key inventory, and a caller that supplies none gets the warning.
+
+**Rule-included topics do not count against the cap.** `applyGuardrails` seats hard-rule includes **before** the cap and does not truncate them, so a plan can legitimately exceed `maxConditionalTopics`. Counting them would warn that no respondent is ever asked a scale every respondent is in fact asked in full — the exact false alarm this module promises not to raise. A topic a later rule vetoes back out is counted again.
+
 **The count is taken from unavoidable topics, not touched ones.** "Can a plan cover this scale?" is a
 set-cover question — an item claimed by two topics is asked if _either_ is seated — and a greedy
 answer can overstate what is needed. Overstating here means telling an author "no respondent is ever
@@ -533,11 +611,13 @@ topics that would in fact have held. `duplicate_membership` is a warning, report
 | `lib/app/questionnaire/scope/seed.ts`                               | One topic per section, pure                                                                                                                                                       |
 | `lib/app/questionnaire/scope/validate.ts`                           | Coherence findings                                                                                                                                                                |
 | `lib/app/questionnaire/scope/comparability.ts`                      | What routing does to a scoring scale (F17.15) — which scales it can narrow, and which no plan can ever cover                                                                      |
+| `lib/app/questionnaire/analytics/routing.ts`                        | Routing quality (F17.16) — what the planner actually did across a version's interviews, and the findings the counts support                                                       |
 | `app/api/v1/app/questionnaires/_lib/session-scope.ts`               | The DB seam                                                                                                                                                                       |
 | `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
 | `app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`          | The post-turn trigger                                                                                                                                                             |
 | `app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/route.ts` | GET / PUT / PATCH                                                                                                                                                                 |
 | `.../topics/preview/route.ts`                                       | The plan dry-run (F17.14) — the planner over a synthetic opening; writes nothing                                                                                                  |
+| `.../analytics/routing/route.ts`                                    | Routing quality (F17.16) — per-topic selection / exclusion / amendment counts over the window                                                                                     |
 | `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                 | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                         |
 | `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`  | Run the analyst (SSE) · accept or discard its proposal                                                                                                                            |
 | `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`          | The amendment trigger                                                                                                                                                             |

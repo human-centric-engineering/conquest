@@ -236,6 +236,39 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
     expect(body.data.draft).toEqual(draft);
   });
 
+  it('prices the inventory and the topics it feeds, with real slots (F17.8/F17.15)', async () => {
+    // Every other GET test leaves the key inventory empty, which means the seconds arithmetic
+    // `handleList` feeds to `validateAdaptiveScope` and to `costs.byTopicKey` never actually runs.
+    // A likert is 8s and a data slot 40s by default, so the numbers below are the real ones.
+    (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
+      {
+        key: 'q1',
+        prompt: 'How settled do you feel?',
+        type: 'likert',
+        typeConfig: null,
+        weight: 1,
+        section: { title: 'Wellbeing', ordinal: 0 },
+      },
+    ]);
+    (prisma.appDataSlot.findMany as Mock).mockResolvedValue([
+      { key: 'mood', name: 'Mood', theme: 'wellbeing', weight: 1 },
+    ]);
+    (loadTopics as Mock).mockResolvedValue([
+      sampleTopic({ members: { questionKeys: ['q1'], dataSlotKeys: ['mood'] } }),
+    ]);
+
+    const res = await GET(getReq(), ctx(PARAMS));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.inventory.questions[0]).toMatchObject({ key: 'q1', estimatedSeconds: 8 });
+    expect(body.data.inventory.dataSlots[0]).toMatchObject({ key: 'mood', estimatedSeconds: 40 });
+    // `wellbeing` is conditional, so it costs nothing against the mandatory floor but is priced
+    // for the fit: one likert plus one data slot.
+    expect(body.data.costs.byTopicKey.wellbeing.full).toBe(48);
+    expect(body.data.costs.alwaysSeconds).toBe(0);
+  });
+
   it('reports a scale that routing can leave partially assessed (F17.15)', async () => {
     // `wellbeing` is the version's only topic and it is conditional, so a respondent not routed to
     // it is scored on none of the scale — and the cohort report will exclude them.

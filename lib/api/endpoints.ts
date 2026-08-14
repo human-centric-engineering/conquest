@@ -565,6 +565,9 @@ export const API = {
       /** Per-version cost actuals from `AiCostLog` (GET — F8.1). */
       versionAnalyticsCost: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/cost`,
+      /** Routing quality — per-topic selection / exclusion / amendment counts (GET — F17.16). */
+      versionAnalyticsRouting: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/routing`,
       /** Safeguarding summary — flagged/serious sensitive-disclosure session counts (GET). */
       versionAnalyticsSafeguarding: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/safeguarding`,
