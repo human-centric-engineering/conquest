@@ -2,7 +2,7 @@
  * What an interview costs a respondent, in seconds (C7) — pure, no I/O.
  *
  * `maxConditionalTopics` controls **breadth**: how many areas an interview may cover. It was
- * standing in for **duration**, and it cannot do that job. The Merlin5 workbook derives its famous
+ * standing in for **duration**, and it cannot do that job. The pilot client workbook derives its
  * "no more than three routed sections" from arithmetic, not preference:
  *
  * ```

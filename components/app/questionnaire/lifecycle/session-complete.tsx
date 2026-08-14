@@ -68,7 +68,7 @@ const ACCENT = 'var(--app-accent-color, var(--color-primary))';
 
 /**
  * Build the PDF download filename from the questionnaire title so a saved file reads as the
- * questionnaire (e.g. `merlin5-alpha-demo.pdf`), not a generic `responses.pdf`. A blob download must
+ * questionnaire (e.g. `acme-alpha-demo.pdf`), not a generic `responses.pdf`. A blob download must
  * set `anchor.download` explicitly (the server's Content-Disposition is lost through the object URL),
  * so we slugify here. Falls back to `responses` when the title is empty/untitled.
  */

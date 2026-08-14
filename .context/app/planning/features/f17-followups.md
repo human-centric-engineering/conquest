@@ -11,11 +11,11 @@ docs: .context/app/questionnaire/adaptive-scope.md
 # P17 follow-ups
 
 Everything left open when F17.1–F17.7 shipped. Consolidated here so a follow-up does not have to
-reconstruct it by reading seven trackers, the Merlin5 research doc's capability table, and the
+reconstruct it by reading seven trackers, the pilot client research notes' capability table, and the
 authoring script's stdout.
 
-**Nothing below is blocking.** Adaptive Scope works end to end without any of it, and the Merlin5
-Growth Assessor runs. What the first four items blocked was a **faithful** Merlin5 — three of them
+**Nothing below is blocking.** Adaptive Scope works end to end without any of it, and the pilot
+client instrument runs. What the first four items blocked was a **faithful** rendering of it — three of them
 (§1, §3, §4) have since shipped, leaving §2 and the guardrail in §5 as the workbook behaviour we
 cannot yet express.
 
@@ -23,8 +23,8 @@ Ordered by value. Each heading carries a rough size, so a follow-up can tell a h
 phase without reading the whole entry.
 
 > **Where these came from.** §1–§4 are capabilities C7, C6, C8 and C9 of
-> [`../../research/merlin5-growth-assessor.md`](../../research/merlin5-growth-assessor.md) §2, plus
-> guardrails G03 and G05 from that workbook's Guardrails tab. `scripts/author/merlin5-growth-assessor.ts`
+> the pilot client research notes §2 (held outside this repo), plus
+> guardrails G03 and G05 from that workbook's Guardrails tab. The workbook authoring script (since removed)
 > prints §1, §3, §4 and G03 on **every run**, so an operator authoring the instrument is told rather
 > than left to find out.
 
@@ -77,7 +77,7 @@ re-asked on every pass of the fit, because the check is chosen from what the fit
 
 **What exists:** `light` depth takes a topic's two highest-weight members —
 `LIGHT_DEPTH_MEMBER_COUNT`, a module constant. That covers G04 (the blind-spot check) exactly,
-which is why Merlin5 works.
+which is why the pilot instrument works.
 
 **What does not:** carrying an arbitrary subset of items from a non-selected topic — three items
 from one, one from another, or a named item rather than a weight-ranked one. `PlannedTopic` carries
@@ -92,18 +92,18 @@ opposed to authoring the two items as their own topic, which works today.
 
 ## 3. Cross-scale normalisation (G06 / C8) · **DONE** — see [`f17.10.md`](./f17.10.md)
 
-> Shipped 2026-08-13, and wider than recorded below: the trap is not confined to Merlin5's 1–6
+> Shipped 2026-08-13, and wider than recorded below: the trap is not confined to the pilot instrument's 1–6
 > section. Nothing constrains a scoring item's type, so a `numeric` ranged 0–50 could already sit in
 > a scale beside 1–5 likerts and decide it outright. `ScoringSchemaContent.normalise` (off by
 > default) puts every item on a 0–1 ruler; the save is refused when band cutoffs no longer match it.
 
-**The trap:** Merlin5's Section 14 runs a **1–6** agreement scale; Sections 1–13 run **1–5** extent.
+**The trap:** the pilot instrument's Section 14 runs a **1–6** agreement scale; Sections 1–13 run **1–5** extent.
 `scoreSession` combines raw item values by weighted sum or mean with no normalisation, so a
 composite spanning Section 14 and anything else is arithmetic over two different rulers. It will
 produce a number. The number will be wrong, and nothing will say so.
 
-**Mitigation today:** the Merlin5 instrument ships with **no scoring schema**, and
-`scripts/author/merlin5-growth-assessor.ts` prints "do not build a composite across Section 14 and
+**Mitigation today:** the pilot instrument ships with **no scoring schema**, and
+The workbook authoring script (since removed) printed "do not build a composite across Section 14 and
 the rest until this lands" on every run.
 
 **Shape of the work:** `ItemBounds` is already loaded per item for reverse-scoring, so the pieces
@@ -124,7 +124,7 @@ The workbook is unusually direct about this one:
 > "Disagreement between what they say they need and what the scores show is the most valuable output
 > the tool produces."
 
-Merlin5 asks for goals at 0.2, asks what they want done at 15.1/15.2, and scores the sections in
+The pilot instrument asks for goals at 0.2, asks what they want done at 15.1/15.2, and scores the sections in
 between. Nothing currently holds the three against each other — the report writer sees them as
 undifferentiated transcript.
 
@@ -201,7 +201,7 @@ available signal that a version's criteria are wrong, and it is one query away.
 several files — a question bank plus a separate routing memo — needs either a re-ingest that merges
 them or a multi-document input.
 
-Merlin5 arrived as one workbook, so this has not bitten yet.
+The pilot client arrived as one workbook, so this has not bitten yet.
 
 ---
 
@@ -215,7 +215,7 @@ Merlin5 arrived as one workbook, so this has not bitten yet.
   locale, or the regex replaced by a cheap classifier.
 - **No replay of a recorded analysis.** The `AppAiRun` snapshot holds the analyst's output but not
   the resolved prompt, so a rubric change cannot be diffed against past runs.
-- **Merlin5 criteria carry builder-facing sentences.** A few of the client's NOTES are addressed to
+- **The pilot criteria carry builder-facing sentences.** A few of the client's NOTES are addressed to
   whoever builds the thing ("See guard G02", "Ask nothing to elicit it"). Inert to the planner;
   trimming them automatically would have meant deciding which of the author's sentences count, so
   they are left for a human on the Topics tab.
@@ -240,6 +240,6 @@ for P17. Bringing the plan itself up to date across P10–P17 is a separate job,
 - [`f17.1-ui.md`](./f17.1-ui.md) · [`f17.4.md`](./f17.4.md) · [`f17.5.md`](./f17.5.md) ·
   [`f17.6.md`](./f17.6.md) · [`f17.7.md`](./f17.7.md) — the shipped trackers
 - [`../../questionnaire/adaptive-scope.md`](../../questionnaire/adaptive-scope.md) — the domain doc
-- [`../../research/merlin5-growth-assessor.md`](../../research/merlin5-growth-assessor.md) — the
+- The pilot client research notes (held outside this repo) — the
   capability table (C1–C11) these are numbered against
 - [`f15-followups.md`](./f15-followups.md) — the same shape, for Experiences

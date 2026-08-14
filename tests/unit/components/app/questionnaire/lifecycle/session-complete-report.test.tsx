@@ -774,7 +774,7 @@ describe('SessionComplete — respondent report', () => {
         mode: 'narrative',
         onScreen: false,
         download: true,
-        questionnaireTitle: 'Merlin5 Alpha Demo',
+        questionnaireTitle: 'Acme Alpha Demo',
         insights: {
           status: 'ready',
           content: { summary: 'x', sections: [], actions: [] },
@@ -782,7 +782,7 @@ describe('SessionComplete — respondent report', () => {
           error: null,
         },
       });
-      expect(name).toBe('merlin5-alpha-demo.pdf');
+      expect(name).toBe('acme-alpha-demo.pdf');
     });
 
     it('falls back to responses.pdf when there is no title', async () => {

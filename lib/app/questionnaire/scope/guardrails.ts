@@ -247,7 +247,7 @@ export function applyGuardrails(input: ApplyGuardrailsInput): InterviewPlan {
  *   reverse.
  * - **The check topic's seconds are reserved before anything is judged to fit.** It is chosen from
  *   what did NOT make the cut, so its cost is not known until the drops are settled — hence the
- *   re-evaluation each pass. Treating it as free is exactly the omission the Merlin5 workbook's own
+ *   re-evaluation each pass. Treating it as free is exactly the omission the pilot client workbook's own
  *   arithmetic makes, and it is how a plan lands 14 seconds over the number it just promised.
  */
 function fitToBudget(args: {
