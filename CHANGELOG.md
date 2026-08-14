@@ -544,6 +544,76 @@ release process.
 
 ### Fixed
 
+- **Capabilities invoked from a workflow now record a cost row.** The dispatcher
+  wrote `CapabilityContext.agentId` to `AiCostLog.agentId`, but a workflow
+  dispatches under a `workflow:${workflowId}` label rather than a real
+  `AiAgent.id` — and that column is a foreign key to it. Postgres rejected every
+  such insert with P2003 (`ai_cost_log_agentId_fkey`, reproduced against a live
+  database), `logCost` swallowed the rejection into an error log and returned
+  `null`, and the row was lost. So every `tool_call` step emitted an error-level
+  log line and the Costs page's per-tool breakdown under-reported capabilities
+  run from workflows to **zero**. The label is no longer written to that column;
+  `CapabilityContext` gained an optional `workflowExecutionId`, which the
+  `tool_call` executor sets from `ctx.executionId` and which maps to
+  `AiCostLog.workflowExecutionId` — a real FK, satisfied because the execution
+  row exists before any step runs. **Fork-facing:** these rows appear where none
+  did before. No agent's `checkBudget()` total moves — it sums by `agentId`, and
+  these rows never existed to be counted. **Scope of the fix, stated precisely:**
+  the row persists and carries `workflowExecutionId`, so it is queryable by
+  execution and the per-capability stats route (`operation: 'tool_call'` +
+  `metadata.slug`) reports it instead of zero. It does **not** yet show in the
+  execution detail or live cost panels, which key on `metadata.stepId` and skip
+  any row without one — `tool_call` rows carry `{ slug, success }`. Completing
+  that, and the same `workflowExecutionId` for capabilities dispatched from an
+  `agent_call` step, is tracked in #600. Pre-existing, found by review of #528.
+- **Scheduled `tool_call` steps no longer fail on a cold process.**
+  `engine/executors/tool-call.ts` dispatched straight into the capability
+  registry without calling `registerBuiltInCapabilities()` first, unlike the
+  chat handler, the MCP tool registry and `agent_call`. #462 made the registry
+  a `globalThis` singleton so a registration in one module realm is visible
+  from all of them, but the *trigger* stayed lazy behind module-scoped
+  booleans — so the map is only populated once something calls the initialiser,
+  and all three callers that do are reached by an HTTP request. The scheduler
+  is not. A server that had served nothing since boot dispatched into an empty
+  map and the step failed `unknown_capability` naming a slug that was
+  registered perfectly well. It presented as a fork bug (the message names the
+  fork's own slug) and was worst exactly when it mattered: an overnight-quiet
+  process is precisely the one running a 03:15 scheduled workflow. Under load
+  it hid, and no unit suite could see it — tests register explicitly in setup,
+  so their registry is never empty. Reported from a fork whose four scheduled
+  workflows are built almost entirely from `tool_call` steps (#537).
+- **`CAPABILITY_BINDING_MODE=strict` no longer breaks every workflow
+  `tool_call` step.** A workflow execution isn't bound to an agent, so the
+  executor dispatches under a synthetic `workflow:${workflowId}` label. Under
+  `strict` a missing `AiAgentCapability` row denies — and that row **cannot be
+  created**, because `AiAgentCapability.agentId` is a foreign key to
+  `AiAgent.id` and the FK rejects a `workflow:` id. So enabling strict as a
+  hardening measure failed every `tool_call` step in every workflow with
+  `capability_disabled_for_agent` and no configuration that fixed it; because
+  the error is per-step it read as a capability misconfiguration, sending an
+  operator to audit a table that was already correct. Workflow labels are now
+  exempt and fall through to the base capability's defaults in both modes.
+  **Semantics change, deliberate:** `strict` no longer covers workflow
+  `tool_call` steps at all. It is about an *agent* reaching a capability it was
+  never granted, and all three agent-facing paths take the tool name from a
+  model — whereas a step's `capabilitySlug` is Zod-parsed config on an
+  admin-authored workflow (`withAdminAuth` on every workflow write route), so
+  the step *is* the grant — a **workflow-scoped** one. **Read this before
+  relying on strict as a revocation:** its guarantee is _agent_-scoped and does
+  not follow into a workflow. An agent bound to `run_workflow` names the
+  workflow as a tool argument, so every capability inside any workflow its
+  `customConfig.allowedWorkflowSlugs` permits runs under that workflow's label —
+  including one you revoked from the calling agent. Neither deleting the binding
+  row nor `isEnabled: false` closes that, because the workflow path consults no
+  binding at all; `isActive: false` and quarantine do, because both deny before
+  any binding is read. **Fork-facing:** the prefix is now the shared constant
+  `WORKFLOW_AGENT_ID_PREFIX`, with `workflowAgentId()` and `isWorkflowAgentId()`
+  beside it — on `lib/orchestration/capabilities/dispatcher.ts` and re-exported
+  from the `@/lib/orchestration/capabilities` barrel. Mint and test the label
+  through those rather than re-inlining the template, which is how the executor
+  and the dispatcher came to disagree. `permissive` (the default) is
+  behaviourally unchanged; it now skips a query that could only ever return
+  zero rows (#528).
 - **Built-in capability seeds now re-apply their function schema on re-seed.**
   Every `AiCapability` upsert wrote `functionDefinition`, `executionType` and
   `executionHandler` on `create` only, so once a row existed the DB — and

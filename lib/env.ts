@@ -119,7 +119,18 @@ const serverEnvSchema = z.object({
         'setting isEnabled:false and keeping the row. "strict" makes a missing row deny instead. ' +
         'Strict is opt-in because it retroactively revokes every capability an agent relied on ' +
         'implicitly, including the mcp-system agent, which dispatches built-ins with no pivot ' +
-        'rows in a default install — audit AiAgentCapability before enabling it.'
+        'rows in a default install — audit AiAgentCapability before enabling it. ' +
+        'Workflow tool_call steps are EXEMPT: they dispatch under a synthetic ' +
+        '"workflow:<id>" agentId that the AiAgentCapability FK rejects, so no binding row can ' +
+        'be created for them and strict would deny every one with no available remedy. The ' +
+        "step's capabilitySlug is admin-authored config, not a model-chosen tool name, so the " +
+        'step itself is the grant. CONSEQUENCE worth knowing before you rely on strict as a ' +
+        "revocation: strict's guarantee is AGENT-scoped and does not follow into a workflow. An " +
+        'agent bound to run_workflow can reach every capability inside any workflow its ' +
+        'customConfig.allowedWorkflowSlugs permits, including one you revoked from that agent ' +
+        'directly. Note isEnabled:false does NOT help here either — the workflow path never ' +
+        'consults a binding row at all. Audit those allow-lists, or use the capability-scoped ' +
+        'off-switches that deny BEFORE any binding is read: isActive:false, or quarantine.'
     ),
 
   // Logging Configuration (optional)
