@@ -7,13 +7,14 @@ repos, and the two knobs a fork may want to flip. The pipeline is designed to be
 
 ## Workflows
 
-| File                                      | Trigger                      | Purpose                                                                                             |
-| ----------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`                | push to `main`, PR to `main` | Type-check, lint/format, build, tests, erasure smoke, Docker build + stack smoke, lockfile metadata |
-| `.github/workflows/codeql.yml`            | push, PR, weekly cron        | SAST → Security → Code scanning (skips on private; see below)                                       |
-| `.github/workflows/dependency-review.yml` | PR to `main`                 | Blocks PRs adding vulnerable deps (skips on private; see below)                                     |
-| `.github/workflows/secret-scan.yml`       | push, PR, weekly cron        | TruffleHog; diff on PR, full history on cron                                                        |
-| `.github/workflows/dependency-audit.yml`  | weekly cron, manual          | Audits the tree **as it stands**: advisories + `libc` completeness                                  |
+| File                                        | Trigger                      | Purpose                                                                                             |
+| ------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`                  | push to `main`, PR to `main` | Type-check, lint/format, build, tests, erasure smoke, Docker build + stack smoke, lockfile metadata |
+| `.github/workflows/codeql.yml`              | push, PR, weekly cron        | SAST → Security → Code scanning (skips on private; see below)                                       |
+| `.github/workflows/dependency-review.yml`   | PR to `main`                 | Blocks PRs adding vulnerable deps (skips on private; see below)                                     |
+| `.github/workflows/secret-scan.yml`         | push, PR, weekly cron        | TruffleHog; diff on PR, full history on cron                                                        |
+| `.github/workflows/dependency-audit.yml`    | weekly cron, manual          | Audits the tree **as it stands**: advisories + `libc` completeness                                  |
+| `.github/workflows/fork-sync-integrity.yml` | push to `main`, manual       | Detects a squash-merged sync PR that silently reset the merge base (no-op upstream; see below)      |
 
 ## `ci.yml` shape
 
@@ -315,6 +316,102 @@ fail (`Advanced Security must be enabled…`). Both skip automatically on privat
 Dependabot (existing deps), TruffleHog (secret scanning) and `dependency-audit`
 (`npm audit` + the `libc` completeness check) are unaffected — they work on
 private repos regardless, needing no Advanced Security.
+
+### `Fork Sync Integrity` — the one job that only ever fires downstream
+
+`scripts/ci/check-sunrise-ancestry.sh` asserts that the release the tree
+**claims** in `lib/sunrise-version.ts` is genuinely an **ancestor** of `HEAD`.
+
+It exists because a fork that squash-merges its sync PR keeps every file but
+loses the second parent, so the merge base against upstream silently reverts to
+the previous release and the next sync re-conflicts everything already resolved
+by hand. Neither repo settings nor documentation can prevent it — rulesets can
+only restrict merge methods for _every_ PR into the branch, and merging is a
+human click months after anyone read the sync guide. So this is **detection**:
+it collapses time-to-discovery from months to minutes, because the repair is
+trivial only while the context is fresh.
+
+**It is a guaranteed no-op in Sunrise's own repo.** Sunrise tags every release
+on `main`, so the tag is always an ancestor. It is also self-enforcing: a fork
+receives the workflow _by doing a sync merge_, so squashing that sync makes it
+fire on the first run afterwards.
+
+**Five** deliberate non-failures, each of which would otherwise red-line a build
+for something that is not a lost merge base. The script has exactly one `fail`
+path; everything else skips:
+
+| Situation                                      | Behaviour            | Why                                                                                                                                          |
+| ---------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| No `SUNRISE_VERSION` in the tree               | skip + `::warning::` | Nothing is being claimed, so there is nothing to check                                                                                       |
+| Shallow clone                                  | skip + `::warning::` | `merge-base` would answer from truncated history and report a loss that has not happened                                                     |
+| Tag not fetchable                              | skip + `::warning::` | Mid-release (every Sunrise release, at the moment of cutting it) or an unreachable upstream                                                  |
+| Fetched tag claims a different Sunrise version | skip + `::warning::` | It is some other project's release of the same name — see the identity check below                                                           |
+| `merge-base` exits non-zero **and non-1**      | skip + `::warning::` | Only exit 1 means "not an ancestor"; 128 is a git error, and reporting it as a finding would announce a lost merge base for a corrupt object |
+
+**Every skip emits a `::warning::` annotation.** All three exit 0, and a bare
+`echo` would render the check fully green with nothing on the run — which, for a
+guard whose entire premise is time-to-discovery, would reinstate the original
+failure mode one level up. The skips are the residual risk in this design, so
+they are made visible rather than merely logged.
+
+Four implementation details are load-bearing. Each was confirmed by control
+experiment, and `tests/unit/scripts/ci/check-sunrise-ancestry.test.ts` fails
+against the naive version of each:
+
+- **Upstream's tag is fetched into a private ref, not `refs/tags/`, and there is
+  no fallback to the local tag.** A fork versions its app independently of
+  Sunrise, so it may hold its own `v0.8.0` pointing at its own history — which
+  _is_ an ancestor of its own `main`, so a `refs/tags/`-based check reports
+  **success on the very repository it exists to protect**. The mirror case is
+  worse: where the fork's own tag is _not_ an ancestor, such a check fails and
+  tells the operator to `git merge -s ours` an unrelated release branch into
+  `main`, recording a claim that is false. An earlier revision fell back to the
+  local tag when the fetch failed and reinstated both; an unreachable upstream
+  now skips instead, because the honest answer is that we could not look.
+- **`fetch-depth: 0` is required** in the workflow. Lowering it does not disable
+  the guard quietly — the shallow check turns it into a skip with a
+  `::warning::` annotation on the run.
+- **The fetched tag is checked for identity, not just fetched.** The tag name is
+  Sunrise's namespace but resolves against whatever `UPSTREAM_URL` points at, so
+  a framework-tier fork's own same-named release would otherwise be treated as
+  Sunrise's — the private-ref collision again, arriving through the escape
+  hatch. The tag's own `lib/sunrise-version.ts` must equal the claim; every
+  Sunrise release tag satisfies that by construction (verified v0.5.0–v0.8.1).
+
+  **This narrows the collision; it does not eliminate it.** The comparison is on
+  the version _string_, so it still passes if an intermediate fork's own release
+  number happens to equal the Sunrise version it carries — Daybreak cutting its
+  `v0.8.1` while sitting on Sunrise 0.8.1. A tag name is not a globally unique
+  identifier, and no amount of layering makes it one; this is why the guidance
+  is to leave `UPSTREAM_URL` unset unless Sunrise's tags genuinely are
+  unreachable, rather than to rely on the check.
+
+- **The printed repair merges an explicit ref, never the bare tag name.** Plain
+  `git fetch upstream --tags` is **rejected** when the fork already holds a tag
+  of that name (`would clobber existing tag`, exit 1), leaving it pointing at
+  the fork's own commit — so a repair naming the bare tag would record a false
+  claim. The same collision, in the instructions rather than the detection.
+- **The fetch's exit status gates the check, not the ref's existence.** A
+  leftover `refs/sunrise-ancestry/*` from a killed run would otherwise be an
+  undocumented fallback of exactly the kind removed above.
+
+Two caveats for forks, both of which make the guard inert rather than wrong:
+the workflow triggers on `push` to **`main`** only, so a fork with a different
+default branch must edit the `branches:` filter; and a permanently-failing fetch
+(a mistyped or expired `SUNRISE_UPSTREAM_URL`) skips forever. The skip
+annotation quotes git's own error so the second is diagnosable from the run.
+
+The failure message is emitted twice on purpose: plainly for the log, and
+`%0A`-encoded onto a single `::error::` line. Workflow commands are line-scoped,
+so without the encoding the annotation — the surface an operator sees without
+expanding the job — would carry the diagnosis and leave the `git merge -s ours`
+repair behind in log output.
+
+`UPSTREAM_URL` is overridable via `SUNRISE_UPSTREAM_URL`, for a leaf fork of a
+framework-tier fork. The workflow reads the **secret** first and falls back to
+the **variable**: a private upstream needs a token in the URL, and secrets are
+masked in logs and write-only, whereas `vars.*` are unmasked and readable back
+through the API by anyone with write access.
 
 ### One caveat on the scheduled audit
 

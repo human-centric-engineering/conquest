@@ -202,6 +202,32 @@ release process.
   in its place (#559).
 ### Added
 
+- **`Fork Sync Integrity` workflow — catches a squash-merged sync PR.** Squashing
+  a sync PR keeps every file but discards the second parent, so git no longer
+  knows the release tag is in your history and the merge base against upstream
+  silently reverts to the **previous** release. Nothing looks wrong until the
+  next sync replays the whole preceding range and re-conflicts every file
+  already resolved by hand. `scripts/ci/check-sunrise-ancestry.sh` asserts that
+  the release the tree claims in `lib/sunrise-version.ts` is genuinely an
+  ancestor of `HEAD`, and runs on every push to `main`, so the repair is still a
+  zero-diff `git merge -s ours` while the context is fresh — the failure
+  annotation carries that command, `%0A`-encoded onto one line so it survives
+  GitHub's line-scoped workflow commands rather than being left in log output. **A guaranteed no-op in Sunrise's own repository**
+  (Sunrise tags every release on `main`), and self-enforcing downstream: a fork
+  receives the workflow *by doing a sync merge*, so squashing that sync makes it
+  fire on the first run afterwards. It has exactly one failing path: everything
+  else skips, including a version bumped before its tag is pushed (every Sunrise
+  release, at the moment of cutting it), an unreachable upstream, a shallow
+  clone, a fetched tag belonging to some other project's release of the same
+  name, and any `git merge-base` error that is not a plain "not an ancestor".
+  Each skip emits a `::warning::` annotation, because a guard that goes
+  permanently and silently green is the original failure mode one level up. **Fork-facing:** set `SUNRISE_UPSTREAM_URL` if your
+  upstream is not Sunrise itself (a leaf fork of a framework-tier fork) — as a
+  repository **variable**, or as a **secret** of the same name if the URL has to
+  carry a token for a private upstream (the workflow prefers the secret; secrets
+  are masked in logs and write-only, variables are neither).
+  `CUSTOMIZATION.md` §9 now opens with the merge-don't-squash rule and the
+  repair (#539).
 - **`finishReason` on the `done` SSE event.** `ChatEvent.done` now carries an
   optional `finishReason` (`'stop' | 'tool_use' | 'length' | 'error'`) telling a
   consumer why the provider stopped generating on the final turn of the tool
