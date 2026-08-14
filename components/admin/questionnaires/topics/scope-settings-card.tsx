@@ -464,11 +464,12 @@ export function ScopeSettingsCard({
         <div className="space-y-1.5 border-t pt-4">
           <SectionLabel>Extra guidance (optional)</SectionLabel>
           <Label className="text-sm font-medium">
-            Anything the criteria cannot say{' '}
+            Guidance that applies across all topics{' '}
             <FieldHelp title="Planner instructions">
-              Appended to the planner prompt. Use it for judgement the topics’ own criteria cannot
-              express — “prefer breadth over depth for first-time respondents”. It cannot override
-              the limit, the rules, or the fallback: those are enforced after the model answers.
+              Appended to the planner prompt. Each topic’s criteria say when that one topic applies;
+              this says how to judge the plan as a whole — “prefer breadth over depth for first-time
+              respondents”. It cannot override the limit, the rules, or the fallback: those are
+              enforced after the model answers.
             </FieldHelp>
           </Label>
           <AutoTextarea

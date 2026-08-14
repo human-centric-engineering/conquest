@@ -486,8 +486,11 @@ Three things about the tab are load-bearing rather than cosmetic.
 sequence — group every question into a topic, mark the conditional ones, pin the certainties, then
 switch on — and an admin who flips the switch first gets a questionnaire that behaves exactly as it
 did before, with nothing on screen explaining why. `ScopeExplainer` states that sequence at the top
-of the page. It is dismissible and remembered per browser, not per questionnaire: the mechanism is
-the same everywhere, so re-teaching it on the next instrument is noise.
+of the page. It starts collapsed — heading and one-line summary only — and its open/closed state is
+deliberately not persisted anywhere: expanding it is a momentary "remind me what this page is"
+gesture, not a preference about how the page should look, so it is plain component state that resets
+on the next visit. An earlier version remembered it in `localStorage`, which meant expanding it once
+to read it kept the full panel open on every questionnaire afterwards.
 
 **The settings card is ordered by the runtime, and numbered to say so.** Hard rules sit first
 because they really are evaluated before the agent; the cap and the confidence floor sit after

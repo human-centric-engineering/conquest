@@ -9,9 +9,12 @@
  * switch on last). An admin who turns the switch on before any topic is conditional gets a
  * questionnaire that behaves exactly as it did before, with no clue why.
  *
- * Open by default and dismissible, remembered per browser rather than per questionnaire: the thing
- * being learned is the mechanism, which is the same on every questionnaire, so re-teaching it on
- * the next one is noise. The steps stay reachable from the header link once collapsed.
+ * Collapsed by default, and deliberately NOT persisted. Expanding it is a momentary "remind me what
+ * this page is" gesture, not a preference about how the page should look — so it is plain component
+ * state that resets on the next visit. Persisting it got this backwards twice over: an admin who
+ * expanded it once to read it was then shown the full panel on every questionnaire forever, and the
+ * stored value silently outranked any later change to the default. The heading and the one-line
+ * summary stay visible while collapsed, so the panel is still findable by someone who does need it.
  *
  * Deliberately example-free in the domain sense. Every illustration here is drawn from a different
  * kind of instrument (a screener, a compliance audit, a role-specific survey) so no single client's
@@ -19,8 +22,8 @@
  */
 
 import { ChevronDown, Route } from 'lucide-react';
+import { useState } from 'react';
 
-import { useLocalStorage } from '@/lib/hooks/use-local-storage';
 import { cn } from '@/lib/utils';
 
 /** The four authoring steps, in the order they must actually happen. */
@@ -48,7 +51,7 @@ export interface ScopeExplainerProps {
 }
 
 export function ScopeExplainer({ className }: ScopeExplainerProps) {
-  const [open, setOpen] = useLocalStorage('cq.admin.scope.explainer.open.v1', true);
+  const [open, setOpen] = useState(false);
 
   return (
     <section
