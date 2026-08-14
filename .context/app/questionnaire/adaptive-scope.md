@@ -339,6 +339,10 @@ The `notAssessed` list on the session export is what makes an adaptive instrumen
   go looking for a footnote before believing it. Where a scale was partial for everyone, the output
   is "not reportable" — deliberately different wording from k-anonymity's "too few respondents",
   because a bigger cohort would not produce the missing number.
+- **The author is warned before fielding it** (F17.15). Cohort exclusion is the right behaviour and
+  it is silent at authoring time, so `comparability.ts` says on the Topics tab which scales routing
+  can narrow — and which ones no plan can ever cover, whose every score will therefore be partial.
+  See [Comparability](#comparability--what-routing-does-to-a-score-f1715).
 - **The PDF export prints the list itself** (F17.12), under "What this interview did not cover",
   skipped and sampled kept apart. Not gated on any `include` switch: every listing in that document
   is already filtered to what was in scope, so without the note it narrows **silently** and reads as
@@ -468,6 +472,48 @@ respondent, and every plan it produces is plausible. Nothing downstream would ev
 All three are silent when the version has no opening topic at all: `no_opening_topic` is the finding
 to fix first, and one reachability warning per rule on top of it buries the cause.
 
+### Comparability — what routing does to a score (F17.15)
+
+Scoring combines answers into a scale; Adaptive Scope decides which of them get asked. Together they
+can compute a scale from a different subset of its own items for every respondent, and
+`scoreSession` returns a number either way.
+
+F17.13 made the **reporting** side honest — cohort means are computed only over respondents asked
+the whole scale — which has a consequence nobody was told about while authoring: **a scale no plan
+can ever cover completely is excluded for every respondent**, and the author finds out when the
+cohort report comes back empty, after the instrument has been fielded.
+
+| Code                   | Severity                   | When                                                                                      |
+| ---------------------- | -------------------------- | ----------------------------------------------------------------------------------------- |
+| `scale_never_whole`    | warning                    | The scale needs more conditional topics than a plan can seat — by count, or by seconds    |
+| `scale_split_by_scope` | warning                    | The scale draws on conditional topics a plan _can_ cover, so some respondents are partial |
+| `scale_item_unowned`   | error (on) / warning (off) | The scale scores a key belonging to no topic, so it is never asked                        |
+
+**The count is taken from unavoidable topics, not touched ones.** "Can a plan cover this scale?" is a
+set-cover question — an item claimed by two topics is asked if _either_ is seated — and a greedy
+answer can overstate what is needed. Overstating here means telling an author "no respondent is ever
+asked all of this" when one might be, so the count comes from items with exactly **one** owning
+topic. Those topics are in every cover, which makes the number a lower bound and the finding
+incapable of crying wolf. `scale_split_by_scope` uses the wider touched-topic count, because there
+the claim is only that some respondents will be partial — which is true either way.
+
+`light` depth is deliberately not modelled: a topic seated as the blind-spot check contributes two
+members, so a scale drawing on it is partial even when the topic _is_ seated. That makes
+`scale_split_by_scope` an understatement rather than an overstatement, and the fix it points at does
+not change.
+
+These run whether or not `enabled` is set. "What would routing do to my scores" is a question that
+has to be answered before the routing starts.
+
+### Duplicate membership
+
+A question claimed by two topics is tolerated at runtime — asked if either is in scope, attributed to
+the first in-scope topic in ordinal order — but it is not free. `estimateTopicCosts` prices each
+topic independently and `alwaysTopicSeconds` sums them, so a shared member is **charged once per
+claiming topic**: the floor comes out too high, the routed allowance too low, and the fit drops
+topics that would in fact have held. `duplicate_membership` is a warning, reported regardless of
+`enabled`, and aggregated per kind so a copied topic produces one finding rather than forty.
+
 ---
 
 ## Files
@@ -486,6 +532,7 @@ to fix first, and one reachability warning per rule on top of it buries the caus
 | `lib/app/questionnaire/capabilities/analyse-routing.ts`             | The analyst capability                                                                                                                                                            |
 | `lib/app/questionnaire/scope/seed.ts`                               | One topic per section, pure                                                                                                                                                       |
 | `lib/app/questionnaire/scope/validate.ts`                           | Coherence findings                                                                                                                                                                |
+| `lib/app/questionnaire/scope/comparability.ts`                      | What routing does to a scoring scale (F17.15) — which scales it can narrow, and which no plan can ever cover                                                                      |
 | `app/api/v1/app/questionnaires/_lib/session-scope.ts`               | The DB seam                                                                                                                                                                       |
 | `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
 | `app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`          | The post-turn trigger                                                                                                                                                             |

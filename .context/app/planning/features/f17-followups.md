@@ -219,12 +219,25 @@ fired was invisible.
 
 ---
 
+## 12. Nothing warned that routing would make a scale unscoreable · **DONE** — see [`f17.15.md`](./f17.15.md)
+
+> Shipped 2026-08-14. Every check on the tab described the topic set alone; none described what
+> routing does to anything downstream of it. Scoring is downstream of it: §6 made cohort statistics
+> exclude a partly-assessed respondent, which means a scale no plan can ever cover completely is
+> excluded for **everyone** — and the author found out when the cohort report came back empty. The
+> arithmetic was deterministic and unread. `comparability.ts` now reads it, counting only the topics
+> no cover can omit so the finding cannot cry wolf.
+
+Not on the original list either, and it followed directly from §6 landing.
+
+---
+
 ## 10. Smaller things
 
 - **No drag-reorder of topics.** Up/down buttons only. Fine for a dozen, tedious for forty.
-- **No duplicate-membership check.** A question claimed by two topics is tolerated (asked if either
-  is in scope; attributed to the first in-scope topic in ordinal order) but an author almost never
-  means it, and `validateAdaptiveScope` does not look.
+- ~~**No duplicate-membership check.**~~ **DONE** — see [`f17.15.md`](./f17.15.md). It turned out
+  not to be cosmetic: costs are priced per topic and summed, so a shared member is charged once per
+  claiming topic and the floor, the allowance and the fit are all off by it.
 - **The amendment cue gate is English-only.** A localised respondent surface needs the cue list per
   locale, or the regex replaced by a cheap classifier.
 - **No replay of a recorded analysis.** The `AppAiRun` snapshot holds the analyst's output but not

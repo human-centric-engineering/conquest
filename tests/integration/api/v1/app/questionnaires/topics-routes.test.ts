@@ -27,6 +27,7 @@ vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionSlot: { findMany: vi.fn() },
     appDataSlot: { findMany: vi.fn() },
+    appScoringSchema: { findUnique: vi.fn() },
   },
 }));
 
@@ -173,6 +174,8 @@ beforeEach(() => {
   (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
   (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([]);
   (prisma.appDataSlot.findMany as Mock).mockResolvedValue([]);
+  // Most versions do not score — the comparability checks (F17.15) then have nothing to say.
+  (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue(null);
 });
 
 // ─── GET ──────────────────────────────────────────────────────────────────────
@@ -231,6 +234,42 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
     const res = await GET(getReq(), ctx(PARAMS));
     const body = await res.json();
     expect(body.data.draft).toEqual(draft);
+  });
+
+  it('reports a scale that routing can leave partially assessed (F17.15)', async () => {
+    // `wellbeing` is the version's only topic and it is conditional, so a respondent not routed to
+    // it is scored on none of the scale — and the cohort report will exclude them.
+    (loadAdaptiveScopeSettings as Mock).mockResolvedValue({
+      ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+      enabled: true,
+    });
+    (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue({
+      content: {
+        scales: [{ key: 'strain', name: 'Strain' }],
+        items: [{ source: 'question', ref: 'q1', scaleKey: 'strain', weight: 1, reverse: false }],
+        bands: [],
+        method: 'mean',
+      },
+    });
+
+    const res = await GET(getReq(), ctx(PARAMS));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    const scaleIssues = body.data.issues.filter((i: { code: string }) =>
+      i.code.startsWith('scale_')
+    );
+    expect(scaleIssues).toHaveLength(1);
+    expect(scaleIssues[0].code).toBe('scale_split_by_scope');
+    expect(scaleIssues[0].message).toContain('Strain');
+  });
+
+  it('says nothing about scales when the version has no scoring schema', async () => {
+    const res = await GET(getReq(), ctx(PARAMS));
+    const body = await res.json();
+    expect(
+      body.data.issues.filter((i: { code: string }) => i.code.startsWith('scale_'))
+    ).toHaveLength(0);
   });
 });
 
