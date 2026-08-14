@@ -22,10 +22,14 @@
  *
  * ## The time budget
  *
- * A version with `sessionBudgetSeconds` set gets one extra pair of queries here — the question
- * types and the data-slot keys — because a plan cannot be fitted to seconds without knowing what
- * each item costs. Every other session pays nothing for it: the load is gated on the setting, which
- * is `0` by default.
+ * A version with `sessionBudgetSeconds` set gets one extra pair of queries — the question types and
+ * the data-slot keys — because a plan cannot be fitted to seconds without knowing what each item
+ * costs. Every other session pays nothing for it: the load is gated on the setting, which is `0` by
+ * default.
+ *
+ * The pricing itself lives in `questionnaires/_lib/plan-inputs.ts` rather than here, because the
+ * authoring dry-run (F17.14) has to reach the SAME arithmetic. A preview that priced the instrument
+ * differently from the interview would be a preview that lies, and it would lie quietly.
  *
  * ## Fail-soft, always
  *
@@ -55,17 +59,10 @@ import type { ScopeFill } from '@/lib/app/questionnaire/scope/rules';
 import {
   narrowAdaptiveScopeSettings,
   narrowInterviewPlan,
-  type AdaptiveScopeSettings,
   type InterviewPlan,
-  type Topic,
 } from '@/lib/app/questionnaire/scope/types';
-import {
-  estimateTopicCosts,
-  itemSeconds,
-  matrixRowCount,
-} from '@/lib/app/questionnaire/scope/budget';
-import type { PlanBudget } from '@/lib/app/questionnaire/scope/guardrails';
-import { toTopic, TOPIC_SELECT } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { loadTopics } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { loadPlanBudget } from '@/app/api/v1/app/questionnaires/_lib/plan-inputs';
 import { DATA_SLOT_FILLED_THRESHOLD } from '@/lib/app/questionnaire/orchestrator/data-slot-orchestrator';
 
 /** What the trigger decided, for the caller's logging. Never an error. */
@@ -127,12 +124,7 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
       return { kind: 'skipped', reason: 'already planned' };
     }
 
-    const rows = await prisma.appQuestionnaireTopic.findMany({
-      where: { versionId: session.versionId },
-      orderBy: { ordinal: 'asc' },
-      select: TOPIC_SELECT,
-    });
-    const topics = rows.map(toTopic);
+    const topics = await loadTopics(session.versionId);
     if (topics.length === 0) return { kind: 'skipped', reason: 'no topics authored' };
 
     // "Covered" mirrors the orchestrator's own definition (`isCovered`): a plainly-stated answer
@@ -268,44 +260,4 @@ export async function maybePlanScope(sessionId: string): Promise<PlanScopeTrigge
     });
     return { kind: 'skipped', reason: 'planning failed' };
   }
-}
-
-/**
- * Price the version's topics for the fit stage (C7b), or null when there is no budget to fit to.
- *
- * Two queries, and only for a version whose author set a budget — the setting is `0` by default, so
- * the overwhelming majority of sessions never reach the `findMany`s at all.
- *
- * `weight` is loaded because a `light` topic asks its highest-weight members, so what a light topic
- * costs depends on it. Omitting it would price the blind-spot check off the wrong two questions —
- * which is the one cost the fit stage reserves before it judges anything to fit.
- */
-async function loadPlanBudget(
-  versionId: string,
-  settings: AdaptiveScopeSettings,
-  topics: readonly Topic[]
-): Promise<PlanBudget | null> {
-  if (settings.sessionBudgetSeconds <= 0) return null;
-
-  const [questions, dataSlots] = await Promise.all([
-    prisma.appQuestionSlot.findMany({
-      where: { versionId },
-      select: { key: true, type: true, typeConfig: true, weight: true },
-    }),
-    prisma.appDataSlot.findMany({ where: { versionId }, select: { key: true, weight: true } }),
-  ]);
-
-  const seconds = itemSeconds(
-    questions.map((q) => ({ key: q.key, type: q.type, rowCount: matrixRowCount(q.typeConfig) })),
-    dataSlots.map((d) => d.key),
-    settings
-  );
-
-  return {
-    budgetSeconds: settings.sessionBudgetSeconds,
-    costs: estimateTopicCosts(topics, seconds, {
-      byQuestionKey: new Map(questions.map((q) => [q.key, q.weight] as const)),
-      byDataSlotKey: new Map(dataSlots.map((d) => [d.key, d.weight] as const)),
-    }),
-  };
 }

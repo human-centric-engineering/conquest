@@ -548,6 +548,7 @@ function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
     inventory: { questions: [], dataSlots: [] },
     costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
     draft: null,
+    preview: { openingQuestions: [], fillTargets: [] },
     ...over,
   };
 }

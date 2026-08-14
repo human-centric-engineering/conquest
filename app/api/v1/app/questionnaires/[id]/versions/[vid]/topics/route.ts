@@ -39,6 +39,7 @@ import {
   saveTopicsSchema,
 } from '@/lib/app/questionnaire/scope/schemas';
 import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { buildPlanPreviewForm } from '@/lib/app/questionnaire/scope/views';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
@@ -153,6 +154,12 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       inventory: { questions: inventory.questions, dataSlots: inventory.dataSlots },
       costs,
       draft,
+      preview: buildPlanPreviewForm(
+        topics,
+        settings,
+        inventory.dataSlots,
+        new Map(inventory.questions.map((q) => [q.key, q.prompt] as const))
+      ),
     });
   }
 );

@@ -25,6 +25,7 @@ import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/rou
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
+import { PlanPreviewCard } from '@/components/admin/questionnaires/topics/plan-preview-card';
 import {
   TopicListEditor,
   type DraftTopic,
@@ -153,6 +154,23 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         initialDraft={payload.draft}
         questionKeys={payload.inventory.questions.map((q) => q.key)}
         liveTopicCount={payload.topics.length}
+        disabled={busy}
+      />
+
+      {/* Sits after the settings it reads and before the topic list it is a verdict on: an author
+          adjusts criteria below, scrolls up, and re-runs. Hidden entirely when nothing is
+          conditional — there is no decision to preview. */}
+      <PlanPreviewCard
+        // Remount when the server payload changes, for the same reason the two cards below do —
+        // and one this card makes sharper. A verdict is only true of the settings that produced it,
+        // so an author who runs the preview, edits a topic's criteria and saves would otherwise be
+        // left looking at last run's plan sitting next to criteria that no longer produced it.
+        key={`preview-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}-${payload.settings.rules.length}`}
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        form={payload.preview}
+        topics={payload.topics}
+        enabled={payload.settings.enabled}
         disabled={busy}
       />
 

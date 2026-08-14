@@ -205,6 +205,20 @@ The pilot client arrived as one workbook, so this has not bitten yet.
 
 ---
 
+## 11. Nothing simulated a plan · **DONE** — see [`f17.14.md`](./f17.14.md)
+
+> Shipped 2026-08-14. `POST …/topics/preview` runs the real planner over a synthetic opening and
+> returns the plan the current settings would produce, with the layer that decided each topic —
+> including the one distinction the plan itself cannot carry, "the agent chose this and a limit took
+> it back". Writes nothing. Replay over real completed sessions was deliberately not built: it would
+> put respondent answers into an authoring surface.
+
+Not on the original list, and it should have been. Every check on the tab was structural — that the
+setup is well-formed, never what it does — so criteria shipped unverified and a sentence that never
+fired was invisible.
+
+---
+
 ## 10. Smaller things
 
 - **No drag-reorder of topics.** Up/down buttons only. Fine for a dozen, tedious for forty.

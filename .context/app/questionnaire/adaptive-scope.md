@@ -490,9 +490,91 @@ to fix first, and one reachability warning per rule on top of it buries the caus
 | `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
 | `app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`          | The post-turn trigger                                                                                                                                                             |
 | `app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/route.ts` | GET / PUT / PATCH                                                                                                                                                                 |
+| `.../topics/preview/route.ts`                                       | The plan dry-run (F17.14) — the planner over a synthetic opening; writes nothing                                                                                                  |
+| `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                 | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                         |
 | `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`  | Run the analyst (SSE) · accept or discard its proposal                                                                                                                            |
 | `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`          | The amendment trigger                                                                                                                                                             |
 | `components/admin/questionnaires/topics/**`                         | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review                                                                                                  |
+
+## Try it — the plan preview (F17.14)
+
+**Every other check on this tab is structural.** `validateAdaptiveScope` says the configuration is
+well-formed; the cost table says what it would take. Neither says which topics a respondent actually
+gets — and for a feature whose premise is "the model makes a judgement you cannot fully specify in
+advance", that left the author's only feedback loop a complete interview run as a respondent, with
+the plan inferred backwards from what got asked.
+
+`POST …/topics/preview` runs the real planner over an opening the author types and returns the plan
+the current settings would produce. It writes nothing: no session, no plan, no draft.
+
+### What it has to show beyond the plan
+
+A plan alone is not a diagnosis. An author looking at a topic that missed the cut needs to know
+**which layer dropped it**, because each one points at a different fix — the criteria, the cap, the
+seconds, or the rule. The plan already carries that: `PlannedTopic.source` and `ExcludedTopic.source`
+name the decider for every topic in and out.
+
+The one thing the plan cannot carry is the difference between _the model never picked this_ and _the
+model picked it and a guardrail took it back_ — which is precisely the distinction between "your
+criteria are wrong" and "your limit is too tight". So the response carries `proposedKeys` beside the
+plan, read from the planner's own pre-guardrail output snapshot.
+
+**That signal has to OVERRIDE the stored record, not sit beside it.** A proposal the cap trims is
+written to `excluded` with `source: 'llm'` and the rationale _"Not selected — nothing in the opening
+pointed at this area"_ — which is the opposite of what happened, and an author who believes it
+rewrites criteria that worked. Only `proposedKeys` can tell the two apart, so where it says the agent
+chose a topic, the card replaces both the badge and the rationale.
+
+The excluded list also needs **its own vocabulary**. `SCOPE_DECISION_SOURCE_LABELS` was written for a
+topic that made it in, where `llm` reads "Chosen by the agent"; on an excluded topic that same value
+means the exact opposite, so reusing it badges every ordinary non-selection "Chosen by the agent"
+directly under the heading "Not in this interview".
+
+### Naming the layer when it was not the agent
+
+`skippedModelReason` covers the paths where the plan was not the agent's judgement, and the
+distinctions are finer than "was a model called":
+
+| State                      | How it is told apart                       | Why it needs saying                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nothing to decide          | no provider, `confidence: 1`               | Reporting an unreachable agent here sends an author debugging one that is healthy                                                                                                                                           |
+| The call failed            | no provider, `confidence: 0`               | The genuinely unreachable case                                                                                                                                                                                              |
+| Below the confidence floor | **provider present**, `source: 'fallback'` | A check on "was a model called" misses this one entirely — and it is the most confusing state to land in unexplained, because the model's own picks sit in the excluded list rationalised as though nothing pointed at them |
+
+### Synthetic, and the fills are hand-set
+
+The author supplies the answers **and** the data-slot fills. In a live interview a fill is an
+extraction FROM those answers, so a hand-set fill is a hypothesis rather than a prediction, and the
+panel says so rather than leaving it to be discovered.
+
+Running the real extractor over the typed answers would be more faithful and much slower — and it
+would make the one demonstration that matters _harder_: a `not_exists` veto fires on an **absent**
+fill, and absence is exactly what an author needs to be able to set by hand. The slots a veto watches
+are marked in the form, and leaving one empty is presented as a deliberate act rather than an
+unfinished field.
+
+Replay over real completed sessions was considered and deliberately not built: it would put
+respondent answers into an authoring surface, and the author's own phrasing — the phrasing least
+likely to break the routing — is a cost worth naming rather than a gap worth hiding.
+
+### Why it records no `AppAiRun`
+
+`ai-run/types.ts` is explicit that interactive previews an admin is merely exploring with are not
+provenance: nobody acts on the verdict, it changes no durable config, and it is not an output anyone
+would defend to a client. The spend stays visible without it — `planScope` routes every call through
+`logCost`, and the route passes a `preview:<versionId>` reference so those rows stay separable from
+real interviews. A per-admin sub-cap (`scopePreviewLimiter`, 20/min) bounds a button that is _meant_
+to be pressed repeatedly.
+
+### One loader, two callers
+
+The live trigger and the dry-run must not assemble the version differently — **a preview that prices
+or projects the instrument differently from the interview is a preview that lies**, and it would lie
+quietly. Both now go through `loadTopics` (`_lib/topic-routes.ts`) for the topic projection and
+`loadPlanBudget` (`_lib/plan-inputs.ts`) for the pricing. The session-side half legitimately differs:
+one reads fills and answers off a real session, the other takes them from a form.
+
+---
 
 ## The authoring surface
 
