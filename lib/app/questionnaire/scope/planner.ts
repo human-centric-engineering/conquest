@@ -502,3 +502,23 @@ export function isOpeningComplete(
 
   return true;
 }
+
+/**
+ * The topic keys the model itself proposed, read back out of a recorded output snapshot.
+ *
+ * Lives here rather than at the call site because this module is what *writes* that snapshot
+ * (`PlanScopeResult.outputSnapshot` is `asked.value`, already validated against the planner's own
+ * schema). A reader defined anywhere else would be a second, hand-rolled description of a shape this
+ * file already owns — and would drift the moment the schema changed.
+ *
+ * Typed `unknown` in and validated with the real schema rather than cast, because a snapshot can
+ * also be `null` (no model call was made) or, for a row read back from storage, whatever was written
+ * months ago. Anything that does not parse yields `[]`: "the model proposed nothing" is the honest
+ * reading of a snapshot we cannot interpret, and it degrades the preview's trace rather than
+ * breaking it.
+ */
+export function readProposedTopicKeys(snapshot: unknown): string[] {
+  const parsed = plannerSchema.safeParse(snapshot);
+  if (!parsed.success) return [];
+  return parsed.data.selected.map((s) => s.topicKey);
+}

@@ -507,6 +507,12 @@ export const API = {
       /** The analyst's pending topic proposal (POST accept the reviewed set, DELETE discard). */
       versionTopicsDraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/draft`,
+      /**
+       * Dry-run the Scope Planner over a synthetic opening (POST). Writes nothing — returns the
+       * plan the version's current settings would produce, with the layer that decided each topic.
+       */
+      versionTopicsPreview: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/preview`,
       /** Curated glossary for a version (GET terms + document, PUT replace-set the reviewed set). */
       versionGlossary: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary`,

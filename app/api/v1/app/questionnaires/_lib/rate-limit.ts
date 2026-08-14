@@ -370,3 +370,23 @@ export const routingAnalysisLimiter = createRateLimiter({
   interval: ROUTING_ANALYSIS_RATE_LIMIT_INTERVAL_MS,
   maxRequests: ROUTING_ANALYSIS_RATE_LIMIT_MAX,
 });
+
+/**
+ * Scope-preview sub-cap (Adaptive Scope, F17.14). One reasoning-model call over the version's
+ * conditional criteria and a synthetic opening — the same class of spend as the live planner, but
+ * triggered by a button an admin is *meant* to press repeatedly.
+ *
+ * Looser than the routing analyst's 8/min because the honest loop here is genuinely iterative:
+ * adjust a topic's criteria, re-run, see whether the plan moved. Throttling that to eight would make
+ * the feature annoying enough to stop using, which costs more than the calls do. Keyed on the admin
+ * user id, who owns the spend.
+ */
+export const SCOPE_PREVIEW_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link scopePreviewLimiter}, in milliseconds. */
+export const SCOPE_PREVIEW_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const scopePreviewLimiter = createRateLimiter({
+  interval: SCOPE_PREVIEW_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: SCOPE_PREVIEW_RATE_LIMIT_MAX,
+});

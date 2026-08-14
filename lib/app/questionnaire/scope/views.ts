@@ -9,10 +9,12 @@
  */
 
 import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
-import type {
-  AdaptiveScopeSettings,
-  ProposedTopicSet,
-  Topic,
+import {
+  NEGATIVE_SCOPE_OPERATOR,
+  type AdaptiveScopeSettings,
+  type InterviewPlan,
+  type ProposedTopicSet,
+  type Topic,
 } from '@/lib/app/questionnaire/scope/types';
 import type { ScopeIssue } from '@/lib/app/questionnaire/scope/validate';
 
@@ -85,6 +87,11 @@ export interface TopicsPayload {
    * you have" is the sentence an admin needs, and it cannot be written from either half alone.
    */
   draft: ProposedTopicSet | null;
+  /**
+   * What the plan-preview form needs to render (F17.14). Derived from the same topics and rules
+   * carried above, server-side, so "which questions are in the opening" has one implementation.
+   */
+  preview: PlanPreviewForm;
 }
 
 /** The empty payload — what a failed fetch degrades to, so a tab renders rather than crashing. */
@@ -94,4 +101,106 @@ export const EMPTY_TOPICS_PAYLOAD: Omit<TopicsPayload, 'settings'> = {
   inventory: { questions: [], dataSlots: [] },
   costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
   draft: null,
+  preview: { openingQuestions: [], fillTargets: [] },
 };
+
+/* -------------------------------------------------------------------------- */
+/* The plan preview (F17.14)                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** One opening question the preview form offers a box for. */
+export interface PreviewOpeningQuestion {
+  key: string;
+  prompt: string;
+}
+
+/** One data slot the preview form offers a value for — and, crucially, lets be left empty. */
+export interface PreviewFillTarget {
+  key: string;
+  name: string;
+  /**
+   * True when a hard rule tests this slot for ABSENCE (`not_exists`).
+   *
+   * Surfaced because leaving the box empty is then not an omission but the whole experiment: the
+   * veto is the single most valuable thing a preview can demonstrate, and an author who does not
+   * know which slot it watches will fill every box out of tidiness and never see it fire.
+   */
+  watchedByVeto: boolean;
+}
+
+/**
+ * What the preview form needs to render itself, derived server-side from the version.
+ *
+ * Part of {@link TopicsPayload} rather than its own fetch: the form's shape is a function of the
+ * topics and rules already in that payload, and deriving it in the browser would mean a second
+ * implementation of "which questions are in the opening" that could disagree with the planner's.
+ */
+export interface PlanPreviewForm {
+  /** The opening topics' questions, in ordinal order. Empty when no opening topic is authored. */
+  openingQuestions: PreviewOpeningQuestion[];
+  /** Every data slot in the version, with the veto-watched ones marked. */
+  fillTargets: PreviewFillTarget[];
+}
+
+/**
+ * The dry-run's answer: the plan the current settings would produce, plus what the model itself
+ * proposed before the guardrails touched it.
+ *
+ * The plan already carries most of the trace — `PlannedTopic.source` and `ExcludedTopic.source`
+ * name the rule / the model / the fallback / the budget / the check for every topic. The one thing
+ * it cannot carry is the difference between "the model never picked this" and "the model picked it
+ * and a guardrail took it back", which is exactly the difference an author is trying to see.
+ */
+export interface PlanPreviewResult {
+  plan: InterviewPlan;
+  /** The topic keys the model proposed, in its own order. Empty when no model call was made. */
+  proposedKeys: string[];
+  /** Why no model call happened, when none did — "nothing to decide" is a real answer. */
+  skippedModelReason: string | null;
+  /** What this dry-run cost, in USD. Shown so an author knows the button is not free. */
+  costUsd: number;
+}
+
+/**
+ * Derive the preview form from the version's own topics, rules and slot inventory.
+ *
+ * Pure, and server-side by convention (the route calls it) for the same reason `issues` and `costs`
+ * are computed there: "which questions are in the opening" is a question the planner already
+ * answers one way, and a second answer computed in the browser could disagree with it.
+ *
+ * Opening questions are listed in topic-ordinal then member order, which is the order the interview
+ * would ask them in — an author filling the form top to bottom is reproducing a real opening.
+ */
+export function buildPlanPreviewForm(
+  topics: readonly Topic[],
+  settings: AdaptiveScopeSettings,
+  dataSlots: readonly TopicDataSlotRef[],
+  questionPrompts: ReadonlyMap<string, string>
+): PlanPreviewForm {
+  const openingQuestions: PreviewOpeningQuestion[] = [];
+  const seen = new Set<string>();
+  for (const topic of [...topics].sort((a, b) => a.ordinal - b.ordinal)) {
+    if (topic.phase !== 'opening') continue;
+    for (const key of topic.members.questionKeys) {
+      // A member naming a question that no longer exists is skipped, exactly as it is at runtime —
+      // showing a box for it would invite an author to answer a question no respondent can be asked.
+      const prompt = questionPrompts.get(key);
+      if (prompt === undefined || seen.has(key)) continue;
+      seen.add(key);
+      openingQuestions.push({ key, prompt });
+    }
+  }
+
+  const vetoed = new Set(
+    settings.rules.filter((r) => r.operator === NEGATIVE_SCOPE_OPERATOR).map((r) => r.dataSlotKey)
+  );
+
+  return {
+    openingQuestions,
+    fillTargets: dataSlots.map((slot) => ({
+      key: slot.key,
+      name: slot.name,
+      watchedByVeto: vetoed.has(slot.key),
+    })),
+  };
+}
