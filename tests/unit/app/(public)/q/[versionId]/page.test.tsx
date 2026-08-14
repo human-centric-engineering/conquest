@@ -184,11 +184,11 @@ describe('PublicQuestionnairePage', () => {
   describe('metadata', () => {
     it('titles the tab after the questionnaire', async () => {
       vi.mocked(resolveVersionHeader).mockResolvedValue({
-        title: 'Merlin5 Alpha Demo',
+        title: 'Acme Alpha Demo',
         round: null,
       });
       const meta = await generateMetadata({ params: Promise.resolve({ versionId: 'v1' }) });
-      expect(meta.title).toBe('Merlin5 Alpha Demo');
+      expect(meta.title).toBe('Acme Alpha Demo');
     });
 
     it('falls back to the generic title when the version has no resolvable header', async () => {

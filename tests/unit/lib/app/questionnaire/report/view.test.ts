@@ -226,10 +226,10 @@ describe('buildRespondentReportClientView', () => {
 
   it('carries the questionnaire title (so the completion screen can name the download)', async () => {
     (prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
-      session({ enabled: true, mode: 'raw' }, null, 'Merlin5 Alpha Demo')
+      session({ enabled: true, mode: 'raw' }, null, 'Acme Alpha Demo')
     );
     const view = await buildRespondentReportClientView('s1');
-    expect(view?.questionnaireTitle).toBe('Merlin5 Alpha Demo');
+    expect(view?.questionnaireTitle).toBe('Acme Alpha Demo');
   });
 
   it('falls back to a generic title when the questionnaire title is absent', async () => {

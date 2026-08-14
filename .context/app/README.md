@@ -45,17 +45,6 @@ on Sunrise. The **platform tier** (Sunrise itself) is documented separately at
   the two config constraints that silently break capture, the non-`User` PII
   posture, and the demo-spend risk.
 
-### `research/`
-
-- [`merlin5-growth-assessor.md`](./research/merlin5-growth-assessor.md) — **research,
-  not shipped.** Conceptual requirements for an adaptive diagnostic: an unscored
-  opening that exists only to generate routing signal, an inference step that
-  assembles a per-respondent section set under a time budget and six guardrails,
-  and a report built on the disagreement between stated need and scored result.
-  Names the eleven capabilities, maps each onto what we already have, and compares
-  five build options (recommendation: one instrument + a first-class per-session
-  Assessment Plan; the Experience switcher stays for routing _between_ instruments).
-
 ### `questionnaire/`
 
 - [`README.md`](./questionnaire/README.md) — index for the domain/technical docs.

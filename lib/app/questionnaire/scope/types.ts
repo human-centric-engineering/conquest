@@ -232,7 +232,7 @@ export const MAX_SECONDS_PER_ITEM = 600;
  * Seconds one data slot costs a respondent, by default.
  *
  * Priced as an open question rather than by type, because a data slot is filled from conversation:
- * the respondent talks, and the extractor listens. 40s is the Merlin5 workbook's own estimate for
+ * the respondent talks, and the extractor listens. 40s is the pilot client workbook's own estimate for
  * an opening question, which is exactly the shape of thing data slots capture.
  */
 export const DEFAULT_SECONDS_PER_DATA_SLOT = 40;

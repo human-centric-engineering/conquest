@@ -10,7 +10,7 @@ same requirement — and before P17 the only way to express it was to split the 
 several, which costs cross-section scoring and cohort analysis.
 
 > **Status:** F17.1–F17.6 shipped — the model, the runtime, the planner, the authoring
-> surface, the Routing Analyst, report/scoring awareness, and respondent amendment. The Merlin5
+> surface, the Routing Analyst, report/scoring awareness, and respondent amendment. The pilot client
 > instrument itself is not built: it needs its source workbook, which is not in this repo.
 
 ### The tab is called "Adaptive scope"; the URL segment is still `topics`
@@ -530,6 +530,6 @@ compliance audit, a role-specific survey.
 ## Related
 
 - [`../planning/features/f17.1.md`](../planning/features/f17.1.md) onward — the trackers
-- [`../research/merlin5-growth-assessor.md`](../research/merlin5-growth-assessor.md) — the client
+- The pilot client research notes (held outside this repo) — the client
   requirement analysis this capability was generalised from
 - [`experiences.md`](./experiences.md) — routing _between_ questionnaires, the sibling mechanism

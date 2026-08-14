@@ -310,9 +310,9 @@ describe('QuestionnaireSessionPage', () => {
 
   describe('metadata', () => {
     it('titles the tab after the questionnaire the signed-in user owns', async () => {
-      vi.mocked(resolveOwnedSessionTitle).mockResolvedValue('Merlin5 Alpha Demo');
+      vi.mocked(resolveOwnedSessionTitle).mockResolvedValue('Acme Alpha Demo');
       const meta = await generateMetadata({ params: Promise.resolve({ sessionId: 's1' }) });
-      expect(meta.title).toBe('Merlin5 Alpha Demo');
+      expect(meta.title).toBe('Acme Alpha Demo');
       expect(resolveOwnedSessionTitle).toHaveBeenCalledWith('s1', 'user_abc');
     });
 

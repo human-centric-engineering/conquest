@@ -516,7 +516,7 @@ describe('applyGuardrails — the time budget', () => {
 
   it('reserves the blind-spot check’s seconds rather than treating them as free', () => {
     // 340s − 120s floor = 220s. Two 100s topics fit (200s), but only if the 10s check is ignored —
-    // which is exactly the omission the Merlin5 workbook's own arithmetic makes.
+    // which is exactly the omission the pilot client workbook's own arithmetic makes.
     const plan = applyGuardrails(
       input({
         proposed: allFour,

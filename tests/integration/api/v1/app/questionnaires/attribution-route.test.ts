@@ -177,18 +177,18 @@ describe('PATCH /api/v1/app/questionnaires/:id (rename)', () => {
     });
     prismaMock.appQuestionnaire.update.mockResolvedValue({ id: 'qn-1' });
 
-    const res = await attributePATCH(jsonReq({ title: '  Merlin5 Questionnaire  ' }), ctx('qn-1'));
+    const res = await attributePATCH(jsonReq({ title: '  Acme Questionnaire  ' }), ctx('qn-1'));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data).toEqual({ id: 'qn-1', title: 'Merlin5 Questionnaire' });
+    expect(body.data).toEqual({ id: 'qn-1', title: 'Acme Questionnaire' });
     expect(prismaMock.appQuestionnaire.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'qn-1' }, data: { title: 'Merlin5 Questionnaire' } })
+      expect.objectContaining({ where: { id: 'qn-1' }, data: { title: 'Acme Questionnaire' } })
     );
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'questionnaire.rename',
         entityId: 'qn-1',
-        entityName: 'Merlin5 Questionnaire',
+        entityName: 'Acme Questionnaire',
       })
     );
     // Demo-client path is untouched by a rename.
