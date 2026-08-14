@@ -69,42 +69,7 @@ import type {
   TranscribeResponse,
 } from '@/lib/orchestration/llm/types';
 import { getTextContent } from '@/lib/orchestration/llm/types';
-
-/**
- * Is `text` a complete JSON value?
- *
- * Used to tell a structured extraction that merely *ended* at the token cap
- * from one that was cut off mid-value. Only the second is a truncation worth
- * failing: if the object closed, the caller can use it, and `finishReason:
- * 'length'` still tells anyone who cares that the model wanted more room.
- *
- * Deliberately NOT mirrored in the Anthropic adapter. There the extraction
- * payload is rebuilt with `JSON.stringify` from the tool-use block's already
- * parsed input, so even a truncated one serialises to valid JSON — a parse
- * gate would silently disable that guard entirely. Anthropic keys on
- * `stop_reason` alone, and must keep doing so.
- */
-function isCompleteJson(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return false;
-  // Mirrors `tryParseJson`/`stripCodeFence` in
-  // `evaluations/parse-structured.ts` — raw first, then one unwrapped code
-  // fence. A guard that is STRICTER than the parser it protects turns a
-  // response the caller would have accepted into a hard failure, which is
-  // the same class of bug as not guarding at all. Deliberately no more
-  // lenient either: digging a complete object out of surrounding prose would
-  // let a genuinely truncated response through. (Duplicated rather than
-  // imported — this module must not depend on `evaluations/`.)
-  for (const candidate of [trimmed, trimmed.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1')]) {
-    try {
-      JSON.parse(candidate);
-      return true;
-    } catch {
-      // try the next candidate
-    }
-  }
-  return false;
-}
+import { isCompleteJson } from '@/lib/orchestration/llm/json-completeness';
 
 /** Sentinel API key for local servers that require *something* in the header. */
 const LOCAL_API_KEY_SENTINEL = 'not-needed';
@@ -237,8 +202,22 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 
     const content = choice.message.content ?? '';
     const reasoningTokens = completion.usage?.completion_tokens_details?.reasoning_tokens;
-    const isStructuredExtraction =
-      options.responseFormat?.type === 'json_schema' && !options.tools?.length;
+    /**
+     * Any JSON-shaped request, with no tools — `json_object` as well as
+     * `json_schema`.
+     *
+     * Deliberately wider than the `json_schema`-only test this replaced. A
+     * caller asking for `json_object` wants parseable JSON just as much as one
+     * supplying a schema, and truncated JSON is unusable under either — but the
+     * narrow test meant the orchestrator's planner (which requests
+     * `json_object`) sailed through the guard, failed `JSON.parse`, spent a
+     * clarifying retry into the same cap, and surfaced as the misleading
+     * `planner_parse_failed` (#594).
+     */
+    const wantsParseableJson =
+      (options.responseFormat?.type === 'json_object' ||
+        options.responseFormat?.type === 'json_schema') &&
+      !options.tools?.length;
 
     // Truncation guard. For reasoning models (o-series, gpt-5) the
     // `max_completion_tokens` cap covers reasoning tokens AND visible
@@ -260,7 +239,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     // stop during extraction is a truncation.
     if (
       choice.finish_reason === 'length' &&
-      ((isStructuredExtraction && !isCompleteJson(content)) ||
+      ((wantsParseableJson && !isCompleteJson(content)) ||
         (content.length === 0 && toolCalls.length === 0))
     ) {
       const cap =
@@ -272,7 +251,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
           : '';
       throw new ProviderError(
         `Model "${options.model}" hit max_completion_tokens before producing ${
-          isStructuredExtraction ? 'a complete structured response' : 'visible output'
+          wantsParseableJson ? 'a complete structured response' : 'visible output'
         }.${reasoningNote} Raise the agent/step maxTokens (current cap: ${cap ?? 'unset'}).`,
         {
           code: 'truncated_no_output',
@@ -337,11 +316,23 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       arguments: string;
     }
     const toolBuffers = new Map<number, ToolBuffer>();
-    const isStructuredExtraction =
-      options.responseFormat?.type === 'json_schema' && !options.tools?.length;
-    // Accumulated only for a structured extraction, so the truncation guard
-    // after the loop can tell a complete object that ended at the cap from one
-    // cut off mid-value. Bounded by maxTokens.
+    /**
+     * Any JSON-shaped request (`json_schema` OR `json_object`), with no tools.
+     * See the non-streaming guard for why this is wider than the schema-only
+     * test it replaced (#594).
+     */
+    const wantsParseableJson =
+      (options.responseFormat?.type === 'json_object' ||
+        options.responseFormat?.type === 'json_schema') &&
+      !options.tools?.length;
+    // Accumulated for any JSON-shaped request, so the truncation guard after
+    // the loop can tell a complete object that ended at the cap from one cut
+    // off mid-value. Bounded by maxTokens.
+    //
+    // This condition MUST match the guard's. When it was the narrower
+    // schema-only test while the guard asked the wider question, a
+    // `json_object` stream left this empty, `isCompleteJson('')` is false, and
+    // the guard fired on every `length` finish — including complete JSON.
     let structuredText = '';
 
     try {
@@ -359,10 +350,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         if (!choice) continue;
 
         if (choice.delta.content) {
-          // Kept only for a structured extraction, so the truncation guard
-          // below can tell "ended at the cap with a complete object" from
-          // "cut off mid-value". Bounded by maxTokens.
-          if (isStructuredExtraction) structuredText += choice.delta.content;
+          if (wantsParseableJson) structuredText += choice.delta.content;
           yield { type: 'text', content: choice.delta.content };
         }
 
@@ -402,7 +390,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     // letting the consumer treat partial JSON as a finished answer (#587).
     // `streaming-handler.ts` forwards an agent's configured responseFormat on
     // this path whenever the turn has no tools, so this is a live route.
-    if (finishReason === 'length' && isStructuredExtraction && !isCompleteJson(structuredText)) {
+    if (finishReason === 'length' && wantsParseableJson && !isCompleteJson(structuredText)) {
       const cap =
         (params as { max_completion_tokens?: number; max_tokens?: number }).max_completion_tokens ??
         (params as { max_tokens?: number }).max_tokens;
