@@ -26,6 +26,7 @@ import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-e
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import { PlanPreviewCard } from '@/components/admin/questionnaires/topics/plan-preview-card';
+import { RoutingQualityCard } from '@/components/admin/questionnaires/topics/routing-quality-card';
 import {
   TopicListEditor,
   type DraftTopic,
@@ -172,6 +173,17 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         topics={payload.topics}
         enabled={payload.settings.enabled}
         disabled={busy}
+      />
+
+      {/* Immediately after the dry-run, and deliberately: "what it would do" and "what it did" are
+          the same question asked of intent and of evidence, and an author comparing them is doing
+          exactly the check this tab exists for. Renders nothing until the version is switched on
+          and has something to decide. */}
+      <RoutingQualityCard
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        enabled={payload.settings.enabled}
+        conditionalCount={payload.topics.filter((t) => t.phase === 'conditional').length}
       />
 
       <ScopeSettingsCard

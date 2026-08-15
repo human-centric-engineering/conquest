@@ -29,6 +29,11 @@ export { getCompletionFunnel } from '@/lib/app/questionnaire/analytics/funnel';
 export { getQuestionnaireCostBreakdown } from '@/lib/app/questionnaire/analytics/cost';
 export { getSafeguardingSummary } from '@/lib/app/questionnaire/analytics/safeguarding';
 export {
+  getRoutingAnalytics,
+  assembleRoutingAnalytics,
+  ROUTING_FINDING_MIN_PLANS,
+} from '@/lib/app/questionnaire/analytics/routing';
+export {
   getVersionDiagnostics,
   getInvitationDiagnostics,
 } from '@/lib/app/questionnaire/analytics/diagnostics';
@@ -62,4 +67,8 @@ export type {
   DiagnosticsErrorRow,
   DiagnosticsSessionDetail,
   InvitationDiagnosticsResult,
+  RoutingTopicRow,
+  RoutingFinding,
+  RoutingFindingCode,
+  RoutingAnalyticsResult,
 } from '@/lib/app/questionnaire/analytics/views';

@@ -11,6 +11,7 @@ import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { typeConfigSchemaFor } from '@/lib/app/questionnaire/authoring/type-config-schema';
 import { scoreSession, type ItemBounds } from '@/lib/app/questionnaire/scoring/score';
+import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring/schema-validation';
 import { narrowAdaptiveScopeSettings, type Topic } from '@/lib/app/questionnaire/scope/types';
 import { buildSessionScope } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { toTopic, TOPIC_SELECT } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
@@ -56,6 +57,24 @@ export function itemBounds(type: string, typeConfig: unknown): ItemBounds | null
   if (!cfg || typeof cfg.min !== 'number' || typeof cfg.max !== 'number') return null;
   if (cfg.max <= cfg.min) return null;
   return { min: cfg.min, max: cfg.max };
+}
+
+/**
+ * A version's scoring schema, narrowed — or null when it has none.
+ *
+ * A one-query read given its own name because two callers outside the scoring pipeline now need it
+ * for a reason that has nothing to do with computing a score: the Adaptive Scope comparability
+ * checks (F17.15) ask which scales routing can leave partially assessed, and the Topics tab and the
+ * launch gate must ask it the same way or they will disagree about whether a version is coherent.
+ */
+export async function loadScoringSchemaContent(
+  versionId: string
+): Promise<ScoringSchemaContent | null> {
+  const row = await prisma.appScoringSchema.findUnique({
+    where: { versionId },
+    select: { content: true },
+  });
+  return row ? narrowScoringSchemaContent(row.content) : null;
 }
 
 /** Build the version-level scoring inputs (bounds + id→key maps). */

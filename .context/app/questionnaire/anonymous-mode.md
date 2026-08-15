@@ -23,18 +23,19 @@ export); what's withheld is identity, free-text prose, and small-cohort detail.
 
 ## Per-surface gates
 
-| Surface                      | File                                                                                     | Behaviour when `anonymousMode = true`                                                             |
-| ---------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Authed-direct session create | `questionnaire-sessions/_lib/create.ts`                                                  | `respondentUserId` bound, but **no profile snapshot** ever written                                |
-| No-login session create      | `questionnaire-sessions/_lib/create.ts` (`createAnonymousSession`)                       | `respondentUserId = null`; no profile                                                             |
-| Profile capture (form gate)  | `profile/resolve-capture.ts` (`resolveSessionCapture`) + `[id]/profile` PUT              | Resolver returns `null` (no gate) and the PUT rejects — no snapshot ever written (F8.7)           |
-| Conversational capture       | `messages/route.ts` (guards on `!anonymousMode`)                                         | No interviewer directive injected, no extraction/snapshot (F8.7)                                  |
-| Single-session PDF           | `questionnaire-sessions/_lib/session-export.ts` + `export/build-session-export-model.ts` | Identity query skipped; `respondent` and `profile` null                                           |
-| Bulk CSV/JSON export         | `export/results-loader.ts`                                                               | Names skipped; `turns = []`; `profile = null` per session                                         |
-| Distributions analytics      | `analytics/distributions.ts`                                                             | Identity-free by construction; small-cohort detail suppressed (below)                             |
-| Funnel analytics             | `analytics/funnel.ts`                                                                    | Counts-only; small-cohort counts suppressed                                                       |
-| Cost analytics               | `analytics/cost.ts`                                                                      | Per-session spend table dropped (session ids are a re-identification handle)                      |
-| Invitations                  | `questionnaires/[id]/invitations/_lib/read.ts`                                           | Orthogonal — invitations are the _invited_ (non-anonymous) surface; an anonymous version has none |
+| Surface                      | File                                                                                     | Behaviour when `anonymousMode = true`                                                                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authed-direct session create | `questionnaire-sessions/_lib/create.ts`                                                  | `respondentUserId` bound, but **no profile snapshot** ever written                                                                                             |
+| No-login session create      | `questionnaire-sessions/_lib/create.ts` (`createAnonymousSession`)                       | `respondentUserId = null`; no profile                                                                                                                          |
+| Profile capture (form gate)  | `profile/resolve-capture.ts` (`resolveSessionCapture`) + `[id]/profile` PUT              | Resolver returns `null` (no gate) and the PUT rejects — no snapshot ever written (F8.7)                                                                        |
+| Conversational capture       | `messages/route.ts` (guards on `!anonymousMode`)                                         | No interviewer directive injected, no extraction/snapshot (F8.7)                                                                                               |
+| Single-session PDF           | `questionnaire-sessions/_lib/session-export.ts` + `export/build-session-export-model.ts` | Identity query skipped; `respondent` and `profile` null                                                                                                        |
+| Bulk CSV/JSON export         | `export/results-loader.ts`                                                               | Names skipped; `turns = []`; `profile = null` per session                                                                                                      |
+| Distributions analytics      | `analytics/distributions.ts`                                                             | Identity-free by construction; small-cohort detail suppressed (below)                                                                                          |
+| Funnel analytics             | `analytics/funnel.ts`                                                                    | Counts-only; small-cohort counts suppressed                                                                                                                    |
+| Cost analytics               | `analytics/cost.ts`                                                                      | Per-session spend table dropped (session ids are a re-identification handle)                                                                                   |
+| Routing quality (F17.16)     | `analytics/routing.ts`                                                                   | Counts + topic keys only — never `amendments[].request` or the rationale written from it; per-topic rows suppressed below the floor via `isCohortSuppressed()` |
+| Invitations                  | `questionnaires/[id]/invitations/_lib/read.ts`                                           | Orthogonal — invitations are the _invited_ (non-anonymous) surface; an anonymous version has none                                                              |
 
 ## The profile snapshot rule
 
@@ -75,7 +76,7 @@ While the product is in the `alpha` release stage (`IS_ALPHA`, driven by the exi
 cohorts alpha produces. `ALPHA_ANALYTICS_ANONYMITY_DISABLED` gates it, and the admin analytics view
 (`analytics-view.tsx`) shows a visible "disabled for alpha testing" note whenever it is active. This is
 **scoped to the dashboard only** — cohort reports (`cohort-report/dataset.ts`), safeguarding alerts
-(`analytics/safeguarding.ts`), the data-slot material floor, and the version's explicit
+(`analytics/safeguarding.ts`), routing quality (`analytics/routing.ts`), the data-slot material floor, and the version's explicit
 **anonymous-mode** session-table suppression all still enforce k-anonymity via `isCohortSuppressed()`.
 It **auto-restores** the moment the stage moves off `alpha` — no code change is needed for GA. The same
 `alpha` stage also gates the alpha **session-ref browser** (`/admin/questionnaires/sessions`).

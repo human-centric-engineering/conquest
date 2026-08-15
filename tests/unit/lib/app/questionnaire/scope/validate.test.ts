@@ -432,3 +432,125 @@ describe('validateAdaptiveScope — time budget (C7)', () => {
     expect(issues.map((i) => i.code)).not.toContain('budget_below_floor');
   });
 });
+
+describe('validateAdaptiveScope — duplicate membership (F17.15)', () => {
+  it('says nothing when every member is claimed once', () => {
+    expect(codes(healthy())).not.toContain('duplicate_membership');
+  });
+
+  it('names the two topics that claim a shared question, and what it costs', () => {
+    const issues = validateAdaptiveScope({
+      ...healthy(),
+      topics: [
+        topic('open', 'opening'),
+        topic('spine', 'core', {
+          members: { dataSlotKeys: [], questionKeys: ['spine_q', 'open_q'] },
+        }),
+        topic('cond_a', 'conditional'),
+        topic('cond_b', 'conditional'),
+        topic('cond_c', 'conditional'),
+      ],
+    });
+
+    const dup = issues.find((i) => i.code === 'duplicate_membership');
+    expect(dup?.severity).toBe('warning');
+    expect(dup?.message).toContain('"open_q"');
+    expect(dup?.message).toContain('"open"');
+    expect(dup?.message).toContain('"spine"');
+    // The consequence an author cannot see anywhere else: the cost panel over-prices the interview,
+    // because `alwaysTopicSeconds` sums per-topic costs and charges the shared member twice.
+    expect(dup?.message).toContain('priced higher than it costs');
+  });
+
+  it('reports the duplicate even while Adaptive Scope is off — the time estimate is wrong today', () => {
+    const issues = validateAdaptiveScope({
+      ...healthy(),
+      settings: settings({ enabled: false }),
+      topics: [
+        topic('spine', 'core'),
+        topic('other', 'core', { members: { dataSlotKeys: [], questionKeys: ['spine_q'] } }),
+      ],
+      allQuestionKeys: ['spine_q', 'other_q'],
+    });
+
+    expect(issues.map((i) => i.code)).toContain('duplicate_membership');
+  });
+
+  it('aggregates rather than reporting forty findings for a copied topic', () => {
+    const members = { dataSlotKeys: [], questionKeys: ['a', 'b', 'c'] };
+    const issues = validateAdaptiveScope({
+      ...healthy(),
+      topics: [topic('one', 'core', { members }), topic('two', 'core', { members })],
+      allQuestionKeys: ['a', 'b', 'c'],
+    });
+
+    const dups = issues.filter((i) => i.code === 'duplicate_membership');
+    expect(dups).toHaveLength(1);
+    expect(dups[0].message).toContain('3 questions');
+  });
+
+  it('reports duplicated data slots separately from duplicated questions', () => {
+    const members = { dataSlotKeys: ['s1'], questionKeys: ['a'] };
+    const issues = validateAdaptiveScope({
+      ...healthy(),
+      topics: [topic('one', 'core', { members }), topic('two', 'core', { members })],
+      allQuestionKeys: ['a'],
+      allDataSlotKeys: ['s1'],
+    });
+
+    const dups = issues.filter((i) => i.code === 'duplicate_membership');
+    expect(dups).toHaveLength(2);
+    expect(dups.map((d) => d.message).join(' ')).toContain('data slot "s1"');
+  });
+});
+
+describe('validateAdaptiveScope — comparability passthrough (F17.15)', () => {
+  const scoring = {
+    scales: [{ key: 'trust', name: 'Trust' }],
+    items: [
+      { source: 'question' as const, ref: 'spine_q', scaleKey: 'trust', weight: 1, reverse: false },
+      {
+        source: 'question' as const,
+        ref: 'cond_a_q',
+        scaleKey: 'trust',
+        weight: 1,
+        reverse: false,
+      },
+    ],
+    bands: [],
+    method: 'mean' as const,
+  };
+
+  it('runs no comparability check when the version does not score', () => {
+    expect(codes(healthy())).not.toContain('scale_split_by_scope');
+  });
+
+  it('merges the scale findings into the same sorted list', () => {
+    const issues = validateAdaptiveScope({ ...healthy(), scoring });
+
+    expect(issues.map((i) => i.code)).toContain('scale_split_by_scope');
+    // Errors first is the contract the Topics tab and the launch gate both rely on.
+    const severities = issues.map((i) => i.severity);
+    expect([...severities].sort((a, b) => (a === b ? 0 : a === 'error' ? -1 : 1))).toEqual(
+      severities
+    );
+  });
+
+  it('prices the scale against the routed allowance derived from the budget and the floor', () => {
+    const issues = validateAdaptiveScope({
+      ...healthy(),
+      settings: settings({ maxConditionalTopics: 3, sessionBudgetSeconds: 300 }),
+      scoring: {
+        ...scoring,
+        items: [
+          { source: 'question', ref: 'cond_a_q', scaleKey: 'trust', weight: 1, reverse: false },
+          { source: 'question', ref: 'cond_b_q', scaleKey: 'trust', weight: 1, reverse: false },
+        ],
+      },
+      // Floor 250 of a 300s budget leaves 50 — less than the 120s the scale's two topics need.
+      seconds: { always: 250, cheapestConditional: 60, byTopicKey: { cond_a: 60, cond_b: 60 } },
+    });
+
+    expect(issues.map((i) => i.code)).toContain('scale_never_whole');
+  });
+});

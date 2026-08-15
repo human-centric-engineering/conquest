@@ -2,7 +2,7 @@
  * Integration test: questionnaire analytics read routes (F8.1).
  *
  * Pins the route → auth → version-scope → query-validation → aggregator
- * wiring for the three GET endpoints (distributions / funnel / cost). The aggregators
+ * wiring for the GET endpoints (distributions / funnel / cost / routing). The aggregators
  * themselves are unit-tested separately (lib/app/questionnaire/analytics/*.test.ts);
  * here they're stubbed so the test exercises only the route shell:
  *   - 401 unauthenticated / 403 non-admin
@@ -29,6 +29,7 @@ const analyticsMock = vi.hoisted(() => ({
   getQuestionDistributions: vi.fn(),
   getCompletionFunnel: vi.fn(),
   getQuestionnaireCostBreakdown: vi.fn(),
+  getRoutingAnalytics: vi.fn(),
 }));
 vi.mock('@/lib/app/questionnaire/analytics', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app/questionnaire/analytics')>()),
@@ -40,6 +41,7 @@ vi.mock('@/lib/app/questionnaire/analytics', async (importOriginal) => ({
 import { GET as getDistributions } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/distributions/route';
 import { GET as getFunnel } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/funnel/route';
 import { GET as getCost } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/cost/route';
+import { GET as getRouting } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/analytics/routing/route';
 
 import { auth } from '@/lib/auth/config';
 import {
@@ -53,7 +55,7 @@ type Mock = ReturnType<typeof vi.fn>;
 const BASE = 'http://localhost:3000/api/v1/app/questionnaires/qn-1/versions/v1/analytics';
 const PARAMS = { id: 'qn-1', vid: 'v1' };
 
-function req(path: 'distributions' | 'funnel' | 'cost', search = ''): NextRequest {
+function req(path: 'distributions' | 'funnel' | 'cost' | 'routing', search = ''): NextRequest {
   return { url: `${BASE}/${path}${search}`, headers: new Headers() } as unknown as NextRequest;
 }
 function ctx<T extends Record<string, string>>(params: T): { params: Promise<T> } {
@@ -83,6 +85,23 @@ const ROUTES = [
     agg: analyticsMock.getQuestionnaireCostBreakdown,
     payload: { versionId: 'v1', totalCostUsd: 0, byCapability: [], trend: [], topSessions: [] },
   },
+  {
+    name: 'routing',
+    handler: getRouting,
+    agg: analyticsMock.getRoutingAnalytics,
+    payload: {
+      versionId: 'v1',
+      range: { from: 'a', to: 'b' },
+      plans: 0,
+      amendedPlans: 0,
+      fallbackPlans: 0,
+      checkTopicPlans: 0,
+      meanConfidence: 0,
+      topics: [],
+      findings: [],
+      suppressed: false,
+    },
+  },
 ] as const;
 
 beforeEach(() => {
@@ -97,6 +116,7 @@ beforeEach(() => {
   analyticsMock.getQuestionDistributions.mockResolvedValue(ROUTES[0].payload);
   analyticsMock.getCompletionFunnel.mockResolvedValue(ROUTES[1].payload);
   analyticsMock.getQuestionnaireCostBreakdown.mockResolvedValue(ROUTES[2].payload);
+  analyticsMock.getRoutingAnalytics.mockResolvedValue(ROUTES[3].payload);
 });
 
 describe.each(ROUTES)('GET analytics/$name', ({ name, handler, agg, payload }) => {

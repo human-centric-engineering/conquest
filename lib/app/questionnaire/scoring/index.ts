@@ -22,6 +22,7 @@ export {
   narrowScoringSchemaContent,
 } from '@/lib/app/questionnaire/scoring/schema-validation';
 export {
+  loadScoringSchemaContent,
   buildScoringInputs,
   scoreSessions,
   recomputeSessionScores,

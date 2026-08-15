@@ -15,15 +15,21 @@
  *   every respondent).
  * - **`warning`** — it will run, but not as the author probably intends.
  *
- * Every check is inert while `enabled` is false, except the orphan check, which is reported as a
- * warning then — it is exactly what an admin needs to see BEFORE they flip the switch.
+ * Every check is inert while `enabled` is false, except three that an admin needs to see BEFORE
+ * they flip the switch: the orphan check (reported as a warning then), the duplicate-membership
+ * check (whose effect on the time arithmetic is visible either way), and the comparability checks
+ * in `comparability.ts` — "what would routing do to my scores" is a question that must be answered
+ * before the routing starts, not after a cohort report comes back empty.
  */
 
+import { routedAllowanceSeconds } from '@/lib/app/questionnaire/scope/budget';
+import { checkScaleComparability } from '@/lib/app/questionnaire/scope/comparability';
 import {
   ALWAYS_PHASES,
   type AdaptiveScopeSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
+import type { ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 
 /** How badly a finding bites. */
 export type ScopeIssueSeverity = 'error' | 'warning';
@@ -55,7 +61,20 @@ export interface ValidateScopeInput {
     always: number;
     /** The cheapest conditional topic at full depth, or 0 when there are none. */
     cheapestConditional: number;
+    /**
+     * Full-depth cost per topic key — what the comparability checks price a scale's topics with
+     * (F17.15). Optional beside the two totals because a caller that only needs the floor
+     * arithmetic should not have to carry the whole map.
+     */
+    byTopicKey?: Readonly<Record<string, number>>;
   };
+  /**
+   * The version's scoring schema, when it has one — for the comparability checks (F17.15).
+   *
+   * Optional, and its absence means "this version does not score", not "do not check": a caller
+   * without it gets every other finding, exactly as with `seconds`.
+   */
+  scoring?: ScoringSchemaContent;
 }
 
 /**
@@ -116,6 +135,42 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         message: `"${topic.label}" is conditional but has no "include this when…" criteria, so the agent has nothing to judge it on.`,
       });
     }
+  }
+
+  // ── Duplicate membership ──────────────────────────────────────────────────────────────────
+  // Tolerated at runtime — a question claimed by two topics is asked if EITHER is in scope, and
+  // attributed to the first in-scope topic in ordinal order — but an author almost never means it,
+  // and it is not free: `estimateTopicCosts` prices each topic independently and `alwaysTopicSeconds`
+  // sums them, so a shared member is charged once per claiming topic. The floor comes out too high,
+  // the routed allowance too low, and topics get dropped from a fit that would in fact have held
+  // them. Reported regardless of `enabled` for exactly that reason: the cost panel is wrong today.
+  for (const [kind, field] of [
+    ['question', 'questionKeys'],
+    ['data slot', 'dataSlotKeys'],
+  ] as const) {
+    const claimedBy = new Map<string, string[]>();
+    for (const topic of topics) {
+      // Deduped WITHIN a topic first: a membership list may legitimately carry the same key twice
+      // (nothing prunes it on the AI-proposal or import paths), and counting that as two claimants
+      // produces `"q1" belongs to both "Wellbeing" and "Wellbeing"`. One topic asking a question
+      // twice is not the double-billing this check is about.
+      for (const key of new Set(topic.members[field])) {
+        const owners = claimedBy.get(key);
+        if (owners) owners.push(topic.label);
+        else claimedBy.set(key, [topic.label]);
+      }
+    }
+    const duplicated = [...claimedBy.entries()].filter(([, owners]) => owners.length > 1);
+    if (duplicated.length === 0) continue;
+    const [firstKey, firstOwners] = duplicated[0];
+    issues.push({
+      severity: 'warning',
+      code: 'duplicate_membership',
+      message:
+        duplicated.length === 1
+          ? `The ${kind} "${firstKey}" belongs to both "${firstOwners[0]}" and "${firstOwners[1]}". It is asked once, but the time estimate counts it in both — so this interview is priced higher than it costs.`
+          : `${duplicated.length} ${kind}s belong to more than one topic (including "${firstKey}", in "${firstOwners[0]}" and "${firstOwners[1]}"). Each is asked once, but the time estimate counts it in every topic that claims it — so this interview is priced higher than it costs.`,
+    });
   }
 
   // ── Whole-setup checks, only meaningful once the feature is on ────────────────────────────
@@ -273,6 +328,34 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         message: `"${key}" always runs, so naming it as a fallback or blind-spot check has no effect.`,
       });
     }
+  }
+
+  // ── Comparability (F17.15) ────────────────────────────────────────────────────────────────
+  // Skipped only when the caller has no scoring schema to check against, which is most versions.
+  if (input.scoring) {
+    const byTopicKey = input.seconds?.byTopicKey;
+    issues.push(
+      ...checkScaleComparability({
+        topics,
+        settings,
+        scoring: input.scoring,
+        // Lets the scale checks tell a key that exists but sits in no topic (fixable here, an
+        // error) from one the version no longer has at all (a stale scoring reference, a warning).
+        inventory: {
+          questionKeys: input.allQuestionKeys,
+          dataSlotKeys: input.allDataSlotKeys ?? [],
+        },
+        seconds: byTopicKey
+          ? {
+              byTopicKey,
+              routedAllowance: routedAllowanceSeconds(
+                settings.sessionBudgetSeconds,
+                input.seconds?.always ?? 0
+              ),
+            }
+          : undefined,
+      })
+    );
   }
 
   return issues.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1));

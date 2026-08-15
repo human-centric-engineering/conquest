@@ -39,6 +39,7 @@ import {
   saveTopicsSchema,
 } from '@/lib/app/questionnaire/scope/schemas';
 import { validateAdaptiveScope } from '@/lib/app/questionnaire/scope/validate';
+import { loadScoringSchemaContent } from '@/lib/app/questionnaire/scoring/compute';
 import { buildPlanPreviewForm } from '@/lib/app/questionnaire/scope/views';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
@@ -115,10 +116,13 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
 
     // Settings first: the key inventory prices itself against this version's per-type overrides.
     const settings = await loadAdaptiveScopeSettings(vid);
-    const [topics, inventory, draft] = await Promise.all([
+    const [topics, inventory, draft, scoring] = await Promise.all([
       loadTopics(vid),
       loadKeyInventory(vid, settings),
       loadTopicDraft(vid),
+      // For the comparability checks (F17.15) — which scales routing can leave partially assessed.
+      // `null` for the versions that do not score, which is most of them.
+      loadScoringSchemaContent(vid),
     ]);
 
     // The time arithmetic (C7), computed here for the same reason `issues` is: one implementation,
@@ -138,7 +142,9 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       seconds: {
         always: alwaysSeconds,
         cheapestConditional: conditionalCosts.length > 0 ? Math.min(...conditionalCosts) : 0,
+        byTopicKey: Object.fromEntries([...byTopicKey].map(([key, cost]) => [key, cost.full])),
       },
+      scoring: scoring ?? undefined,
     });
     const costs = {
       budgetSeconds: settings.sessionBudgetSeconds,
