@@ -11,9 +11,11 @@ import { describe, expect, it } from 'vitest';
 import {
   runDataSlotTurn,
   DATA_SLOT_SELECTION_TOOL_SLUG,
+  OPENING_PROBE_TOOL_SLUG,
   PROVISIONAL_FLOOR_CONFIDENCE,
   type DataSlotTarget,
   type DataSlotAnsweredView,
+  type OpeningRoutabilityOutcome,
   type TurnState,
 } from '@/lib/app/questionnaire/orchestrator';
 import type { DataSlotFillIntent } from '@/lib/app/questionnaire/extraction/types';
@@ -1109,5 +1111,269 @@ describe('runDataSlotTurn — completeness milestones (F-progress)', () => {
     expect(result.response.kind).toBe('contradiction_probe');
     expect(result.events.some((e) => e.type === 'warning' && e.code === 'milestone')).toBe(false);
     expect(result.sideEffects.raisedMilestones).toBeUndefined();
+  });
+});
+
+/**
+ * The opening's follow-up allowance (G03 / F17.17).
+ *
+ * The mechanism under test is deliberately small: the allowance only ever LOWERS the per-slot
+ * re-ask cap for a slot in the opening, so a probe the opening cannot afford becomes an ordinary
+ * park. What matters is that it does that in exactly the right circumstances and in no others.
+ */
+describe('runDataSlotTurn — the opening probe allowance (G03)', () => {
+  /** A weak answer on d1 — `inferred`, so it is parkable — with a per-slot cap of 3. */
+  function weakOpening(input: {
+    openingProbe?: TurnState['openingProbe'];
+    openingRoutability?: Partial<OpeningRoutabilityOutcome>;
+    attempts?: number;
+    /** The author's per-slot re-ask cap. Deliberately above 1 so a follow-up is possible at all. */
+    cap?: number;
+  }) {
+    const { invokers, calls } = stubInvokers({
+      extract: { dataSlotFills: [fill('d1', 0.3, 'inferred')] },
+      ...('openingRoutability' in input
+        ? { openingRoutability: input.openingRoutability ?? {} }
+        : {}),
+    });
+    const state = {
+      ...dsState({
+        questions: [q({ id: 'q1' })],
+        dataSlots: [
+          ds({ id: 'd1', key: 'd1', theme: 'A' }),
+          ds({ id: 'd2', key: 'd2', theme: 'B' }),
+        ],
+        activeDataSlotKey: 'd1',
+        dataSlotAttempts: { d1: input.attempts ?? 1 },
+        config: { maxDataSlotAttempts: input.cap ?? 3 },
+      }),
+      ...(input.openingProbe ? { openingProbe: input.openingProbe } : {}),
+    };
+    return { state, invokers, calls };
+  }
+
+  it('re-asks as before when no allowance governs the turn', async () => {
+    const { state, invokers } = weakOpening({});
+    const result = await runDataSlotTurn(state, invokers);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d1');
+      expect(result.response.isReask).toBe(true);
+    }
+  });
+
+  it('parks instead of following up once the opening has spent its allowance', async () => {
+    const { state, invokers, calls } = weakOpening({
+      openingProbe: { slotIds: ['d1'], spent: 1, allowance: 1 },
+      openingRoutability: { routable: false },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    const d1Fill = (result.sideEffects.dataSlotFills ?? []).find((f) => f.dataSlotKey === 'd1');
+    expect(d1Fill?.provisional).toBe(true);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
+    // Spent means spent: there is nothing to decide, so nothing is paid to decide it.
+    expect(calls.routability).toHaveLength(0);
+  });
+
+  it('withholds an affordable follow-up when what they said is already routable', async () => {
+    const { state, invokers, calls } = weakOpening({
+      openingProbe: { slotIds: ['d1'], spent: 0, allowance: 1 },
+      // The live invoker always measures itself, so the recorded latency is the production path.
+      openingRoutability: {
+        routable: true,
+        reason: 'They named a section outright.',
+        latencyMs: 42,
+      },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    expect(calls.routability).toHaveLength(1);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
+    // Recorded on the turn, not only in a log — a withheld question should be answerable for, and
+    // the latency is what makes a check that quietly got slow visible at all.
+    expect(result.toolCalls).toContainEqual(
+      expect.objectContaining({ slug: OPENING_PROBE_TOOL_SLUG, success: true, latencyMs: 42 })
+    );
+  });
+
+  it('spends the follow-up when no check is wired at all', async () => {
+    // Reachable in production: `openingProbe` is resolved whenever the allowance governs an opening
+    // slot, but the route only wires the check when the version HAS conditional topics — with none,
+    // there is nothing to be routable against and the invoker is omitted entirely. The turn must
+    // then behave exactly as it did before G03 rather than silently withholding the question.
+    const { state, invokers, calls } = weakOpening({
+      openingProbe: { slotIds: ['d1'], spent: 0, allowance: 1 },
+    });
+    expect(invokers.assessOpeningRoutability).toBeUndefined();
+
+    const result = await runDataSlotTurn(state, invokers);
+
+    expect(calls.routability).toHaveLength(0);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d1');
+      expect(result.response.isReask).toBe(true);
+    }
+    // No check ran, so there is nothing to record — an empty verdict must not fake a tool call.
+    expect(result.toolCalls.some((t) => t.slug === OPENING_PROBE_TOOL_SLUG)).toBe(false);
+  });
+
+  it('spends the follow-up when the answer is too abstract to route on', async () => {
+    const { state, invokers, calls } = weakOpening({
+      openingProbe: { slotIds: ['d1'], spent: 0, allowance: 1 },
+      openingRoutability: { routable: false, reason: 'A slogan, not a situation.' },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    expect(calls.routability).toHaveLength(1);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') {
+      expect(result.response.dataSlotId).toBe('d1');
+      expect(result.response.isReask).toBe(true);
+    }
+  });
+
+  it('spends the follow-up when the check could not be made at all', async () => {
+    // `routable: null` is the absence of a verdict, not a verdict of "routable". The check may only
+    // ever save a question — never skip one on the strength of a call that did not happen.
+    const { state, invokers } = weakOpening({
+      openingProbe: { slotIds: ['d1'], spent: 0, allowance: 1 },
+      openingRoutability: { routable: null, diagnostic: 'routability_unavailable' },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d1');
+  });
+
+  it('leaves a slot outside the opening alone', async () => {
+    // The allowance governs the opening. A core-topic slot asked before the plan is decided is not
+    // part of it, and must not be rationed by it.
+    const { state, invokers, calls } = weakOpening({
+      openingProbe: { slotIds: ['d_other'], spent: 1, allowance: 1 },
+      openingRoutability: { routable: true },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    expect(calls.routability).toHaveLength(0);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d1');
+  });
+
+  it('spends every probe an allowance of three actually promises', async () => {
+    // The allowance is a COUNT of follow-ups, so an author who sets three must get three. Walk the
+    // real sequence on one slot: each turn the interview re-asks, `spent` grows by one and
+    // `attempts` grows by one, and the loader recomputes `remaining` from the turn record. The trap
+    // is counting the allowance down twice — once through `spent` and again through the cap — which
+    // parks a turn early and quietly delivers N-1 probes for an author who asked for N.
+    const asks: string[] = [];
+    for (let probe = 0; probe < 3; probe += 1) {
+      const turn = weakOpening({
+        attempts: probe + 1,
+        cap: 4,
+        openingProbe: { slotIds: ['d1'], spent: probe, allowance: 3 },
+        openingRoutability: { routable: false },
+      });
+      const result = await runDataSlotTurn(turn.state, turn.invokers);
+      if (result.response.kind === 'data_slot') asks.push(result.response.dataSlotId);
+    }
+    // Three follow-ups asked, none of them a premature move-on to d2.
+    expect(asks).toEqual(['d1', 'd1', 'd1']);
+
+    // And the fourth turn — the allowance now genuinely spent — parks.
+    const exhausted = weakOpening({
+      attempts: 4,
+      cap: 4,
+      openingProbe: { slotIds: ['d1'], spent: 3, allowance: 3 },
+      openingRoutability: { routable: false },
+    });
+    const after = await runDataSlotTurn(exhausted.state, exhausted.invokers);
+    if (after.response.kind === 'data_slot') expect(after.response.dataSlotId).toBe('d2');
+  });
+
+  it('never lets a large allowance outlast the author’s own per-slot cap', async () => {
+    // Two consecutive turns on the same slot, with five follow-ups unspent throughout. The first is
+    // affordable to BOTH limits and gets asked; the second is not the allowance's to give, because
+    // the author capped the slot at two attempts. Stated as a sequence deliberately: a single turn
+    // sitting already AT the cap proves nothing, since the gate never reaches the clamp — it would
+    // pass just as happily if the clamp had been written to ignore the author's limit entirely.
+    const budget = { slotIds: ['d1'], spent: 0, allowance: 5 };
+
+    const first = weakOpening({
+      attempts: 1,
+      cap: 2,
+      openingProbe: budget,
+      openingRoutability: { routable: false },
+    });
+    const afterFirst = await runDataSlotTurn(first.state, first.invokers);
+    expect(first.calls.routability).toHaveLength(1);
+    expect(afterFirst.response.kind).toBe('data_slot');
+    if (afterFirst.response.kind === 'data_slot') {
+      expect(afterFirst.response.dataSlotId).toBe('d1');
+      expect(afterFirst.response.isReask).toBe(true);
+    }
+
+    const second = weakOpening({
+      attempts: 2,
+      cap: 2,
+      openingProbe: budget,
+      openingRoutability: { routable: false },
+    });
+    const afterSecond = await runDataSlotTurn(second.state, second.invokers);
+    // Four probes still unspent, and the interview moves on anyway.
+    expect(afterSecond.response.kind).toBe('data_slot');
+    if (afterSecond.response.kind === 'data_slot')
+      expect(afterSecond.response.dataSlotId).toBe('d2');
+    // …and it never paid a model to tell it something the author's own limit had already settled.
+    expect(second.calls.routability).toHaveLength(0);
+  });
+
+  it('never gates a first ask, and never pays for a check on one', async () => {
+    // `attempts: 0` — nothing has been asked of this slot yet, so there is no follow-up to ration
+    // and the allowance (here, zero) must not turn the FIRST question into a park.
+    const { state, invokers, calls } = weakOpening({
+      attempts: 0,
+      openingProbe: { slotIds: ['d1'], spent: 0, allowance: 0 },
+      openingRoutability: { routable: true },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    expect(calls.routability).toHaveLength(0);
+    expect(result.response.kind).toBe('data_slot');
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d1');
+  });
+
+  it('never follows up at all on an allowance of zero', async () => {
+    const { state, invokers, calls } = weakOpening({
+      openingProbe: { slotIds: ['d1'], spent: 0, allowance: 0 },
+      openingRoutability: { routable: false },
+    });
+    const result = await runDataSlotTurn(state, invokers);
+    expect(calls.routability).toHaveLength(0);
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
+  });
+
+  it('leaves a covered slot alone — a clear answer is never a probe decision', async () => {
+    // A `direct` fill is covered whatever its confidence number, so there is no follow-up to weigh
+    // and the check must not run (nor the slot be parked).
+    const { invokers, calls } = stubInvokers({
+      extract: { dataSlotFills: [fill('d1', 0.9, 'direct')] },
+      openingRoutability: { routable: false },
+    });
+    const result = await runDataSlotTurn(
+      {
+        ...dsState({
+          questions: [q({ id: 'q1' })],
+          dataSlots: [
+            ds({ id: 'd1', key: 'd1', theme: 'A' }),
+            ds({ id: 'd2', key: 'd2', theme: 'B' }),
+          ],
+          activeDataSlotKey: 'd1',
+          dataSlotAttempts: { d1: 1 },
+          config: { maxDataSlotAttempts: 3 },
+        }),
+        openingProbe: { slotIds: ['d1'], spent: 0, allowance: 1 },
+      },
+      invokers
+    );
+    expect(calls.routability).toHaveLength(0);
+    if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
   });
 });

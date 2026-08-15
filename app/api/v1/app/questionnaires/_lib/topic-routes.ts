@@ -21,7 +21,7 @@ import {
   type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
-import { narrowToEnum } from '@/lib/app/questionnaire/types';
+import { DEFAULT_QUESTIONNAIRE_CONFIG, narrowToEnum } from '@/lib/app/questionnaire/types';
 
 /** Shared select projecting a topic row. */
 export const TOPIC_SELECT = {
@@ -83,6 +83,21 @@ export async function loadAdaptiveScopeSettings(versionId: string): Promise<Adap
     select: { adaptiveScope: true },
   });
   return narrowAdaptiveScopeSettings(config?.adaptiveScope);
+}
+
+/**
+ * The version's per-slot re-ask cap (G03).
+ *
+ * Read on its own rather than folded into {@link loadAdaptiveScopeSettings} because it belongs to a
+ * different blob and a different tab: it governs the interviewer, not the routing. Only the Topics
+ * tab needs it, and only to say when a follow-up limit set there cannot bind.
+ */
+export async function loadMaxDataSlotAttempts(versionId: string): Promise<number> {
+  const config = await prisma.appQuestionnaireConfig.findUnique({
+    where: { versionId },
+    select: { maxDataSlotAttempts: true },
+  });
+  return config?.maxDataSlotAttempts ?? DEFAULT_QUESTIONNAIRE_CONFIG.maxDataSlotAttempts;
 }
 
 /**

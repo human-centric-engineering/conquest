@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     appQuestionnaireSession: { findUnique: vi.fn() },
     // Adaptive Scope (P17): only queried when a version has opted in — see the parity test below.
     appQuestionnaireTopic: { findMany: vi.fn(async () => []) },
+    // G03: only queried when the opening's follow-up allowance actually governs the turn.
+    appQuestionnaireTurn: { findMany: vi.fn(async () => []) },
   },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: mocks.prisma }));
@@ -989,5 +991,135 @@ describe('buildTurnContext — Adaptive Scope (P17)', () => {
     expect(loaded!.base.questions.map((q) => q.key)).toEqual(['role']);
     expect(loaded!.byId.get('q2')?.key).toBe('team');
     expect(loaded!.activeQuestionKey).toBe('team');
+  });
+});
+
+/**
+ * The opening's follow-up allowance (G03 / F17.17).
+ *
+ * Two things are worth pinning here: that the allowance is resolved only when it can actually bind
+ * (nobody else pays a query for it), and that "spent" is counted off the FULL turn record rather
+ * than the windowed transcript — an allowance read off a window would quietly refill itself.
+ */
+describe('buildTurnContext — the opening follow-up allowance (G03)', () => {
+  function baseVersion(): Record<string, unknown> {
+    return (sessionGraph() as unknown as { version: Record<string, unknown> }).version;
+  }
+
+  /** A version with one opening data slot and Adaptive Scope on. */
+  function probeVersion(scopeOver: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...baseVersion(),
+      config: {
+        adaptiveScope: {
+          enabled: true,
+          limitOpeningProbes: true,
+          maxOpeningProbes: 1,
+          ...scopeOver,
+        },
+      },
+      dataSlots: [
+        {
+          id: 'ds-sig',
+          key: 'signal',
+          name: 'The signal',
+          description: 'd',
+          theme: 'Opening',
+          ordinal: 0,
+          weight: 1,
+          questions: [{ questionSlot: { key: 'role' } }],
+        },
+      ],
+    };
+  }
+
+  const openingTopic = {
+    id: 't-open',
+    key: 'open',
+    label: 'open',
+    description: null,
+    phase: 'opening',
+    criteria: null,
+    depth: 'full',
+    members: { questionKeys: ['role'], dataSlotKeys: ['signal'] },
+    ordinal: 0,
+    source: 'seeded',
+  };
+
+  beforeEach(() => {
+    (mocks.prisma.appQuestionnaireTurn.findMany as Mock).mockResolvedValue([]);
+  });
+
+  it('resolves the allowance and counts what the opening has already spent', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ version: probeVersion(), interviewPlan: null })
+    );
+    (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([openingTopic]);
+    // The slot was asked twice — one ask and one follow-up.
+    (mocks.prisma.appQuestionnaireTurn.findMany as Mock).mockResolvedValue([
+      { targetedDataSlotId: 'ds-sig' },
+      { targetedDataSlotId: 'ds-sig' },
+    ]);
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.openingProbe).toEqual({
+      slotIds: ['ds-sig'],
+      spent: 1,
+      allowance: 1,
+    });
+  });
+
+  it('does not resolve one — or query for it — when the version never opted in', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ version: probeVersion({ limitOpeningProbes: false }), interviewPlan: null })
+    );
+    (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([openingTopic]);
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.openingProbe).toBeUndefined();
+    expect(mocks.prisma.appQuestionnaireTurn.findMany).not.toHaveBeenCalled();
+  });
+
+  it('stops resolving one once the plan is decided — there is no opening left to ration', async () => {
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({
+        version: probeVersion(),
+        interviewPlan: {
+          v: 1,
+          topics: [],
+          excluded: [],
+          checkTopicKey: null,
+          confidence: 0.9,
+          source: 'llm',
+          respondentMessage: '',
+          decidedAtTurn: 2,
+          decidedAt: '2026-08-15T00:00:00.000Z',
+        },
+      })
+    );
+    (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([openingTopic]);
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.openingProbe).toBeUndefined();
+    expect(mocks.prisma.appQuestionnaireTurn.findMany).not.toHaveBeenCalled();
+  });
+
+  it('resolves nothing when the opening names no data slot that exists', async () => {
+    // The allowance rations conversational follow-ups. An opening built only from questions has
+    // none to ration, and a budget over an empty slot set would be a lie in the state.
+    (mocks.prisma.appQuestionnaireSession.findUnique as Mock).mockResolvedValue(
+      sessionGraph({ version: probeVersion(), interviewPlan: null })
+    );
+    (mocks.prisma.appQuestionnaireTopic.findMany as Mock).mockResolvedValue([
+      { ...openingTopic, members: { questionKeys: ['role'], dataSlotKeys: ['deleted_slot'] } },
+    ]);
+
+    const loaded = await buildTurnContext('sess-1');
+
+    expect(loaded!.base.openingProbe).toBeUndefined();
+    expect(mocks.prisma.appQuestionnaireTurn.findMany).not.toHaveBeenCalled();
   });
 });

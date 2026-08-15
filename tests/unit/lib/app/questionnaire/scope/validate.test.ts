@@ -554,3 +554,113 @@ describe('validateAdaptiveScope — comparability passthrough (F17.15)', () => {
     expect(issues.map((i) => i.code)).toContain('scale_never_whole');
   });
 });
+
+/**
+ * The opening's follow-up allowance (G03 / F17.17).
+ *
+ * Both findings exist for the same reason: the allowance can be switched on and change nothing,
+ * and neither reason is visible from the tab it is switched on from.
+ */
+describe('validateAdaptiveScope — the opening follow-up allowance', () => {
+  const codes = (issues: ReturnType<typeof validateAdaptiveScope>) => issues.map((i) => i.code);
+
+  it('says nothing while the allowance is off', () => {
+    const issues = validateAdaptiveScope({ ...healthy(), maxDataSlotAttempts: 1 });
+    expect(codes(issues)).not.toContain('opening_probe_limit_inert');
+    expect(codes(issues)).not.toContain('opening_probe_limit_moot');
+  });
+
+  it('flags an opening with no data slot — the limit rations conversational follow-ups', () => {
+    // `healthy()`'s opening topic is built from a QUESTION. The interviewer re-asks data slots, not
+    // form questions, so there is nothing here for the allowance to bound.
+    const issues = validateAdaptiveScope({
+      ...healthy(),
+      settings: settings({ limitOpeningProbes: true }),
+      maxDataSlotAttempts: 3,
+    });
+    expect(codes(issues)).toContain('opening_probe_limit_inert');
+  });
+
+  it('flags an opening whose data-slot keys no longer resolve', () => {
+    // A topic may still name a slot an author deleted. A limit rationing a slot that does not exist
+    // rations nothing, and reads on the tab exactly like one that does.
+    const base = healthy();
+    const issues = validateAdaptiveScope({
+      ...base,
+      topics: [
+        topic('open', 'opening', { members: { dataSlotKeys: ['gone'], questionKeys: [] } }),
+        ...base.topics.slice(1),
+      ],
+      settings: settings({ limitOpeningProbes: true }),
+      allQuestionKeys: base.allQuestionKeys.filter((k) => k !== 'open_q'),
+      allDataSlotKeys: ['still_here'],
+      maxDataSlotAttempts: 3,
+    });
+    expect(codes(issues)).toContain('opening_probe_limit_inert');
+  });
+
+  it('flags a limit that cannot bind because the interview never follows up', () => {
+    // The per-slot cap lives on a different tab and defaults to 1 — one ask, no follow-up ever. An
+    // author rationing follow-ups there is rationing something that does not happen.
+    const base = healthy();
+    const issues = validateAdaptiveScope({
+      ...base,
+      topics: [
+        topic('open', 'opening', { members: { dataSlotKeys: ['sig'], questionKeys: [] } }),
+        ...base.topics.slice(1),
+      ],
+      settings: settings({ limitOpeningProbes: true }),
+      allQuestionKeys: base.allQuestionKeys.filter((k) => k !== 'open_q'),
+      allDataSlotKeys: ['sig'],
+      maxDataSlotAttempts: 1,
+    });
+    expect(codes(issues)).toContain('opening_probe_limit_moot');
+    // One finding, not both — an opening that HAS a data slot is not also inert.
+    expect(codes(issues)).not.toContain('opening_probe_limit_inert');
+  });
+
+  it('names the stored per-slot value rather than assuming it is 1', () => {
+    // A 0 in the column (an import, a direct write) would otherwise be reported as a 1, sending the
+    // admin to look for a number that is not on their screen.
+    const base = healthy();
+    const issues = validateAdaptiveScope({
+      ...base,
+      topics: [
+        topic('open', 'opening', { members: { dataSlotKeys: ['sig'], questionKeys: [] } }),
+        ...base.topics.slice(1),
+      ],
+      settings: settings({ limitOpeningProbes: true }),
+      allQuestionKeys: base.allQuestionKeys.filter((k) => k !== 'open_q'),
+      allDataSlotKeys: ['sig'],
+      maxDataSlotAttempts: 0,
+    });
+    const moot = issues.find((i) => i.code === 'opening_probe_limit_moot');
+    expect(moot?.message).toContain('is 0 on the Settings tab');
+  });
+
+  it('says nothing when the allowance can actually bind', () => {
+    const base = healthy();
+    const issues = validateAdaptiveScope({
+      ...base,
+      topics: [
+        topic('open', 'opening', { members: { dataSlotKeys: ['sig'], questionKeys: [] } }),
+        ...base.topics.slice(1),
+      ],
+      settings: settings({ limitOpeningProbes: true }),
+      allQuestionKeys: base.allQuestionKeys.filter((k) => k !== 'open_q'),
+      allDataSlotKeys: ['sig'],
+      maxDataSlotAttempts: 3,
+    });
+    expect(codes(issues).filter((c) => c.startsWith('opening_probe_'))).toHaveLength(0);
+  });
+
+  it('stays silent about the follow-up allowance while Adaptive Scope itself is off', () => {
+    const base = healthy();
+    const issues = validateAdaptiveScope({
+      ...base,
+      settings: settings({ enabled: false, limitOpeningProbes: true }),
+      maxDataSlotAttempts: 3,
+    });
+    expect(codes(issues).filter((c) => c.startsWith('opening_probe_'))).toHaveLength(0);
+  });
+});

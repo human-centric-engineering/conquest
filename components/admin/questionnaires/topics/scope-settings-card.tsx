@@ -32,8 +32,10 @@ import { SaveButton } from '@/components/admin/questionnaires/save-button';
 import { ScopeRulesEditor } from '@/components/admin/questionnaires/topics/scope-rules-editor';
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_OPENING_PROBES_CEILING,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
+  MIN_OPENING_PROBES,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
   type AdaptiveScopeSettings,
   type ScopeRule,
@@ -170,6 +172,10 @@ export function ScopeSettingsCard({
               </p>
               <ol className="mt-2 list-decimal space-y-1 pl-4">
                 <li>
+                  The <strong>opening</strong> gathers the signal, within whatever follow-up
+                  allowance you set. It is the only step that happens before the decision.
+                </li>
+                <li>
                   Your <strong>hard rules</strong> run first. A “never include” can never be undone
                   by anything below it.
                 </li>
@@ -219,7 +225,85 @@ export function ScopeSettingsCard({
         )}
 
         <div className="space-y-3">
-          <SectionLabel step={1}>The cases you are certain about</SectionLabel>
+          <SectionLabel step={1}>Before the decision — what the opening may spend</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="scope-limit-probes" className="text-sm font-medium">
+                Ration follow-ups in the opening{' '}
+                <FieldHelp title="Opening follow-ups">
+                  <p>
+                    A <strong>follow-up</strong> is the interview circling back on something it has
+                    already asked, because the answer was too vague to route on. It is the most
+                    useful thing an interviewer does and the most expensive: every follow-up spends
+                    a turn that could have gone on a routed topic.
+                  </p>
+                  <p>
+                    The allowance is shared across the <strong>whole opening</strong>, not per
+                    question — which is the thing “attempts per data slot” on the Settings tab
+                    cannot express, because it has no idea a follow-up was already spent three
+                    questions ago.
+                  </p>
+                  <p>
+                    Before spending one, the agent checks whether what the respondent has already
+                    said is enough to choose topics from. If it is, the follow-up is not asked — the
+                    failure this exists to prevent is probing an answer that was already specific
+                    enough.
+                  </p>
+                  <p>
+                    Off by default. It only ever <em>removes</em> questions: it can never make the
+                    interview ask more than the per-slot limit you set elsewhere.
+                  </p>
+                </FieldHelp>
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                Off means the opening follows up as often as the per-slot limit allows.
+              </p>
+            </div>
+            <Switch
+              id="scope-limit-probes"
+              checked={draft.limitOpeningProbes}
+              onCheckedChange={(v) => set({ limitOpeningProbes: v })}
+              disabled={busy}
+            />
+          </div>
+          {draft.limitOpeningProbes && (
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground text-xs">
+                Follow-ups allowed across the whole opening
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  className="max-w-28"
+                  min={MIN_OPENING_PROBES}
+                  max={MAX_OPENING_PROBES_CEILING}
+                  value={draft.maxOpeningProbes}
+                  onChange={(e) =>
+                    set({
+                      maxOpeningProbes: boundedInt(
+                        e.target.value,
+                        MIN_OPENING_PROBES,
+                        MAX_OPENING_PROBES_CEILING,
+                        draft.maxOpeningProbes
+                      ),
+                    })
+                  }
+                  disabled={busy}
+                />
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {draft.maxOpeningProbes === 0
+                    ? 'never follow up'
+                    : draft.maxOpeningProbes === 1
+                      ? 'one, for the whole opening'
+                      : `${draft.maxOpeningProbes} in total`}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 border-t pt-4">
+          <SectionLabel step={2}>The cases you are certain about</SectionLabel>
           <ScopeRulesEditor
             rules={draft.rules}
             onChange={(next: ScopeRule[]) => set({ rules: next })}
@@ -230,7 +314,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={2}>How much the agent may cover</SectionLabel>
+          <SectionLabel step={3}>How much the agent may cover</SectionLabel>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
@@ -344,7 +428,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-2 border-t pt-4">
-          <SectionLabel step={3}>Guard against a narrow result</SectionLabel>
+          <SectionLabel step={4}>Guard against a narrow result</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-check-topic" className="text-sm font-medium">
@@ -391,7 +475,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-1.5 border-t pt-4">
-          <SectionLabel step={4}>When the agent cannot decide</SectionLabel>
+          <SectionLabel step={5}>When the agent cannot decide</SectionLabel>
           <Label className="text-sm font-medium">
             Ask these instead{' '}
             <FieldHelp title="Fallback topics">
@@ -412,7 +496,7 @@ export function ScopeSettingsCard({
         </div>
 
         <div className="space-y-3 border-t pt-4">
-          <SectionLabel step={5}>What the respondent is told</SectionLabel>
+          <SectionLabel step={6}>What the respondent is told</SectionLabel>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <Label htmlFor="scope-announce" className="text-sm font-medium">

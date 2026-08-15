@@ -15,9 +15,10 @@ reconstruct it by reading seven trackers, the pilot client research notes' capab
 authoring script's stdout.
 
 **Nothing below is blocking.** Adaptive Scope works end to end without any of it, and the pilot
-client instrument runs. What the first four items blocked was a **faithful** rendering of it — three of them
-(§1, §3, §4) have since shipped, leaving §2 and the guardrail in §5 as the workbook behaviour we
-cannot yet express.
+client instrument runs. What the first four items blocked was a **faithful** rendering of it — all
+of them (§1, §3, §4) have since shipped, as has the guardrail in §5, leaving **§2 alone** as the
+workbook behaviour we cannot yet express — and §2 is deliberately gated on a second instrument
+actually needing it.
 
 Ordered by value. Each heading carries a rough size, so a follow-up can tell a half-hour job from a
 phase without reading the whole entry.
@@ -136,19 +137,26 @@ there is something in the result the respondent did not already believe.
 
 ---
 
-## 5. One probe maximum across the opening (G03) · **~1 day**
+## 5. One probe maximum across the opening (G03) · **DONE** — see [`f17.17.md`](./f17.17.md)
+
+> Shipped 2026-08-15. `limitOpeningProbes` + `maxOpeningProbes` (off; 1) lower an opening slot's
+> effective re-ask cap to `min(maxDataSlotAttempts, 1 + remaining)`, so a follow-up the opening
+> cannot afford becomes an ordinary park rather than a new branch. `assessOpeningRoutability` — the
+> planner's own agent, at the routing tier — decides whether the last probe is worth spending, and
+> returns `null` on every failure, which spends it. The check may only ever save a question.
+>
+> `spent` is derived from the turn record (opening turns minus distinct opening slots) rather than
+> stored, and read over the full history rather than the loader's window, which would have refilled
+> itself on a long opening. Still open, and deliberately: nothing prices the interviewer's own turns,
+> so a probe is bounded by count rather than by the seconds it costs.
 
 **What the client specified:** probe only when an answer is too abstract to route ("a predictable
 revenue engine"); do not probe when it is already routable ("reps who cannot hold a CFO
 conversation"); **one probe for the whole opening**, because every probe costs a section of the
 budget.
 
-**What exists:** nothing session-scoped. The interviewer probes per its own strategy settings, and
+**What existed:** nothing session-scoped. The interviewer probed per its own strategy settings, and
 `maxDataSlotAttempts` is per slot, not a shared allowance.
-
-**Shape of the work:** a routable-or-not classifier on the opening's answers plus a session-scoped
-probe counter. Note the two halves are separable — the counter is cheap; the classifier is the part
-that needs care, since spending the probe on an already-routable answer is the failure G03 names.
 
 ---
 
@@ -272,6 +280,10 @@ for P17. Bringing the plan itself up to date across P10–P17 is a separate job,
 
 - [`f17.1-ui.md`](./f17.1-ui.md) · [`f17.4.md`](./f17.4.md) · [`f17.5.md`](./f17.5.md) ·
   [`f17.6.md`](./f17.6.md) · [`f17.7.md`](./f17.7.md) — the shipped trackers
+- [`f17.8.md`](./f17.8.md) · [`f17.9.md`](./f17.9.md) · [`f17.10.md`](./f17.10.md) ·
+  [`f17.11.md`](./f17.11.md) · [`f17.12.md`](./f17.12.md) · [`f17.13.md`](./f17.13.md) ·
+  [`f17.14.md`](./f17.14.md) · [`f17.15.md`](./f17.15.md) · [`f17.16.md`](./f17.16.md) ·
+  [`f17.17.md`](./f17.17.md) — the follow-ups above, as they shipped
 - [`../../questionnaire/adaptive-scope.md`](../../questionnaire/adaptive-scope.md) — the domain doc
 - The pilot client research notes (held outside this repo) — the
   capability table (C1–C11) these are numbered against

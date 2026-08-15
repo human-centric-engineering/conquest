@@ -9,9 +9,10 @@ not-applicable, and any long instrument that should not ask all of itself to eve
 same requirement — and before P17 the only way to express it was to split the questionnaire into
 several, which costs cross-section scoring and cohort analysis.
 
-> **Status:** F17.1–F17.6 shipped — the model, the runtime, the planner, the authoring
-> surface, the Routing Analyst, report/scoring awareness, and respondent amendment. The pilot client
-> instrument itself is not built: it needs its source workbook, which is not in this repo.
+> **Status:** F17.1–F17.17 shipped — the model, the runtime, the planner, the authoring
+> surface, the Routing Analyst, report/scoring awareness, respondent amendment, the plan preview,
+> routing-quality analytics and the opening's follow-up allowance. The pilot client instrument
+> itself is not built: it needs its source workbook, which is not in this repo.
 
 ### The tab is called "Adaptive scope"; the URL segment is still `topics`
 
@@ -281,6 +282,103 @@ The announcement rides the existing **briefing** seam into the phraser, on the o
 decision (`decidedAtTurn === selectionRound`). The interviewer weaves it in its own voice — "based on
 what you've said I want to go deeper on pipeline and forecasting" reads as the same person still
 talking, where a prepended paragraph reads as a system notice.
+
+---
+
+## What the opening may spend (G03 / F17.17)
+
+The opening is the only part of the interview whose answers decide the rest, which makes its
+follow-ups both the most valuable questions in the instrument and the most expensive. Every
+follow-up spends a turn the plan could have spent on a routed topic — in the pilot client's own
+arithmetic, roughly a section each. Their guardrail was blunt about it: **one probe for the whole
+opening**, and only when the answer is too abstract to route.
+
+### A probe is a follow-up, and `maxDataSlotAttempts` cannot ration it
+
+The interviewer re-asks a data slot when what came back was not confidently captured — the
+`isReask` path in `data-slot-orchestrator.ts`. `maxDataSlotAttempts` bounds that **per slot**, which
+is the wrong unit for this: a per-slot cap has no idea a follow-up was already spent three questions
+ago. `adaptiveScope.maxOpeningProbes` is the shared allowance across the whole opening.
+
+Two fields rather than one — `limitOpeningProbes` (the switch, off) and `maxOpeningProbes` (the
+number, 1). `0` is a meaningful setting here ("never follow up"), so unlike `sessionBudgetSeconds`
+it cannot double as the off switch.
+
+### It only ever lowers a cap, and the mechanism is the park
+
+When the allowance governs the active slot, the effective re-ask cap becomes
+`1` — a probe the opening cannot afford (the allowance is spent) or should not spend (the answer is
+already routable). Otherwise the author's own `maxDataSlotAttempts` governs, untouched. A probe the
+opening cannot afford therefore becomes an
+ordinary **park** — a provisional fill and a bridge to a fresh area — which the runtime already knew
+how to do. No new response kind, and no new way for an interview to stall.
+
+The cap is only ever lowered, never raised, so an allowance of five cannot make an interview ask a
+question the author's own per-slot cap forbids — a slot already at that cap fails the
+`attempts < cap` guard and never consults the allowance at all.
+
+**The allowance is counted down once, by `spent`, and nowhere else.** An earlier revision also
+lowered the cap to `1 + remaining` on the affordable path. That double-counts: the follow-up being
+authorised right now will itself increment `spent`, so the next turn's `remaining` is already one
+lower and parks the slot then. Subtracting a second time retired the allowance a turn early, and an
+author who asked for three probes silently received two. The bug was invisible at `maxOpeningProbes:
+1` — where the two arithmetics agree — which is why it survived the first round of tests.
+
+### Spending the probe on an already-routable answer is the failure
+
+"We need a predictable revenue engine" is worth a follow-up. "Our reps cannot hold a conversation
+with a CFO" names a section on its own, and probing it wastes the only probe the opening has. So
+before a probe is spent, `assessOpeningRoutability` asks whether the plan could already be decided
+from what has been said — against **the author's own criteria**, which is the only test that means
+anything.
+
+It runs on the **planner's own agent binding**, at the `routing` tier rather than the planner's
+`reasoning` tier. Same agent because the check is a prediction of that agent's own judgement, and a
+second agent could disagree with it about the very question the check exists to anticipate; a
+different tier because this one runs _inside_ a live turn while the respondent watches a typing
+indicator, so its timeout is 6s against the planner's 12s.
+
+**Failure leans one way only.** `assessOpeningRoutability` returns `null` for a missing agent, an
+unresolved provider, a timeout or an unparseable reply — and `null` is not `false`, and certainly
+not `true`. The caller spends the probe on a null, which is exactly what the interview would have
+done before this existed. The check may only ever _save_ a question, never skip one on the strength
+of a call that did not happen.
+
+### The count is derived, never stored
+
+`spent` is read off the turn record: opening-slot turns minus distinct opening slots, i.e. the
+second and every later question about the same thing. That is self-healing in a way a counter column
+is not — a turn that never persisted never spent a probe, and no bookkeeping has to remember it. It
+also counts a _return_ to a slot the interview had moved on from, which costs the respondent exactly
+as much as a consecutive re-ask.
+
+The read is over the **full** turn history for those slots, not the windowed transcript the loader
+already holds: an allowance read off a window would quietly refill itself on a long opening.
+
+### What it costs everyone else
+
+Nothing. `buildTurnContext` resolves an allowance only when the version opted in, the plan is not
+yet decided, and an opening topic names data slots that exist — one extra query, for those turns
+only. The classifier is called at most once per **turn**, at the moment a probe is about to be
+spent: never on a first ask, never on a covered slot, and never when the allowance is already
+exhausted (there is nothing to decide, so nothing is paid to decide it).
+
+Once per turn, not once per session — a `routable: true` verdict withholds the follow-up without
+spending a probe, so the next opening slot whose answer lands weakly asks again. An opening of six
+slots answered routably throughout costs six checks across six turns. That is bounded by the
+opening's length rather than by the allowance, and it is the one place this feature can cost more
+than it saves; if it ever bites, the fix is to remember a `true` verdict for the session rather than
+to shorten the timeout.
+
+### What is deliberately not built
+
+**Nothing prices the interviewer's own turns.** The session budget (C7) prices the _questions_; a
+probe is a turn, and the two are not yet reconciled. The allowance bounds probes by count for the
+same reason `maxConditionalTopics` bounds topics by count — it is the honest thing to enforce
+without pricing what has never been measured.
+
+**The allowance covers data slots only.** An opening built from form questions is not rationed, and
+the tab says so (`opening_probe_limit_inert`) rather than leaving the author to discover it.
 
 ---
 
@@ -592,6 +690,16 @@ claiming topic**: the floor comes out too high, the routed allowance too low, an
 topics that would in fact have held. `duplicate_membership` is a warning, reported regardless of
 `enabled`, and aggregated per kind so a copied topic produces one finding rather than forty.
 
+### A follow-up limit that cannot bind
+
+Two ways to ration the opening's follow-ups and change nothing, neither visible from the tab it is
+set on. `opening_probe_limit_inert` fires when no opening topic contains a data slot that exists —
+the allowance rations conversational follow-ups, so an opening built from form questions is not
+rationed at all. `opening_probe_limit_moot` fires when `maxDataSlotAttempts` is 1, which is the
+**default**: one ask, no follow-up ever, so there is nothing for the allowance to bound. That knob
+lives on the Settings tab, which is precisely why the author cannot see it from here — the Topics
+route loads it (`loadMaxDataSlotAttempts`) for no other reason.
+
 ---
 
 ## Files
@@ -604,6 +712,8 @@ topics that would in fact have held. `duplicate_membership` is a warning, report
 | `lib/app/questionnaire/scope/guardrails.ts`                         | Cap, fallback, the time fit, check topic                                                                                                                                          |
 | `lib/app/questionnaire/scope/budget.ts`                             | What an interview costs in seconds — per-type pricing, per-topic cost at both depths, the floor and the allowance                                                                 |
 | `lib/app/questionnaire/scope/planner.ts`                            | The model call; never throws                                                                                                                                                      |
+| `lib/app/questionnaire/scope/probe.ts`                              | The opening's follow-up counter (G03) — pure, so the orchestrator can import it                                                                                                   |
+| `lib/app/questionnaire/scope/routability.ts`                        | "Could the plan already be decided?" — the check that decides whether a probe is worth spending; returns null on every failure                                                    |
 | `lib/app/questionnaire/scope/amendment.ts`                          | Cue gate, label match, plan mutation (F17.6) — pure                                                                                                                               |
 | `lib/app/questionnaire/scope/analysis-schema.ts`                    | The Routing Analyst's output contract                                                                                                                                             |
 | `lib/app/questionnaire/scope/analysis-prompt.ts`                    | Its rubric — mostly about quoting versus inferring                                                                                                                                |

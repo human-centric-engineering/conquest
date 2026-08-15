@@ -50,6 +50,7 @@ import {
 } from '@/lib/app/questionnaire/sensitivity';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
 import { coverageRatio, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
+import { governsSlot, probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
   AnswerSlotIntent,
@@ -76,6 +77,12 @@ import type {
 
 /** Synthetic slug recorded on a turn's `toolCalls` for the data-slot selection step. */
 export const DATA_SLOT_SELECTION_TOOL_SLUG = 'app_select_data_slot';
+
+/**
+ * Adaptive Scope (G03): the opening-routability check, recorded as a tool call so a turn that
+ * withheld a follow-up says so in its own record rather than only in a log line.
+ */
+export const OPENING_PROBE_TOOL_SLUG = 'app_assess_opening_routability';
 
 /** Confidence at/above which a data slot counts as "filled" for targeting + the panel. */
 export const DATA_SLOT_FILLED_THRESHOLD = 0.5;
@@ -391,18 +398,65 @@ export async function runDataSlotTurn(
   //     disregarded (abusive) turn — the gate already cleared the fills there. The extractor was
   //     asked to infer this slot this turn (`parkPending`); if it returned nothing, synthesise a
   //     floor fill so progress is guaranteed regardless of model compliance.
+  //
+  //     Adaptive Scope (G03): for a slot in the OPENING, the effective cap is whichever is lower —
+  //     the author's per-slot cap, or one ask plus whatever is left of the opening's shared
+  //     follow-up allowance. Lowering the cap is the whole mechanism: a probe the opening cannot
+  //     afford becomes a park, which already knows how to record a provisional fill and bridge to a
+  //     fresh area. No new response kind, no new way for the interview to get stuck.
   const activeSlot = state.activeDataSlotKey
     ? dataSlots.find((s) => s.key === state.activeDataSlotKey)
     : undefined;
   let parkedTheme: string | undefined;
-  if (
-    hasMessage &&
-    !disregarded &&
-    activeSlot !== undefined &&
-    (state.dataSlotAttempts?.[activeSlot.id] ?? 0) >= state.config.maxDataSlotAttempts
-  ) {
+  if (hasMessage && !disregarded && activeSlot !== undefined) {
+    // The cap this turn actually parks on. Re-derived from the author's per-slot limit every turn,
+    // and only ever lowered to 1 — an allowance cannot buy an ask the author forbade, because a
+    // slot already at that limit fails the `attempts < openingProbeCap` guard below and never
+    // enters the block at all (so the allowance is neither consulted nor paid for).
+    let openingProbeCap: number = state.config.maxDataSlotAttempts;
     const merged = effectiveDataAnswered.find((a) => a.dataSlotId === activeSlot.id);
-    if (merged === undefined || !isCovered(merged)) {
+    const uncovered = merged === undefined || !isCovered(merged);
+    const attempts = state.dataSlotAttempts?.[activeSlot.id] ?? 0;
+    // Only when the author's own cap would have allowed another ask AND that ask would be a
+    // follow-up (`attempts > 0`) is there a probe to ration — so an opening slot's FIRST ask is
+    // never gated, and a slot already at the per-slot cap never pays for the check.
+    const probeBudget = state.openingProbe;
+    if (
+      uncovered &&
+      attempts > 0 &&
+      attempts < openingProbeCap &&
+      probeBudget !== undefined &&
+      governsSlot(probeBudget, activeSlot.id)
+    ) {
+      const remaining = probesRemaining(probeBudget);
+      if (remaining <= 0) {
+        // Spent. Nothing to decide, and nothing to pay a model to decide.
+        openingProbeCap = 1;
+      } else {
+        // A probe IS available — so the only question left is whether it would buy anything.
+        // `routable === true` is the one answer that withholds it; a null (the check did not
+        // happen) asks the follow-up, exactly as the interview would have before G03 existed.
+        const verdict = invokers.assessOpeningRoutability
+          ? await invokers.assessOpeningRoutability(state)
+          : null;
+        if (verdict) {
+          costUsd += verdict.costUsd;
+          toolCalls.push(
+            toolCall(OPENING_PROBE_TOOL_SLUG, verdict.routable !== null, {
+              ...(verdict.diagnostic !== undefined ? { code: verdict.diagnostic } : {}),
+              ...(verdict.latencyMs !== undefined ? { latencyMs: verdict.latencyMs } : {}),
+            })
+          );
+        }
+        // Withhold, or leave the author's own cap to govern — and NOTHING in between. Counting the
+        // allowance down here as well would spend it twice: this follow-up already increments
+        // `spent`, so the next turn's `remaining` is one lower and the branch above parks the slot
+        // then. Lowering the cap to `1 + remaining` on top of that retires the allowance a turn
+        // early, and an author who asked for three probes silently received two.
+        if (verdict?.routable === true) openingProbeCap = 1;
+      }
+    }
+    if (uncovered && attempts >= openingProbeCap) {
       const inferred = dataSlotFills.find((f) => f.dataSlotKey === activeSlot.key);
       if (inferred) {
         inferred.provisional = true;

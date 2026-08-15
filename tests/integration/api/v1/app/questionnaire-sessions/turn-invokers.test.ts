@@ -25,6 +25,12 @@ vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/data-slot-selection', () =
   selectNextDataSlot: dataSlotSelectionMock.selectNextDataSlot,
 }));
 
+// G03: the opening-routability check. Mocked at its own module so this file pins the WIRING —
+// whether the invoker exists, what evidence it assembles, how a null becomes an outcome — rather
+// than re-testing the model call (`scope/routability.test.ts` owns that).
+const routabilityMock = vi.hoisted(() => ({ assessOpeningRoutability: vi.fn() }));
+vi.mock('@/lib/app/questionnaire/scope/routability', () => routabilityMock);
+
 // Mocks for assessSeriousness: provider resolution, getProvider, structured completion, and
 // logCost (fire-and-forget — a no-op here so the test doesn't hit Prisma/SDK).
 const resolverMock = vi.hoisted(() => ({ resolveAgentProviderAndModel: vi.fn() }));
@@ -1299,5 +1305,113 @@ describe('selectDataSlot — ranks by the current answer, not the prior question
 
     const passed = dataSlotSelectionMock.selectNextDataSlot.mock.calls[0][0];
     expect(passed.recentMessages).toEqual(['Welcome!']);
+  });
+});
+
+describe('assessOpeningRoutability (G03)', () => {
+  const CANDIDATES = [{ key: 'pipeline', label: 'Pipeline', criteria: 'when deals stall' }];
+
+  /** A data-slot-mode state carrying one targeted slot with a captured paraphrase. */
+  function openingState() {
+    return state({
+      userMessage: 'We need a predictable revenue engine.',
+      dataSlots: [
+        {
+          id: 'd1',
+          key: 'signal',
+          name: 'The signal',
+          description: 'What is in the way',
+          theme: 'Opening',
+          ordinal: 0,
+          weight: 1,
+        },
+      ],
+      dataSlotAnswered: [
+        { dataSlotId: 'd1', confidence: 0.3, value: null, paraphrase: 'Wants growth.' },
+      ],
+      activeDataSlotKey: 'signal',
+    });
+  }
+
+  it('is not wired at all when the route supplies no candidate topics', async () => {
+    // The overwhelmingly common case: no version has the allowance on. An invoker that existed and
+    // returned a null would still cost the orchestrator a call it has no reason to make.
+    expect((await invokers()).assessOpeningRoutability).toBeUndefined();
+    expect(
+      (await invokers({ routabilityCandidates: [] })).assessOpeningRoutability
+    ).toBeUndefined();
+  });
+
+  it('hands the check the criteria, the captured opening, and what was just said', async () => {
+    routabilityMock.assessOpeningRoutability.mockResolvedValue({
+      routable: true,
+      reason: 'Named a section outright.',
+      costUsd: 0.0004,
+    });
+    const inv = await invokers({ routabilityCandidates: CANDIDATES, goal: 'Find the constraint' });
+
+    const out = await inv.assessOpeningRoutability!(openingState());
+
+    const passed = routabilityMock.assessOpeningRoutability.mock.calls[0][0];
+    expect(passed.candidates).toEqual(CANDIDATES);
+    expect(passed.goal).toBe('Find the constraint');
+    // A data slot has no fixed prompt — it is asked as a phrasing of its name + description, so
+    // that is what stands in for the question the answer belongs to.
+    expect(passed.evidence).toEqual([
+      { asked: 'The signal — What is in the way', said: 'Wants growth.' },
+    ]);
+    // The answer the follow-up would be aimed at — extraction may not have folded it into a fill.
+    expect(passed.latestMessage).toBe('We need a predictable revenue engine.');
+    expect(out).toMatchObject({
+      routable: true,
+      reason: 'Named a section outright.',
+      costUsd: 0.0004,
+    });
+    expect(typeof out.latencyMs).toBe('number');
+  });
+
+  it('omits a slot with no captured paraphrase rather than sending an empty line', async () => {
+    routabilityMock.assessOpeningRoutability.mockResolvedValue({
+      routable: false,
+      reason: 'x',
+      costUsd: 0,
+    });
+    const inv = await invokers({ routabilityCandidates: CANDIDATES });
+
+    await inv.assessOpeningRoutability!(
+      state({
+        userMessage: '',
+        dataSlots: [
+          {
+            id: 'd1',
+            key: 'signal',
+            name: 'The signal',
+            description: 'd',
+            theme: 'Opening',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: null, paraphrase: '  ' }],
+      })
+    );
+
+    const passed = routabilityMock.assessOpeningRoutability.mock.calls[0][0];
+    expect(passed.evidence).toEqual([]);
+    // A kickoff turn carries no message; sending an empty quote would read as a blank answer.
+    expect(passed.latestMessage).toBeUndefined();
+  });
+
+  it('maps a failed check to routable: null with a diagnostic, never to a verdict', async () => {
+    // The load-bearing mapping: the orchestrator spends the probe on a null, and would WITHHOLD it
+    // on a `true`. Collapsing "could not tell" into either verdict is the one unsafe outcome.
+    routabilityMock.assessOpeningRoutability.mockResolvedValue(null);
+    const inv = await invokers({ routabilityCandidates: CANDIDATES });
+
+    const out = await inv.assessOpeningRoutability!(openingState());
+
+    expect(out.routable).toBeNull();
+    expect(out.diagnostic).toBe('routability_unavailable');
+    expect(out.costUsd).toBe(0);
   });
 });

@@ -4,6 +4,7 @@ import {
   DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
   DEFAULT_SECONDS_PER_DATA_SLOT,
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_OPENING_PROBES_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_SESSION_BUDGET_SECONDS,
@@ -124,6 +125,36 @@ describe('narrowTopicMembers', () => {
       dataSlotKeys: [],
       questionKeys: ['q1', 'q2'],
     });
+  });
+});
+
+describe('narrowAdaptiveScopeSettings — the opening follow-up allowance (G03)', () => {
+  it('is off by default, so the opening probes exactly as it always has', () => {
+    const s = narrowAdaptiveScopeSettings({});
+    expect(s.limitOpeningProbes).toBe(false);
+    // The number is what an author gets when they turn it ON — never what they run today.
+    expect(s.maxOpeningProbes).toBe(1);
+  });
+
+  it('keeps zero, because "never follow up" is a real setting here', () => {
+    // Unlike `sessionBudgetSeconds`, 0 is not how this is turned off — the switch beside it is.
+    // Clamping 0 up to 1 would silently reinstate the probe the author just removed.
+    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 0 }).maxOpeningProbes).toBe(0);
+  });
+
+  it('clamps to the ceiling and rounds a fractional allowance', () => {
+    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 99 }).maxOpeningProbes).toBe(
+      MAX_OPENING_PROBES_CEILING
+    );
+    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: -2 }).maxOpeningProbes).toBe(0);
+    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 1.6 }).maxOpeningProbes).toBe(2);
+  });
+
+  it('falls back to the default for anything that is not a number', () => {
+    expect(narrowAdaptiveScopeSettings({ maxOpeningProbes: 'one' }).maxOpeningProbes).toBe(1);
+    expect(narrowAdaptiveScopeSettings({ limitOpeningProbes: 'yes' }).limitOpeningProbes).toBe(
+      false
+    );
   });
 });
 

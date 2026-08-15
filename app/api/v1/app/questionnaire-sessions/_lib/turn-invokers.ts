@@ -52,11 +52,17 @@ import {
 import type { AnswerFitMode } from '@/lib/app/questionnaire/types';
 import { selectGlossaryLines } from '@/lib/app/questionnaire/glossary/injection';
 import type { GlossaryEntry } from '@/lib/app/questionnaire/glossary/types';
+import {
+  assessOpeningRoutability,
+  type ProbeEvidence,
+} from '@/lib/app/questionnaire/scope/routability';
+import type { Topic } from '@/lib/app/questionnaire/scope/types';
 import type {
   CapabilityInvokers,
   DataSlotSelectOutcome,
   DetectOutcome,
   ExtractOutcome,
+  OpeningRoutabilityOutcome,
   RefineOutcome,
   SelectOutcome,
   SeriousnessOutcome,
@@ -206,6 +212,13 @@ export async function buildTurnInvokers(opts: {
    * accepted terms or prompt injection is off — every seam then collapses to nothing.
    */
   glossaryEntries?: readonly GlossaryEntry[];
+  /**
+   * Adaptive Scope (G03): the conditional topics the plan will choose between, supplied by the
+   * route only when the opening's follow-up allowance actually governs this turn. Their criteria
+   * ARE the routability test — without them there is nothing to be routable against, so an absent
+   * (or empty) list omits the invoker entirely and the interview probes as it always has.
+   */
+  routabilityCandidates?: readonly Pick<Topic, 'key' | 'label' | 'criteria'>[];
 }): Promise<CapabilityInvokers> {
   const {
     userId,
@@ -222,6 +235,7 @@ export async function buildTurnInvokers(opts: {
     anonymous,
     recordInspectorCall,
     glossaryEntries = [],
+    routabilityCandidates,
   } = opts;
 
   // Inspector (admin preview only): resolve a binding's display model/provider for a trace, fail-soft.
@@ -579,6 +593,54 @@ export async function buildTurnInvokers(opts: {
         ...(recordInspectorCall ? { recordInspectorCall } : {}),
       });
     },
+
+    // Adaptive Scope (G03): would one more follow-up buy anything? Wired only when the route
+    // resolved candidate topics for it; the orchestrator calls it at most once per TURN, at the
+    // moment a probe is about to be spent (a routable verdict spends no probe, so a later slot can
+    // ask again). Fail-soft inside — a null verdict spends the probe.
+    ...(routabilityCandidates && routabilityCandidates.length > 0
+      ? {
+          async assessOpeningRoutability(state): Promise<OpeningRoutabilityOutcome> {
+            const started = Date.now();
+            // What the opening has gathered, read off the state the core already holds: each
+            // targeted data slot with the living paraphrase captured for it. `name` stands in for
+            // the question, because a data slot is asked as an interviewer phrasing of it rather
+            // than as a fixed prompt.
+            const paraphraseBySlotId = new Map(
+              (state.dataSlotAnswered ?? []).map((f) => [f.dataSlotId, f.paraphrase ?? null])
+            );
+            const evidence: ProbeEvidence[] = (state.dataSlots ?? []).flatMap((slot) => {
+              const said = paraphraseBySlotId.get(slot.id);
+              return said && said.trim().length > 0
+                ? [{ asked: `${slot.name} — ${slot.description}`, said }]
+                : [];
+            });
+            const verdict = await assessOpeningRoutability({
+              sessionId: state.sessionId,
+              candidates: routabilityCandidates,
+              evidence,
+              // The answer the follow-up would be aimed at. Extraction has run by the time the core
+              // asks, but a vague reply is exactly the one it may not have folded into a fill yet —
+              // which is the case this check exists for.
+              ...(state.userMessage.trim().length > 0 ? { latestMessage: state.userMessage } : {}),
+              ...(goal ? { goal } : {}),
+            });
+            return verdict === null
+              ? {
+                  routable: null,
+                  costUsd: 0,
+                  latencyMs: Date.now() - started,
+                  diagnostic: 'routability_unavailable',
+                }
+              : {
+                  routable: verdict.routable,
+                  reason: verdict.reason,
+                  costUsd: verdict.costUsd,
+                  latencyMs: Date.now() - started,
+                };
+          },
+        }
+      : {}),
 
     async assessSeriousness(state): Promise<SeriousnessOutcome> {
       // Stage 2 of the seriousness gate — a direct structured LLM call (not a registered

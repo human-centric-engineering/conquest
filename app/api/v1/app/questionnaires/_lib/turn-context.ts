@@ -38,6 +38,7 @@ import {
   type SessionScope,
 } from '@/app/api/v1/app/questionnaires/_lib/session-scope';
 import { isDataSlotInScope, isQuestionInScope } from '@/lib/app/questionnaire/scope/resolve';
+import { countOpeningProbes, type OpeningProbeBudget } from '@/lib/app/questionnaire/scope/probe';
 import type {
   DataSlotAnsweredView,
   DataSlotTarget,
@@ -515,6 +516,40 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
     ? dataSlots.filter((d) => isDataSlotInScope(scope.scope, d.key))
     : dataSlots;
 
+  // ── The opening's follow-up allowance (G03) ───────────────────────────────────────────────
+  // Resolved only while it can actually bite: the version opted in, the plan is not yet decided
+  // (afterwards there is no opening left to ration), and an opening topic names data slots that
+  // exist. Everyone else — every version that never opted in, and every turn after the decision —
+  // pays a set intersection and no query at all.
+  let openingProbe: OpeningProbeBudget | undefined;
+  if (scope.settings.enabled && scope.settings.limitOpeningProbes && scope.plan === null) {
+    const openingSlotKeys = new Set(
+      scope.topics.filter((t) => t.phase === 'opening').flatMap((t) => t.members.dataSlotKeys)
+    );
+    // Against the UNSCOPED data slots: an opening topic's members are in scope by definition, but
+    // resolving ids from the scoped list would silently drop any that were not, and a budget that
+    // governs fewer slots than the author named is a budget that quietly over-probes.
+    const openingSlotIds = new Set(
+      dataSlots.filter((d) => openingSlotKeys.has(d.key)).map((d) => d.id)
+    );
+    if (openingSlotIds.size > 0) {
+      // The FULL turn history for these slots, not the windowed `session.turns` above: an allowance
+      // read off a window would silently refill itself on a long opening.
+      const openingTurns = await prisma.appQuestionnaireTurn.findMany({
+        where: { sessionId: session.id, targetedDataSlotId: { in: [...openingSlotIds] } },
+        select: { targetedDataSlotId: true },
+      });
+      openingProbe = {
+        slotIds: [...openingSlotIds],
+        spent: countOpeningProbes(
+          openingTurns.map((t) => t.targetedDataSlotId),
+          openingSlotIds
+        ),
+        allowance: scope.settings.maxOpeningProbes,
+      };
+    }
+  }
+
   // Sensitivity awareness / safeguarding: the session's remembered disclosures. The running-max
   // level switches the phraser to a gentle tone; the note summaries remind it what to be careful
   // about. Carries summaries only — the rest of each note stays on the row for analytics/events.
@@ -569,6 +604,8 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
       dataSlotAnswered,
       activeDataSlotKey,
       dataSlotAttempts,
+      // Adaptive Scope (G03): the opening's shared follow-up allowance, when one governs this turn.
+      ...(openingProbe ? { openingProbe } : {}),
       // Seriousness / abuse gate: the session's strikes so far (the core returns the updated count).
       abuseStrikes: session.abuseStrikes,
       // Sensitivity awareness: the remembered disclosure level + summaries (gentle-tone memory).

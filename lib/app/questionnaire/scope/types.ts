@@ -224,6 +224,17 @@ export const MAX_CONDITIONAL_TOPICS_CEILING = 20;
 export const MIN_SESSION_BUDGET_SECONDS = 30;
 export const MAX_SESSION_BUDGET_SECONDS = 14_400;
 
+/**
+ * Bounds on the opening's shared follow-up allowance (G03).
+ *
+ * `0` is legal and means "never probe in the opening" — an instrument whose opening questions are
+ * concrete enough that a follow-up is always waste. The ceiling is deliberately small: the whole
+ * point of the allowance is that a probe is expensive, and an author who wants six of them does not
+ * want an allowance, they want the per-slot cap they already have.
+ */
+export const MIN_OPENING_PROBES = 0;
+export const MAX_OPENING_PROBES_CEILING = 5;
+
 /** Bounds on a per-question-type time estimate, in seconds. */
 export const MIN_SECONDS_PER_ITEM = 1;
 export const MAX_SECONDS_PER_ITEM = 600;
@@ -471,6 +482,25 @@ export interface AdaptiveScopeSettings {
    */
   secondsPerDataSlot: number;
 
+  /**
+   * Ration follow-up questions across the opening (G03). **False by default**, and while false the
+   * opening probes exactly as it always has — the per-slot `maxDataSlotAttempts` cap alone.
+   *
+   * A pair rather than a single number because `0` is a meaningful setting here ("never probe"),
+   * so it cannot double as the off switch the way `sessionBudgetSeconds: 0` does.
+   */
+  limitOpeningProbes: boolean;
+
+  /**
+   * How many follow-ups the **whole opening** gets, when {@link limitOpeningProbes} is on.
+   *
+   * The unit is the interview, not the question. A per-slot cap cannot express "one probe for the
+   * whole opening", because it has no idea a probe was already spent three questions ago — and
+   * every probe costs a routed section of the session budget, which is what makes the allowance
+   * shared rather than per item.
+   */
+  maxOpeningProbes: number;
+
   /** The hard rules, evaluated before the planner. */
   rules: ScopeRule[];
 }
@@ -490,6 +520,9 @@ export const DEFAULT_ADAPTIVE_SCOPE_SETTINGS: AdaptiveScopeSettings = {
   sessionBudgetSeconds: 0,
   secondsPerQuestionType: {},
   secondsPerDataSlot: DEFAULT_SECONDS_PER_DATA_SLOT,
+  // Off. The allowance below is what an author gets when they turn it on, not what they run today.
+  limitOpeningProbes: false,
+  maxOpeningProbes: 1,
   rules: [],
 };
 
@@ -754,6 +787,15 @@ export function narrowAdaptiveScopeSettings(value: unknown): AdaptiveScopeSettin
         MIN_SECONDS_PER_ITEM,
         MAX_SECONDS_PER_ITEM,
         d.secondsPerDataSlot
+      )
+    ),
+    limitOpeningProbes: asBool(obj.limitOpeningProbes, d.limitOpeningProbes),
+    maxOpeningProbes: Math.round(
+      asNumber(
+        obj.maxOpeningProbes,
+        MIN_OPENING_PROBES,
+        MAX_OPENING_PROBES_CEILING,
+        d.maxOpeningProbes
       )
     ),
     rules,
