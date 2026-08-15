@@ -642,6 +642,74 @@ release process.
 
 ### Fixed
 
+- **EPUB chapter text is now extracted by a real DOM parse, not a regex chain.**
+  `epub-parser.ts` stripped markup with fourteen chained `.replace()` calls;
+  CodeQL raised five high-severity findings against them on #613. Three were
+  real, measured against the old code rather than assumed: `<[^>]+>` does not
+  match `</script >`, so a script block written that way survived removal and
+  its **body** landed in the knowledge base as text; `&amp;` was unescaped ahead
+  of `&lt;`, so the literal text `&amp;lt;` double-unescaped to `<`; and only
+  six entities were decoded, so `Caf&eacute;` reached the chunker verbatim —
+  every book not written in English. (The other two, the "incomplete
+  multi-character sanitization" pair, do not produce a live tag through either
+  implementation; they are theoretical for this sink and are not claimed as
+  fixed.)
+
+  The replacement is `lib/orchestration/knowledge/parsers/dom-text.ts`, holding
+  the jsdom text-extraction machinery `html-parser.ts` already had — now shared
+  rather than duplicated. Both parsers use it. Alongside the correctness fixes,
+  EPUB text gains proper decoding of every entity, `<head>` exclusion for free
+  (it is not in `document.body`, so the regex added earlier in this release is
+  gone), non-breaking spaces folded to ordinary ones, and markdown headings —
+  which `chunkMarkdownDocument()` splits on, so a book now chunks along its
+  chapters instead of arbitrarily.
+
+  Verified through a production build and against the standalone server, since
+  jsdom in a knowledge parser is precisely what broke this pipeline once before:
+  `npm run smoke:epub`.
+
+- **The EPUB parser returned an empty document for every book ever ingested.**
+  `epub-parser.ts` called `await epub.parse()`, but `epub2@3.0.2`'s `parse()`
+  returns `this`, not a promise — parsing is callback-driven and completes on an
+  `end` event. The `await` resolved on the next microtask and the parser read
+  `metadata`, `flow` and `toc` while all three were still empty. Measured
+  against a spec-valid EPUB 2 archive, the old code returned
+  `{ title: '<filename>', metadata: { format: 'epub' }, sections: 0, fullText: '', warnings: [] }`.
+  Silent: the upload reported success, and any agent grounded on an EPUB had
+  been answering from nothing. A second instance of the same mistake sat two
+  lines below — `await epub.getChapterRaw(id)` awaits a callback-style method
+  that returns `void`. Both now use the library's promise API,
+  `EPub.createAsync()` and `getChapterRawAsync()`.
+
+  **An empty result is also no longer silent.** Two paths still return zero
+  sections from a *resolved* parse — a book with no spine, and one whose every
+  chapter strips to nothing (an image-only comic or photo book) — and both
+  looked exactly like the bug. Each now carries a warning naming the reason,
+  which `document-manager` persists into the document's metadata and logs. That
+  matters because `uploadDocument` derives `fileHash` from the extracted *text*,
+  so every book extracting to nothing hashes to `sha256('')` and the second one
+  silently dedups into the first under a different title.
+
+  **Fork-facing:** a caller that treated `sections: []` as "an empty book" was
+  reading every book that way and will now get content. An unreadable archive
+  rejected before this change and still does — that was never the broken part.
+  Chapter text also no longer repeats the chapter title, which leaked in from
+  the XHTML `<head>`. A malformed OPF remains able to throw an uncatchable
+  `TypeError` out of `epub2`'s own inflate callback; that is a defect in the
+  library with no call-site fix, tracked in #614.
+
+  **What let it ship, and what stops it recurring.** `types/epub2.d.ts` — a
+  hand-written declaration shadowing the library's own — declared both methods
+  as returning promises. That is the only reason
+  `@typescript-eslint/await-thenable`, an error under `recommendedTypeChecked`,
+  stayed silent; with the declaration corrected it flags both call sites. The
+  unit tests mocked `epub2` wholesale and asserted against the invented shape,
+  so 27 green tests sat on top of a parser that never worked. They are kept for
+  the branch cases and the mock now mirrors the real API, but the guard is a new
+  no-mock suite that parses an archive built byte-by-byte by
+  `tests/helpers/epub-fixture.ts`. That fixture DEFLATEs its entries on purpose:
+  with stored entries `parse()` happens to complete synchronously and the bug
+  does not reproduce (#606).
 - **Edits to a system capability's seed-owned fields are now refused instead of
   silently reverted.** Since #545 the capability seeds re-apply
   `functionDefinition`, `executionType` and `executionHandler` to existing rows
