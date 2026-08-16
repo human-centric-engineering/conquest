@@ -48,6 +48,7 @@ const INVENTORY: TopicsPayload['inventory'] = {
     sectionTitle: t.label,
     type: 'free_text',
     estimatedSeconds: 45,
+    weight: 1,
   })),
   dataSlots: [],
 };

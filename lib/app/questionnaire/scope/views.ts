@@ -27,6 +27,14 @@ export interface TopicQuestionRef {
   type: string;
   /** Estimated seconds this question costs a respondent. */
   estimatedSeconds: number;
+  /**
+   * The authored weight, carried so a client surface can name the members a `light` topic samples.
+   *
+   * `light` keeps the highest-weight members, so "which two does it ask" is unanswerable without
+   * this — and a surface that showed the light DURATION but guessed at the light MEMBERS would
+   * print two numbers that do not add up. The picker ignores it; the routing map reads it.
+   */
+  weight: number;
 }
 
 /** One data slot the membership picker can offer. */
@@ -36,6 +44,8 @@ export interface TopicDataSlotRef {
   theme: string;
   /** Estimated seconds this slot costs a respondent (C7). */
   estimatedSeconds: number;
+  /** The authored weight. Same purpose as {@link TopicQuestionRef.weight}. */
+  weight: number;
 }
 
 /**

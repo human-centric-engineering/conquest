@@ -42,6 +42,8 @@
 
 import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
+import { membersAtDepth } from '@/lib/app/questionnaire/scope/resolve';
+import { questionTypeLabel } from '@/lib/app/questionnaire/types';
 import {
   SCOPE_RULE_OPERATOR_LABELS,
   TOPIC_DEPTH_LABELS,
@@ -50,9 +52,14 @@ import {
   type AdaptiveScopeSettings,
   type ScopeRuleOperator,
   type Topic,
+  type TopicDepth,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
-import type { TopicDataSlotRef, TopicsCostView } from '@/lib/app/questionnaire/scope/views';
+import type {
+  TopicDataSlotRef,
+  TopicQuestionRef,
+  TopicsCostView,
+} from '@/lib/app/questionnaire/scope/views';
 
 /* -------------------------------------------------------------------------- */
 /* Shape                                                                      */
@@ -91,6 +98,63 @@ export interface ScopeDetailRow {
   value: string;
 }
 
+/**
+ * One line of the arithmetic behind a topic's estimate: a rate, how many things are charged at it,
+ * and what that comes to.
+ *
+ * Grouped by rate rather than by type, so a 6-row matrix and a 3-row matrix land in separate lines
+ * instead of averaging into a rate that prices neither of them. A reader can add the column up.
+ */
+export interface ScopeTimingGroup {
+  /** What is being charged — a question type's label, or "Data slot". */
+  label: string;
+  count: number;
+  /** Seconds one of these costs. */
+  secondsEach: number;
+  /** `count * secondsEach`. */
+  seconds: number;
+}
+
+/** One member of a topic, priced. Used to name the members a light run actually asks. */
+export interface ScopeTimingItem {
+  key: string;
+  /** The question's prompt or the data slot's name — what the author recognises it by. */
+  label: string;
+  typeLabel: string;
+  seconds: number;
+}
+
+/**
+ * Where a topic's two duration figures come from — the estimate with its assumptions attached.
+ *
+ * The panel used to print "Full depth 1m 17s" and nothing else, which is a number with no
+ * provenance: an author could not tell whether it was measured, guessed, or a property of the chat
+ * at all. Everything needed to reconstruct it is carried here instead — the per-rate arithmetic, the
+ * members a light run samples, and the count of members that price at nothing because their key no
+ * longer resolves.
+ *
+ * What it deliberately does NOT model is stated at the surface rather than encoded here: the
+ * estimate is the respondent's answering time, item by item. The agent's own turns, its follow-ups
+ * and any clarifying back-and-forth are not in it, so a real conversation runs longer than the
+ * figure. That is a property of `scope/budget.ts` — this type just makes it visible.
+ */
+export interface ScopeNodeTiming {
+  /** The depth this topic is authored at, so the panel can mark which figure actually applies. */
+  depth: TopicDepth;
+  fullSeconds: number;
+  lightSeconds: number;
+  /** Members the topic names — questions plus data slots, resolvable or not. */
+  memberCount: number;
+  /** Members a light run asks — up to two of EACH kind (`LIGHT_DEPTH_MEMBER_COUNT`), not overall. */
+  lightMemberCount: number;
+  /** The arithmetic behind {@link fullSeconds}, heaviest line first. */
+  groups: ScopeTimingGroup[];
+  /** The members a light run samples, named. Empty when light and full are the same run. */
+  lightItems: ScopeTimingItem[];
+  /** Members naming a key the version no longer has. They cost nothing, and that is worth saying. */
+  unresolvedCount: number;
+}
+
 /** Everything the detail panel shows for a node. */
 export interface ScopeNodeDetail {
   title: string;
@@ -104,6 +168,8 @@ export interface ScopeNodeDetail {
   topicKey?: string;
   /** The author's criteria, verbatim and untruncated. Only conditional topics carry one. */
   criteria?: string;
+  /** Where this topic's duration figures come from. Only topic nodes carry one. */
+  timing?: ScopeNodeTiming;
 }
 
 /** One node, already positioned. */
@@ -152,6 +218,15 @@ export interface BuildScopeGraphInput {
   costs: TopicsCostView;
   /** The version's data slots — for resolving a rule's slot key to the name an author recognises. */
   dataSlots: readonly TopicDataSlotRef[];
+  /**
+   * The version's questions, priced.
+   *
+   * Only the detail panel's timing breakdown reads them, and it reads them for one reason: a
+   * duration an author cannot take apart is a duration they cannot trust. Optional so a caller that
+   * only wants the shape of the map — the layout tests, chiefly — need not build an inventory; the
+   * figures then fall back to the server's per-topic totals with no arithmetic behind them.
+   */
+  questions?: readonly TopicQuestionRef[];
   /**
    * Fan the always-asked band out into one node per topic.
    *
@@ -242,22 +317,156 @@ function memberSummary(topic: Topic): string {
   return parts.length > 0 ? parts.join(' · ') : 'no members';
 }
 
+/** A member of a topic, priced from the version inventory. */
+interface PricedMember {
+  label: string;
+  typeLabel: string;
+  seconds: number;
+}
+
+/** What the timing builder needs, resolved once for the whole graph rather than per topic. */
+interface PricedInventory {
+  byQuestionKey: ReadonlyMap<string, PricedMember>;
+  byDataSlotKey: ReadonlyMap<string, PricedMember>;
+  weightByQuestionKey: ReadonlyMap<string, number>;
+  weightByDataSlotKey: ReadonlyMap<string, number>;
+  /** False when no inventory was supplied — the panel then shows totals without the arithmetic. */
+  priced: boolean;
+}
+
+function priceInventory(
+  questions: readonly TopicQuestionRef[] | undefined,
+  dataSlots: readonly TopicDataSlotRef[]
+): PricedInventory {
+  const byQuestionKey = new Map<string, PricedMember>();
+  const weightByQuestionKey = new Map<string, number>();
+  for (const q of questions ?? []) {
+    byQuestionKey.set(q.key, {
+      label: q.prompt,
+      typeLabel: questionTypeLabel(q.type),
+      seconds: q.estimatedSeconds,
+    });
+    weightByQuestionKey.set(q.key, q.weight);
+  }
+  const byDataSlotKey = new Map<string, PricedMember>();
+  const weightByDataSlotKey = new Map<string, number>();
+  for (const slot of dataSlots) {
+    byDataSlotKey.set(slot.key, {
+      label: slot.name,
+      typeLabel: DATA_SLOT_TYPE_LABEL,
+      seconds: slot.estimatedSeconds,
+    });
+    weightByDataSlotKey.set(slot.key, slot.weight);
+  }
+  return {
+    byQuestionKey,
+    byDataSlotKey,
+    weightByQuestionKey,
+    weightByDataSlotKey,
+    priced: questions !== undefined,
+  };
+}
+
+/** How a data slot is named in the arithmetic. Not a question type, and priced by its own rate. */
+const DATA_SLOT_TYPE_LABEL = 'Data slot';
+
+/**
+ * Take a topic's estimate apart: the rates behind the full figure, and the members a light run asks.
+ *
+ * Deliberately prices through the SAME `membersAtDepth` the interview resolves with and the same
+ * per-item seconds the server summed, so the breakdown adds up to the headline by construction
+ * rather than by coincidence. The headline itself still comes from `costs` — the server is the one
+ * authority on what a topic costs, and a second implementation here is exactly the drift the cost
+ * module's own docblock warns about.
+ */
+function topicTiming(
+  topic: Topic,
+  cost: TopicCost | undefined,
+  inventory: PricedInventory
+): ScopeNodeTiming | undefined {
+  if (!cost) return undefined;
+
+  const memberCount = topic.members.questionKeys.length + topic.members.dataSlotKeys.length;
+
+  const resolve = (
+    keys: readonly string[],
+    priced: ReadonlyMap<string, PricedMember>
+  ): ScopeTimingItem[] =>
+    keys
+      .map((key) => {
+        const member = priced.get(key);
+        return member ? { key, ...member } : null;
+      })
+      .filter((item): item is ScopeTimingItem => item !== null);
+
+  const fullItems = [
+    ...resolve(topic.members.questionKeys, inventory.byQuestionKey),
+    ...resolve(topic.members.dataSlotKeys, inventory.byDataSlotKey),
+  ];
+
+  const lightKeys = {
+    questions: membersAtDepth(topic.members.questionKeys, 'light', inventory.weightByQuestionKey),
+    dataSlots: membersAtDepth(topic.members.dataSlotKeys, 'light', inventory.weightByDataSlotKey),
+  };
+  const lightItems = [
+    ...resolve(lightKeys.questions, inventory.byQuestionKey),
+    ...resolve(lightKeys.dataSlots, inventory.byDataSlotKey),
+  ];
+
+  // Keyed on the RATE as well as the label so two matrices of different heights stay two lines.
+  const groups = new Map<string, ScopeTimingGroup>();
+  for (const item of fullItems) {
+    const id = `${item.typeLabel}@${item.seconds}`;
+    const existing = groups.get(id);
+    if (existing) {
+      existing.count += 1;
+      existing.seconds += item.seconds;
+    } else {
+      groups.set(id, {
+        label: item.typeLabel,
+        count: 1,
+        secondsEach: item.seconds,
+        seconds: item.seconds,
+      });
+    }
+  }
+
+  return {
+    depth: topic.depth,
+    fullSeconds: cost.full,
+    lightSeconds: cost.light,
+    memberCount,
+    lightMemberCount: lightKeys.questions.length + lightKeys.dataSlots.length,
+    // Heaviest first: what an author trims is what costs, not what happens to be authored first.
+    groups: [...groups.values()].sort((a, b) => b.seconds - a.seconds || b.count - a.count),
+    // Named only when the sample is smaller than the topic. When light IS the whole topic, listing
+    // it again beneath the same number reads as a second, different set.
+    lightItems: cost.light !== cost.full ? lightItems : [],
+    unresolvedCount: inventory.priced ? memberCount - fullItems.length : 0,
+  };
+}
+
+/** Spread-friendly wrapper: an unpriced topic contributes no key at all rather than `undefined`. */
+function timingDetail(
+  topic: Topic,
+  cost: TopicCost | undefined,
+  inventory: PricedInventory
+): { timing?: ScopeNodeTiming } {
+  const timing = topicTiming(topic, cost, inventory);
+  return timing ? { timing } : {};
+}
+
 /** The rows every topic node's detail panel shows, whatever its phase. */
-function topicDetailRows(topic: Topic, cost: TopicCost | undefined): ScopeDetailRow[] {
+function topicDetailRows(topic: Topic): ScopeDetailRow[] {
   const rows: ScopeDetailRow[] = [
     { label: 'Key', value: topic.key },
     { label: 'Phase', value: TOPIC_PHASE_LABELS[topic.phase] },
     { label: 'Depth', value: TOPIC_DEPTH_LABELS[topic.depth] },
     { label: 'Members', value: memberSummary(topic) },
   ];
-  if (cost) {
-    rows.push({ label: 'Full depth', value: formatSeconds(cost.full) });
-    // Only worth a line when it differs: for a one- or two-member topic the light sample IS the topic,
-    // and a second identical duration reads as a rounding artefact rather than as the same number twice.
-    if (cost.light !== cost.full) {
-      rows.push({ label: 'Light depth', value: formatSeconds(cost.light) });
-    }
-  }
+  // No duration rows here on purpose. Two bare figures labelled "Full depth" and "Light depth" were a
+  // number with no provenance — the panel now carries `timing`, which shows the same figures with the
+  // arithmetic and the assumptions attached.
   return rows;
 }
 
@@ -288,7 +497,8 @@ function byOrdinal(a: Topic, b: Topic): number {
  * always has something to render rather than collapsing to a blank rectangle an author reads as a bug.
  */
 export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
-  const { topics, settings, costs, dataSlots, expandAlways } = input;
+  const { topics, settings, costs, dataSlots, questions, expandAlways } = input;
+  const inventory = priceInventory(questions, dataSlots);
 
   const nodes: ScopeGraphNode[] = [];
   const edges: ScopeGraphEdge[] = [];
@@ -340,8 +550,9 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
         title: topic.label,
         summary:
           'Runs first, for everyone. What the respondent says here is what the hard rules test and what the agent reads. The routing decision waits until every member of every opening topic is covered.',
-        rows: topicDetailRows(topic, costs.byTopicKey[topic.key]),
+        rows: topicDetailRows(topic),
         topicKey: topic.key,
+        ...timingDetail(topic, costs.byTopicKey[topic.key], inventory),
       },
     });
     edges.push({ id: `e:start:${id}`, source: START_NODE_ID, target: id, kind: 'always' });
@@ -580,8 +791,9 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
         title: topic.label,
         summary:
           'Asked only when it is selected. Nothing on this map says whether it will be — that depends on what a respondent says, which is what “Try it” on the Adaptive scope tab answers.',
-        rows: topicDetailRows(topic, cost),
+        rows: topicDetailRows(topic),
         topicKey: topic.key,
+        ...timingDetail(topic, cost, inventory),
         ...(topic.criteria && topic.criteria.trim().length > 0 ? { criteria: topic.criteria } : {}),
       },
     });
@@ -653,8 +865,9 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
           title: topic.label,
           summary:
             'Runs for every respondent. No decision is ever taken about it, which is why it sits outside the pipeline above.',
-          rows: topicDetailRows(topic, costs.byTopicKey[topic.key]),
+          rows: topicDetailRows(topic),
           topicKey: topic.key,
+          ...timingDetail(topic, costs.byTopicKey[topic.key], inventory),
         },
       });
       edges.push({

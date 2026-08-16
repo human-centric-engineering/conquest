@@ -33,7 +33,16 @@ import {
   type Topic,
   type TopicPhase,
 } from '@/lib/app/questionnaire/scope/types';
-import type { TopicDataSlotRef, TopicsCostView } from '@/lib/app/questionnaire/scope/views';
+import {
+  estimateTopicCosts,
+  itemSeconds,
+  type TopicCost,
+} from '@/lib/app/questionnaire/scope/budget';
+import type {
+  TopicDataSlotRef,
+  TopicQuestionRef,
+  TopicsCostView,
+} from '@/lib/app/questionnaire/scope/views';
 
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                   */
@@ -83,7 +92,28 @@ function costs(overrides: Partial<TopicsCostView> = {}): TopicsCostView {
 }
 
 function slot(key: string, name = key): TopicDataSlotRef {
-  return { key, name, theme: 'general', estimatedSeconds: 40 };
+  return { key, name, theme: 'general', estimatedSeconds: 40, weight: 1 };
+}
+
+function question(
+  key: string,
+  type: string,
+  estimatedSeconds: number,
+  weight = 1
+): TopicQuestionRef {
+  return {
+    key,
+    prompt: `Prompt for ${key}`,
+    sectionTitle: 'Section',
+    type,
+    estimatedSeconds,
+    weight,
+  };
+}
+
+/** The detail panel's timing block for a node, or undefined when it carries none. */
+function timingOf(graph: ScopeGraph, nodeId: string) {
+  return graph.nodes.find((n) => n.id === nodeId)?.detail.timing;
 }
 
 function build(input: Partial<BuildScopeGraphInput> = {}): ScopeGraph {
@@ -555,6 +585,173 @@ describe('buildScopeGraph', () => {
 
       const y = (id: string) => graph.nodes.find((n) => n.id === `rule:${id}`)!.y;
       expect(y('early')).toBeLessThan(y('late'));
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* The detail panel's timing block                                          */
+  /* ------------------------------------------------------------------------ */
+
+  describe('what a topic’s duration is made of', () => {
+    // Five members priced as the pilot instrument prices them: four ratings and one open question.
+    const MEMBERS = ['q_a', 'q_b', 'q_c', 'q_d', 'q_open'];
+    const INVENTORY: TopicQuestionRef[] = [
+      question('q_a', 'likert', 8, 5),
+      question('q_b', 'likert', 8, 4),
+      question('q_c', 'likert', 8, 3),
+      question('q_d', 'likert', 8, 2),
+      question('q_open', 'free_text', 45, 1),
+    ];
+    const COST: TopicCost = { full: 77, light: 16 };
+
+    // `null` rather than `undefined` for "the server priced nothing": an explicit `undefined` would
+    // fall back to the default parameter and quietly test the opposite case.
+    function buildTiming(overrides: Partial<Topic> = {}, cost: TopicCost | null = COST) {
+      const subject = topic('sales', 'conditional', {
+        members: { dataSlotKeys: [], questionKeys: MEMBERS },
+        ...overrides,
+      });
+      const graph = build({
+        topics: [subject],
+        costs: costs(cost ? { byTopicKey: { sales: cost } } : {}),
+        questions: INVENTORY,
+      });
+      return timingOf(graph, 'conditional:sales');
+    }
+
+    it('carries both figures and the depth the topic is actually set to', () => {
+      const timing = buildTiming();
+
+      expect(timing).toMatchObject({
+        depth: 'full',
+        fullSeconds: 77,
+        lightSeconds: 16,
+        memberCount: 5,
+        lightMemberCount: 2,
+      });
+    });
+
+    it('breaks the full figure into lines that add up to it, one line per rate', () => {
+      const timing = buildTiming();
+
+      expect(timing?.groups).toEqual([
+        { label: 'Free text', count: 1, secondsEach: 45, seconds: 45 },
+        { label: 'Likert', count: 4, secondsEach: 8, seconds: 32 },
+      ]);
+      const summed = timing?.groups.reduce((total, g) => total + g.seconds, 0);
+      expect(summed).toBe(timing?.fullSeconds);
+    });
+
+    it('agrees with the arithmetic the server and the planner use', () => {
+      // The panel would be worse than useless if its breakdown and the budget module disagreed: the
+      // planner drops topics by the budget module's numbers, and an author reads these.
+      const seconds = itemSeconds(
+        INVENTORY.map((q) => ({ key: q.key, type: q.type })),
+        [],
+        settings()
+      );
+      const subject = topic('sales', 'conditional', {
+        members: { dataSlotKeys: [], questionKeys: MEMBERS },
+      });
+      const priced = estimateTopicCosts([subject], seconds, {
+        byQuestionKey: new Map(INVENTORY.map((q) => [q.key, q.weight])),
+      });
+
+      expect(priced.get('sales')).toEqual(COST);
+    });
+
+    it('names the members a light run samples — the highest-weighted, not the first authored', () => {
+      const timing = buildTiming();
+
+      expect(timing?.lightItems.map((i) => i.key)).toEqual(['q_a', 'q_b']);
+      expect(timing?.lightItems[0]).toMatchObject({
+        label: 'Prompt for q_a',
+        typeLabel: 'Likert',
+        seconds: 8,
+      });
+    });
+
+    it('lists no light sample when a light run is the whole topic', () => {
+      const timing = buildTiming(
+        { members: { dataSlotKeys: [], questionKeys: ['q_a', 'q_b'] } },
+        {
+          full: 16,
+          light: 16,
+        }
+      );
+
+      expect(timing?.lightItems).toEqual([]);
+    });
+
+    it('samples up to two of EACH kind, because that is what the resolver does', () => {
+      const graph = build({
+        topics: [
+          topic('sales', 'conditional', {
+            members: { dataSlotKeys: ['s_a', 's_b', 's_c'], questionKeys: ['q_a', 'q_b', 'q_c'] },
+          }),
+        ],
+        costs: costs({ byTopicKey: { sales: { full: 144, light: 96 } } }),
+        questions: INVENTORY,
+        dataSlots: [slot('s_a'), slot('s_b'), slot('s_c')],
+      });
+
+      const timing = timingOf(graph, 'conditional:sales');
+      expect(timing?.lightMemberCount).toBe(4);
+      expect(timing?.lightItems.map((i) => i.key)).toEqual(['q_a', 'q_b', 's_a', 's_b']);
+    });
+
+    it('counts members whose key the version no longer has, since they are charged nothing', () => {
+      const timing = buildTiming({
+        members: { dataSlotKeys: [], questionKeys: [...MEMBERS, 'q_deleted'] },
+      });
+
+      expect(timing?.memberCount).toBe(6);
+      expect(timing?.unresolvedCount).toBe(1);
+      expect(timing?.groups.reduce((total, g) => total + g.count, 0)).toBe(5);
+    });
+
+    it('claims no unresolved members when no inventory was supplied to price against', () => {
+      const graph = build({
+        topics: [topic('sales', 'conditional')],
+        costs: costs({ byTopicKey: { sales: COST } }),
+      });
+
+      const timing = timingOf(graph, 'conditional:sales');
+      expect(timing?.unresolvedCount).toBe(0);
+      expect(timing?.groups).toEqual([]);
+      expect(timing?.fullSeconds).toBe(77);
+    });
+
+    it('carries no timing at all for a topic the server did not price', () => {
+      expect(buildTiming({}, null)).toBeUndefined();
+    });
+
+    it('gives opening and always-asked topics the same block, since both cost the same way', () => {
+      const graph = build({
+        topics: [topic('open', 'opening'), topic('wrap', 'closing')],
+        costs: costs({
+          byTopicKey: { open: { full: 45, light: 45 }, wrap: { full: 8, light: 8 } },
+        }),
+        questions: [question('q_open', 'free_text', 45), question('q_wrap', 'likert', 8)],
+        expandAlways: true,
+      });
+
+      expect(timingOf(graph, 'opening:open')?.fullSeconds).toBe(45);
+      expect(timingOf(graph, 'always:wrap')?.fullSeconds).toBe(8);
+    });
+
+    it('no longer prints bare duration rows — the figures live in the timing block', () => {
+      const graph = build({
+        topics: [topic('sales', 'conditional')],
+        costs: costs({ byTopicKey: { sales: COST } }),
+        questions: INVENTORY,
+      });
+
+      const labels = graph.nodes
+        .find((n) => n.id === 'conditional:sales')!
+        .detail.rows.map((r) => r.label);
+      expect(labels).not.toContain('Full depth');
+      expect(labels).not.toContain('Light depth');
     });
   });
 });

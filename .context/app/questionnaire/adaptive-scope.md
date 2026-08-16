@@ -722,6 +722,7 @@ route loads it (`loadMaxDataSlotAttempts`) for no other reason.
 | `lib/app/questionnaire/scope/validate.ts`                           | Coherence findings                                                                                                                                                                |
 | `lib/app/questionnaire/scope/comparability.ts`                      | What routing does to a scoring scale (F17.15) — which scales it can narrow, and which no plan can ever cover                                                                      |
 | `lib/app/questionnaire/scope/graph.ts`                              | The routing map's graph (F17.18) — pure, laid out, and carrying no React Flow import                                                                                              |
+| `lib/app/questionnaire/scope/criteria-format.ts`                    | Reads an author's criteria text as the list it already is — recovery only, never rewriting                                                                                        |
 | `lib/app/questionnaire/analytics/routing.ts`                        | Routing quality (F17.16) — what the planner actually did across a version's interviews, and the findings the counts support                                                       |
 | `app/api/v1/app/questionnaires/_lib/session-scope.ts`               | The DB seam                                                                                                                                                                       |
 | `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
@@ -882,8 +883,8 @@ endpoint is missing, so a head that came and went would take those edges with it
 
 ### Read-only, with one way back
 
-Clicking a node opens its detail: what it is, what decides it, its cost at both depths, and — for a
-conditional topic — the author's criteria **verbatim**, since the node itself clamps to two lines. A topic
+Clicking a node opens its detail: what it is, what decides it, where its duration comes from, and — for a
+conditional topic — the author's criteria, since the node itself clamps to two lines. A topic
 node also offers **"Edit this topic"**, which closes the map and expands that row in the topic list.
 
 The dialog closes first on purpose: the row is behind the overlay, so leaving the map open would read as
@@ -894,6 +895,52 @@ hides has nothing to open; honouring the request beats preserving a view prefere
 
 Nothing is authored on the canvas. A second editor beside the topic list is a second thing that can
 disagree with it, and the map has no mutation of its own worth that risk.
+
+### A duration with no provenance is a duration nobody believes
+
+The panel used to print two rows — `Full depth 1m 17s`, `Light depth 16s` — and nothing else. Those are
+correct figures and they were still the wrong surface, because none of the three questions an author
+actually has could be answered from them: what is being counted, where the number came from, and whether
+it describes the **chat** they are going to run. The reasonable reading of an unexplained duration on a
+routing screen is that it was measured, and it was not.
+
+So the panel shows the arithmetic instead (`ScopeNodeTiming`, built in `scope/graph.ts`):
+
+|                                             |                                                                                                                                                                                                                          |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **One line per rate**                       | `4 × Likert @ 8s → 32s`, `1 × Free text @ 45s → 45s`. Grouped by rate rather than by type, so a 6-row matrix and a 3-row matrix stay two lines instead of averaging into a rate that prices neither. The column adds up. |
+| **The authored depth is marked**            | One of the two figures is what this topic actually costs; the other is context. Two equal numbers is two questions, one marked number is an answer.                                                                      |
+| **The light sample is named**               | Not just "16s" but _which_ members — computed through the same exported `membersAtDepth` the interview resolves with, so the named members and the priced members cannot be different sets.                              |
+| **The headline still comes from `costs`**   | The server prices topics and the planner drops them by that price; a second implementation in the browser is exactly the drift `scope/budget.ts` warns about. The breakdown is derived from the same per-item seconds.   |
+| **Missing members are counted, not hidden** | A member naming a deleted question is charged nothing, and the panel says how many. Silently short arithmetic is worse than none.                                                                                        |
+
+**The caveat is stated in the panel, not behind the ⓘ.** The estimate is the respondent's _answering_
+time, item by item. The interview is a conversation: the agent's turns, its follow-ups, its re-asks and
+any back-and-forth are not counted, so a real chat runs longer — and an author who reads the figure as a
+stopwatch will set a session budget that cuts their instrument in half. That sentence sits under the
+figures at all times; the ⓘ carries the longer version, including the point that this is nonetheless the
+arithmetic `applyGuardrails` fits the plan with, which is what makes the relative weights worth reading.
+
+This is why `TopicQuestionRef` and `TopicDataSlotRef` carry `weight`. Without it the panel could show the
+light _duration_ but would have to guess at the light _members_, and a named set that disagreed with the
+number beside it is the one failure this whole treatment exists to avoid.
+
+### The criteria are a list, and it is drawn as one
+
+A conditional topic's `criteria` is free text, but authors and the Routing Analyst both converge on the
+same shape — a lead-in sentence, then one line per signal, usually naming the signal and how much it
+counts for. Rendered as one grey block, that structure is invisible and every reader re-derives it by eye.
+
+`scope/criteria-format.ts` recovers it: prose blocks, list items, and per-item `term` / `priority`. It
+**recovers, never rewrites** — every character reaches the screen, and the only things moved are the
+bullet marker (which becomes the bullet the renderer draws) and the priority marker (which becomes a chip
+beside the line it was already describing). Text it cannot read falls through as a verbatim block with its
+line breaks intact, which is exactly how the old panel rendered everything.
+
+The term split is deliberately conservative: dashes only (never a colon — `they said something like:` is
+not a label), capped at 48 characters and 7 words, and refused outright if the fragment ends a sentence or
+leaves nothing after it. A wrongly-split term bolds a fragment and reads as a typo, so the failure mode is
+always "no term", never "the wrong term".
 
 ### Why a modal rather than a tab
 

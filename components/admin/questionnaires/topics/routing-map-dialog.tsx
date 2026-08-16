@@ -20,9 +20,10 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Network, PenLine } from 'lucide-react';
+import { Network } from 'lucide-react';
 
 import { RoutingMapCanvas } from '@/components/admin/questionnaires/topics/routing-map-canvas';
+import { RoutingMapDetail } from '@/components/admin/questionnaires/topics/routing-map-detail';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -58,9 +59,19 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
         settings: payload.settings,
         costs: payload.costs,
         dataSlots: payload.inventory.dataSlots,
+        // Priced, so the detail panel can show the arithmetic behind a topic's duration rather than
+        // the bare figure — see `routing-map-detail.tsx`.
+        questions: payload.inventory.questions,
         expandAlways,
       }),
-    [payload.topics, payload.settings, payload.costs, payload.inventory.dataSlots, expandAlways]
+    [
+      payload.topics,
+      payload.settings,
+      payload.costs,
+      payload.inventory.dataSlots,
+      payload.inventory.questions,
+      expandAlways,
+    ]
   );
 
   const selected = useMemo(
@@ -150,51 +161,7 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
             aria-live="polite"
             data-testid="routing-map-detail"
           >
-            {selected ? (
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold">{selected.detail.title}</h3>
-                  <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-                    {selected.detail.summary}
-                  </p>
-                </div>
-
-                <dl className="space-y-1.5 text-xs">
-                  {selected.detail.rows.map((row) => (
-                    <div key={row.label} className="grid grid-cols-[6.5rem_1fr] gap-2">
-                      <dt className="text-muted-foreground">{row.label}</dt>
-                      <dd className="break-words">{row.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-
-                {selected.detail.criteria ? (
-                  <div>
-                    <p className="text-muted-foreground text-xs font-medium">Criteria</p>
-                    <p className="bg-muted/40 mt-1 rounded-md border p-2 text-xs whitespace-pre-wrap">
-                      {selected.detail.criteria}
-                    </p>
-                  </div>
-                ) : null}
-
-                {selected.detail.topicKey ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => handleEdit(selected.detail.topicKey as string)}
-                  >
-                    <PenLine className="mr-2 h-4 w-4" />
-                    Edit this topic
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-xs">
-                Select anything on the map to see what it is and what decides it.
-              </p>
-            )}
+            <RoutingMapDetail node={selected} onEditTopic={handleEdit} />
           </aside>
         </div>
       </DialogContent>

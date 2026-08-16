@@ -55,7 +55,7 @@ function settingsWith(rules: ScopeRule[]): AdaptiveScopeSettings {
 }
 
 function slot(key: string, name: string): TopicDataSlotRef {
-  return { key, name, theme: 'Opening', estimatedSeconds: 40 };
+  return { key, name, theme: 'Opening', estimatedSeconds: 40, weight: 1 };
 }
 
 const PROMPTS = new Map([
