@@ -21,6 +21,7 @@ import type {
   DetectOutcome,
   ExistingAnswerView,
   ExtractOutcome,
+  OpeningRoutabilityOutcome,
   RefineOutcome,
   RefinementTrigger,
   SelectOutcome,
@@ -119,6 +120,12 @@ export interface StubConfig {
    * Provide a value (or `null`) to wire it and drive the adaptive branch.
    */
   selectDataSlot?: DataSlotSelectOutcome | null;
+  /**
+   * Opening-routability outcome (G03). ABSENT (key omitted) → the `assessOpeningRoutability`
+   * invoker is not wired, which is the default: no version has the follow-up allowance on.
+   * Provide a value to wire it and drive the probe-rationing branch.
+   */
+  openingRoutability?: Partial<OpeningRoutabilityOutcome>;
 }
 
 export interface StubCalls {
@@ -134,6 +141,8 @@ export interface StubCalls {
     unfilled: DataSlotTarget[];
     context: { activeTheme: string | null; parkedTheme: string | null };
   }>;
+  /** Records each opening-routability check — above all, that it was NOT made. */
+  routability: TurnState[];
 }
 
 /** Stub invokers that record calls and return configured outcomes. */
@@ -149,6 +158,7 @@ export function stubInvokers(cfg: StubConfig = {}): {
     serious: [],
     sensitivity: [],
     selectData: [],
+    routability: [],
   };
   const invokers: CapabilityInvokers = {
     async extractAnswers(s) {
@@ -186,6 +196,12 @@ export function stubInvokers(cfg: StubConfig = {}): {
   };
   // Wire the adaptive data-slot selector ONLY when the config opts in (key present) — otherwise the
   // orchestrator keeps its deterministic topic-local pick, which is the default most tests want.
+  if ('openingRoutability' in cfg) {
+    invokers.assessOpeningRoutability = async (s) => {
+      calls.routability.push(s);
+      return { routable: null, costUsd: 0, ...cfg.openingRoutability };
+    };
+  }
   if ('selectDataSlot' in cfg) {
     invokers.selectDataSlot = async (s, unfilled, context) => {
       calls.selectData.push({ state: s, unfilled, context });

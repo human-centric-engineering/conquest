@@ -37,3 +37,29 @@ export const MAX_ANSWERS_IN_PLANNER_PROMPT = 20;
 
 /** Per-answer character cap in the prompt. */
 export const PLANNER_ANSWER_CHARS = 800;
+
+/* -------------------------------------------------------------------------- */
+/* The opening probe classifier (G03 / F17.17)                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Hard ceiling on the routability check.
+ *
+ * Half the planner's, and for a sharper reason: this call sits INSIDE a live turn, between the
+ * respondent's message and the interviewer's reply, whereas the planner runs after a turn is
+ * persisted. The whole point of the check is to save the respondent a question — spending twelve
+ * seconds of their time to do it would be self-defeating.
+ */
+export const OPENING_PROBE_TIMEOUT_MS = 6_000;
+
+/** Output cap. One verdict and a sentence — never prose. */
+export const OPENING_PROBE_MAX_TOKENS = 300;
+
+/** How many conditional topics' criteria to inline. Beyond this the check stops paying for itself. */
+export const MAX_CANDIDATES_IN_PROBE_PROMPT = 20;
+
+/** Per-item character cap on the evidence lines the check reads. */
+export const PROBE_EVIDENCE_CHARS = 600;
+
+/** How many pieces of opening evidence to inline. */
+export const MAX_EVIDENCE_IN_PROBE_PROMPT = 20;

@@ -75,6 +75,16 @@ export interface ValidateScopeInput {
    * without it gets every other finding, exactly as with `seconds`.
    */
   scoring?: ScoringSchemaContent;
+  /**
+   * The version's per-slot re-ask cap (`maxDataSlotAttempts`), when the caller has it — for the
+   * opening follow-up checks (G03).
+   *
+   * It lives in a different config blob from Adaptive Scope, which is exactly why it is worth
+   * checking: an author rationing the opening's follow-ups has no way to see that the interview
+   * does not ask any. Optional, like `seconds` and `scoring` — a caller without it gets every
+   * other finding.
+   */
+  maxDataSlotAttempts?: number;
 }
 
 /**
@@ -218,6 +228,38 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
           severity: 'warning',
           code: 'budget_admits_no_topic',
           message: `After the questions every respondent gets (~${always}s), ${budget - always}s is left — less than your cheapest conditional topic (~${cheapestConditional}s). Every interview will run the always-on questions alone.`,
+        });
+      }
+    }
+
+    // ── The opening's follow-up allowance (G03) ────────────────────────────────────────────
+    // Two ways to switch this on and change nothing, both invisible from the tab it is set on.
+    if (settings.limitOpeningProbes) {
+      // The allowance rations DATA-SLOT follow-ups: the interviewer re-asks a data slot, never a
+      // form question. An opening built only from questions is therefore not rationed at all.
+      const openingDataSlotKeys = topics
+        .filter((t) => t.phase === 'opening')
+        .flatMap((t) => t.members.dataSlotKeys);
+      // Against the version's real data slots: a topic may still name a key an author deleted,
+      // and a limit rationing a slot that no longer exists rations nothing.
+      const known = input.allDataSlotKeys ? new Set(input.allDataSlotKeys) : null;
+      const resolvable = known
+        ? openingDataSlotKeys.filter((k) => known.has(k))
+        : openingDataSlotKeys;
+      if (resolvable.length === 0) {
+        issues.push({
+          severity: 'warning',
+          code: 'opening_probe_limit_inert',
+          message:
+            'You have limited follow-ups in the opening, but no opening topic contains a data slot — the limit applies to conversational follow-ups, so nothing is being rationed.',
+        });
+      } else if (input.maxDataSlotAttempts !== undefined && input.maxDataSlotAttempts <= 1) {
+        issues.push({
+          severity: 'warning',
+          code: 'opening_probe_limit_moot',
+          // The stored value, not the default it usually holds: telling an admin their setting is 1
+          // when the row says 0 sends them looking for a number that is not on their screen.
+          message: `You have limited follow-ups in the opening, but “attempts per data slot” is ${input.maxDataSlotAttempts} on the Settings tab, so the interview never follows up on anything and the limit can never bind.`,
         });
       }
     }

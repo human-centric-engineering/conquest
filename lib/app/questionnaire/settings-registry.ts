@@ -543,6 +543,16 @@ export const SETTING_DESCRIPTORS = {
               : 'No limit',
         },
         {
+          // G03. Shown as one row rather than two because "off" and "how many" only mean anything
+          // together — a bare "1" beside a switch nobody set reads as a limit that is in force.
+          label: 'Opening follow-ups',
+          value: c.adaptiveScope.limitOpeningProbes
+            ? c.adaptiveScope.maxOpeningProbes === 0
+              ? 'None — never probe'
+              : `Up to ${c.adaptiveScope.maxOpeningProbes} across the opening`
+            : 'Not limited',
+        },
+        {
           label: 'Unraised-area check topic',
           value: yesNo(c.adaptiveScope.includeCheckTopic),
         },

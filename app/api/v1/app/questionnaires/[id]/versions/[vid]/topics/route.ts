@@ -45,6 +45,7 @@ import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import {
   loadAdaptiveScopeSettings,
+  loadMaxDataSlotAttempts,
   loadTopics,
   patchAdaptiveScopeSettings,
   replaceTopics,
@@ -116,13 +117,15 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
 
     // Settings first: the key inventory prices itself against this version's per-type overrides.
     const settings = await loadAdaptiveScopeSettings(vid);
-    const [topics, inventory, draft, scoring] = await Promise.all([
+    const [topics, inventory, draft, scoring, maxDataSlotAttempts] = await Promise.all([
       loadTopics(vid),
       loadKeyInventory(vid, settings),
       loadTopicDraft(vid),
       // For the comparability checks (F17.15) — which scales routing can leave partially assessed.
       // `null` for the versions that do not score, which is most of them.
       loadScoringSchemaContent(vid),
+      // For the opening follow-up checks (G03) — the per-slot re-ask cap the allowance sits under.
+      loadMaxDataSlotAttempts(vid),
     ]);
 
     // The time arithmetic (C7), computed here for the same reason `issues` is: one implementation,
@@ -145,6 +148,9 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
         byTopicKey: Object.fromEntries([...byTopicKey].map(([key, cost]) => [key, cost.full])),
       },
       scoring: scoring ?? undefined,
+      // G03: the per-slot re-ask cap, so the tab can say when an opening follow-up limit cannot
+      // bind. It lives on the Settings tab, which is why the author cannot see it from here.
+      maxDataSlotAttempts,
     });
     const costs = {
       budgetSeconds: settings.sessionBudgetSeconds,

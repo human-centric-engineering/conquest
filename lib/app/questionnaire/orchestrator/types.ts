@@ -35,6 +35,7 @@ import type {
   AnswerSlotIntent,
   DataSlotFillIntent,
 } from '@/lib/app/questionnaire/extraction/types';
+import type { OpeningProbeBudget } from '@/lib/app/questionnaire/scope/probe';
 import type {
   ContradictionFinding,
   PendingContradiction,
@@ -201,6 +202,18 @@ export interface TurnState {
    */
   dataSlotAttempts?: Record<string, number>;
   /**
+   * Adaptive Scope (G03): the opening's SHARED follow-up allowance and what it has already spent.
+   *
+   * Present only while it governs something — the version opted in to `limitOpeningProbes`, the
+   * interview plan is not yet decided, and at least one data slot belongs to an `opening` topic.
+   * Absent (the overwhelmingly common case) means the per-slot {@link QuestionnaireConfigShape}
+   * `maxDataSlotAttempts` cap is the only thing bounding re-asks, exactly as before.
+   *
+   * It never RAISES the per-slot cap — a budget with four probes left cannot make an interview
+   * ask a question the author's own limit forbids. It only lowers it.
+   */
+  openingProbe?: OpeningProbeBudget;
+  /**
    * Cost-cap pressure for this turn, set by the route when the session's spend so far crosses
    * the soft threshold (F6.3). `'soft'` biases the core toward offering completion early (so the
    * session winds down before the hard cap) and threads a wrap-up instruction into the offer
@@ -241,6 +254,22 @@ export interface ExtractOutcome {
    * turn, when one was detected (and the feature is on). Absent = nothing detected.
    */
   sensitivity?: SensitivityAssessment;
+  costUsd: number;
+  latencyMs?: number;
+  diagnostic?: string;
+}
+
+/**
+ * Opening-routability invoker outcome (G03).
+ *
+ * `routable: null` is not `false`. False is a verdict — the account is too abstract, spend the
+ * probe. Null is the absence of one (no agent, no provider, a timeout, unparseable JSON), which
+ * also spends the probe but for a different reason, and the two must stay distinguishable in a log.
+ */
+export interface OpeningRoutabilityOutcome {
+  routable: boolean | null;
+  /** One sentence from the check, when it produced one. */
+  reason?: string;
   costUsd: number;
   latencyMs?: number;
   diagnostic?: string;
@@ -332,6 +361,20 @@ export interface CapabilityInvokers {
    * invoker resolves the active question + transcript from its own closure; the core just gates
    * the call and acts on the verdict. Fail-soft (returns `verdict: null` + a diagnostic).
    */
+  /**
+   * Adaptive Scope (G03): would a follow-up buy anything? Called at most **once per turn**, and
+   * only at the moment a probe from {@link TurnState.openingProbe} is about to be spent — so a
+   * version that never opted in, and every turn after the opening, pays nothing for it.
+   *
+   * Not once per session: a `routable: true` verdict withholds the follow-up without spending a
+   * probe, so the next opening slot whose answer lands weakly asks again. An opening of N slots
+   * answered routably throughout therefore costs up to N checks across N turns — bounded by the
+   * opening's length, not by the allowance.
+   *
+   * Optional + fail-soft, and its failure direction matters: `routable: null` means the check did
+   * not happen, and the core then asks the follow-up. The check may only ever save a question.
+   */
+  assessOpeningRoutability?(state: TurnState): Promise<OpeningRoutabilityOutcome>;
   assessSeriousness(state: TurnState): Promise<SeriousnessOutcome>;
   /**
    * Sensitivity / safeguarding — dedicated detector: rule on whether this turn's message carries a

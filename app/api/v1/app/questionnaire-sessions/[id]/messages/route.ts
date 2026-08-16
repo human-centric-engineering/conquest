@@ -76,6 +76,7 @@ import { persistTurn } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-r
 import { maybePlanScope } from '@/app/api/v1/app/questionnaire-sessions/_lib/plan-scope';
 import { maybeAmendPlan } from '@/app/api/v1/app/questionnaire-sessions/_lib/amend-plan';
 import { amendmentBriefingLine } from '@/lib/app/questionnaire/scope/amendment';
+import { probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import { streamOfferMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
 import { streamQuestionMessage } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { loadRoundBriefing } from '@/app/api/v1/app/questionnaire-sessions/_lib/round-briefing';
@@ -506,12 +507,23 @@ async function handleMessage(
     // Build the FULL data-slot candidate set (the extractor's shape) once. Each carries its `current`
     // fill (when any) so a correction merges/updates rather than re-derives, plus a move-on
     // `parkPending` flag when the slot has hit the re-ask cap and still isn't confidently filled.
+    //
+    // Adaptive Scope (G03): a spent allowance ends the slot's follow-ups too, and earlier than the
+    // per-slot cap does. Reading only the cap left the extractor un-asked for a best-effort reading
+    // on exactly the turns the allowance parks, so those slots recorded the floor placeholder
+    // instead of what the respondent actually said. Only the DETERMINISTIC half is knowable here —
+    // a park caused by the routability verdict happens inside the orchestrator, after this.
+    const openingProbeSpent =
+      loaded.base.openingProbe !== undefined && probesRemaining(loaded.base.openingProbe) <= 0;
     const dataSlotCandidatesFull = dataSlots.map((s) => {
       const fill = dataSlotFillByDataSlotId.get(s.id);
       const attempts = loaded.base.dataSlotAttempts?.[s.id] ?? 0;
+      const effectiveAttemptCap =
+        openingProbeSpent && loaded.base.openingProbe?.slotIds.includes(s.id)
+          ? 1
+          : loaded.base.config.maxDataSlotAttempts;
       const parkPending =
-        attempts >= loaded.base.config.maxDataSlotAttempts &&
-        (fill?.confidence ?? 0) < DATA_SLOT_FILLED_THRESHOLD;
+        attempts >= effectiveAttemptCap && (fill?.confidence ?? 0) < DATA_SLOT_FILLED_THRESHOLD;
       return {
         key: s.key,
         name: s.name,
@@ -615,6 +627,17 @@ async function handleMessage(
       // Anonymous (no-login) session: the adaptive selectors skip the LLM pick (its `streamChat`
       // would FK-violate on the synthetic `anon:<sessionId>` user) and fall back to deterministic.
       ...(access.anonymous ? { anonymous: true } : {}),
+      // Adaptive Scope (G03): the criteria a follow-up would have to make decidable. Supplied only
+      // when the opening's allowance governs this turn — `openingProbe` is itself present only
+      // before the plan is decided on a version that opted in — so the invoker is omitted, and the
+      // check never runs, for everyone else.
+      ...(loaded.base.openingProbe
+        ? {
+            routabilityCandidates: loaded.scope.topics
+              .filter((t) => t.phase === 'conditional')
+              .map((t) => ({ key: t.key, label: t.label, criteria: t.criteria })),
+          }
+        : {}),
     });
 
     const keyToSlotId = new Map(loaded.slots.map((s) => [s.key, s.id]));
@@ -632,6 +655,9 @@ async function handleMessage(
     // re-ask counts + the configured cap, used to frame a sharper/final re-ask.
     const dataSlotAttempts = loaded.base.dataSlotAttempts ?? {};
     const maxDataSlotAttempts = loaded.base.config.maxDataSlotAttempts;
+    // Adaptive Scope (G03): the opening's shared follow-up allowance, so the phraser can tell that
+    // a follow-up is the last one this interview will ask about the slot.
+    const openingProbe = loaded.base.openingProbe;
 
     // Diagnostics: hoisted so the streaming generator (where TS loses `loaded`'s narrowing) can
     // attribute any captured error to this version without re-reading the session.
@@ -802,7 +828,16 @@ async function handleMessage(
         // allowed attempt so it stays pressure-free before we move on.
         const currentUnderstanding = dataSlotFillByDataSlotId.get(r.dataSlotId)?.paraphrase ?? null;
         const attemptsForTarget = dataSlotAttempts[r.dataSlotId] ?? 0;
-        const isFinalAttempt = r.isReask && attemptsForTarget + 1 >= maxDataSlotAttempts;
+        // Adaptive Scope (G03): the opening's shared allowance ends a slot's follow-ups just as
+        // firmly as the per-slot cap, and one turn sooner. Reading only the cap let the phraser ask
+        // "let me try once more" and then move on regardless — the abrupt hand-off `isFinalAttempt`
+        // exists to prevent. This follow-up spends the last probe when only one remains.
+        const openingProbeFinal =
+          openingProbe !== undefined &&
+          openingProbe.slotIds.includes(r.dataSlotId) &&
+          probesRemaining(openingProbe) <= 1;
+        const isFinalAttempt =
+          r.isReask && (attemptsForTarget + 1 >= maxDataSlotAttempts || openingProbeFinal);
         // Continuity: what they've already shared (other slots), minus the one we're asking now.
         const priorAnswers = buildPriorAnswersDigest({
           dataSlots,

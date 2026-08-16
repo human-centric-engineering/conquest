@@ -27,6 +27,7 @@ import {
   type QuestionnaireConfigShape,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 
 function configOf(overrides: Partial<QuestionnaireConfigShape> = {}): ConfigView {
   return { ...DEFAULT_QUESTIONNAIRE_CONFIG, ...overrides, saved: true };
@@ -323,6 +324,29 @@ describe('value formatting', () => {
     const { byLabel } = rowsOf(config, true);
     expect(byLabel.get('Report instructions')).toBe('Set');
     expect([...byLabel.values()].join(' ')).not.toContain('never mention pricing');
+  });
+
+  it('states the opening follow-up allowance only in terms an operator can act on (G03)', () => {
+    // The switch and the number only mean anything together: a bare "1" beside a switch nobody set
+    // reads as a limit that is in force, and an operator reading this pack is trying to work out
+    // which limit actually stopped an interview.
+    const scoped = (over: Record<string, unknown>) =>
+      configOf({
+        adaptiveScope: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true, ...over },
+      });
+
+    expect(rowsOf(scoped({})).byLabel.get('Opening follow-ups')).toBe('Not limited');
+    expect(
+      rowsOf(scoped({ limitOpeningProbes: true, maxOpeningProbes: 1 })).byLabel.get(
+        'Opening follow-ups'
+      )
+    ).toBe('Up to 1 across the opening');
+    // Zero is a setting someone means, and it must not read as "not limited".
+    expect(
+      rowsOf(scoped({ limitOpeningProbes: true, maxOpeningProbes: 0 })).byLabel.get(
+        'Opening follow-ups'
+      )
+    ).toBe('None — never probe');
   });
 
   it('lists the shown invitee fields, marking the required ones', () => {

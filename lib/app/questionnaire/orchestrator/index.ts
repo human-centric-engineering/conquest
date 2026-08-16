@@ -16,6 +16,7 @@ export {
 export {
   runDataSlotTurn,
   DATA_SLOT_SELECTION_TOOL_SLUG,
+  OPENING_PROBE_TOOL_SLUG,
   DATA_SLOT_FILLED_THRESHOLD,
   PROVISIONAL_FLOOR_CONFIDENCE,
 } from '@/lib/app/questionnaire/orchestrator/data-slot-orchestrator';
@@ -28,6 +29,7 @@ export type {
   ExistingAnswerView,
   ExtractOutcome,
   OfferComposeInput,
+  OpeningRoutabilityOutcome,
   RefineOutcome,
   RefinementTrigger,
   SelectOutcome,

@@ -14,9 +14,11 @@ import { z } from 'zod';
 
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_OPENING_PROBES_CEILING,
   MAX_SECONDS_PER_ITEM,
   MAX_SESSION_BUDGET_SECONDS,
   MIN_CONDITIONAL_TOPICS,
+  MIN_OPENING_PROBES,
   MIN_SECONDS_PER_ITEM,
   MIN_SESSION_BUDGET_SECONDS,
   PLANNER_INSTRUCTIONS_MAX_LENGTH,
@@ -121,6 +123,15 @@ export const adaptiveScopeSettingsSchema = z.object({
     .int()
     .min(MIN_SECONDS_PER_ITEM)
     .max(MAX_SECONDS_PER_ITEM)
+    .optional(),
+  // G03 — the opening's shared follow-up allowance. A boolean switch beside the number because 0
+  // is a real setting here ("never probe"), so it cannot also mean "no limit".
+  limitOpeningProbes: z.boolean().optional(),
+  maxOpeningProbes: z
+    .number()
+    .int()
+    .min(MIN_OPENING_PROBES)
+    .max(MAX_OPENING_PROBES_CEILING)
     .optional(),
   rules: z.array(scopeRuleInputSchema).max(100).optional(),
 });

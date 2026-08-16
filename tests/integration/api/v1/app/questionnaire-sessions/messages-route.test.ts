@@ -628,6 +628,134 @@ describe('data-slot mode', () => {
   });
 });
 
+describe('the opening follow-up allowance (G03)', () => {
+  /** A context whose opening allowance governs this turn, with two conditional topics authored. */
+  function probeContext(openingProbe: unknown) {
+    const base = loadedContext();
+    return {
+      ...base,
+      base: {
+        ...(base.base as Record<string, unknown>),
+        ...(openingProbe ? { openingProbe } : {}),
+      },
+      scope: {
+        ...(base.scope as Record<string, unknown>),
+        topics: [
+          { key: 'open', label: 'Opening', phase: 'opening', criteria: null },
+          { key: 'pipeline', label: 'Pipeline', phase: 'conditional', criteria: 'deals stall' },
+          { key: 'talent', label: 'Talent', phase: 'conditional', criteria: null },
+        ],
+      },
+    };
+  }
+
+  it('hands the check only the topics it could ever route to', async () => {
+    // Always-run topics are not decided between, so their criteria say nothing about whether the
+    // opening is routable — sending them would make an unroutable answer look decidable.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      probeContext({ slotIds: ['ds-1'], spent: 0, allowance: 1 })
+    );
+
+    const res = await POST(req({ message: 'we need a predictable revenue engine' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0][0] as {
+      routabilityCandidates?: Array<{ key: string; label: string; criteria: string | null }>;
+    };
+    expect(args.routabilityCandidates).toEqual([
+      { key: 'pipeline', label: 'Pipeline', criteria: 'deals stall' },
+      { key: 'talent', label: 'Talent', criteria: null },
+    ]);
+  });
+
+  it('tells the extractor a slot is about to be parked when the allowance is spent', async () => {
+    // `parkPending` is how the extractor is asked for a best-effort reading before the interview
+    // moves on. Computed from the per-slot cap alone, it stayed false on exactly the turns G03
+    // parks — so those slots recorded the floor placeholder rather than what the respondent said.
+    const base = probeContext({ slotIds: ['ds-1'], spent: 1, allowance: 1 });
+    ctxMock.buildTurnContext.mockResolvedValue({
+      ...base,
+      base: {
+        ...(base.base as Record<string, unknown>),
+        dataSlots: [
+          {
+            id: 'ds-1',
+            key: 'signal',
+            name: 'The signal',
+            description: 'd',
+            theme: 'Opening',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: [],
+        activeDataSlotKey: 'signal',
+        // One ask so far — under the per-slot cap of 4, so only the spent allowance can park it.
+        dataSlotAttempts: { 'ds-1': 1 },
+        config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, abuseThreshold: 0, maxDataSlotAttempts: 4 },
+      },
+    });
+
+    const res = await POST(req({ message: 'something vague' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0][0] as {
+      dataSlotCandidates?: Array<{ key: string; parkPending?: boolean }>;
+    };
+    expect(args.dataSlotCandidates?.find((c) => c.key === 'signal')?.parkPending).toBe(true);
+  });
+
+  it('leaves parkPending alone while the allowance still has a follow-up left', async () => {
+    const base = probeContext({ slotIds: ['ds-1'], spent: 0, allowance: 1 });
+    ctxMock.buildTurnContext.mockResolvedValue({
+      ...base,
+      base: {
+        ...(base.base as Record<string, unknown>),
+        dataSlots: [
+          {
+            id: 'ds-1',
+            key: 'signal',
+            name: 'The signal',
+            description: 'd',
+            theme: 'Opening',
+            ordinal: 0,
+            weight: 1,
+          },
+        ],
+        dataSlotAnswered: [],
+        activeDataSlotKey: 'signal',
+        dataSlotAttempts: { 'ds-1': 1 },
+        config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, abuseThreshold: 0, maxDataSlotAttempts: 4 },
+      },
+    });
+
+    const res = await POST(req({ message: 'something vague' }), ctx);
+    await drainSse(res);
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0][0] as {
+      dataSlotCandidates?: Array<{ key: string; parkPending?: boolean }>;
+    };
+    expect(args.dataSlotCandidates?.find((c) => c.key === 'signal')?.parkPending).toBeUndefined();
+  });
+
+  it('supplies nothing when no allowance governs the turn, so the check is never wired', async () => {
+    // The common case by a wide margin. Omitting the field is what keeps `assessOpeningRoutability`
+    // off the invoker set entirely rather than present and always returning null.
+    ctxMock.buildTurnContext.mockResolvedValue(probeContext(null));
+
+    const res = await POST(req({ message: 'hello' }), ctx);
+    expect(res.status).toBe(200);
+    await drainSse(res);
+
+    const args = invokersMock.buildTurnInvokers.mock.calls[0][0] as {
+      routabilityCandidates?: unknown;
+    };
+    expect(args.routabilityCandidates).toBeUndefined();
+  });
+});
+
 describe('extraction pre-filter', () => {
   /** A context with two question slots + two data slots — enough to assert narrowing. */
   function multiSlotContext() {
@@ -1837,6 +1965,47 @@ describe('data_slot response — phrasing inputs', () => {
     const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input as {
       isFinalAttempt?: boolean;
     };
+    expect(input.isFinalAttempt).toBe(true);
+  });
+
+  it('sets isFinalAttempt when the opening allowance — not the per-slot cap — ends the follow-ups', async () => {
+    // maxDataSlotAttempts is 4, so the per-slot cap says "three more tries". The allowance says this
+    // is the last one. Reading only the cap let the phraser promise another go and then move on
+    // regardless, which is the abrupt hand-off the flag exists to prevent.
+    const base = loadedContext();
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...base.base,
+          config: { ...base.base.config, maxDataSlotAttempts: 4 },
+          activeDataSlotKey: 'department',
+          dataSlots: [
+            {
+              id: 'ds-1',
+              key: 'department',
+              name: 'Department',
+              description: 'Which department?',
+              theme: 'role',
+              ordinal: 0,
+              weight: 1,
+            },
+          ],
+          dataSlotAnswered: [
+            { dataSlotId: 'ds-1', value: null, paraphrase: 'Still unclear', confidence: 0.3 },
+          ],
+          dataSlotAttempts: { 'ds-1': 1 },
+          openingProbe: { slotIds: ['ds-1'], spent: 0, allowance: 1 },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'vague again' }), ctx));
+
+    const input = (questionMock.streamQuestionMessage as Mock).mock.calls[0]?.[0]?.input as {
+      isReask?: boolean;
+      isFinalAttempt?: boolean;
+    };
+    expect(input.isReask).toBe(true);
     expect(input.isFinalAttempt).toBe(true);
   });
 

@@ -28,6 +28,9 @@ vi.mock('@/lib/db/client', () => ({
     appQuestionSlot: { findMany: vi.fn() },
     appDataSlot: { findMany: vi.fn() },
     appScoringSchema: { findUnique: vi.fn() },
+    // G03: the route reads the per-slot re-ask cap so the tab can flag a follow-up limit that
+    // cannot bind. Defaults to a null row (⇒ the config default) unless a case says otherwise.
+    appQuestionnaireConfig: { findUnique: vi.fn() },
   },
 }));
 
@@ -176,6 +179,7 @@ beforeEach(() => {
   (prisma.appDataSlot.findMany as Mock).mockResolvedValue([]);
   // Most versions do not score — the comparability checks (F17.15) then have nothing to say.
   (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue(null);
+  (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue(null);
 });
 
 // ─── GET ──────────────────────────────────────────────────────────────────────
