@@ -182,7 +182,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
       issues.push({
         severity: 'warning',
         code: 'scale_never_whole',
-        message: `"${scale.name}" draws on ${capBound.length} conditional topics your criteria must choose between, but a plan seats at most ${cap}. With Adaptive Scope on, no respondent is ever asked the whole scale — every score is partial and the cohort report has nothing to aggregate. Move the shared items into an always-run topic, or raise the limit to ${capBound.length}.`,
+        message: `"${scale.name}" draws on ${capBound.length} conditional topics your criteria must choose between, but at most ${cap} of them are ever asked. With Adaptive Scope on, no respondent is ever asked the whole scale — every score is partial and the cohort report has nothing to aggregate. Move the shared items into an always-run topic, or raise the limit to ${capBound.length}.`,
       });
       continue;
     }
@@ -195,7 +195,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
         issues.push({
           severity: 'warning',
           code: 'scale_never_whole',
-          message: `"${scale.name}" draws on conditional topics costing about ${needed}s together, but only ${seconds.routedAllowance}s is left for routed topics. They can never all be seated, so with Adaptive Scope on no respondent is ever asked the whole scale.`,
+          message: `"${scale.name}" draws on conditional topics costing about ${needed}s together, but only ${seconds.routedAllowance}s is left for the topics the agent chooses. They can never all be asked, so with Adaptive Scope on no respondent is ever asked the whole scale.`,
         });
         continue;
       }
@@ -204,7 +204,7 @@ export function checkScaleComparability(input: ComparabilityInput): ScopeIssue[]
     issues.push({
       severity: 'warning',
       code: 'scale_split_by_scope',
-      message: `"${scale.name}" draws on ${touched.size === 1 ? 'a conditional topic' : `${touched.size} conditional topics`}, so while Adaptive Scope is on a respondent not routed to ${touched.size === 1 ? 'it' : 'all of them'} is scored on part of the scale. Cohort averages and band distributions exclude those respondents.`,
+      message: `"${scale.name}" draws on ${touched.size === 1 ? 'a conditional topic' : `${touched.size} conditional topics`}, so while Adaptive Scope is on a respondent who is not asked ${touched.size === 1 ? 'it' : 'all of them'} is scored on only part of the scale. Cohort averages and score-band breakdowns leave those respondents out.`,
     });
   }
 

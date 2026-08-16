@@ -99,7 +99,7 @@ describe('checkScaleComparability', () => {
       expect(issues[0].code).toBe('scale_split_by_scope');
       expect(issues[0].severity).toBe('warning');
       expect(issues[0].message).toContain('2 conditional topics');
-      expect(issues[0].message).toContain('exclude those respondents');
+      expect(issues[0].message).toContain('leave those respondents out');
     });
 
     it('reports it even while Adaptive Scope is off — the question is asked before the switch', () => {
@@ -114,7 +114,7 @@ describe('checkScaleComparability', () => {
   });
 
   describe('a scale no plan can ever cover', () => {
-    it('warns when the scale needs more conditional topics than a plan seats', () => {
+    it('warns when the scale needs more conditional topics than one interview can ask', () => {
       const issues = checkScaleComparability({
         topics: [
           topic('cond_a', 'conditional', ['q1']),

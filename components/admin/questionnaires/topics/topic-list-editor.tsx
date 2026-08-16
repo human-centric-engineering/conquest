@@ -30,7 +30,7 @@
  *   lets a topic survive a version fork with no re-linking at all.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -160,6 +160,22 @@ export interface TopicListEditorProps {
   busy: boolean;
   /** True when the feature is on — drives the "criteria is what the agent judges" emphasis. */
   enabled: boolean;
+  /**
+   * A topic another surface has asked to edit — today, the routing map's "Edit this topic".
+   *
+   * Carries a `nonce` rather than being a bare key because asking for the SAME topic twice must still
+   * move the list: with a plain string the second request is unchanged state and the effect below
+   * never re-fires, so the second click would do nothing at all.
+   */
+  focusTopic?: { key: string; nonce: number } | null;
+  /**
+   * Called once a {@link focusTopic} request has been honoured, so the caller can drop it.
+   *
+   * Without this the request outlives the click. This component is keyed on the topic set, so any
+   * later save remounts it, the effect below re-runs against a request from minutes ago, and the
+   * admin's filter is cleared and the view yanked back to a topic they have moved on from.
+   */
+  onFocusHandled?: () => void;
 }
 
 export function TopicListEditor({
@@ -168,6 +184,8 @@ export function TopicListEditor({
   onSave,
   busy,
   enabled,
+  focusTopic,
+  onFocusHandled,
 }: TopicListEditorProps) {
   // Per-item seconds, keyed once. The route priced every question and data slot against this
   // version's own overrides, so the browser never re-derives a per-type estimate.
@@ -258,6 +276,41 @@ export function TopicListEditor({
     });
 
   const filtering = filter !== 'all';
+
+  // One DOM node per rendered row, so the focus effect can scroll to a topic without reaching into
+  // the document. Rows unmount as the filter changes, so entries are cleaned up on unmount.
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const registerRow = (clientId: string) => (el: HTMLLIElement | null) => {
+    if (el) rowRefs.current.set(clientId, el);
+    else rowRefs.current.delete(clientId);
+  };
+
+  // "Edit this topic", arriving from the routing map.
+  //
+  // The filter is cleared first, and that is the whole reason this is an effect rather than a call:
+  // a topic hidden by the current filter has no row to expand, so setting `expanded` alone would look
+  // to the admin like the button did nothing. Clearing is safe — the filter is a view preference, and
+  // the alternative (silently failing to honour an explicit request) is worse.
+  useEffect(() => {
+    if (!focusTopic) return;
+    const target = drafts.find((d) => d.key === focusTopic.key);
+    if (!target) return;
+    setFilter('all');
+    setExpanded((prev) => new Set(prev).add(target.clientId));
+    // Retire the request now it has been acted on. A remount must not replay it.
+    onFocusHandled?.();
+    // One frame later: the row may have only just been revealed by the filter reset above, so it does
+    // not exist yet at the moment this effect runs.
+    const raf = requestAnimationFrame(() => {
+      rowRefs.current
+        .get(target.clientId)
+        ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+    // `drafts` is deliberately not a dependency: this must fire when a request ARRIVES, not every
+    // time the admin types a character into a topic.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTopic]);
 
   const setOpen = (clientId: string, open: boolean) => {
     setExpanded((prev) => {
@@ -485,7 +538,7 @@ export function TopicListEditor({
             const open = expanded.has(draft.clientId);
             const name = draft.label.trim().length > 0 ? draft.label : 'Untitled topic';
             return (
-              <li key={draft.clientId}>
+              <li key={draft.clientId} ref={registerRow(draft.clientId)}>
                 <Card
                   className={cn(
                     'overflow-hidden transition-shadow',
@@ -767,9 +820,9 @@ export function TopicListEditor({
                           help={
                             <>
                               <p>
-                                The questions this topic covers. When the topic is out of scope,
-                                these are not asked and the report records them as{' '}
-                                <em>not asked</em> rather than unanswered.
+                                The questions this topic covers. When the topic is not part of this
+                                respondent&rsquo;s interview, these are not asked and the report
+                                records them as <em>not asked</em> rather than unanswered.
                               </p>
                               <p className="mt-2">
                                 Each question should sit in exactly one topic. A question in none

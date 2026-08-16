@@ -92,12 +92,14 @@ async function loadKeyInventory(versionId: string, settings: AdaptiveScopeSettin
       sectionTitle: q.section.title,
       type: q.type,
       estimatedSeconds: seconds.byQuestionKey.get(q.key) ?? 0,
+      weight: q.weight,
     })),
     dataSlots: dataSlots.map((d) => ({
       key: d.key,
       name: d.name,
       theme: d.theme,
       estimatedSeconds: seconds.byDataSlotKey.get(d.key) ?? 0,
+      weight: d.weight,
     })),
     seconds,
     weights: {

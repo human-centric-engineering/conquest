@@ -22,6 +22,7 @@ import {
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
+import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
@@ -47,6 +48,10 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkNotice, setForkNotice] = useState<number | null>(null);
+  // The topic the routing map asked to edit. A counter rides with it so asking for the SAME topic
+  // twice still moves the list — a plain key would be unchanged state on the second request and the
+  // editor's effect would never re-fire.
+  const [focusTopic, setFocusTopic] = useState<{ key: string; nonce: number } | null>(null);
 
   // Release the busy lock once the refreshed payload arrives — closing the window where a second
   // save could fire against the pre-fork version id.
@@ -126,6 +131,21 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   return (
     <div className="space-y-5">
       <ScopeExplainer />
+
+      {/* The map sits above every card rather than inside one: it is a view of the whole tab — the
+          settings, the rules and the topic set together — and hanging it off any single card would
+          suggest it only shows that card's half. */}
+      <div className="flex justify-end">
+        <RoutingMapDialog
+          // Remount on the payload for the reason its neighbours do, and one this view sharpens: a
+          // map is only true of the settings that produced it, so a stale graph sitting behind a
+          // button after a save would be a picture of a version that no longer exists.
+          key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.rules.length}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
+          payload={payload}
+          onEditTopic={(key) => setFocusTopic((prev) => ({ key, nonce: (prev?.nonce ?? 0) + 1 }))}
+          disabled={busy}
+        />
+      </div>
 
       {forkNotice !== null && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
@@ -233,6 +253,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           onSave={saveTopics}
           busy={busy}
           enabled={payload.settings.enabled}
+          focusTopic={focusTopic}
+          onFocusHandled={() => setFocusTopic(null)}
         />
       </section>
     </div>
