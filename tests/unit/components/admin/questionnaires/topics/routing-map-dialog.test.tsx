@@ -160,14 +160,16 @@ describe('RoutingMapDialog', () => {
   });
 
   describe('the always-asked band', () => {
-    it('starts collapsed and expands to one node per topic', () => {
+    it('starts expanded, one node per topic, and collapses to the head alone', () => {
       open();
-      const collapsed = nodeCount();
+      // Two always-run topics in the fixture — `spine` and `wrap` — drawn from the first paint, because
+      // the band is laid out clear of every other stage and no longer costs the map anything.
+      const expanded = nodeCount();
+      expect(screen.getByRole('switch')).toBeChecked();
 
       fireEvent.click(screen.getByRole('switch'));
 
-      // Two always-run topics in the fixture — `spine` and `wrap`.
-      expect(nodeCount()).toBe(collapsed + 2);
+      expect(nodeCount()).toBe(expanded - 2);
     });
 
     it('labels the toggle generically, with no count baked into it', () => {

@@ -254,6 +254,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           busy={busy}
           enabled={payload.settings.enabled}
           focusTopic={focusTopic}
+          onFocusHandled={() => setFocusTopic(null)}
         />
       </section>
     </div>

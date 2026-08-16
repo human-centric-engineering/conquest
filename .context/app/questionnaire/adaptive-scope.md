@@ -635,6 +635,14 @@ reading a slot the interview has not gathered by then is not a rule that fires l
 | `rule_slot_unreachable`    | warning                    | No opening topic gathers the slot — the rule never matches                                      |
 | `rule_slot_not_in_opening` | warning                    | A `core` topic gathers it — whether it has been asked yet is not something the rule can rely on |
 | `rule_veto_always_fires`   | error (on) / warning (off) | A `not_exists` rule reading a slot no opening topic gathers                                     |
+| `rule_names_always_topic`  | warning                    | The rule's target is `core` / `opening` / `closing`, so the rule changes nothing                |
+
+**A rule aimed at an always-run topic does nothing at all.** `applyGuardrails` seats and vetoes
+within the _conditional_ set, and `resolveScope` puts every other phase in scope regardless — so
+"never include the audit questions for a non-licence-holder" is inert the moment `audit` is a `core`
+topic. It is the same no-op as `always_topic_named_as_choice`, reached from the other direction, and
+it is reported separately because the fix differs: the author either meant a different topic or meant
+to make this one conditional. On the map the rule node carries a **No effect** badge.
 
 **The veto case is the one worth an error.** Absence is what `not_exists` matches on, so an
 ungathered slot does not make the rule inert — it makes it fire for everybody. An author who wrote
@@ -868,12 +876,24 @@ off nothing.
 The two computations are independent (the validator words a warning, the builder picks an edge), which is
 exactly the pair that drifts silently, so `graph.test.ts` asserts they agree across all four cases.
 
-### The always-asked band collapses
+### The always-asked band can collapse, but does not start that way
 
 Ingest seeds one `core` topic per extracted section, so fifteen-plus always-asked topics is the ordinary
-first sight of a version — and drawn individually they crowd out the conditional band, which is the only
-part of the picture any decision is taken about. The band therefore renders as a single priced head node
-(`Always asked — 15 topics · 4m 26s`) with a toggle to fan it out.
+first sight of a version. The band therefore has a priced head node (`Always asked — 15 topics · 4m 26s`)
+and a toggle that puts every topic behind it.
+
+The toggle is **on by default**, which is a reversal. It shipped off, on the reasoning that fifteen
+individually drawn topics crowd out the conditional band — the only part of the picture any decision is
+taken about — and while the band was drawn as a wrapped row that was simply true. Stacked in a column of
+its own, clear of every other stage's `x`, it costs the rest of the map nothing, and the first sight of a
+routing map should be the whole interview rather than a summary of a third of it. The toggle stays for
+the reader who wants the pipeline on its own.
+
+Its id is `always::band`, with two colons, and that is not a typo. Topic nodes are `always:<key>` and
+`topicKeySchema` permits the key `band`, so a single colon let a legitimately-named topic land on the
+canvas under the head's own id — a duplicate node, a self-edge, and every click on that topic resolving
+to the band head. Topic keys are `^[a-z0-9_]+$`, so the second colon puts the head somewhere no key can
+reach.
 
 The head node stays on the canvas in **both** states, and that is load-bearing rather than tidy: it is the
 band's only anchor. `start` points at it rather than at fifteen topics, and a weak-evidence edge from a
@@ -881,10 +901,130 @@ band's only anchor. `start` points at it rather than at fifteen topics, and a we
 endpoint is missing, so a head that came and went would take those edges with it — which is why
 `graph.test.ts` asserts no edge ever names a node that is not present.
 
+### On-screen copy is plain English, never the code's vocabulary
+
+The map and the settings tab used to say a rule **seats** a topic, that a plan **seats at most 3**, that
+nothing was **seated**, that a rule **vetoes**, that a topic is **out of scope**, that a check is
+**deterministic**, and that time is left for **routed** topics. Every one of those is a word from the
+implementation — `guardrails.ts` really does have a `seat()` — and none of them is a word an admin has
+ever been taught. A reader who has to decode the label cannot check the thing the label describes, which
+defeats the point of a surface whose entire job is to be checkable.
+
+The replacements, which are the vocabulary to keep using:
+
+| Was                | Is                                      |
+| ------------------ | --------------------------------------- |
+| seats / is seated  | adds / is included / is asked           |
+| nothing was seated | nothing was chosen                      |
+| vetoes / vetoed    | blocks / blocked                        |
+| the cap            | the limit on how many topics            |
+| routed topics      | the topics the agent chooses            |
+| out of scope       | not part of this respondent's interview |
+| deterministic      | applied in code, not asked of the AI    |
+| the instrument     | the questionnaire                       |
+| the pipeline       | the flow above (on the map)             |
+
+Domain words an admin _is_ taught by the UI stay: **topic**, **data slot**, **opening**, **conditional**,
+**hard rule**, **guardrails**, **blind-spot check**, **Full / Light depth**. The test is not whether a
+word is technical, it is whether the product ever teaches it — `Light depth` is a labelled control on
+the topic editor, `seated` was never anywhere but the source.
+
+### Every badge is explained where it is read
+
+`Fallback` and `Preferred check` are the system's own vocabulary for guardrail mechanics an author met
+once, in a settings field, possibly weeks ago. Two words on a node cannot carry that, and for a while
+nothing anywhere on the map said what they did — a reader could see that `Management` was a fallback and
+still have no way to learn what being one costs or buys.
+
+Both the pill and its sentence now come from one table, `SCOPE_BADGES` in `graph.ts`, and the detail
+panel renders the pill in the same shape and colour the node drew it in — literally, from the same
+`BADGE_TONES` table, because two copies of a colour map drift while the text stays identical, which is
+the one mismatch that makes a reader doubt they clicked the right node. So a reader is not matching two
+words by memory. Building them together is what makes the guarantee cheap: `graph.test.ts` asserts that
+every badge on every node the builder can produce has a note beside it, in the same order, so a badge
+cannot reach the canvas unexplained.
+
+The meanings are written as consequences rather than definitions — a fallback is "used only when the
+decision chooses nothing at all", not "a fallback topic" — because the question a reader has in front of
+this map is always what the tag _does to a respondent_.
+
+### The layout is size-aware and lane-based, because a fixed grid cannot be
+
+The first cut laid the map on a fixed grid — one column every 300 units, one row every 120, every column
+centred on y = 0. Each of those three decisions produced a different defect.
+
+**A 300 pitch** leaves 64 units of gutter beside a 236-wide node, which at the zoom `fitView` picks for a
+twelve-topic column reads as boxes touching. The pitch is now written as the node's own width plus the
+gutter, and the gutter is half a node wide.
+
+**A fixed row pitch** has to be set for the tallest node in the graph, so a two-line label carrying two
+badges either overlaps its neighbour or forces every single-line node to sit in a pool of dead space.
+`graph.ts` now estimates each node's rendered height from what it says — label lines, sublabel lines,
+badge rows — and stacks each column from those heights with a constant gap between bottom edge and top
+edge. The constants are read off `routing-map-node.tsx`, and the node's width travels the other way: the
+renderer takes it from `ROUTING_MAP_NODE_WIDTH` rather than a Tailwind class, because the column pitch is
+derived from it and a node that renders wider than the layout believes closes the gutter it left.
+Estimated rather than measured because the graph is built before React Flow has seen a node, and React
+Flow's own measurement arrives far too late to position anything with. A few pixels out is absorbed by
+the gap; height-blind is not absorbed by anything.
+
+**Every column on one centre line** was the worst of the three, and it did not merely look flat. A
+left-to-right graph draws its edges as horizontal runs, so six columns on one line puts every run in the
+same horizontal band: the hard rule's edge to its conditional topic was drawn straight through the
+planner and the guardrails, and a reader could not tell an edge that stops at a node from one that passes
+behind it. Each column now sits on its own **lane**. The ±56 along the spine is the small job — it stops
+two adjacent columns sharing a run. The hard rules get a much larger offset, and that one carries meaning
+rather than clearance: a rule **bypasses** the planner and the guardrails, which is exactly where
+`applyGuardrails` seats it, so it is drawn as the bypass lane it is, running underneath the stage it goes
+around.
+
+**Every edge runs left to right, and the band is what nearly broke that.** React Flow leaves each node's
+source handle on the right and its target handle on the left, so two nodes sharing an `x` are joined by a
+path that leaves the right side, doubles back over both boxes and re-enters from the left — a rendering
+fault to look at, not a relationship. The band used to start one column right of where it does now, which
+put its expanded topics in the **rule** column, and the weak-evidence edge from a `core` topic to the rule
+reading its slot then ran inside a single column. That edge is the "timing not guaranteed" case: the
+single most important thing on this map, drawn worst.
+
+The band now hangs beneath the pipeline's first two columns instead of its second and third, which puts
+head → topic and topic → rule back on left-to-right runs. The one edge that cannot be — `start` → head,
+now directly below it — is why the head is the only node on the map whose inbound handle is on the
+**top**, and drawing it as a vertical drop is what the band was always described as doing anyway.
+`graph.test.ts` asserts the invariant over the whole graph rather than over that one edge, because the way
+it was introduced was a layout decision taken for unrelated reasons.
+
+### A node's title is never truncated
+
+The title used to clamp at two lines, which drew a rule node as `Commercial outcome named was never…`.
+An ellipsis in a title is worse than a tall node: a truncated rule sentence reads as a _different rule_.
+`was never…` could be `was never answered`, and the operator is the whole of what decides whether that
+rule fires for one respondent or for every one of them. Titles now wrap as far as they need, and
+`estimateNodeHeight` counts the lines, so the extra height is already in the stacking.
+
+The sublabel still stops, at three lines. It is a summary, its full text is one click away in the detail
+panel, and it is the one field an author can make arbitrarily long by naming a topic in a sentence.
+
+### The always-asked band is one column, not a wrapped row
+
+The band's expanded topics stack in a single column one step right of the head, exactly as the conditional
+topics stack one step right of the guardrails. An earlier cut wrapped them left-to-right across three
+columns, reasoning that a list should not be drawn as a stage of the pipeline. It drew a picture that
+lied: every topic hangs off the one head node, and **a fan-out of N edges can only be drawn without
+running through a box if every target has a horizontal lane to itself** — wrapped, the head's edge to the
+third topic was drawn straight through the first two.
+
+What keeps the band from reading as a stage is what it is drawn in — dashed borders, muted fill, and
+`ALWAYS_BAND_GAP` of clear air below the spine — not which way it wraps. Keeping it inside one `x` also
+means it only has to clear the two short columns it hangs beneath, never the twelve-topic conditional
+column away to the right; hanging it below _that_ put a screen of dead canvas through the middle of the
+picture, which `fitView` then has to zoom out to include, shrinking every label on the map to buy
+nothing. `graph.test.ts` asserts the strong form: no band node's box ever intersects a pipeline node's.
+
 ### Read-only, with one way back
 
-Clicking a node opens its detail: what it is, what decides it, where its duration comes from, and — for a
-conditional topic — the author's criteria, since the node itself clamps to two lines. A topic
+Clicking a node opens its detail: what it is, what decides it, where its duration comes from, what each
+of its **tags** means, and — for a conditional topic — the author's criteria, which the node never shows.
+A topic
 node also offers **"Edit this topic"**, which closes the map and expands that row in the topic list.
 
 The dialog closes first on purpose: the row is behind the overlay, so leaving the map open would read as
@@ -914,7 +1054,13 @@ So the panel shows the arithmetic instead (`ScopeNodeTiming`, built in `scope/gr
 | **The headline still comes from `costs`**   | The server prices topics and the planner drops them by that price; a second implementation in the browser is exactly the drift `scope/budget.ts` warns about. The breakdown is derived from the same per-item seconds.   |
 | **Missing members are counted, not hidden** | A member naming a deleted question is charged nothing, and the panel says how many. Silently short arithmetic is worse than none.                                                                                        |
 
-**The caveat is stated in the panel, not behind the ⓘ.** The estimate is the respondent's _answering_
+**The block is collapsed by default.** The arithmetic is wanted once; the figures are wanted every
+time. Closed, the section is two readings (`1m 17s full · 16s light`, the authored one marked), a
+one-line caveat and a chevron; opening it swaps the readings for the fuller cards rather than
+repeating them underneath, so the disclosure reads as a zoom into the same thing rather than as a
+second answer. Open, it had grown taller than everything else in the panel put together.
+
+**The caveat is stated in the panel, not behind the ⓘ — and not behind the chevron either.** The estimate is the respondent's _answering_
 time, item by item. The interview is a conversation: the agent's turns, its follow-ups, its re-asks and
 any back-and-forth are not counted, so a real chat runs longer — and an author who reads the figure as a
 stopwatch will set a session budget that cuts their instrument in half. That sentence sits under the

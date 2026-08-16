@@ -92,6 +92,95 @@ export interface ScopeNodeBadge {
   tone: 'neutral' | 'positive' | 'negative' | 'warning';
 }
 
+/**
+ * Every badge the map can draw, and what it means.
+ *
+ * A badge is the shortest thing on a node and the only one written in the system's own vocabulary —
+ * `Fallback` and `Preferred check` name guardrail mechanics that an author has met once, in a settings
+ * field, possibly weeks ago. Two words on a node cannot carry that, and the detail panel is where a
+ * reader goes when a node does not explain itself, so the meanings live beside the badges here rather
+ * than in the renderer: the pill and its sentence are built from one table and cannot drift apart.
+ *
+ * Keyed by the badge's own label, so a badge added without a meaning fails the exhaustiveness check
+ * below rather than shipping an unexplained chip.
+ */
+export const SCOPE_BADGES = {
+  noCriteria: {
+    label: 'No criteria',
+    tone: 'warning',
+    meaning:
+      'There is nothing here for the agent to judge this topic on. It reads each conditional topic’s criteria when it decides what to ask, so with none written, this topic can only be asked because a hard rule includes it, because it is a fallback, or because the blind-spot check picks it.',
+  },
+  fallback: {
+    label: 'Fallback',
+    tone: 'neutral',
+    meaning:
+      'Named as a fallback on the Adaptive scope tab. It is used only when the decision chooses nothing at all: if the agent fails, or picks no topics, the fallback topics are asked instead, so the respondent gets more than the always-asked ones. It is not a preference — on a normal run it changes nothing.',
+  },
+  preferredCheck: {
+    label: 'Preferred check',
+    tone: 'neutral',
+    meaning:
+      'First in line for the blind-spot check. When that check is on, one topic the agent did NOT choose is asked anyway, at Light depth — just its most important few questions. This topic is picked ahead of the others whenever it is available.',
+  },
+  include: {
+    label: 'Include',
+    tone: 'positive',
+    meaning:
+      'This rule adds its topic outright, before the agent runs and before the limit on how many topics is applied — so a respondent can end up with more topics than that limit would normally allow.',
+  },
+  exclude: {
+    label: 'Exclude',
+    tone: 'negative',
+    meaning:
+      'This rule blocks its topic, before the agent runs. Blocking always wins: a topic blocked here stays out however many other rules or judgements ask for it.',
+  },
+  unknownTopic: {
+    label: 'Unknown topic',
+    tone: 'warning',
+    meaning:
+      'This rule points at a topic this version does not have, so it can never add or block anything. Either the topic was renamed and the rule was not, or the topic was deleted and the rule was left behind.',
+  },
+  noEffect: {
+    label: 'No effect',
+    tone: 'warning',
+    meaning:
+      'This rule points at a topic that is asked in every interview, so it can never add or block anything. Rules only act on topics set to “Ask when it fits” — change the topic to that, or delete the rule.',
+  },
+  checkThis: {
+    label: 'Check this',
+    tone: 'warning',
+    meaning:
+      'Something to fix before you publish this version. It is not something that varies from one respondent to the next.',
+  },
+  ai: {
+    label: 'AI',
+    tone: 'neutral',
+    meaning:
+      'The only step on this map that makes a judgement rather than following a rule. Everything it chooses still has to get past the guardrails.',
+  },
+} as const satisfies Record<string, ScopeNodeBadge & { meaning: string }>;
+
+type ScopeBadgeKey = keyof typeof SCOPE_BADGES;
+
+/** The badge as a node carries it — label and tone only, with the meaning left for the panel. */
+function badge(key: ScopeBadgeKey): ScopeNodeBadge {
+  const { label, tone } = SCOPE_BADGES[key];
+  return { label, tone };
+}
+
+/** A badge on a node, paired with what it means. What the detail panel renders. */
+export interface ScopeBadgeNote {
+  label: string;
+  tone: ScopeNodeBadge['tone'];
+  meaning: string;
+}
+
+/** The notes for a node's badges, in the order the node draws them. */
+function badgeNotes(keys: readonly ScopeBadgeKey[]): ScopeBadgeNote[] {
+  return keys.map((key) => ({ ...SCOPE_BADGES[key] }));
+}
+
 /** One line of the detail panel: a label and its value. */
 export interface ScopeDetailRow {
   label: string;
@@ -170,6 +259,13 @@ export interface ScopeNodeDetail {
   criteria?: string;
   /** Where this topic's duration figures come from. Only topic nodes carry one. */
   timing?: ScopeNodeTiming;
+  /**
+   * What each badge on the node means, in the order the node draws them.
+   *
+   * A node never carries a badge the panel cannot explain: both are built from `SCOPE_BADGES` in the
+   * same place, so a pill that appears on the map always has a sentence behind it.
+   */
+  badgeNotes?: ScopeBadgeNote[];
 }
 
 /** One node, already positioned. */
@@ -230,10 +326,11 @@ export interface BuildScopeGraphInput {
   /**
    * Fan the always-asked band out into one node per topic.
    *
-   * Off by default at the call site, and that default is the point: ingest seeds one `core` topic per
-   * extracted section, so fifteen-plus always-asked topics is the ordinary first sight of a version.
-   * Drawn individually they crowd out the conditional band, which is the only part of the picture any
-   * decision is ever taken about.
+   * On by default at the call site. It was off while the band was drawn as a wrapped row — ingest seeds
+   * one `core` topic per extracted section, so fifteen-plus always-asked topics is the ordinary first
+   * sight of a version, and wrapped they crowded out the conditional band the map exists to explain.
+   * Stacked in a column of their own, clear of every other stage's `x`, they cost the rest of the
+   * picture nothing. The flag stays because putting the band away is still worth one click.
    */
   expandAlways: boolean;
 }
@@ -255,8 +352,16 @@ export const UNGATHERED_NODE_ID = 'ungathered';
  * it while the band is collapsed. An edge whose endpoint is not on the canvas is silently dropped by
  * React Flow, so a head that came and went would take those edges with it.
  */
-export const ALWAYS_BAND_NODE_ID = 'always:band';
+export const ALWAYS_BAND_NODE_ID = 'always::band';
 
+/**
+ * A topic node's id.
+ *
+ * The double colon in {@link ALWAYS_BAND_NODE_ID} is what keeps the head out of this namespace. Topic
+ * keys are `^[a-z0-9_]+$` (`topicKeySchema`), so no key can ever produce `always::band` — where a
+ * single colon would have collided with a topic legitimately keyed `band`, putting two nodes on the
+ * canvas under one id, drawing a self-edge, and resolving that topic's clicks to the band head.
+ */
 const topicNodeId = (phase: 'opening' | 'conditional' | 'always', key: string): string =>
   `${phase}:${key}`;
 
@@ -265,13 +370,20 @@ const topicNodeId = (phase: 'opening' | 'conditional' | 'always', key: string): 
 /* -------------------------------------------------------------------------- */
 
 /**
- * Column pitch and row pitch, in canvas units.
+ * Column pitch, in canvas units.
  *
- * Wider than `workflow-mappers.ts`'s 220/150 because these nodes carry more text — a topic node shows a
- * label, a cost and a membership count, where a workflow node shows an icon and a name.
+ * Expressed as the node's own width plus the clear air either side of it, rather than as one opaque
+ * number, because the gutter is the thing being tuned: at the old 300 pitch a 236-wide node left 64px
+ * between one column and the next, which at the zoom `fitView` picks for a twelve-topic column read as
+ * boxes touching. The gap is now wider than half a node, which is what makes a column legible as a
+ * column at any zoom.
  */
-const X_STEP = 300;
-const Y_STEP = 120;
+export const ROUTING_MAP_NODE_WIDTH = 236;
+const COLUMN_GAP = 120;
+const X_STEP = ROUTING_MAP_NODE_WIDTH + COLUMN_GAP;
+
+/** Clear air between two stacked nodes. Not a pitch — the pitch is this plus the node's own height. */
+const ROW_GAP = 52;
 
 /** Column index per stage. Fixed, because the pipeline's order is fixed. */
 const COL = {
@@ -283,6 +395,36 @@ const COL = {
   conditional: 5,
 } as const;
 
+type ColumnKey = keyof typeof COL;
+
+/**
+ * The vertical lane each column is centred on. Every column on y = 0 is what made the first map
+ * unreadable, and not because it looked flat.
+ *
+ * A left-to-right graph draws its edges as horizontal runs. Put six columns on one centre line and every
+ * one of those runs lands in the same horizontal band — so the rule's edge to a conditional topic is
+ * drawn straight through the planner and the guardrails, and a reader cannot tell an edge that stops at
+ * a node from one that merely passes behind it. Offsetting a column moves its outbound runs into a lane
+ * of their own, and the diagonals that result are the cheapest signal that two nodes are not the same
+ * kind of thing.
+ *
+ * The hard rules get the big offset, and it is the one that carries meaning rather than clearance: a
+ * rule **bypasses** the planner and the guardrails — that is exactly where `applyGuardrails` seats it —
+ * so it is drawn as the bypass lane it is, running underneath the stage it goes around. The ±56 on the
+ * spine is the smaller job: it stops two adjacent columns sharing an edge run.
+ */
+const LANE: Record<ColumnKey, number> = {
+  start: 0,
+  opening: 56,
+  rule: 240,
+  planner: -56,
+  guardrails: 0,
+  conditional: 0,
+};
+
+const COLUMN_KEYS = Object.keys(COL) as ColumnKey[];
+const laneByX = new Map<number, number>(COLUMN_KEYS.map((key) => [COL[key] * X_STEP, LANE[key]]));
+
 /**
  * Vertical gap between the decision pipeline and the always-asked band beneath it.
  *
@@ -292,12 +434,145 @@ const COL = {
  */
 const ALWAYS_BAND_GAP = 180;
 
-/** How many expanded always-topics sit in one row before wrapping. */
-const ALWAYS_BAND_COLUMNS = 4;
+/**
+ * The column an expanded always-asked topic sits in — one to the right of the band's head, exactly as
+ * the conditional topics sit one to the right of the guardrails.
+ *
+ * An earlier cut wrapped the band left-to-right across three columns, on the reasoning that a list
+ * should not be drawn as a stage of the pipeline. It drew a picture that lied: every topic hangs off the
+ * one head node, and a fan-out of N edges can only be drawn without running through a box if every
+ * target has a horizontal lane to itself. Wrapped, the head's edge to the third topic was drawn straight
+ * through the first two. The band is kept from reading as a stage by what it is drawn in — dashed
+ * borders, muted fill, `ALWAYS_BAND_GAP` of clear air — not by which way it wraps.
+ *
+ * It also keeps the whole band inside one `x`, so it only ever has to clear the two short columns it
+ * hangs beneath and never the twelve-topic conditional column away to the right.
+ *
+ * **Why the band sits under the first two columns and not the second and third.** Every edge on this map
+ * must run left to right: React Flow leaves each node's source handle on the right and its target handle
+ * on the left, so an edge between two nodes sharing an `x` is drawn as a backwards loop around both of
+ * them. The band used to start one column further right, which put its expanded topics in the *rule*
+ * column — and the weak-evidence edge from a `core` topic to the rule that reads its slot then ran
+ * inside a single column. That edge is the "timing not guaranteed" case, which is the single most
+ * important thing this map has to make legible, and it was the one drawn worst.
+ *
+ * Moving the band one column left puts every edge it touches back on a left-to-right run: head → topic,
+ * and topic → rule. The one edge that cannot be — `start` → head, now vertically below it — is why the
+ * head is the only node on the map whose inbound handle is on top. See `routing-map-node.tsx`.
+ */
+const ALWAYS_BAND_HEAD_COLUMN = COL.start;
+const ALWAYS_BAND_COLUMN = COL.opening;
 
-/** Centre a column of `count` nodes on y = 0, so the pipeline reads along one spine. */
-function columnY(index: number, count: number): number {
-  return (index - (count - 1) / 2) * Y_STEP;
+/* --- how tall a node will render ------------------------------------------ */
+
+/**
+ * A node's rendered height, estimated from what it says.
+ *
+ * Estimated rather than measured because the layout is computed on the server side of the render — the
+ * graph is built before React Flow has ever seen a node, and React Flow's own measurement arrives too
+ * late to position anything with. Every constant below is read off `routing-map-node.tsx`: change the
+ * node's padding, type scale or badge row and these move with it.
+ *
+ * Being a few pixels out is harmless. Being height-blind is not: a fixed row pitch has to be set for the
+ * tallest node in the graph, so a two-line label with two badges either overlaps its neighbour or forces
+ * every single-line node to sit in a pool of dead space. This is what buys the map both at once.
+ */
+const NODE_CHROME = 24; // border-2 top and bottom + py-2.5
+const ICON_PLATE = 30; // h-7 plate + mt-0.5 — the floor on any node's content height
+const LABEL_LINE = 18; // text-sm / leading-tight
+const SUBLABEL_LINE = 14; // text-[11px] / leading-tight
+const SUBLABEL_MARGIN = 2; // mt-0.5
+const BADGE_ROW = 18; // the pill itself
+const BADGE_MARGIN = 6; // mt-1.5
+/** Usable text width inside a node: 236 − px-3 either side − border-2 either side − icon plate − gap. */
+const TEXT_WIDTH = 170;
+/** Rough advance width per character, per type scale. */
+const LABEL_CHAR = 6.6;
+const SUBLABEL_CHAR = 5.3;
+/**
+ * How many lines each style may take before the renderer truncates it.
+ *
+ * A node's **title is never truncated**. It used to clamp at two lines, which turned a rule node into
+ * `Commercial outcome named was never…` — and an ellipsis in a title is worse than a tall node, because
+ * a truncated rule sentence reads as a different rule. `was never…` could be `was never answered`, and
+ * it is the operator that decides whether the rule fires for everybody. Letting it wrap costs a few
+ * units of height that the stacking above already accounts for.
+ *
+ * The sublabel still stops, at three lines: it is a summary whose full text is one click away in the
+ * detail panel, and it is the one field an author can make arbitrarily long by naming a topic in a
+ * sentence.
+ */
+const LABEL_MAX_LINES = Number.POSITIVE_INFINITY;
+const SUBLABEL_MAX_LINES = 3;
+/** Rough width of one badge pill: px-1.5 either side, plus 9px bold caps, plus the flex gap. */
+const BADGE_CHAR = 5.2;
+const BADGE_CHROME = 16;
+
+function clampedLines(text: string, charWidth: number, maxLines: number): number {
+  return Math.min(maxLines, Math.max(1, Math.ceil((text.length * charWidth) / TEXT_WIDTH)));
+}
+
+function badgeRows(badges: readonly ScopeNodeBadge[]): number {
+  const width = badges.reduce((sum, b) => sum + b.label.length * BADGE_CHAR + BADGE_CHROME, 0);
+  return Math.min(2, Math.max(1, Math.ceil(width / TEXT_WIDTH)));
+}
+
+export function estimateNodeHeight(
+  node: Pick<ScopeGraphNode, 'label' | 'sublabel' | 'badges'>
+): number {
+  const body =
+    clampedLines(node.label, LABEL_CHAR, LABEL_MAX_LINES) * LABEL_LINE +
+    (node.sublabel
+      ? SUBLABEL_MARGIN +
+        clampedLines(node.sublabel, SUBLABEL_CHAR, SUBLABEL_MAX_LINES) * SUBLABEL_LINE
+      : 0) +
+    (node.badges && node.badges.length > 0 ? BADGE_MARGIN + badgeRows(node.badges) * BADGE_ROW : 0);
+  return NODE_CHROME + Math.max(ICON_PLATE, body);
+}
+
+/* --- stacking -------------------------------------------------------------- */
+
+/**
+ * Give every pipeline node its `y`, and report each column's lowest edge, keyed by its `x`.
+ *
+ * Nodes are grouped by the `x` they were built at — the column IS the stage — and each column is
+ * stacked in build order (which is ordinal order) and centred on its {@link LANE}, so the pipeline
+ * still reads left to right without any two adjacent columns sharing an edge run. Order within a column is never touched: a reader tracing rule 1, rule 2, rule 3 down
+ * the column is reading the order they fire in.
+ *
+ * The returned figures are real bottom edges, not last nodes' centres, so a gap measured from one is
+ * genuinely that much clear air whatever the column ends with. They are reported per column rather than
+ * as one number because the always-asked band only has to clear the columns it sits beneath.
+ */
+function stackColumns(nodes: ScopeGraphNode[]): Map<number, number> {
+  const columns = new Map<number, ScopeGraphNode[]>();
+  for (const node of nodes) {
+    const column = columns.get(node.x);
+    if (column) column.push(node);
+    else columns.set(node.x, [node]);
+  }
+
+  const bottoms = new Map<number, number>();
+  for (const [x, column] of columns) {
+    const heights = column.map(estimateNodeHeight);
+    const total = heights.reduce((a, b) => a + b, 0) + ROW_GAP * (column.length - 1);
+    let y = (laneByX.get(x) ?? 0) - total / 2;
+    for (const [i, node] of column.entries()) {
+      node.y = y;
+      y += heights[i] + ROW_GAP;
+    }
+    bottoms.set(x, y - ROW_GAP);
+  }
+  return bottoms;
+}
+
+/** Stack the expanded always-asked band down from `top`, one topic per lane, in ordinal order. */
+function stackBandRows(band: ScopeGraphNode[], top: number): void {
+  let rowTop = top;
+  for (const node of band) {
+    node.y = rowTop;
+    rowTop += estimateNodeHeight(node) + ROW_GAP;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -436,7 +711,10 @@ function topicTiming(
     fullSeconds: cost.full,
     lightSeconds: cost.light,
     memberCount,
-    lightMemberCount: lightKeys.questions.length + lightKeys.dataSlots.length,
+    // Counted off the RESOLVED items, not off `lightKeys`: a member naming a key the version no
+    // longer has is dropped from `lightItems` below, and counting it here printed "the 2 members
+    // carrying the most weight" above a list of one.
+    lightMemberCount: lightItems.length,
     // Heaviest first: what an author trims is what costs, not what happens to be authored first.
     groups: [...groups.values()].sort((a, b) => b.seconds - a.seconds || b.count - a.count),
     // Named only when the sample is smaller than the topic. When light IS the whole topic, listing
@@ -537,19 +815,20 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
 
   /* --- opening ----------------------------------------------------------- */
 
-  for (const [i, topic] of opening.entries()) {
+  for (const topic of opening) {
     const id = topicNodeId('opening', topic.key);
     nodes.push({
       id,
       kind: 'opening',
       x: COL.opening * X_STEP,
-      y: columnY(i, opening.length),
+      y: 0, // stacked by `stackColumns` once the whole pipeline is built
+
       label: topic.label,
       sublabel: memberSummary(topic),
       detail: {
         title: topic.label,
         summary:
-          'Runs first, for everyone. What the respondent says here is what the hard rules test and what the agent reads. The routing decision waits until every member of every opening topic is covered.',
+          'Runs first, for everyone. What the respondent says here is what the hard rules test and what the agent reads. The decision waits until every question and data slot in the opening topics has been covered.',
         rows: topicDetailRows(topic),
         topicKey: topic.key,
         ...timingDetail(topic, costs.byTopicKey[topic.key], inventory),
@@ -591,20 +870,22 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
       kind: 'ungathered',
       // Seated at the foot of the opening column: it stands where the evidence would have come from.
       x: COL.opening * X_STEP,
-      y: columnY(opening.length, opening.length + 1),
+      y: 0,
+
       label: 'Not gathered in the opening',
       sublabel: 'the rules beside this have nothing to read',
-      badges: [{ label: 'Check this', tone: 'warning' }],
+      badges: [badge('checkThis')],
       detail: {
         title: 'Not gathered in the opening',
+        badgeNotes: badgeNotes(['checkThis']),
         summary:
-          'Hard rules are evaluated at exactly one moment — when the opening completes — so a rule can only read a data slot the opening gathered. A rule reading anything else never matches. The exception is worse: “was never answered” matches on absence, so an ungathered slot makes that rule fire for every respondent.',
+          'Hard rules are checked at exactly one moment — when the opening finishes — so a rule can only read a data slot the opening collected. A rule reading anything else never matches. The exception is worse: “was never answered” matches when the answer is missing, so a slot nothing collects makes that rule fire for every respondent.',
         rows: [
           { label: 'Fix', value: 'Add the data slot to an opening topic, or drop the rule.' },
           {
             label: 'Note',
             value:
-              'A conditional or closing topic gathering the slot does not help — neither is in scope until after the decision has been taken.',
+              'It does not help to collect the slot in a conditional or closing topic — neither of those is asked until after the decision has been made.',
           },
         ],
       },
@@ -613,35 +894,50 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
 
   /* --- hard rules --------------------------------------------------------- */
 
-  for (const [i, rule] of rules.entries()) {
+  for (const rule of rules) {
     const id = `rule:${rule.id}`;
     const slotName = slotNameByKey.get(rule.dataSlotKey) ?? `${rule.dataSlotKey} (missing)`;
     const target = topicByKey.get(rule.topicKey);
     const include = rule.action === 'include';
 
-    const badges: ScopeNodeBadge[] = [
-      { label: include ? 'Include' : 'Exclude', tone: include ? 'positive' : 'negative' },
-    ];
-    if (!target) badges.push({ label: 'Unknown topic', tone: 'warning' });
+    // A rule can only act on a CONDITIONAL topic: `applyGuardrails` seats and vetoes within the
+    // conditional set, and `resolveScope` puts every other phase in scope regardless. So a rule aimed
+    // at a `core`/`opening`/`closing` topic is dead — and without this badge it drew identically to a
+    // live one, which is the same failure `rule_veto_always_fires` exists to prevent: a rule that
+    // looks reasonable and does nothing to anybody.
+    const targetAlwaysRuns = target !== undefined && target.phase !== 'conditional';
+    const badgeKeys: ScopeBadgeKey[] = [include ? 'include' : 'exclude'];
+    if (!target) badgeKeys.push('unknownTopic');
+    else if (targetAlwaysRuns) badgeKeys.push('noEffect');
+    const badges = badgeKeys.map(badge);
 
     nodes.push({
       id,
       kind: include ? 'ruleInclude' : 'ruleExclude',
       x: COL.rule * X_STEP,
-      y: columnY(i, rules.length),
+      y: 0,
+
       label: ruleSentence(slotName, rule.operator, rule.value),
       sublabel: `${include ? 'always include' : 'never include'} ${target?.label ?? rule.topicKey}`,
       badges,
       detail: {
         title: 'Hard rule',
+        badgeNotes: badgeNotes(badgeKeys),
         summary: include
-          ? 'Checked before the agent runs, and seated before the cap — an author’s “always” is never truncated by a limit, so a plan can legitimately hold more topics than the cap allows.'
-          : 'Checked before the agent runs. Exclude beats include: a topic vetoed here stays out however many other rules ask for it.',
+          ? 'Checked before the agent runs, and applied before the limit on how many topics — your “always include” is never cut short by that limit, so a respondent can end up with more topics than it would normally allow.'
+          : 'Checked before the agent runs. Blocking always wins: a topic blocked here stays out however many other rules ask for it.',
         rows: [
           { label: 'Reads', value: slotName },
           { label: 'When', value: ruleSentence(slotName, rule.operator, rule.value) },
           { label: 'Then', value: include ? 'always include' : 'never include' },
-          { label: 'Topic', value: target ? target.label : `${rule.topicKey} — no such topic` },
+          {
+            label: 'Topic',
+            value: !target
+              ? `${rule.topicKey} — no such topic`
+              : targetAlwaysRuns
+                ? `${target.label} — always asked, so this rule changes nothing`
+                : target.label,
+          },
         ],
       },
     });
@@ -691,11 +987,12 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
     y: 0,
     label: 'The agent decides',
     sublabel: plural(conditional.length, 'candidate'),
-    badges: [{ label: 'AI', tone: 'neutral' }],
+    badges: [badge('ai')],
     detail: {
       title: 'The agent decides',
+      badgeNotes: badgeNotes(['ai']),
       summary:
-        'One call, once, when the opening completes. It reads what the respondent said and what was captured from it, weighs each conditional topic’s criteria, and proposes a set. It never gets the last word — everything it returns passes through the guardrails.',
+        'The agent is asked once, when the opening finishes. It reads what the respondent said and what was captured from it, judges each conditional topic against its criteria, and proposes which ones to ask. It never gets the last word — everything it proposes goes through the guardrails.',
       rows: [
         { label: 'Candidates', value: plural(conditional.length, 'conditional topic') },
         { label: 'Confidence floor', value: settings.minConfidence.toFixed(2) },
@@ -725,7 +1022,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
 
   const budgetValue =
     settings.sessionBudgetSeconds > 0
-      ? `${formatSeconds(settings.sessionBudgetSeconds)} — ${formatSeconds(costs.routedAllowanceSeconds)} left once the always-asked topics are paid for`
+      ? `${formatSeconds(settings.sessionBudgetSeconds)} — ${formatSeconds(costs.routedAllowanceSeconds)} left once the always-asked topics are counted`
       : 'No budget set';
 
   nodes.push({
@@ -738,21 +1035,21 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
     detail: {
       title: 'Guardrails',
       summary:
-        'Applied to the agent’s answer, in this order: the cap, the fallback if nothing was seated at all, the time fit, then the blind-spot check. Deterministic code, not a request the model is trusted to honour — which is why the rule edges above arrive already seated and pass straight through.',
+        'Applied to the agent’s answer, in this order: the limit on how many topics, the fallback if nothing was chosen at all, the time check, then the blind-spot check. These are checks in code, not instructions the AI is trusted to follow — which is why the rule lines above arrive already decided and pass straight through.',
       rows: [
-        { label: 'Cap', value: plural(settings.maxConditionalTopics, 'conditional topic') },
+        { label: 'Limit', value: plural(settings.maxConditionalTopics, 'conditional topic') },
         { label: 'Time budget', value: budgetValue },
         {
           label: 'Fallback',
           value:
             settings.fallbackTopicKeys.length > 0
-              ? `${plural(settings.fallbackTopicKeys.length, 'topic')}, used only when nothing is seated`
-              : 'None — a failed decision runs the always-asked topics only',
+              ? `${plural(settings.fallbackTopicKeys.length, 'topic')}, used only when nothing else is chosen`
+              : 'None — if the decision fails, only the always-asked topics are run',
         },
         {
           label: 'Blind-spot check',
           value: settings.includeCheckTopic
-            ? 'On — one topic that was not selected is sampled at light depth'
+            ? 'On — one topic that was not chosen is asked at Light depth'
             : 'Off',
         },
       ],
@@ -767,21 +1064,21 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
 
   /* --- conditional topics -------------------------------------------------- */
 
-  for (const [i, topic] of conditional.entries()) {
+  for (const topic of conditional) {
     const id = topicNodeId('conditional', topic.key);
     const cost = costs.byTopicKey[topic.key];
-    const badges: ScopeNodeBadge[] = [];
-    if (!topic.criteria || topic.criteria.trim().length === 0) {
-      badges.push({ label: 'No criteria', tone: 'warning' });
-    }
-    if (fallbackKeys.has(topic.key)) badges.push({ label: 'Fallback', tone: 'neutral' });
-    if (checkPreference.has(topic.key)) badges.push({ label: 'Preferred check', tone: 'neutral' });
+    const badgeKeys: ScopeBadgeKey[] = [];
+    if (!topic.criteria || topic.criteria.trim().length === 0) badgeKeys.push('noCriteria');
+    if (fallbackKeys.has(topic.key)) badgeKeys.push('fallback');
+    if (checkPreference.has(topic.key)) badgeKeys.push('preferredCheck');
+    const badges = badgeKeys.map(badge);
 
     nodes.push({
       id,
       kind: 'conditional',
       x: COL.conditional * X_STEP,
-      y: columnY(i, conditional.length),
+      y: 0,
+
       label: topic.label,
       sublabel: cost
         ? `${memberSummary(topic)} · ${formatSeconds(cost.full)}`
@@ -793,6 +1090,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
           'Asked only when it is selected. Nothing on this map says whether it will be — that depends on what a respondent says, which is what “Try it” on the Adaptive scope tab answers.',
         rows: topicDetailRows(topic),
         topicKey: topic.key,
+        ...(badgeKeys.length > 0 ? { badgeNotes: badgeNotes(badgeKeys) } : {}),
         ...timingDetail(topic, cost, inventory),
         ...(topic.criteria && topic.criteria.trim().length > 0 ? { criteria: topic.criteria } : {}),
       },
@@ -807,19 +1105,22 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
 
   /* --- the always-asked band ------------------------------------------------ */
 
-  // Seated below the deepest point of the pipeline so the two never overlap, whichever column is tallest.
-  const tallest = Math.max(
-    opening.length + (needsUngathered ? 1 : 0),
-    rules.length,
-    conditional.length,
-    1
-  );
-  const bandY = ((tallest - 1) / 2) * Y_STEP + ALWAYS_BAND_GAP;
+  // Every pipeline node is on the canvas by this point and nothing below is a column, so this is where
+  // the columns get their `y` — and where the band learns how far down it has to sit to clear them.
+  //
+  // It only has to clear the columns it is actually drawn under — the head's own column and the one the
+  // topics stack in — so the twelve-topic conditional column away to the right never gets to push the
+  // band down a screen of canvas it does not overlap.
+  const bandColumns = new Set([ALWAYS_BAND_HEAD_COLUMN * X_STEP, ALWAYS_BAND_COLUMN * X_STEP]);
+  const bandClearance = [...stackColumns(nodes).entries()]
+    .filter(([x]) => bandColumns.has(x))
+    .reduce((lowest, [, bottom]) => Math.max(lowest, bottom), 0);
+  const bandY = bandClearance + ALWAYS_BAND_GAP;
 
   nodes.push({
     id: ALWAYS_BAND_NODE_ID,
     kind: 'alwaysBand',
-    x: COL.opening * X_STEP,
+    x: ALWAYS_BAND_HEAD_COLUMN * X_STEP,
     y: bandY,
     label:
       always.length > 0
@@ -831,7 +1132,7 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
     detail: {
       title: 'Always asked',
       summary:
-        'Core and closing topics run for every respondent whatever they say. They are drawn apart from the pipeline because no decision is ever taken about them — the agent only ever chooses between conditional topics. Their cost is spent before the routed allowance is worked out, which is why a heavy always-asked set leaves less room for anything else.',
+        'Core and closing topics run for every respondent whatever they say. They are drawn apart from the flow above because no decision is ever taken about them — the agent only ever chooses between conditional topics. Their time is counted first, before the time left for chosen topics is worked out, which is why a heavy always-asked set leaves less room for anything else.',
       rows: [
         { label: 'Topics', value: `${always.length}` },
         { label: 'Cost', value: formatSeconds(costs.alwaysSeconds) },
@@ -850,21 +1151,22 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
   });
 
   if (expandAlways) {
-    for (const [i, topic] of always.entries()) {
+    // Collected before they are positioned: each one's `y` depends on the height of every node above
+    // it, which is not known until they have all been built.
+    const bandNodes: ScopeGraphNode[] = [];
+    for (const topic of always) {
       const id = topicNodeId('always', topic.key);
-      nodes.push({
+      bandNodes.push({
         id,
         kind: 'always',
-        // Laid out left to right and wrapped, rather than down a column: the band is a list, not a stage
-        // of the pipeline, and stacking it vertically would make it read as one.
-        x: (COL.rule + (i % ALWAYS_BAND_COLUMNS)) * X_STEP,
-        y: bandY + Math.floor(i / ALWAYS_BAND_COLUMNS) * Y_STEP,
+        x: ALWAYS_BAND_COLUMN * X_STEP,
+        y: 0,
         label: topic.label,
         sublabel: `${TOPIC_PHASE_LABELS[topic.phase]} · ${memberSummary(topic)}`,
         detail: {
           title: topic.label,
           summary:
-            'Runs for every respondent. No decision is ever taken about it, which is why it sits outside the pipeline above.',
+            'Runs for every respondent. No decision is ever taken about it, which is why it sits apart from the flow above.',
           rows: topicDetailRows(topic),
           topicKey: topic.key,
           ...timingDetail(topic, costs.byTopicKey[topic.key], inventory),
@@ -877,6 +1179,8 @@ export function buildScopeGraph(input: BuildScopeGraphInput): ScopeGraph {
         kind: 'always',
       });
     }
+    stackBandRows(bandNodes, bandY);
+    nodes.push(...bandNodes);
   }
 
   return { nodes, edges };

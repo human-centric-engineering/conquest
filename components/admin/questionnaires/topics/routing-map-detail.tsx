@@ -15,6 +15,17 @@
  * many of them this topic has, and what that comes to — plus, when they differ, the members a light
  * run actually samples. Everything a reader needs to check the total by adding a column up.
  *
+ * The block is **collapsed by default**, because the arithmetic is what a reader wants once and the
+ * figure is what they want every time. Open, it took more vertical space than everything else in the
+ * panel combined. Two things survive the collapse: the two readings, and the caveat in short form.
+ *
+ * It also explains **every badge the node draws**. `Fallback` and `Preferred check` are the system's
+ * own vocabulary for guardrail mechanics an author met once, in a settings field, possibly weeks ago —
+ * two words on a node cannot carry that, and until this section existed nothing anywhere on the map
+ * said what they did. The pill is re-drawn here in the same shape and colour so a reader is not
+ * matching two words by memory, and both pill and sentence come from `SCOPE_BADGES`, so a badge can
+ * never reach the canvas without its explanation.
+ *
  * The caveat is given the same prominence as the figure, because it is the half that is most often
  * assumed wrong: this is **answering** time, item by item. The interview is a conversation, and the
  * agent's own turns, its follow-ups and any re-asks are not in it. A real chat runs longer than the
@@ -29,8 +40,10 @@
  * moved are the bullet marker and the priority marker.
  */
 
-import { AlertTriangle, PenLine } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, ChevronRight, PenLine } from 'lucide-react';
 
+import { BADGE_TONES } from '@/components/admin/questionnaires/topics/routing-map-node';
 import { Button } from '@/components/ui/button';
 import { FieldHelp } from '@/components/ui/field-help';
 import { formatSeconds } from '@/lib/app/questionnaire/scope/budget';
@@ -39,7 +52,11 @@ import {
   type CriteriaItem,
   type CriteriaPriority,
 } from '@/lib/app/questionnaire/scope/criteria-format';
-import type { ScopeGraphNode, ScopeNodeTiming } from '@/lib/app/questionnaire/scope/graph';
+import type {
+  ScopeBadgeNote,
+  ScopeGraphNode,
+  ScopeNodeTiming,
+} from '@/lib/app/questionnaire/scope/graph';
 import { cn } from '@/lib/utils';
 
 /** Shared heading treatment: quiet, small, and the same in all three sections. */
@@ -79,6 +96,10 @@ export function RoutingMapDetail({ node, onEditTopic }: RoutingMapDetailProps) {
         ))}
       </dl>
 
+      {detail.badgeNotes && detail.badgeNotes.length > 0 ? (
+        <BadgeNotesSection notes={detail.badgeNotes} />
+      ) : null}
+
       {detail.timing ? <TimingSection timing={detail.timing} /> : null}
       {detail.criteria ? <CriteriaSection text={detail.criteria} /> : null}
 
@@ -99,10 +120,44 @@ export function RoutingMapDetail({ node, onEditTopic }: RoutingMapDetailProps) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* What the badges mean                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The same pill treatment the node uses, deliberately.
+ *
+ * A reader arrives here holding the chip they just saw on the canvas; re-drawing it as plain text would
+ * make them match two words by memory. Same shape, same colour, sentence beside it.
+ */
+function BadgeNotesSection({ notes }: { notes: ScopeBadgeNote[] }) {
+  return (
+    <section className="bg-card space-y-2 rounded-lg border p-3" data-testid="routing-map-badges">
+      <h4 className={SECTION_LABEL}>What the tags mean</h4>
+      <ul className="space-y-2">
+        {notes.map((note) => (
+          <li key={note.label} className="space-y-1">
+            <span
+              className={cn(
+                'inline-flex rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide',
+                BADGE_TONES[note.tone]
+              )}
+            >
+              {note.label}
+            </span>
+            <p className="text-muted-foreground text-xs leading-relaxed">{note.meaning}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* Estimated time                                                             */
 /* -------------------------------------------------------------------------- */
 
 function TimingSection({ timing }: { timing: ScopeNodeTiming }) {
+  const [open, setOpen] = useState(false);
   const { fullSeconds, lightSeconds, depth } = timing;
   // Both bars are drawn against the full figure, so "light" reads as a fraction of the topic rather
   // than as a bar of its own. A topic that prices at nothing still gets a track, not a divide by zero.
@@ -110,15 +165,15 @@ function TimingSection({ timing }: { timing: ScopeNodeTiming }) {
   const sameRun = lightSeconds === fullSeconds;
 
   return (
-    <section className="bg-card space-y-3 rounded-lg border p-3" data-testid="routing-map-timing">
+    <section className="bg-card space-y-2 rounded-lg border p-3" data-testid="routing-map-timing">
       <header className="flex items-center justify-between gap-2">
         <h4 className={SECTION_LABEL}>Estimated answering time</h4>
         <FieldHelp title="How this is estimated" contentClassName="w-80">
           <p>
-            An estimate built from the instrument, not from the conversation. Every question is
-            charged a rate for its type — a rating is quick, an open question is not — a rating grid
-            is charged per row, and a data slot has a rate of its own. This version&rsquo;s rates
-            are the ones shown in the breakdown.
+            An estimate built from the questionnaire itself, not from the conversation. Every
+            question is charged a rate for its type — a rating is quick, an open question is not — a
+            rating grid is charged per row, and a data slot has a rate of its own. This
+            version&rsquo;s rates are the ones shown in the breakdown.
           </p>
           <p>
             <strong>It is answering time only.</strong> The interview is a chat: the agent&rsquo;s
@@ -134,85 +189,149 @@ function TimingSection({ timing }: { timing: ScopeNodeTiming }) {
         </FieldHelp>
       </header>
 
-      <div className="space-y-2">
-        <DepthFigure
-          label="Full"
-          note={`all ${countLabel(timing.memberCount)}`}
-          seconds={fullSeconds}
-          ratio={1}
-          active={depth === 'full'}
-        />
-        <DepthFigure
-          label="Light"
-          note={
-            sameRun
-              ? 'this topic is small enough that a light run is the whole of it'
-              : `the ${countLabel(timing.lightMemberCount)} carrying the most weight`
-          }
-          seconds={lightSeconds}
-          ratio={lightRatio}
-          active={depth === 'light'}
-        />
-      </div>
+      {/* Collapsed, the two readings ARE the section: a figure each, the authored one carrying the
+          weight. Expanding swaps them for the fuller cards rather than repeating them underneath,
+          so the disclosure reads as a zoom into the same thing and never as a second answer. */}
+      {open ? (
+        <div className="space-y-2">
+          <DepthFigure
+            label="Full"
+            note={`all ${countLabel(timing.memberCount)}`}
+            seconds={fullSeconds}
+            ratio={1}
+            active={depth === 'full'}
+          />
+          <DepthFigure
+            label="Light"
+            note={
+              sameRun
+                ? 'this topic is small enough that a light run is the whole of it'
+                : `the ${countLabel(timing.lightMemberCount)} carrying the most weight`
+            }
+            seconds={lightSeconds}
+            ratio={lightRatio}
+            active={depth === 'light'}
+          />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <DepthReading label="full" seconds={fullSeconds} active={depth === 'full'} />
+          <span className="text-muted-foreground/40 text-xs">·</span>
+          <DepthReading label="light" seconds={lightSeconds} active={depth === 'light'} />
+        </div>
+      )}
 
-      {timing.groups.length > 0 ? (
-        <div className="space-y-1.5 border-t pt-2.5">
-          <p className={SECTION_LABEL}>How the full figure adds up</p>
-          <dl className="space-y-1">
-            {timing.groups.map((group) => (
-              <div
-                key={`${group.label}-${group.secondsEach}`}
-                className="flex items-baseline justify-between gap-3 text-[11px]"
-              >
-                <dt className="text-muted-foreground min-w-0 truncate">
-                  {group.count} × {group.label}{' '}
-                  <span className="opacity-70">@ {formatSeconds(group.secondsEach)}</span>
-                </dt>
-                <dd className="shrink-0 font-medium tabular-nums">
-                  {formatSeconds(group.seconds)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          {timing.unresolvedCount > 0 ? (
-            <p className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
-              <span>
-                {countLabel(timing.unresolvedCount)} no longer{' '}
-                {timing.unresolvedCount === 1 ? 'exists' : 'exist'} in this version, so nothing is
-                charged for {timing.unresolvedCount === 1 ? 'it' : 'them'}.
-              </span>
-            </p>
+      {open ? (
+        <div className="space-y-3">
+          {timing.groups.length > 0 ? (
+            <div className="space-y-1.5 border-t pt-2.5">
+              <p className={SECTION_LABEL}>How the full figure adds up</p>
+              <dl className="space-y-1">
+                {timing.groups.map((group) => (
+                  <div
+                    key={`${group.label}-${group.secondsEach}`}
+                    className="flex items-baseline justify-between gap-3 text-[11px]"
+                  >
+                    <dt className="text-muted-foreground min-w-0 truncate">
+                      {group.count} × {group.label}{' '}
+                      <span className="opacity-70">@ {formatSeconds(group.secondsEach)}</span>
+                    </dt>
+                    <dd className="shrink-0 font-medium tabular-nums">
+                      {formatSeconds(group.seconds)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {timing.unresolvedCount > 0 ? (
+                <p className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+                  <span>
+                    {countLabel(timing.unresolvedCount)} no longer{' '}
+                    {timing.unresolvedCount === 1 ? 'exists' : 'exist'} in this version, so nothing
+                    is charged for {timing.unresolvedCount === 1 ? 'it' : 'them'}.
+                  </span>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {timing.lightItems.length > 0 ? (
+            <div className="space-y-1.5 border-t pt-2.5">
+              <p className={SECTION_LABEL}>A light run asks only</p>
+              <ul className="space-y-1">
+                {timing.lightItems.map((item) => (
+                  <li key={item.key} className="flex items-baseline gap-2 text-[11px]">
+                    <span className="bg-muted-foreground/40 mt-1.5 h-1 w-1 shrink-0 rounded-full" />
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-2" title={item.label}>
+                        {item.label}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {item.typeLabel} · {formatSeconds(item.seconds)}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
       ) : null}
 
-      {timing.lightItems.length > 0 ? (
-        <div className="space-y-1.5 border-t pt-2.5">
-          <p className={SECTION_LABEL}>A light run asks only</p>
-          <ul className="space-y-1">
-            {timing.lightItems.map((item) => (
-              <li key={item.key} className="flex items-baseline gap-2 text-[11px]">
-                <span className="bg-muted-foreground/40 mt-1.5 h-1 w-1 shrink-0 rounded-full" />
-                <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2" title={item.label}>
-                    {item.label}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {item.typeLabel} · {formatSeconds(item.seconds)}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      <p className="text-muted-foreground border-t pt-2.5 text-[11px] leading-relaxed">
-        Answering time only. The agent&rsquo;s own turns and its follow-ups are not counted, so the
-        chat runs longer than this.
+      {/* The caveat is never collapsed, only shortened. The figure is answering time and the
+          interview is a chat, so a reader who never opens the disclosure must still not read it as
+          a stopwatch — that misreading is what sets a budget which halves the instrument. */}
+      <p className="text-muted-foreground text-[11px] leading-relaxed">
+        {open ? (
+          <>
+            Answering time only. The agent&rsquo;s own turns and its follow-ups are not counted, so
+            the chat runs longer than this.
+          </>
+        ) : (
+          <>Answering time only — a real chat runs longer.</>
+        )}
       </p>
+
+      <button
+        type="button"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        className="text-muted-foreground hover:text-foreground -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1 rounded px-1 py-0.5 text-[11px] transition-colors"
+      >
+        <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
+        {open ? 'Hide the arithmetic' : 'How this is worked out'}
+      </button>
     </section>
+  );
+}
+
+/** One depth's figure at a glance: the duration, what it is, and whether it is the one that counts. */
+function DepthReading({
+  label,
+  seconds,
+  active,
+}: {
+  label: string;
+  seconds: number;
+  active: boolean;
+}) {
+  return (
+    <span className="flex items-baseline gap-1">
+      <span
+        className={cn(
+          'text-sm leading-none font-semibold tabular-nums',
+          !active && 'text-muted-foreground font-normal'
+        )}
+      >
+        {formatSeconds(seconds)}
+      </span>
+      <span className="text-muted-foreground text-[11px]">{label}</span>
+      {active ? (
+        <span className="text-primary border-primary/30 rounded-full border px-1.5 py-px text-[10px] leading-none">
+          this topic
+        </span>
+      ) : null}
+    </span>
   );
 }
 

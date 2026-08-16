@@ -234,6 +234,59 @@ describe('validateAdaptiveScope', () => {
         codes({ ...healthy(), settings: settings({ fallbackTopicKeys: ['spine'] }) })
       ).toContain('always_topic_named_as_choice');
     });
+
+    /**
+     * A hard rule aimed at an always-run topic is the same no-op reached from the other direction:
+     * `applyGuardrails` seats and vetoes within the conditional set, and `resolveScope` puts every
+     * other phase in scope regardless. It is worth its own finding because a rule is where a silent
+     * no-op costs most — it reads as a certainty ("never ask compliance of a non-licence-holder")
+     * and does nothing to anybody, on every interview, with no other surface reporting it.
+     */
+    it.each<TopicPhase>(['core', 'opening', 'closing'])(
+      'warns when a rule names the %s topic "spine", which is asked either way',
+      (phase) => {
+        const base = healthy();
+        expect(
+          codes({
+            ...base,
+            topics: base.topics.map((t) => (t.key === 'spine' ? topic('spine', phase) : t)),
+            settings: settings({
+              maxConditionalTopics: 2,
+              rules: [rule({ topicKey: 'spine', action: 'exclude' })],
+            }),
+            allDataSlotKeys: ['known_slot'],
+          })
+        ).toContain('rule_names_always_topic');
+      }
+    );
+
+    it('names the rule’s direction, so the author can find which rule to fix', () => {
+      const issue = validateAdaptiveScope({
+        ...healthy(),
+        settings: settings({
+          maxConditionalTopics: 2,
+          rules: [rule({ topicKey: 'spine', action: 'include' })],
+        }),
+        allDataSlotKeys: ['known_slot'],
+      }).find((i) => i.code === 'rule_names_always_topic');
+
+      expect(issue?.severity).toBe('warning');
+      expect(issue?.topicKey).toBe('spine');
+      expect(issue?.message).toContain('includes "spine"');
+    });
+
+    it('says nothing about a rule aimed at a conditional topic', () => {
+      expect(
+        codes({
+          ...healthy(),
+          settings: settings({
+            maxConditionalTopics: 2,
+            rules: [rule({ topicKey: 'cond_a' })],
+          }),
+          allDataSlotKeys: ['known_slot'],
+        })
+      ).not.toContain('rule_names_always_topic');
+    });
   });
 
   /**

@@ -221,7 +221,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         issues.push({
           severity: 'error',
           code: 'budget_below_floor',
-          message: `The questions every respondent gets already take about ${always}s, which is at or over your ${budget}s budget. No routed topic can ever fit, so the interview would never adapt.`,
+          message: `The questions every respondent gets already take about ${always}s, which is at or over your ${budget}s budget. No conditional topic can ever fit, so the interview would never adapt.`,
         });
       } else if (cheapestConditional > 0 && budget - always < cheapestConditional) {
         issues.push({
@@ -370,6 +370,20 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         message: `"${key}" always runs, so naming it as a fallback or blind-spot check has no effect.`,
       });
     }
+  }
+  // A hard rule aimed at an always-run topic is the same no-op, reached from the other direction:
+  // `applyGuardrails` acts within the conditional set, and `resolveScope` puts every other phase in
+  // scope regardless. Reported separately from the check above because the fix is different — the
+  // author either meant a different topic or meant to make this one conditional — and because a rule
+  // is the surface where a silent no-op is most expensive: it reads as the certainty it is not.
+  for (const rule of settings.rules) {
+    if (!alwaysKeys.has(rule.topicKey)) continue;
+    issues.push({
+      severity: 'warning',
+      code: 'rule_names_always_topic',
+      topicKey: rule.topicKey,
+      message: `A rule ${rule.action === 'include' ? 'includes' : 'excludes'} "${rule.topicKey}", but that topic is asked in every interview, so the rule changes nothing. Rules only act on topics set to "Ask when it fits".`,
+    });
   }
 
   // ── Comparability (F17.15) ────────────────────────────────────────────────────────────────

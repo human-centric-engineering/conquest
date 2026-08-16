@@ -168,6 +168,14 @@ export interface TopicListEditorProps {
    * never re-fires, so the second click would do nothing at all.
    */
   focusTopic?: { key: string; nonce: number } | null;
+  /**
+   * Called once a {@link focusTopic} request has been honoured, so the caller can drop it.
+   *
+   * Without this the request outlives the click. This component is keyed on the topic set, so any
+   * later save remounts it, the effect below re-runs against a request from minutes ago, and the
+   * admin's filter is cleared and the view yanked back to a topic they have moved on from.
+   */
+  onFocusHandled?: () => void;
 }
 
 export function TopicListEditor({
@@ -177,6 +185,7 @@ export function TopicListEditor({
   busy,
   enabled,
   focusTopic,
+  onFocusHandled,
 }: TopicListEditorProps) {
   // Per-item seconds, keyed once. The route priced every question and data slot against this
   // version's own overrides, so the browser never re-derives a per-type estimate.
@@ -288,6 +297,8 @@ export function TopicListEditor({
     if (!target) return;
     setFilter('all');
     setExpanded((prev) => new Set(prev).add(target.clientId));
+    // Retire the request now it has been acted on. A remount must not replay it.
+    onFocusHandled?.();
     // One frame later: the row may have only just been revealed by the filter reset above, so it does
     // not exist yet at the moment this effect runs.
     const raf = requestAnimationFrame(() => {
@@ -809,9 +820,9 @@ export function TopicListEditor({
                           help={
                             <>
                               <p>
-                                The questions this topic covers. When the topic is out of scope,
-                                these are not asked and the report records them as{' '}
-                                <em>not asked</em> rather than unanswered.
+                                The questions this topic covers. When the topic is not part of this
+                                respondent&rsquo;s interview, these are not asked and the report
+                                records them as <em>not asked</em> rather than unanswered.
                               </p>
                               <p className="mt-2">
                                 Each question should sit in exactly one topic. A question in none

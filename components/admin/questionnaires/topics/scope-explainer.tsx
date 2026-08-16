@@ -75,7 +75,7 @@ export function ScopeExplainer({ className }: ScopeExplainerProps) {
           <span className="text-muted-foreground block text-xs leading-relaxed">
             Ask each respondent only the parts of this questionnaire that apply to them — without
             splitting it into several questionnaires and losing the scoring and cohort analysis that
-            come from one instrument.
+            come from one questionnaire.
           </span>
         </span>
         <ChevronDown
@@ -112,7 +112,7 @@ export function ScopeExplainer({ className }: ScopeExplainerProps) {
               <p className="text-muted-foreground text-xs leading-relaxed">
                 Screeners and eligibility checks · sections that only apply to one role, region or
                 account tier · compliance areas that must be recorded as not-applicable rather than
-                skipped · any long instrument that should not ask all of itself to everyone.
+                skipped · any long questionnaire that should not ask all of itself to everyone.
               </p>
             </div>
             <div className="space-y-1">

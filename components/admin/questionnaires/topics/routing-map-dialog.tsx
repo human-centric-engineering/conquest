@@ -49,7 +49,11 @@ export interface RoutingMapDialogProps {
 
 export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapDialogProps) {
   const [open, setOpen] = useState(false);
-  const [expandAlways, setExpandAlways] = useState(false);
+  // On by default. The band used to be drawn as a wrapped row, where fifteen expanded topics crowded
+  // out the conditional band the map exists to explain; laid out as a column clear of every other
+  // stage it costs the picture nothing, and the first sight of the map should be the whole interview
+  // rather than a summary of a third of it. The toggle stays, to put the band away again.
+  const [expandAlways, setExpandAlways] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const graph = useMemo(

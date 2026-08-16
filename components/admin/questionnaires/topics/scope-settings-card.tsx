@@ -235,7 +235,7 @@ export function ScopeSettingsCard({
                     A <strong>follow-up</strong> is the interview circling back on something it has
                     already asked, because the answer was too vague to route on. It is the most
                     useful thing an interviewer does and the most expensive: every follow-up spends
-                    a turn that could have gone on a routed topic.
+                    a turn that could have gone on one of the topics the agent chose.
                   </p>
                   <p>
                     The allowance is shared across the <strong>whole opening</strong>, not per
@@ -368,9 +368,9 @@ export function ScopeSettingsCard({
                 Most conditional topics per interview{' '}
                 <FieldHelp title="Topic limit">
                   Breadth control: how many conditional topics one interview may cover. The agent
-                  proposes; this caps, deterministically — a limit obeyed “most of the time” is the
-                  worst kind. Length and cost are governed separately by the question cap and
-                  budget.
+                  proposes; this limit is applied in code afterwards, not asked of the AI — a limit
+                  obeyed “most of the time” is the worst kind. Length and cost are governed
+                  separately by the question cap and budget.
                 </FieldHelp>
               </Label>
               <Input
@@ -458,8 +458,8 @@ export function ScopeSettingsCard({
               <Label className="text-muted-foreground text-xs">
                 Prefer these topics for the check, best first{' '}
                 <FieldHelp title="Blind-spot preference">
-                  Leave empty for “whichever unselected topic carries the most weight”, which is the
-                  more informative default. Naming topics makes it predictable instead.
+                  Leave empty for “whichever unchosen topic matters most”, which is the more
+                  informative default. Naming topics makes it predictable instead.
                 </FieldHelp>
               </Label>
               <MultiSelect
@@ -533,7 +533,8 @@ export function ScopeSettingsCard({
                 </FieldHelp>
               </Label>
               <p className="text-muted-foreground text-xs">
-                Only ever adds topics — a respondent can never remove one the instrument requires.
+                Only ever adds topics — a respondent can never remove one the questionnaire
+                requires.
               </p>
             </div>
             <Switch

@@ -137,7 +137,10 @@ function CanvasInner({ graph, onSelectNode }: RoutingMapCanvasProps) {
       elementsSelectable
       edgesFocusable={false}
       fitView
-      fitViewOptions={{ padding: 0.15 }}
+      // Tighter than the 0.15 a canvas usually wants. The map is six columns wide, so `fitView` is
+      // width-bound on every real version: padding it generously costs zoom on the whole graph, and
+      // zoom is what makes a node's second line readable. The legend still sits over empty canvas.
+      fitViewOptions={{ padding: 0.06 }}
       minZoom={0.15}
       colorMode={theme === 'dark' ? 'dark' : 'light'}
       proOptions={{ hideAttribution: true }}
