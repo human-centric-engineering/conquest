@@ -721,6 +721,7 @@ route loads it (`loadMaxDataSlotAttempts`) for no other reason.
 | `lib/app/questionnaire/scope/seed.ts`                               | One topic per section, pure                                                                                                                                                       |
 | `lib/app/questionnaire/scope/validate.ts`                           | Coherence findings                                                                                                                                                                |
 | `lib/app/questionnaire/scope/comparability.ts`                      | What routing does to a scoring scale (F17.15) — which scales it can narrow, and which no plan can ever cover                                                                      |
+| `lib/app/questionnaire/scope/graph.ts`                              | The routing map's graph (F17.18) — pure, laid out, and carrying no React Flow import                                                                                              |
 | `lib/app/questionnaire/analytics/routing.ts`                        | Routing quality (F17.16) — what the planner actually did across a version's interviews, and the findings the counts support                                                       |
 | `app/api/v1/app/questionnaires/_lib/session-scope.ts`               | The DB seam                                                                                                                                                                       |
 | `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
@@ -731,7 +732,7 @@ route loads it (`loadMaxDataSlotAttempts`) for no other reason.
 | `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                 | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                         |
 | `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`  | Run the analyst (SSE) · accept or discard its proposal                                                                                                                            |
 | `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`          | The amendment trigger                                                                                                                                                             |
-| `components/admin/questionnaires/topics/**`                         | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review                                                                                                  |
+| `components/admin/questionnaires/topics/**`                         | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                   |
 
 ## Try it — the plan preview (F17.14)
 
@@ -812,6 +813,102 @@ quietly. Both now go through `loadTopics` (`_lib/topic-routes.ts`) for the topic
 one reads fills and answers off a real session, the other takes them from a form.
 
 ---
+
+## The routing map (F17.18)
+
+Every other surface on this tab states the routing in **prose or in lists** — a rules editor, a settings
+card numbered by the order the runtime applies it, a topic list. All of them are correct, and none of them
+is a picture. "Routing map" is: a zoomable canvas, opened from a button at the top of the tab, drawn
+entirely from the payload the tab already holds.
+
+### There are no topic-to-topic edges, because there is no such mechanism
+
+The obvious thing to draw — arrows between topics — would be a lie. Topics do not flow into one another;
+a topic is selected or it is not. What Adaptive Scope actually is, is a decision pipeline, and the
+pipeline is what is drawn:
+
+```
+start ──> opening topics ──> hard rules ──────────────────────────┐
+      │                  └─> planner ──> guardrails ──> conditional topics
+      └──────────────────────────────────> always asked (core + closing)
+```
+
+**The geometry is the argument.** A rule edge runs straight from the rule to its topic, skipping over the
+planner and the guardrails — because `applyGuardrails` seats rule includes _before_ the cap and never
+truncates them. The misreading this prevents is the one the settings card's numbering already fights: a
+cap read as a request the model tries to honour, rather than a limit applied to its answer. On the map it
+is a shape rather than a sentence.
+
+The always-asked band hangs off `start` and bypasses everything, which is the same claim about the other
+end: the planner touches the `conditional` phase and nothing else.
+
+### Structural, never predictive
+
+No fills exist at authoring time, so **no rule can be evaluated and no plan can be known**. Every rule
+draws its edge; the guardrails draw a candidate edge to every conditional topic. `evaluateScopeRules` and
+`plannerCandidates` are deliberately not called — both need a session's fills, and a map that pretended to
+have them would be a preview that lies, quietly, in the one direction an author cannot check. The dry-run
+card above it is the surface that answers "what would this actually do", and the dialog's own subtitle
+points at it.
+
+### The one thing the structure can settle
+
+Where a rule reads its evidence from. That is a fact about the topic set, not about a respondent, so it is
+drawn — and it is classified **exactly as `validateAdaptiveScope` classifies it**: opening, `core`, or
+neither. A solid edge from the opening topic that gathers the slot; an amber dashed edge labelled _timing
+not guaranteed_ from a `core` topic; and from an explicit **"Not gathered in the opening"** node when
+nothing reachable gathers it at all.
+
+That last node is the point of the whole treatment. `rule_veto_always_fires` is the sharpest finding this
+feature has — a veto reading an ungathered slot fires for **every** respondent, and every plan it produces
+looks entirely reasonable — and it is currently one warning in a list. On the map the rule visibly hangs
+off nothing.
+
+The two computations are independent (the validator words a warning, the builder picks an edge), which is
+exactly the pair that drifts silently, so `graph.test.ts` asserts they agree across all four cases.
+
+### The always-asked band collapses
+
+Ingest seeds one `core` topic per extracted section, so fifteen-plus always-asked topics is the ordinary
+first sight of a version — and drawn individually they crowd out the conditional band, which is the only
+part of the picture any decision is taken about. The band therefore renders as a single priced head node
+(`Always asked — 15 topics · 4m 26s`) with a toggle to fan it out.
+
+The head node stays on the canvas in **both** states, and that is load-bearing rather than tidy: it is the
+band's only anchor. `start` points at it rather than at fifteen topics, and a weak-evidence edge from a
+`core` topic falls back to it while the band is collapsed. React Flow silently drops an edge whose
+endpoint is missing, so a head that came and went would take those edges with it — which is why
+`graph.test.ts` asserts no edge ever names a node that is not present.
+
+### Read-only, with one way back
+
+Clicking a node opens its detail: what it is, what decides it, its cost at both depths, and — for a
+conditional topic — the author's criteria **verbatim**, since the node itself clamps to two lines. A topic
+node also offers **"Edit this topic"**, which closes the map and expands that row in the topic list.
+
+The dialog closes first on purpose: the row is behind the overlay, so leaving the map open would read as
+the button having done nothing. The request carries a **nonce** beside the key, because asking for the same
+topic twice must still move the list — a bare key is unchanged state the second time and the effect never
+re-fires. And `TopicListEditor` **clears its filter** before expanding, since a row the current filter
+hides has nothing to open; honouring the request beats preserving a view preference.
+
+Nothing is authored on the canvas. A second editor beside the topic list is a second thing that can
+disagree with it, and the map has no mutation of its own worth that risk.
+
+### Why a modal rather than a tab
+
+The workspace sub-nav already carries fifteen tabs, and a sixteenth for a **read-only view of another
+tab's data** would say the map is a peer of the thing it depicts. A near-full-screen dialog says the truer
+thing and gives a canvas the room it needs. There is no fetch, no route and no stored layout behind it:
+the map is a pure function of `TopicsPayload`, so it cannot drift from the settings above it — and the
+dialog is `key`-remounted on the payload so a stale graph never sits behind the button after a save.
+
+### Still open
+
+The three overlays this deliberately does not carry, all of which have their data source already built:
+the **dry-run's** verdict lit onto the path it took (`proposedKeys` would show which guardrail took a topic
+back), **routing analytics** (F17.16) weighting each topic by how often it was really selected, and the
+**coherence findings** pinned to the nodes they name rather than listed above the map.
 
 ## The authoring surface
 
