@@ -16,7 +16,7 @@ Phase 7 Session 7.3 — circuit breaker, provider fallback, budget UX, input gua
 | Error message registry  | `lib/orchestration/chat/error-messages.ts`                                 |
 | Chat rate limiter       | `lib/security/rate-limit.ts` → `chatLimiter`                               |
 | Warning ChatEvent       | `types/orchestration.ts` → `{ type: 'warning' }`                           |
-| Client reconnect        | `components/admin/orchestration/agent-test-chat.tsx`                       |
+| Client reconnect        | `components/admin/orchestration/chat/chat-interface.tsx`                   |
 
 ## Circuit Breaker
 
@@ -150,13 +150,30 @@ Use case: A customer-facing FAQ bot may use `block` mode to prevent any flagged 
 
 If the LLM stream fails after starting (network error, provider crash), the streaming handler automatically retries with the next fallback provider:
 
-1. Record a circuit breaker failure for the current provider
-2. Emit `{ type: 'warning', code: 'provider_retry' }` SSE event
-3. Reset accumulated content and tool calls
-4. Resolve the next provider from `agent.fallbackProviders`
-5. Restart the stream from the new provider
+1. Record whatever the failed call cost, if the error carries usage
+2. Record a circuit breaker failure for the current provider
+3. Emit `{ type: 'warning', code: 'provider_retry' }` SSE event
+4. Reset accumulated content and tool calls
+5. Resolve the next provider from `agent.fallbackProviders`
+6. Restart the stream from the new provider
 
-Maximum retries: 2 (`MAX_STREAM_RETRIES`). `AbortError` (client disconnect) bypasses retry — no point retrying if nobody's listening. See [Streaming Chat Handler](./chat.md#mid-stream-retry--recovery) for details.
+Maximum retries: 2 (`MAX_STREAM_RETRIES`). See [Streaming Chat Handler](./chat.md#mid-stream-retry--recovery) for details.
+
+**Two failures are deliberately kept away from the breaker**, because it exists to route around a provider that is _unwell_ and neither is evidence of that:
+
+- **A client abort** (stop pressed, tab closed, navigation mid-answer) bypasses retry — nobody is listening — and records **no** breaker failure. At `failureThreshold: 5`, five cancelled streams would otherwise open the circuit for that provider slug across **every** agent using it — one reader changing their mind five times taking a healthy provider offline for everybody.
+
+  `isClientAbort()` decides, and it is consulted in two places: the inner stream catch, which is the one a cancellation actually reaches, and the outer crash catch as **defence** — both shipped adapters raise an in-flight abort as `ProviderError('request aborted', { code: 'aborted' })`, and the outer catch's `ProviderError` branch returns before the breaker line, so the outer guard exists for the shape a fork adapter can still produce (a raw `AbortError`, or anything not funnelled through `toProviderError`).
+
+  The predicate asks, in order: is the caller's `AbortSignal` aborted (authoritative); is this a `ProviderError` (then its `code` is the answer — never its message); is it named `AbortError`; and only with no signal to consult, does the message contain "aborted". The `ProviderError` rule is what stops a 502 whose body echoes the word from being read as a cancellation on the signal-less path — the evaluation runner spreads `signal` conditionally.
+
+- **A request fault** (`isRequestFault()`, currently `truncated_no_output`) neither fails over nor records a failure: the token cap travels with the agent config, not the endpoint, so every fallback rejects it identically.
+
+**Cost on the error path.** `ProviderError.usage` carries what the provider billed for the call the error ended, and it is populated from two places: the truncation guards (what the provider reported) and `toProviderErrorWithUsage()` in the adapters' stream-iteration catch (what had accumulated by the time it died). Anthropic sets `inputTokens` at `message_start` and updates `outputTokens` on every `message_delta`, so its mid-stream failures carry real numbers; an OpenAI-compatible stream reports usage in a final chunk, so an error before that has nothing to attach.
+
+The streaming handler folds the field into `AiCostLog` on the way into the catch, so it is recorded whichever exit is taken — request fault, failover, or terminal. **Zeroed usage is dropped, never written**: zero means "the provider never told us", and a zeroed row would report the turn as free, which is a worse answer than no row at all.
+
+**It feeds the per-turn cap too.** The same fold adds to `turnCostUsd`, which `maxCostPerTurnUsd` is tested against — so a turn that lost a nearly-capped stream and then recovered on a fallback can stop the tool loop early with an `endedReason: 'budget_exceeded'` marker. That is the cap counting the money actually spent rather than only the spend that reached a `done` chunk, but it is a behaviour change worth knowing when tuning a cap.
 
 ## Guard Mode Fallback Logging
 
@@ -192,7 +209,7 @@ This is sufficient for single-server deployments. Multi-instance deployments wou
 - `streaming-handler.ts` persists partial responses before errors
 - Error events are sanitized — raw provider errors never reach the client
 
-### Client-side (`agent-test-chat.tsx`)
+### Client-side (`chat/chat-interface.tsx`)
 
 - **Warning banner**: yellow alert above reply area for `warning` events
 - **Structured errors**: error panel with title, message, and action from registry
@@ -200,10 +217,10 @@ This is sufficient for single-server deployments. Multi-instance deployments wou
 
 ## Test Coverage
 
-| Test File                                                            | Tests                                           |
-| -------------------------------------------------------------------- | ----------------------------------------------- |
-| `tests/unit/lib/orchestration/llm/circuit-breaker.test.ts`           | States, transitions, window pruning, registry   |
-| `tests/unit/lib/orchestration/llm/provider-fallback.test.ts`         | Primary, fallback, exhaustion, DB failure skip  |
-| `tests/unit/lib/orchestration/chat/input-guard.test.ts`              | All patterns, edge cases, false positive checks |
-| `tests/unit/lib/orchestration/chat/error-messages.test.ts`           | All codes, fallback, non-empty guarantees       |
-| `tests/unit/components/admin/orchestration/agent-test-chat.test.tsx` | Warning banner, structured errors, reconnect    |
+| Test File                                                                | Tests                                           |
+| ------------------------------------------------------------------------ | ----------------------------------------------- |
+| `tests/unit/lib/orchestration/llm/circuit-breaker.test.ts`               | States, transitions, window pruning, registry   |
+| `tests/unit/lib/orchestration/llm/provider-fallback.test.ts`             | Primary, fallback, exhaustion, DB failure skip  |
+| `tests/unit/lib/orchestration/chat/input-guard.test.ts`                  | All patterns, edge cases, false positive checks |
+| `tests/unit/lib/orchestration/chat/error-messages.test.ts`               | All codes, fallback, non-empty guarantees       |
+| `tests/unit/components/admin/orchestration/chat/chat-interface.test.tsx` | Warning banner, structured errors, reconnect    |

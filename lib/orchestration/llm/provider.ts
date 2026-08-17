@@ -246,6 +246,54 @@ export function toProviderError(err: unknown, fallbackMessage: string): Provider
 }
 
 /**
+ * {@link toProviderError}, plus whatever the call had already been billed for.
+ *
+ * For a stream that dies part-way through. The adapters track `inputTokens` /
+ * `outputTokens` as chunks arrive, so at the moment they throw they know what
+ * the provider has charged for — and the plain `toProviderError` path drops it,
+ * which is the half of #592 that survived #593. The model produced output; the
+ * vendor bills for it; only the `done` chunk that never arrived was going to
+ * tell us how much.
+ *
+ * **Zero is not "free", it is "unknown", so zeroed usage is dropped.** An
+ * OpenAI-compatible stream reports usage in a final chunk (via
+ * `stream_options.include_usage`), so an error before that leaves both counts
+ * at 0 — and a zeroed `AiCostLog` row would tell the dashboard the turn cost
+ * nothing, which is a worse answer than no row. Anthropic sets `inputTokens` at
+ * `message_start` and updates `outputTokens` on every `message_delta`, so its
+ * mid-stream errors do carry real numbers.
+ *
+ * An error that already carries usage keeps it: the truncation guards attach
+ * exactly what the provider reported, which beats anything reconstructed here.
+ */
+export function toProviderErrorWithUsage(
+  err: unknown,
+  fallbackMessage: string,
+  usage: { inputTokens: number; outputTokens: number }
+): ProviderError {
+  const base = toProviderError(err, fallbackMessage);
+  if (base.usage || (usage.inputTokens <= 0 && usage.outputTokens <= 0)) return base;
+
+  const rebuilt = new ProviderError(base.message, {
+    code: base.code,
+    ...(base.status !== undefined ? { status: base.status } : {}),
+    retriable: base.retriable,
+    // Every `toProviderError` branch that CONSTRUCTS an error already sets
+    // `cause`; the only branch that does not is the one returning its input
+    // untouched, where there is no wrapped error to point at. So `base.cause`
+    // is the whole answer — an `?? err` fallback would be unreachable.
+    cause: base.cause,
+    usage,
+  });
+  // Carry the original stack across. Without this the rebuilt error points at
+  // this helper rather than the adapter loop that threw, so
+  // `log.error('Streaming chat handler crashed', err)` and the span exception
+  // both lose the throw site — the one thing an operator opens them for.
+  if (base.stack) rebuilt.stack = base.stack;
+  return rebuilt;
+}
+
+/**
  * Per-request overrides accepted as the second argument by both
  * `@anthropic-ai/sdk` and `openai` (`RequestOptions` in each).
  */
