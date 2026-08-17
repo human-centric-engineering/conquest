@@ -16,7 +16,74 @@ release process.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-17
+
+> **Alpha release.** Twelfth tagged Sunrise release. **MINOR bump** — the
+> largest batch Sunrise has cut: a security sweep, a dependency-hygiene
+> programme, and the production Docker path made to actually work.
+>
+> **No migration.** Zero migrations and no `prisma/schema/` change since 0.8.1,
+> so a fork takes this with a plain `git merge v0.9.0` and no database step.
+>
+> **Security — read this section even if you skip the rest.** An SSRF sweep
+> closed four related holes: `checkSafeProviderUrl()` validated only the first
+> hop, so a redirect to `169.254.169.254` reached cloud metadata and had the
+> body ingested as a knowledge document; `http://[::ffff:169.254.169.254]/`
+> matched nothing in the denylist, so every range check returned false;
+> escalation webhooks were never validated at all; and the webhook subscription
+> dispatcher followed redirects. An open redirect in `isRootRelativePath()` was
+> reachable from the login form's `callbackUrl` — the victim authenticates on
+> the genuine page and lands on the attacker's origin. Storage HMAC schemes are
+> now domain-separated, and the local storage provider refuses a key escaping
+> its own root.
+>
+> **Node 24 is now the floor.** Node 20 reached end-of-life; `.nvmrc`,
+> `engines.node`, both Dockerfiles and `@types/node` are checked against each
+> other by `npm run check:node-version`, which reads the **resolved**
+> `@types/node` from the lockfile rather than the range. `@types/node` moved
+> `^26` → `^24`: a deliberate direct downgrade, because type-checking against a
+> standard library two majors ahead of every runtime accepts APIs that throw in
+> production.
+>
+> **Deployment is fork-facing and worth reading before you merge.**
+> `.env.production` is no longer baked into the production image, the Prisma CLI
+> is no longer in the runtime image, the `deps` stage no longer takes a
+> `DATABASE_URL` build argument, and there are now `migrator` and `seeder`
+> stages. If your fork's deploy runs migrations from inside the running web
+> container, or passes `DATABASE_URL` at build time, it needs a change. The CI
+> `docker` job now runs the production stack rather than only building it —
+> which is how it was found that the stack could not start at all.
+>
+> **Other breaking-in-`0.x` changes.** `PATCH …/capabilities/{id}` returns 403
+> for a change to a system capability's `slug`, `functionDefinition`,
+> `executionType` or `executionHandler` — automation reconfiguring a built-in
+> over the API must move into its seed unit. A structured extraction cut off at
+> the token cap now raises `truncated_no_output` instead of returning partial
+> JSON. Error-marker assistant messages are no longer replayed into the prompt.
+> The EPUB parser swapped `epub2` for `epub`, which removes `adm-zip` and its
+> permanently-unfixable high advisory from the tree entirely — a fork importing
+> `epub2` directly must switch.
+>
+> **Two silent-data-loss bugs.** Every `.epub` ever ingested produced an empty
+> document — filename as title, zero sections, no warning — because
+> `await epub.parse()` awaited a non-Promise. And built-in capability seeds
+> stopped re-applying their function schema, so three shipped capabilities were
+> advertising a stale schema to the model.
+>
+> **Dependency hygiene got machinery rather than care.** `check:lockfile`,
+> `check:exports`, `check:changelog`, `fix:lockfile-libc` and a scheduled
+> `Dependency Audit` all landed, after `libc` metadata went missing for two
+> releases and put glibc binaries in a musl image without erroring.
+
 ### Security
+
+- **`js-yaml` bumped to 4.3.1**, clearing a high advisory
+  ([GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj),
+  CVE-2026-59870 — quadratic CPU consumption resolving `!!omap`). Transitive and
+  **dev-only**, via `@eslint/eslintrc`, so no fork runtime parses attacker-supplied
+  YAML through it; taken because the fix is a patch and a release should not ship
+  with its own audit red. Found by triggering `Dependency Audit` as step 5 of
+  this cut — the first time that workflow has ever completed.
 
 - **Open redirect closed in `isRootRelativePath()`.** The WHATWG URL parser
   removes ASCII tab, LF and CR from anywhere in a URL before reading the
@@ -367,7 +434,10 @@ release process.
   tree and does work here, but has no package to bump when the fix lives in a
   **grandparent**: `ws@8.20.1` sat behind `engine.io` and `socket.io-adapter`,
   both declaring `ws: ~8.20.1` and neither vulnerable, so no PR was raised and
-  the alert stayed open seven weeks (#538). `adm-zip` is in that state today.
+  the alert stayed open seven weeks (#538). `adm-zip` was in that state when
+  this landed, and is the case that proved the point: no bump existed at all,
+  because `epub2` pinned it below the patched version — it took replacing the
+  library to clear it (#601, under **Changed**).
   Two independent jobs: `npm run check:audit`, and the absolute counterpart to
   `check:lockfile` via `fix:lockfile-libc --check`, which catches `libc`
   missing since before the base commit — the state `main` was in for two
@@ -1054,7 +1124,7 @@ release process.
   regardless of application health. Run health checks from the host, or use
   `wget -qO-` inside (#583).
 
-- **`package-lock.json` declares `libc` again on 101 native Linux packages.**
+- **`package-lock.json` declares `libc` again on every native Linux package that has one.**
   Production is `node:24-alpine` (musl) and `libc` is the only field separating
   `@img/sharp-linux-x64` from `@img/sharp-linuxmusl-x64` — both are otherwise
   just `os: linux, cpu: x64`. Without it a musl install resolves **both**
@@ -1067,7 +1137,11 @@ release process.
   deleted the key on every platform, while dependabot's newer npm kept adding
   it back. Restored from each package's registry manifest at its exact locked
   version — no version moved, nothing added or removed, 303 insertions and zero
-  deletions. Forks on 0.8.0 or later inherit the fault and should take this
+  deletions across the 101 packages that carried the field at the time. That
+  count tracks the dependency graph, not this fix: at 0.9.0 it is 70, and
+  `npm run fix:lockfile-libc -- --check` reports the lockfile complete, with the
+  21 remaining Linux packages declaring no `libc` upstream. Check the state, not
+  the number. Forks on 0.8.0 or later inherit the fault and should take this
   merge (#571).
 - **The capability admin form no longer degrades a stored tool schema when you
   edit it.** The visual builder holds four fields per parameter — name, type,
@@ -2961,5 +3035,16 @@ Sunrise safe to fork and to merge upstream releases into.
 
 ---
 
-[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/human-centric-engineering/sunrise/releases/tag/v0.0.1
