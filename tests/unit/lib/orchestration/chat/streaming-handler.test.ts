@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { assertNoAttachmentPersistence } from '@/tests/helpers/no-attachment-persistence';
 
 // ---------------------------------------------------------------------------
 // Module mocks — hoisted before dynamic imports
@@ -5015,6 +5016,79 @@ describe('attachment gate', () => {
     expect(events.find((e) => (e as { type: string }).type === 'error')).toMatchObject({
       code: 'IMAGE_NOT_SUPPORTED',
     });
+  });
+
+  it('never persists attachment bytes on a successful attachment turn', async () => {
+    // The invariant `tests/helpers/no-attachment-persistence.ts` was written
+    // for — and, until now, was not wired to anything, so nothing enforced it.
+    //
+    // It holds today only by construction: `persistMessage` builds its `data`
+    // from a fixed allowlist (conversationId, role, content, metadata,
+    // provenance, …) with no attachment field, so bytes cannot reach
+    // `aiMessage.create`. That is exactly the kind of implicit guarantee a
+    // later contributor breaks silently — by adding `attachments` to
+    // `PersistMessageParams`, or by folding base64 into `metadata`.
+    //
+    // The guard detects both a suspect KEY name and a base64 payload SHAPE.
+    // The shape check is load-bearing, not belt-and-braces: the first version
+    // of this test checked keys only, and a mutation persisting the real
+    // field (`metadata.files[].data` — attachments are `{name, mediaType,
+    // data}`) passed it while writing the whole PNG to the database. Verified
+    // by mutation both ways: keys-only passed, shape-aware fails naming the
+    // PNG and PDF magic bytes.
+    //
+    // Every other test in this block exercises a REJECTION path, which errors
+    // before any persistence happens. The turn has to succeed for the
+    // assertion to mean anything.
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ enableImageInput: true, enableDocumentInput: true })
+    );
+    (prisma.aiOrchestrationSettings.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      imageInputGloballyEnabled: true,
+      documentInputGloballyEnabled: true,
+    });
+    (assertModelSupportsAttachments as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'I can see it.' },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 5 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'anthropic',
+    });
+
+    const events = await collect(
+      streamChat({
+        ...baseRequest,
+        attachments: [imageAttachment(), pdfAttachment()],
+      })
+    );
+
+    // Guard the guard: if the turn errored, the assertion below passes
+    // vacuously because nothing was ever persisted.
+    expect(events.find((e) => (e as { type: string }).type === 'error')).toBeUndefined();
+    const createCalls = (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(createCalls.some((c: any) => c[0].data.role === 'user')).toBe(true);
+
+    // Every sink this turn writes to, not just the message row. The invariant
+    // in the helper's docblock is "only the user's text becomes an AiMessage,
+    // and only an aggregate cost row goes to AiCostLog" — asserting on
+    // aiMessage.create alone would leave base64 folded into a conversation
+    // title, an eval log or a logCost metadata field completely uncovered.
+    // Both existing audio-guard consumers assert over logCost for this reason.
+    const sinks: Array<[string, unknown]> = [
+      ['prisma.aiMessage.create', prisma.aiMessage.create],
+      ['prisma.aiConversation.create', prisma.aiConversation.create],
+      ['prisma.aiConversation.update', prisma.aiConversation.update],
+      ['prisma.aiEvaluationLog.create', prisma.aiEvaluationLog.create],
+      ['logCost', logCost],
+    ];
+    for (const [label, sink] of sinks) {
+      assertNoAttachmentPersistence(sink as { mock: { calls: unknown[][] } }, label);
+    }
   });
 
   it('does not run the gate when there are no attachments', async () => {
