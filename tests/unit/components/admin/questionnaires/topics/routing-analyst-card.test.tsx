@@ -210,6 +210,19 @@ describe('RoutingAnalystCard — no pending draft', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Too many requests, slow down.')
     );
   });
+
+  it('shows an error when the request itself throws (network failure)', async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) return Promise.reject(new Error('Network down.'));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard();
+    await user.click(screen.getByRole('button', { name: /Propose topics from the document/ }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Network down.'));
+  });
 });
 
 describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
@@ -355,6 +368,36 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
     expect(
       screen.getByRole('button', { name: /Propose topics from the document/ })
     ).toBeInTheDocument();
+  });
+
+  it('does not show an error banner when an auto-triggered run ends in a terminal SSE error', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve(
+          sseResponse([
+            { type: 'error', code: 'ROUTING_ANALYSIS_FAILED', message: 'The model timed out.' },
+          ])
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
+
+  it('does not show an error banner when an auto-triggered run throws', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) return Promise.reject(new Error('Network down.'));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 
   it('does not auto-run when the card already has a pending draft', () => {
