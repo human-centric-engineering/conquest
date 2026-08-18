@@ -86,6 +86,7 @@ function wireDefaultCompletion() {
         },
         tokenUsage: { input: 10, output: 20 },
         costUsd: 0.001,
+        finishReason: 'stop' as const,
       };
     }
     return {
@@ -100,6 +101,7 @@ function wireDefaultCompletion() {
       },
       tokenUsage: { input: 5, output: 10 },
       costUsd: 0.0005,
+      finishReason: 'stop' as const,
     };
   });
 }
@@ -246,6 +248,7 @@ describe('streamDataSlotGeneration — failures', () => {
           },
           tokenUsage: { input: 1, output: 1 },
           costUsd: 0,
+          finishReason: 'stop' as const,
         };
       }
       // Fail the "Setup" group (contains q1), succeed for "Feedback" (q3).
@@ -264,6 +267,7 @@ describe('streamDataSlotGeneration — failures', () => {
         },
         tokenUsage: { input: 1, output: 1 },
         costUsd: 0,
+        finishReason: 'stop' as const,
       };
     });
 
@@ -302,6 +306,7 @@ describe('streamDataSlotGeneration — failures', () => {
         },
         tokenUsage: { input: 1, output: 1 },
         costUsd: 0,
+        finishReason: 'stop' as const,
       };
     });
 

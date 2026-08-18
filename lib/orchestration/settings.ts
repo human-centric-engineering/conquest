@@ -51,6 +51,14 @@ export function parseSearchConfig(raw: Prisma.JsonValue | null | undefined): Sea
 /**
  * Narrow a `Prisma.JsonValue` loaded from `AiOrchestrationSettings.escalationConfig`
  * into a typed `EscalationConfig` via Zod. Returns `null` if absent or invalid.
+ *
+ * Validates the SHAPE only. `webhookUrl`'s SSRF guard lives on
+ * `escalationConfigWriteSchema` (the API boundary) and on `notifyEscalation`
+ * (the point of use), deliberately not here — this is the read path, and a
+ * value rejected here would be one the settings API cannot return, the form
+ * cannot show, and the operator cannot correct. The form rebuilds the whole
+ * config blob on save, so an absent `webhookUrl` is written back as absent:
+ * rejecting on read would silently destroy a URL nobody chose to remove (#553).
  */
 export function parseEscalationConfig(
   raw: Prisma.JsonValue | null | undefined

@@ -388,14 +388,10 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
     expect(result.error?.message).toBe('provider blew up');
   });
 
-  it('logs cost without an agentId, and without a session id in metadata, when both are omitted', async () => {
+  it('logs cost without a session id in metadata when one is omitted', async () => {
     (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
 
-    await capabilityDispatcher.dispatch(
-      SLUG,
-      baseArgs({ sessionId: undefined }),
-      baseContext({ agentId: undefined })
-    );
+    await capabilityDispatcher.dispatch(SLUG, baseArgs({ sessionId: undefined }), baseContext());
 
     const chatCall = (logCost as Mock).mock.calls.find(
       ([arg]) => arg?.metadata?.capability === SLUG
@@ -407,7 +403,6 @@ describe('AppComposeCompletionOfferCapability — dispatch', () => {
       operation: CostOperation.CHAT,
       metadata: { capability: SLUG },
     });
-    expect(chatArg).not.toHaveProperty('agentId');
     expect(chatArg.metadata).not.toHaveProperty('appQuestionnaireSessionId');
   });
 });

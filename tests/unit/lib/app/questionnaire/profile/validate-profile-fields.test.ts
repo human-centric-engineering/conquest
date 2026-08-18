@@ -51,7 +51,12 @@ function field(overrides: Partial<ProfileFieldConfig> & { key: string }): Profil
 function agenticResult(
   results: Array<{ key: string; plausible: boolean; normalized: string; reason?: string }>
 ) {
-  return { value: { results }, tokenUsage: { input: 10, output: 5 }, costUsd: 0.001 };
+  return {
+    value: { results },
+    tokenUsage: { input: 10, output: 5 },
+    costUsd: 0.001,
+    finishReason: 'stop' as const,
+  };
 }
 
 beforeEach(() => {

@@ -53,7 +53,12 @@ const FIELDS: ProfileFieldConfig[] = [
 ];
 
 function extractionResult(found: Array<{ key: string; value: string }>) {
-  return { value: { found }, tokenUsage: { input: 10, output: 5 }, costUsd: 0.001 };
+  return {
+    value: { found },
+    tokenUsage: { input: 10, output: 5 },
+    costUsd: 0.001,
+    finishReason: 'stop' as const,
+  };
 }
 
 beforeEach(() => {

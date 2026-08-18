@@ -38,23 +38,26 @@ Every outcome is a `CapabilityResult` — the dispatcher never throws at its bou
 
 Everything is exported from `@/lib/orchestration/capabilities`:
 
-| Export                         | Kind      | Purpose                                                                                                 |
-| ------------------------------ | --------- | ------------------------------------------------------------------------------------------------------- |
-| `capabilityDispatcher`         | singleton | `register`, `dispatch`, `loadFromDatabase`, `getRegistryEntry`, `has`, `clearCache`                     |
-| `registerBuiltInCapabilities`  | function  | Idempotent wiring of the built-in handlers; also runs the app auto-init + flush                         |
-| `registerAppCapability`        | function  | Add one app/fork capability (extends `BaseCapability`); optional `{ slug?, guard? }`; idempotent by key |
-| `registerAppCapabilities`      | function  | Flush app-registered capabilities into the dispatcher (called by `registerBuiltInCapabilities`)         |
-| `getCapabilityDefinitions`     | function  | Returns the function definitions an LLM should see for a given agent (strict allow-list)                |
-| `BaseCapability`               | class     | Abstract parent with `validate`, `success`, `error` helpers                                             |
-| `CapabilityValidationError`    | class     | Thrown by `validate` on bad args; dispatcher maps to `invalid_args`                                     |
-| `CapabilityResult`             | type      | `{ success, data?, error?, skipFollowup? }`                                                             |
-| `CapabilityContext`            | type      | `{ userId, agentId, conversationId?, entityContext?, scope?, customConfig?, isEnabled? }`               |
-| `CapabilityFunctionDefinition` | type      | OpenAI-compatible function schema stored in `AiCapability.functionDefinition`                           |
-| `CapabilityRegistryEntry`      | type      | Merged view of the `AiCapability` row loaded by the dispatcher                                          |
-| `AgentCapabilityBinding`       | type      | Per-agent override, merged `AiAgentCapability` + `AiCapability`                                         |
-| `CapabilityRegisterOptions`    | type      | Optional 2nd arg to `register` / `registerAppCapability`: `{ slug?, guard? }` (fork seam)               |
-| `CapabilityGuard`              | type      | `(context) => { allow, reason? } \| Promise<…>` — pre-execute dispatch gate                             |
-| `CapabilityGuardDecision`      | type      | `{ allow: boolean; reason?: string }` returned by a `CapabilityGuard`                                   |
+| Export                         | Kind      | Purpose                                                                                                                                  |
+| ------------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `capabilityDispatcher`         | singleton | `register`, `dispatch`, `loadFromDatabase`, `getRegistryEntry`, `getHandler`, `has`, `clearCache`                                        |
+| `workflowAgentId`              | function  | Mint the synthetic `agentId` a workflow's `tool_call` steps dispatch under. Use this rather than re-inlining the template (#528)         |
+| `isWorkflowAgentId`            | function  | True when an `agentId` is a workflow label rather than a real `AiAgent.id`                                                               |
+| `WORKFLOW_AGENT_ID_PREFIX`     | const     | The `workflow:` prefix itself, for a fork that needs to match on it directly                                                             |
+| `registerBuiltInCapabilities`  | function  | Idempotent wiring of the built-in handlers; also runs the app auto-init + flush                                                          |
+| `registerAppCapability`        | function  | Add one app/fork capability (extends `BaseCapability`); optional `{ slug?, guard? }`; idempotent by key                                  |
+| `registerAppCapabilities`      | function  | Flush app-registered capabilities into the dispatcher (called by `registerBuiltInCapabilities`)                                          |
+| `getCapabilityDefinitions`     | function  | Returns the function definitions an LLM should see for a given agent (strict allow-list); advertises each tool under its **slug** (#509) |
+| `BaseCapability`               | class     | Abstract parent with `validate`, `success`, `error` helpers                                                                              |
+| `CapabilityValidationError`    | class     | Thrown by `validate` on bad args; dispatcher maps to `invalid_args`                                                                      |
+| `CapabilityResult`             | type      | `{ success, data?, error?, skipFollowup? }`                                                                                              |
+| `CapabilityContext`            | type      | `{ userId, agentId, conversationId?, workflowExecutionId?, entityContext?, scope?, customConfig?, isEnabled? }`                          |
+| `CapabilityFunctionDefinition` | type      | OpenAI-compatible function schema stored in `AiCapability.functionDefinition`                                                            |
+| `CapabilityRegistryEntry`      | type      | Merged view of the `AiCapability` row loaded by the dispatcher                                                                           |
+| `AgentCapabilityBinding`       | type      | Per-agent override, merged `AiAgentCapability` + `AiCapability`                                                                          |
+| `CapabilityRegisterOptions`    | type      | Optional 2nd arg to `register` / `registerAppCapability`: `{ slug?, guard? }` (fork seam)                                                |
+| `CapabilityGuard`              | type      | `(context) => { allow, reason? } \| Promise<…>` — pre-execute dispatch gate                                                              |
+| `CapabilityGuardDecision`      | type      | `{ allow: boolean; reason?: string }` returned by a `CapabilityGuard`                                                                    |
 
 Built-in capability classes (`SearchKnowledgeCapability`, `GetPatternDetailCapability`, `EstimateCostCapability`, `ReadUserMemoryCapability`, `WriteUserMemoryCapability`, `EscalateToHumanCapability`, `ApplyAuditChangesCapability`, `AddProviderModelsCapability`, `DeactivateProviderModelsCapability`, `CallExternalApiCapability`, `RunWorkflowCapability`, `UploadToStorageCapability`) are **not** re-exported — callers go through the dispatcher.
 
@@ -72,7 +75,18 @@ export function initAppCapabilities(): void {
 }
 ```
 
-`registerBuiltInCapabilities()` (already on the lazy path the chat handler and agent-call executor hit) runs `initAppCapabilities()` once in the **server route-handler runtime**, then flushes — so your capability is in the dispatcher before any agent resolves its tools. Registration is idempotent by slug. `lib/app/capabilities.ts` is one of the `lib/app/` auto-wired bootstrap files; see [Building on Sunrise → §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface) for the full set and the per-runtime rationale.
+`registerBuiltInCapabilities()` (already on the lazy path every dispatch caller hits) runs `initAppCapabilities()` once in the **server route-handler runtime**, then flushes — so your capability is in the dispatcher before any agent resolves its tools. Registration is idempotent by slug. `lib/app/capabilities.ts` is one of the `lib/app/` auto-wired bootstrap files; see [Building on Sunrise → §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface) for the full set and the per-runtime rationale.
+
+> **Every path that dispatches must call it first.** The registry is a `globalThis`-backed singleton (#462), so a registration made in one module realm is visible from all of them — but the _trigger_ is lazy, guarded by module-scoped booleans, so the shared map is only populated once something calls the initialiser. All four callers below do — but `executors/tool-call.ts` did not until #537. It dispatched straight in, and on a process that had served no HTTP request — precisely an overnight-quiet server running a 03:15 scheduled workflow — the map was empty and the step failed `unknown_capability` naming a slug that was registered fine. Under load the bug hides, and no unit suite sees it because tests register explicitly in setup. If you add a dispatch path, call `registerBuiltInCapabilities()` at the top of it.
+
+| Dispatch path                    | Reached by                                                  |
+| -------------------------------- | ----------------------------------------------------------- |
+| `chat/streaming-handler.ts`      | HTTP request                                                |
+| `mcp/tool-registry.ts`           | HTTP request                                                |
+| `engine/executors/agent-call.ts` | HTTP request **or a scheduler tick** (an `agent_call` step) |
+| `engine/executors/tool-call.ts`  | HTTP request **or a scheduler tick** (a `tool_call` step)   |
+
+Both engine executors can run cold — anything the scheduler starts reaches them without an HTTP request first. `agent-call.ts` happened to already register; `tool-call.ts` did not, and that asymmetry is the whole of #537.
 
 Like every built-in, an app capability still needs an active `AiCapability` row (and a per-agent `AiAgentCapability` binding) before an LLM will _see_ it — `getCapabilityDefinitions` cross-checks the DB against the in-memory dispatcher.
 
@@ -94,6 +108,7 @@ export function initAppCapabilities(): void {
 ```
 
 - **`slug`** overrides the in-memory handler key (defaults to `capability.slug`).
+  **⚠️ Second hard contract (#509): a namespaced slug is not advertisable to an LLM.** The slug _is_ the tool name a model sees — `getCapabilityDefinitions` sets `name` from it, because dispatch resolves the emitted name back as a slug. Provider tool names must match `^[a-zA-Z0-9_-]{1,64}$`, so `billing:lookup_order` cannot be one, and a capability whose slug fails that charset is **dropped from the agent's toolset with a warning** rather than sent to the provider — a malformed tool name fails the entire request, not just the call. Such a capability was never reachable from chat regardless (no valid tool name can resolve to a namespaced slug); **MCP is its supported surface**, since `mcp/tool-registry.ts` advertises `customName` and resolves it back to the slug before dispatch. Use an underscore-or-hyphen slug for anything an agent should call directly.
   **⚠️ Hard contract:** the override slug must correspond to an **active `AiCapability` row**. Every downstream gate — registry lookup (step 3), quarantine, per-agent binding, rate limit — looks the DB up by this same slug. An override with no active row dies at `capability_inactive` **before the handler or guard ever runs**. Forks whose module system creates the namespaced rows satisfy this automatically; a bare override with no matching row will silently never dispatch.
 - **`guard`** is an async-capable predicate run as dispatch step 4a (after the per-agent binding, before the rate limiter). It reads the generic [`CapabilityContext.scope`](#dispatch-scope-carrier-capabilitycontextscope) carrier — core names no keys. `{ allow: false }` → `capability_guard_denied`; a guard that throws **fails closed** (denied + logged). Keyed by the same registration key as the handler, so a `slug` override guards the override key.
 
@@ -102,6 +117,18 @@ Re-registering the same key **replaces the handler and its guard together** — 
 ### Dispatch scope carrier (`CapabilityContext.scope`)
 
 `CapabilityContext.scope?: Record<string, string>` is a free-form, optional string map the dispatcher's caller can populate. It is **generic by design** — core names no keys and no built-in capability reads it; the dispatcher passes it verbatim into `execute()`. A fork uses it to let a capability refuse to run outside its intended scope (e.g. a `module` slug). In vanilla Sunrise the chat handler threads it from `ChatRequest.scope` into the dispatch context, so it stays `undefined` and inert unless a caller sets it.
+
+### Workflow attribution (`CapabilityContext.workflowExecutionId`)
+
+`CapabilityContext.workflowExecutionId?: string` is set by the `tool_call` executor from `ctx.executionId`, and is how a capability dispatched by a workflow gets attributed on its cost row.
+
+It exists because **`agentId` cannot do that job for a workflow.** The label the executor dispatches under is not an `AiAgent.id`, and `AiCostLog.agentId` is a foreign key to one — so writing it there was rejected with P2003 (`ai_cost_log_agentId_fkey`). `logCost` swallows that rejection into an error log and returns `null`, so the symptom was not a crash but an error line per step and a **missing** cost row: the Costs page's per-tool breakdown reported zero for every capability a workflow ran.
+
+Dispatch step 9 therefore writes `agentId` only when it is a real agent, and `workflowExecutionId` otherwise. That FK is satisfied — the `AiWorkflowExecution` row exists before any step runs.
+
+**What this does and does not get you.** The row persists, is queryable by execution, and is counted by the per-capability stats route (which filters on `operation: 'tool_call'` and `metadata.slug`). It does **not** appear in the execution detail or live cost panels: both key on `metadata.stepId` and skip any row without one, and the dispatcher writes `{ slug, success }`. Capabilities dispatched from an `agent_call` step likewise still carry no `workflowExecutionId`. Both are open — see #600.
+
+**If you add a dispatch path that is not an agent**, carry the id of whatever real row owns the call and add a column for it, rather than encoding it into `agentId`. `workflowAgentId()` carries the same warning for the same reason.
 
 ### Resolved-binding carrier (`CapabilityContext.customConfig` / `isEnabled`)
 
@@ -234,6 +261,43 @@ The dispatcher and `getCapabilityDefinitions` use deliberately asymmetric defaul
 
 - **`dispatch()` is default-allow.** No `AiAgentCapability` row = use the base capability's settings. Backend, CLI, and test callers can dispatch without any admin wiring.
 - **`getCapabilityDefinitions()` is default-deny.** Only capabilities with an explicit `AiAgentCapability` row where `isEnabled: true` AND the underlying capability is both `isActive` and present in the in-memory handler map are returned. The LLM only _sees_ tools an admin has explicitly enabled.
+
+**What reconciles the two: every caller that dispatches a MODEL-EMITTED name checks it against the advertised set first.** Default-allow is safe for a backend caller naming a slug in code; it is not safe for a name a model produced, because injected content — a knowledge document, a tool result, an upstream step's output — can name any globally-registered slug and a missing pivot row would then allow it. So `chat/streaming-handler.ts` and `engine/executors/agent-call.ts` both build `advertisedToolNames` from `getCapabilityDefinitions` and refuse anything outside it, feeding the refusal back as a tool result (an assistant `toolCall` with no matching tool message makes the next provider call fail). The other two callers never take a name from a model: `executors/tool-call.ts` reads `capabilitySlug` from admin-authored step config, and `mcp/tool-registry.ts` resolves an incoming name against the exposed-tool set before dispatching that row's `tool.slug`.
+
+**MCP is a model-driven surface too — the host on the other end of an MCP key is an LLM — so it is worth being exact about what protects it, and what does not.** What it checks is membership of the **globally exposed** set: an admin publishing an `McpExposedTool` row is the grant. What it does **not** check is the calling key's scoped agent, and `getAgentBinding` default-allows when that agent has no pivot row — so a key scoped to a restricted agent can call any exposed tool that agent was never explicitly granted. That is [documented, deliberate opt-out scoping](./mcp.md), not an oversight, and `tools/list` ↔ `tools/call` stay consistent about it; whether scoped should mean allow-list-only is an open question recorded there. The difference from the `agent_call` gap #559 closed is that publishing a tool over MCP is an explicit per-capability decision, whereas `agent_call` checked nothing at all.
+
+`agent_call` had no such check until #559 — #476 added it to chat only, and the dispatcher's own note claimed the path was closed generally. **A new caller that dispatches a model-emitted name must add the check**; `CAPABILITY_BINDING_MODE=strict` is the blunt alternative and revokes every implicit binding at once.
+
+### `strict` mode and workflows
+
+A workflow execution isn't bound to an agent, so `executors/tool-call.ts` dispatches under a synthetic `agentId` of `workflow:${workflowId}` — a label, not an `AiAgent.id`. **Workflow `tool_call` steps are therefore exempt from `strict`** (#528).
+
+The exemption exists because the remedy strict mode implies is unavailable here, not because workflows are trusted in general. `AiAgentCapability.agentId` is a foreign key to `AiAgent.id`, and the FK rejects `workflow:<cuid>` — so an operator told to "create the binding rows before enabling strict" **cannot create this one**. Before the exemption, enabling strict failed every `tool_call` step in every workflow with `capability_disabled_for_agent` and no configuration that fixed it. Because the error is per-step, it read as a capability misconfiguration; an operator would audit `AiAgentCapability`, find nothing wrong, and be left with silently dead scheduled workflows.
+
+That differs from the `mcp-system` caveat in the same env var's description, which **is** actionable: `mcp-system` is a real seeded `AiAgent` row (`prisma/seeds/008-mcp-server.ts`), so the rows can be added.
+
+What makes it safe rather than merely convenient: strict mode is about an **agent** reaching a capability it was never granted, and all three agent-facing dispatch paths take the tool name from a model. A `tool_call` step's `capabilitySlug` is Zod-parsed config on a workflow definition, and every workflow write route is `withAdminAuth` — so the step **is** the explicit grant, authored by an admin. Nothing constructs a `tool_call` step at runtime either: an `orchestrator` step builds a synthetic `agent_call` step and delegates to `executeAgentCall`, which dispatches under the real agent id and is checked against that agent's advertised set.
+
+The prefix is a shared constant (`WORKFLOW_AGENT_ID_PREFIX`, with `workflowAgentId()` / `isWorkflowAgentId()` beside it) rather than an inline template, because the executor that mints it and the dispatcher that recognises it are different modules — and #528 is what it looks like when they disagree.
+
+#### What `strict` does NOT cover — read this before relying on it as a revocation
+
+**`strict` is agent-scoped, and its scope does not follow into a workflow.** The exemption above is deliberate, but it has a consequence that is easy to miss when you are using strict as a hardening measure:
+
+An agent bound to `run_workflow` names the workflow it wants as a **tool argument**. The binding's `customConfig.allowedWorkflowSlugs` constrains which ones, but every capability inside an allow-listed workflow then dispatches under that workflow's label — so it runs regardless of whether the calling agent has a binding for it. Revoking capability X from agent A does not stop A reaching X through a workflow it is allowed to run.
+
+So "the step is the grant" is exact, and worth reading precisely: the grant is **workflow-scoped**, authored by the admin who wrote the step. It is not the calling agent's grant, and the calling agent's revocations do not apply to it.
+
+Two things that do **not** close this, both worth stating because both look like they should:
+
+- `isEnabled: false` on the agent's `AiAgentCapability` row — the workflow path never consults a binding row at all.
+- Deleting the row — that is the [default-allow hazard](#default-allow-vs-default-deny) and widens rather than revokes.
+
+What does close it, because each denies **before** any binding is read (steps 3 and 3a of `dispatch()`, ahead of `getAgentBinding` at step 4):
+
+- `isActive: false` on the `AiCapability` row — the capability is off everywhere, workflows included.
+- [Quarantine](#quarantine-incident-disable) — same, and reversible, which is what you want mid-incident.
+- Or narrow the `allowedWorkflowSlugs` on the `run_workflow` binding, which is the agent-scoped control for this path.
 
 ## Quarantine (incident disable)
 

@@ -11,7 +11,9 @@ Follow these steps precisely, in order:
 
 ### Step 1: Run automated checks
 
-Run `npm run validate` (type-check + lint + format check). Capture and report any failures.
+Run `npm run validate` (CHANGELOG structure + type-check + lint + format (Prettier + Prisma)). Capture and report any failures.
+
+`validate` runs the CHANGELOG check **first** and short-circuits on failure, so a structural problem in `CHANGELOG.md` will report as a failure with nothing after it — that is the check working, not the type-check being skipped. Fix it and re-run rather than working around it; the rules and their reasoning are in `scripts/ci/changelog-structure.ts`. Note the history rule needs `origin/main`, so run `git fetch origin main` first if the local ref is stale.
 
 Then run `npm run test:coverage`. This runs the full test suite and generates a coverage report at `coverage/coverage-summary.json`. Capture and report any test failures.
 
@@ -30,13 +32,83 @@ If `SKIP`, record "Migration drift: N/A (no prisma/ changes)" and move on. If `R
 - **1** — FAIL: a migration on this branch dropped one of these objects. This is the `prisma migrate dev` footgun — it diffs the schema against the shadow DB and silently emits `DROP INDEX`/`DROP CONSTRAINT` for anything it can't represent, and `migrate dev` already applied that DROP to your local DB. **Stop and report.** Fix: edit the offending migration to remove the spurious `DROP` (re-add a `CREATE … IF NOT EXISTS` if needed), and re-author migrations on these tables with `prisma migrate dev --create-only` so the DROP is reviewed before it's ever applied.
 - **2** — SKIPPED (local DB unreachable). Record "Migration drift: SKIPPED (start your dev DB to enable)" — do **not** fail the run on this.
 
-### Step 2: Identify changed files
+### Step 1b: Resolve the base, then inspect the lockfile and public surface
 
-First, resolve the correct base ref. The local `main` branch may be stale or polluted with feature-branch commits, so **always use the remote tracking ref**:
+**Resolve the base ref here, before either check.** Both default to the merge
+base with `origin/main`, and neither fetches — so on a stale ref they compare
+against history that has moved on: `check:exports` attributes other people's
+new symbols to this branch, and `check:lockfile` can exit 1 on a metadata loss
+`main` already carries. The repo rule is "always use the remote tracking ref";
+this is where it has to happen, because Step 2's early exit ("no TypeScript
+files → stop") would skip a lockfile-only PR entirely.
 
 ```bash
 git fetch origin main --quiet
 BASE=$(git merge-base origin/main HEAD)
+```
+
+Reuse `$BASE` in Step 2 rather than resolving it twice.
+
+**Lockfile** — if `package-lock.json` **or `package.json`** is in the diff
+(`git diff --name-only $BASE...HEAD`). `package.json` matters because the
+`overrides` rule reads that file at both revisions: an override that tightens a
+range npm already satisfied changes nothing in the lockfile, so keying on the
+lockfile alone would skip it.
+
+```bash
+npm run check:lockfile -- --base "$BASE"
+```
+
+Exit 1 means something needs a decision: platform metadata (`libc`/`os`/`cpu`)
+lost — including across a hoist — or `overrides` changed (adding, changing OR
+removing an entry). Lost metadata is the one that has actually bitten (#571).
+The cause is almost always **npm below 11.11.0**, which deletes `libc` from
+every entry it writes on every platform; check `npm -v`, then repair with `npm
+run fix:lockfile-libc` and re-run this.
+
+**Downgrades do not fail this check** — neither transitive nor direct. They are
+reported, direct ones in their own block. The direct rule used to gate; over 134
+lockfile commits it fired twice, on two deliberate pins, while
+`dependency-review` fails any PR landing on a KNOWN-vulnerable version, which is
+the actual risk (#584). So a run that prints "moved BACKWARDS" and still exits 0
+is the tool working, not a bug. **On a private fork `dependency-review` is
+skipped**, so read that block yourself rather than assuming something enforced
+it.
+
+Note the all-clear says "no version or platform-metadata change", not
+"unchanged": these rules do not read `dev`, `resolved`, `integrity` or `link`,
+so a `dependencies` ↔ `devDependencies` move is not something they can see.
+
+Metadata _gained_ is reported and never gates — a package becoming more precise
+is not a risk. It is printed because the #571 repair changed nothing but `libc`
+on 101 packages, and a check that called that "no platform-metadata change"
+would be describing the one thing the PR did as nothing at all.
+
+**Public surface** — always:
+
+```bash
+npm run check:exports -- --base "$BASE"
+```
+
+Reports symbols added, removed or renamed on any `lib/**/index.ts` barrel.
+Adding an export is normal, so a change here is **not** a failure — but it
+exits 1 for an unusable `--base` or when it finds no barrels at all (which is
+what happens if it is run from anywhere but the repo root). Treat exit 1 as a
+wiring problem to fix, not as a finding about the branch.
+
+It exists so step 5d's question gets asked from the surface rather than from a
+path list — the list missed `normalizeRootRelativePath` on `@/lib/security` in
+#506. **Anything it prints should have a CHANGELOG entry, and a removal or
+rename is breaking for any fork importing it.**
+
+Record both outputs in the summary.
+
+### Step 2: Identify changed files
+
+`$BASE` was already resolved in Step 1b, from the remote tracking ref — the local `main` branch may be stale or polluted with feature-branch commits. Reuse it; do not re-resolve:
+
+```bash
+echo "$BASE"   # resolved in Step 1b
 ```
 
 Use `$BASE` as the comparison point for all git diff commands in subsequent steps. Report the resolved base commit (short hash) in the output so reviewers can verify.
@@ -105,6 +177,81 @@ Flag server components (files under `app/` without `'use client'`) and server-si
 **4l. Direct Prisma usage outside API routes**
 Flag imports of `@/lib/prisma`, `@/lib/db`, or `@prisma/client` — and any usage of the `prisma` client (e.g., `prisma.`, `PrismaClient`) — in files outside of `app/api/`, `lib/`, `prisma/`, and `scripts/`. Pages, layouts, components, and other non-API app code must call the API (via `serverFetch()` or client fetch) rather than accessing the database directly. This enforces API-first separation of concerns so the API can be split out of the monolith in the future. Note: this check catches direct imports only, not transitive dependencies (e.g., a page importing a lib helper that internally uses Prisma). Full import-chain analysis is out of scope for this check.
 
+**4m. Hand-rolled `next/navigation` router mocks**
+Flag any router object written out by hand instead of built with `createMockRouter()` from `@/tests/types/mocks`. **Run these repo-wide, not over the diff** — both invariants are currently zero, so a whole-repo count is the check, and a diff-scoped one would be blind to every pre-existing violation until someone happened to re-touch those exact lines. That blindness is not hypothetical: the first version of this check was diff-scoped and could not see the 23 files it was written to catch.
+
+```bash
+grep -rnE "as unknown as ReturnType<typeof useRouter>" tests/ \
+  --include='*.ts' --include='*.tsx' | grep -vE ':[[:space:]]*\*'
+
+python3 - <<'EOF'
+import pathlib, re, sys
+
+SIX = {'push', 'replace', 'refresh', 'back', 'forward', 'prefetch'}
+KEY = re.compile(r'([A-Za-z_$][\w$]*)\s*:')
+hits = []
+
+# Anchor on `prefetch:` — any complete router literal must contain it — then
+# brace-match outwards. Anchoring on a key rather than on a surrounding syntax
+# form is what makes this independent of how the literal happens to be written.
+for path in sorted(pathlib.Path('tests').rglob('*.ts*')):
+    if path.name.endswith('.d.ts') or str(path) == 'tests/types/mocks.ts':
+        continue  # the factory's own definition necessarily matches
+    src = path.read_text()
+    for anchor in re.finditer(r'\bprefetch\s*:', src):
+        depth, start = 0, None
+        for i in range(anchor.start(), -1, -1):
+            if src[i] == '}':
+                depth += 1
+            elif src[i] == '{':
+                if depth == 0:
+                    start = i
+                    break
+                depth -= 1
+        if start is None:
+            continue
+        depth, end = 0, None
+        for i in range(start, len(src)):
+            if src[i] == '{':
+                depth += 1
+            elif src[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is None:
+            continue
+        body = src[start + 1 : end]
+        keys, d = set(), 0
+        for j, ch in enumerate(body):
+            if ch in '{[(':
+                d += 1
+            elif ch in '}])':
+                d -= 1
+            elif d == 0:
+                m = KEY.match(body, j)
+                if m and (j == 0 or not (body[j - 1].isalnum() or body[j - 1] in '_$.')):
+                    keys.add(m.group(1))
+        if keys >= SIX and 'createMockRouter' not in body:
+            hits.append(f'{path}:{src.count(chr(10), 0, start) + 1}')
+
+print('\n'.join(sorted(set(hits))) or 'CLEAN')
+sys.exit(1 if hits else 0)
+EOF
+```
+
+The grep must print **nothing**; the Python check must print **`CLEAN`** and exit 0. Any file path from either is a finding.
+
+The **cast** is always wrong: `AppRouterInstance` gains required members between Next minors, and a double cast does not satisfy the new member — it hides that the mock is missing it, so the literal keeps compiling while the component receives an incomplete router. `tests/types/mocks.ts` is deliberately **not** excluded from this one: the comment filter already handles the JSDoc mentions, and a real cast added there (say, by a fork extending the factory) is exactly what needs catching.
+
+The **six-member literal** means the author intended a complete router, so it should use the factory. A minimal stub (`push`/`replace` only, for a component that reads nothing else) is fine and deliberately not flagged.
+
+**Why the scanner is shaped this way — every clause is a bug it already had.** It brace-matches outward from a key instead of matching a syntax form, because a form-matching regex saw `useRouter: vi.fn(() => ({…}))` and silently missed `useRouter: () => ({…})` — 23 files' worth. It parses keys without line anchors, because a line-anchored version reported CLEAN on a single-line six-member literal, which Prettier at `printWidth: 100` will never reflow into view. It globs `*.ts*` rather than `*.test.ts*`, because the narrower glob could not see `tests/setup.ts` — the single highest-risk file, and the one the docs name as such. And anchoring on a key rather than on `useRouter` is what lets it catch the hoisted `const mockRouter = {…}; useRouter: () => mockRouter` form.
+
+If you change this scanner, re-test it against those four shapes before trusting a CLEAN.
+
+Nothing type-checks a `vi.mock` factory, so neither form fails the build — this scan is the only thing that catches them. See `.context/testing/mocking.md`.
+
 ### Step 5: Check .context/ documentation
 
 This step always runs. It checks documentation that was changed on this branch AND documentation that should have been updated to reflect code changes.
@@ -151,7 +298,9 @@ For each changed file from Step 2, decide whether it touches the public surface 
 - **Published Prisma model interfaces** — flag if `prisma/schema/` files change models the orchestration admin API exposes (`User`, `Ai*` models — see `.context/orchestration/admin-api.md`). Do NOT flag if only an `app.prisma` model changes — that file is fork-reserved and ships empty upstream, so a core PR touching it is itself worth questioning.
 - **The CHANGELOG / VERSIONING contract itself** — flag if `VERSIONING.md` or `CHANGELOG.md` is removed or has its `[Unreleased]` section deleted without a release-rename.
 
-If ANY public-surface path above is in the diff AND `CHANGELOG.md` is NOT in the diff, flag it as: `Public-surface change without CHANGELOG entry — intentional? See VERSIONING.md "Covered" list.` Include the specific files that triggered the flag.
+**The path list is a floor, not the answer.** `npm run check:exports` from Step 1b answers the real question — _did the set of importable symbols change?_ — and it catches seams the list has never heard of. Treat any barrel change it reported as a public-surface change here, whether or not the file appears above.
+
+If ANY public-surface path above is in the diff, OR Step 1b reported a barrel export change, AND `CHANGELOG.md` is NOT in the diff, flag it as: `Public-surface change without CHANGELOG entry — intentional? See VERSIONING.md "Covered" list.` Include the specific files that triggered the flag.
 
 If `CHANGELOG.md` IS in the diff, the check passes regardless of what was added (the agent has already made the call; trust it).
 
@@ -167,11 +316,14 @@ Output a clear summary in this format:
 ## Pre-PR Validation Results
 
 ### Automated Checks
+- [ ] CHANGELOG structure: PASS / FAIL
 - [ ] Type-check: PASS / FAIL
 - [ ] Lint: PASS / FAIL
 - [ ] Format: PASS / FAIL
 - [ ] Tests: PASS / FAIL (X passed, Y failed)
 - [ ] Migration drift (Prisma-unmodelled objects): PASS / FAIL / SKIPPED / N/A
+- [ ] Lockfile: PASS / FAIL / N/A (no `package-lock.json` change)
+- [ ] Public surface (barrel exports): {symbols added/removed, NO CHANGE, or FAIL (wiring — see Step 1b)}
 
 ### Coverage (changed files — threshold 80%)
 | File | Lines | Branches | Functions | Stmts | Status |
@@ -193,6 +345,7 @@ Output a clear summary in this format:
 - [ ] Unvalidated request bodies: {count found or CLEAN}
 - [ ] Bare fetch() instead of serverFetch(): {count found or CLEAN}
 - [ ] Direct Prisma outside API routes: {count found or CLEAN}
+- [ ] Hand-rolled router mocks: {count found or CLEAN}
 
 ### Documentation Check
 - [ ] Stale content in changed docs: {CLEAN or issues found}

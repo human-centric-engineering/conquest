@@ -35,9 +35,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Raise Node's heap cap globally. It is a ceiling, not a reservation: on a 16GB
-# public runner it is never approached; on a 7GB private-fork runner it stops
-# `tsc` / `next build` OOMing (exit 134) when Node's default heap caps near ~2GB.
+# Raise Node's heap cap for every job's own steps. It is a ceiling, not a
+# reservation: on a 16GB public runner it is never approached; on a 7GB
+# private-fork runner it stops `tsc` / `next build` OOMing (exit 134) when
+# Node's default heap caps near ~2GB.
+#
+# It does NOT reach inside a container build — this used to say "globally",
+# which is the belief that cost #543 two weeks of a red `docker` job. The
+# builder stage takes the value as a `NODE_HEAP_MB` build arg instead; see the
+# `docker` job below.
 #
 # Economics knob 2 — repo variable `CI_NODE_HEAP_MB` (default 5120):
 # 5120 is sized for base Sunrise. A fork with a meaningful amount of added code
@@ -60,6 +66,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docker: ${{ steps.filter.outputs.docker }}
+      deps: ${{ steps.filter.outputs.deps }}
       test_scope: ${{ steps.filter.outputs.test_scope }}
     steps:
       - name: Detect change scope + resolve test mode
@@ -67,13 +74,77 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # TRUNCATION is the hazard here, not correctness of the patterns.
+          # Every gate below defaults to "off" and is switched on by a matching
+          # file, and `ci-status` only fails on the literal string `failure` —
+          # so a SKIPPED job passes. A short file list therefore reads as a
+          # green build with type-check, lint, tests, docker and the lockfile
+          # supply-chain check never having run.
+          #
+          # `gh pr view --json files` goes through GraphQL, which pages
+          # `files(first: 100)` and does not follow on. Measured against
+          # kubernetes/kubernetes#141224 (411 files): it returns exactly 100.
+          # Both paths below use REST with `--paginate`, which follows the
+          # `Link: rel="next"` headers to exhaustion — 411 on the same commit.
+          # `per_page=100` keeps that to 5 requests instead of 14; every extra
+          # request is another chance for a 5xx to abort this step.
+          #
+          # DEFAULT TO TRUNCATED. This flag is only cleared by a positive,
+          # numeric confirmation that the list is complete. Starting it `false`
+          # meant any comparison that merely ERRORED — an empty `$TOTAL` makes
+          # `[ "$COUNT" -ne "$TOTAL" ]` exit 2 with "integer expression
+          # expected", and `set -e` is exempt inside an `if` — left it false and
+          # carried on with whatever partial list came back. That is fail-closed
+          # in the one place that must fail open.
+          TRUNCATED=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json files --jq '.files[].path')
+            PR=${{ github.event.pull_request.number }}
+            CHANGED=$(gh api "repos/${{ github.repository }}/pulls/$PR/files?per_page=100" --paginate --jq '.[].filename')
+            # Cross-checked against the PR's own count rather than trusting
+            # pagination, so a future API change that reintroduces a cap is
+            # caught instead of inherited.
+            TOTAL=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq '.changed_files')
+            COUNT=$(printf '%s\n' "$CHANGED" | grep -c . || true)
+            if printf '%s' "$TOTAL" | grep -qE '^[0-9]+$' && [ "$COUNT" -eq "$TOTAL" ]; then
+              TRUNCATED=false
+            else
+              echo "::warning::Changed-file list unconfirmed ($COUNT found, PR reports '${TOTAL:-unknown}') — running every gate"
+            fi
           else
-            CHANGED=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }} --jq '.files[].filename')
+            # The commits API caps `files` at 300 PER PAGE but does paginate:
+            # the un-paginated response carries `Link: rel="next"`, and
+            # `--paginate` returns all 411 on the commit above. An earlier
+            # revision of this file claimed the opposite and called it measured;
+            # it was not — the 300 came from a run without the flag. The
+            # `compare` endpoint genuinely does cap at 300 (its pagination is
+            # over commits, not files), which is what that measurement was.
+            CHANGED=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}?per_page=100" --paginate --jq '.files[].filename')
+            COUNT=$(printf '%s\n' "$CHANGED" | grep -c . || true)
+            # Both REST endpoints stop at a hard 3000 files even WITH
+            # `--paginate` — measured on torvalds/linux 1da177e4 (~17k files):
+            # exactly 3000. The last page returns `files: []` with HTTP 200, so
+            # `gh` exits 0 and a truncated list is indistinguishable from a
+            # complete one.
+            #
+            # The PR path catches that through its cross-check against
+            # `changed_files`. This path has no equivalent — a commit object
+            # reports no file total — so the cap itself is the only signal, and
+            # hitting it is treated as truncation.
+            #
+            # An exact alternative exists if this ever matters: check out with
+            # `fetch-depth: 0` and use `git diff --name-only
+            # ${{ github.event.before }} ${{ github.sha }}`, which has no cap.
+            # Not taken because it adds a checkout to a job that is currently
+            # API-only and seconds long, and `github.event.before` needs
+            # handling for branch creation and force-push.
+            if [ "$COUNT" -ge 3000 ]; then
+              echo "::warning::Commit touches >=3000 files, the API's hard cap — running every gate"
+            else
+              TRUNCATED=false
+            fi
           fi
 
-          echo "Changed files:"
+          echo "Changed files ($COUNT):"
           echo "$CHANGED"
 
           # CODE   — anything that isn't docs-only (gates validate + docker)
@@ -81,12 +152,35 @@ jobs:
           #          job on PRs; on push to main docker always runs as a gate)
           CODE=false
           DOCKER=false
+          # DEPS — the manifest or the lockfile moved, so the `lockfile` job
+          # below has something to diff. package.json matters as well as the
+          # lockfile: the `overrides` rule reads that file at both revisions,
+          # and an override that tightens a range npm already satisfied changes
+          # nothing in the lockfile.
+          DEPS=false
           while IFS= read -r file; do
             [[ -z "$file" ]] && continue
+            # `prisma/*` matches recursively — inside `case`, `*` crosses `/`
+            # (the .context/* arm below relies on the same behaviour). It is
+            # here because the docker job now runs `prisma migrate deploy`
+            # inside the stack, so a migration that fails to apply is exactly
+            # what this job exists to catch. Consequence: schema PRs run the
+            # heaviest job. That is intended.
+            # The backslashes are required: a `|` immediately before a newline
+            # is a bash syntax error inside `case`.
             case "$file" in
-              Dockerfile | .dockerignore | package.json | package-lock.json | next.config.js | next.config.mjs | next.config.ts)
+              Dockerfile | Dockerfile.dev | .dockerignore | docker-compose*.yml | .npmrc | \
+              package.json | package-lock.json | \
+              next.config.js | next.config.mjs | next.config.ts | \
+              prisma.config.ts | prisma/*)
                 DOCKER=true
                 echo "Docker-relevant change detected: $file"
+                ;;
+            esac
+            case "$file" in
+              package.json | package-lock.json)
+                DEPS=true
+                echo "Dependency manifest change detected: $file"
                 ;;
             esac
             [[ "$file" == *.md ]] && continue
@@ -97,8 +191,17 @@ jobs:
             echo "Code change detected: $file"
           done <<< "$CHANGED"
 
+          # Fail OPEN. A list we know to be incomplete must not be allowed to
+          # switch gates off — the whole point of the check is that it runs.
+          if [ "$TRUNCATED" = "true" ]; then
+            CODE=true
+            DOCKER=true
+            DEPS=true
+          fi
+
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "docker=$DOCKER" >> "$GITHUB_OUTPUT"
+          echo "deps=$DEPS" >> "$GITHUB_OUTPUT"
           # Resolve the test mode here so every downstream job reads one value.
           echo "test_scope=${{ vars.CI_TEST_SCOPE || 'full' }}" >> "$GITHUB_OUTPUT"
 
@@ -116,7 +219,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       # Per-job cache scoped to the artifact this job produces. (Sharing one key
       # across fan-out jobs would let the first finisher overwrite the rest.)
@@ -146,7 +249,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       # The eslint/prettier caches use the `content` strategy (see package.json),
       # so a fresh checkout's reset mtimes don't invalidate them — but the cache
@@ -166,19 +269,87 @@ jobs:
         if: needs.config.outputs.code == 'true'
         run: npm run lint
       - run: npm run format:check
+      # CHANGELOG.md is the one file a fork reads before deciding what an
+      # upgrade will cost it, and the release process edits it by text
+      # replacement every single time (CONTRIBUTING step 4). Cutting 0.8.1
+      # replaced a block that included the previous release's heading,
+      # `## [0.8.0]` was never re-added, and 962 lines of 0.8.0 content — two
+      # migrations, two breaking changes — re-attributed themselves to a patch
+      # release. It merged and was tagged; Prettier saw well-formed markdown
+      # and nothing else looked (#550).
+      #
+      # Ungated like format:check above, and for the same reason: a
+      # CHANGELOG-only PR is docs-only, so a code-gated check would skip
+      # exactly the change most able to break this file.
+      #
+      # The append-only rule needs the base revision — a deleted heading leaves
+      # a file that is still valid in every static sense. Fetched shallowly
+      # here rather than raising the job to `fetch-depth: 0`, which would pull
+      # the whole history on every docs-only PR to read one file. The script
+      # treats an unreadable `--base` as a hard failure, so a broken fetch
+      # surfaces instead of silently downgrading to the static rules.
+      #
+      # `HEAD^` is the right base for BOTH events, and for the same structural
+      # reason. On a PR, checkout gives us `refs/pull/N/merge`, whose first
+      # parent IS the base commit it was merged against — that is what the merge
+      # ref is made of, so there is no assumption to get wrong. On push, HEAD is
+      # the commit that just landed and `HEAD^` is the one before it.
+      #
+      # Deepening by `github.sha` and not by branch name matters: `--depth`
+      # counts from the tip of whatever is fetched, so `origin main` would
+      # deepen around the CURRENT tip. Another merge landing while this run sits
+      # in the queue would leave this commit's parent unfetched, `HEAD^` would
+      # be unreadable, and main would go red for a PR that never touched the
+      # file.
+      #
+      # Guarded, because `--depth` TRUNCATES a complete clone as readily as it
+      # deepens a shallow one: on a full checkout this fetch takes the repo from
+      # its whole history down to two commits. Vanilla Sunrise checks out at
+      # depth 1 so it would be a no-op here — but the two fork-seam steps below
+      # run later in this same job, and a fork that raised the job to
+      # `fetch-depth: 0` so its `app:ci-checks` could look at history would find
+      # the history gone by the time its own check ran.
+      - name: CHANGELOG structure
+        run: |
+          git cat-file -e 'HEAD^' 2>/dev/null || git fetch --no-tags --depth=2 origin "${{ github.sha }}"
+          npx tsx scripts/ci/check-changelog.ts --base 'HEAD^'
       # Prettier does not format .prisma files, so drift from the pinned Prisma's
       # own formatter is invisible to format:check. Without this, an unformatted
       # schema lands on main and every fork's next `prisma format` — which
       # `migrate dev` runs implicitly — dirties a core file it never edited (#482).
+      #
+      # This runs the same npm script `npm run validate` does, rather than its
+      # own copy of the logic: a check that exists only here is one contributors
+      # discover by having a PR rejected for a file they never touched, and it
+      # is worse downstream — the fork tiers own `framework-*.prisma` and
+      # `app.prisma`, exactly the files core never reformats (#510).
       - name: Prisma schema format check
         if: needs.config.outputs.code == 'true'
         run: |
-          npx prisma format --schema prisma/schema
-          if ! git diff --exit-code -- prisma/schema; then
-            echo "::error::prisma/schema is not formatted per the pinned Prisma."
-            echo "Run 'npx prisma format --schema prisma/schema' and commit the result."
+          npm run format:prisma:check || {
+            # Deliberately neutral. The script already prints the actionable
+            # message and distinguishes "not formatted" from "could not check"
+            # — an annotation that always says "not formatted" is wrong exactly
+            # when the cause is something else, and the annotation is what
+            # GitHub surfaces above the log.
+            echo "::error::Prisma schema format check failed — see the step log."
             exit 1
-          fi
+          }
+      # The Node major lives in FIVE declarations no tool reconciles: `.nvmrc`
+      # (what this workflow installs), both Dockerfiles (what ships),
+      # `engines.node` (what forks are told), and the resolved `@types/node`
+      # (what `tsc` type-checks against). Bump `.nvmrc` alone and every job here
+      # goes green on the new major while the image still builds the old one —
+      # the suite passes precisely because it stopped testing what ships. Leave
+      # `@types/node` behind and `tsc` accepts APIs that throw in production.
+      # Same npm script `npm run validate` runs, for the reason given above.
+      - name: Node version consistency
+        if: needs.config.outputs.code == 'true'
+        run: |
+          npm run check:node-version || {
+            echo "::error::Node major disagrees across .nvmrc, the Dockerfiles, engines.node or the resolved @types/node — see the step log."
+            exit 1
+          }
       # Fork-owned CI checks seam. A fork adds an `app:ci-checks` script to
       # package.json (a boundary check, migration-hygiene lint, etc.); vanilla
       # Sunrise ships no such script, so `--if-present` makes this a no-op here
@@ -209,7 +380,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       - name: Cache Next.js build cache
         uses: actions/cache@v6
@@ -259,7 +430,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
       - run: npm run db:migrate:deploy
@@ -303,7 +474,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
       - run: npm run db:migrate:deploy
@@ -347,7 +518,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
       - run: npm run db:migrate:deploy
@@ -365,15 +536,26 @@ jobs:
       - run: npx tsx scripts/smoke/export.ts
 
   docker:
-    name: Docker Build
+    name: Docker Build + Stack Smoke
     runs-on: ubuntu-latest
     needs: config
+    # This job now starts containers, so a hung health-wait would otherwise burn
+    # the six-hour default. (First timeout-minutes in the repo — the other jobs
+    # only run processes that end on their own.)
+    timeout-minutes: 30
     # Decoupled from the checks so an image break surfaces in parallel rather
     # than after the long test run. On PRs it runs only when Docker-relevant
     # files change; on push to main it always runs as the production-image gate.
     if: >-
       needs.config.outputs.code == 'true' &&
       (github.event_name == 'push' || needs.config.outputs.docker == 'true')
+    env:
+      COMPOSE_FILE: docker-compose.prod.yml
+      # Pinned so the compose services' interpolated image names resolve to the
+      # exact tags the buildx steps below produce. Without it the project name
+      # comes from the checkout directory, and `up --no-build` would look for a
+      # tag nothing built.
+      COMPOSE_PROJECT_NAME: sunrise
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -381,14 +563,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build Docker image
+      # `load: true` is the whole point. The previous version of this job used
+      # `push: false` with no `load`, so the image never entered the local
+      # daemon and nothing ever ran it — "Docker Build is green" only ever meant
+      # "it compiled". #583 (the production stack could not start at all) lived
+      # through four months of green builds because of that gap.
+      #
+      # Tags match the `image:` keys in docker-compose.prod.yml so the stack can
+      # come up with --no-build.
+      - name: Build runtime image
         uses: docker/build-push-action@v7
         with:
           context: .
-          push: false
-          tags: sunrise:${{ github.sha }}
+          target: runner
+          load: true
+          tags: sunrise-web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Host stays `localhost`: nothing connects at build time (this only has
+          # to parse, for Next's env validation), and a literal
+          # `postgres:postgres@db` trips TruffleHog's structural Postgres
+          # detector, which tolerates `localhost` but not a service name.
+          # NODE_HEAP_MB is the whole point of #543: the workflow-level
+          # NODE_OPTIONS above does not cross into a container build, so
+          # without this the builder stage stays pinned at its 4096 default
+          # while every runner-side job honours the variable.
           build-args: |
             DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sunrise
             BETTER_AUTH_URL=http://localhost:3000
@@ -396,27 +595,290 @@ jobs:
             NEXT_PUBLIC_APP_URL=http://localhost:3000
             NODE_HEAP_MB=${{ vars.CI_NODE_HEAP_MB || 5120 }}
 
+      # The migrator and seeder derive from `deps`, which the build above just
+      # produced. Buildx keeps one builder instance for the whole job, so these
+      # hit its local cache and cost seconds. They deliberately do NOT write to
+      # the GHA cache: a second `cache-to` on the same scope would overwrite the
+      # runtime image's entry, which is the one worth keeping warm.
+      - name: Build migrator image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: migrator
+          load: true
+          tags: sunrise-migrator:latest
+          cache-from: type=gha
+
+      - name: Build seeder image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: seeder
+          load: true
+          tags: sunrise-seeder:latest
+          cache-from: type=gha
+
+      # Assertions on the images themselves, before anything is started.
+      - name: Assert image invariants
+        run: |
+          set -euo pipefail
+
+          # #571: `libc` is the only field separating @img/sharp-linux-* (glibc)
+          # from @img/sharp-linuxmusl-* (musl). A glibc variant in this musl
+          # image is silent — it inflates the image and dies at first use.
+          IMGS=$(docker run --rm sunrise-web:latest ls node_modules/@img)
+          echo "$IMGS"
+          echo "$IMGS" | grep -q 'sharp-linuxmusl-'
+          # Matches sharp-linux-* and sharp-libvips-linux-* (both glibc), while
+          # NOT matching the musl names, which are sharp-linuxmusl-* /
+          # sharp-libvips-linuxmusl-*. The `-` before `linux` is what separates
+          # them: "linuxmusl" has no hyphen at that position.
+          if echo "$IMGS" | grep -qE '^sharp-(libvips-)?linux-(x64|arm64)$'; then
+            echo "::error::glibc sharp variant present in a musl image (#571)"
+            exit 1
+          fi
+          docker run --rm sunrise-web:latest node -e "require('sharp'); console.log('sharp loads')"
+
+          # #583: the Prisma CLI must stay out of the runtime image. Its closure
+          # is ~240 MB of deploy-time tooling (Studio, pglite, effect, d3). A
+          # well-meaning COPY would put it back without breaking anything
+          # visible, which is exactly how this rots.
+          if docker run --rm sunrise-web:latest sh -c 'test -e node_modules/prisma'; then
+            echo "::error::Prisma CLI is back in the runtime image (#583)"
+            exit 1
+          fi
+
+          # The admin knowledge-seed route reads this at
+          # `path.join(process.cwd(), 'prisma/seeds/data/chunks/chunks.json')`.
+          # Dropping the wholesale `COPY /app/prisma` left it in the image only
+          # because nft statically evaluated that join — there is no
+          # `outputFileTracingIncludes` backing it up, and the stack smoke never
+          # hits that admin-authed route. So assert it directly: an nft upgrade
+          # or a refactor that puts the path in a variable would otherwise ship
+          # an image that 500s with ENOENT while this job stays green.
+          docker run --rm sunrise-web:latest test -f prisma/seeds/data/chunks/chunks.json
+
+          for img in sunrise-web sunrise-migrator sunrise-seeder; do
+            docker image inspect "$img:latest" --format "$img {{.Size}} bytes"
+          done
+
+      # Compose interpolates ${DB_PASSWORD} etc. and every service declares
+      # `env_file: .env`. The file is gitignored, so CI writes its own.
+      - name: Write .env for compose
+        run: |
+          # The DSN is assembled from parts rather than written literally. Here
+          # the host must be `db` (the compose service name — the containers
+          # resolve it on the bridge network), and a literal
+          # `postgres:postgres@db` trips TruffleHog's structural Postgres
+          # detector. `.github/` is deliberately not on .trufflehog-exclude.txt,
+          # so the fix belongs here rather than in the allowlist. Braces are
+          # load-bearing: `${DB_USER}` reads clean, bare `$DB_USER` does not.
+          # Unquoted heredoc, so these expand.
+          DB_USER=postgres
+          DB_PASSWORD=postgres
+          DB_NAME=sunrise
+          cat > .env <<EOF
+          NODE_ENV=production
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          DB_NAME=${DB_NAME}
+          DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+          BETTER_AUTH_SECRET=ci-build-secret-not-for-production-use
+          BETTER_AUTH_URL=http://localhost:3000
+          NEXT_PUBLIC_APP_URL=http://localhost:3000
+          EOF
+          echo "--- .env written ---"
+          sed 's/=.*/=<redacted>/' .env
+
+      # Naming `web` pulls in db + migrator through depends_on. `nginx` is not
+      # named on purpose: it binds :80/:443 and mounts nginx.conf, and it is not
+      # part of what this job is proving.
+      - name: Start the stack (db + migrator + web)
+        run: docker compose up -d --no-build web
+
+      - name: Assert the migrator exited 0
+        run: |
+          set -euo pipefail
+          CID=$(docker compose ps -aq migrator)
+          docker logs "$CID"
+          CODE=$(docker inspect -f '{{.State.ExitCode}}' "$CID")
+          echo "migrator exit code: $CODE"
+          test "$CODE" = "0"
+
+      # Poll the container's own healthcheck rather than sleeping a fixed
+      # interval. The Dockerfile sets start-period 40s / interval 30s /
+      # retries 3, so healthy usually lands at 40-70s.
+      - name: Wait for web to report healthy
+        run: |
+          set -euo pipefail
+          CID=$(docker compose ps -q web)
+          for i in $(seq 1 60); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' "$CID")
+            echo "attempt $i: $STATUS"
+            case "$STATUS" in
+              healthy) exit 0 ;;
+              unhealthy) echo "::error::web went unhealthy"; exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "::error::web never reached healthy within 300s"
+          exit 1
+
+      - name: Assert /api/health reports an operational database
+        run: |
+          set -euo pipefail
+          BODY=$(curl -fsS http://localhost:3000/api/health)
+          echo "$BODY"
+          test "$(jq -r '.status' <<<"$BODY")" = "ok"
+          # `connected`, not `status`: determineServiceStatus() downgrades to
+          # `degraded` above 500 ms latency while still returning 200/ok
+          # (app/api/health/route.ts:19-31), so asserting `operational` would
+          # turn a merely contended runner into a red X that means nothing.
+          test "$(jq -r '.services.database.connected' <<<"$BODY")" = "true"
+          case "$(jq -r '.services.database.status' <<<"$BODY")" in
+            operational | degraded) ;;
+            *) echo "::error::unexpected database status"; exit 1 ;;
+          esac
+
+      # /api/health only runs `$queryRaw SELECT 1` (lib/db/utils.ts), which goes
+      # straight through the pg adapter and never touches the generated client.
+      # The client and its wasm query compiler reach this image through Next's
+      # standalone trace rather than an explicit COPY, so they are exactly what
+      # slimming the runner in #583 could have broken — and nothing above would
+      # notice.
+      #
+      # This runs a real model query using only the image's own modules, and
+      # fails on a non-zero exit. It does NOT go through an HTTP route on
+      # purpose: the obvious candidate
+      # (`/api/v1/invitations/metadata`, which reaches
+      # `prisma.verification.findFirst`) is useless as a probe, because
+      # `getInvitationMetadata` catches every error and returns
+      # `reason: 'not_found'` (lib/utils/invitation-token.ts:360-363), which the
+      # route maps to 404 — the same 404 a working lookup returns. Verified by
+      # deleting `query_compiler_fast_bg.wasm-base64.js` from the image: the
+      # endpoint still answered 404, while this step exits 1.
+      #
+      # `@prisma/adapter-pg` must be `import`ed, not `require`d: the trace
+      # carries its ESM entry only, because that is how the server loads it.
+      - name: Assert a Prisma model query works in the runtime image
+        run: |
+          set -euo pipefail
+          docker compose exec -T web node --input-type=module -e "
+            import { createRequire } from 'node:module';
+            const require = createRequire('/app/');
+            const { PrismaClient } = require('@prisma/client');
+            const { Pool } = require('pg');
+            const { PrismaPg } = await import('@prisma/adapter-pg');
+            const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+            const rows = await new PrismaClient({ adapter: new PrismaPg(pool) }).user.count();
+            console.log('model query ok, user rows:', rows);
+            await pool.end();
+          "
+
+      # The step docker-compose.prod.yml calls REQUIRED on first install, and
+      # which silently could not work before #583. --no-deps because db and
+      # migrator are already up.
+      - name: Seed via the profile-gated seeder
+        run: docker compose --profile seed run --rm --no-deps seeder
+
+      - name: Surface container logs on failure
+        if: failure()
+        run: |
+          docker compose ps -a || true
+          for s in db migrator web; do
+            echo "===== $s ====="
+            docker compose logs --no-color --tail=200 "$s" || true
+          done
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans || true
+
+  # Only fires when the manifest or lockfile moved. Offline by design: this is
+  # the *diff* check, which compares the two revisions' own contents and makes
+  # no registry calls, so it is safe as a PR gate. Its absolute counterpart
+  # (`fix:lockfile-libc --check`, ~1,400 registry requests) stays on the weekly
+  # schedule in dependency-audit.yml for exactly that reason.
+  #
+  # It exists here because `/pre-pr` runs this check locally and Dependabot PRs
+  # never run `/pre-pr`. npm below 11.11.0 deletes `libc` from every entry it
+  # writes, on every platform, and the result installs fine locally and wrong on
+  # Alpine — #571 shipped that way for two releases. Whatever npm a contributor
+  # or a bot happens to have, the loss now surfaces on the PR that causes it.
+  lockfile:
+    name: Lockfile metadata
+    runs-on: ubuntu-latest
+    needs: config
+    # Pull requests only. This is a diff against the merge base, and on a push
+    # to main HEAD *is* the merge base — the job would compare the tree with
+    # itself and pass on anything.
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.config.outputs.deps == 'true'
+    # prisma generate (postinstall) needs DATABASE_URL defined; it does not
+    # connect, so a placeholder is fine — no Postgres service on this job.
+    env:
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci
+      # `HEAD^`, not `merge-base origin/main HEAD`, and not `fetch-depth: 0`.
+      # Both are the same lesson the CHANGELOG step above already learned: on a
+      # PR, checkout gives us `refs/pull/N/merge`, whose first parent IS the
+      # base commit it was merged against. That is what the merge ref is made
+      # of, so there is nothing to resolve and no assumption to get wrong —
+      # whereas `origin/main` depends on the refspec checkout happened to
+      # configure, and a full-history fetch costs the whole clone to read one
+      # file at one revision.
+      #
+      # Deepen by `github.sha`, not by branch: `--depth` counts from the tip of
+      # whatever is fetched, so `origin main` would deepen around the CURRENT
+      # tip, and another merge landing while this run queues would leave this
+      # commit's parent unfetched. Guarded, because `--depth` truncates a
+      # complete clone as readily as it deepens a shallow one.
+      - name: Check lockfile platform metadata
+        run: |
+          set -euo pipefail
+          git cat-file -e 'HEAD^' 2>/dev/null || git fetch --no-tags --depth=2 origin "${{ github.sha }}"
+          npm run check:lockfile -- --base 'HEAD^'
+
   # Gate job for branch protection — always runs and reports a single status.
   # Skipped jobs (docs-only, the inactive test mode, non-docker PRs) are not
   # failures, so the gate passes as long as nothing that ran failed.
   ci-status:
     name: CI Status
     runs-on: ubuntu-latest
-    needs: [typecheck, lint, build, test-full, test-changed, smoke, docker]
+    # `config` is in this list deliberately. Every other job is gated on its
+    # outputs, so if IT fails they all resolve to `skipped` — and the loop below
+    # passes on `skipped`. That produced "CI passed" with zero gates run: the
+    # exact hole this file's change-detection fix closes, one job further up.
+    needs: [config, typecheck, lint, build, test-full, test-changed, smoke, docker, lockfile]
     if: always()
     steps:
       - name: Check CI result
         run: |
           for result in \
+            "${{ needs.config.result }}" \
             "${{ needs.typecheck.result }}" \
             "${{ needs.lint.result }}" \
             "${{ needs.build.result }}" \
             "${{ needs.test-full.result }}" \
             "${{ needs.test-changed.result }}" \
             "${{ needs.smoke.result }}" \
-            "${{ needs.docker.result }}"; do
-            if [[ "$result" == "failure" ]]; then
-              echo "CI failed"
+            "${{ needs.docker.result }}" \
+            "${{ needs.lockfile.result }}"; do
+            # Allow-list, not a deny-list. Testing for `failure` let
+            # `cancelled` through — a job killed by its own `timeout-minutes`
+            # (the docker job carries 30), or a run cancelled while this job's
+            # `if: always()` still fires, reported "CI passed" for gates that
+            # never finished. Same shape as the `skipped` hole this file's
+            # change-detection fix closes, so it gets the same treatment.
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "CI failed (a required job reported '$result')"
               exit 1
             fi
           done

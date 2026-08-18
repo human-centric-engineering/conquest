@@ -68,7 +68,7 @@ Use for external library docs: `resolve-library-id` → `query-docs`. Essential 
 ```bash
 # Development
 npm run dev                    # Start dev server
-npm run validate               # Type-check + lint + format
+npm run validate               # CHANGELOG + Node version + type-check + lint + format (Prettier + Prisma)
 
 # Database
 npm run db:migrate:dev         # Create and apply migration (dev only)
@@ -289,8 +289,8 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | ------------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Architecture             | `.context/architecture/`                                  | System design, deployment                                                                                                                                                      |
 | CI Pipeline              | `.context/architecture/ci.md`                             | GitHub Actions pipeline; public/private-fork adaptation, `CI_TEST_SCOPE` knob, GHAS-skip, sharding, the two forker gotchas                                                     |
-| Multi-Tenancy            | `.context/architecture/multi-tenancy.md`                  | Opt-in RLS retrofit playbook; single-tenant by default, `TENANCY_MODE` seam                                                                                                    |
-| Multi-Tenancy Research   | `.context/architecture/multi-tenancy-research.md`         | Gap analysis: five isolation planes, control/commercial planes, platform-vs-fork ownership matrix, fork merge surface                                                          |
+| Multi-Tenancy            | `.context/architecture/multi-tenancy.md`                  | Opt-in RLS retrofit playbook; single-tenant by default, `TENANCY_MODE` seam, fork-tier map, upstream-sync checklist                                                            |
+| Multi-Tenancy Research   | `.context/architecture/multi-tenancy-research.md`         | Gap analysis: five isolation planes, control/commercial planes, ownership matrix, fork merge surface, provisions for forks                                                     |
 | Authentication           | `.context/auth/`                                          | better-auth, sessions, guards                                                                                                                                                  |
 | API                      | `.context/api/`                                           | Endpoints, responses, client                                                                                                                                                   |
 | Database                 | `.context/database/`                                      | Prisma schema, migrations, seeding                                                                                                                                             |

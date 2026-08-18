@@ -24,7 +24,16 @@ const unit: SeedUnit = {
 
     const capability = await prisma.aiCapability.upsert({
       where: { slug: SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: SUGGEST_ROUND_BRIEFING_HANDLER,
+        functionDefinition:
+          SUGGEST_ROUND_BRIEFING_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: SUGGEST_ROUND_BRIEFING_CAPABILITY_SLUG,
         name: 'Suggest Round Briefing',

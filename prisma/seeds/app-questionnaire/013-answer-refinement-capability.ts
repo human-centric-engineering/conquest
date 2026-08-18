@@ -33,7 +33,15 @@ const unit: SeedUnit = {
 
     const capability = await prisma.aiCapability.upsert({
       where: { slug: REFINE_ANSWER_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: REFINE_ANSWER_HANDLER,
+        functionDefinition: REFINE_ANSWER_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: REFINE_ANSWER_CAPABILITY_SLUG,
         name: 'Refine Answer',

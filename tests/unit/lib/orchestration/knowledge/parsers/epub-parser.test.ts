@@ -1,24 +1,27 @@
 /**
- * Unit Tests: EPUB Parser (parseEpub)
+ * Unit Tests: EPUB Parser (parseEpub) — mocked branch cases
  *
- * Tests the EPUB document parser that writes the buffer to a temp file,
- * uses epub2 to extract chapters, and strips HTML to produce plain text.
+ * Covers the branches that are awkward to reach with a real archive: a chapter
+ * whose extraction rejects, individual metadata fields absent, and the HTML
+ * stripping rules in isolation.
  *
- * Test Coverage:
- * - Happy path: parses a valid EPUB with chapters
- * - Metadata extraction (title, author, language, publisher)
- * - TOC-based section title lookup
- * - Near-empty chapters are skipped (< 10 chars)
- * - Chapters that fail extraction are skipped with a warning
- * - Empty EPUB (no flow chapters) → empty sections, title from filename
- * - Temp directory is always cleaned up (even on error)
- * - HTML stripping: style/script tags, entities, block-element newlines
+ * **This file cannot catch a wrong belief about the library, and it once
+ * enshrined one.** Its mock declared `parse()` returning a resolved promise
+ * while `epub2`'s returned `this` — 27 tests green over a parser that produced
+ * an empty document for every book (#606). `epub-parser-archive.test.ts` is the
+ * file that can catch that: it mocks nothing and feeds `parseEpub` a real
+ * archive. When the library was swapped for `epub` (#601/#614), that suite
+ * passed unchanged and this one had to be rewritten — which is the difference
+ * between the two, demonstrated.
  *
- * Mocking strategy:
- * - `fs/promises` (writeFile / mkdtemp / rm) is mocked via vi.hoisted + vi.mock
- * - `epub2` default export — EPub class constructor + parse + metadata/toc/flow/getChapterRaw
+ * So: keep the assertions here about `parseEpub`'s own logic, and put anything
+ * that depends on how the library behaves in the archive suite.
+ *
+ * Mocking strategy: `epub`'s default export only. There is no `fs` mock because
+ * there is no temp file — `epub` reads the Buffer directly.
  *
  * @see lib/orchestration/knowledge/parsers/epub-parser.ts
+ * @see tests/unit/lib/orchestration/knowledge/parsers/epub-parser-archive.test.ts
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -28,8 +31,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // available inside mock factories without hoisting issues.
 
 const mocks = vi.hoisted(() => {
+  // Copy any addition's shape from `node_modules/epub/dist/epub.d.ts` — the
+  // library ships its own types now, so there is no hand-written declaration
+  // left to get this wrong in. `parse()` and `getChapterRaw()` really are
+  // promise-returning here; under `epub2` neither was, and inventing that in
+  // this mock is what hid #606.
   const epubInstance = {
-    parse: vi.fn(),
     metadata: {
       title: 'Test Book',
       creator: 'Test Author',
@@ -38,39 +45,23 @@ const mocks = vi.hoisted(() => {
     },
     toc: [] as Array<{ id: string; title: string }>,
     flow: [] as Array<{ id: string; title?: string }>,
+    parse: vi.fn(),
     getChapterRaw: vi.fn(),
   };
 
-  // EPub must be a proper constructor function so `new EPub(...)` works.
-  // Cannot use an arrow function here — it would fail with "not a constructor".
+  // `new EPub(buffer)` — a real constructor function, not an arrow, or the
+  // `new` fails.
   function MockEPubConstructor(this: unknown) {
     return epubInstance;
   }
 
-  return {
-    writeFile: vi.fn(),
-    mkdtemp: vi.fn(),
-    rm: vi.fn(),
-    epubInstance,
-    EPub: MockEPubConstructor,
-  };
+  return { epubInstance, EPub: MockEPubConstructor };
 });
 
 // ─── Module mocks ────────────────────────────────────────────────────────────
 
-vi.mock('epub2', () => ({
+vi.mock('epub', () => ({
   default: mocks.EPub,
-}));
-
-vi.mock('fs/promises', () => ({
-  writeFile: mocks.writeFile,
-  mkdtemp: mocks.mkdtemp,
-  rm: mocks.rm,
-  default: {
-    writeFile: mocks.writeFile,
-    mkdtemp: mocks.mkdtemp,
-    rm: mocks.rm,
-  },
 }));
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
@@ -103,80 +94,7 @@ function resetEpubInstance(): void {
 describe('parseEpub', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.writeFile.mockResolvedValue(undefined);
-    mocks.mkdtemp.mockResolvedValue('/tmp/sunrise-epub-abc123');
-    mocks.rm.mockResolvedValue(undefined);
     resetEpubInstance();
-  });
-
-  // ---------------------------------------------------------------------------
-  // Temp file lifecycle
-  // ---------------------------------------------------------------------------
-
-  describe('temp file lifecycle', () => {
-    it('should write the buffer into a private temp directory before parsing', async () => {
-      // Arrange
-      mocks.epubInstance.flow = [{ id: 'ch1' }];
-      mocks.epubInstance.getChapterRaw.mockResolvedValue('<p>Content here.</p>');
-
-      // Act
-      await parseEpub(fakeBuffer(), 'book.epub');
-
-      // Assert: temp dir created with mkdtemp (unpredictable, mode 0700) and
-      // the buffer written inside it.
-      expect(mocks.mkdtemp).toHaveBeenCalledTimes(1);
-      expect(mocks.mkdtemp.mock.calls[0][0] as string).toContain('sunrise-epub-');
-      expect(mocks.writeFile).toHaveBeenCalledTimes(1);
-      const [path, buf] = mocks.writeFile.mock.calls[0] as [string, Buffer];
-      expect(path).toBe('/tmp/sunrise-epub-abc123/book.epub');
-      expect(Buffer.isBuffer(buf)).toBe(true);
-    });
-
-    it('should always remove the temp directory after successful parse', async () => {
-      // Arrange
-      mocks.epubInstance.flow = [{ id: 'ch1' }];
-      mocks.epubInstance.getChapterRaw.mockResolvedValue('<p>Content here.</p>');
-
-      // Act
-      await parseEpub(fakeBuffer(), 'book.epub');
-
-      // Assert: temp dir removed recursively
-      expect(mocks.rm).toHaveBeenCalledTimes(1);
-      const [path, opts] = mocks.rm.mock.calls[0] as [
-        string,
-        { recursive: boolean; force: boolean },
-      ];
-      expect(path).toBe('/tmp/sunrise-epub-abc123');
-      expect(opts).toEqual({ recursive: true, force: true });
-    });
-
-    it('should remove the temp directory even when epub.parse() throws', async () => {
-      // Arrange: simulate corrupt EPUB
-      mocks.epubInstance.parse.mockRejectedValue(new Error('Corrupt EPUB'));
-
-      // Act + Assert: error re-thrown after cleanup
-      await expect(parseEpub(fakeBuffer(), 'bad.epub')).rejects.toThrow('Corrupt EPUB');
-      expect(mocks.rm).toHaveBeenCalledTimes(1);
-    });
-
-    it('should remove the temp directory even when writeFile throws', async () => {
-      // Arrange: the write into the (already created) temp dir fails
-      mocks.writeFile.mockRejectedValue(new Error('ENOSPC: no space left on device'));
-
-      // Act + Assert: error re-thrown, but the mkdtemp directory is still cleaned up
-      await expect(parseEpub(fakeBuffer(), 'book.epub')).rejects.toThrow('ENOSPC');
-      expect(mocks.rm).toHaveBeenCalledTimes(1);
-      expect(mocks.rm.mock.calls[0][0]).toBe('/tmp/sunrise-epub-abc123');
-    });
-
-    it('should not throw if removing the temp directory fails', async () => {
-      // Arrange: rm fails (e.g. temp dir already cleaned)
-      mocks.epubInstance.flow = [];
-      mocks.rm.mockRejectedValue(new Error('Directory not found'));
-
-      // Act + Assert: resolves cleanly despite rm failure
-      await expect(parseEpub(fakeBuffer(), 'book.epub')).resolves.toBeDefined();
-    });
   });
 
   // ---------------------------------------------------------------------------

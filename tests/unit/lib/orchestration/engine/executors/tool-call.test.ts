@@ -23,6 +23,17 @@ vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
     loadFromDatabase: vi.fn().mockResolvedValue(undefined),
     getRegistryEntry: vi.fn().mockReturnValue(undefined),
   },
+  // Kept in step with the real export so the executor's `agentId` assertion
+  // below is testing the executor, not a stub that invented the format.
+  workflowAgentId: (workflowId: string) => `workflow:${workflowId}`,
+}));
+// The executor calls this before dispatching (#537). Stubbed here because this
+// file mocks the dispatcher wholesale, so the real registration would call
+// `register()` on an object that has no such method. That also means this file
+// cannot see #537 at all — the registry it dispatches into is never empty.
+// `tool-call-cold-registry.test.ts` runs the real dispatcher for exactly that.
+vi.mock('@/lib/orchestration/capabilities/registry', () => ({
+  registerBuiltInCapabilities: vi.fn(),
 }));
 vi.mock('@/lib/orchestration/engine/dispatch-cache', () => ({
   buildIdempotencyKey: vi.fn(({ executionId, stepId, turnIndex }) =>
@@ -177,7 +188,12 @@ describe('executeToolCall', () => {
     expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
       'my-tool',
       { x: 1 },
-      { userId: 'user_1', agentId: 'workflow:wf_tool', scope: { projectId: 'proj-42' } }
+      {
+        userId: 'user_1',
+        agentId: 'workflow:wf_tool',
+        workflowExecutionId: 'exec_1',
+        scope: { projectId: 'proj-42' },
+      }
     );
   });
 
@@ -192,7 +208,14 @@ describe('executeToolCall', () => {
 
     const [, , context] = vi.mocked(capabilityDispatcher.dispatch).mock.calls[0];
     expect(context).not.toHaveProperty('scope');
-    expect(context).toEqual({ userId: 'user_1', agentId: 'workflow:wf_tool' });
+    // `workflowExecutionId` is unconditional, unlike `scope`: it is the only FK
+    // the dispatcher's cost log can persist a workflow dispatch against, since
+    // the `agentId` beside it is a label rather than an `AiAgent.id`.
+    expect(context).toEqual({
+      userId: 'user_1',
+      agentId: 'workflow:wf_tool',
+      workflowExecutionId: 'exec_1',
+    });
   });
 
   it('uses argsFrom step output (object) when config.args is absent', async () => {

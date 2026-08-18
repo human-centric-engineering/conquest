@@ -119,7 +119,18 @@ const serverEnvSchema = z.object({
         'setting isEnabled:false and keeping the row. "strict" makes a missing row deny instead. ' +
         'Strict is opt-in because it retroactively revokes every capability an agent relied on ' +
         'implicitly, including the mcp-system agent, which dispatches built-ins with no pivot ' +
-        'rows in a default install — audit AiAgentCapability before enabling it.'
+        'rows in a default install — audit AiAgentCapability before enabling it. ' +
+        'Workflow tool_call steps are EXEMPT: they dispatch under a synthetic ' +
+        '"workflow:<id>" agentId that the AiAgentCapability FK rejects, so no binding row can ' +
+        'be created for them and strict would deny every one with no available remedy. The ' +
+        "step's capabilitySlug is admin-authored config, not a model-chosen tool name, so the " +
+        'step itself is the grant. CONSEQUENCE worth knowing before you rely on strict as a ' +
+        "revocation: strict's guarantee is AGENT-scoped and does not follow into a workflow. An " +
+        'agent bound to run_workflow can reach every capability inside any workflow its ' +
+        'customConfig.allowedWorkflowSlugs permits, including one you revoked from that agent ' +
+        'directly. Note isEnabled:false does NOT help here either — the workflow path never ' +
+        'consults a binding row at all. Audit those allow-lists, or use the capability-scoped ' +
+        'off-switches that deny BEFORE any binding is read: isActive:false, or quarantine.'
     ),
 
   // Logging Configuration (optional)
@@ -145,6 +156,23 @@ const serverEnvSchema = z.object({
     .describe(
       'Emit one structured access-log line per request from the proxy (requestId, visitorId, ' +
         'method, path). Default OFF — opt in with "true" to make navigation visible server-side.'
+    ),
+
+  // Escalation webhook target policy (optional)
+  ESCALATION_WEBHOOK_ALLOW_PRIVATE: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((val) => val === 'true')
+    .describe(
+      'Permit the escalation webhook to POST to a private RFC1918 or IPv6 unique-local ' +
+        'address. Off by default. Set it only when the escalation relay genuinely runs on ' +
+        "the deployment's own private network (a VPC endpoint, say) — it widens the SSRF " +
+        'guard for that one target. Link-local (169.254.0.0/16, fe80::/10) stays blocked ' +
+        'either way: it hosts credential-vending metadata services beyond the well-known ' +
+        '169.254.169.254 — AWS ECS task metadata at 169.254.170.2, EKS Pod Identity at ' +
+        '169.254.170.23. CGNAT (100.64.0.0/10) stays blocked too — shared address space, ' +
+        "the default Tailscale range, and Alibaba's metadata host. Loopback IS permitted by " +
+        'this flag, so a same-pod relay sidecar on 127.0.0.1 works.'
     ),
 
   // Internal self-calls (optional)

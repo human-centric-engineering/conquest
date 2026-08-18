@@ -22,6 +22,8 @@ import {
   ProviderError,
   buildRequestOptions,
   toProviderError,
+  toProviderErrorWithUsage,
+  isRequestFault,
   fetchWithTimeout,
   withRetry,
   DEFAULT_TIMEOUT_MS,
@@ -247,6 +249,51 @@ describe('toProviderError', () => {
 // ---------------------------------------------------------------------------
 // fetchWithTimeout
 // ---------------------------------------------------------------------------
+
+describe('isRequestFault', () => {
+  it('identifies a truncation as a request fault', () => {
+    expect(isRequestFault(new ProviderError('cut off', { code: 'truncated_no_output' }))).toBe(
+      true
+    );
+  });
+
+  it('does NOT treat a status-less transport failure as one', () => {
+    // The regression this predicate exists to prevent. `toProviderError` can
+    // only set `retriable` when it reads a retriable HTTP status, so a
+    // connection reset or read timeout — no status — arrives as
+    // `provider_error` with `retriable: false`. Gating retry on that flag
+    // would stop a workflow step retrying an ordinary network blip, since
+    // `withRetry` also declines to retry it. Only the CODE may gate.
+    const connectionReset = toProviderError(
+      new Error('Connection error.'),
+      'OpenAI-compatible chat request failed'
+    );
+    expect(connectionReset.retriable).toBe(false);
+    expect(connectionReset.code).toBe('provider_error');
+    expect(isRequestFault(connectionReset)).toBe(false);
+  });
+
+  it('does NOT treat an auth failure as one — failing over is the point', () => {
+    const unauthorized = new ProviderError('bad key', {
+      code: 'http_401',
+      status: 401,
+      retriable: false,
+    });
+    expect(isRequestFault(unauthorized)).toBe(false);
+  });
+
+  it('ignores non-ProviderError values', () => {
+    for (const v of [
+      new Error('truncated_no_output'),
+      'truncated_no_output',
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(isRequestFault(v)).toBe(false);
+    }
+  });
+});
 
 describe('fetchWithTimeout', () => {
   // Use real timers for fetchWithTimeout tests to avoid happy-dom AbortSignal
@@ -533,5 +580,97 @@ describe('buildRequestOptions', () => {
   it('honours a zero timeout rather than treating it as unset', () => {
     // 0 is falsy; an `if (options.timeoutMs)` guard would silently drop it.
     expect(buildRequestOptions({ model: 'gpt-4o', timeoutMs: 0 })).toEqual({ timeout: 0 });
+  });
+});
+
+describe('toProviderErrorWithUsage', () => {
+  // The half of #592 that survived #593: an adapter knows what a dying stream
+  // has already been billed for, and the plain `toProviderError` path drops it,
+  // leaving the streaming handler with nothing to write to `AiCostLog`.
+
+  it('attaches usage the provider had already reported', () => {
+    const err = toProviderErrorWithUsage(new Error('socket hang up'), 'stream failed', {
+      inputTokens: 400,
+      outputTokens: 900,
+    });
+
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.usage).toEqual({ inputTokens: 400, outputTokens: 900 });
+  });
+
+  it('drops zeroed usage rather than reporting the turn as free', () => {
+    // Zero means "the provider never told us", not "this cost nothing". An
+    // OpenAI-compatible stream reports usage in a final chunk, so an error
+    // before it leaves both counts at 0 — and a zeroed AiCostLog row reads as
+    // a free turn on the dashboard, which is worse than no row.
+    const err = toProviderErrorWithUsage(new Error('connection refused'), 'stream failed', {
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+
+    expect(err.usage).toBeUndefined();
+  });
+
+  it('attaches a partial count when only one side is known', () => {
+    const err = toProviderErrorWithUsage(new Error('reset'), 'stream failed', {
+      inputTokens: 120,
+      outputTokens: 0,
+    });
+
+    expect(err.usage).toEqual({ inputTokens: 120, outputTokens: 0 });
+  });
+
+  it('does not overwrite usage an error already carries', () => {
+    // The truncation guards attach exactly what the provider reported, which
+    // beats anything reconstructed from a partial accumulator.
+    const original = new ProviderError('truncated', {
+      code: 'truncated_no_output',
+      usage: { inputTokens: 1, outputTokens: 2 },
+    });
+
+    const err = toProviderErrorWithUsage(original, 'stream failed', {
+      inputTokens: 999,
+      outputTokens: 999,
+    });
+
+    expect(err.usage).toEqual({ inputTokens: 1, outputTokens: 2 });
+    expect(err).toBe(original);
+  });
+
+  it('keeps the original throw site in the stack', () => {
+    // The rebuild happens in this helper, so without carrying `stack` across,
+    // `log.error('Streaming chat handler crashed', err)` and the span exception
+    // both point at the helper instead of the adapter loop that threw — the one
+    // thing an operator opens them for.
+    const original = new ProviderError('exploded in the stream loop', { code: 'http_500' });
+    const originalStack = original.stack;
+
+    const err = toProviderErrorWithUsage(original, 'stream failed', {
+      inputTokens: 5,
+      outputTokens: 7,
+    });
+
+    expect(err).not.toBe(original);
+    expect(err.stack).toBe(originalStack);
+  });
+
+  it('preserves code, status and retriable while adding usage', () => {
+    // Rebuilding the error must not quietly downgrade a retriable 503 into a
+    // non-retriable `provider_error`, which would stop failover.
+    const original = new ProviderError('unavailable', {
+      code: 'http_503',
+      status: 503,
+      retriable: true,
+    });
+
+    const err = toProviderErrorWithUsage(original, 'stream failed', {
+      inputTokens: 5,
+      outputTokens: 7,
+    });
+
+    expect(err.code).toBe('http_503');
+    expect(err.status).toBe(503);
+    expect(err.retriable).toBe(true);
+    expect(err.usage).toEqual({ inputTokens: 5, outputTokens: 7 });
   });
 });

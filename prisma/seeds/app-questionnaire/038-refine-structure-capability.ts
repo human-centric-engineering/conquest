@@ -23,7 +23,16 @@ const unit: SeedUnit = {
 
     const capability = await prisma.aiCapability.upsert({
       where: { slug: REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: REFINE_QUESTIONNAIRE_STRUCTURE_HANDLER,
+        functionDefinition:
+          REFINE_QUESTIONNAIRE_STRUCTURE_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: REFINE_QUESTIONNAIRE_STRUCTURE_CAPABILITY_SLUG,
         name: 'Refine Questionnaire Structure',

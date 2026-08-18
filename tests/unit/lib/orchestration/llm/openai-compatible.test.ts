@@ -390,6 +390,215 @@ describe('chat', () => {
     expect(response.finishReason).toBe('length');
   });
 
+  it('throws truncated_no_output when a structured extraction is cut off mid-JSON (#587)', async () => {
+    // Arrange — the far more common shape than the empty-content case above:
+    // reasoning ate most of the budget, the model emitted a few hundred
+    // tokens of the object, and got cut off mid-string. The content is
+    // non-empty, so the empty-content guard cannot see it, and the partial
+    // JSON reaches the caller's parser and reads as a schema violation.
+    // Anthropic already treats ANY max_tokens stop during extraction as a
+    // truncation (anthropic.ts); this is that same rule.
+    chatCreateMock.mockResolvedValue(makeChatCompletion('{"dimension":"clar', 'length'));
+
+    // Act
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      await provider.chat([{ role: 'user', content: 'x' }], {
+        model: 'gpt-5',
+        maxTokens: 2048,
+        responseFormat: { type: 'json_schema', name: 'judgement', schema: { type: 'object' } },
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    // Assert
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
+    expect((caught as Error).message).toMatch(/structured/i);
+    expect((caught as Error).message).toMatch(/2048/);
+  });
+
+  it('does not flag an extraction whose object is complete when the cap is hit', async () => {
+    // The model closed the object and was cut before the stop token, so
+    // `finish_reason` is 'length' but the payload is usable. Throwing here
+    // hard-fails a call the caller would have parsed happily, and burns a
+    // retry first. Matches the runner's rule, which requires parse to have
+    // failed AND the finish to be 'length'.
+    chatCreateMock.mockResolvedValue(makeChatCompletion('{"dimension":"clarity"}', 'length'));
+
+    const provider = makeProvider();
+    const response = await provider.chat([{ role: 'user', content: 'x' }], {
+      model: 'gpt-5',
+      maxTokens: 2048,
+      responseFormat: { type: 'json_schema', name: 'judgement', schema: { type: 'object' } },
+    });
+
+    expect(response.content).toBe('{"dimension":"clarity"}');
+    // Still surfaced, so a caller that cares can notice the model wanted more.
+    expect(response.finishReason).toBe('length');
+  });
+
+  it("accepts a complete object inside a code fence, as the callers' parser does", async () => {
+    // A host that ignores `response_format` (Ollama, LM Studio, vLLM) can
+    // still fence its JSON. `tryParseJson` strips one fence and would have
+    // accepted this; a guard stricter than the parser it protects turns a
+    // usable response into a hard failure — and on the streaming and
+    // llm_call paths there is no retry to save it.
+    chatCreateMock.mockResolvedValue(
+      makeChatCompletion('```json\n{"dimension":"clarity"}\n```', 'length')
+    );
+
+    const provider = makeProvider();
+    const response = await provider.chat([{ role: 'user', content: 'x' }], {
+      model: 'gpt-5',
+      responseFormat: { type: 'json_schema', name: 'judgement', schema: { type: 'object' } },
+    });
+
+    expect(response.finishReason).toBe('length');
+  });
+
+  it('still flags a fence whose object never closed', async () => {
+    // Guards the leniency above from going too far.
+    chatCreateMock.mockResolvedValue(makeChatCompletion('```json\n{"dimension":"clar', 'length'));
+
+    const provider = makeProvider();
+    await expect(
+      provider.chat([{ role: 'user', content: 'x' }], {
+        model: 'gpt-5',
+        responseFormat: { type: 'json_schema', name: 'judgement', schema: { type: 'object' } },
+      })
+    ).rejects.toMatchObject({ code: 'truncated_no_output' });
+  });
+
+  it('omits usage from the truncation error when the host reported none', async () => {
+    // `{0, 0}` is truthy at the call site, so it would write a $0 cost row for
+    // a full-cap turn — "this turn was free" is a worse lie than the missing
+    // row it replaced. Local hosts that ignore `stream_options` do this.
+    chatCreateMock.mockResolvedValue({
+      id: 'cmpl-test',
+      model: 'local-model',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: '{"partial', tool_calls: null },
+          finish_reason: 'length',
+        },
+      ],
+      usage: null,
+    });
+
+    const provider = makeLocalProvider();
+    let caught: unknown;
+    try {
+      await provider.chat([{ role: 'user', content: 'x' }], {
+        model: 'local-model',
+        responseFormat: { type: 'json_schema', name: 'j', schema: { type: 'object' } },
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
+    expect((caught as { usage?: unknown }).usage).toBeUndefined();
+  });
+
+  it('throws truncated_no_output when a json_object response is cut off mid-JSON (#594)', async () => {
+    // The orchestrator planner requests `json_object`, not `json_schema`
+    // (`executors/orchestrator.ts`). The guard used to test `json_schema`
+    // only, so a truncated plan sailed through, failed `JSON.parse`, spent a
+    // clarifying retry into the same cap, and surfaced as the misleading
+    // `planner_parse_failed`. A caller asking for json_object wants parseable
+    // JSON just as much as one supplying a schema.
+    chatCreateMock.mockResolvedValue(makeChatCompletion('{"steps":[{"agent":"resea', 'length'));
+
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      await provider.chat([{ role: 'user', content: 'plan it' }], {
+        model: 'gpt-5',
+        maxTokens: 4096,
+        responseFormat: { type: 'json_object' },
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
+    expect((caught as Error).message).toMatch(/4096/);
+    // Non-retriable, so the engine does not re-run the whole step at the same
+    // cap — `isRequestFault` keys on this code (llm-runner.ts).
+    expect((caught as { retriable?: boolean }).retriable).toBe(false);
+  });
+
+  it('does NOT arm the JSON guard when responseFormat is a bare string (#594 regression)', async () => {
+    // `metadataSchema` (lib/validations/orchestration.ts) allows only
+    // primitives, so an agent configured through the admin API stores
+    // `metadata.responseFormat` as the STRING "json_object", and
+    // `streaming-handler` casts it to LlmResponseFormat without validating.
+    //
+    // The first version of the widened guard tested `!!options.responseFormat`,
+    // which is true for a non-empty string. Nothing is sent to the API for a
+    // string (buildBaseParams keys on `.type`), so the model returns ordinary
+    // prose — and every `length` finish became `truncated_no_output`, which
+    // `isRequestFault` treats as a request fault, so the chat handler emitted
+    // `content_reset` and wiped text already streamed to the user.
+    chatCreateMock.mockResolvedValue(
+      makeChatCompletion('Here is a long prose answer that ran out of', 'length')
+    );
+
+    const provider = makeProvider();
+    const res = await provider.chat([{ role: 'user', content: 'explain' }], {
+      model: 'gpt-5',
+      maxTokens: 512,
+      responseFormat: 'json_object' as unknown as { type: 'json_object' },
+    });
+
+    expect(res.content).toMatch(/^Here is a long prose answer/);
+  });
+
+  it('does NOT flag a json_object response that completed before the cap', async () => {
+    // The complementary half. Without it, widening the guard to any
+    // responseFormat could fire on every `length` finish and the suite would
+    // still be green.
+    chatCreateMock.mockResolvedValue(makeChatCompletion('{"steps":[]}', 'length'));
+
+    const provider = makeProvider();
+    const res = await provider.chat([{ role: 'user', content: 'plan it' }], {
+      model: 'gpt-5',
+      maxTokens: 4096,
+      responseFormat: { type: 'json_object' },
+    });
+
+    expect(res.content).toBe('{"steps":[]}');
+  });
+
+  it('does not flag a truncated tool-calling turn that also carries a responseFormat', async () => {
+    // Arrange — with tools in play a `length` stop is the ordinary
+    // partial-output case, not a broken extraction: the model may be
+    // mid-tool-call, and the tool loop handles that. Mirrors the
+    // `!options.tools?.length` half of the Anthropic guard.
+    chatCreateMock.mockResolvedValue(makeChatCompletion('thinking about it', 'length'));
+
+    // Act
+    const provider = makeProvider();
+    const response = await provider.chat([{ role: 'user', content: 'x' }], {
+      model: 'gpt-5',
+      responseFormat: { type: 'json_schema', name: 'judgement', schema: { type: 'object' } },
+      tools: [
+        {
+          name: 'lookup',
+          description: 'look something up',
+          parameters: { type: 'object', properties: {} },
+        },
+      ],
+    });
+
+    // Assert
+    expect(response.content).toBe('thinking about it');
+    expect(response.finishReason).toBe('length');
+  });
+
   it('surfaces reasoning_tokens in usage when the SDK reports it', async () => {
     // Arrange
     chatCreateMock.mockResolvedValue({
@@ -567,6 +776,107 @@ describe('chatStream', () => {
     }
 
     // Assert
+    const done = collected.find((c) => (c as { type: string }).type === 'done');
+    expect(done).toMatchObject({ type: 'done', finishReason: 'length' });
+  });
+
+  it('throws truncated_no_output when a streaming structured extraction is cut off (#587)', async () => {
+    // Arrange — mirrors the non-streaming guard and the Anthropic streaming
+    // one. `streaming-handler.ts` forwards an agent's configured
+    // responseFormat on the streaming path whenever it has no tools, so this
+    // is a live combination, and the partial JSON already yielded as text is
+    // not usable JSON.
+    const chunks = [
+      makeChunk({ content: '{"verdict":"pa' }),
+      makeChunk({ finishReason: 'length' }),
+    ];
+    chatCreateMock.mockResolvedValue(toAsyncIterable(chunks));
+
+    // Act
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      for await (const _chunk of provider.chatStream([{ role: 'user', content: 'go' }], {
+        model: 'gpt-5',
+        maxTokens: 512,
+        responseFormat: { type: 'json_schema', name: 'verdict', schema: { type: 'object' } },
+      })) {
+        // drain
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    // Assert — surfaced before the `done` chunk, as on Anthropic.
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
+    expect((caught as Error).message).toMatch(/structured/i);
+  });
+
+  it('throws truncated_no_output when a streaming json_object response is cut off (#594)', async () => {
+    // Guards the accumulator as much as the guard: `structuredText` has to be
+    // collected for json_object too. When it was collected only for
+    // json_schema, this check read an always-empty string, `isCompleteJson('')`
+    // is false, and the guard fired on EVERY length finish — including
+    // complete JSON.
+    const chunks = [
+      makeChunk({ content: '{"steps":[{"agent":"resea' }),
+      makeChunk({ finishReason: 'length' }),
+    ];
+    chatCreateMock.mockResolvedValue(toAsyncIterable(chunks));
+
+    const provider = makeProvider();
+    let caught: unknown;
+    try {
+      for await (const _chunk of provider.chatStream([{ role: 'user', content: 'go' }], {
+        model: 'gpt-5',
+        maxTokens: 512,
+        responseFormat: { type: 'json_object' },
+      })) {
+        // drain
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    expect((caught as { code?: string }).code).toBe('truncated_no_output');
+  });
+
+  it('does NOT flag a streaming json_object response whose object completed', async () => {
+    const chunks = [makeChunk({ content: '{"steps":[]}' }), makeChunk({ finishReason: 'length' })];
+    chatCreateMock.mockResolvedValue(toAsyncIterable(chunks));
+
+    const provider = makeProvider();
+    const seen: string[] = [];
+    for await (const chunk of provider.chatStream([{ role: 'user', content: 'go' }], {
+      model: 'gpt-5',
+      maxTokens: 512,
+      responseFormat: { type: 'json_object' },
+    })) {
+      if (chunk.type === 'text') seen.push(chunk.content);
+    }
+
+    expect(seen.join('')).toBe('{"steps":[]}');
+  });
+
+  it('does not flag a streaming extraction whose object completed at the cap', async () => {
+    // Streaming counterpart of the non-streaming case above.
+    const chunks = [
+      makeChunk({ content: '{"verdict":' }),
+      makeChunk({ content: '"pass"}' }),
+      makeChunk({ finishReason: 'length' }),
+    ];
+    chatCreateMock.mockResolvedValue(toAsyncIterable(chunks));
+
+    const provider = makeProvider();
+    const collected: unknown[] = [];
+    for await (const chunk of provider.chatStream([{ role: 'user', content: 'go' }], {
+      model: 'gpt-5',
+      maxTokens: 512,
+      responseFormat: { type: 'json_schema', name: 'verdict', schema: { type: 'object' } },
+    })) {
+      collected.push(chunk);
+    }
+
     const done = collected.find((c) => (c as { type: string }).type === 'done');
     expect(done).toMatchObject({ type: 'done', finishReason: 'length' });
   });

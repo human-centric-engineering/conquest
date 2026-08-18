@@ -173,6 +173,38 @@ Both attempts going through `runStructuredCompletion`
 machinery the summary call uses. The retry never includes the
 malformed prior response in the prompt.
 
+A response that failed to parse because it was **truncated** still gets the
+retry, but once both attempts are spent the error names the truncation and the
+cap rather than blaming the schema. See
+[Truncation](./llm-providers.md#truncation-guard-truncated_no_output).
+
+Note where that message stops: `completeEvaluationSession` deliberately never
+forwards raw provider text, so it logs the detail and rethrows a flat
+`Failed to generate evaluation analysis`. The truncation and the cap are in the
+**server log and the `llm.call` span**, not in the API response.
+
+**That covers the completion summary only.** `runAnalysis` is the one
+evaluation caller of `runStructuredCompletion`. Per-turn metric scoring goes
+through `scoreResponse` → `drainStreamChat`, which is a different route to the
+same question — and it used to reach the same wrong answer, recording
+`score: null` with `'judge response was not valid {score, reasoning} JSON'` for
+a judge that had merely run out of tokens.
+
+Closed in #594. `ChatEvent.done` now carries an optional
+[`finishReason`](../api/sse.md), `DrainResult` surfaces it, and `runJudge`
+separates the two failures — because they have different fixes and the string
+is persisted to the metric row and shown to an operator:
+
+| What happened                     | Recorded reasoning                                                                | Operator's fix                |
+| --------------------------------- | --------------------------------------------------------------------------------- | ----------------------------- |
+| `finishReason === 'length'`       | `judge response was cut off at the model's token limit after N output tokens — …` | Raise the judge's `maxTokens` |
+| Anything else that fails to parse | `judge response was not valid {score, reasoning} JSON`                            | Fix the judge's prompt        |
+
+Note why the adapter guards cannot help here, since it is the reason this needed
+its own fix: the seeded judges run at `maxTokens: 1000` and carry **no**
+`responseFormat`, and every adapter truncation guard keys on one. `runJudge` is
+the only place the distinction can be drawn.
+
 `runStructuredCompletion` also accepts an optional `responseSchema`
 (plus `responseSchemaName` / `responseSchemaStrict`). When supplied it is
 forwarded as a `json_schema` `responseFormat` on both attempts, so

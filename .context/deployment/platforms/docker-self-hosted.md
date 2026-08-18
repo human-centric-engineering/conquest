@@ -99,11 +99,29 @@ docker compose -f docker-compose.prod.yml logs -f web
 
 Migrations apply automatically via the `migrator` service: it runs `prisma migrate deploy` once against the healthy `db`, exits, and the `web` service waits on `service_completed_successfully` before starting. No manual migration step is needed.
 
+The `migrator` service builds the **`migrator` target** — a different image from
+`web`. The runtime image carries no Prisma CLI, so anything Prisma-CLI-shaped
+runs here rather than via `exec web` (#583).
+
 Inspect migration status without applying:
 
 ```bash
-docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate status
+docker compose -f docker-compose.prod.yml run --rm migrator prisma migrate status
 ```
+
+### First install: seed the database
+
+Required once, after the first `up`. It creates the default knowledge base row
+that runtime code FK-references, plus the built-in agents, capabilities,
+templates and provider models:
+
+```bash
+docker compose -f docker-compose.prod.yml --profile seed run --rm seeder
+```
+
+The `seed` profile means a plain `up` never builds or starts it. Seeding needs
+`tsx` and the application source — neither is in the runtime image — so it gets
+its own target. Re-running is safe: unchanged seed units are skipped.
 
 ### 5. Verify Deployment
 
@@ -234,7 +252,9 @@ git pull origin main
 
 # Rebuild and restart — the migrator service re-runs `prisma migrate deploy`
 # automatically before `web` starts, so new migrations apply without extra steps.
-docker compose -f docker-compose.prod.yml up -d --build
+# --wait blocks until `web` is healthy; without it the verify step below races
+# Next's boot and fails on a good deploy.
+docker compose -f docker-compose.prod.yml up -d --build --wait
 
 # Verify
 curl http://localhost:3000/api/health
@@ -353,18 +373,96 @@ Before going live:
 
 The multi-stage Dockerfile is optimized for minimal image size and security.
 
+### Measured image sizes
+
+This is the **only** place in the repo that states **production** image sizes.
+Four mutually inconsistent figures used to be scattered across the docs, none of
+them close to reality, so everywhere else links here instead of restating a
+number. (`DOCKER-TESTING.md` still quotes a dev-image figure; that image is
+built from `Dockerfile.dev` and is not what ships.)
+
+**amd64 — what production actually ships.** Taken from the `Docker Build +
+Stack Smoke` CI job, which logs `docker image inspect --format '{{.Size}}'` for
+all three images on every run. That job is the authoritative source; the figures
+below are from 2026-08-12.
+
+| Image                          | Size    | Notes                           |
+| ------------------------------ | ------- | ------------------------------- |
+| `runner` (what serves traffic) | 298 MB  | 312,535,891 bytes               |
+| `migrator`                     | 2.36 GB | Deploy-time only, never pushed  |
+| `seeder`                       | 2.44 GB | `migrator` plus the source tree |
+
+For scale: `node:24-alpine` on its own measures 230 MB (arm64, `docker images`),
+so the "~100 MB final image" the docs used to claim was never achievable — the
+base alone exceeds it.
+
+**The improvement, measured like-for-like.** On the same machine with the same
+command (`docker images`, arm64), the runtime image went from **739 MB to
+402 MB** — a 46% cut. Inside the container, `/app` went from **372 MB to
+133 MB** (75 MB `.next`, 58 MB traced `node_modules`).
+
+The old image carried a partial copy of the Prisma CLI: 171.6 MB of `@prisma/*`
+plus 41.9 MB of `prisma/`, none of which worked. What the app actually needs is
+**376 KB** of `@prisma` and 5.3 MB of `.prisma`, both supplied by the standalone
+trace.
+
+**Do not compare the two blocks above.** `docker images` on Docker Desktop's
+containerd store and `docker image inspect .Size` on Linux Docker report
+different things for the same image — on one arm64 build they disagreed by 4×.
+Compare before-and-after from the same tool on the same host, and take absolute
+production figures from CI. Sizes also settle a minute or two after a build
+finishes; read them once unpacking has completed.
+
+The `migrator` and `seeder` images look alarming but cost almost nothing on
+disk: they derive from `deps`, whose layers the build already materialises, and
+`seeder` adds only the source tree on top of `migrator`.
+
 ### Base Image
 
-- **`node:20-alpine`**: Alpine Linux base (~150-200MB final image)
-- **`libc6-compat`**: Required for Node.js compatibility on Alpine Linux
+- **`node:24-alpine`**: Alpine Linux base. Alpine uses
+  **musl**, not glibc — which is the thing to keep in mind whenever a dependency
+  ships a compiled binary.
+- **`libc6-compat`**: glibc compatibility shims, carried over from the upstream
+  Next.js Dockerfile. Not needed by Node itself — the `node:*-alpine` images are
+  built against musl — it is insurance for third-party native binaries that were
+  only ever compiled for glibc.
+
+### Native binaries and the `libc` lockfile field
+
+Packages with compiled binaries publish one build per platform, and npm picks
+between them using the `os`, `cpu` and **`libc`** fields in
+`package-lock.json`. `libc` is the only one that separates a musl build from a
+glibc build: `@img/sharp-linux-x64` and `@img/sharp-linuxmusl-x64` are both
+just `os: linux, cpu: x64`.
+
+If `libc` goes missing from the lockfile, npm cannot tell them apart and
+installs **both** — measured on this repo, that was 2.4 GB of `node_modules`
+against 2.0 GB, with `sharp-linux-x64`, `sharp-libvips-linux-x64`,
+`swc-linux-x64-gnu` and `oxide-linux-x64-gnu` all landing in a musl image.
+Nothing errors, which is why it went unnoticed for a release (#571).
+
+**npm below 11.11.0 deletes `libc` on every lockfile write**, on every platform
+— see CONTRIBUTING, "Cutting a release that changes dependencies". Check
+`npm -v` before committing a lockfile change, and repair with
+`npm run fix:lockfile-libc`.
+
+With the field intact, Alpine gets musl-native builds: `sharp-linuxmusl-x64`
+links `libc.musl-x86_64.so.1` and carries no glibc references at all, where the
+glibc build links `libc.so.6` and `libm.so.6`.
 
 ### Build Stages
 
-| Stage     | Purpose                                           |
-| --------- | ------------------------------------------------- |
-| `deps`    | Install dependencies with `.npmrc` configuration  |
-| `builder` | Build Next.js application with standalone output  |
-| `runner`  | Minimal production image with only required files |
+| Stage      | Purpose                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------- |
+| `deps`     | Install dependencies with `.npmrc` configuration                                            |
+| `builder`  | Build Next.js application with standalone output                                            |
+| `migrator` | Prisma CLI + schema + migrations; run-once at deploy time (`FROM deps`, so no extra layers) |
+| `seeder`   | `migrator` plus the application source, for `tsx prisma/seed.ts`                            |
+| `runner`   | Standalone output only — **no Prisma CLI**, no schema, no migrations, no `prisma.config.ts` |
+
+`runner` is deliberately the **last** stage: `docker build .` with no `--target`
+builds the last stage, and that has to keep producing the runtime image. Adding
+a stage after it would silently change what a bare build returns.
 
 ### Key Configuration
 
@@ -424,7 +522,7 @@ depends_on:
     condition: service_completed_successfully
 ```
 
-`web` starts only after (1) `db` passes its health check and (2) the run-once `migrator` service exits successfully. The `migrator` service builds the same image as `web`, runs `npx prisma migrate deploy`, and exits — so `web` never serves traffic against a stale schema. If migrations fail, `web` does not start.
+`web` starts only after (1) `db` passes its health check and (2) the run-once `migrator` service exits successfully. The `migrator` service builds the **`migrator` target** — a different image from `web`, carrying the Prisma CLI that the runtime image deliberately does not (#583) — runs `prisma migrate deploy`, and exits, so `web` never serves traffic against a stale schema. If migrations fail, `web` does not start.
 
 **Environment variables:**
 

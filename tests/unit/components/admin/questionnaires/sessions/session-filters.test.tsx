@@ -39,6 +39,7 @@ function withRouter(searchParams = '') {
     back: vi.fn(),
     forward: vi.fn(),
     prefetch: vi.fn(),
+    bfcacheId: '',
   });
   vi.mocked(useSearchParams).mockReturnValue(new URLSearchParams(searchParams) as never);
   return replace;

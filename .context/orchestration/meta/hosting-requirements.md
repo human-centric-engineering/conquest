@@ -2,7 +2,7 @@
 
 What it takes to run Sunrise in production with the agentic layer enabled, the gotchas that bite first, and how the realistic deployment targets compare. Written for engineers picking a platform **and** for smart readers who haven't deployed much before.
 
-**Last updated:** 2026-05-06
+**Last updated:** 2026-08-11
 
 ---
 
@@ -40,7 +40,7 @@ If any of the words below are new, this section is the floor. None of these are 
 | **Function timeout**   | On serverless platforms, each request runs inside a "function" with a maximum duration (e.g. 60 s). Long agent runs and SSE streams can hit this ceiling.                                           |
 | **Cron / cron tick**   | A scheduler that runs a command on a schedule (e.g. every minute). Sunrise expects something external to "tick" one URL every minute.                                                               |
 | **Migration**          | A change to the database schema. `prisma migrate deploy` applies any new migrations to the production DB. Must run before the new app starts.                                                       |
-| **Standalone build**   | A flag (`output: 'standalone'`) that makes Next.js bundle a small, self-contained Node server. Already enabled in `next.config.js`.                                                                 |
+| **Standalone build**   | A flag (`output: 'standalone'`) that makes Next.js bundle a small, self-contained Node server. Enabled in `next.config.js` for every target except Vercel, which supplies its own build adapter.    |
 
 If you remember one thing: **pick a platform, give it your repo, set the environment variables, point a cron at one URL.** Everything below is the detail behind that sentence.
 
@@ -52,29 +52,31 @@ If you remember one thing: **pick a platform, give it your repo, set the environ
 
 In plain terms: Sunrise is a normal long-running web server (Node.js). Some platforms (Vercel) run web apps as short-lived "functions" instead, which is great for short requests but creates friction for the agentic layer's long streams.
 
-Sunrise runs as a **single long-lived Node 20+ process** built from `next build` with `output: 'standalone'` (`next.config.js:4`). The orchestration layer assumes a real, persistent Node runtime — it is not designed for an Edge runtime, and several pieces (native modules, long SSE streams, in-process scheduling assumptions) preclude purely serverless execution models that hard-cap function duration at 60 seconds.
+Sunrise runs as a **single long-lived Node 24+ process** built from `next build` with `output: 'standalone'` (set in `next.config.js`, and deliberately disabled when `VERCEL` is set — see [`.context/deployment/platforms/vercel.md`](../../deployment/platforms/vercel.md)). The orchestration layer assumes a real, persistent Node runtime — it is not designed for an Edge runtime, and several pieces (native modules, long SSE streams, in-process scheduling assumptions) preclude purely serverless execution models that hard-cap function duration at 60 seconds.
 
 | Requirement                           | Why it matters                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Node 20+                              | Required by Prisma 7's client and the Next.js 16 / React 19 toolchain                                   |
-| `output: 'standalone'`                | Produces `.next/standalone/server.js` so the runtime image carries only what it needs                   |
+| Node 24+                              | Node 20 went EOL 2026-03-24 and gets no security patches; 24 is the current LTS                         |
+| `output: 'standalone'`                | Produces `.next/standalone/server.js` so the runtime image carries only what it needs (off on Vercel)   |
 | `serverExternalPackages`              | `@prisma/client`, `@prisma/adapter-pg`, `ioredis` are excluded from the bundler — must exist at runtime |
 | `.npmrc` with `legacy-peer-deps=true` | Required by `better-auth` + Prisma 7 — must be present at install time, not just dev                    |
 | Build memory ≥ 2 GB                   | `next build` + Prisma generate + type-check peaks high; tiny VMs OOM mid-build                          |
 
 ### 1.2 Native dependencies
 
-In plain terms: a few of the libraries Sunrise uses are not pure JavaScript — they include compiled binaries. Most platforms handle this transparently; the only platform-level catch is that very stripped-down Linux images (Alpine) need an extra package.
+In plain terms: a few of the libraries Sunrise uses are not pure JavaScript — they include compiled binaries. Most platforms handle this transparently; the platform-level catch is that Alpine uses **musl** rather than glibc, so it needs the musl build of anything compiled.
 
-| Dependency      | Purpose                                  | Host implication                                          |
-| --------------- | ---------------------------------------- | --------------------------------------------------------- |
-| `sharp`         | Image transforms (Next.js + uploads)     | Pre-built binaries for glibc; Alpine needs `libc6-compat` |
-| `pdf-parse`     | Knowledge base PDF ingestion             | Pure JS, but heap-heavy on large PDFs                     |
-| `mammoth`       | DOCX ingestion                           | Pure JS                                                   |
-| `epub2`         | EPUB ingestion                           | Pure JS                                                   |
-| `gpt-tokenizer` | Token counting for cost / context limits | Pure JS                                                   |
+| Dependency      | Purpose                                  | Host implication                                                   |
+| --------------- | ---------------------------------------- | ------------------------------------------------------------------ |
+| `sharp`         | Image transforms (Next.js + uploads)     | Pre-built binaries for **both** glibc and musl; selected by `libc` |
+| `pdf-parse`     | Knowledge base PDF ingestion             | Pure JS, but heap-heavy on large PDFs                              |
+| `mammoth`       | DOCX ingestion                           | Pure JS                                                            |
+| `epub`          | EPUB ingestion                           | Pure JS (ESM-only; bundled by Next, not externalised)              |
+| `gpt-tokenizer` | Token counting for cost / context limits | Pure JS                                                            |
 
-The `Dockerfile` already handles `libc6-compat` and the standalone trace; non-Docker hosts must ensure equivalent base packages.
+`sharp` publishes musl-native builds (`@img/sharp-linuxmusl-*`), and npm chooses between those and the glibc ones using the **`libc`** field in `package-lock.json` — the only field that distinguishes them, since both declare `os: linux, cpu: x64`. With `libc` present, Alpine gets a binary linking `libc.musl-x86_64.so.1` and needing no glibc shim; with it missing, npm installs both variants and glibc-linked binaries end up in a musl image without any error (#571). npm below 11.11.0 strips the field on every write — see CONTRIBUTING, "Cutting a release that changes dependencies", and `npm run fix:lockfile-libc`.
+
+The `Dockerfile` already handles the standalone trace and installs `libc6-compat` — glibc compatibility shims inherited from the upstream Next.js template, insurance for any dependency that only ever ships a glibc build, rather than something Node or `sharp` requires. Non-Docker hosts must ensure equivalent base packages.
 
 ### 1.3 Database — PostgreSQL with `pgvector`
 
@@ -210,7 +212,9 @@ The scheduler does **not** require a singleton instance — the optimistic-lock 
 
 In plain terms: when the database schema changes, you must apply that change to the production database before the new code starts serving traffic. The command is `prisma migrate deploy`. Where you put it differs per platform, but the rule is the same.
 
-`prisma migrate deploy` must run **after `next build`, before traffic shifts**. The runtime image ships the Prisma CLI and `prisma/migrations/` so the same artifact serves both roles. See `.context/deployment/overview.md` for the per-platform mapping. Migrations are written to be backward-compatible so a partial rollout is safe.
+`prisma migrate deploy` must run **after `next build`, before traffic shifts**. The **`migrator`** image — a separate target of the same `Dockerfile` — ships the Prisma CLI and `prisma/migrations/`; the runtime image ships neither, so a migration hook that runs _inside the deployed container_ (Render's and Railway's Pre-Deploy Command, Fly's `release_command`) will fail. That rules out the most obvious option on three of the platforms below; see `.context/deployment/overview.md` for what to do on each. Migrations are written to be backward-compatible so a partial rollout is safe.
+
+This is also the only thing keeping `@prisma/client` in the runtime image: it arrives through Next's standalone trace (`serverExternalPackages` in `next.config.js`), not through an explicit `COPY` (#583).
 
 ### 4.2 Build-time environment variables
 
@@ -244,7 +248,7 @@ The first three are deployment blockers. The fourth bites only if you split subd
 | Cost spikes            | LLM calls are billed per token; a runaway tool loop can burn budget fast                                                                                                                                                                                   | Provider-side budget alarms in addition to in-app budget enforcement                                                                                                                                      |
 | Long execution windows | Autonomous orchestrator workflows can run for many minutes                                                                                                                                                                                                 | Function-duration limits and proxy timeouts must clear the worst case                                                                                                                                     |
 | Memory under load      | Document ingestion (large PDFs, EPUBs, vector-grid table extraction) and `sharp` transforms spike RSS by hundreds of MB on big files                                                                                                                       | Right-size containers; watch OOM kills. Reference ceilings: Vercel Hobby 1 GB / Pro 3 GB; Render Starter 512 MB; Fly default Machine 256 MB. Move ingestion off the request path if it competes with chat |
-| Bundle / function size | Standalone build pulls in Prisma client, `pdf-parse`, `mammoth`, `epub2`, `sharp`, `gpt-tokenizer`, `@xyflow/react` — heavier than a typical Next.js app                                                                                                   | Vercel Hobby's 250 MB unzipped function size limit is at risk; verify with `vercel build` before committing to the plan. Long-lived Node servers (Render / Fly / VPS) don't have this ceiling             |
+| Bundle / function size | Standalone build pulls in Prisma client, `pdf-parse`, `mammoth`, `epub`, `sharp`, `gpt-tokenizer`, `@xyflow/react` — heavier than a typical Next.js app                                                                                                    | Vercel Hobby's 250 MB unzipped function size limit is at risk; verify with `vercel build` before committing to the plan. Long-lived Node servers (Render / Fly / VPS) don't have this ceiling             |
 | Concurrency            | Multiple in-flight streams hold sockets and Node event-loop slots                                                                                                                                                                                          | Plan max concurrent chats per instance; add instances before vertical limits hit                                                                                                                          |
 | In-memory state        | Per-instance state includes: LRU rate-limit counters, scheduler claim windows, circuit breaker, budget mutex, and the **MCP session map** (`lib/orchestration/mcp/session-manager.ts`). Embed-widget chat sessions persist via DB, but MCP sessions do not | Single-instance: fine. Multi-instance: add Redis for shared rate limits + circuit breaker, **and enable sticky sessions** so MCP and long-lived embed connections stick to one instance                   |
 | Outbound IP            | LLM providers and partner APIs may sit behind enterprise allowlists requiring a stable source IP                                                                                                                                                           | Vercel's IP pool is wide and shared; Render and Fly offer dedicated egress as paid add-ons; a VPS gives a single static IP. Plan for compliance customers up front — retrofitting is painful              |
@@ -311,7 +315,7 @@ The table scores each option against the requirements above. "OK" means supporte
 **Trade-offs.** This is the option with the most moving parts to understand. You will be:
 
 - Picking and creating a VPS (DigitalOcean / Hetzner / Linode / Vultr)
-- Editing Forge's deploy script to install Node 20, run `npm ci`, build, and run migrations
+- Editing Forge's deploy script to install Node 24, run `npm ci`, build, and run migrations
 - Editing the nginx vhost so SSE streams aren't buffered (`proxy_buffering off`, raised `proxy_read_timeout`)
 - Installing the `pgvector` extension on the system Postgres (`apt install postgresql-XX-pgvector`, then `CREATE EXTENSION vector` in the DB)
 - Wiring a Forge Scheduled Job to `curl` the maintenance tick endpoint
@@ -341,7 +345,7 @@ You do not need to know what nginx, Docker, or supervisord are.
 1. Push the repo to GitHub.
 2. Sign up at render.com, create a "Web Service" pointed at the repo. Render auto-detects Next.js.
 3. Create a managed Postgres from Render's dashboard, copy the internal connection string into `DATABASE_URL`.
-4. Set the pre-deploy command to `npm run db:migrate:deploy`.
+4. **Leave the Pre-Deploy Command empty** — it runs inside the deployed image, which has no Prisma CLI. Turn Auto-Deploy off, add a Deploy Hook, and migrate from CI against the _external_ connection string before firing it. Full recipe in [`deployment/platforms/render.md`](../../deployment/platforms/render.md).
 5. Add env vars.
 6. Create one "Cron Job" hitting `/api/v1/admin/orchestration/maintenance/tick` every minute.
 7. Push to `main`. It deploys.
@@ -352,8 +356,9 @@ You do not need to know what nginx, Docker, or supervisord are.
 2. Run `fly launch` in the repo. It reads the `Dockerfile`, asks a few questions, generates a `fly.toml`.
 3. Run `fly postgres create` to provision a Postgres app; attach it. Enable `pgvector` (`fly pg connect`, then `CREATE EXTENSION vector`).
 4. Set env vars with `fly secrets set KEY=value`.
-5. Run `fly deploy`.
-6. For cron, the simplest path is an external pinger (cron-job.org) hitting `/api/v1/admin/orchestration/maintenance/tick` every minute. Or schedule a small machine.
+5. Apply migrations before deploying — **not** via `release_command`, which runs in the app image and has no Prisma CLI. Simplest: `fly proxy 5432 -a <your-pg-app>` in one terminal, then `DATABASE_URL=postgres://…@localhost:5432/<db> npm run db:migrate:deploy` in another. In CI, use the `migrator`-image recipe from [`deployment/overview.md`](../../deployment/overview.md#migration-strategy). Fly _does_ support `fly deploy --build-target migrator`, so a second migrator-only app is possible if you already run several.
+6. Run `fly deploy`.
+7. For cron, the simplest path is an external pinger (cron-job.org) hitting `/api/v1/admin/orchestration/maintenance/tick` every minute. Or schedule a small machine.
 
 You'll learn the CLI but you don't need to manage a server.
 
@@ -362,7 +367,7 @@ You'll learn the CLI but you don't need to manage a server.
 1. Pick a VPS provider (DigitalOcean is the gentlest first time). Create an account.
 2. Sign up for Forge and connect it to your VPS provider's API. Click "Create Server".
 3. Once provisioned, create a "Site" pointed at your domain.
-4. **Install Node 20** on the server (Forge defaults are older). Either pick the Node version in Forge's UI or SSH in and use `nvm`.
+4. **Install Node 24** on the server (Forge defaults are older). Either pick the Node version in Forge's UI or SSH in and use `nvm`.
 5. **Install pgvector** on the Postgres Forge installed: SSH in, `sudo apt install postgresql-15-pgvector`, then connect to the DB and `CREATE EXTENSION vector`.
 6. Edit Forge's **deploy script** so it pulls Git, runs `npm ci`, builds, runs `npm run db:migrate:deploy`, and signals the daemon to restart.
 7. Add a Forge **Daemon** running `node .next/standalone/server.js` from the deploy directory.
@@ -377,7 +382,7 @@ This is the most rewarding path if you want to learn how a server actually works
 
 If you're new to deployment, the realistic pattern is "pick a platform, then ask Claude to generate the platform-specific bits". Concrete things that work well:
 
-- **"Generate the Forge deploy script for this repo, including Node 20 install via nvm, npm ci, build, prisma migrate deploy, and a graceful daemon restart."** Claude can read the `package.json`, `Dockerfile`, and existing scripts and produce a script you paste into Forge's UI.
+- **"Generate the Forge deploy script for this repo, including Node 24 install via nvm, npm ci, build, prisma migrate deploy, and a graceful daemon restart."** Claude can read the `package.json`, `Dockerfile`, and existing scripts and produce a script you paste into Forge's UI.
 - **"Write the nginx vhost block for this app, with SSE-safe settings."** Output you paste into Forge's Edit Files / nginx UI.
 - **"Generate a `fly.toml` for this repo with sensible defaults for a small Machine, plus the `fly secrets set` commands I need to run."**
 - **"Walk me through enabling `pgvector` on Render Postgres / Fly Postgres / a Forge-managed Postgres."**

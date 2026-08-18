@@ -44,6 +44,7 @@ vi.mock('@/lib/env', () => ({
   env: {
     BETTER_AUTH_URL: 'https://app.example.com',
     NEXT_PUBLIC_APP_URL: 'https://app.example.com',
+    ESCALATION_WEBHOOK_ALLOW_PRIVATE: false,
   },
 }));
 
@@ -252,6 +253,57 @@ describe('notifyEscalation', () => {
           webhookUrl: 'https://hooks.example.com/escalation',
         }) as never
       );
+    });
+
+    // #553: the target is re-checked HERE, at the point of use, not only at the
+    // API boundary — a direct DB write, a restored backup bundle or a value
+    // stored before the refine existed reaches this code unvalidated. Skipping
+    // only the POST (rather than failing the config parse) keeps the emails
+    // flowing and leaves the URL visible in the settings form to be corrected.
+    describe('SSRF guard at dispatch', () => {
+      it.each([
+        ['cloud metadata', 'http://169.254.169.254/latest/meta-data/'],
+        ['IPv4-mapped IPv6 metadata', 'http://[::ffff:169.254.169.254]/'],
+        ['RFC1918', 'http://10.0.0.5/internal'],
+        ['loopback', 'http://127.0.0.1:9000/'],
+      ])('does not POST to %s', async (_label, url) => {
+        vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
+          makeSettings({
+            emailAddresses: ['ops@example.com'],
+            notifyOnPriority: 'all',
+            webhookUrl: url,
+          }) as never
+        );
+
+        await notifyEscalation(makePayload());
+
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      });
+
+      it('still sends the emails and names the rejected target', async () => {
+        vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue(
+          makeSettings({
+            emailAddresses: ['ops@example.com'],
+            notifyOnPriority: 'all',
+            webhookUrl: 'http://169.254.169.254/latest/meta-data/',
+          }) as never
+        );
+
+        await notifyEscalation(makePayload());
+
+        expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+          'Escalation webhook target rejected; skipping the POST',
+          expect.objectContaining({ url: 'http://169.254.169.254/latest/meta-data/' })
+        );
+      });
+    });
+
+    it('refuses to follow redirects', async () => {
+      await notifyEscalation(makePayload());
+
+      const init = (vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit])[1];
+      expect(init.redirect).toBe('error');
     });
 
     it('POSTs to webhookUrl with correct event payload', async () => {

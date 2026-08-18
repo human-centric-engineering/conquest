@@ -425,16 +425,11 @@ describe('AppReconcileSuggestionsCapability — degraded surroundings', () => {
   });
 
   it('omits the optional cost dimensions rather than logging them as undefined', async () => {
-    // A run dispatched outside an agent, on a version-less preview, must not write `agentId: undefined`
-    // into the cost row — an absent key and a present-but-empty one read differently in the ledger.
-    await capabilityDispatcher.dispatch(
-      SLUG,
-      baseArgs({ versionId: undefined }),
-      baseContext({ agentId: undefined })
-    );
+    // A run on a version-less preview must not write `versionId: undefined` into the cost
+    // row — an absent key and a present-but-empty one read differently in the ledger.
+    await capabilityDispatcher.dispatch(SLUG, baseArgs({ versionId: undefined }), baseContext());
 
     const call = (logCost as Mock).mock.calls[0][0];
-    expect(call).not.toHaveProperty('agentId');
     expect(call.metadata).not.toHaveProperty('versionId');
     expect(call.metadata.targetCount).toBe(1);
   });

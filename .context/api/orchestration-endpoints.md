@@ -296,11 +296,13 @@ Each item includes `_agents: Array<{ id, name, slug, isActive }>` — the agents
 
 ### `POST /capabilities`
 
-Create. Body validated by `createCapabilitySchema` — `functionDefinition` must be a JSON Schema compatible with the LLM tool-use format.
+Create. Body validated by `createCapabilitySchema` — `functionDefinition` must be a JSON Schema compatible with the LLM tool-use format, must carry `name`, `description` and `parameters`, and its `name` must equal the capability `slug` (#509 — the slug is the advertised tool name, so the two cannot diverge). Capability slugs accept underscores as well as hyphens and are capped at 64 characters. The same rules apply to `PATCH`; when a PATCH moves only one half of the pair, the route compares it against the stored row.
 
 ### `GET / PATCH / DELETE /capabilities/:id`
 
 Standard CRUD. `DELETE` is a soft delete. Dispatcher cache is cleared on every mutation.
+
+On an `isSystem: true` row, `PATCH` returns **403** for a _changed_ `slug`, `functionDefinition`, `executionType` or `executionHandler` — the seeds own those four and would revert (or, for `slug`, duplicate) the row on the next deploy (#598). The check compares values rather than presence, so the admin form resubmitting the whole form on every save is unaffected, and it is key-order-insensitive because `functionDefinition` is `jsonb`. Every other field, `executionConfig` included, stays editable. See [`.context/database/seeding.md`](../database/seeding.md).
 
 ### `GET /capabilities/:id/stats`
 

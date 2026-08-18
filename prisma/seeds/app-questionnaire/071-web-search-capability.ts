@@ -29,6 +29,8 @@ const unit: SeedUnit = {
       where: { slug: WEB_SEARCH_CAPABILITY_SLUG },
       update: {
         isSystem: false,
+        executionType: 'internal',
+        executionHandler: WEB_SEARCH_HANDLER,
         functionDefinition: WEB_SEARCH_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
       },
       create: {

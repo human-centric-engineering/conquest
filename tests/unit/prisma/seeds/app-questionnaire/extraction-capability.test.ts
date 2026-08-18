@@ -14,7 +14,8 @@ import type { SeedContext } from '@/prisma/runner';
  *  - upserts the AiCapability row keyed on the extractor slug, as an internal
  *    capability pointing at the registered handler class;
  *  - functionDefinition.name matches the slug (the dispatcher / LLM contract);
- *  - the `update` branch only re-asserts isSystem (idempotent re-seed);
+ *  - the `update` branch re-applies the code-owned fields (executionType,
+ *    executionHandler, functionDefinition) and no operator-owned column (#545);
  *  - binds the capability to the extractor agent when the agent exists, and
  *    skips the binding (without throwing) when it doesn't;
  *  - declares the path-derived SeedHistory key.
@@ -61,12 +62,24 @@ describe('app-questionnaire/003-extraction-capability seed', () => {
     expect(arg.create.category).toBe('app');
   });
 
-  it('uses an idempotent update that only re-asserts isSystem', async () => {
+  it('re-applies the code-owned fields on update, and nothing the operator owns', async () => {
     const { ctx, capabilityUpsert } = makeCtx();
 
     await extractionCapabilitySeed.run(ctx);
 
-    expect(capabilityUpsert.mock.calls[0][0].update).toEqual({ isSystem: false });
+    // Code-owned fields track the capability class, so an edited definition has to
+    // reach rows that already exist — a create-only write leaves the original schema
+    // advertised to the model for ever (#545). Operator-owned columns must NOT be
+    // written here: re-applying `isActive` would silently re-enable a capability an
+    // operator disabled, and `name` / `description` would revert their edits.
+    const { update } = capabilityUpsert.mock.calls[0][0];
+    expect(update.isSystem).toBe(false);
+    expect(update.executionType).toBe('internal');
+    expect(update.executionHandler).toBe(EXTRACT_QUESTIONNAIRE_STRUCTURE_HANDLER);
+    expect(update.functionDefinition).toBeDefined();
+    expect(Object.keys(update)).toEqual(
+      expect.not.arrayContaining(['isActive', 'rateLimit', 'name', 'description', 'category'])
+    );
   });
 
   it('binds the capability to the extractor agent when the agent exists', async () => {

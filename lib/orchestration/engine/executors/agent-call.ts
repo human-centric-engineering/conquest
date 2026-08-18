@@ -38,6 +38,8 @@ import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { resolveMaxCostPerTurn } from '@/lib/orchestration/llm/cost-caps';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import type { CapabilityResult } from '@/lib/orchestration/capabilities/types';
+import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
 import {
   getCapabilityDefinitions,
   registerBuiltInCapabilities,
@@ -45,6 +47,7 @@ import {
 import { agentCallConfigSchema } from '@/lib/validations/orchestration';
 import type { ExecutionContext } from '@/lib/orchestration/engine/context';
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
+import { isRequestFault, ProviderError } from '@/lib/orchestration/llm/provider';
 import { interpolatePrompt } from '@/lib/orchestration/engine/llm-runner';
 import {
   composeSystemPromptString,
@@ -155,6 +158,9 @@ async function runSingleTurn(
   let totalCostUsd = startCost;
   let finalContent = startContent;
   let currentMessages = startMessages ? [...startMessages] : [...initialMessages];
+  // Names already refused this turn, so the hook fires once per distinct name
+  // rather than once per iteration — see the emission site for why.
+  const refusedToolNames = new Set<string>();
 
   for (let iteration = startIteration; iteration < maxIterations; iteration++) {
     const turnOutcome = await withSpan(
@@ -187,6 +193,7 @@ async function runSingleTurn(
             signal: ctx.signal,
           });
         } catch (err) {
+          const billedOnFailure = err instanceof ProviderError ? err.usage : undefined;
           // Carry partial cost from earlier successful turns through the error
           // so the engine's retry/fallback accumulator can surface it on the
           // trace entry. Without this, prior turns' tokens are billed via
@@ -196,9 +203,16 @@ async function runSingleTurn(
             'agent_call_failed',
             err instanceof Error ? err.message : 'Agent LLM call failed',
             err,
-            true,
-            totalTokensUsed,
-            totalCostUsd
+            !isRequestFault(err),
+            // Prior turns' totals PLUS what the vendor billed for the attempt
+            // that failed — see the note in `llm-runner.ts`.
+            totalTokensUsed +
+              (billedOnFailure ? billedOnFailure.inputTokens + billedOnFailure.outputTokens : 0),
+            totalCostUsd +
+              (billedOnFailure
+                ? calculateCost(model, billedOnFailure.inputTokens, billedOnFailure.outputTokens)
+                    .totalCostUsd
+                : 0)
           );
         }
         const turnDurationMs = Date.now() - turnStarted;
@@ -318,15 +332,103 @@ async function runSingleTurn(
 
         const toolCall: LlmToolCall = response.toolCalls[0];
 
-        const capResult = await capabilityDispatcher.dispatch(toolCall.name, toolCall.arguments, {
-          userId: ctx.userId,
-          agentId: agent!.id,
-          // Forward the run's scope so tools an agent_call turn dispatches are
-          // scoped too — same as the tool_call executor. Without this an
-          // agent_call (and orchestrator, which delegates here) would run its
-          // capabilities unscoped, leaving a hole in the workflow scope path.
-          ...(ctx.scope ? { scope: ctx.scope } : {}),
-        });
+        /**
+         * The tools this agent is allowed to call — the same check the chat
+         * handler makes, which this surface never had (#559).
+         *
+         * `toolDefinitions` is what was advertised to the model, built by
+         * `getCapabilityDefinitions(agent.id)` from explicitly-enabled bindings.
+         * Dispatch, though, took the emitted name straight through, and a
+         * MISSING pivot row synthesizes a default-ALLOW binding — so a name the
+         * agent was never granted still ran, unrestricted. The reachable route
+         * is injected content rather than an admin: a knowledge document, a
+         * tool result, or an upstream step's output naming a globally
+         * registered slug.
+         *
+         * #476 closed this on chat and its dispatcher note claimed the path was
+         * closed generally. It was closed on one of the two surfaces.
+         *
+         * Trace caveat: a refusal reaches the trace only when `recordTurn` was
+         * passed down, and it often is not — multi-turn mode deliberately
+         * omits it, and `orchestrator.ts` sets `recordTurn: undefined` on
+         * every delegated context. Delegations run single-turn, so an earlier
+         * version of this note claiming "single-turn mode records it" was
+         * wrong about the highest-risk path of all: planner output choosing a
+         * delegate whose injected content then names an un-granted tool.
+         *
+         * Where `recordTurn` IS present, the refusal is recorded as a
+         * `continuing` turn carrying the `tool_not_advertised` result.
+         * Everywhere else the durable evidence is this log line and the hook
+         * below — so do not rely on the trace alone to spot injected tool
+         * calls. Note also that a delegation's `stepId` is the synthetic
+         * `${step.id}_delegate_${agentSlug}`, which matches no step in the
+         * workflow definition; correlate on `executionId`.
+         */
+        const advertisedToolNames = new Set(toolDefinitions.map((t) => t.name));
+
+        let capResult: CapabilityResult;
+        if (!advertisedToolNames.has(toolCall.name)) {
+          logger.warn('Refusing tool not advertised to this agent', {
+            // Every other log line in this executor carries `executionId`, and
+            // `step.id` is unique only within a workflow definition — so
+            // without it an operator grepping for this security event cannot
+            // tie a refusal to the run it came from.
+            executionId: ctx.executionId,
+            stepId: step.id,
+            agentId: agent!.id,
+            toolName: toolCall.name,
+            advertised: [...advertisedToolNames],
+          });
+          // The chat handler emits this too, describing it as "a security
+          // signal worth a subscribable event". A fork monitoring the hook
+          // would otherwise see chat refusals and be blind to workflow ones.
+          // Neither surface is the riskier one — both take a name from a
+          // model, and both read content an attacker may have planted; chat
+          // additionally takes end-user text directly. They need equal
+          // coverage, which is the whole point of emitting from both. No
+          // `conversationId` here: the workflow equivalents are the execution
+          // and step, so they take its place.
+          // Once per distinct name per turn. The model is free to re-emit a
+          // refused name every iteration, and each emission creates an
+          // `AiEventHookDelivery` row plus an outbound POST per subscription —
+          // through an orchestrator (rounds x delegations x iterations) one
+          // poisoned document could otherwise fan out to dozens of deliveries.
+          // The security signal is "this name was attempted", which the first
+          // emission carries; the per-iteration detail stays in the log above.
+          if (!refusedToolNames.has(toolCall.name)) {
+            refusedToolNames.add(toolCall.name);
+            emitHookEvent('capability.refused_not_advertised', {
+              executionId: ctx.executionId,
+              stepId: step.id,
+              agentId: agent!.id,
+              agentSlug: agent!.slug,
+              userId: ctx.userId,
+              toolName: toolCall.name,
+              advertised: [...advertisedToolNames],
+            });
+          }
+          // Shaped like a dispatch result and fed back as one, so the loop
+          // continues with the assistant+tool message pair intact — an
+          // assistant toolCall with no matching tool result makes the NEXT
+          // provider call 400. The model gets to answer without the tool.
+          capResult = {
+            success: false,
+            error: {
+              code: 'tool_not_advertised',
+              message: `Tool '${toolCall.name}' is not available to this agent`,
+            },
+          };
+        } else {
+          capResult = await capabilityDispatcher.dispatch(toolCall.name, toolCall.arguments, {
+            userId: ctx.userId,
+            agentId: agent!.id,
+            // Forward the run's scope so tools an agent_call turn dispatches are
+            // scoped too — same as the tool_call executor. Without this an
+            // agent_call (and orchestrator, which delegates here) would run its
+            // capabilities unscoped, leaving a hole in the workflow scope path.
+            ...(ctx.scope ? { scope: ctx.scope } : {}),
+          });
+        }
 
         if (capResult.skipFollowup) {
           finalContent = JSON.stringify(capResult.data ?? capResult);

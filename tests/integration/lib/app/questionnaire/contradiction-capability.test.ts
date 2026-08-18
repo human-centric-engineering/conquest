@@ -495,23 +495,6 @@ describe('AppDetectContradictionsCapability — dispatch', () => {
     expect(result.success).toBe(true);
     expect((result.data as { findings: unknown[] }).findings).toHaveLength(1);
   });
-
-  it('logs cost without an agentId when the context omits one', async () => {
-    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
-
-    await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext({ agentId: undefined }));
-
-    const chatCall = (logCost as Mock).mock.calls.find(
-      ([arg]) => arg?.metadata?.capability === SLUG
-    );
-    expect(chatCall, 'a CHAT cost log for this capability should have been emitted').toBeDefined();
-    // Pin the positive shape (not just "defined"), then assert agentId is omitted.
-    expect(chatCall?.[0]).toMatchObject({
-      operation: CostOperation.CHAT,
-      metadata: { capability: SLUG },
-    });
-    expect(chatCall?.[0]).not.toHaveProperty('agentId');
-  });
 });
 
 describe('AppDetectContradictionsCapability — redactProvenance', () => {

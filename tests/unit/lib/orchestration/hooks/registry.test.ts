@@ -948,6 +948,60 @@ describe('HMAC signing (via dispatchWebhook)', () => {
     expect(headers['X-Sunrise-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
   });
 
+  // #534: the hook URL is validated at create/update time and never again at
+  // dispatch. `fetch` defaults to redirect: 'follow', so a redirect would POST
+  // the event payload AND its HMAC signature headers to an unvalidated second
+  // target. Refuse rather than chase — what GitHub and Stripe do.
+  it('refuses to follow redirects, so a signed payload cannot be forwarded off-target', async () => {
+    vi.mocked(prisma.aiEventHook.findMany).mockResolvedValue([
+      makeHook({
+        id: 'hook-redirect',
+        eventType: 'conversation.started',
+        action: { type: 'webhook', url: 'https://example.com/hook' },
+        secret: 'c'.repeat(64),
+      }),
+    ] as never);
+
+    emitHookEvent('conversation.started', { conversationId: 'conv-1' });
+
+    await vi.waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.redirect).toBe('error');
+  });
+
+  // undici reports the reason on `cause`, not `message` — a refused redirect, a
+  // DNS failure and a connection reset are all a bare "fetch failed" without it.
+  // Without this an endpoint that started 301-ing would burn every retry and
+  // land in `exhausted` with nothing pointing at "re-point the URL".
+  it('records the underlying cause, not a bare "fetch failed"', async () => {
+    vi.mocked(prisma.aiEventHook.findMany).mockResolvedValue([
+      makeHook({
+        id: 'hook-cause',
+        eventType: 'conversation.started',
+        action: { type: 'webhook', url: 'https://example.com/redirecting' },
+      }),
+    ] as never);
+    mockFetch.mockRejectedValueOnce(
+      Object.assign(new TypeError('fetch failed'), { cause: new Error('unexpected redirect') })
+    );
+
+    emitHookEvent('conversation.started', { conversationId: 'conv-1' });
+
+    await vi.waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+    await vi.waitFor(() => {
+      const writes = vi
+        .mocked(prisma.aiEventHookDelivery.update)
+        .mock.calls.map((c) => (c[0] as { data?: { lastError?: string } })?.data?.lastError)
+        .filter(Boolean);
+      expect(writes.some((e) => e?.includes('unexpected redirect'))).toBe(true);
+    });
+  });
+
   it('omits signing headers when hook.secret is null', async () => {
     vi.mocked(prisma.aiEventHook.findMany).mockResolvedValue([
       makeHook({

@@ -20,20 +20,17 @@ import { render, screen, waitFor, within, act, fireEvent } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 
 import { CapabilityForm } from '@/components/admin/orchestration/capability-form';
+import type { AiCapability } from '@/types/prisma';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-  useSearchParams: () => ({ get: () => null }),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: () => createMockRouter(),
+    useSearchParams: () => ({ get: () => null }),
+  };
+});
 
 vi.mock('@/lib/api/client', () => ({
   apiClient: {
@@ -408,6 +405,416 @@ describe('CapabilityForm — Function Definition tab', () => {
                 }),
               }),
             }),
+          })
+        );
+      });
+    });
+  });
+  // ── Round-trip fidelity of a stored definition (#509) ───────────────────────
+  //
+  // The form used to re-narrow a loaded `functionDefinition` through the visual
+  // builder's own shape — `properties: record(object({ type, description }))`
+  // — and Zod strips unknown keys, so `enum`, `items`, `minLength` and every
+  // nested schema silently disappeared. An untouched Save then wrote the
+  // stripped copy back. Every seeded capability carries at least one of those.
+  //
+  // It was unreachable only by accident: the old client slug regex was
+  // hyphen-only, so a seeded underscore slug failed validation and blocked
+  // submit. #509 fixed the regex, which removed the brake — these two cases
+  // exist so the lossy narrow cannot come back with it.
+  describe('stored definitions survive an untouched save', () => {
+    const RICH_DEFINITION = {
+      name: 'escalate_to_human',
+      description: 'Escalate to a human.',
+      parameters: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: 'Why.', minLength: 1, maxLength: 1000 },
+          priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Urgency.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Tags.' },
+        },
+        required: ['reason'],
+      },
+    };
+
+    // The slug must equal `functionDefinition.name` (#509) or the form's own
+    // pre-submit check refuses the save — correctly, and for a different
+    // reason than the one under test here.
+    function makeRichCapability(functionDefinition: { name: string }): AiCapability {
+      return {
+        id: 'cap-rich',
+        name: 'Escalate To Human',
+        slug: functionDefinition.name,
+        description: 'Escalate to a human.',
+        category: 'support',
+        executionType: 'internal',
+        executionHandler: 'EscalateToHumanCapability',
+        executionConfig: null,
+        functionDefinition,
+        requiresApproval: false,
+        rateLimit: null,
+        isActive: true,
+        createdBy: 'system',
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-01'),
+        deletedAt: null,
+        metadata: {},
+      } as unknown as AiCapability;
+    }
+
+    // This fixture contains `enum`/`items`, which force JSON mode — so on its
+    // own it does NOT cover the Builder path. The next case does; keep both.
+    it('keeps enum, items and length constraints through a save (JSON mode)', async () => {
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability(RICH_DEFINITION)}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            body: expect.objectContaining({ functionDefinition: RICH_DEFINITION }),
+          })
+        );
+      });
+    });
+
+    it('leaves a builder-representable definition alone until it is edited', async () => {
+      // The case the JSON-mode test above cannot reach. `get_pattern_detail`
+      // IS reverse-compilable — `tryReverseCompile` tolerates
+      // `minimum`/`maximum` and maps `integer` to `number` — so the form opens
+      // in Visual mode, and the recompile effect used to fire on MOUNT and
+      // overwrite the stored definition with the builder's lossy rendering.
+      // Pressing Save without touching anything rewrote the schema:
+      // `integer` became `number` (so a model may emit 1.5 for a pattern
+      // number) and the bounds vanished.
+      const BUILDER_REPRESENTABLE = {
+        name: 'get_pattern_detail',
+        description: 'Return every chunk for one pattern.',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern_number: {
+              type: 'integer',
+              description: 'The pattern number (1-999).',
+              minimum: 1,
+              maximum: 999,
+            },
+          },
+          required: ['pattern_number'],
+        },
+      };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability(BUILDER_REPRESENTABLE)}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            body: expect.objectContaining({ functionDefinition: BUILDER_REPRESENTABLE }),
+          })
+        );
+      });
+    });
+
+    // The point of the merge: the builder owns four fields per parameter, and
+    // an edit to one of them must not delete the ones it cannot show.
+    it('keeps bounds and integer-ness when only a description is edited', async () => {
+      const STORED = {
+        name: 'get_pattern_detail',
+        description: 'Return every chunk for one pattern.',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern_number: {
+              type: 'integer',
+              description: 'The pattern number (1-999).',
+              minimum: 1,
+              maximum: 999,
+            },
+          },
+          required: ['pattern_number'],
+        },
+      };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability(STORED)}
+          availableCategories={['support']}
+        />
+      );
+
+      // Edit through the BUILDER — the path that used to rebuild each
+      // parameter from scratch and drop everything it had no slot for.
+      await user.click(screen.getByRole('tab', { name: /function/i }));
+      const descInput = screen.getByDisplayValue('The pattern number (1-999).');
+      await user.clear(descInput);
+      await user.type(descInput, 'Which pattern to fetch.');
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
+      });
+      const body = vi.mocked(apiClient.patch).mock.calls[0]?.[1] as {
+        body: { functionDefinition: { parameters: { properties: Record<string, unknown> } } };
+      };
+      expect(body.body.functionDefinition.parameters.properties.pattern_number).toEqual({
+        type: 'integer',
+        description: 'Which pattern to fetch.',
+        minimum: 1,
+        maximum: 999,
+      });
+    });
+
+    it('drops the stored keywords when the admin changes the parameter type', async () => {
+      // The one case where losing them is right: `minLength` on a field that
+      // just stopped being a string is nonsense, and the admin chose it.
+      const STORED = {
+        name: 'get_pattern_detail',
+        description: 'd',
+        parameters: {
+          type: 'object',
+          properties: {
+            label: { type: 'string', description: 'A label.', minLength: 1, maxLength: 40 },
+          },
+          required: [],
+        },
+      };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability(STORED)}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('tab', { name: /function/i }));
+      // The parameter-row type select has no accessible name; it is the only
+      // combobox on this tab. Scope the option lookup to the Radix portal, as
+      // the category-select tests above do.
+      const combos = screen.getAllByRole('combobox');
+      await user.click(combos[combos.length - 1]);
+      const listbox = await screen.findByRole('listbox');
+      await user.click(within(listbox).getByRole('option', { name: /^number$/i }));
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
+      });
+      const body = vi.mocked(apiClient.patch).mock.calls[0]?.[1] as {
+        body: { functionDefinition: { parameters: { properties: Record<string, unknown> } } };
+      };
+      expect(body.body.functionDefinition.parameters.properties.label).toEqual({
+        type: 'number',
+        description: 'A label.',
+      });
+    });
+
+    it('preserves an untouched divergent row apart from repairing its name', async () => {
+      // A legacy row whose stored name differs from its slug, carrying a
+      // top-level key the API accepts. Opening it and saving used to rewrite
+      // the definition — the mount-time slug mirror re-triggered the recompile
+      // that the mount-skip exists to prevent — and dropped `strict`.
+      const DIVERGENT = {
+        name: 'custom_kb_search',
+        description: 'Search.',
+        parameters: { type: 'object', properties: {}, required: [] },
+        strict: true,
+      };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={{
+            ...makeRichCapability({ name: 'search_knowledge_base' }),
+            functionDefinition: DIVERGENT,
+          }}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
+      });
+      const body = vi.mocked(apiClient.patch).mock.calls[0]?.[1] as {
+        body: { functionDefinition: Record<string, unknown> };
+      };
+      // Only the name moved, to satisfy the #509 invariant.
+      expect(body.body.functionDefinition).toEqual({
+        ...DIVERGENT,
+        name: 'search_knowledge_base',
+      });
+    });
+
+    it('compiles the first builder edit after opening in JSON mode', async () => {
+      // The mount-skip flag was consumed inside the `visual` branch, so a form
+      // opening in JSON mode returned with it still armed and then swallowed
+      // the first compile once the admin reached the builder. "Reset to
+      // Builder" emptied the table on screen while the payload still carried
+      // the original parameters.
+      const WITH_ENUM = {
+        name: 'escalate_to_human',
+        description: 'Escalate.',
+        parameters: {
+          type: 'object',
+          properties: { priority: { type: 'string', enum: ['low', 'high'], description: 'U.' } },
+          required: [],
+        },
+      };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability(WITH_ENUM)}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('tab', { name: /function/i }));
+      await user.click(screen.getByRole('button', { name: /reset to builder/i }));
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
+      });
+      const body = vi.mocked(apiClient.patch).mock.calls[0]?.[1] as {
+        body: { functionDefinition: { parameters: { properties: Record<string, unknown> } } };
+      };
+      // The reset emptied the table, so the payload must be empty too — screen
+      // and payload agreeing is the whole point.
+      expect(body.body.functionDefinition.parameters.properties).toEqual({});
+    });
+
+    it('can save a stored definition that predates the required fields', async () => {
+      // `description`/`parameters` were optional on create until #509, and the
+      // documented example omitted `parameters`. Removing the mount compile
+      // left such a row unsaveable — the submit guard blamed a missing
+      // function name that was plainly present.
+      const PARTIAL = { name: 'legacy_tool' };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={{
+            ...makeRichCapability({ name: 'legacy_tool' }),
+            functionDefinition: PARTIAL,
+          }}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
+      });
+    });
+
+    it('saves JSON edits made inside the debounce window', async () => {
+      // The JSON parse is debounced 200ms. Saving inside that window used to
+      // persist the PREVIOUS definition, report "Saved", and then let the
+      // stale timer write the unsaved JSON back into state — leaving the admin
+      // looking at edits marked as saved that never were. Submit now flushes
+      // the pending parse and uses its result.
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability({ name: 'legacy_tool' })}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('tab', { name: /function/i }));
+      await user.click(screen.getByRole('button', { name: /^json editor$/i }));
+
+      const textarea = screen.getByRole('textbox', { name: /json editor/i });
+      const edited = JSON.stringify({
+        name: 'legacy_tool',
+        description: 'Edited inside the debounce.',
+        parameters: { type: 'object', properties: {}, required: [] },
+      });
+      fireEvent.change(textarea, { target: { value: edited } });
+
+      // No waiting — press Save while the 200ms timer is still pending.
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalled();
+      });
+      const body = vi.mocked(apiClient.patch).mock.calls[0]?.[1] as {
+        body: { functionDefinition: { description: string } };
+      };
+      expect(body.body.functionDefinition.description).toBe('Edited inside the debounce.');
+    });
+
+    it('can still save a definition the visual builder cannot represent', async () => {
+      // A property with no `type` fails the builder shape outright. That used
+      // to leave `parsedFn` null, so submit was refused with "Function
+      // definition requires at least a function name" — leaving the admin
+      // unable to edit the description, rate limit or active flag either.
+      const UNBUILDABLE = {
+        name: 'call_external_api',
+        description: 'Call an API.',
+        parameters: {
+          type: 'object',
+          properties: { body: { description: 'Request body, any shape.' } },
+          required: [],
+        },
+      };
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeRichCapability(UNBUILDABLE)}
+          availableCategories={['support']}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /save|update/i }));
+
+      const { apiClient } = await import('@/lib/api/client');
+      await waitFor(() => {
+        expect(apiClient.patch).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            body: expect.objectContaining({ functionDefinition: UNBUILDABLE }),
           })
         );
       });

@@ -57,6 +57,44 @@ import {
 } from '@/lib/orchestration/tracing';
 
 /**
+ * Prefix marking a `CapabilityContext.agentId` that is a LABEL, not an
+ * `AiAgent.id`. A workflow execution isn't bound to an agent, so the
+ * `tool_call` executor dispatches under `workflow:${workflowId}` to keep rate
+ * limits scoped per-workflow (see {@link workflowAgentId}).
+ *
+ * The prefix is a constant rather than an inline template in each file
+ * because two modules have to agree on it: the executor mints it and
+ * {@link CapabilityDispatcher.getAgentBinding} has to recognise it. They
+ * disagreed in exactly that way in #528.
+ */
+export const WORKFLOW_AGENT_ID_PREFIX = 'workflow:';
+
+/**
+ * Build the synthetic `agentId` a workflow's `tool_call` steps dispatch under.
+ *
+ * ⚠️ **This value is not an `AiAgent.id` and must never be written to a column
+ * with a foreign key to one.** More than one table has such a column —
+ * `AiAgentCapability.agentId` (which is why strict mode needed the exemption
+ * below) and `AiCostLog.agentId` — and Postgres rejects the insert with P2003.
+ * Treat it as a label for in-memory scoping (rate-limit buckets, log context),
+ * not as a persistable id.
+ */
+export function workflowAgentId(workflowId: string): string {
+  return `${WORKFLOW_AGENT_ID_PREFIX}${workflowId}`;
+}
+
+/**
+ * True when an `agentId` is a workflow label rather than a real agent id.
+ *
+ * Safe as a prefix test because `AiAgent.id` is a cuid — no colons — so no
+ * real agent can collide, and no caller passes an attacker-chosen `agentId`
+ * (every other `dispatch()` call site passes a row's own `id`).
+ */
+export function isWorkflowAgentId(agentId: string): boolean {
+  return agentId.startsWith(WORKFLOW_AGENT_ID_PREFIX);
+}
+
+/**
  * Parse a Prisma `Json` value from `AiCapability.functionDefinition` into a
  * trusted `CapabilityFunctionDefinition`. Returns `null` (with a warn log)
  * if the row's JSON shape doesn't match — the caller is expected to skip
@@ -498,8 +536,22 @@ class CapabilityDispatcher {
         //    tool already logged its own tokens, so we record zeros and
         //    rely on the `operation: 'tool_call'` breakdown for per-tool
         //    analytics.
+        //    `agentId` is written only when it is a real `AiAgent.id`. A
+        //    workflow label is not one, and `AiCostLog.agentId` is a foreign
+        //    key to `AiAgent.id` — so writing the label violated
+        //    `ai_cost_log_agentId_fkey` (P2003). `logCost` catches and swallows
+        //    that, which meant every capability invoked from a workflow logged
+        //    an error and recorded NO cost row: the Costs page's per-tool
+        //    breakdown under-reported workflow tool usage to zero.
+        //    `workflowExecutionId` is the column that models this properly, and
+        //    its FK is satisfied — the execution row exists before any step runs.
         void logCost({
-          ...(context.agentId ? { agentId: context.agentId } : {}),
+          ...(context.agentId && !isWorkflowAgentId(context.agentId)
+            ? { agentId: context.agentId }
+            : {}),
+          ...(context.workflowExecutionId
+            ? { workflowExecutionId: context.workflowExecutionId }
+            : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
           operation: CostOperation.TOOL_CALL,
           model: 'n/a',
@@ -554,15 +606,72 @@ class CapabilityDispatcher {
    * `mcp-system` agent, which dispatches built-ins with no pivot rows in a
    * default install. Audit your `AiAgentCapability` table before enabling it.
    *
-   * Independently of this setting, the chat handler refuses any tool name
-   * outside the agent's advertised set before dispatch, which closes the
-   * reachable path (see `advertisedToolNames` in `streaming-handler.ts`).
+   * **Workflow `tool_call` steps are exempt from `strict`** — see the
+   * short-circuit at the top of the method. That advice ("audit the table
+   * first") is only actionable for a caller whose `agentId` is a real
+   * `AiAgent.id`; a workflow's is not, and the FK makes the row strict mode
+   * asks for impossible to insert (#528).
+   *
+   * Independently of this setting, here is what each caller checks before it
+   * gets here. THREE of the four take a name from a model.
+   *
+   * - `chat/streaming-handler.ts` and `engine/executors/agent-call.ts` —
+   *   model-emitted, both checked against the calling agent's advertised set
+   *   (`advertisedToolNames`, built from `getCapabilityDefinitions`).
+   * - `mcp/tool-registry.ts` — ALSO model-emitted; the host behind an MCP key
+   *   is an LLM. Checked against the globally EXPOSED-TOOL set (publishing an
+   *   `McpExposedTool` row is the grant), but NOT against the calling key's
+   *   scoped agent — and with no pivot row for that agent this method
+   *   default-allows, so a scoped key can reach an exposed tool its agent was
+   *   never granted. Deliberate opt-out scoping, documented in
+   *   `.context/orchestration/mcp.md` with the open question of whether scoped
+   *   should mean allow-list-only.
+   * - `executors/tool-call.ts` — the only one that is NOT model-driven:
+   *   `capabilitySlug` comes from Zod-parsed, admin-authored step config.
+   *   Nothing synthesizes a `tool_call` step at runtime; an orchestrator or
+   *   `plan` step delegates to `agent_call`, which dispatches under the real
+   *   agent id and is checked against that agent's advertised set. This is
+   *   what makes the workflow exemption above safe rather than convenient.
+   *
+   * An earlier draft of this note listed MCP among the callers that "do not
+   * take a name from a model at all" and then contradicted itself two lines
+   * later. Stated plainly here because a reader who stops at the first
+   * sentence is exactly who this note keeps failing.
+   *
+   * This note used to say "the chat handler … closes the reachable path". That
+   * was true of chat and false of `agent_call`, which had no such check until
+   * #559 — so a sentence intended to explain why the default is safe was, for
+   * anyone weighing `strict`, the reason not to look.
    */
   private async getAgentBinding(
     agentId: string,
     slug: string,
     entry: CapabilityRegistryEntry
   ): Promise<AgentCapabilityBinding | null> {
+    // What a caller gets when no pivot row narrows the capability: the base
+    // entry's own defaults. Named because two paths now return it.
+    const defaultAllowBinding = (): AgentCapabilityBinding => ({
+      slug,
+      isEnabled: true,
+      effectiveRateLimit: entry.rateLimit,
+      customConfig: null,
+      functionDefinition: entry.functionDefinition,
+      requiresApproval: entry.requiresApproval,
+    });
+
+    // A workflow label is not an agent id, so there is no row to look for:
+    // `AiAgentCapability.agentId` is a FK to `AiAgent.id`, and the FK rejects
+    // `workflow:<cuid>`. That is what separates this from the `mcp-system`
+    // caveat above — an operator told to "create the binding rows first"
+    // literally cannot, so under `strict` EVERY tool_call step in EVERY
+    // workflow failed with `capability_disabled_for_agent` and no available
+    // remedy (#528).
+    //
+    // Under `permissive` this changes nothing: the query could only ever
+    // return zero rows, so it already fell through to the same binding — this
+    // just stops issuing it.
+    if (isWorkflowAgentId(agentId)) return defaultAllowBinding();
+
     const now = Date.now();
     const fetchedAt = this.agentBindingsFetchedAt.get(agentId) ?? 0;
 
@@ -620,14 +729,7 @@ class CapabilityDispatcher {
       return null;
     }
 
-    return {
-      slug,
-      isEnabled: true,
-      effectiveRateLimit: entry.rateLimit,
-      customConfig: null,
-      functionDefinition: entry.functionDefinition,
-      requiresApproval: entry.requiresApproval,
-    };
+    return defaultAllowBinding();
   }
 
   private getOrCreateRateLimiter(slug: string, maxRequests: number): RateLimiter {

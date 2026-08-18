@@ -526,21 +526,6 @@ describe('AppExtractAnswerSlotsCapability — dispatch', () => {
     expect(result.success).toBe(true);
     expect((result.data as { intents: unknown[] }).intents).toHaveLength(2);
   });
-
-  it('logs cost without an agentId when the context omits one', async () => {
-    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
-
-    await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext({ agentId: undefined }));
-
-    // The CHAT cost log omits agentId rather than sending undefined. Assert the
-    // call actually happened first — otherwise the `not.toHaveProperty` below
-    // passes vacuously on `undefined` even if cost logging were skipped entirely.
-    const chatCall = (logCost as Mock).mock.calls.find(
-      ([arg]) => arg?.metadata?.capability === SLUG
-    );
-    expect(chatCall).toBeDefined();
-    expect(chatCall?.[0]).not.toHaveProperty('agentId');
-  });
 });
 
 describe('AppExtractAnswerSlotsCapability — data-slot mode', () => {
