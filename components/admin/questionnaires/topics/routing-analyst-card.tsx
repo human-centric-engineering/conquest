@@ -162,7 +162,9 @@ export function RoutingAnalystCard({
   const run = async (opts?: { silent?: boolean }) => {
     setAnalysing(true);
     setError(null);
-    setStatus('Starting…');
+    // `status` is set here unconditionally, so `status ?? '…'` in the render below never actually
+    // falls through to its default — the auto-run/manual distinction has to be made HERE, not there.
+    setStatus(opts?.silent ? 'Drafting a proposal…' : 'Starting…');
     try {
       const res = await fetch(
         API.APP.QUESTIONNAIRES.versionTopicsAnalyseStream(questionnaireId, versionId),
@@ -355,7 +357,7 @@ export function RoutingAnalystCard({
               {analysing ? (
                 <>
                   <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />
-                  {status ?? (autoStarted ? 'Drafting a proposal…' : 'Analysing…')}
+                  {status ?? 'Analysing…'}
                 </>
               ) : (
                 <>

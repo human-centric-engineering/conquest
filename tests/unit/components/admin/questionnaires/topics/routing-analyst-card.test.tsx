@@ -267,6 +267,40 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
     await waitFor(() => expect(screen.getByText('Pipeline')).toBeInTheDocument());
   });
 
+  it('shows a distinct initial status before any phase event arrives', async () => {
+    // The first `read()` never resolves, so the component is stuck on whatever `run()` seeded
+    // `status` to before the stream produced anything — this is what pins the auto-run's initial
+    // label as reachable, rather than being permanently shadowed by the unconditional `setStatus`
+    // call at the top of `run()`.
+    const release: { current: (() => void) | null } = { current: null };
+    const hang = new Promise<void>((resolve) => {
+      release.current = resolve;
+    });
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                await hang;
+                return { done: true, value: undefined };
+              },
+            }),
+          },
+        } as unknown as Response);
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(screen.getByText('Drafting a proposal…')).toBeInTheDocument());
+
+    release.current?.();
+  });
+
   it('explains the auto-run while it is in flight', async () => {
     // A stream that emits a phase but never a terminal event, so the component stays in its
     // `draft === null` / analysing state long enough to assert the banner.
