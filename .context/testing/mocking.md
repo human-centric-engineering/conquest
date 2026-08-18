@@ -30,6 +30,49 @@ import { createMockHeaders, createMockSession, delayed } from '@/tests/types/moc
 
 ---
 
+## The network is closed
+
+`tests/setup.ts` installs a happy-dom fetch interceptor that **refuses every
+real HTTP request** with the same error a genuine network failure produces — a
+`DOMException` named `NetworkError`, matching `happy-dom/lib/fetch/Fetch.js`.
+An **aborted** request is exempt and still rejects with `AbortError`: happy-dom
+runs the interceptor before its own signal check, so without that exemption
+every `if (err.name === 'AbortError') return` branch would quietly stop working
+under test. A component that fetches on mount, in a test that has not stubbed
+`fetch`, fails immediately with the URL named:
+
+```
+Blocked a real network request to http://localhost:3000/api/v1/... .
+Tests must not reach the network: stub it with vi.stubGlobal('fetch', …),
+or mock the module that issues it.
+```
+
+**Why it exists.** happy-dom's document URL is `http://localhost:3000`, so a
+relative path resolves against it and the request actually went out — ~470
+`ECONNREFUSED` lines per full run, each a socket opened during a test. Nothing
+failed because of them, but one still in flight when Vitest tears the
+environment down produces `EnvironmentTeardownError` (#597).
+
+**Why it hooks where it does.** happy-dom ships its own fetch over `node:http`
+(`happy-dom/lib/fetch/`) and binds its module references at import time, before
+`tests/setup.ts` runs. Patching `globalThis.fetch` intercepts none of it, and
+neither does patching `node:http`. Only `settings.fetch.interceptor` sees the
+traffic — worth knowing before writing a global fetch stub and wondering why it
+never fires.
+
+To let a test make a request, stub it:
+
+```ts
+const fetchMock = vi
+  .fn()
+  .mockResolvedValue(new Response(JSON.stringify({ success: true, data: [] }), { status: 200 }));
+vi.stubGlobal('fetch', fetchMock);
+```
+
+Note `vi.restoreAllMocks()` in the global `afterEach` does **not** undo
+`vi.stubGlobal` — use `vi.unstubAllGlobals()` if a stub must not leak between
+tests in the same file.
+
 ## Prisma (Database)
 
 **When to use**: Unit tests requiring database operations WITHOUT real database.
