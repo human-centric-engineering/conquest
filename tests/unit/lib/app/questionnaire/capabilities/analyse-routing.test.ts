@@ -75,6 +75,12 @@ const RESULT = {
     },
   ],
   rules: [],
+  gaps: [
+    {
+      sourceQuote: 'Use judgement for respondents outside these categories.',
+      explanation: 'Too vague to test mechanically.',
+    },
+  ],
   summary: 'Found one conditional section gated on channel structure.',
   fromDocument: true,
 };

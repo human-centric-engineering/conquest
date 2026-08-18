@@ -21,13 +21,24 @@
  *   one they must re-derive, at which point writing it by hand was less work.
  * - **uncovered questions** — with scope on, a question in no topic can never be asked, and nothing
  *   else in the system reports it. The count is shown before accepting, not after.
+ * - **`gaps`** (Phase 2, F17.19) — routing language the analyst recognized but could not formalize
+ *   into a topic or rule. Previously silently dropped; now shown so the admin knows what the
+ *   accepted proposal does NOT cover.
  *
  * Accepting is a single POST of the reviewed set; nothing here writes live until then.
  */
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, FileSearch, Loader2, Quote, Sparkles, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  FileSearch,
+  HelpCircle,
+  Loader2,
+  Quote,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -331,6 +342,12 @@ export function RoutingAnalystCard({
               {draft.topics.length} proposed {draft.topics.length === 1 ? 'topic' : 'topics'} ·{' '}
               {conditionalCount} conditional
               {draft.rules.length > 0 && <> · {draft.rules.length} hard rules</>}
+              {draft.gaps.length > 0 && (
+                <>
+                  {' '}
+                  · {draft.gaps.length} unformalized {draft.gaps.length === 1 ? 'gap' : 'gaps'}
+                </>
+              )}
               {draft.maxConditionalTopics !== undefined && (
                 <> · limit of {draft.maxConditionalTopics} per interview</>
               )}
@@ -421,6 +438,36 @@ export function RoutingAnalystCard({
                           {rule.sourceQuote}
                         </p>
                       )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {draft.gaps.length > 0 && (
+              <div className="space-y-2">
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <HelpCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  Recognized but not formalized
+                  <FieldHelp title="What a gap means">
+                    The document plainly states a routing or eligibility instruction here, but the
+                    analyst could not turn it into a topic or a hard rule — often because it names
+                    something not modeled as a data slot, or is too vague to check mechanically.
+                    Accepting the proposal below does not cover these; review them and add a topic,
+                    criteria, or rule by hand if they matter.
+                  </FieldHelp>
+                </p>
+                <ul className="space-y-2">
+                  {draft.gaps.map((gap, i) => (
+                    <li
+                      key={i}
+                      className="space-y-1 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                    >
+                      <p className="flex items-start gap-1.5 italic">
+                        <Quote className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                        {gap.sourceQuote}
+                      </p>
+                      <p>{gap.explanation}</p>
                     </li>
                   ))}
                 </ul>

@@ -173,6 +173,7 @@ export class AppAnalyseRoutingCapability extends BaseCapability<
               conditionalCount: result.data.result.topics.filter((t) => t.phase === 'conditional')
                 .length,
               ruleCount: result.data.result.rules.length,
+              gapCount: result.data.result.gaps.length,
               fromDocument: result.data.result.fromDocument,
             },
           })

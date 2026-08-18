@@ -15,6 +15,11 @@
  * Caps are deliberate. An instrument whose every paragraph becomes a topic is a proposal nobody
  * will read; the prompt asks for restraint and these caps stop a runaway response regardless.
  *
+ * **`gaps` (Phase 2, F17.19).** Routing language the analyst recognized but could not formalize
+ * into a topic or a hard rule — a vague eligibility clause, a rule that would need a data slot the
+ * instrument never produced. Previously this language was silently dropped; now it is reported, so
+ * the admin sees what the document said that the proposal above does not cover, rather than nothing.
+ *
  * Pure: Zod only, no Prisma / Next.
  */
 
@@ -39,6 +44,13 @@ export const ROUTING_ANALYSIS_MAX_TOPICS = 40;
 
 /** Hard cap on proposed hard rules. Rules are for certainties, and certainties are few. */
 export const ROUTING_ANALYSIS_MAX_RULES = 20;
+
+/**
+ * Hard cap on reported gaps. A gap is the analyst admitting it recognized routing language it could
+ * not formalize — a small honesty channel, not a second proposal, so it is capped tighter than
+ * topics.
+ */
+export const ROUTING_ANALYSIS_MAX_GAPS = 15;
 
 /** Quoted spans are evidence, not excerpts of the whole document. */
 const SOURCE_QUOTE_MAX_LENGTH = 1_000;
@@ -82,6 +94,22 @@ const proposedRuleSchema = z.object({
 
 export type ProposedRulePayload = z.infer<typeof proposedRuleSchema>;
 
+/**
+ * Routing language the analyst recognized but could not turn into a topic or a hard rule — a
+ * vague eligibility clause, a reference to something the instrument never defines, a rule that
+ * would need a data slot the extractor did not produce. Unlike a topic or rule, `sourceQuote` is
+ * REQUIRED: a gap that cannot be traced to the document's own words is not a gap, it is the analyst
+ * inventing a problem, and the point of this field is the opposite — admitting what the document
+ * said that the proposal above does not cover.
+ */
+const proposedGapSchema = z.object({
+  sourceQuote: z.string().trim().min(1).max(SOURCE_QUOTE_MAX_LENGTH),
+  /** What the analyst recognized but could not formalize, and why. */
+  explanation: z.string().trim().min(1).max(SCOPE_RATIONALE_MAX_LENGTH),
+});
+
+export type ProposedGapPayload = z.infer<typeof proposedGapSchema>;
+
 export const routingAnalysisSchema = z.object({
   topics: z
     .array(proposedTopicSchema)
@@ -98,6 +126,8 @@ export const routingAnalysisSchema = z.object({
       'A conditional topic must carry the criteria for including it'
     ),
   rules: z.array(proposedRuleSchema).max(ROUTING_ANALYSIS_MAX_RULES).default([]),
+  /** Routing language recognized but not formalized into a topic or rule (Phase 2, F17.19). */
+  gaps: z.array(proposedGapSchema).max(ROUTING_ANALYSIS_MAX_GAPS).default([]),
   /** Only when the document states a breadth limit of its own. Omitted otherwise. */
   maxConditionalTopics: z
     .number()

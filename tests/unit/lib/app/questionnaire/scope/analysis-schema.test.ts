@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  ROUTING_ANALYSIS_MAX_GAPS,
   ROUTING_ANALYSIS_MAX_TOPICS,
   validateRoutingAnalysis,
 } from '@/lib/app/questionnaire/scope/analysis-schema';
@@ -54,6 +55,7 @@ describe('validateRoutingAnalysis', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.rules).toEqual([]);
+    expect(result.value.gaps).toEqual([]);
     expect(result.value.topics[0]?.questionKeys).toEqual([]);
     expect(result.value.topics[0]?.criteria).toBeNull();
     expect(result.value.topics[0]?.depth).toBe('full');
@@ -186,5 +188,43 @@ describe('validateRoutingAnalysis', () => {
         })
       ).ok
     ).toBe(false);
+  });
+
+  it('accepts a well-formed gap', () => {
+    const result = validateRoutingAnalysis(
+      proposal({
+        gaps: [
+          {
+            sourceQuote: 'Use judgement for respondents outside these categories.',
+            explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
+          },
+        ],
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.gaps).toHaveLength(1);
+  });
+
+  it('refuses a gap with no source quote — a gap must be traceable to the document', () => {
+    const result = validateRoutingAnalysis(
+      proposal({ gaps: [{ sourceQuote: '', explanation: 'Something vague.' }] })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a gap with no explanation', () => {
+    const result = validateRoutingAnalysis(
+      proposal({ gaps: [{ sourceQuote: 'Some clause.', explanation: '' }] })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('caps the number of reported gaps', () => {
+    const many = Array.from({ length: ROUTING_ANALYSIS_MAX_GAPS + 1 }, (_, i) => ({
+      sourceQuote: `Clause ${i}.`,
+      explanation: 'x',
+    }));
+    expect(validateRoutingAnalysis(proposal({ gaps: many })).ok).toBe(false);
   });
 });

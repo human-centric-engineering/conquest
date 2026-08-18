@@ -222,6 +222,15 @@ describe('buildRoutingAnalysisPrompt', () => {
     expect(rubric).toContain('Propose at most 20 rules');
     expect(rubric).toContain('Output ONLY a single JSON object');
   });
+
+  it('states the gaps rubric — required quote, capped count', () => {
+    const [system] = buildRoutingAnalysisPrompt({ questions: QUESTIONS });
+    const rubric = typeof system.content === 'string' ? system.content : '';
+    expect(rubric).toContain('## Gaps');
+    expect(rubric).toContain('"sourceQuote" is REQUIRED');
+    expect(rubric).toContain('Report at most 15 gaps');
+    expect(rubric).toContain('"gaps"');
+  });
 });
 
 describe('buildRoutingAnalysisRetryMessage', () => {
@@ -231,6 +240,7 @@ describe('buildRoutingAnalysisRetryMessage', () => {
     expect(message).toContain('lowercase_snake_case');
     expect(message).toContain('"criteria"');
     expect(message).toContain('"rules"');
+    expect(message).toContain('"gaps"');
     expect(message).toContain('"fromDocument"');
     expect(message).toContain('No prose, no code fences');
   });
