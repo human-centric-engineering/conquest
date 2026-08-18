@@ -60,6 +60,39 @@ release process.
 
 ### Changed
 
+- **`npm run lint` runs under an explicit Node heap cap.** Node derives its
+  default heap from machine RAM and stops there — 4288MB on a 16GB host,
+  however much of the rest is free — and cold, whole-repo, type-aware
+  `eslint .` needs ~4.1GB. Base Sunrise clears that by about 2%; **a fork with
+  real code on top does not**, and it fails as `exit 134` (SIGABRT) with no
+  message naming memory. Measured across the fork family: Sunrise 4.05 GiB and
+  passing, two ~2,700-file forks aborting and needing 5120, a ~1.9x fork
+  needing 6144. `lint` and `lint:fix` now go through `scripts/run-capped.mjs`,
+  which appends `--max-old-space-size` to `NODE_OPTIONS` — **only when nothing
+  has set one already**, so CI's `CI_NODE_HEAP_MB` stays authoritative and a
+  fork's measured value is never silently replaced. `NODE_HEAP_MB` overrides
+  the 6144 default locally; it is clamped to 75% of physical memory and floored
+  at Node's own default, so on a machine too small for it the wrapper is a
+  no-op rather than a downgrade. `type-check` and the pre-commit hook are
+  deliberately **not** capped — measured at 1.64-1.75 GiB and 1.85 GiB
+  respectively, both with a wide margin. See
+  [`.context/architecture/lint-toolchain.md`](./.context/architecture/lint-toolchain.md#memory-why-lint-runs-under-an-explicit-heap-cap).
+
+- **The test jobs no longer attach a Postgres service container.** `test-full`
+  (×4 shards) and `test-changed` each started a `pgvector/pgvector:pg15`
+  container and ran `db:migrate:deploy` + `db:seed` against a database **no test
+  could reach**: `tests/setup.ts` is a global `setupFiles` entry and overwrites
+  `DATABASE_URL`, so a query would have authenticated as a user the container
+  never created. Measured at ~37s per shard against a 143s vitest step — ~2.5
+  job-minutes on every push, plus a term in the test-job heap budget on the 8GB
+  private runner where it is tightest. `smoke` keeps its container; it is the
+  job that queries Postgres for real. Both test jobs keep `DATABASE_URL`, which
+  `prisma generate` wants defined and never connects with. **A fork that has
+  repointed `tests/setup.ts` at the CI database and added genuinely DB-backed
+  tests will go red** — re-add the `services:` block and the two steps, both
+  shown in
+  [`.context/architecture/ci.md`](./.context/architecture/ci.md#the-postgres-service-container).
+
 - **Tests in the happy-dom environment no longer touch the network.** happy-dom loads
   `<script src>` and `<link rel=stylesheet>` for real (both flags default to
   *off*), and resolves relative URLs against its default document origin,
