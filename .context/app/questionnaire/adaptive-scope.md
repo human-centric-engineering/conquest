@@ -412,6 +412,17 @@ analyst declare which it did:
 
 Uncovered questions are counted **server-side** before the accept, never trusted from the model.
 
+### Finding out it exists (F17.19)
+
+Everything above is **manual** — an admin has to already know the tab exists and click "Run". A
+cheap, fail-soft candidacy check now runs during ingestion itself (all four entry points: new
+ingest + re-ingest, plain + streaming) and decides, at the fast `routing` tier rather than this
+analyst's `reasoning` tier, whether the document's own words describe conditional routing at all.
+Ingestion-time detection **only** so far — the verdict is recorded (`AppAiRun` kind
+`scope_candidacy`) and cached on the version, but nothing yet auto-runs this analyst from it or
+surfaces it in any UI. See [`f17.19.md`](../planning/features/f17.19.md) for the phased plan and
+what's still open.
+
 ## Reports and scoring (F17.5)
 
 The `notAssessed` list on the session export is what makes an adaptive instrument honest downstream.

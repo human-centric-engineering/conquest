@@ -63,6 +63,13 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
   INGEST_RATE_LIMIT_INTERVAL_MS: 60_000,
 }));
 
+// Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
+// logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
+// the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
+vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
+  checkAdaptiveScopeCandidacy: vi.fn(),
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaires/stream/route';
@@ -73,6 +80,7 @@ import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatche
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
+import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -180,6 +188,9 @@ beforeEach(() => {
     data: structuredClone(COHERENT_EXTRACTION),
   });
   (persistIngestion as Mock).mockResolvedValue(PERSIST_RESULT);
+  // Default: not a candidate / check skipped — keeps every pre-existing test's frame
+  // sequence and done-event shape unchanged (no `adaptiveScopeCandidate` key) untouched.
+  (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
 });
 
 // ─── Gate + auth (pre-stream — JSON envelope, not SSE) ─────────────────────────
@@ -428,5 +439,48 @@ describe('POST /api/v1/app/questionnaires/stream — persist failure mid-stream'
     expect(frames.some((f) => f.type === 'done')).toBe(false);
     // The raw DB error message is never forwarded onto the wire.
     expect(JSON.stringify(frames)).not.toContain('DB connection lost');
+  });
+});
+
+// ─── Adaptive Scope candidacy wiring (P17.19) ───────────────────────────────────
+// `checkAdaptiveScopeCandidacy` itself is mocked at the module boundary — its Prisma-branch
+// logic is unit-tested in `_lib/scope-candidacy.test.ts`. These tests only prove this route
+// wires the result into its own `checking_scope` phase frame and terminal `done` frame.
+
+describe('POST /api/v1/app/questionnaires/stream — adaptive scope candidacy wiring', () => {
+  it('emits a checking_scope phase frame between saving and the terminal done frame', async () => {
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
+    const savingIndex = phaseNames.indexOf('saving');
+    const checkingIndex = phaseNames.indexOf('checking_scope');
+
+    expect(savingIndex).toBeGreaterThanOrEqual(0);
+    expect(checkingIndex).toBeGreaterThan(savingIndex);
+    expect(frames[frames.length - 1].type).toBe('done');
+  });
+
+  it('carries adaptiveScopeCandidate on the done frame when the check resolves a verdict', async () => {
+    const verdict = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(verdict);
+
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect(doneFrame.data.adaptiveScopeCandidate).toEqual(verdict);
+  });
+
+  it('omits adaptiveScopeCandidate from the done frame when the check resolves null', async () => {
+    // beforeEach already defaults the mock to null — pins the omission (not
+    // present-and-undefined) directly against the parsed SSE frame data.
+    const res = await POST(makeRequest('onboarding.md'));
+    const frames = await drainSse(res);
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
   });
 });

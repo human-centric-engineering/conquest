@@ -22,6 +22,7 @@ import {
   AppComposeCompletionOfferCapability,
   AppComposeQuestionnaireCapability,
   AppDetectContradictionsCapability,
+  AppDetectScopeCandidacyCapability,
   AppEvaluateStructureCapability,
   AppReconcileSuggestionsCapability,
   AppExtractAnswerSlotsCapability,
@@ -80,6 +81,11 @@ export function initAppCapabilities(): void {
   // pages and proposes the topics + hard rules they describe. Dispatched by the Topics tab's
   // analysis route; writes nothing live.
   registerAppCapability(new AppAnalyseRoutingCapability());
+
+  // Adaptive Scope (P17.19) — the ingestion-time candidacy check. A cheap triage read that decides
+  // whether a freshly-uploaded document is worth flagging as a routing candidate. Dispatched by the
+  // ingest pipeline, on every fresh upload; writes nothing itself.
+  registerAppCapability(new AppDetectScopeCandidacyCapability());
 
   // Data Slots — the data-slot generator. Dispatched by the generate-data-slots route.
   registerAppCapability(new AppGenerateDataSlotsCapability());

@@ -66,6 +66,13 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
   INGEST_RATE_LIMIT_INTERVAL_MS: 60_000,
 }));
 
+// Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
+// logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
+// the route wires the result into the response.
+vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
+  checkAdaptiveScopeCandidacy: vi.fn(),
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaires/route';
@@ -77,6 +84,7 @@ import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatche
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
+import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -179,6 +187,9 @@ beforeEach(() => {
     data: structuredClone(COHERENT_EXTRACTION),
   });
   (persistIngestion as Mock).mockResolvedValue(PERSIST_RESULT);
+  // Default: not a candidate / check skipped — keeps every pre-existing test's response body
+  // shape unchanged (no `adaptiveScopeCandidate` key) without touching those tests.
+  (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
 });
 
 // ─── Gate + auth ──────────────────────────────────────────────────────────────
@@ -613,5 +624,45 @@ describe('POST /api/v1/app/questionnaires — dedup, config, rate-limit', () => 
     // Rate-limited before any parse/dispatch work.
     expect(parseDocument).not.toHaveBeenCalled();
     expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Adaptive Scope candidacy wiring (P17.19) ───────────────────────────────────
+// `checkAdaptiveScopeCandidacy` itself is mocked at the module boundary — its Prisma-branch
+// logic (eligibility, fail-soft, dispatch, caching) is unit-tested in `_lib/scope-candidacy.test.ts`.
+// These tests only prove this route wires the result into the 201 response correctly.
+
+describe('POST /api/v1/app/questionnaires — adaptive scope candidacy wiring', () => {
+  it('includes adaptiveScopeCandidate in the 201 body when the check resolves a verdict', async () => {
+    const verdict = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(verdict);
+
+    const res = await POST(makeRequest('onboarding.md'));
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.data.adaptiveScopeCandidate).toEqual(verdict);
+  });
+
+  it('omits the adaptiveScopeCandidate key entirely when the check resolves null', async () => {
+    // beforeEach already defaults the mock to null — this pins the omission (not
+    // present-and-undefined) via the `in` operator against the raw JSON body.
+    const res = await POST(makeRequest('onboarding.md'));
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect('adaptiveScopeCandidate' in body.data).toBe(false);
+  });
+
+  it('calls the candidacy check with the persisted versionId and the parsed document text', async () => {
+    await POST(makeRequest('onboarding.md'));
+
+    expect(checkAdaptiveScopeCandidacy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        versionId: PERSIST_RESULT.versionId,
+        // The parsed document's full text, not the raw upload buffer.
+        documentText: PARSED_DOC.fullText,
+      })
+    );
   });
 });

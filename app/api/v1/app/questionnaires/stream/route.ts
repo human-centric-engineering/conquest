@@ -34,6 +34,7 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/extract-pipeline';
 import { orchestrateExtraction } from '@/app/api/v1/app/questionnaires/_lib/orchestrate-extraction';
 import { persistIngestion } from '@/app/api/v1/app/questionnaires/_lib/persist';
+import { checkAdaptiveScopeCandidacy } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import { recordAiRun } from '@/lib/app/questionnaire/ai-run/store';
 import type { ExtractionStreamEvent } from '@/lib/app/questionnaire/ingestion/extraction-stream-events';
 
@@ -168,6 +169,22 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         });
       }
 
+      // Adaptive Scope (P17.19): a cheap, fail-soft triage read over the just-persisted version.
+      // Its own phase event so the admin sees why the stream keeps going a little past "saving"
+      // rather than reading it as a stall.
+      yield {
+        type: 'phase',
+        phase: 'checking_scope',
+        message: 'Checking for conditional routing…',
+      };
+      const candidacy = await checkAdaptiveScopeCandidacy({
+        versionId: result.versionId,
+        documentText: parsed.fullText,
+        fileName: file.name,
+        adminId,
+        log,
+      });
+
       logAdminAction({
         userId: adminId,
         action: 'questionnaire.ingest',
@@ -204,6 +221,7 @@ const handleIngestStream = withAdminAuth(async (request: NextRequest, session) =
         sectionCount: result.sectionCount,
         questionCount: result.questionCount,
         changeCount: result.changeCount,
+        ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
       };
     } catch (err) {
       log.error('Ingest stream: persist failed (response already streamed)', {

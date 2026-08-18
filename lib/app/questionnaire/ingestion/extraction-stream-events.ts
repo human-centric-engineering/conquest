@@ -11,12 +11,17 @@
  * client dialog, so it must stay free of any server-only import.
  */
 
+import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
+
 /**
  * Progress phases surfaced to the admin while the draft builds. Unlike the old scripted
  * ticker these are REAL: each is emitted by the orchestrator as it reaches that stage.
  * `verifying`/`repairing` fire only when the ingest verify+repair pass is enabled.
+ * `checking_scope` fires only on a fresh, eligible version (P17.19) — see
+ * `_lib/scope-candidacy.ts`.
  */
-export type ExtractionPhase = 'extracting' | 'verifying' | 'repairing' | 'saving';
+export type ExtractionPhase =
+  'extracting' | 'verifying' | 'repairing' | 'checking_scope' | 'saving';
 
 /** A real progress event — the client renders `message` and, when present, the `progress` counts. */
 export interface ExtractionPhaseEvent {
@@ -58,6 +63,13 @@ export interface ExtractionDoneEvent {
    * response so the client keeps one code path for "the work finished".
    */
   deduped?: boolean;
+  /**
+   * Adaptive Scope candidacy check (P17.19) — present only when the check actually ran (a fresh,
+   * eligible version) and returned a verdict. Absent on a deduped no-op, on an ineligible version
+   * (scope already on / already authored), and on any check failure — all of which mean "nothing to
+   * report" rather than "checked and found nothing".
+   */
+  adaptiveScopeCandidate?: ScopeCandidacyVerdict;
 }
 
 export type ExtractionStreamEvent =

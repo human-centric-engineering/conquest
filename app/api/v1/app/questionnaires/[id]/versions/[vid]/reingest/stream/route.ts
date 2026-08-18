@@ -44,6 +44,10 @@ import {
   ReingestNotDraftError,
   reingestVersion,
 } from '@/app/api/v1/app/questionnaires/_lib/reingest';
+import {
+  checkAdaptiveScopeCandidacy,
+  isEligibleForScopeCandidacy,
+} from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 
 /**
  * Convert a pre-built error `Response` from the pipeline into a terminal stream error
@@ -242,6 +246,37 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         });
       }
 
+      // Adaptive Scope (P17.19): a cheap, fail-soft triage read over the just-replaced draft.
+      // Pre-checked here (rather than relying only on the internal gate inside
+      // `checkAdaptiveScopeCandidacy`, which re-checks it anyway) so the "checking…" phase is only
+      // shown when a real check is about to run — a re-ingest, unlike a fresh ingest, may land on a
+      // version that already has scope on or authored topics, and announcing a check that turns
+      // out to be a silent no-op would read as "checked, found nothing" rather than "not applicable".
+      // A pre-check failure is treated as ineligible (skip announcing), matching the check's own
+      // "when in doubt, don't check" discipline.
+      const eligibleForCandidacyCheck = await isEligibleForScopeCandidacy(vid).catch((err) => {
+        log.warn('scope candidacy: pre-check threw; not announcing a check', {
+          versionId: vid,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      });
+      let candidacy: Awaited<ReturnType<typeof checkAdaptiveScopeCandidacy>> = null;
+      if (eligibleForCandidacyCheck) {
+        yield {
+          type: 'phase',
+          phase: 'checking_scope',
+          message: 'Checking for conditional routing…',
+        };
+        candidacy = await checkAdaptiveScopeCandidacy({
+          versionId: vid,
+          documentText: parsed.fullText,
+          fileName: file.name,
+          adminId,
+          log,
+        });
+      }
+
       logAdminAction({
         userId: adminId,
         action: 'questionnaire.reingest',
@@ -277,6 +312,7 @@ const handleReingestStream = withAdminAuth<{ id: string; vid: string }>(
         questionCount: result.questionCount,
         changeCount: result.changeCount,
         deduped: false,
+        ...(candidacy ? { adaptiveScopeCandidate: candidacy } : {}),
       };
     }
 
