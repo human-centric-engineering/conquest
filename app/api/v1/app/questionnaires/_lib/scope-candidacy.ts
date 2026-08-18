@@ -3,8 +3,8 @@
  *
  * Runs on every fresh questionnaire ingestion (new ingest + re-ingest, streaming and non-streaming)
  * and decides whether the uploaded document is worth flagging as a routing candidate — NOT the
- * Routing Analyst itself, which does the actual topic/rule proposal and (a later phase) is
- * auto-triggered from the Topics tab when this check fires.
+ * Routing Analyst itself, which does the actual topic/rule proposal and is auto-triggered from the
+ * Topics tab when this check fires (`loadAutoTriggerState`, Phase 3).
  *
  * Fail-soft throughout, the same discipline as the ingest verify/repair pass
  * (`orchestrate-extraction.ts`): a missing agent, no provider, a timeout, or an unparseable reply
@@ -240,4 +240,68 @@ export async function checkAdaptiveScopeCandidacy(
     confidence: result.confidence,
     summary: result.summary,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Auto-trigger eligibility (F17.19 Phase 3)                                  */
+/* -------------------------------------------------------------------------- */
+
+export interface AutoTriggerState {
+  /** The cached verdict (Phase 1), trimmed for client display. Null if never checked, ineligible
+   *  at check time, or malformed. */
+  candidacy: ScopeCandidacyVerdict | null;
+  /** True only when the Routing Analyst should be invoked automatically, right now, unprompted. */
+  pending: boolean;
+}
+
+/**
+ * Decide whether the Topics tab should auto-invoke the Routing Analyst right now.
+ *
+ * The candidacy check only ever WRITES a verdict at ingestion time; whether it still applies by
+ * the time an admin opens the tab is a later-in-time question, so everything here is read fresh:
+ * a draft may have landed since (from this very auto-trigger, or a manual run), a topic may have
+ * been hand-authored, or the version may already be enabled.
+ *
+ * `hasAuthoredTopic` / `hasDraft` / `enabled` are passed in rather than re-queried — the Topics
+ * route's GET handler already loaded the topic set, the draft and the settings for its own
+ * response, and re-querying the same three facts here could disagree with what it actually
+ * returns in the same payload.
+ */
+export async function loadAutoTriggerState(
+  versionId: string,
+  current: { hasAuthoredTopic: boolean; hasDraft: boolean; enabled: boolean }
+): Promise<AutoTriggerState> {
+  const version = await prisma.appQuestionnaireVersion.findUnique({
+    where: { id: versionId },
+    select: { adaptiveScopeCandidate: true },
+  });
+  const validated = version?.adaptiveScopeCandidate
+    ? validateScopeCandidacy(version.adaptiveScopeCandidate)
+    : null;
+  if (!validated?.ok) return { candidacy: null, pending: false };
+
+  const candidacy: ScopeCandidacyVerdict = {
+    isCandidate: validated.value.isCandidate,
+    confidence: validated.value.confidence,
+    summary: validated.value.summary,
+  };
+
+  if (!candidacy.isCandidate) return { candidacy, pending: false };
+  if (current.enabled || current.hasDraft || current.hasAuthoredTopic) {
+    return { candidacy, pending: false };
+  }
+
+  // The durable "already tried" signal. Unlike the draft — which a discard deletes — this survives
+  // a rejected proposal, so declining what the analyst proposed never re-fires the same auto-run
+  // just because the admin revisits the tab. Recorded for both a successful AND a failed real run
+  // (the analyse/stream route logs `status: 'failed'` from inside its dispatch), but NOT for the
+  // early-return paths ahead of any model call (rate limited, no questions, agent unseeded) — those
+  // stay eligible to retry on a later visit, which is the correct behaviour for "nothing was
+  // actually attempted yet".
+  const priorRun = await prisma.appAiRun.findFirst({
+    where: { versionId, kind: 'routing_analysis' },
+    select: { id: true },
+  });
+
+  return { candidacy, pending: priorRun === null };
 }

@@ -9,6 +9,7 @@
  */
 
 import type { TopicCost } from '@/lib/app/questionnaire/scope/budget';
+import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import {
   NEGATIVE_SCOPE_OPERATOR,
   type AdaptiveScopeSettings,
@@ -102,6 +103,18 @@ export interface TopicsPayload {
    * carried above, server-side, so "which questions are in the opening" has one implementation.
    */
   preview: PlanPreviewForm;
+  /**
+   * The ingestion-time candidacy verdict (F17.19 Phase 1), or null when the version was never
+   * checked, was ineligible at check time, or the document did not read as a routing candidate.
+   */
+  candidacy: ScopeCandidacyVerdict | null;
+  /**
+   * True when the Routing Analyst should run automatically, right now, because Phase 1 flagged
+   * this document and nothing has acted on it since (F17.19 Phase 3). The client fires it at most
+   * once — the next time this GET is called, either a draft will exist or an `AppAiRun` will
+   * record the attempt, and this flips back to false.
+   */
+  autoTriggerPending: boolean;
 }
 
 /** The empty payload — what a failed fetch degrades to, so a tab renders rather than crashing. */
@@ -112,6 +125,8 @@ export const EMPTY_TOPICS_PAYLOAD: Omit<TopicsPayload, 'settings'> = {
   costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
   draft: null,
   preview: { openingQuestions: [], fillTargets: [] },
+  candidacy: null,
+  autoTriggerPending: false,
 };
 
 /* -------------------------------------------------------------------------- */

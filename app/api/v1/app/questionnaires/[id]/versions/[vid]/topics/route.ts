@@ -4,7 +4,9 @@
  * GET /api/v1/app/questionnaires/:id/versions/:vid/topics
  *   Admin-only: the version's topics, its resolved `adaptiveScope` settings, the coherence
  *   findings, the key inventory the editor needs to offer membership pickers, and the Routing
- *   Analyst's pending proposal when one is waiting for review (`draft`, else null).
+ *   Analyst's pending proposal when one is waiting for review (`draft`, else null). Also carries
+ *   the ingestion-time candidacy verdict and whether the analyst should now auto-run from it
+ *   (`candidacy` / `autoTriggerPending`, F17.19 Phase 3).
  *
  * PUT /api/v1/app/questionnaires/:id/versions/:vid/topics
  *   Admin-only: replace the topic set with the reviewed one. Forks a new draft first if the
@@ -51,6 +53,7 @@ import {
   replaceTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { loadTopicDraft } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
+import { loadAutoTriggerState } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 
 /**
  * The version's question + data-slot keys, for the membership pickers and the orphan check — plus
@@ -161,6 +164,14 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
       byTopicKey: Object.fromEntries(byTopicKey),
     };
 
+    // F17.19 Phase 3: whether the Routing Analyst should fire on its own right now, because Phase
+    // 1 flagged this document at ingestion and nothing has acted on it since.
+    const { candidacy, pending: autoTriggerPending } = await loadAutoTriggerState(vid, {
+      hasAuthoredTopic: topics.some((t) => t.source !== 'seeded'),
+      hasDraft: draft !== null,
+      enabled: settings.enabled,
+    });
+
     return successResponse({
       topics,
       settings,
@@ -174,6 +185,8 @@ const handleList = withAdminAuth<{ id: string; vid: string }>(
         inventory.dataSlots,
         new Map(inventory.questions.map((q) => [q.key, q.prompt] as const))
       ),
+      candidacy,
+      autoTriggerPending,
     });
   }
 );

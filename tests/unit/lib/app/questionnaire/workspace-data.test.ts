@@ -549,6 +549,8 @@ function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
     costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
     draft: null,
     preview: { openingQuestions: [], fillTargets: [] },
+    candidacy: null,
+    autoTriggerPending: false,
     ...over,
   };
 }
