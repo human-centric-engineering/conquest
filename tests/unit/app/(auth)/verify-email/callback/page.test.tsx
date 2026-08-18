@@ -25,20 +25,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VerifyCallbackClientContent } from '@/app/(auth)/verify-email/callback/verify-callback-content';
+import { createMockRouter, type MockRouter } from '@/tests/types/mocks';
 
 // Mock next/navigation
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  })),
-  usePathname: vi.fn(() => '/verify-email/callback'),
-  useSearchParams: vi.fn(() => new URLSearchParams()),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: vi.fn(() => createMockRouter()),
+    usePathname: vi.fn(() => '/verify-email/callback'),
+    useSearchParams: vi.fn(() => new URLSearchParams()),
+  };
+});
 
 /**
  * Test Suite: Email Verification Callback Page
@@ -46,14 +43,7 @@ vi.mock('next/navigation', () => ({
  * Tests both success and error states of the verification callback flow.
  */
 describe('VerifyCallbackClientContent', () => {
-  let mockRouter: {
-    push: ReturnType<typeof vi.fn>;
-    replace: ReturnType<typeof vi.fn>;
-    refresh: ReturnType<typeof vi.fn>;
-    back: ReturnType<typeof vi.fn>;
-    forward: ReturnType<typeof vi.fn>;
-    prefetch: ReturnType<typeof vi.fn>;
-  };
+  let mockRouter: MockRouter;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,14 +52,7 @@ describe('VerifyCallbackClientContent', () => {
     global.fetch = vi.fn();
 
     // Setup router mock
-    mockRouter = {
-      push: vi.fn(),
-      replace: vi.fn(),
-      refresh: vi.fn(),
-      back: vi.fn(),
-      forward: vi.fn(),
-      prefetch: vi.fn(),
-    };
+    mockRouter = createMockRouter();
   });
 
   afterEach(() => {
@@ -109,7 +92,7 @@ describe('VerifyCallbackClientContent', () => {
       vi.mocked(useSearchParams).mockReturnValue(
         new URLSearchParams() as unknown as ReturnType<typeof useSearchParams>
       );
-      vi.mocked(useRouter).mockReturnValue(mockRouter as ReturnType<typeof useRouter>);
+      vi.mocked(useRouter).mockReturnValue(mockRouter);
     });
 
     it('should render success message when no error param', async () => {
@@ -176,7 +159,7 @@ describe('VerifyCallbackClientContent', () => {
       vi.mocked(useSearchParams).mockReturnValue(
         new URLSearchParams('error=invalid_token') as unknown as ReturnType<typeof useSearchParams>
       );
-      vi.mocked(useRouter).mockReturnValue(mockRouter as ReturnType<typeof useRouter>);
+      vi.mocked(useRouter).mockReturnValue(mockRouter);
     });
 
     describe('rendering', () => {
@@ -755,7 +738,7 @@ describe('VerifyCallbackClientContent', () => {
           typeof useSearchParams
         >
       );
-      vi.mocked(useRouter).mockReturnValue(mockRouter as ReturnType<typeof useRouter>);
+      vi.mocked(useRouter).mockReturnValue(mockRouter);
 
       // Act
       render(<VerifyCallbackClientContent />);
@@ -773,7 +756,7 @@ describe('VerifyCallbackClientContent', () => {
       vi.mocked(useSearchParams).mockReturnValue(
         new URLSearchParams('error=token_expired') as unknown as ReturnType<typeof useSearchParams>
       );
-      vi.mocked(useRouter).mockReturnValue(mockRouter as ReturnType<typeof useRouter>);
+      vi.mocked(useRouter).mockReturnValue(mockRouter);
 
       // Act
       render(<VerifyCallbackClientContent />);

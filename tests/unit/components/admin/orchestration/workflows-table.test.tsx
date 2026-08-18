@@ -18,22 +18,19 @@ import userEvent from '@testing-library/user-event';
 import { WorkflowsTable } from '@/components/admin/orchestration/workflows-table';
 import type { PaginationMeta } from '@/types/api';
 import { createMockFetchResponse } from '@/tests/helpers/mocks';
+import { createMockRouter } from '@/tests/types/mocks';
 import type { AiWorkflowListItem } from '@/types/orchestration';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  })),
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: vi.fn(() => createMockRouter()),
 
-  useSearchParams: () => ({ get: () => null }),
-}));
+    useSearchParams: () => ({ get: () => null }),
+  };
+});
 
 vi.mock('@/lib/api/client', () => ({
   apiClient: {
@@ -317,14 +314,7 @@ describe('WorkflowsTable', () => {
       const { apiClient } = await import('@/lib/api/client');
       const { useRouter } = await import('next/navigation');
       const push = vi.fn();
-      vi.mocked(useRouter).mockReturnValue({
-        push,
-        replace: vi.fn(),
-        refresh: vi.fn(),
-        back: vi.fn(),
-        forward: vi.fn(),
-        prefetch: vi.fn(),
-      });
+      vi.mocked(useRouter).mockReturnValue(createMockRouter({ push }));
 
       vi.mocked(apiClient.get).mockResolvedValue({
         // GET /workflows/:id now returns the published version on a relation;

@@ -118,6 +118,115 @@ describe('checkSafeProviderUrl', () => {
     });
   });
 
+  // #534: an IPv4-mapped IPv6 literal reaches the same host as its dotted-quad
+  // form (verified: a fetch to `http://[::ffff:127.0.0.1]:PORT/` is served by a
+  // listener bound to 127.0.0.1), but matched nothing in the denylist and made
+  // `parseIpv4` return null, so every range check was false and the guard said
+  // ok. Note the WHATWG parser rewrites the dotted spelling into hex, so these
+  // arrive as `::ffff:a9fe:a9fe` rather than the readable form written here.
+  describe('IPv4-in-IPv6 literals', () => {
+    it('normalizes the mapped form to its dotted quad', () => {
+      // Guards the premise of every case below: if the parser stopped
+      // rewriting, matching only the hex form would silently cover nothing.
+      expect(new URL('http://[::ffff:169.254.169.254]/').hostname).toBe('[::ffff:a9fe:a9fe]');
+    });
+
+    it.each([
+      ['cloud metadata', 'http://[::ffff:169.254.169.254]/latest/meta-data/'],
+      ['metadata, hex spelling', 'http://[::ffff:a9fe:a9fe]/'],
+      ['loopback', 'http://[::ffff:127.0.0.1]/'],
+      ['RFC1918 10/8', 'http://[::ffff:10.0.0.5]/'],
+      ['RFC1918 192.168/16', 'http://[::ffff:192.168.1.1]/'],
+      ['deprecated IPv4-compatible', 'http://[::169.254.169.254]/'],
+    ])('blocks %s', (_label, url) => {
+      expect(checkSafeProviderUrl(url).ok).toBe(false);
+    });
+
+    it('applies the same policy as the plain form, not a blanket refusal', () => {
+      // Unwrapping rather than rejecting means allowLoopback still works for a
+      // local provider addressed this way — and that private ranges stay
+      // blocked even with the opt-in, exactly as for the dotted form.
+      expect(
+        checkSafeProviderUrl('http://[::ffff:127.0.0.1]:11434/', { allowLoopback: true }).ok
+      ).toBe(true);
+      expect(checkSafeProviderUrl('http://[::ffff:10.0.0.5]/', { allowLoopback: true }).ok).toBe(
+        false
+      );
+    });
+
+    it('leaves genuine IPv6 addresses alone', () => {
+      expect(checkSafeProviderUrl('http://[2606:4700:4700::1111]/').ok).toBe(true);
+    });
+  });
+
+  // #553. An escalation relay inside a VPC is a legitimate target, and before
+  // the refine landed it worked (because nothing was validated). This is the
+  // opt-in that keeps it possible without reverting to no validation at all.
+  describe('allowPrivateNetwork', () => {
+    it.each([
+      ['RFC1918 10/8', 'http://10.0.1.5/hooks/escalate'],
+      ['RFC1918 192.168/16', 'http://192.168.1.20/hooks'],
+      ['RFC1918 172.16/12', 'http://172.20.1.1/hooks'],
+      ['IPv6 unique local', 'http://[fd12:3456::1]/'],
+    ])('permits %s when opted in', (_label, url) => {
+      expect(checkSafeProviderUrl(url).ok).toBe(false);
+      expect(checkSafeProviderUrl(url, { allowPrivateNetwork: true }).ok).toBe(true);
+    });
+
+    // The whole point of the flag is that it does NOT reopen the target that
+    // makes SSRF worth exploiting. BLOCKED_HOSTNAMES is checked first.
+    // The flag deliberately does NOT relax link-local. A denylist of metadata
+    // LITERALS is not enough: 169.254.169.254 is only the best-known one. AWS
+    // ECS task metadata vends IAM role credentials from 169.254.170.2 and EKS
+    // Pod Identity from 169.254.170.23, and 169.254.0.0/16 is reserved for
+    // exactly this class of service — nothing an operator would legitimately
+    // POST an escalation to lives there.
+    it.each([
+      ['cloud metadata', 'http://169.254.169.254/latest/meta-data/'],
+      ['metadata via IPv4-mapped IPv6', 'http://[::ffff:169.254.169.254]/'],
+      ['AWS ECS task credentials', 'http://169.254.170.2/v2/credentials/abc'],
+      ['EKS Pod Identity credentials', 'http://169.254.170.23/v1/credentials'],
+      ['any other link-local', 'http://169.254.10.10/'],
+      ['IPv6 link-local', 'http://[fe80::1]/'],
+      // CGNAT is shared address space, not a network the deployment owns; it
+      // is also the default Tailscale range and contains Alibaba Cloud's
+      // metadata service at 100.100.100.200. Relaxing it would reduce
+      // protection there to that one denylisted literal — the same argument
+      // that keeps link-local sealed.
+      ['CGNAT 100.64/10', 'http://100.64.0.1/'],
+      ['CGNAT near Alibaba metadata', 'http://100.100.100.5/'],
+      ['Alibaba metadata itself', 'http://100.100.100.200/'],
+      ['GCP metadata hostname', 'http://metadata.google.internal/'],
+      ['unspecified address', 'http://0.0.0.0/'],
+    ])('still blocks %s when opted in', (_label, url) => {
+      expect(checkSafeProviderUrl(url, { allowPrivateNetwork: true }).ok).toBe(false);
+    });
+
+    it('does not imply allowLoopback', () => {
+      // A VPC address is not a loopback address; widening one must not widen
+      // the other.
+      expect(checkSafeProviderUrl('http://127.0.0.1/', { allowPrivateNetwork: true }).ok).toBe(
+        false
+      );
+      expect(checkSafeProviderUrl('http://[::1]/', { allowPrivateNetwork: true }).ok).toBe(false);
+    });
+
+    it('composes with allowLoopback when both are set', () => {
+      expect(
+        checkSafeProviderUrl('http://127.0.0.1:11434/', {
+          allowLoopback: true,
+          allowPrivateNetwork: true,
+        }).ok
+      ).toBe(true);
+    });
+
+    it('does not relax the scheme check', () => {
+      expect(checkSafeProviderUrl('file:///etc/passwd', { allowPrivateNetwork: true }).ok).toBe(
+        false
+      );
+    });
+  });
+
   describe('public hosts', () => {
     it.each([
       'https://api.openai.com/v1',

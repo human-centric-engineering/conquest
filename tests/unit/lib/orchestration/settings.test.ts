@@ -243,6 +243,32 @@ describe('parseEscalationConfig', () => {
     // Assert — Zod safeParse fails because emailAddresses is missing
     expect(result).toBeNull();
   });
+
+  // #553. The SSRF guard deliberately does NOT live on this read path: it is on
+  // `escalationConfigWriteSchema` (the API boundary) and on `notifyEscalation`
+  // (the point of use). Rejecting here would make a stored value invisible to
+  // the settings API, and because the form rebuilds the whole config blob on
+  // save, the next save of any unrelated field would silently destroy it.
+  describe('webhookUrl on the read path', () => {
+    const base = { emailAddresses: ['ops@example.com'], notifyOnPriority: 'all' as const };
+
+    it.each([
+      ['a private RFC1918 target', 'http://10.0.1.5/hooks/escalate'],
+      ['cloud metadata', 'http://169.254.169.254/latest/meta-data/'],
+    ])('preserves %s so the operator can see and correct it', (_label, webhookUrl) => {
+      const result = parseEscalationConfig({ ...base, webhookUrl });
+
+      expect(result?.webhookUrl).toBe(webhookUrl);
+    });
+
+    it('still rejects a syntactically invalid URL', () => {
+      expect(parseEscalationConfig({ ...base, webhookUrl: 'not-a-url' })).toBeNull();
+    });
+
+    it('still rejects a config that is invalid for another reason', () => {
+      expect(parseEscalationConfig({ emailAddresses: [] })).toBeNull();
+    });
+  });
 });
 
 describe('hydrateSettings', () => {

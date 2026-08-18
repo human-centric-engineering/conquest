@@ -2,8 +2,8 @@ import { PROVIDER_MODEL_AUDIT_TEMPLATE } from '@/prisma/seeds/data/templates/pro
 import { Prisma } from '@prisma/client';
 import { createInitialVersion } from '@/lib/orchestration/workflows/version-service';
 import type { SeedUnit } from '@/prisma/runner';
+import { CAPABILITIES } from '@/lib/orchestration/model-audit/enums';
 import { serviceAccountWhere } from '@/lib/auth/account';
-import { MODEL_CAPABILITIES } from '@/types/orchestration';
 
 const MODEL_AUDITOR_INSTRUCTIONS = `You are the Provider Model Auditor for the Sunrise AI orchestration platform. Your role is to evaluate provider model entries for accuracy and freshness, proposing corrections where data is stale or incorrect.
 
@@ -69,7 +69,7 @@ Every report you produce should follow this structure:
 - Format numbers and counts clearly. If zero changes were applied, state that explicitly.
 - Do not editorialize or speculate beyond what the data shows.`;
 
-const APPLY_AUDIT_CHANGES_DEFINITION = {
+export const APPLY_AUDIT_CHANGES_DEFINITION = {
   slug: 'apply_audit_changes',
   name: 'Apply Audit Changes',
   description:
@@ -100,6 +100,7 @@ const APPLY_AUDIT_CHANGES_DEFINITION = {
                 type: 'string',
                 enum: [
                   'tierRole',
+                  'deploymentProfiles',
                   'reasoningDepth',
                   'latency',
                   'costEfficiency',
@@ -141,8 +142,15 @@ const APPLY_AUDIT_CHANGES_DEFINITION = {
           items: {
             type: 'object',
             properties: {
-              model_id: { type: 'string' },
-              changes: { type: 'array', items: { type: 'object' } },
+              model_id: {
+                type: 'string',
+              },
+              changes: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                },
+              },
             },
             required: ['model_id', 'changes'],
           },
@@ -154,7 +162,7 @@ const APPLY_AUDIT_CHANGES_DEFINITION = {
   },
 } as const;
 
-const ADD_PROVIDER_MODELS_DEFINITION = {
+export const ADD_PROVIDER_MODELS_DEFINITION = {
   slug: 'add_provider_models',
   name: 'Add Provider Models',
   description:
@@ -175,41 +183,63 @@ const ADD_PROVIDER_MODELS_DEFINITION = {
           items: {
             type: 'object',
             properties: {
-              name: { type: 'string', description: 'Human-readable model name.' },
+              name: {
+                type: 'string',
+                description: 'Human-readable model name.',
+              },
               slug: {
                 type: 'string',
                 description: 'URL-safe slug (lowercase alphanumeric with hyphens).',
               },
-              providerSlug: { type: 'string', description: 'Provider identifier.' },
-              modelId: { type: 'string', description: 'API model identifier.' },
-              description: { type: 'string', description: 'Brief model description.' },
+              providerSlug: {
+                type: 'string',
+                description: 'Provider identifier.',
+              },
+              modelId: {
+                type: 'string',
+                description: 'API model identifier.',
+              },
+              description: {
+                type: 'string',
+                description: 'Brief model description.',
+              },
               capabilities: {
                 type: 'array',
-                // Source of truth: `MODEL_CAPABILITIES` in `types/orchestration.ts`.
-                // Imported (not duplicated) so the enum here stays in lockstep when
-                // new capability types are added — a hard-coded literal here drifted
-                // in the past, causing the validate_proposals guard to reject any
-                // proposal that included 'vision' or 'documents' even though both
-                // are valid in the schema. `unknown` is excluded intentionally —
-                // it's a discovery-only placeholder the matrix rejects.
-                items: { type: 'string', enum: [...MODEL_CAPABILITIES] },
+                items: {
+                  type: 'string',
+                  // Sourced, not spelled out: a hard-coded literal here drifted
+                  // in the past and made `validate_proposals` reject any
+                  // proposal containing 'vision' or 'documents'. This is the
+                  // constant the capability CLASS reads — note that is
+                  // `model-audit/enums`, not the same-valued `MODEL_CAPABILITIES`
+                  // in `types/orchestration` that this seed used to import.
+                  enum: [...CAPABILITIES],
+                },
+                description: 'Model capabilities.',
               },
               tierRole: {
                 type: 'string',
                 enum: ['thinking', 'worker', 'infrastructure', 'control_plane', 'embedding'],
                 description:
-                  'Capability tier — what the model is for. Orthogonal to deploymentProfiles.',
+                  'Capability tier classification \u2014 what the model is for. Orthogonal to deploymentProfiles (where it runs).',
               },
               deploymentProfiles: {
                 type: 'array',
-                items: { type: 'string', enum: ['hosted', 'sovereign'] },
-                description: 'Where the model runs. Defaults to ["hosted"] for vendor APIs.',
+                items: {
+                  type: 'string',
+                  enum: ['hosted', 'sovereign'],
+                },
+                description:
+                  'Deployment locus \u2014 where the model runs. `hosted` is vendor-managed; `sovereign` is operator infrastructure. Defaults to ["hosted"].',
               },
               reasoningDepth: {
                 type: 'string',
                 enum: ['very_high', 'high', 'medium', 'none'],
               },
-              latency: { type: 'string', enum: ['very_fast', 'fast', 'medium'] },
+              latency: {
+                type: 'string',
+                enum: ['very_fast', 'fast', 'medium'],
+              },
               costEfficiency: {
                 type: 'string',
                 enum: ['very_high', 'high', 'medium', 'none'],
@@ -218,11 +248,26 @@ const ADD_PROVIDER_MODELS_DEFINITION = {
                 type: 'string',
                 enum: ['very_high', 'high', 'medium', 'n_a'],
               },
-              toolUse: { type: 'string', enum: ['strong', 'moderate', 'none'] },
-              bestRole: { type: 'string', description: 'Optimal use case summary.' },
-              dimensions: { type: 'number' },
-              schemaCompatible: { type: 'boolean' },
-              quality: { type: 'string', enum: ['high', 'medium', 'budget'] },
+              toolUse: {
+                type: 'string',
+                enum: ['strong', 'moderate', 'none'],
+              },
+              bestRole: {
+                type: 'string',
+                description: 'Optimal use case summary.',
+              },
+              dimensions: {
+                type: 'number',
+                description: 'Embedding vector dimensions.',
+              },
+              schemaCompatible: {
+                type: 'boolean',
+                description: 'Compatible with pgvector(1536) schema.',
+              },
+              quality: {
+                type: 'string',
+                enum: ['high', 'medium', 'budget'],
+              },
             },
             required: [
               'name',
@@ -244,7 +289,7 @@ const ADD_PROVIDER_MODELS_DEFINITION = {
   },
 } as const;
 
-const DEACTIVATE_PROVIDER_MODELS_DEFINITION = {
+export const DEACTIVATE_PROVIDER_MODELS_DEFINITION = {
   slug: 'deactivate_provider_models',
   name: 'Deactivate Provider Models',
   description:
@@ -353,7 +398,15 @@ const unit: SeedUnit = {
     const def = APPLY_AUDIT_CHANGES_DEFINITION;
     const auditCap = await prisma.aiCapability.upsert({
       where: { slug: def.slug },
-      update: { isSystem: true },
+      // Code-owned fields are re-applied so an edited definition reaches rows
+      // that already exist; `name` / `description` / `category` / `isActive`
+      // stay operator-owned. See `.context/database/seeding.md` (#545).
+      update: {
+        isSystem: true,
+        executionType: def.executionType,
+        executionHandler: def.executionHandler,
+        functionDefinition: def.functionDefinition,
+      },
       create: {
         name: def.name,
         slug: def.slug,
@@ -371,7 +424,15 @@ const unit: SeedUnit = {
     const addDef = ADD_PROVIDER_MODELS_DEFINITION;
     const addCap = await prisma.aiCapability.upsert({
       where: { slug: addDef.slug },
-      update: { isSystem: true },
+      // Code-owned fields are re-applied so an edited definition reaches rows
+      // that already exist; `name` / `description` / `category` / `isActive`
+      // stay operator-owned. See `.context/database/seeding.md` (#545).
+      update: {
+        isSystem: true,
+        executionType: addDef.executionType,
+        executionHandler: addDef.executionHandler,
+        functionDefinition: addDef.functionDefinition,
+      },
       create: {
         name: addDef.name,
         slug: addDef.slug,
@@ -389,7 +450,15 @@ const unit: SeedUnit = {
     const deactDef = DEACTIVATE_PROVIDER_MODELS_DEFINITION;
     const deactCap = await prisma.aiCapability.upsert({
       where: { slug: deactDef.slug },
-      update: { isSystem: true },
+      // Code-owned fields are re-applied so an edited definition reaches rows
+      // that already exist; `name` / `description` / `category` / `isActive`
+      // stay operator-owned. See `.context/database/seeding.md` (#545).
+      update: {
+        isSystem: true,
+        executionType: deactDef.executionType,
+        executionHandler: deactDef.executionHandler,
+        functionDefinition: deactDef.functionDefinition,
+      },
       create: {
         name: deactDef.name,
         slug: deactDef.slug,

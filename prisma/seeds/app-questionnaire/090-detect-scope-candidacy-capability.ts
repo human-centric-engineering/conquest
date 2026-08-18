@@ -25,7 +25,16 @@ const unit: SeedUnit = {
 
     await prisma.aiCapability.upsert({
       where: { slug: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: DETECT_SCOPE_CANDIDACY_HANDLER,
+        functionDefinition:
+          DETECT_SCOPE_CANDIDACY_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG,
         name: 'Detect Adaptive Scope Candidacy',

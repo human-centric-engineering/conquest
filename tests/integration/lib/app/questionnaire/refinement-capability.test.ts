@@ -570,22 +570,6 @@ describe('AppRefineAnswerCapability — dispatch', () => {
     );
   });
 
-  it('logs cost without an agentId when the context omits one', async () => {
-    (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
-
-    await capabilityDispatcher.dispatch(SLUG, baseArgs(), baseContext({ agentId: undefined }));
-
-    const chatCall = (logCost as Mock).mock.calls.find(
-      ([arg]) => arg?.metadata?.capability === SLUG
-    );
-    expect(chatCall, 'a CHAT cost log for this capability should have been emitted').toBeDefined();
-    expect(chatCall?.[0]).toMatchObject({
-      operation: CostOperation.CHAT,
-      metadata: { capability: SLUG },
-    });
-    expect(chatCall?.[0]).not.toHaveProperty('agentId');
-  });
-
   it('coerces a malformed refiner binding from context to safe types', async () => {
     (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
 

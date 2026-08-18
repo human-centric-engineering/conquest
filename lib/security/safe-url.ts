@@ -21,11 +21,26 @@
  *
  * Limitations — by design:
  *
- *   - No DNS resolution. Defending against DNS rebinding would require
- *     resolving at validate-time AND pinning the resolved IP for the
- *     subsequent fetch, which the OpenAI/Anthropic SDKs don't expose.
- *     We instead block all private ranges at fetch-time too (see the
- *     defense-in-depth check in `provider-manager.buildProviderFromConfig`).
+ *   - **No DNS resolution — so a hostname that resolves to a private or
+ *     metadata address is NOT blocked, and DNS rebinding is not defended
+ *     against.** This is an accepted risk, not a mitigated one. Defending
+ *     against rebinding would require resolving at validate-time AND pinning
+ *     the resolved IP for the subsequent fetch, which the OpenAI/Anthropic
+ *     SDKs don't expose.
+ *
+ *     `provider-manager.buildProviderFromConfig` re-runs this function before
+ *     building a provider. That is worth having, and its own comment is
+ *     accurate about why — it catches a PATCH that flipped `isLocal` without
+ *     re-validating `baseUrl`, and direct DB writes that bypass the Zod layer.
+ *     But it is **not** a compensating control for the gap above: it re-parses
+ *     the same string and never resolves anything, so against a hostname
+ *     pointing at a private address a second identical check adds nothing.
+ *     (An earlier version of this comment claimed otherwise — see #534.)
+ *   - **Validation is per-URL, not per-hop.** A caller that follows redirects
+ *     presents the guard with only the first target; every subsequent `Location`
+ *     is unchecked. Callers must either refuse redirects (`redirect: 'error'`)
+ *     or re-run this check on each hop — see `fetchRevalidatingRedirects` in
+ *     `lib/orchestration/knowledge/url-fetcher.ts` for the loop.
  *   - No IPv4-in-IPv6 mapping parsing beyond what `URL` exposes.
  *
  * This module is platform-agnostic — no Next.js imports.
@@ -57,6 +72,43 @@ function stripIpv6Brackets(host: string): string {
   return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 }
 
+/**
+ * IPv4-mapped (`::ffff:a9fe:a9fe`) and the deprecated IPv4-compatible
+ * (`::a9fe:a9fe`) IPv6 forms, as the WHATWG parser normalizes them.
+ *
+ * Note the parser rewrites the readable dotted spelling into hex —
+ * `new URL('http://[::ffff:169.254.169.254]/').hostname` is `[::ffff:a9fe:a9fe]` —
+ * so matching only the dotted form would catch nothing that actually reaches here.
+ */
+const IPV4_IN_IPV6 = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/;
+const IPV4_IN_IPV6_DOTTED = /^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/;
+
+/**
+ * Rewrite an IPv4-in-IPv6 literal to its dotted-quad equivalent so the IPv4
+ * range checks below actually see it.
+ *
+ * These addresses reach the same host as the bare IPv4 form — verified: a fetch
+ * to `http://[::ffff:127.0.0.1]:PORT/` is served by a listener bound to
+ * `127.0.0.1`. Without this, `http://[::ffff:169.254.169.254]/` matched nothing
+ * in `BLOCKED_HOSTNAMES`, `parseIpv4` returned null so every range check was
+ * false, and cloud metadata was reachable through a guard that reports `ok`.
+ *
+ * Unwrapping rather than rejecting outright is deliberate: it makes the mapped
+ * form obey exactly the same policy as the plain one, so `allowLoopback` still
+ * works for a local provider addressed as `::ffff:127.0.0.1`.
+ */
+function unwrapIpv4InIpv6(host: string): string {
+  const dotted = IPV4_IN_IPV6_DOTTED.exec(host);
+  if (dotted?.[1]) return dotted[1];
+
+  const hex = IPV4_IN_IPV6.exec(host);
+  if (!hex?.[1] || !hex[2]) return host;
+
+  const high = Number.parseInt(hex[1], 16);
+  const low = Number.parseInt(hex[2], 16);
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
 export interface SafeUrlCheckOptions {
   /**
    * When true, permit loopback targets (`localhost`, `127.0.0.1`, `::1`).
@@ -64,6 +116,37 @@ export interface SafeUrlCheckOptions {
    * flag — local model servers run on loopback, not on the LAN.
    */
   allowLoopback?: boolean;
+
+  /**
+   * When true, permit private **RFC1918** (10/8, 172.16/12, 192.168/16) and
+   * **IPv6 unique-local** (`fc00::/7`) targets.
+   * For a service the deployment genuinely runs on its own private network —
+   * an escalation relay inside a VPC, say — where the alternative is no
+   * validation at all.
+   *
+   * **Link-local (`169.254.0.0/16`, `fe80::/10`) is NOT relaxed**, and that is
+   * the whole reason this flag is narrower than "private". A denylist of
+   * metadata *literals* is not enough: `169.254.169.254` is only the
+   * best-known one. AWS ECS task metadata vends IAM role credentials from
+   * `169.254.170.2` and EKS Pod Identity from `169.254.170.23`, and the range
+   * is reserved for exactly this class of link-local service. Nothing an
+   * operator would legitimately POST an escalation to lives there, so the
+   * range stays refused however the flag is set.
+   *
+   * **CGNAT (`100.64.0.0/10`) is not relaxed either**, for the same reason: it
+   * is shared address space rather than a network the deployment owns, it is
+   * the default range for overlay VPNs such as Tailscale, and Alibaba Cloud's
+   * metadata service sits at `100.100.100.200`. Relaxing it would reduce
+   * protection in that range to a single denylisted literal.
+   *
+   * Cloud-metadata hostnames and the unspecified address also stay blocked —
+   * `BLOCKED_HOSTNAMES` is checked before this flag is consulted.
+   *
+   * Loopback is governed separately by `allowLoopback`: a VPC address is not a
+   * loopback address, and conflating them would widen two things when a caller
+   * asked for one. Set both if you need both.
+   */
+  allowPrivateNetwork?: boolean;
 }
 
 export interface SafeUrlCheckResult {
@@ -105,7 +188,9 @@ export function checkSafeProviderUrl(
   // Node's WHATWG implementation — e.g. `http://[::1]/` → `[::1]`.
   // Strip them once so hostname comparisons and IP-range checks can use
   // a single canonical form.
-  const host = stripIpv6Brackets(parsed.hostname.toLowerCase());
+  // Unwrap IPv4-in-IPv6 BEFORE any comparison, so a mapped literal is subject
+  // to the identical denylist and range checks as its dotted-quad form (#534).
+  const host = unwrapIpv4InIpv6(stripIpv6Brackets(parsed.hostname.toLowerCase()));
 
   if (BLOCKED_HOSTNAMES.has(host)) {
     return {
@@ -128,11 +213,32 @@ export function checkSafeProviderUrl(
     return { ok: true };
   }
 
-  if (isPrivateIp(host) || isLinkLocalIp(host) || isUniqueLocalIpv6(host)) {
+  // Link-local is checked unconditionally: `allowPrivateNetwork` relaxes RFC1918
+  // and IPv6 unique-local only. 169.254.0.0/16 hosts credential-vending
+  // metadata services beyond the single literal in BLOCKED_HOSTNAMES — AWS ECS
+  // task metadata at 169.254.170.2, EKS Pod Identity at 169.254.170.23 — and no
+  // legitimate outbound target lives in that range.
+  if (isLinkLocalIp(host)) {
     return {
       ok: false,
       reason: 'private_ip',
-      message: `Base URL host "${host}" resolves to a private or link-local address`,
+      message: `Base URL host "${host}" resolves to a link-local address`,
+    };
+  }
+
+  // The opt-in relaxes RFC1918 + IPv6 unique-local ONLY — deliberately not
+  // everything `isPrivateIp` matches. That predicate also covers CGNAT
+  // (100.64.0.0/10), which is shared address space rather than a network the
+  // deployment owns, is the default range for overlay VPNs like Tailscale, and
+  // contains Alibaba Cloud's metadata service at 100.100.100.200. Relaxing it
+  // would reduce protection there to the single denylisted literal — precisely
+  // the reasoning used above to keep link-local sealed.
+  const relaxable = options.allowPrivateNetwork && (isRfc1918(host) || isUniqueLocalIpv6(host));
+  if (!relaxable && (isPrivateIp(host) || isUniqueLocalIpv6(host))) {
+    return {
+      ok: false,
+      reason: 'private_ip',
+      message: `Base URL host "${host}" resolves to a private address`,
     };
   }
 
@@ -169,6 +275,22 @@ function isLoopbackIp(host: string): boolean {
   if (octets) return octets[0] === 127;
   // Unbracketed IPv6 loopback.
   return host === '::1';
+}
+
+/**
+ * RFC1918 only — the three ranges an organisation is actually allocated for its
+ * own network. Narrower than {@link isPrivateIp}, which additionally covers
+ * CGNAT shared address space; see the `allowPrivateNetwork` comment in
+ * `checkSafeProviderUrl` for why the opt-in uses this one.
+ */
+function isRfc1918(host: string): boolean {
+  const octets = parseIpv4(host);
+  if (!octets) return false;
+  const [a, b] = octets;
+  if (a === 10) return true;
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
 }
 
 function isPrivateIp(host: string): boolean {

@@ -24,7 +24,16 @@ const unit: SeedUnit = {
 
     await prisma.aiCapability.upsert({
       where: { slug: VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: VERIFY_EXTRACTION_STRUCTURE_HANDLER,
+        functionDefinition:
+          VERIFY_EXTRACTION_STRUCTURE_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: VERIFY_EXTRACTION_STRUCTURE_CAPABILITY_SLUG,
         name: 'Verify Extracted Questionnaire',

@@ -27,7 +27,16 @@ const unit: SeedUnit = {
 
     await prisma.aiCapability.upsert({
       where: { slug: RECONCILE_SUGGESTIONS_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: RECONCILE_SUGGESTIONS_HANDLER,
+        functionDefinition:
+          RECONCILE_SUGGESTIONS_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: RECONCILE_SUGGESTIONS_CAPABILITY_SLUG,
         name: 'Reconcile Judge Suggestions',

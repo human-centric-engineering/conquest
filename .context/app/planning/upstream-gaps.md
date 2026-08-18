@@ -527,3 +527,55 @@ the conditions that would invalidate it.
 `lib/orchestration/maintenance/run-tick.ts` · `lib/orchestration/retention.ts` ·
 `components/status/use-health-check.ts` ·
 [`.context/app/questionnaire/maintenance-cron.md`](../questionnaire/maintenance-cron.md).
+
+---
+
+### UG-14 — `isWorkflowAgentId()` throws on a nullish `agentId` instead of returning false
+
+_Status:_ open · _Opened:_ 2026-08-18 · _Surfaced by:_ the Sunrise 0.8.0 → 0.9.0 sync
+
+**Gap.** Sunrise 0.9.0 added `isWorkflowAgentId(agentId)` and calls it from
+`CapabilityDispatcher.getAgentBinding()` before anything else touches the id:
+
+```ts
+export function isWorkflowAgentId(agentId: string): boolean {
+  return agentId.startsWith(WORKFLOW_AGENT_ID_PREFIX);
+}
+```
+
+A nullish `agentId` therefore raises `TypeError: Cannot read properties of
+undefined (reading 'startsWith')` from inside the dispatcher, **before** the
+per-capability cost-logging code that already guards for the absent case
+(`...(context.agentId ? { agentId: context.agentId } : {})` — the platform's own
+idiom, used at `lib/orchestration/llm/cost-reports.ts:169`,
+`lib/orchestration/evaluations/run-worker.ts:307` and
+`lib/orchestration/analytics/analytics-service.ts:22`).
+
+`CapabilityContext.agentId` is typed `string` (required), so this is defensible
+as written — but the failure is a bare `TypeError` with no slug, no capability
+and no agent in the message, which is a poor diagnostic for a field the rest of
+the platform treats as routinely absent.
+
+**Why upstream.** Both the type and the call site are platform-owned
+(`lib/orchestration/capabilities/types.ts`, `.../dispatcher.ts`). Any fork that
+dispatches a capability outside an agent context hits the same crash, and the
+inconsistency — required in `CapabilityContext`, optional in every cost/analytics
+path — is a platform-level decision to settle, not a fork one.
+
+**Proposed fix.** Either make the guard total —
+`return typeof agentId === 'string' && agentId.startsWith(...)` — or, if the
+required typing is deliberate, keep it strict and say so on
+`CapabilityContext.agentId`, so a fork knows the defensive branches downstream
+are dead code rather than load-bearing.
+
+**Interim mitigation.** None carried — no ConQuest production path omits
+`agentId` (every `capabilityDispatcher.dispatch()` call site in `lib/app/**` and
+`app/api/v1/app/**` passes a resolved row's `id`, behind a null guard on the
+binding). Six integration tests that passed `agentId: undefined` through untyped
+`baseContext()` overrides were exercising a state the contract forbids; three
+were removed and three narrowed to the dimensions that _are_ genuinely optional
+(`sessionId`, `versionId`) in the 0.9.0 sync.
+
+**References.** `lib/orchestration/capabilities/dispatcher.ts` (`isWorkflowAgentId`,
+`getAgentBinding`) · `lib/orchestration/capabilities/types.ts` (`CapabilityContext`) ·
+`tests/integration/lib/app/questionnaire/*-capability.test.ts`.

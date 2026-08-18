@@ -59,7 +59,7 @@ Platform docs:
 
 ### Prerequisites
 
-- Node.js 20.19+ (or 22.12+, 24+)
+- Node.js 24+ (see `.nvmrc`)
 - PostgreSQL 15+ (local, Docker, or hosted)
 
 ### Setup
@@ -121,7 +121,7 @@ automatically promoted to `ADMIN`. Every account created after that is a regular
 
 ```bash
 npm run dev              # Start dev server
-npm run validate         # Type-check + lint + format + tests
+npm run validate         # CHANGELOG + Node version + type-check + lint + format (Prettier + Prisma)
 npm run db:studio        # Open Prisma Studio
 npm test                 # Run tests
 ```

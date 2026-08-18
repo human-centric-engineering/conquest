@@ -111,6 +111,36 @@ Vercel automatically builds and deploys.
 - **Output Directory:** `.next`
 - **Install Command:** `npm install`
 
+### Node.js Version (handled by `engines`, no dashboard change needed)
+
+Vercel is the one deployment target that does not build from this repo's
+`Dockerfile`, so it never sees `node:24-alpine` and does not read `.nvmrc`.
+
+It does read `engines.node`, and that **overrides** the dashboard:
+
+> "You can define the major Node.js version in the `engines#node` section of the
+> `package.json` to override the one you have selected in the Project Settings"
+> — [Vercel: supported Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions)
+
+`package.json` declares `>=24`, which Vercel resolves to the **latest 24.x**.
+So a project whose dashboard still says 20.x deploys on 24 anyway, and there is
+nothing to change after syncing this repo.
+
+The corollary is the part worth knowing: **the dashboard value is not the truth
+on this platform.** Pinning 20.x under Settings → Build and Deployment →
+Node.js Version will not give you 20.x while `engines.node` says `>=24` — it
+will quietly keep deploying 24, and the setting will read back as though it took
+effect. If you genuinely need a different major, change `engines.node`; the
+version-consistency check (`npm run check:node-version`) will then require the
+Dockerfiles, `.nvmrc` and the `@types/node` devDependency to move with it — five
+declarations in four files, all of which must agree. `@types/node` is in that
+set because it is what `tsc` type-checks against: ahead of the runtime it
+accepts APIs that throw in production and reports nothing (#584). Moving it also
+means updating its Dependabot `ignore` entry.
+
+To confirm what a deployment actually ran, log `process.version` or run
+`node -v` in the build command.
+
 ### Function Configuration (vercel.json)
 
 ConQuest ships a `vercel.json` in the project root (Sunrise's own starter does not — Vercel auto-detects Next.js otherwise). It is required here for the **maintenance cron** (see below) and the report `maxDuration`.
@@ -173,8 +203,27 @@ Vercel handles infrastructure health monitoring automatically. The `/api/health`
 ### Build Timeout
 
 - Free tier has 45s timeout; Pro has 5 minutes
-- Optimize build by ensuring `output: 'standalone'` in `next.config.js`
 - Check for slow dependencies
+- **Do not enable `output: 'standalone'` for Vercel.** Vercel builds its own
+  serverless output and does not use it; `next.config.js` deliberately switches
+  it off when `process.env.VERCEL` is set (see below)
+
+### Build Fails With `ENOENT: .next/next-server.js.nft.json`
+
+Caused by `output: 'standalone'` being active on Vercel. From Next 16.3.0,
+Turbopack stops emitting `next-server.js.nft.json` when a deployment adapter is
+driving the build, on the grounds that adapters do not read it
+([vercel/next.js#93684](https://github.com/vercel/next.js/pull/93684)).
+Standalone output _does_ read it, so the combination fails at
+`onBuildComplete` ([#93915](https://github.com/vercel/next.js/pull/93915)).
+
+The build succeeds locally, which makes this confusing to diagnose: with no
+adapter present, Next still generates the file, so `npm run build` on a laptop
+never reproduces it.
+
+`next.config.js` already handles this by setting `output` to `undefined` when
+`VERCEL` is set. If you fork and hardcode `output: 'standalone'` back, expect
+this error on Vercel while Docker keeps working.
 
 ### Environment Variables Not Loading
 

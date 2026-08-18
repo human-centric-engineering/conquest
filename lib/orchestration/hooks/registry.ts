@@ -19,6 +19,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import { describeFetchFailure } from '@/lib/errors/fetch-error';
 import {
   HookEventPayloadSchema,
   WebhookActionSchema,
@@ -240,6 +241,14 @@ async function attemptDelivery(
       },
       body,
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
+      // Refuse redirects rather than follow them (#534). `fetch` defaults to
+      // 'follow', and the hook URL is validated once at create/update time and
+      // never again at dispatch — so a redirect is an unvalidated second target
+      // that this request would POST the event payload AND its HMAC signature
+      // headers to. Erroring is also what GitHub and Stripe do for outbound
+      // webhooks: an endpoint that moved should be re-pointed, not chased.
+      // The failure surfaces as a normal delivery error and is retried.
+      redirect: 'error',
     });
 
     statusCode = res.status;
@@ -261,7 +270,9 @@ async function attemptDelivery(
 
     error = `HTTP ${res.status}`;
   } catch (err: unknown) {
-    error = err instanceof Error ? err.message : String(err);
+    // undici renders a refused redirect, a DNS failure and a connection reset
+    // all as a bare "fetch failed"; the reason lives on `cause`.
+    error = describeFetchFailure(err);
   }
 
   // Delivery failed — update record and maybe schedule retry

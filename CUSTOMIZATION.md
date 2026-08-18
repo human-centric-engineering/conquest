@@ -1021,6 +1021,71 @@ For the full version contract and how Sunrise releases are produced, see
 
 ## 9. Staying in sync with upstream Sunrise
 
+### Merge the sync PR — never squash it
+
+**"Squash and merge" on a sync PR keeps every file and silently breaks your next
+sync.** Squashing discards the second parent, so git no longer knows the release
+tag is in your history and the merge base against upstream reverts to the
+**previous** release. Nothing looks wrong at the time. The next
+`git merge vNEXT` then replays the entire preceding range and re-conflicts every
+file you already resolved by hand.
+
+This is not hypothetical — it happened to one of our own forks on the v0.8.0
+sync. The content was perfect (byte-identical trees); only the ancestry was
+gone.
+
+Use **"Create a merge commit"** for the sync PR. Squash is fine, and remains the
+sensible default, for your own feature work.
+
+If it happens anyway, the [`Fork Sync Integrity`](./.github/workflows/fork-sync-integrity.yml)
+workflow catches it on the next push to `main` and prints the repair, which
+changes no files:
+
+```bash
+git fetch upstream --tags
+git checkout main
+git merge -s ours v0.8.0 -m "chore: record Sunrise 0.8.0 as merged (ancestry repair)"
+git push origin main
+```
+
+`-s ours` is only safe once you have confirmed the content is already there —
+`git diff --stat <tip-of-the-squashed-PR-branch> main` must be empty.
+
+**Leave `SUNRISE_UPSTREAM_URL` unset unless you have to set it.** The tag the
+guard looks for is `v<SUNRISE_VERSION>` — Sunrise's namespace — but it is
+resolved against whatever that URL points at. Point it at a framework-tier fork
+that versions itself independently and you may fetch _its_ `v0.8.1`, an
+unrelated release of a different project. The guard usually detects that and
+skips — it compares the fetched tag's own `lib/sunrise-version.ts` against your
+claim — so it normally fails safe, but it stops checking anything, which is not
+what you want. And the comparison is on the version _string_, so it does not
+help in the one case where the numbers coincide: an intermediate fork cutting
+its own `v0.8.1` while sitting on Sunrise 0.8.1. A tag name is not a globally
+unique identifier and no check makes it one.
+
+Sunrise's public URL is reachable from a leaf fork anyway, so only override this
+when Sunrise's tags genuinely are not.
+
+If you must — a private upstream, or a mirror — set it as a repository
+**variable** named `SUNRISE_UPSTREAM_URL`.
+
+If that upstream is **private** and the URL has to carry a token, put it in a
+**secret** of the same name instead — the workflow prefers the secret. Secrets
+are masked in logs and are write-only; repository variables are neither, and are
+readable back through the API by anyone with write access.
+
+Without either, the check skips rather than failing — it cannot tell "ancestry
+lost" from "cannot look" — and says so with a warning annotation on the run,
+quoting git's own error, so a permanently-skipping guard is visible and
+diagnosable rather than a silent green tick.
+
+**If your default branch is not `main`,** edit the `branches:` filter in
+`.github/workflows/fork-sync-integrity.yml`. The workflow triggers on pushes to
+`main` only, so on a fork that uses something else it never runs at all — no
+check, no annotation, not even a skip.
+
+### Migrations
+
 When you pull a new Sunrise release into your fork, the biggest moving part is
 the database migration history — your app's migrations and Sunrise's share one
 directory.

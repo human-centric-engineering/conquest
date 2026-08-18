@@ -58,6 +58,1216 @@ release process.
   the app-owned retention prune. They run at tick cadence exactly as before, so
   `backgroundTasks` in the tick response now lists the 8 platform jobs rather than 11.
 
+## [0.9.0] — 2026-08-17
+
+> **Alpha release.** Twelfth tagged Sunrise release. **MINOR bump** — the
+> largest batch Sunrise has cut: a security sweep, a dependency-hygiene
+> programme, and the production Docker path made to actually work.
+>
+> **No migration.** Zero migrations and no `prisma/schema/` change since 0.8.1,
+> so a fork takes this with a plain `git merge v0.9.0` and no database step.
+>
+> **Security — read this section even if you skip the rest.** An SSRF sweep
+> closed four related holes: `checkSafeProviderUrl()` validated only the first
+> hop, so a redirect to `169.254.169.254` reached cloud metadata and had the
+> body ingested as a knowledge document; `http://[::ffff:169.254.169.254]/`
+> matched nothing in the denylist, so every range check returned false;
+> escalation webhooks were never validated at all; and the webhook subscription
+> dispatcher followed redirects. An open redirect in `isRootRelativePath()` was
+> reachable from the login form's `callbackUrl` — the victim authenticates on
+> the genuine page and lands on the attacker's origin. Storage HMAC schemes are
+> now domain-separated, and the local storage provider refuses a key escaping
+> its own root.
+>
+> **Node 24 is now the floor.** Node 20 reached end-of-life; `.nvmrc`,
+> `engines.node`, both Dockerfiles and `@types/node` are checked against each
+> other by `npm run check:node-version`, which reads the **resolved**
+> `@types/node` from the lockfile rather than the range. `@types/node` moved
+> `^26` → `^24`: a deliberate direct downgrade, because type-checking against a
+> standard library two majors ahead of every runtime accepts APIs that throw in
+> production.
+>
+> **Deployment is fork-facing and worth reading before you merge.**
+> `.env.production` is no longer baked into the production image, the Prisma CLI
+> is no longer in the runtime image, the `deps` stage no longer takes a
+> `DATABASE_URL` build argument, and there are now `migrator` and `seeder`
+> stages. If your fork's deploy runs migrations from inside the running web
+> container, or passes `DATABASE_URL` at build time, it needs a change. The CI
+> `docker` job now runs the production stack rather than only building it —
+> which is how it was found that the stack could not start at all.
+>
+> **Other breaking-in-`0.x` changes.** `PATCH …/capabilities/{id}` returns 403
+> for a change to a system capability's `slug`, `functionDefinition`,
+> `executionType` or `executionHandler` — automation reconfiguring a built-in
+> over the API must move into its seed unit. A structured extraction cut off at
+> the token cap now raises `truncated_no_output` instead of returning partial
+> JSON. Error-marker assistant messages are no longer replayed into the prompt.
+> The EPUB parser swapped `epub2` for `epub`, which removes `adm-zip` and its
+> permanently-unfixable high advisory from the tree entirely — a fork importing
+> `epub2` directly must switch.
+>
+> **Two silent-data-loss bugs.** Every `.epub` ever ingested produced an empty
+> document — filename as title, zero sections, no warning — because
+> `await epub.parse()` awaited a non-Promise. And built-in capability seeds
+> stopped re-applying their function schema, so three shipped capabilities were
+> advertising a stale schema to the model.
+>
+> **Dependency hygiene got machinery rather than care.** `check:lockfile`,
+> `check:exports`, `check:changelog`, `fix:lockfile-libc` and a scheduled
+> `Dependency Audit` all landed, after `libc` metadata went missing for two
+> releases and put glibc binaries in a musl image without erroring.
+
+### Security
+
+- **`js-yaml` bumped to 4.3.1**, clearing a high advisory
+  ([GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj),
+  CVE-2026-59870 — quadratic CPU consumption resolving `!!omap`). Transitive and
+  **dev-only**, via `@eslint/eslintrc`, so no fork runtime parses attacker-supplied
+  YAML through it; taken because the fix is a patch and a release should not ship
+  with its own audit red. Found by triggering `Dependency Audit` as step 5 of
+  this cut — the first time that workflow has ever completed.
+
+- **Open redirect closed in `isRootRelativePath()`.** The WHATWG URL parser
+  removes ASCII tab, LF and CR from anywhere in a URL before reading the
+  authority, so `/<TAB>/evil.com` survived `trim()` and the `path[1]` check and
+  then collapsed to `//evil.com`. The reachable sink was
+  `components/forms/login-form.tsx`, which reads `callbackUrl` off the query
+  string and `router.push()`es it after a successful login — a phishing
+  primitive, since the victim authenticates on the genuine page and lands on
+  the attacker's origin. The OAuth path was never affected (better-auth's
+  `matchesOriginPattern` rejects the character). Same class as #437, which
+  fixed it in `sanitizeUrl()`; the reasoning never propagated to the other
+  guard in the same file (#506).
+- **`safeCallbackUrl()` now returns the normalized string** rather than the raw
+  input, so the value that was judged safe is the value the caller navigates
+  to. `resolveAuthLandingRoute()` in `lib/auth-landing/route.ts` was corrected
+  the same way (#506).
+- **Redirects are no longer an unvalidated second SSRF target.**
+  `checkSafeProviderUrl()` validates one URL, so a caller that followed
+  redirects presented it with only the first hop.
+  `POST …/knowledge/documents/fetch-url` now re-runs the guard on **every**
+  redirect target (`redirect: 'manual'`, capped at 5 hops, relative `Location`
+  resolved against the redirecting URL) — previously
+  `https://attacker.example/doc` → `302` → `http://169.254.169.254/…` reached
+  cloud metadata and had the response body ingested as a knowledge document.
+  The event-hook dispatcher takes the opposite and stricter route,
+  `redirect: 'error'`: its URL is validated at create/update time and never at
+  dispatch, and following a redirect would POST the event payload *and its HMAC
+  signature headers* to the new target. Both paths are `withAdminAuth`, so this
+  is hardening rather than a privilege boundary (#534).
+- **SSRF guard: IPv4-in-IPv6 literals are no longer a bypass.**
+  `http://[::ffff:169.254.169.254]/` reaches the same host as
+  `http://169.254.169.254/` — verified against a live listener — but the mapped
+  form matched nothing in the denylist and made `parseIpv4()` return `null`, so
+  every range check was false and `checkSafeProviderUrl()` returned `ok`. Cloud
+  metadata, loopback and RFC1918 were all reachable through a guard reporting
+  success. Mapped (`::ffff:`) and the deprecated IPv4-compatible (`::`) forms
+  are now unwrapped to their dotted quad **before** any comparison, so they obey
+  exactly the same policy as the plain form — including `allowLoopback`, which
+  still works for a local provider addressed that way. Found by `/code-review`
+  on the redirect work below, which had claimed to close the metadata attack
+  while this made it reachable in one line (#534).
+- **`safe-url.ts`'s header no longer claims a compensating control it does not
+  have.** It cited the re-check in `provider-manager.buildProviderFromConfig`
+  as covering DNS rebinding; that call re-parses the same string and resolves
+  nothing, so against a hostname pointing at a private address it adds nothing.
+  The absent DNS resolution is now stated as an accepted risk, and the
+  per-URL-not-per-hop limitation is documented alongside it (#534).
+- **The webhook subscription dispatcher refuses redirects too.**
+  `attemptWebhookDelivery` in `lib/orchestration/webhooks/dispatcher.ts` had the
+  same defect fixed in the event-hook dispatcher above: `sub.url` is validated
+  by `isSafeProviderUrl` in the Zod refine at create/update and never again at
+  dispatch, while `fetch` defaulted to following redirects — so a redirect
+  POSTed the payload *and its `X-Webhook-Signature` header* to an unvalidated
+  second target. Now `redirect: 'error'`. **Behaviour change on upgrade:** a
+  subscription pointing at an endpoint that responds with a redirect (an
+  `http`→`https` upgrade, or a trailing-slash redirect) will start failing
+  delivery until its URL is re-pointed; the failure is non-terminal and retries
+  as normal. Both dispatchers now also record the underlying `cause` of a fetch
+  failure rather than a bare `fetch failed`, so that case is diagnosable from
+  the delivery log (#534).
+- **Escalation webhooks are validated against SSRF at last.**
+  `escalationConfig.webhookUrl` was `z.string().url()` with **no**
+  `isSafeProviderUrl` refine, while every comparable outbound target has one —
+  provider `baseUrl` and the webhook subscription `url` alongside it in
+  `lib/validations/orchestration.ts`, and event-hook `action.url` in
+  `lib/orchestration/hooks/types.ts`. An escalation therefore POSTed its payload — conversation
+  reason, priority and metadata — to whatever host was configured, cloud
+  metadata and RFC1918 included. Guarded now in the two places that matter,
+  mirroring how provider `baseUrl` is handled: `escalationConfigWriteSchema`
+  rejects an unsafe target at the API boundary, and `notifyEscalation` re-checks
+  at dispatch so a direct DB write, a restored backup bundle or a value stored
+  before this release is still refused. The POST also refuses redirects (#553).
+- **A rejected escalation webhook is preserved, not destroyed.** The guard is
+  deliberately *not* on the read path. Rejecting there would make the stored
+  value invisible to the settings API — and because the settings form rebuilds
+  the whole config blob on save, the next save of any unrelated field would have
+  written it back as absent, silently deleting a URL nobody chose to remove.
+  Instead the value is read, shown in the form, and skipped at dispatch with a
+  warning naming the target, so an operator can see the problem and correct it
+  (#553).
+- **Escalation webhooks refuse redirects — note this failure is quieter than the
+  dispatchers'.** Same reasoning as the two webhook dispatchers above, but
+  `notifyEscalation` is fire-and-forget: there is no retry and no delivery row,
+  so an escalation endpoint that starts redirecting (an `http`→`https` upgrade,
+  say) fails **once per escalation** with a single `logger.warn` as the entire
+  signal. That warning now names the underlying cause rather than reporting a
+  bare `fetch failed` — without it the condition is effectively undiagnosable.
+  If you route escalations through a redirecting endpoint, re-point it (#553).
+- **The two HMAC token schemes are domain-separated.** `lib/storage/access-tokens.ts`
+  (grants a read of one storage key) and `lib/orchestration/approval-tokens.ts`
+  (grants an approve/reject on one execution) sign the same
+  `base64url(payload).base64url(HMAC-SHA256(BETTER_AUTH_SECRET, payload))`
+  construction with nothing in the signed bytes saying which scheme a token
+  belongs to, so a signature minted by one verified structurally as the other.
+  Cross-scheme replay failed only at the next step, because the two payload
+  schemas happen to be disjoint on required fields (`key` vs `executionId`) —
+  a property of today's shapes, not a decision, and one that stops holding the
+  day either payload gains an optional field that satisfies the other's schema.
+  Both payloads now carry a `typ` tag (`storage-read` / `workflow-approval`)
+  that verification asserts. A third scheme on the same secret must declare its
+  own (#507).
+  **Breaking for outstanding tokens:** the tag is inside the signed bytes, so
+  every token minted before this release fails verification. In practice that
+  is unclicked approval links (default 7-day expiry) and signed storage URLs
+  (capped at 7 days) — the same blast radius as rotating `BETTER_AUTH_SECRET`.
+  A dead approval link is not a stuck execution: the admin approval queue acts
+  on the execution directly under a session and never touches these tokens.
+  A dead storage URL is re-minted by whatever issued it. The third surface is
+  an in-chat or embedded approval card held by a browser across the deploy —
+  `run_workflow` hands the tokens to the client and they are persisted on
+  `AiMessage.metadata.pendingApproval` — which reports "Invalid or expired
+  approval token" on click, and on the embed surface the end user has no admin
+  queue to fall back to. Narrow, because a history reload drops
+  `pendingApproval`: it affects only sessions already open when you deploy.
+- **The local storage provider refuses a key that resolves to its own root.**
+  `validateStorageKey('.')` passes every rule it has (no `..`, not absolute, no
+  NUL, no backslash) and `resolve(root, '.')` is `root`, which `resolveWithin()`
+  used to permit — so a prefix of `.`, `./` or any equivalent reached
+  `rm(root, { recursive: true })` in `deletePrefix()` and erased every object
+  the provider held. The same key in `upload()` is not the harmless `EISDIR` it
+  looks like either: with the root absent (the default `.storage/private` on a
+  fresh checkout) it `mkdir`s **outside** the root and writes a regular file at
+  the root path, after which every upload fails `ENOTDIR`. The rejection
+  therefore lives in `resolveWithin()` and covers all four operations, rather
+  than only the destructive one. Not reachable today — object keys are
+  `avatars/${userId}/…` and `${keyPrefix}${randomUUID()}${ext}`, and no route
+  accepts a caller-supplied prefix — so this is defence in depth, taken because
+  the `deletePrefix` blast radius is total and the check is one comparison. S3
+  and Vercel Blob are unaffected: a prefix there is a literal string match
+  against keys, not a path (#508).
+- **A capability's advertised tool name is now its slug, closing a gap in the
+  #476 tool-call guard.** The guard built its advertised set from each
+  capability's `functionDefinition.name`, while dispatch resolved the name a
+  model emitted *as the slug*, and no schema required the two to agree — so a
+  capability was checked under one identity and executed under another. A row
+  with `slug: 'estimate_workflow_cost'` and
+  `functionDefinition.name: 'apply_audit_changes'`, bound to a low-privilege
+  agent, passed the guard and ran the privileged built-in. Admin write access
+  was needed to author it, so no trust boundary was crossed; it is fixed because
+  the guard reads as authoritative over the thing that dispatches, and because a
+  future import path or self-service capability builder would turn it into a
+  real escalation. `getCapabilityDefinitions()` now advertises the slug, which
+  also corrects the `capabilitySlug` recorded on tool messages and evaluation
+  logs — previously a name written into a slug field (#509).
+- **`functionDefinition.name` must equal `slug` on create and update.** The
+  runtime override above is the backstop for rows already stored; this stops the
+  divergence being authored. Divergence was never useful even before it was a
+  security question: the tool was advertised under a name dispatch could not
+  resolve, so it failed — unless the name happened to match another capability's
+  slug, which is the escalation. The check is on the write path only; the read
+  path repairs instead of rejecting, so an existing divergent row keeps working
+  rather than vanishing from its agent's toolset (#509).
+- **A capability's `functionDefinition` must be written whole.** `description`
+  and `parameters` were optional on create and update while the read validator
+  requires both, and a write replaces the whole JSON column — so
+  `{ "name": … }` alone silently discarded the rest and left a row the runtime
+  cannot parse. That was also a two-step walk around the rule above: PATCH a
+  definition that *agrees* with the slug but is stripped, then PATCH the slug
+  alone, and with nothing left to compare against the check was skipped. Both
+  schemas now require the full shape (#509).
+- **`agent_call` refuses a tool the agent was never advertised.** The #476
+  tool-call guard was added to the chat handler only; the workflow `agent_call`
+  executor dispatched whatever name the model emitted, and because a missing
+  `AiAgentCapability` row synthesizes a default-ALLOW binding, that capability
+  then ran unrestricted. The reachable route is injected content rather than an
+  admin — a knowledge document, a tool result, or an upstream step's output
+  naming any globally-registered slug. The executor now builds
+  `advertisedToolNames` from `getCapabilityDefinitions` and feeds a
+  `tool_not_advertised` result back to the model, keeping the assistant+tool
+  message pair intact so the next provider call stays well-formed. Swept the
+  other dispatch callers: three of the four take a name from a model. Chat is
+  guarded (#476); MCP is too — the host behind an MCP key is an LLM — and it
+  checks the globally exposed tool set, which is the grant, though **not** the
+  calling key's scoped agent, that being deliberate opt-out scoping documented
+  in `.context/orchestration/mcp.md`. Only `tool_call` is not model-driven at
+  all: its slug comes from Zod-parsed, admin-authored step config. The
+  dispatcher note claiming the chat guard "closes the reachable path" is
+  corrected: it was true of one of the two model-driven surfaces. The refusal
+  also emits `capability.refused_not_advertised`, the hook the chat handler
+  already fires and the docs describe as a security signal — a subscriber
+  keying on `conversationId` would otherwise have seen chat refusals and been
+  blind to workflow ones. The workflow payload carries `executionId` + `stepId`
+  in its place (#559).
+### Added
+
+- **`jsonEquals()` on `@/lib/utils/json-equal`** — structural equality for JSON
+  values that ignores object key order. Needed wherever one side of a comparison
+  has been through Postgres (`jsonb` canonicalises key order on write) or Zod
+  (which rebuilds a parsed object in schema-declaration order), so the same
+  value round-trips to two different strings and a `JSON.stringify` comparison
+  calls it changed. The two existing `valuesEqual` helpers
+  (`agent-version-diff.ts`, `apply-audit-changes.ts`) are deliberately *not*
+  key-order-insensitive — both compare values produced by the same code path on
+  both sides. Values that are not JSON — `Date`, `Map`, `Set`, `RegExp`, class
+  instances — are reported **unequal** rather than compared by their (empty) own
+  key sets, which would otherwise make any two `Date`s equal (#598).
+- **`SEED_OWNED_CAPABILITY_FIELDS`, `changedSeedOwnedFields()` and the types
+  `SeedOwnedCapabilityField` / `SeedOwnedCapabilityValues` on
+  `@/lib/orchestration/capabilities`** — the single definition of which
+  `AiCapability` fields belong to the seeds rather than the operator, and the
+  value-level (not presence-level) diff both write paths consult. A fork adding
+  a third write path to capabilities should call it rather than re-deriving the
+  list (#598).
+- **`Fork Sync Integrity` workflow — catches a squash-merged sync PR.** Squashing
+  a sync PR keeps every file but discards the second parent, so git no longer
+  knows the release tag is in your history and the merge base against upstream
+  silently reverts to the **previous** release. Nothing looks wrong until the
+  next sync replays the whole preceding range and re-conflicts every file
+  already resolved by hand. `scripts/ci/check-sunrise-ancestry.sh` asserts that
+  the release the tree claims in `lib/sunrise-version.ts` is genuinely an
+  ancestor of `HEAD`, and runs on every push to `main`, so the repair is still a
+  zero-diff `git merge -s ours` while the context is fresh — the failure
+  annotation carries that command, `%0A`-encoded onto one line so it survives
+  GitHub's line-scoped workflow commands rather than being left in log output. **A guaranteed no-op in Sunrise's own repository**
+  (Sunrise tags every release on `main`), and self-enforcing downstream: a fork
+  receives the workflow *by doing a sync merge*, so squashing that sync makes it
+  fire on the first run afterwards. It has exactly one failing path: everything
+  else skips, including a version bumped before its tag is pushed (every Sunrise
+  release, at the moment of cutting it), an unreachable upstream, a shallow
+  clone, a fetched tag belonging to some other project's release of the same
+  name, and any `git merge-base` error that is not a plain "not an ancestor".
+  Each skip emits a `::warning::` annotation, because a guard that goes
+  permanently and silently green is the original failure mode one level up. **Fork-facing:** set `SUNRISE_UPSTREAM_URL` if your
+  upstream is not Sunrise itself (a leaf fork of a framework-tier fork) — as a
+  repository **variable**, or as a **secret** of the same name if the URL has to
+  carry a token for a private upstream (the workflow prefers the secret; secrets
+  are masked in logs and write-only, variables are neither).
+  `CUSTOMIZATION.md` §9 now opens with the merge-don't-squash rule and the
+  repair (#539).
+- **`finishReason` on the `done` SSE event.** `ChatEvent.done` now carries an
+  optional `finishReason` (`'stop' | 'tool_use' | 'length' | 'error'`) telling a
+  consumer why the provider stopped generating on the final turn of the tool
+  loop. `'length'` means the assistant text is a **fragment** cut off at the
+  token cap, not a complete answer. The information already existed on
+  `StreamChunk.done`; the chat handler discarded it, so nothing downstream of
+  the stream could distinguish "the model produced the wrong shape" from "the
+  model was interrupted mid-shape". `drainStreamChat` surfaces it on
+  `DrainResult` too. **Optional and additive** — absent when the provider
+  reports nothing, and no existing consumer (widget, admin chat UI, forks) has
+  to read it (#594).
+- **`ProviderError.usage`** — tokens the provider billed for the call an error
+  ended, populated by the four truncation guards. A truncation is a full cap's
+  worth of output, the most expensive shape a turn has, and it used to vanish
+  with the response when the guard threw: the vendor charged and `AiCostLog`
+  recorded nothing. `streamChat` now costs it on that path, and
+  `runStructuredCompletion` folds it into the totals it returns. Absent for
+  errors raised before the model produced anything (#587).
+
+- **`isRequestFault()`** on `@/lib/orchestration/llm/provider` — is this
+  `ProviderError` a fault in the request rather than the provider, i.e. one
+  that re-running, re-routing or failing over cannot fix? Used by `streamChat`
+  to skip provider failover and by the engine's executors to mark the step
+  non-retriable. Currently `truncated_no_output` only (#587).
+
+- **`StructuredCompletionResult.finishReason`** — the finish reason of the
+  attempt that produced the value. Worth checking for `'length'` even on
+  success: a lenient `parse` can accept content that happened to be well-formed
+  where it was cut off, and a truncated array of results reads as a complete
+  short one. The failure path throws, so this field is the only place that case
+  is visible (#587).
+
+- **`migrator` and `seeder` Dockerfile stages**, and a profile-gated `seeder`
+  compose service. Both derive from `deps`, so they duplicate no layers and cost
+  a normal `docker build` nothing — BuildKit only materialises the stages the
+  requested target needs. They sit **before** `runner` in the file on purpose:
+  the last stage is what a bare `docker build .` produces, and that must stay
+  the runtime image (#583).
+
+- **`ESCALATION_WEBHOOK_ALLOW_PRIVATE`** — opt a deployment into escalation
+  webhooks targeting its own private network (an in-VPC relay), for the case
+  where the alternative is no validation at all. Off by default; accepts exactly
+  `"true"` or `"false"` so a typo fails startup rather than silently leaving it
+  off. Backed by a new `allowPrivateNetwork` option on `checkSafeProviderUrl` /
+  `isSafeProviderUrl`.
+  **It relaxes RFC1918, IPv6 unique-local and loopback** — the last so a
+  same-pod relay sidecar on `127.0.0.1` works, matching what `isLocal` already
+  allows for LLM providers. It does **not** relax link-local
+  (`169.254.0.0/16`, `fe80::/10`) or CGNAT (`100.64.0.0/10`), and the reason is
+  the same for both: a denylist of metadata *literals* is not enough.
+  `169.254.169.254` is only the best-known one — AWS ECS task metadata vends IAM
+  role credentials from `169.254.170.2`, EKS Pod Identity from
+  `169.254.170.23` — and `100.64/10` is shared address space (the default
+  Tailscale range) containing Alibaba Cloud metadata at `100.100.100.200`.
+  Cloud-metadata hostnames, the unspecified address and the scheme allowlist are
+  untouched (#553).
+- **`describeFetchFailure(err)`** in `lib/errors/fetch-error.ts` — renders a
+  thrown value for an operator, unwrapping undici's `cause`. Node's `fetch`
+  reports nearly every network-layer failure as a bare
+  `TypeError: fetch failed` and puts the real reason on `error.cause`, so a
+  refused redirect, a DNS miss and a connection reset are indistinguishable
+  from the message alone. Extracted once three outbound callers needed it
+  (`hooks/registry.ts`, `webhooks/dispatcher.ts`, `escalation-notifier.ts`),
+  all of which gained `redirect: 'error'` and have to explain that refusal to a
+  human. Only `Error` and `string` causes are unwrapped — an arbitrary object
+  would reach the log as `[object Object]` (#553).
+
+- **`normalizeRootRelativePath(path)`** in `lib/security/sanitize.ts`, exported
+  via `@/lib/security` — returns the parser-normalized path when it is genuinely
+  same-origin, or `null`. Prefer it over `isRootRelativePath()` wherever the
+  value gets navigated to: returning the normalized form is what stops a caller
+  validating one string and using another. `isRootRelativePath()` is unchanged
+  in signature and now delegates to it (#506).
+- **`npm run check:changelog`** — a structure check on `CHANGELOG.md`, wired
+  into `npm run validate` (first, so it fails in milliseconds rather than
+  behind the type-check) and into the CI `lint & format` job, which is ungated
+  and so runs on docs-only PRs too. Nothing checked this file before: Prettier
+  saw well-formed markdown, `/security-review` correctly skips markdown, and
+  `/pre-pr` step 5d only checks the CHANGELOG is *present* in a public-surface
+  diff. It enforces unique version headings in descending SemVer order, real
+  dates, `## [Unreleased]` present, first and undated, Keep-a-Changelog `### `
+  categories that do not repeat within a section, agreement between the topmost
+  release and `SUNRISE_VERSION` — and, comparing against the base revision,
+  that a released heading is never deleted. That last rule is the one that
+  catches the incident behind it: cutting 0.8.1 replaced a block that included
+  `## [0.8.0]`, never re-added the heading, and 962 lines of 0.8.0 content —
+  two migrations, two breaking changes — re-attributed themselves to a patch
+  release, merged, and were tagged. **Forks:** the check assumes
+  `CHANGELOG.md` carries Sunrise's release history, which it does by default
+  after any upstream merge; keep your own app's release notes in a separate
+  file. See `.context/architecture/ci.md` (#550).
+- **`npm run format:prisma` and `npm run format:prisma:check`**, the latter
+  wired into `npm run validate` and now the implementation the CI step calls
+  too. Prettier has no `.prisma` parser, so schema drift from the pinned
+  Prisma's own formatter was invisible to `format:check` and surfaced only as a
+  red CI job named "Lint & format" — a misleading place to look for a Prisma
+  problem, on a branch about something else. It lands hardest on forks: the
+  `/framework` and `/app` tiers own `framework-*.prisma` and `app.prisma`,
+  exactly the files core never reformats, so a Prisma bump upstream silently
+  invalidates formatting only the fork can fix. The check formats a **copy** in
+  a temp directory and compares, rather than running the formatter over
+  `prisma/schema` and diffing against git: the git form is correct only on a
+  clean tree, and locally it reports your own well-formatted uncommitted work
+  as drift — the exact situation a local check exists for. It walks
+  `prisma/schema` **recursively**, because `prisma format` does, and a flat
+  listing would silently skip a fork's nested schema files while failing P1012
+  on any relation that crossed into them. It runs Prisma's own declared entry
+  point under `process.execPath` rather than `npx` or the `.bin` shim: both
+  force a shell on Windows, and `shell: true` concatenates argv without
+  escaping it (Node emits DEP0190 saying so), which would split any temp path
+  containing a space — `os.tmpdir()` there sits under `%USERPROFILE%`. Formatter errors are
+  rewritten to name the real schema path: Prisma reports against the copy, and
+  the copy is deleted before the message prints. `format:prisma` is the
+  mutating fixer, mirroring `format` / `format:check` (#510).
+- **Scheduled `Dependency Audit` workflow** (Mondays, plus `workflow_dispatch`)
+  asking whether the tree is clean **as it stands** — the question
+  `dependency-review` cannot answer, because it diffs a PR and so goes green
+  forever once a vulnerable version is on `main`. Dependabot does watch the
+  tree and does work here, but has no package to bump when the fix lives in a
+  **grandparent**: `ws@8.20.1` sat behind `engine.io` and `socket.io-adapter`,
+  both declaring `ws: ~8.20.1` and neither vulnerable, so no PR was raised and
+  the alert stayed open seven weeks (#538). `adm-zip` was in that state when
+  this landed, and is the case that proved the point: no bump existed at all,
+  because `epub2` pinned it below the patched version — it took replacing the
+  library to clear it (#601, under **Changed**).
+  Two independent jobs: `npm run check:audit`, and the absolute counterpart to
+  `check:lockfile` via `fix:lockfile-libc --check`, which catches `libc`
+  missing since before the base commit — the state `main` was in for two
+  releases (#571) and which no diff check can see. **Forks inherit both**, and
+  neither needs Advanced Security, so unlike CodeQL and dependency-review they
+  run on private forks too. `check:audit` fails only on findings actionable
+  today (at or above the floor with a non-major fix) and reports the rest to
+  the job summary: measured against this repo, two of eight high advisories had
+  no fix at all, so a plain `npm audit --audit-level=high` would have failed
+  every week from day one for something nobody could clear. Gating on
+  fixability is self-clearing for the no-fix case — the day `epub2` accepts a
+  patched `adm-zip`, the job goes red on its own, with no allowlist to curate.
+  A fix that exists but cannot be taken is not covered; the remedy there is
+  usually a `package.json` `overrides` entry, which `check:lockfile` gates as a
+  reviewed decision. `--floor=` raises
+  the bar; `--report` downgrades findings to advisory, though the job still
+  fails if the audit could not be run at all (#549).
+- **`npm run fix:lockfile-libc`** restores `libc` to `package-lock.json` from
+  the registry, with `--check` to report without writing. Needed because npm
+  below 11.11.0 deletes the field on every write and no npm puts it back — once
+  it is gone the tree reads as up to date, so nothing recomputes the metadata.
+  It reads each package's registry manifest at its exact locked version
+  (`/<name>/<version>`, ~2 KB — not the whole packument, which for `vite` is
+  37 MB of publish history), so a version cannot move by construction, and it
+  inserts the key where npm's serialiser would put it — alphabetically among
+  the scalar keys, which is after `dev` and before any object-valued key,
+  `dependencies` included. Package names and versions are validated against
+  npm's grammar before becoming URL path segments, and every request is bounded
+  by a timeout and retried with exponential backoff. It refuses to write when
+  the lockfile does not survive a JSON round-trip, when the registry is
+  unreachable, or when an existing value disagrees. Validated by
+  strip-and-restore against
+  `d5b913fb^`, the last lockfile a modern npm wrote: delete all 77 `libc`
+  fields, rebuild from the registry, and the file comes back byte-identical.
+  Deliberately not in `validate` or CI — it needs the network, and the
+  automated guard is `check:lockfile` (#571).
+- **`npm run check:lockfile` and `npm run check:exports`**, both wired into
+  `/pre-pr`, which was silent on two classes of change it should never have
+  been. A PR whose entire substance is `package-lock.json` got a clean bill
+  from a gate that builds its file set from `*.ts` — which is what happened
+  during the 0.8.1 cut, where `npm update` stripped `libc` from five native
+  Linux packages. That one was caught by hand before it was committed, so
+  0.8.1 shipped clean; an earlier dependabot merge was not, and **v0.8.0
+  shipped with 72 packages already missing `libc`**. Every fork inherited it by
+  taking 0.8.0 — nothing to do with the 0.8.1 upgrade. Repaired in the same
+  release; see the Fixed entry for #571. `check:lockfile` compares the parsed
+  trees and fails on the things
+  that need a decision: platform metadata (`libc`/`os`/`cpu`) lost, a **direct**
+  dependency moved backwards, or `overrides` changed. Transitive downgrades are
+  listed but do not gate — measured over all 134 lockfile commits in this
+  repo's history, there are 45 of them against 2 direct, and they cluster in
+  commits like "pin Prisma to ~7.1.0" where one intended pin drags its subtree
+  back. Running it over that history flags 5 commits, every one a real event.
+  `check:exports` answers step 5d's question — *did the set of importable
+  symbols change?* — from the surface rather than a hardcoded path list, by
+  diffing what every `lib/**/index.ts` barrel exports. It uses the TypeScript
+  compiler rather than a regex because six of those exports are `export *`
+  (three of them `export * as ns`), which a regex cannot follow; specifiers
+  resolve through the `@/` alias, since CLAUDE.md mandates it and ESLint
+  forbids relative paths, so `@/` is the only form this codebase produces. A
+  star it cannot follow is reported, on both revisions, rather than counted as
+  zero symbols — "nothing exported" and "could not look" are not the same
+  answer. It reports and never gates. Over the last 60 commits it fires once:
+  on #506's `normalizeRootRelativePath`, the export the path list missed
+  (#552).
+
+### Changed
+
+- **The EPUB parser now uses `epub` instead of `epub2`.** `epub2` is a fork of
+  `epub` that overtook it while the original was dormant; the original has since
+  been modernised and the fork has not published since September 2023. Three
+  open issues were all downstream of that one choice, and all three close here:
+
+  - **#601** — `epub2` pins `adm-zip ^0.5.10` while the fix for its high
+    advisory is `0.6.0`, so no Dependabot PR could ever arrive and no in-range
+    bump existed. `epub` depends on `fast-xml-parser` + `jszip` instead, so
+    `adm-zip` leaves the tree entirely — `npm audit` on the new tree reports
+    **0 vulnerabilities**. No `overrides` entry was needed, which also means
+    this never touched the `overrides` gate.
+  - **#614** — a malformed OPF made `epub2` reject *and then* throw an
+    uncatchable `TypeError` out of its own inflate callback, an
+    `uncaughtException` reachable from an admin upload. `epub` rejects cleanly;
+    verified against the same crafted archive.
+  - **#606** — `parse()` and `getChapterRaw()` genuinely return promises here,
+    so the class of bug is gone rather than worked around.
+
+  Also removed: the temp-file dance (`epub` reads a `Buffer` directly, where
+  `epub2` could only read a path), and `types/epub2.d.ts` — the hand-written
+  declaration that shadowed the library's own and, by claiming both methods
+  returned promises, silenced the `await-thenable` rule that would have caught
+  #606 at authoring time. `epub` ships its own types, so there is nothing left
+  to get wrong there. Nothing chose `epub2` deliberately: it arrived inside a
+  large feature commit in April 2026 with no comparison recorded anywhere.
+
+  **Fork-facing:** if you import `epub2` directly, it is no longer a dependency.
+  `parseEpub()`'s own signature and return shape are unchanged.
+
+  **Verified beyond the unit suite**, because this path has twice broken in ways
+  vitest could not see and `epub` is ESM-only: a production build, then a real
+  `.epub` uploaded through the real admin route against both `next start` and
+  the **standalone** server, asserting the book's prose landed in the stored
+  chunks. That check is now `npm run smoke:epub`.
+
+- **`check:lockfile` no longer fails a PR for a direct-dependency downgrade.** It
+  reports them in their own block instead. The rule existed because "a version
+  going backwards is how a patched dependency quietly returns to a vulnerable
+  one" — but that is a proxy for a risk something else measures exactly:
+  `dependency-review` runs on every PR at `fail-on-severity: high` and fails a
+  change landing on a **known-vulnerable** version, and `check:audit` covers the
+  standing tree weekly. Measured over all 134 commits that touched this
+  lockfile, the rule would have fired twice, on `pin Prisma to ~7.1.0` and `pin
+  jsdom to 26` — two deliberate pins, zero accidents. A gate whose only outcomes
+  are false positives teaches people to route around it. **Fork-facing:**
+  `dependency-review` is skipped on private repos, so a private fork now has no
+  per-PR enforcement here — the downgrade is still printed prominently, with
+  that caveat in the output. Lost `libc`/`os`/`cpu` and `overrides` changes still
+  gate: both are rare, neither is covered by another PR-time check, and the
+  first is the one that actually shipped broken (#571) (#584).
+- **`@types/node` pinned to the runtime major (`^26` → `^24`), and added as a
+  fifth source to `npm run check:node-version`.** #581 established Node 24 as
+  the floor and `node:24-alpine` as what ships, but `tsc` was type-checking
+  against a standard library **two majors ahead of every runtime we run on** —
+  so it accepted any API added in Node 25 or 26 and reported nothing, with the
+  first signal a `TypeError` in the production image on a path the types called
+  safe. Pinning to `^24` produced a clean `tsc --noEmit`, so nothing in the tree
+  depended on the post-24 surface. The version-consistency check now covers all
+  five declarations across four files instead of four, and a Dependabot `ignore`
+  holds `@types/node` at `>=25` so the major cannot re-land silently — which is
+  how it arrived. **Fork-facing:** a fork on a different Node major must move
+  `@types/node` with `.nvmrc`, both Dockerfiles and `engines.node`, or
+  `check:node-version` fails; a fork that had been relying on the newer types
+  will see real errors, and those are the point. Only the major is compared, so
+  `24.x` minors still flow through Dependabot. The fifth source reads the
+  **resolved** version from `package-lock.json` rather than the range in
+  `package.json`, because a range need not pin a major — `>=24` resolves to
+  26.2.0, so a range-based check reported "consistent" for exactly the drift
+  it was added to catch (#584).
+- **`PATCH …/capabilities/{id}` now returns 403 for a change to a system
+  capability's `slug`, `functionDefinition`, `executionType` or
+  `executionHandler`.** **Fork-facing:** any automation that reconfigures a
+  built-in capability over the API will start failing at that call. It was
+  already failing — silently, at the next re-seed — so the fix is to move the
+  change into the capability's seed unit in `prisma/seeds/`, which is where it
+  had to live to survive a deploy. Every other field, including
+  `executionConfig`, stays editable. See the entry under **Fixed** for the full
+  reasoning (#598).
+- **A structured extraction cut off at the token cap is now an error on the
+  OpenAI-compatible adapter, not partial JSON.** It already was on Anthropic
+  and on the empty-content case; what changes is `finish_reason: 'length'` with
+  **non-empty** content when `responseFormat` is a `json_schema` and the turn
+  has no tools — on both the streaming and non-streaming paths. Such a call
+  previously returned (or streamed) a fragment of an object; it now raises
+  `ProviderError('truncated_no_output')`. **Fork-facing:** any caller that was
+  salvaging partial JSON from a truncated extraction will now see a thrown
+  error instead — raise `maxTokens`. A turn that carries tools is unaffected:
+  a `length` stop there is the ordinary partial-output case.
+  `runStructuredCompletion` keeps its retry on a truncation and now absorbs the
+  adapter's throw to get there — the stricter temp-0 retry prompt is a real
+  remedy for the commonest truncation of all, a model spending the budget on a
+  preamble before starting the JSON. Once both attempts are spent it does
+  **not** consult the caller's `onFinalFailure` hook, which exists to phrase
+  "the model broke my contract" — a premise that is false here (#587).
+
+- **A chat stream no longer fails over to another provider when the fault is in
+  the request.** A `truncated_no_output` `ProviderError` now ends the turn
+  instead of retrying against each configured fallback and recording a
+  circuit-breaker failure for every one. The token cap comes from the agent's
+  config, so a fallback rejects it identically; the old path billed a full-cap
+  call per provider, wiped the visitor's screen with a `content_reset` each
+  time, and could open a healthy provider's breaker for every other agent using
+  it. Deliberately a one-entry code list and **not** the `retriable` flag:
+  `toProviderError` marks every 4xx non-retriable, and failing over on a `401`
+  from a provider with a stale key is exactly what fallbacks are for. That path
+  also now persists an error-marker assistant message, so a failed turn no
+  longer reloads as a user question with no answer (#587).
+
+- **Error-marker assistant messages are no longer replayed into the prompt.**
+  `loadHistory` returned them like any other turn, so
+  `[An error occurred and the response could not be completed.]` became a
+  permanent part of the model's context — burning tokens and inviting
+  imitation — for the rest of the conversation. They are persisted for the
+  *client*, so a failed turn renders instead of an unanswered question, and are
+  now filtered out of prompt rebuilding. Pre-existing, but newly common: this
+  release persists a marker for every `ProviderError` reaching the outer catch,
+  where previously an exhausted 429/503 left no row at all (#587).
+
+- **A workflow step's failed LLM attempt now reports what it cost.** `llm_call`,
+  `chat_turn` and `agent_call` wrapped a `provider.chat()` throw with
+  `tokensUsed`/`costUsd` left at 0 — the very fields the engine's retry
+  accumulator folds into the step trace and the execution total. A truncation
+  is a full cap's worth of billed output, so the priciest attempt a step made
+  was the one missing from its totals. They now carry `ProviderError.usage`
+  when the provider reported it (#587).
+
+- **A request-fault provider failure is no longer retried by workflow steps.**
+  `ExecutorError` defaults to `retriable: true`, and `llm_call`, `chat_turn`
+  and `agent_call` all wrapped a `provider.chat()` throw at that default — so a
+  step with a `retry` error strategy re-issued a truncation for its whole
+  `retryCount`, each attempt billing a full cap's worth of output to hit the
+  identical wall. They now mark it non-retriable via the shared
+  `isRequestFault()`. Note this keys on the error **code**, not on
+  `ProviderError.retriable`: that flag is only set when `toProviderError` can
+  read a retriable HTTP status, so a connection reset or read timeout carries
+  `retriable: false`, and gating on it would have stopped steps retrying
+  ordinary network blips (#587).
+
+- **`.gitignore` now denies `.env*` by default** and allowlists only
+  `.env.example` and `.env.development`. The previous form enumerated names, so
+  `.env.production`, `.env.staging` and `.env.test` were all freely
+  committable. That matters more than it looks: Next's standalone build copies
+  `.env` and `.env.production` into the build output and the server loads them
+  at boot, so a committed `.env.production` would ship its contents inside the
+  production image as well as into git. **A fork that deliberately commits an
+  env file other than those two must add its own negation** — an
+  already-tracked file keeps being tracked, so nothing breaks silently, but new
+  changes to it will stop being picked up.
+
+- **`.env.production` is no longer baked into the production image.**
+  **Action required if you keep runtime configuration there.** `.dockerignore`
+  excluded `.env` and the four `.env.*.local` names but nothing matched
+  `.env.production` or `.env.staging`, so those files entered the build context
+  — and Next's standalone output copies `.env` and `.env.production` into
+  `.next/standalone` (`next/dist/build/index.js:325-337`), where the server
+  loads them at boot. The result was a secrets file shipped inside the runtime
+  image *and* silently supplying `process.env`. Both now stop: a `.dockerignore`
+  rule of `.env.*` keeps them out of the context entirely (`.env.example` is
+  still re-included). A fork that relied on `.env.production` for runtime
+  configuration must supply those values another way — compose `env_file`,
+  `docker run --env-file`, or the platform's environment settings — or they
+  will read as `undefined` in a container that otherwise starts cleanly.
+  `.gitignore` used to have the same hole; it is closed in the same release
+  (see the `.gitignore` entry above), but that does not untrack a file already
+  committed — check you have not committed one (#583).
+
+- **The production runtime image no longer contains the Prisma CLI** — nor the
+  schema, the migrations, or `prisma.config.ts`. **Action required if you run Prisma inside
+  the app container.** `npx prisma …` and `npm run db:migrate:deploy` now fail
+  there with a message naming the replacement rather than a bare
+  `command not found`; `npm run db:seed` fails with `sh: tsx: not found`, since
+  `tsx` was never in that image either. Migrations run from a new `migrator`
+  image built from the same `Dockerfile`; seeding from a new `seeder` image.
+  The reason is that completing the CLI's dependency closure would have meant
+  shipping 133 packages / ~240 MB of deploy-time tooling — Prisma Studio, a WASM
+  Postgres, a charting stack — inside the process that serves traffic. Removing
+  it instead took the image from **739 MB to 402 MB** (arm64, like-for-like;
+  the amd64 image CI builds measures 298 MB). What the app needs
+  (`@prisma/client`, `.prisma/client`, `@prisma/adapter-pg`) arrives through
+  Next's standalone trace.
+  **Render, Railway and Fly.io users must change how migrations run**: all three
+  execute their migration hook inside the deployed image, and Render cannot
+  build a specific Dockerfile stage. Each platform guide now documents a
+  supported alternative, and `.context/deployment/overview.md` carries a
+  portable recipe that runs the real `migrator` image against production (#583).
+- **`docker-compose.prod.yml` gained explicit `target:` and `image:` keys and a
+  `seed` profile.** `migrator` builds the `migrator` target instead of the
+  runtime image and takes its command from the stage's `CMD`; a new
+  profile-gated `seeder` service handles `db:seed` and is never built or started
+  by a plain `up`. The `image:` names reproduce Compose's existing implicit
+  names, so nothing changes for existing stacks (#583).
+- **The CI `docker` job now runs the production stack instead of only building
+  it.** It builds three targets with `load: true`, asserts image invariants
+  (musl-only `sharp`; no Prisma CLI in the runtime image), brings up
+  `db` + `migrator` + `web`, and asserts the migrator exited 0, `web` reached
+  healthy, and a Prisma model query succeeds. Its path filter widened to include
+  `Dockerfile.dev`, `docker-compose*.yml`, `prisma.config.ts` and `prisma/**`,
+  so schema PRs now run it. The job id is unchanged, so `ci-status` needs no
+  edit — forks merging this will not see a conflict in that block (#583).
+- **The `deps` build stage no longer takes a `DATABASE_URL` build argument.** It
+  uses a fixed placeholder, because `prisma generate` only needs the DSN to
+  parse. Build arguments are recorded verbatim in `docker history`, and the
+  `migrator`/`seeder` images derive from `deps` — so a real production DSN would
+  otherwise have been readable from a shipped image (#583).
+
+- **Capability slugs may now contain underscores**
+  (`^[a-z0-9]+(?:[_-][a-z0-9]+)*$`) and are capped at 64 characters rather than
+  100, matching the provider tool-name limit the slug now has to satisfy — a
+  longer one would create successfully and then be dropped from every agent's
+  toolset with only a warn log to explain it. The shared slug rule allows
+  hyphens only. Required by the rule above: the slug is the tool name, every built-in
+  uses the underscore convention LLM tool names take, and those rows are seeded
+  through Prisma without ever meeting the API schema — so without this a
+  capability authored through the API could never match the convention its
+  thirteen siblings use. **The charset is wider; the length is narrower.** A
+  slug of 65–100 characters was creatable before and is now refused, on update
+  as well as create — so an API client doing a full-object PATCH that echoes a
+  legacy over-length slug gets a 400 on a field it did not change. Omit `slug`
+  from the PATCH body (it is immutable anyway) or recreate the capability. The
+  admin form already omits it (#509).
+- **The minimum supported Node version is now 24.** Node 20 reached end-of-life
+  on 2026-03-24 and receives no security patches — that alone is the reason.
+  It additionally unblocks two pending major upgrades (`openai` v7,
+  `@testing-library/jest-dom` v7) whose floor is ≥22; neither is a dependency
+  yet. `Dockerfile` and `Dockerfile.dev` build on `node:24-alpine`,
+  `package.json` declares `engines.node: ">=24"`, and a new `.nvmrc` is the
+  single source the CI workflows read via `node-version-file` — previously the
+  version was hardcoded in eight separate places with nothing keeping them in
+  step. **A fork on Node 20 or 22 must upgrade its runtime**; `npm install` will
+  warn rather than fail, because `.npmrc` does not set `engine-strict`, so the
+  mismatch will otherwise surface late rather than at install (#581).
+- **A capability whose slug cannot be a tool name is dropped from an agent's
+  toolset with a warning** rather than sent to the provider. Providers reject the
+  *entire request* over a malformed tool name, so a namespaced fork slug from the
+  `register(cap, { slug })` seam — `billing:lookup_order` — would have killed the
+  conversation rather than one call. Such a capability was never reachable from
+  chat anyway; MCP remains its surface, and resolves custom names back to slugs
+  explicitly (#509).
+
+### Fixed
+
+- **A cancelled stream no longer counts against the provider's circuit breaker.**
+  Pressing stop, closing the tab or navigating away mid-answer raises an abort,
+  and the streaming handler's inner catch recorded a provider failure before it
+  checked for one. At `failureThreshold: 5`, five cancelled streams opened the
+  circuit for that provider slug across **every** agent using it: one reader
+  changing their mind five times could take a healthy provider offline for
+  everybody. The breaker exists to route around a provider that is unwell, and a
+  reader is not evidence about the provider.
+
+  One `isClientAbort()` predicate now answers the question, consulted at the
+  inner catch and — as **defence rather than a second live site** — at the outer
+  one. Both shipped adapters raise an in-flight abort as
+  `ProviderError('request aborted', { code: 'aborted' })`, which the outer
+  catch's `ProviderError` branch returns on before it could reach the breaker,
+  so a cancellation from either never got there. The outer guard covers the
+  shape a fork adapter can still produce. The predicate reads the caller's
+  `AbortSignal` first and a `ProviderError`'s own `code` second, and only falls
+  back to matching the message when neither exists — so a provider error whose
+  text happens to contain "aborted" stays a provider failure (#592).
+- **A stream that dies part-way through now records what it was billed for.**
+  Two halves, and neither works without the other. The **adapters** knew the
+  cost and threw it away: Anthropic sets `inputTokens` at `message_start` and
+  updates `outputTokens` on every `message_delta`, so at the moment the stream
+  catch fires it knows exactly what the provider has charged for — and
+  `toProviderError` dropped it. `toProviderErrorWithUsage()` attaches it
+  instead. The **handler** folded `ProviderError.usage` into `AiCostLog` only
+  inside the request-fault branch added by #593; the other two exits — failing
+  over to a fallback, and giving up with no fallback left — dropped it, so a
+  turn billed by two providers would have logged only the second. The fold now
+  happens on the way into the catch, covering every exit in one statement.
+
+  Together: a mid-stream failure on Anthropic that previously vanished from
+  `AiCostLog` is now recorded against the agent's budget. OpenAI-compatible
+  reports usage in a final chunk, so an error before that still has nothing to
+  attach — and zeroed usage is deliberately dropped rather than written, because
+  a zeroed row tells the dashboard the turn was free, which is a worse answer
+  than no row.
+
+  **Fork-facing: this also feeds the per-turn cost cap, not just the log.** The
+  recovered spend is added to `turnCostUsd`, which `maxCostPerTurnUsd` is tested
+  against — so a turn that burned most of its cap, lost the stream, and then
+  succeeded on a fallback provider can now stop the tool loop early with an
+  `endedReason: 'budget_exceeded'` marker where it previously ran on. That is
+  the cap working on the money actually spent rather than on the subset that
+  survived to a `done` chunk, but it is a behaviour change and an agent sitting
+  close to its cap is where it will show (#592).
+
+- **EPUB chapter text is now extracted by a real DOM parse, not a regex chain.**
+  `epub-parser.ts` stripped markup with fourteen chained `.replace()` calls;
+  CodeQL raised five high-severity findings against them on #613. Three were
+  real, measured against the old code rather than assumed: `<[^>]+>` does not
+  match `</script >`, so a script block written that way survived removal and
+  its **body** landed in the knowledge base as text; `&amp;` was unescaped ahead
+  of `&lt;`, so the literal text `&amp;lt;` double-unescaped to `<`; and only
+  six entities were decoded, so `Caf&eacute;` reached the chunker verbatim —
+  every book not written in English. (The other two, the "incomplete
+  multi-character sanitization" pair, do not produce a live tag through either
+  implementation; they are theoretical for this sink and are not claimed as
+  fixed.)
+
+  The replacement is `lib/orchestration/knowledge/parsers/dom-text.ts`, holding
+  the jsdom text-extraction machinery `html-parser.ts` already had — now shared
+  rather than duplicated. Both parsers use it. Alongside the correctness fixes,
+  EPUB text gains proper decoding of every entity, `<head>` exclusion for free
+  (it is not in `document.body`, so the regex added earlier in this release is
+  gone), non-breaking spaces folded to ordinary ones, and markdown headings —
+  which `chunkMarkdownDocument()` splits on, so a book now chunks along its
+  chapters instead of arbitrarily.
+
+  Verified through a production build and against the standalone server, since
+  jsdom in a knowledge parser is precisely what broke this pipeline once before:
+  `npm run smoke:epub`.
+
+- **The EPUB parser returned an empty document for every book ever ingested.**
+  `epub-parser.ts` called `await epub.parse()`, but `epub2@3.0.2`'s `parse()`
+  returns `this`, not a promise — parsing is callback-driven and completes on an
+  `end` event. The `await` resolved on the next microtask and the parser read
+  `metadata`, `flow` and `toc` while all three were still empty. Measured
+  against a spec-valid EPUB 2 archive, the old code returned
+  `{ title: '<filename>', metadata: { format: 'epub' }, sections: 0, fullText: '', warnings: [] }`.
+  Silent: the upload reported success, and any agent grounded on an EPUB had
+  been answering from nothing. A second instance of the same mistake sat two
+  lines below — `await epub.getChapterRaw(id)` awaits a callback-style method
+  that returns `void`. Both now use the library's promise API,
+  `EPub.createAsync()` and `getChapterRawAsync()`.
+
+  **An empty result is also no longer silent.** Two paths still return zero
+  sections from a *resolved* parse — a book with no spine, and one whose every
+  chapter strips to nothing (an image-only comic or photo book) — and both
+  looked exactly like the bug. Each now carries a warning naming the reason,
+  which `document-manager` persists into the document's metadata and logs. That
+  matters because `uploadDocument` derives `fileHash` from the extracted *text*,
+  so every book extracting to nothing hashes to `sha256('')` and the second one
+  silently dedups into the first under a different title.
+
+  **Fork-facing:** a caller that treated `sections: []` as "an empty book" was
+  reading every book that way and will now get content. An unreadable archive
+  rejected before this change and still does — that was never the broken part.
+  Chapter text also no longer repeats the chapter title, which leaked in from
+  the XHTML `<head>`. (The library itself was then replaced — see the next
+  entry, which is where the rest of this stopped mattering.)
+
+  **What let it ship, and what stops it recurring.** `types/epub2.d.ts` — a
+  hand-written declaration shadowing the library's own — declared both methods
+  as returning promises. That is the only reason
+  `@typescript-eslint/await-thenable`, an error under `recommendedTypeChecked`,
+  stayed silent; with the declaration corrected it flags both call sites. The
+  unit tests mocked `epub2` wholesale and asserted against the invented shape,
+  so 27 green tests sat on top of a parser that never worked. They are kept for
+  the branch cases and the mock now mirrors the real API, but the guard is a new
+  no-mock suite that parses an archive built byte-by-byte by
+  `tests/helpers/epub-fixture.ts`. That fixture DEFLATEs its entries on purpose:
+  with stored entries `parse()` happens to complete synchronously and the bug
+  does not reproduce (#606).
+- **Edits to a system capability's seed-owned fields are now refused instead of
+  silently reverted.** Since #545 the capability seeds re-apply
+  `functionDefinition`, `executionType` and `executionHandler` to existing rows
+  on every deploy whose seed-file hash changes. Nothing stopped an operator
+  writing those same fields through `PATCH …/capabilities/{id}` or the config
+  importer: the write succeeded, logged a `capability.update` audit entry — and
+  the next re-seed undid it with **no audit entry, no log and no signal in the
+  UI**. `slug` had a worse ending, because it is the key the seed upserts on: a
+  rename was not reverted, it made the next re-seed create a **second row** for
+  one built-in. PATCH now returns 403 naming the offending fields; the importer
+  skips just those fields and records a warning, so a whole-config restore is
+  not failed by a bundle carrying a built-in's shipped definition. The System
+  badge and banner in the capability form now name what is protected rather than
+  leaving the operator to discover it at save time. The form also stops sending
+  an **untouched** `functionDefinition` for a system row: it normalises the
+  stored definition on load — forcing `name` to the slug, replacing a non-string
+  `description`, coercing `parameters` — so a row whose stored value did not
+  already match that normalisation would have 403'd a save that only edited the
+  description, naming the one field the operator has no way to fix there. An
+  edited definition is still sent, and still refused with a message saying why;
+  dropping it unconditionally would silently discard a deliberate edit and
+  report "Saved" (#598).
+- **The config importer no longer deactivates a built-in capability.**
+  `PATCH …/capabilities/{id}` treats `isActive: false` on a system row as
+  equivalent to deleting it and refuses; the importer applied it, and nothing
+  put it back — every capability seed sets `isActive` only in its `create`
+  branch, so no re-seed restores it. A hand-edited or foreign bundle carrying
+  `{"slug":"upload_to_storage","isActive":false}` therefore disabled a built-in
+  permanently, through the same call that declines to import that bundle's
+  `executionHandler`. It is now skipped with a warning. Re-**activating** is
+  still imported, exactly as PATCH still allows it (#598).
+
+- **CI's changed-file detection no longer caps at 100 files, silently skipping
+  every gate.** The `config` job read `gh pr view --json files`, which goes
+  through GraphQL and pages `files(first: 100)` without following on —
+  **measured: 100 of 411** against a real PR. Every gate defaults to off and is
+  switched on by a matching path, and `ci-status` fails only on a literal
+  `failure`, so a skipped job passes: a PR over 100 files could go fully green
+  with type-check, lint, build, tests, the Docker stack smoke and the
+  `lockfile` supply-chain check never having run. A release PR is exactly the
+  large-diff case, and exactly when `package-lock.json` moves. PRs now use the
+  REST files endpoint with `--paginate` (cap 3000) and **cross-check the result
+  against the PR's own `changed_files` count**, so a future API change that
+  reintroduces a cap is caught rather than trusted. Pushes use the commits API with the same
+  flag — it caps at 300 *per page* but does paginate. **Both endpoints stop at a
+  hard 3000 files regardless**, returning a final empty page with HTTP 200, so
+  the push path treats reaching that cap as truncation (the PR path catches it
+  via the cross-check instead). The
+  truncation flag defaults to **true** and is cleared only by a positive numeric
+  match, so a comparison that merely errors cannot leave the gates switched off.
+  On any truncation the job runs **every** gate and emits a `::warning::`:
+  running too much on a huge diff is the cheap mistake. Two fixes to the gate itself:
+  `config` joins `ci-status`'s `needs` — every other job is gated on its
+  outputs, so a failure in change detection made them all `skipped` and reported
+  "CI passed" with nothing run — and `ci-status` now fails on anything that is
+  not `success` or `skipped`, so a `cancelled` job (a `timeout-minutes` kill, or
+  a cancelled run) no longer passes the required check (#591).
+- **A truncated evaluation judge no longer records a wrong verdict.** A judge
+  agent runs as a streaming chat call, so it goes through `drainStreamChat`
+  rather than `runStructuredCompletion`, and the seeded judges run at
+  `maxTokens: 1000` with **no** `responseFormat` — so neither adapter's
+  truncation guard can fire. When a judge ran out of tokens mid-object,
+  `scoreResponse` recorded `score: null, reasoning: "judge response was not
+  valid {score, reasoning} JSON"` — into a metric row **an operator reads**.
+  That is a wrong diagnosis, and it sent people to rewrite a judge prompt that
+  was working when the fix was to raise `maxTokens`. It now distinguishes the
+  two, names the output-token count, and states the remedy. Same defect as
+  #587, on the feature the original report came from (#594).
+- **A truncated `json_object` response is now reported as truncation on both
+  adapters.** The truncation guards tested `responseFormat.type ===
+  'json_schema'` specifically, so a caller asking for `json_object` — notably
+  the orchestrator's planner — sailed straight through with partial JSON. It
+  then failed `JSON.parse`, spent a **clarifying retry into the same token
+  cap**, and surfaced as `planner_parse_failed` with `retriable: true`, inviting
+  the engine to re-run the whole step at that same cap. All four guards
+  (Anthropic and OpenAI-compatible, streaming and non-streaming) now cover any
+  `responseFormat`: a caller asking for `json_object` wants parseable JSON just
+  as much as one supplying a schema, and truncated JSON is unusable under
+  either. This also removes the wasted retry and the false `retriable`, since
+  the adapter now raises `truncated_no_output` before the parse and
+  `isRequestFault` marks it non-retriable. The guards test
+  `responseFormat.type` explicitly rather than truthiness, because
+  `agent.metadata` permits only primitives — so an agent configured through the
+  admin API stores the **string** `"json_object"`, and a truthiness test would
+  arm the guard on a request that never reaches the API as JSON at all. On
+  Anthropic the completeness test applies to `json_object` but not to the
+  forced-tool `json_schema` path, whose payload is rebuilt via `JSON.stringify`
+  and is therefore always valid JSON; the shared test now lives in
+  `lib/orchestration/llm/json-completeness.ts` so the two adapters cannot
+  drift. **Fork-facing:** a `json_object` call that previously returned a
+  partial string now throws — which is the point, but a fork catching parse
+  failures downstream should expect the error earlier and better-labelled
+  (#594).
+- **Capabilities invoked from a workflow now record a cost row.** The dispatcher
+  wrote `CapabilityContext.agentId` to `AiCostLog.agentId`, but a workflow
+  dispatches under a `workflow:${workflowId}` label rather than a real
+  `AiAgent.id` — and that column is a foreign key to it. Postgres rejected every
+  such insert with P2003 (`ai_cost_log_agentId_fkey`, reproduced against a live
+  database), `logCost` swallowed the rejection into an error log and returned
+  `null`, and the row was lost. So every `tool_call` step emitted an error-level
+  log line and the Costs page's per-tool breakdown under-reported capabilities
+  run from workflows to **zero**. The label is no longer written to that column;
+  `CapabilityContext` gained an optional `workflowExecutionId`, which the
+  `tool_call` executor sets from `ctx.executionId` and which maps to
+  `AiCostLog.workflowExecutionId` — a real FK, satisfied because the execution
+  row exists before any step runs. **Fork-facing:** these rows appear where none
+  did before. No agent's `checkBudget()` total moves — it sums by `agentId`, and
+  these rows never existed to be counted. **Scope of the fix, stated precisely:**
+  the row persists and carries `workflowExecutionId`, so it is queryable by
+  execution and the per-capability stats route (`operation: 'tool_call'` +
+  `metadata.slug`) reports it instead of zero. It does **not** yet show in the
+  execution detail or live cost panels, which key on `metadata.stepId` and skip
+  any row without one — `tool_call` rows carry `{ slug, success }`. Completing
+  that, and the same `workflowExecutionId` for capabilities dispatched from an
+  `agent_call` step, is tracked in #600. Pre-existing, found by review of #528.
+- **Scheduled `tool_call` steps no longer fail on a cold process.**
+  `engine/executors/tool-call.ts` dispatched straight into the capability
+  registry without calling `registerBuiltInCapabilities()` first, unlike the
+  chat handler, the MCP tool registry and `agent_call`. #462 made the registry
+  a `globalThis` singleton so a registration in one module realm is visible
+  from all of them, but the *trigger* stayed lazy behind module-scoped
+  booleans — so the map is only populated once something calls the initialiser,
+  and all three callers that do are reached by an HTTP request. The scheduler
+  is not. A server that had served nothing since boot dispatched into an empty
+  map and the step failed `unknown_capability` naming a slug that was
+  registered perfectly well. It presented as a fork bug (the message names the
+  fork's own slug) and was worst exactly when it mattered: an overnight-quiet
+  process is precisely the one running a 03:15 scheduled workflow. Under load
+  it hid, and no unit suite could see it — tests register explicitly in setup,
+  so their registry is never empty. Reported from a fork whose four scheduled
+  workflows are built almost entirely from `tool_call` steps (#537).
+- **`CAPABILITY_BINDING_MODE=strict` no longer breaks every workflow
+  `tool_call` step.** A workflow execution isn't bound to an agent, so the
+  executor dispatches under a synthetic `workflow:${workflowId}` label. Under
+  `strict` a missing `AiAgentCapability` row denies — and that row **cannot be
+  created**, because `AiAgentCapability.agentId` is a foreign key to
+  `AiAgent.id` and the FK rejects a `workflow:` id. So enabling strict as a
+  hardening measure failed every `tool_call` step in every workflow with
+  `capability_disabled_for_agent` and no configuration that fixed it; because
+  the error is per-step it read as a capability misconfiguration, sending an
+  operator to audit a table that was already correct. Workflow labels are now
+  exempt and fall through to the base capability's defaults in both modes.
+  **Semantics change, deliberate:** `strict` no longer covers workflow
+  `tool_call` steps at all. It is about an *agent* reaching a capability it was
+  never granted, and all three agent-facing paths take the tool name from a
+  model — whereas a step's `capabilitySlug` is Zod-parsed config on an
+  admin-authored workflow (`withAdminAuth` on every workflow write route), so
+  the step *is* the grant — a **workflow-scoped** one. **Read this before
+  relying on strict as a revocation:** its guarantee is _agent_-scoped and does
+  not follow into a workflow. An agent bound to `run_workflow` names the
+  workflow as a tool argument, so every capability inside any workflow its
+  `customConfig.allowedWorkflowSlugs` permits runs under that workflow's label —
+  including one you revoked from the calling agent. Neither deleting the binding
+  row nor `isEnabled: false` closes that, because the workflow path consults no
+  binding at all; `isActive: false` and quarantine do, because both deny before
+  any binding is read. **Fork-facing:** the prefix is now the shared constant
+  `WORKFLOW_AGENT_ID_PREFIX`, with `workflowAgentId()` and `isWorkflowAgentId()`
+  beside it — on `lib/orchestration/capabilities/dispatcher.ts` and re-exported
+  from the `@/lib/orchestration/capabilities` barrel. Mint and test the label
+  through those rather than re-inlining the template, which is how the executor
+  and the dispatcher came to disagree. `permissive` (the default) is
+  behaviourally unchanged; it now skips a query that could only ever return
+  zero rows (#528).
+- **Built-in capability seeds now re-apply their function schema on re-seed.**
+  Every `AiCapability` upsert wrote `functionDefinition`, `executionType` and
+  `executionHandler` on `create` only, so once a row existed the DB — and
+  therefore the MCP tool list and everything the LLM is shown — kept
+  advertising the **original** schema forever. Reported from a fork that added
+  a parameter to a capability: every test stayed green and the new field never
+  appeared on dev or prod. The tests could not catch it because they pin the
+  capability class against the seed constant, not the seed constant against the
+  DB write.
+
+  The code-owned fields are now hoisted into one constant per seed and spread
+  into both branches, so they cannot drift.
+  `tests/unit/prisma/seeds/capability-code-owned-fields.test.ts` parses every
+  seed and enforces it, including for seeds not yet written.
+
+  **`005-pattern-advisor` changed in the other direction:** it was the one seed
+  re-applying `name`, `description` and `category`, which silently reverted an
+  operator's renames on every deploy. Those are admin-UI presentation and are
+  now left alone — what the LLM reads lives inside `functionDefinition`, which
+  is still re-applied. `isActive` and `rateLimit` were never touched and still
+  aren't. See [`.context/database/seeding.md`](./.context/database/seeding.md)
+  for the ownership rule (#545).
+
+- **Three built-in capabilities were advertising a stale schema to the LLM.**
+  Separate from the propagation bug above and found while fixing it: the seed
+  constants had drifted from the capability classes that actually validate and
+  run. `call_external_api` never gained the `multipart` parameter (named file
+  parts, for endpoints like document renderers), so no agent could use it;
+  `apply_audit_changes` was missing `deploymentProfiles`; `add_provider_models`
+  carried several out-of-date parameter descriptions. All three now match their
+  class exactly, enforced by
+  `tests/unit/prisma/seeds/capability-class-seed-parity.test.ts` — a
+  deep-equality check per capability, since a name-only comparison would have
+  missed the descriptions, and a description is how the model picks a
+  parameter (#545).
+
+- **A truncated response is no longer reported as a schema failure on the
+  `runStructuredCompletion` and provider-adapter paths.**
+  `runStructuredCompletion` never read `finishReason`, so a response cut off at
+  the token cap arrived as text its `parse` rejected — indistinguishable, from
+  the content alone, from a model that ignored the schema. Both attempts burned
+  and the caller was told the contract was broken, which sent operators to edit
+  a schema that was never wrong. Reported from a fork whose production judge
+  failed with `"Judge response was not valid against the schema after one
+  retry"` and an empty issue list — reading as "no schema problems found"
+  rather than "we never got JSON" — when the real fault was a 2048-token cap on
+  a reasoning model, where the cap covers hidden reasoning tokens as well as
+  visible output. The error now names the truncation and the cap on the three
+  routes that can detect it: both provider adapters and the runner, which
+  raises it once both attempts are spent. **Two in-repo paths are not covered**
+  and are tracked separately: evaluation judge agents go through
+  `drainStreamChat`, whose `done` event carries no finish reason, and the
+  orchestrator planner uses `json_object` rather than `json_schema` (#594)
+  (#587).
+
+- **`truncated_no_output` gains user-facing chat copy.** It had no `ERROR_MAP`
+  entry, so `getUserFacingError` fell through to the generic "Something went
+  wrong" — the actionable detail reached the server log and the trace but never
+  the person who could act on it. The copy is deliberately vaguer than the
+  underlying `ProviderError`, because this registry is rendered by whatever
+  client is attached, a fork's end-user surface included. Note the bundled
+  embed widget does **not** consult it — it renders a fixed
+  `'Something went wrong.'` for every error event — so this reaches the admin
+  chat interface and any client that calls `getUserFacingError` (#587).
+
+- **`CI_NODE_HEAP_MB` now reaches the Docker build.** A workflow-level `env:`
+  does not cross into a container build, so raising the variable moved
+  `typecheck`, `lint` and `build` while the `docker` job stayed pinned at the
+  `builder` stage's hardcoded 4096 — a fork that outgrew the default got a green
+  board with one permanently red job, OOMing at exactly 4128 MB, and a knob that
+  appeared to do nothing. The cap is now a `NODE_HEAP_MB` build arg. The
+  Dockerfile default is unchanged at 4096, so a bare `docker build` and a
+  self-hosted compose build behave exactly as before; the `docker` CI job
+  forwards `CI_NODE_HEAP_MB` (so it now builds at 5120 by default, matching
+  every other job rather than lagging them), and `docker-compose.prod.yml`
+  exposes `NODE_HEAP_MB` so a self-hosted build has the same lever. Base Sunrise never
+  hit this — 4096 is enough for the template — so it only affected forks, which
+  is the population the variable exists for. Reported and verified in a fork by
+  @JohnD-EE (#543).
+
+- **The production Docker stack could not start at all.**
+  `docker compose -f docker-compose.prod.yml up` never reached the app: the
+  `migrator` service exited **127** (`sh: prisma: not found`), and `web` waits
+  on `service_completed_successfully`, so it never ran. Two independent faults,
+  both in the `runner` stage: `node_modules/.bin` was never copied, so there was
+  no `prisma` shim — and because a *partial* `node_modules/prisma` was present,
+  `npx` found the package, stopped looking, and never fell back to a registry
+  fetch (which is how this worked before the Prisma CLI was added to the image).
+  Second, the CLI's dependency closure was absent, so invoking the entry point
+  directly gave `Cannot find module 'effect'`. Broken since 2026-04-15 and
+  invisible because CI built the image and never ran it (#583).
+- **`docker compose … exec web npm run db:seed`, documented as REQUIRED on first
+  install, never worked.** `db:seed` is `tsx prisma/seed.ts`; `tsx` is a
+  devDependency and the seed units import from `lib/`, so neither the runner nor
+  any tool it contained could run it. Seeding now has its own image (#583).
+- **Two deployment docs told you to run `curl` inside the container.**
+  `node:24-alpine` does not ship `curl`, so `exec -T web curl -f …` failed
+  regardless of application health. Run health checks from the host, or use
+  `wget -qO-` inside (#583).
+
+- **`package-lock.json` declares `libc` again on every native Linux package that has one.**
+  Production is `node:24-alpine` (musl) and `libc` is the only field separating
+  `@img/sharp-linux-x64` from `@img/sharp-linuxmusl-x64` — both are otherwise
+  just `os: linux, cpu: x64`. Without it a musl install resolves **both**
+  variants: measured, `node_modules` went 2.4 GB → 2.0 GB once the field was
+  restored, with `sharp-linux-x64`, `sharp-libvips-linux-x64`,
+  `swc-linux-x64-gnu` and `oxide-linux-x64-gnu` no longer landing in a musl
+  image. Nothing errored, which is why it survived a release. The cause is
+  **npm below 11.11.0**, not macOS as previously documented: `@npmcli/arborist`
+  omitted `libc` from its serialised field list until 9.4.0, so every write
+  deleted the key on every platform, while dependabot's newer npm kept adding
+  it back. Restored from each package's registry manifest at its exact locked
+  version — no version moved, nothing added or removed, 303 insertions and zero
+  deletions across the 101 packages that carried the field at the time. That
+  count tracks the dependency graph, not this fix: at 0.9.0 it is 70, and
+  `npm run fix:lockfile-libc -- --check` reports the lockfile complete, with the
+  21 remaining Linux packages declaring no `libc` upstream. Check the state, not
+  the number. Forks on 0.8.0 or later inherit the fault and should take this
+  merge (#571).
+- **The capability admin form no longer degrades a stored tool schema when you
+  edit it.** The visual builder holds four fields per parameter — name, type,
+  description, required — and rebuilt each parameter from those alone, so
+  saving deleted every keyword it had no slot for. Editing one description
+  stripped `minimum`/`maximum` from the parameter beside it, and `integer` was
+  silently widened to `number`, letting a model send `1.5` where a whole number
+  was required. Merely *opening* a seeded capability and pressing Save was
+  enough. A compile now merges over the stored spec: the builder owns type,
+  description and required-ness, and everything else is carried through. A
+  deliberate type change still drops the stored keywords, which is the one case
+  where losing them is correct. Not previously reachable through the UI — the
+  client slug rule rejected every seeded capability's underscore slug and
+  blocked the save — so this ships as a fix alongside the change that removed
+  that accidental brake (#509).
+- **A capability rename now pins its MCP tool name instead of moving it.**
+  `tools/list` advertises `customName ?? functionDefinition.name` and
+  `tools/call` resolves an incoming call by whatever was advertised — so
+  forcing the name to equal the slug would have renamed the published tool,
+  and an external client calling the old name would get `Unknown tool`. Every
+  capability created through the admin UI before this release diverged by
+  default (`search-web` slug, `search_web` function name), so an ordinary save
+  — reword a description, change a rate limit — was enough to break someone
+  else's integration, silently and from a form that never mentions MCP.
+  A write that displaces the function name now copies the old one into
+  `customName` first, in the same transaction, so the external contract stays
+  where it was while the internal invariant is repaired. Rows that already set
+  `customName` are untouched, and a displaced name that could not legally live
+  in `customName` (`^[a-z][a-z0-9_]*$`) is not written — that rename proceeds
+  and is logged, because writing it would fail validation the next time
+  anyone edited the MCP row (#509).
+
+- **Vercel builds no longer fail with `ENOENT: .next/next-server.js.nft.json`.**
+  `next.config.js` set `output: 'standalone'` unconditionally, for Docker
+  self-hosting. From Next 16.3.0, Turbopack stops emitting
+  `next-server.js.nft.json` when a deployment adapter drives the build
+  ([vercel/next.js#93684](https://github.com/vercel/next.js/pull/93684)) — but
+  standalone output reads that file, so the two together break the build at
+  `onBuildComplete`. `output` is now `undefined` when `VERCEL` is set; Vercel
+  never used standalone, and Docker is unaffected. Forks that hardcode
+  `output: 'standalone'` back will hit this on Vercel while Docker keeps
+  working, and the local build will not reproduce it — with no adapter present,
+  Next still generates the file. See
+  [`.context/deployment/platforms/vercel.md`](.context/deployment/platforms/vercel.md).
+
+## [0.8.1] — 2026-08-06
+
+> **Alpha release.** Eleventh tagged Sunrise release. **PATCH bump** — one
+> dependency fix, no public-surface change, no migration. Forks can take this
+> with a plain `git merge v0.8.1`.
+>
+> **Take this if you are on 0.8.0.** The v0.8.0 lockfile hoists a `ws` version
+> inside a high-severity advisory, so a fork that merged 0.8.0 is running the
+> vulnerable copy whether or not anything told it so.
+>
+> **Most forks will not have been warned.** `dependency-review` is diff-based:
+> once the vulnerable version sits on `main`, no later PR "introduces" it and
+> the job stays green — upstream and downstream alike. A fork only sees an
+> alert if its own `main` had already patched `ws` independently, because then
+> the sync merge reads as a *downgrade*. That is the inverted case — the forks
+> that get blocked are the ones that had already fixed themselves, while the
+> forks still carrying the vulnerability sync silently. Do not read a green
+> sync PR as evidence you are unaffected; check the hoisted `ws` version in
+> your lockfile.
+>
+> **If you worked around it with an `overrides` entry**, drop it when you take
+> this release. Forcing `ws` above the old `~8.20.1` pins was never in-range
+> for the two packages that declared them; the transitive bump below is, so
+> the override is no longer buying anything and is actively masking the
+> resolution.
+
+### Security
+
+- **`ws` lifted out of GHSA-96hv-2xvq-fx4p** — memory-exhaustion DoS from tiny
+  fragments and data chunks, high severity, affected `>=8.0.0 <=8.20.1`. The
+  vulnerable copy was held in place by two transitive packages reached via
+  `react-email` → `socket.io`, whose `~8.20.1` tilde pins excluded the patched
+  line. Refreshing just those two — `engine.io` 6.6.8 → 6.6.9 and
+  `socket.io-adapter` 2.5.7 → 2.5.8, both of which widened to `~8.21.0`
+  specifically to pick up patched `ws` — lets `ws` hoist to `8.21.2` on its
+  own, and every consumer (`jsdom`, `openai`, `happy-dom`, and the two above)
+  is satisfied natively. Lockfile-only: no `overrides` entry, no
+  `package.json` change, and no direct dependency moved (#538).
+
 ## [0.8.0] — 2026-08-04
 
 > **Alpha release.** Tenth tagged Sunrise release. **MINOR bump** — a large
@@ -1873,5 +3083,16 @@ Sunrise safe to fork and to merge upstream releases into.
 
 ---
 
-[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/human-centric-engineering/sunrise/releases/tag/v0.0.1

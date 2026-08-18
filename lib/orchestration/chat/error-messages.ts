@@ -134,6 +134,25 @@ const ERROR_MAP: Record<string, UserFacingError> = {
     message: 'The response was blocked by content policy.',
     action: 'Try a different question or contact an admin.',
   },
+  // Deliberately vaguer than the underlying `ProviderError`, which names the
+  // model and the exact token cap. That detail is what an operator needs and
+  // it stays on the server log and the trace; this registry is rendered by
+  // whatever client is attached, including a fork's own end-user surface, so
+  // it must not assume an admin audience. Without an entry here the code fell
+  // through to the generic "Something went wrong", which gave the reader
+  // nothing to act on.
+  //
+  // Note who actually sees it: the admin chat interface, which calls
+  // `getUserFacingError(code)` client-side. The bundled embed widget does
+  // NOT — it renders a hard-coded 'Something went wrong.' for every `error`
+  // event and never reads `code` or `message`, so an embed visitor hitting a
+  // truncation still gets nothing specific. Teaching the widget to use this
+  // registry is its own change.
+  truncated_no_output: {
+    title: 'Response Cut Short',
+    message: 'The assistant ran out of room before it could finish its answer.',
+    action: "Try a shorter or simpler question, or ask an admin to raise this agent's max tokens.",
+  },
   conversation_length_cap_reached: {
     title: 'Conversation Limit Reached',
     message: 'This conversation has reached the maximum number of messages.',

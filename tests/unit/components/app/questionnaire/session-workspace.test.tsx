@@ -409,6 +409,7 @@ beforeEach(() => {
     back: vi.fn(),
     forward: vi.fn(),
     prefetch: vi.fn(),
+    bfcacheId: '',
   });
 });
 
@@ -1371,6 +1372,7 @@ describe('SessionWorkspace', () => {
         back: vi.fn(),
         forward: vi.fn(),
         prefetch: vi.fn(),
+        bfcacheId: '',
       });
 
       renderCompletedLeg({ publicRef: 'ABC123' }, 'tok-9');
@@ -1394,6 +1396,7 @@ describe('SessionWorkspace', () => {
         back: vi.fn(),
         forward: vi.fn(),
         prefetch: vi.fn(),
+        bfcacheId: '',
       });
 
       // No accessToken — the authenticated surface — regardless of publicRef.

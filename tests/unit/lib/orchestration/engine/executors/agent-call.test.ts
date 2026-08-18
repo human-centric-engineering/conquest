@@ -61,6 +61,10 @@ vi.mock('@/lib/orchestration/capabilities/registry', () => ({
   getCapabilityDefinitions: vi.fn(),
 }));
 
+vi.mock('@/lib/orchestration/hooks/registry', () => ({
+  emitHookEvent: vi.fn(),
+}));
+
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: { dispatch: vi.fn() },
 }));
@@ -148,7 +152,17 @@ function setupDefaultMocks(): void {
     provider: mockProvider as never,
     usedSlug: 'anthropic',
   });
-  vi.mocked(getCapabilityDefinitions).mockResolvedValue([]);
+  // Advertise the tools these tests have their models emit. #559 added the
+  // advertised-set check the chat handler always had, so a model naming a tool
+  // the agent was never granted is now refused — which is what an empty list
+  // means. The fixtures were only ever green because nothing checked.
+  vi.mocked(getCapabilityDefinitions).mockResolvedValue(
+    ['search-knowledge', 'get-cost', 'search', 'cap'].map((name) => ({
+      name,
+      description: `${name} tool`,
+      parameters: { type: 'object', properties: {} },
+    }))
+  );
   vi.mocked(interpolatePrompt).mockReturnValue('Summarize: hello');
   vi.mocked(calculateCost).mockReturnValue({
     totalCostUsd: 0.01,
@@ -397,6 +411,214 @@ describe('executeAgentCall', () => {
       tokensUsed: 150, // 100 + 50 from the successful first turn
       costUsd: 0.01, // single calculateCost call before the failure
     });
+  });
+
+  // ── #559: the advertised-set guard ────────────────────────────────────────
+  //
+  // `agent_call` dispatched whatever the model named, and a MISSING pivot row
+  // synthesizes a default-ALLOW binding — so an injected knowledge document,
+  // tool result or upstream step output naming any globally-registered slug
+  // ran it unrestricted. #476 closed this on chat only.
+
+  it('refuses a tool the agent was never advertised', async () => {
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search',
+        description: 'search tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+    mockChat.mockResolvedValueOnce({
+      content: 'Let me use that...',
+      toolCalls: [{ id: 'tc_1', name: 'apply_audit_changes', arguments: { x: 1 } }],
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'tool_use',
+      model: 'claude-sonnet-4-20250514',
+    });
+    mockChat.mockResolvedValueOnce({
+      content: 'I could not use that tool.',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'stop',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    await executeAgentCall(makeStep(), makeCtx());
+
+    expect(capabilityDispatcher.dispatch).not.toHaveBeenCalled(); // test-review:accept no_arg_called — the whole point is that the un-granted capability never runs
+  });
+
+  it('emits the security hook so a fork sees workflow refusals too', async () => {
+    // The chat handler emits this and the docs call it a security signal. A
+    // subscriber would otherwise see chat refusals and be blind to workflow
+    // ones — the more reachable surface, since the name can arrive in injected
+    // content rather than from an admin.
+    const { emitHookEvent } = await import('@/lib/orchestration/hooks/registry');
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search',
+        description: 'search tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+    mockChat.mockResolvedValueOnce({
+      content: 'Let me use that...',
+      toolCalls: [{ id: 'tc_1', name: 'apply_audit_changes', arguments: {} }],
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'tool_use',
+      model: 'claude-sonnet-4-20250514',
+    });
+    mockChat.mockResolvedValueOnce({
+      content: 'Done.',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'stop',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    await executeAgentCall(makeStep(), makeCtx());
+
+    // Assert the WHOLE payload, including the two workflow-side correlation
+    // ids this PR documents in `hooks.md` and `hooks/types.ts`. Checking only
+    // toolName/agentId/advertised left them free to be dropped, which would
+    // make both of those documents wrong with the suite still green.
+    expect(vi.mocked(emitHookEvent)).toHaveBeenCalledWith(
+      'capability.refused_not_advertised',
+      expect.objectContaining({
+        executionId: 'exec_1',
+        stepId: 'step1',
+        agentId: 'agent_1',
+        agentSlug: 'summarizer',
+        userId: 'user_1',
+        toolName: 'apply_audit_changes',
+        advertised: ['search'],
+      })
+    );
+  });
+
+  it('feeds the refusal back as a tool result so the next turn is well-formed', async () => {
+    // An assistant toolCall with no matching tool message makes the NEXT
+    // provider call 400 — so the refusal has to travel as a result, not as a
+    // dropped turn. The model then answers without the tool.
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search',
+        description: 'search tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+    mockChat.mockResolvedValueOnce({
+      content: 'Let me use that...',
+      toolCalls: [{ id: 'tc_1', name: 'apply_audit_changes', arguments: {} }],
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'tool_use',
+      model: 'claude-sonnet-4-20250514',
+    });
+    mockChat.mockResolvedValueOnce({
+      content: 'Answered without it.',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'stop',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    const result = await executeAgentCall(makeStep(), makeCtx());
+
+    const secondCallMessages = mockChat.mock.calls[1][0] as Array<{
+      role: string;
+      toolCallId?: string;
+      content?: string;
+    }>;
+    const toolMessage = secondCallMessages.find((m) => m.role === 'tool');
+    expect(toolMessage?.toolCallId).toBe('tc_1');
+    expect(toolMessage?.content).toContain('tool_not_advertised');
+    expect(result.output).toBe('Answered without it.');
+  });
+
+  it('still dispatches a tool that IS advertised', async () => {
+    // The guard rejects what was not granted, not everything.
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search',
+        description: 'search tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+    mockChat.mockResolvedValueOnce({
+      content: 'Searching...',
+      toolCalls: [{ id: 'tc_1', name: 'search', arguments: { q: 'x' } }],
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'tool_use',
+      model: 'claude-sonnet-4-20250514',
+    });
+    mockChat.mockResolvedValueOnce({
+      content: 'Done.',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'stop',
+      model: 'claude-sonnet-4-20250514',
+    });
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
+
+    await executeAgentCall(makeStep(), makeCtx());
+
+    expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
+      'search',
+      { q: 'x' },
+      expect.objectContaining({ agentId: 'agent_1' })
+    );
+  });
+
+  it('emits the hook once per name, not once per iteration', async () => {
+    // The model is free to re-emit a refused name every iteration, and each
+    // emission writes a delivery row plus an outbound POST per subscription.
+    // Through an orchestrator (rounds x delegations x iterations) one poisoned
+    // document would otherwise fan out to dozens.
+    const { emitHookEvent } = await import('@/lib/orchestration/hooks/registry');
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([
+      {
+        name: 'search',
+        description: 'search tool',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]);
+    for (let i = 0; i < 3; i++) {
+      mockChat.mockResolvedValueOnce({
+        content: 'Trying again...',
+        toolCalls: [{ id: `tc_${i}`, name: 'apply_audit_changes', arguments: {} }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+        finishReason: 'tool_use',
+        model: 'claude-sonnet-4-20250514',
+      });
+    }
+    mockChat.mockResolvedValueOnce({
+      content: 'Gave up on it.',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'stop',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    await executeAgentCall(makeStep(), makeCtx());
+
+    const refusalEmissions = vi
+      .mocked(emitHookEvent)
+      .mock.calls.filter(([type]) => type === 'capability.refused_not_advertised');
+    expect(refusalEmissions).toHaveLength(1);
+  });
+
+  it('passes no tools to the provider when the agent has none', async () => {
+    // The default fixture advertises four tools since #559, which removed the
+    // only coverage of the empty case. A regression always sending `tools`
+    // (and always stamping `toolCount` into the trace snapshot) would
+    // otherwise stay green.
+    vi.mocked(getCapabilityDefinitions).mockResolvedValue([]);
+    mockChat.mockResolvedValueOnce({
+      content: 'No tools needed.',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: 'stop',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    await executeAgentCall(makeStep(), makeCtx());
+
+    const options = mockChat.mock.calls[0][1] as Record<string, unknown>;
+    expect(options.tools).toBeUndefined();
   });
 
   it('handles tool call loop: dispatches capability and loops back', async () => {

@@ -28,17 +28,13 @@ import type { AiCapability } from '@/types/prisma';
 
 const mockPush = vi.fn();
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: mockPush,
-    replace: vi.fn(),
-    refresh: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-  useSearchParams: () => ({ get: () => null }),
-}));
+vi.mock('next/navigation', async () => {
+  const { createMockRouter } = await import('@/tests/types/mocks');
+  return {
+    useRouter: () => createMockRouter({ push: mockPush }),
+    useSearchParams: () => ({ get: () => null }),
+  };
+});
 
 vi.mock('@/lib/api/client', () => ({
   apiClient: {
@@ -191,6 +187,9 @@ describe('CapabilityForm — Basic tab', () => {
   // ── Slug auto-generation ───────────────────────────────────────────────────
 
   describe('slug auto-generation', () => {
+    // #509: a capability slug is also the tool name the LLM is given, so the
+    // default is underscore-separated to match the convention every built-in
+    // uses (`search_knowledge_base`). Hyphens are still accepted by the API.
     it('slug auto-populates from name on typing', async () => {
       const user = userEvent.setup();
       render(<CapabilityForm mode="create" availableCategories={['api']} />);
@@ -199,11 +198,11 @@ describe('CapabilityForm — Basic tab', () => {
 
       const slugInput = screen.getByRole('textbox', { name: /^slug/i });
       await waitFor(() => {
-        expect((slugInput as HTMLInputElement).value).toBe('my-knowledge-search');
+        expect((slugInput as HTMLInputElement).value).toBe('my_knowledge_search');
       });
     });
 
-    it('slug is lowercase with hyphens', async () => {
+    it('slug is lowercase with underscores', async () => {
       const user = userEvent.setup();
       render(<CapabilityForm mode="create" availableCategories={['api']} />);
 
@@ -212,8 +211,28 @@ describe('CapabilityForm — Basic tab', () => {
       const slugInput = screen.getByRole('textbox', { name: /^slug/i });
       await waitFor(() => {
         const val = (slugInput as HTMLInputElement).value;
-        expect(val).toMatch(/^[a-z0-9-]+$/);
+        expect(val).toMatch(/^[a-z0-9_]+$/);
         expect(val).toContain('hello');
+      });
+    });
+
+    // The whole point of #509: whatever the slug ends up as, the function name
+    // follows it. A divergent pair is rejected by the API, and the old form
+    // produced one from the default typing alone (`search-web` / `search_web`).
+    it('mirrors the slug into the function name', async () => {
+      const user = userEvent.setup();
+      render(<CapabilityForm mode="create" availableCategories={['api']} />);
+
+      await user.type(screen.getByRole('textbox', { name: /^name/i }), 'My Knowledge Search');
+
+      await user.click(screen.getByRole('tab', { name: /function/i }));
+
+      await waitFor(() => {
+        const fnNameInput = screen.getByRole('textbox', { name: /function name/i });
+        expect((fnNameInput as HTMLInputElement).value).toBe('my_knowledge_search');
+        // Read-only: the invariant is enforced server-side, so the field must
+        // not offer a way to author a pair the API will reject.
+        expect(fnNameInput).toHaveAttribute('readonly');
       });
     });
 
@@ -659,6 +678,142 @@ describe('CapabilityForm — Basic tab', () => {
         expect(screen.getByText(/slug already taken/i)).toBeInTheDocument();
       });
     });
+
+    // ── An UNTOUCHED definition is not sent for a system row (#598) ─────────
+    //
+    // The API 403s a write that CHANGES `functionDefinition` on a system row,
+    // and what this form holds is not the stored value: `initialFunctionState`
+    // normalises it on load — `name` forced to the slug, a non-string
+    // `description` replaced with `''`, `parameters` coerced. So on a system
+    // row whose stored definition does not already match that normalisation, a
+    // save that only edited the DESCRIPTION came back 403 naming
+    // `functionDefinition` — the one field the operator has no way to fix
+    // there, leaving the row uneditable.
+    //
+    // The fixture reproduces it without contrivance: `functionDefinition.name`
+    // is `existing_capability` while the slug is `existing-capability`, so the
+    // normalisation genuinely rewrites it.
+    //
+    // The omission is deliberately conditional. Dropping the field on every
+    // system save would be worse than the bug it fixes: a deliberate edit in
+    // the Function tab would vanish and the form would report "Saved". See the
+    // next test.
+    it('does not send an UNTOUCHED function definition on a system capability', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.patch).mockResolvedValue({ id: 'cap-edit-1' });
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeCapability({
+            isSystem: true,
+            functionDefinition: {
+              name: 'existing_capability',
+              description: 'Does something',
+              parameters: { type: 'object', properties: {} },
+            },
+          })}
+          availableCategories={['api']}
+        />
+      );
+
+      const descriptionInput = screen.getByRole('textbox', { name: /^description/i });
+      await user.clear(descriptionInput);
+      await user.type(descriptionInput, 'Operator edited only this');
+
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => expect(apiClient.patch).toHaveBeenCalled());
+
+      const body = vi.mocked(apiClient.patch).mock.calls[0][1]?.body as Record<string, unknown>;
+      expect(body).toHaveProperty('description', 'Operator edited only this');
+      expect(Object.prototype.hasOwnProperty.call(body, 'functionDefinition')).toBe(false);
+      // The slug was already dropped for its own reason; the others are still
+      // sent, because they come straight from the stored row and so cannot
+      // differ from it unless the operator edits them.
+      expect(Object.prototype.hasOwnProperty.call(body, 'slug')).toBe(false);
+      expect(body).toHaveProperty('executionType');
+    });
+
+    it('DOES send an edited definition on a system row, so the API can refuse it', async () => {
+      // The half that makes the omission honest. A deliberate edit must reach
+      // the server and come back 403 with a message naming the seed unit —
+      // dropping it here would report "Saved" over a change that never
+      // happened, which is the silent failure the whole issue is about.
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.patch).mockResolvedValue({ id: 'cap-edit-1' });
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeCapability({
+            isSystem: true,
+            functionDefinition: {
+              name: 'existing-capability',
+              description: 'Does something',
+              parameters: { type: 'object', properties: {} },
+            },
+          })}
+          availableCategories={['api']}
+        />
+      );
+
+      await user.click(screen.getByRole('tab', { name: /function definition/i }));
+      await user.click(screen.getByRole('button', { name: /^json editor$/i }));
+      fireEvent.change(screen.getByRole('textbox', { name: /json editor/i }), {
+        target: {
+          value: JSON.stringify({
+            name: 'existing-capability',
+            description: 'An edit the operator meant',
+            parameters: { type: 'object', properties: {} },
+          }),
+        },
+      });
+
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => expect(apiClient.patch).toHaveBeenCalled());
+
+      const body = vi.mocked(apiClient.patch).mock.calls[0][1]?.body as Record<string, unknown>;
+      expect(body.functionDefinition).toMatchObject({
+        description: 'An edit the operator meant',
+      });
+    });
+
+    it('still sends the function definition for a NON-system capability', async () => {
+      // The omission keys on `isSystem`. An operator-owned capability's
+      // definition is theirs to edit, and dropping it would make the Function
+      // tab silently do nothing.
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.patch).mockResolvedValue({ id: 'cap-edit-1' });
+
+      const user = userEvent.setup();
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeCapability({
+            isSystem: false,
+            functionDefinition: {
+              name: 'existing_capability',
+              description: 'Does something',
+              parameters: { type: 'object', properties: {} },
+            },
+          })}
+          availableCategories={['api']}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => expect(apiClient.patch).toHaveBeenCalled());
+
+      const body = vi.mocked(apiClient.patch).mock.calls[0][1]?.body as Record<string, unknown>;
+      expect(body).toHaveProperty('functionDefinition');
+      expect(body).toHaveProperty('executionType');
+      expect(body).toHaveProperty('executionHandler');
+    });
   });
 
   // ── Metadata validation ──────────────────────────────────────────────────
@@ -704,6 +859,27 @@ describe('CapabilityForm — Basic tab', () => {
   // ── System capability banner ──────────────────────────────────────────────
 
   describe('system capability banner', () => {
+    /**
+     * The banner interleaves `<strong>` field names with plain text, so the
+     * sentence spans several DOM nodes and `getByText` on a full phrase finds
+     * nothing. Match on the container whose *combined* text content reads as
+     * the banner instead.
+     *
+     * Anchoring on "seeded from code" rather than on the whole sentence is
+     * deliberate: the copy is prose and will be reworded, but the claim that
+     * the capability comes from code is the part that must not quietly vanish.
+     */
+    const bannerMatcher = (_content: string, element: Element | null): boolean => {
+      if (!element) return false;
+      const text = element.textContent ?? '';
+      if (!/seeded from code/i.test(text)) return false;
+      // Only the innermost matching element, or every ancestor up to <body>
+      // matches and `getByText` throws on multiple results.
+      return !Array.from(element.children).some((child) =>
+        /seeded from code/i.test(child.textContent ?? '')
+      );
+    };
+
     it('shows info banner when editing a system capability', () => {
       render(
         <CapabilityForm
@@ -713,7 +889,26 @@ describe('CapabilityForm — Basic tab', () => {
         />
       );
 
-      expect(screen.getByText(/system capability managed by seed data/i)).toBeInTheDocument();
+      expect(screen.getByText(bannerMatcher)).toBeInTheDocument();
+    });
+
+    it('names every seed-owned field so the operator learns before the 403', () => {
+      // The form does not disable the protected inputs, so this copy is the
+      // only thing telling an admin which fields are refused. It previously
+      // said they "can edit its description, safety settings, and execution
+      // config" — true, but silent on the four that are not theirs (#598).
+      render(
+        <CapabilityForm
+          mode="edit"
+          capability={makeCapability({ isSystem: true })}
+          availableCategories={['api']}
+        />
+      );
+
+      const banner = screen.getByText(bannerMatcher);
+      for (const field of ['slug', 'function definition', 'execution type', 'execution handler']) {
+        expect(banner.textContent?.toLowerCase()).toContain(field);
+      }
     });
 
     it('does not show info banner for non-system capabilities', () => {
@@ -725,13 +920,13 @@ describe('CapabilityForm — Basic tab', () => {
         />
       );
 
-      expect(screen.queryByText(/system capability managed by seed data/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(bannerMatcher)).not.toBeInTheDocument();
     });
 
     it('does not show info banner in create mode', () => {
       render(<CapabilityForm mode="create" availableCategories={['api']} />);
 
-      expect(screen.queryByText(/system capability managed by seed data/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(bannerMatcher)).not.toBeInTheDocument();
     });
   });
 });

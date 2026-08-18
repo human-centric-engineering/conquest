@@ -8,13 +8,17 @@
  * Called fire-and-forget from `EscalateToHumanCapability.execute()`.
  */
 
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { sendEmail } from '@/lib/email/send';
 import { EscalationNotification } from '@/emails/escalation-notification';
-import { escalationConfigSchema } from '@/lib/validations/orchestration';
 import { env } from '@/lib/env';
+import { checkSafeProviderUrl } from '@/lib/security/safe-url';
+import { describeFetchFailure } from '@/lib/errors/fetch-error';
+// Single implementation, deliberately shared: this used to be a private copy,
+// and hardening one while the settings API kept the other is what opened the
+// recipient-list data-loss path (#553).
+import { parseEscalationConfig } from '@/lib/orchestration/settings';
 import type { EscalationConfig } from '@/types/orchestration';
 
 interface EscalationPayload {
@@ -48,15 +52,6 @@ function meetsPriorityThreshold(
     default:
       return true;
   }
-}
-
-/**
- * Parse the stored `escalationConfig` JSON from the settings singleton.
- * Returns `null` if the value is absent, null, or fails validation.
- */
-function parseEscalationConfig(raw: Prisma.JsonValue | null | undefined): EscalationConfig | null {
-  const parsed = escalationConfigSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -105,6 +100,32 @@ export async function notifyEscalation(payload: EscalationPayload): Promise<void
 
     // Optional webhook POST
     if (config.webhookUrl) {
+      // Re-check at the point of use, not just at the API boundary (#553).
+      // `escalationConfigWriteSchema` rejects an unsafe target on PATCH, but a
+      // direct DB write, a restored backup bundle or a value stored before that
+      // refine existed reaches here unvalidated — the same reasoning
+      // provider-manager applies to `baseUrl`. Skipping only the POST (rather
+      // than failing the parse) keeps the emails flowing and leaves the URL
+      // visible in the settings form so it can actually be corrected.
+      // The flag means "my relay is on infrastructure I control and it is not
+      // publicly routable". A same-pod sidecar on loopback fits that exactly —
+      // and is a pattern this codebase already supports for LLM providers via
+      // `isLocal` — so it opts into both. The guard keeps the two options
+      // orthogonal because they are different properties of an address; the
+      // product-level flag composes them because they are one operator intent.
+      const targetCheck = checkSafeProviderUrl(config.webhookUrl, {
+        allowPrivateNetwork: env.ESCALATION_WEBHOOK_ALLOW_PRIVATE,
+        allowLoopback: env.ESCALATION_WEBHOOK_ALLOW_PRIVATE,
+      });
+      if (!targetCheck.ok) {
+        logger.warn('Escalation webhook target rejected; skipping the POST', {
+          url: config.webhookUrl,
+          reason: targetCheck.reason,
+          message: targetCheck.message,
+        });
+        return;
+      }
+
       try {
         const response = await fetch(config.webhookUrl, {
           method: 'POST',
@@ -120,6 +141,10 @@ export async function notifyEscalation(payload: EscalationPayload): Promise<void
             timestamp: new Date().toISOString(),
           }),
           signal: AbortSignal.timeout(10_000),
+          // Refuse redirects (#534/#553). The URL is validated when the config
+          // is parsed, not per hop, so following one would POST the escalation
+          // payload to a target the guard never saw.
+          redirect: 'error',
         });
 
         if (!response.ok) {
@@ -129,8 +154,11 @@ export async function notifyEscalation(payload: EscalationPayload): Promise<void
           });
         }
       } catch (err) {
+        // `redirect: 'error'` above makes a newly-redirecting endpoint a new
+        // failure mode, and undici renders it as a bare "fetch failed" — this
+        // warning is the only signal there is, so it must name the cause.
         logger.warn('Escalation webhook call failed', {
-          error: err instanceof Error ? err.message : String(err),
+          error: describeFetchFailure(err),
           url: config.webhookUrl,
         });
       }

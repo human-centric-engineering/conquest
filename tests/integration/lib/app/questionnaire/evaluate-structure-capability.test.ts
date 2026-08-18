@@ -395,18 +395,17 @@ describe('AppEvaluateStructureCapability — dispatch', () => {
     expect(options.timeoutMs).toBe(90_000);
   });
 
-  it('omits agentId and versionId from cost metadata when absent', async () => {
+  it('omits versionId from cost metadata when absent', async () => {
     (getProvider as Mock).mockResolvedValue(makeProvider([{ content: VALID_JSON }]));
 
     const result = await capabilityDispatcher.dispatch(
       SLUG,
       baseArgs({ versionId: undefined }),
-      baseContext({ agentId: undefined })
+      baseContext()
     );
 
     expect(result.success).toBe(true);
     const call = (logCost as Mock).mock.calls[0][0];
-    expect(call.agentId).toBeUndefined();
     expect(call.metadata.versionId).toBeUndefined();
     expect(call.metadata.dimension).toBe('clarity');
   });

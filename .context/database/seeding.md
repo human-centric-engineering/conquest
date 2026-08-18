@@ -102,7 +102,64 @@ export default unit;
 
 ### Rules
 
-**Idempotent.** Every write is an `upsert` (or equivalent). `update: {}` is the common idiom — re-seeding never overwrites admin edits. `createMany` is not safe unless you pair it with `skipDuplicates: true` and a unique constraint.
+**Idempotent.** Every write is an `upsert` (or equivalent). `createMany` is not safe unless you pair it with `skipDuplicates: true` and a unique constraint.
+
+**Split the `update` branch by who owns the field.** `update: {}` — "never overwrite admin edits" — is the common idiom and the right default, but it is wrong for anything that has to track the code. A row seeded once then never re-synced keeps advertising the original definition forever, and nothing fails: the tests pin the class against the seed constant, not the seed constant against the DB row (#545).
+
+| Ownership          | Examples                                                   | On update       |
+| ------------------ | ---------------------------------------------------------- | --------------- |
+| **Code-owned**     | `functionDefinition`, `executionType`, `executionHandler`  | Always re-apply |
+| **Operator-owned** | `isActive`, `rateLimit`, `name`, `description`, `category` | Never touch     |
+
+A stale `functionDefinition` is not a customisation — it is a schema the handler will reject, shown to every LLM and MCP client. A stale `executionHandler` points at a class that may no longer exist. Neither is something an admin chose.
+
+The split falls where it does because **what the model reads lives inside `functionDefinition`** — its own `name`, `description` and parameter schema. The row's top-level `name` / `description` are the admin UI's presentation, editable via `PATCH /capabilities/{id}`, so re-applying them would revert an operator's rename on the next deploy while gaining nothing the LLM sees.
+
+Hoist the code-owned half into a constant and spread it into both branches, so the two cannot drift:
+
+```typescript
+const CALL_EXTERNAL_API_IMPL = {
+  executionType: 'internal',
+  executionHandler: 'CallExternalApiCapability',
+  functionDefinition: {/* … */},
+};
+
+await prisma.aiCapability.upsert({
+  where: { slug: 'call_external_api' },
+  update: { isSystem: true, ...CALL_EXTERNAL_API_IMPL },
+  create: {
+    slug: 'call_external_api',
+    name,
+    description,
+    category,
+    rateLimit: 60,
+    isActive: true,
+    ...CALL_EXTERNAL_API_IMPL,
+  },
+});
+```
+
+**The write paths enforce this split on system rows** (#598), via `changedSeedOwnedFields()` in `lib/orchestration/capabilities/seed-owned.ts`:
+
+- `PATCH /capabilities/{id}` returns **403** naming the fields, rather than accepting an edit the next re-seed reverts with no audit entry.
+- The **config importer** skips those fields on a system row and records a warning, rather than failing the whole restore. Sunrise's exporter filters `isSystem: false`, so only a hand-edited or foreign bundle reaches that path. It also skips `isActive: false` on a system row, because PATCH refuses that too — deactivating a built-in is equivalent to deleting it, and no re-seed restores it (seeds set `isActive` only in their `create` branch). Re-activating is still imported.
+- The **capability form** does not send an _untouched_ `functionDefinition` for a system row. It has to normalise the stored definition on load — `name` forced to the slug, a non-string `description` replaced, `parameters` coerced — so a row whose stored value did not already match that normalisation would 403 a save that only edited the description, naming the one field the operator cannot fix there. An **edited** definition is still sent and still refused: dropping it unconditionally would silently discard a deliberate edit and report "Saved", which is a worse failure than the one being fixed.
+
+`slug` is guarded alongside the three, for a different reason: it is the upsert's `where` key, so a rename is **not** reverted — the next re-seed matches nothing and creates a **second row** for one built-in.
+
+Two things to preserve if you touch that guard, both of which shipped broken once:
+
+1. **Gate on the value changing, not on the field being present.** The capability form PATCHes the whole form on every save, so a presence check 403s an admin who only edited the description, naming three fields they never touched.
+2. **Compare `functionDefinition` structurally, not with `JSON.stringify`.** It is `jsonb`: Postgres canonicalises key order on write and Zod rebuilds the parsed body in schema order, so the same value round-trips to two different strings. `jsonEquals()` (`lib/utils/json-equal.ts`) is key-order-insensitive; the two other `valuesEqual` helpers in the codebase are not, deliberately.
+
+`npm run smoke:capability-ownership` proves (2) against the real database rather than against anyone's belief about it — writing `{description, parameters, name}` and reading back `{name, parameters, description}`. It fails loudly if a future Postgres stops re-ordering, because that would mean the comparison strategy needs re-deciding rather than that the guard is fine.
+
+Two caveats when seeding a live box:
+
+- **Caches do not clear across processes.** The PATCH route pairs every `functionDefinition` write with `capabilityDispatcher.clearCache()`, `clearMcpToolCache()` and `broadcastMcpToolsChanged()`. `db:seed` runs in a different process and cannot, so a running app keeps serving the previous MCP `inputSchema` on `tools/list` for up to the dispatcher's 5-minute TTL. Restart the app after a seed that changes a capability, or wait it out.
+- **A re-seed only happens when the seed FILE hash changes** (plus any `hashInputs`). Editing a capability class alone will not trigger one — which is why the parity test below matters: it forces the seed constant to change whenever the class does, which is what moves the hash.
+
+Enforced by `tests/unit/prisma/seeds/capability-code-owned-fields.test.ts`, which parses every `aiCapability.upsert` in this directory and checks both directions. **The same shape applies to any seeded row with code-owned fields** — built-in agents' `systemInstructions` are the obvious next case, and the agent seeds are currently inconsistent about it (`008`/`016`/`017`/`018` re-apply them; `005`/`006`/`010` do not).
 
 **Self-contained.** Look up dependencies from the DB, don't pass them between units. For config ownership — `001-system-owner` seeds a non-login `system@sunrise.local` user (`role: ADMIN`, `accountType: SERVICE`, no credential) precisely so config-owning seeds always have a deterministic owner. Resolve it via the SERVICE predicate (not "first ADMIN", which is non-deterministic once humans exist):
 

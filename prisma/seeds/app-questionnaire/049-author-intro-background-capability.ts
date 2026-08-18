@@ -23,7 +23,16 @@ const unit: SeedUnit = {
 
     const capability = await prisma.aiCapability.upsert({
       where: { slug: AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG },
-      update: { isSystem: false },
+      update: {
+        // Code-owned fields are re-applied so an edited definition reaches rows
+        // that already exist; `name` / `description` / `category` / `isActive`
+        // stay operator-owned. See `.context/database/seeding.md` (#545).
+        isSystem: false,
+        executionType: 'internal',
+        executionHandler: AUTHOR_INTRO_BACKGROUND_HANDLER,
+        functionDefinition:
+          AUTHOR_INTRO_BACKGROUND_FUNCTION_DEFINITION as unknown as Prisma.InputJsonValue,
+      },
       create: {
         slug: AUTHOR_INTRO_BACKGROUND_CAPABILITY_SLUG,
         name: 'Author Respondent Intro Background',

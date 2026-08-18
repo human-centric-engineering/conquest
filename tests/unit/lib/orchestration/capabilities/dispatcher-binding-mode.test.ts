@@ -46,8 +46,10 @@ vi.mock('@/lib/env', () => ({
 }));
 
 const { prisma } = await import('@/lib/db/client');
-const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/dispatcher');
+const { capabilityDispatcher, workflowAgentId } =
+  await import('@/lib/orchestration/capabilities/dispatcher');
 const { BaseCapability } = await import('@/lib/orchestration/capabilities/base-capability');
+const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
 
 class OkCapability extends BaseCapability<{ n: number }, { doubled: number }> {
   readonly slug = 'ok';
@@ -151,6 +153,99 @@ describe('CAPABILITY_BINDING_MODE', () => {
       const result = await capabilityDispatcher.dispatch('ok', { n: 3 }, ctx);
 
       expect(result).toEqual({ success: true, data: { doubled: 6 } });
+    });
+  });
+
+  /**
+   * A workflow execution has no agent, so `tool_call` steps dispatch under a
+   * LABEL — `workflow:${workflowId}`. `AiAgentCapability.agentId` is a FK to
+   * `AiAgent.id`, so that label can never have a binding row: the FK rejects
+   * the insert.
+   *
+   * That is what made strict mode a trap rather than a hardening measure
+   * (#528). The env description's advice — audit the table, add the rows you
+   * need — is actionable for `mcp-system`, which is a real seeded agent row.
+   * For a workflow there is no row to add, so strict failed EVERY tool_call
+   * step in EVERY workflow with no configuration that fixed it, and the error
+   * (`capability_disabled_for_agent`, per-step) read as a capability
+   * misconfiguration rather than a mode-wide one.
+   */
+  describe('workflow tool_call steps (#528)', () => {
+    const workflowCtx = { ...ctx, agentId: workflowAgentId('wf_abc123') };
+
+    it('dispatches under STRICT — the binding row strict would demand cannot exist', async () => {
+      envHolder.CAPABILITY_BINDING_MODE = 'strict';
+      (prisma.aiAgentCapability.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 4 }, workflowCtx);
+
+      expect(result).toEqual({ success: true, data: { doubled: 8 } });
+    });
+
+    it('does not query AiAgentCapability at all for a workflow label', async () => {
+      // Not a performance assertion — it is how we know the exemption is a
+      // real short-circuit and not a query that happens to return zero rows.
+      envHolder.CAPABILITY_BINDING_MODE = 'strict';
+      (prisma.aiAgentCapability.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await capabilityDispatcher.dispatch('ok', { n: 1 }, workflowCtx);
+
+      expect(prisma.aiAgentCapability.findMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves permissive behaviour identical', async () => {
+      (prisma.aiAgentCapability.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 5 }, workflowCtx);
+
+      expect(result).toEqual({ success: true, data: { doubled: 10 } });
+    });
+
+    it('never writes the workflow label to AiCostLog.agentId — it is not an AiAgent.id', async () => {
+      // `AiCostLog.agentId` is an FK to `AiAgent.id`. Writing `workflow:<id>`
+      // there is rejected by Postgres with P2003
+      // (`ai_cost_log_agentId_fkey` — reproduced against a real dev DB), and
+      // `logCost` swallows the rejection into an error log and returns null.
+      // So every capability a workflow invoked logged an error and recorded no
+      // cost row at all, and the Costs page's per-tool breakdown reported zero
+      // for them. A mocked prisma cannot enforce an FK, so this asserts the
+      // shape that the FK would have rejected.
+      (prisma.aiAgentCapability.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await capabilityDispatcher.dispatch(
+        'ok',
+        { n: 7 },
+        { ...workflowCtx, workflowExecutionId: 'exec_abc' }
+      );
+
+      expect(logCost).toHaveBeenCalledTimes(1);
+      const logged = (logCost as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(logged.agentId).toBeUndefined();
+      // Positive half: the row still lands, linked by the FK that IS real.
+      // Without this, dropping `workflowExecutionId` entirely would pass.
+      expect(logged.workflowExecutionId).toBe('exec_abc');
+      expect(logged.operation).toBe('tool_call');
+    });
+
+    it('still records agentId for a REAL agent — the omission is workflow-only', async () => {
+      (prisma.aiAgentCapability.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await capabilityDispatcher.dispatch('ok', { n: 8 }, ctx);
+
+      const logged = (logCost as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(logged.agentId).toBe('agent-1');
+    });
+
+    it('still denies a REAL agent id under strict — the exemption is not a blanket off-switch', async () => {
+      // The guard that matters: this must keep failing, or the fix has turned
+      // strict mode into a no-op for everyone rather than exempting one caller.
+      envHolder.CAPABILITY_BINDING_MODE = 'strict';
+      (prisma.aiAgentCapability.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 6 }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('capability_disabled_for_agent');
     });
   });
 });

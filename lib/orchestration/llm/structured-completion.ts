@@ -48,7 +48,8 @@
  */
 
 import { calculateCost } from '@/lib/orchestration/llm/cost-tracker';
-import type { LlmMessage, LlmResponseFormat } from '@/lib/orchestration/llm/types';
+import { ProviderError } from '@/lib/orchestration/llm/provider';
+import type { LlmFinishReason, LlmMessage, LlmResponseFormat } from '@/lib/orchestration/llm/types';
 import type { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import {
   GEN_AI_OPERATION_NAME,
@@ -117,7 +118,18 @@ export interface StructuredCompletionOptions<T> {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
-  /** Optional caller-supplied error to throw when both attempts fail. */
+  /**
+   * Optional caller-supplied error to throw when the attempts are exhausted
+   * and nothing parsed.
+   *
+   * **Not consulted when the final attempt was truncated** (`finishReason:
+   * 'length'`). This hook exists to phrase "the model broke my contract",
+   * and on a truncation that premise is false — the response was cut off at
+   * the token cap, so there was never a complete answer to check against the
+   * schema. The runner throws its own `ProviderError('truncated_no_output')`
+   * instead, so every caller gets the real cause without having to
+   * rediscover this one (#587).
+   */
   onFinalFailure?: () => Error;
   /**
    * Phase tag for OTEL spans and cost logs — an open string set by the
@@ -134,11 +146,61 @@ export interface StructuredCompletionResult<T> {
   value: T;
   tokenUsage: { input: number; output: number };
   costUsd: number;
+  /**
+   * Finish reason of the attempt that produced `value` (the retry's, when
+   * there was one).
+   *
+   * Worth checking for `'length'` even on success: a lenient `parse` can
+   * accept content that happened to be well-formed at the point it was cut
+   * off — a truncated array of results reads as a complete short one. The
+   * failure path throws, so this field is the only place a caller can see
+   * that case.
+   *
+   * **One provider caveat.** On Anthropic with a `responseSchema`, this can
+   * never be `'length'`: the adapter reports `'stop'` for a structured
+   * extraction (`anthropic.ts`) because it has already thrown on the
+   * truncating case, so the mask loses nothing today. Nothing is silently
+   * dropped — but don't build a fork's continuation or observability signal
+   * on this field alone and expect it to fire there.
+   */
+  finishReason: LlmFinishReason;
 }
 
 const DEFAULT_TEMPERATURE = 0.2;
 const DEFAULT_MAX_TOKENS = 1500;
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+/**
+ * The response ran out of token budget before it could be parsed.
+ *
+ * Reported as `truncated_no_output` — the same code both providers already
+ * raise for the cases they can detect themselves (see the truncation guards
+ * in `anthropic.ts` and `openai-compatible.ts`), so a caller has one code to
+ * catch whichever layer noticed. This layer catches what they cannot: a
+ * provider that ignores `responseSchema` altogether, or a caller relying on
+ * the prompt's prose contract rather than native structured output.
+ *
+ * Reaching a caller means the attempts are exhausted, so the cap really is the
+ * problem — not that a retry might have fitted.
+ *
+ * `usage` rides along because throwing is how an attempt unwinds here (so
+ * `withSpan` records an error rather than stamping the span ok), and a
+ * full-cap response's billed tokens would otherwise be lost on the way out.
+ * Same field the adapters' own guards populate.
+ */
+function truncationError(
+  model: string,
+  maxTokens: number,
+  usage?: { inputTokens: number; outputTokens: number }
+): ProviderError {
+  return new ProviderError(
+    `Structured completion for model "${model}" was truncated at maxTokens (${maxTokens}) ` +
+      `before it could be parsed — the response is incomplete, not schema-invalid. Raise ` +
+      `maxTokens: on OpenAI reasoning models this cap is sent as max_completion_tokens and ` +
+      `covers hidden reasoning tokens as well as visible output.`,
+    { code: 'truncated_no_output', retriable: false, ...(usage ? { usage } : {}) }
+  );
+}
 
 export async function runStructuredCompletion<T>(
   opts: StructuredCompletionOptions<T>
@@ -168,91 +230,159 @@ export async function runStructuredCompletion<T>(
     ...(opts.phase ? { [SUNRISE_EVALUATION_PHASE]: opts.phase } : {}),
   };
 
-  const firstSignal = AbortSignal.timeout(timeoutMs);
-  const first = await withSpan(
-    SPAN_LLM_CALL,
-    {
-      ...phaseAttrs,
-      [GEN_AI_REQUEST_TEMPERATURE]: temperature,
-      [GEN_AI_REQUEST_MAX_TOKENS]: maxTokens,
-    },
-    async (span) => {
-      const response = await opts.provider.chat(opts.messages, {
-        model: opts.model,
-        temperature,
-        maxTokens,
-        // Both halves: the signal bounds the whole attempt sequence (it is
-        // absolute, so retries share it), `timeoutMs` caps the individual HTTP
-        // request inside the provider SDK.
-        timeoutMs,
-        signal: firstSignal,
-        ...(responseFormat ? { responseFormat } : {}),
-      });
-      setSpanAttributes(span, {
-        [GEN_AI_RESPONSE_MODEL]: opts.model,
-        [GEN_AI_USAGE_INPUT_TOKENS]: response.usage.inputTokens,
-        [GEN_AI_USAGE_OUTPUT_TOKENS]: response.usage.outputTokens,
-        [GEN_AI_USAGE_TOTAL_TOKENS]: response.usage.inputTokens + response.usage.outputTokens,
-      });
-      return response;
+  // One attempt. `truncated` covers both routes to the same event: the
+  // provider raised it (both in-repo adapters do, for a structured
+  // extraction), or it came back as a `'length'` finish we notice here (a
+  // provider that ignores `responseFormat`, or no `responseSchema` at all).
+  //
+  // `usage` survives either route: we have the response in hand when we
+  // detect it ourselves, and the adapters attach `ProviderError.usage` when
+  // they raise it. It is null only when the host reported no usage at all. A
+  // truncated attempt is a full cap's worth of output, so dropping it would
+  // under-report the largest component of the bill and break this module's
+  // own promise to sum across attempts.
+  //
+  // The truncation is thrown INSIDE `withSpan` and caught outside it rather
+  // than returned from the callback. That is load-bearing: `withSpan` stamps
+  // `{ code: 'ok' }` on any normal return, so returning early would file a
+  // truncated attempt in the trace as a success — hiding the exact fault this
+  // module exists to make visible. The response rides out on the error so the
+  // usage survives the throw.
+  const attempt = async (
+    messages: LlmMessage[],
+    attemptTemperature: number
+  ): Promise<{
+    parsed: T | null;
+    truncated: boolean;
+    usage: { inputTokens: number; outputTokens: number } | null;
+    finishReason: LlmFinishReason | null;
+  }> => {
+    // Note this is a fresh deadline per attempt, so `timeoutMs` bounds each
+    // call and not the sequence — two attempts can take 2 × `timeoutMs`. That
+    // is long-standing behaviour (both attempts always built their own
+    // signal); the comment that used to sit here claimed the opposite.
+    const signal = AbortSignal.timeout(timeoutMs);
+    try {
+      return await withSpan(
+        SPAN_LLM_CALL,
+        {
+          ...phaseAttrs,
+          [GEN_AI_REQUEST_TEMPERATURE]: attemptTemperature,
+          [GEN_AI_REQUEST_MAX_TOKENS]: maxTokens,
+        },
+        async (span) => {
+          const response = await opts.provider.chat(messages, {
+            model: opts.model,
+            temperature: attemptTemperature,
+            maxTokens,
+            // `timeoutMs` also caps the individual HTTP request inside the
+            // provider SDK; `signal` aborts it from out here.
+            timeoutMs,
+            signal,
+            ...(responseFormat ? { responseFormat } : {}),
+          });
+          setSpanAttributes(span, {
+            [GEN_AI_RESPONSE_MODEL]: opts.model,
+            [GEN_AI_USAGE_INPUT_TOKENS]: response.usage.inputTokens,
+            [GEN_AI_USAGE_OUTPUT_TOKENS]: response.usage.outputTokens,
+            [GEN_AI_USAGE_TOTAL_TOKENS]: response.usage.inputTokens + response.usage.outputTokens,
+          });
+          const parsed = opts.parse(response.content);
+          // Unparseable AND cut off at the cap. A `'length'` finish that still
+          // parses is NOT a truncation for our purposes — the caller got its
+          // value, and `finishReason` on the result lets it judge.
+          if (parsed === null && response.finishReason === 'length') {
+            throw truncationError(opts.model, maxTokens, response.usage);
+          }
+          return {
+            parsed,
+            truncated: false,
+            usage: response.usage,
+            finishReason: response.finishReason,
+          };
+        }
+      );
+    } catch (err) {
+      if (err instanceof ProviderError && err.code === 'truncated_no_output') {
+        // `usage` is absent when the provider discarded the numbers before we
+        // saw them — an adapter guard that had none to report.
+        return {
+          parsed: null,
+          truncated: true,
+          usage: err.usage ?? null,
+          finishReason: 'length',
+        };
+      }
+      throw err;
     }
-  );
+  };
 
-  const firstParsed = opts.parse(first.content);
-  if (firstParsed !== null) {
-    const inputTokens = first.usage.inputTokens;
-    const outputTokens = first.usage.outputTokens;
+  const first = await attempt(opts.messages, temperature);
+  if (first.parsed !== null) {
+    const inputTokens = first.usage?.inputTokens ?? 0;
+    const outputTokens = first.usage?.outputTokens ?? 0;
     return {
-      value: firstParsed,
+      value: first.parsed,
       tokenUsage: { input: inputTokens, output: outputTokens },
       costUsd: calculateCost(opts.model, inputTokens, outputTokens).totalCostUsd,
+      finishReason: first.finishReason ?? 'stop',
     };
   }
 
-  // Retry with a stricter prompt at temperature 0. We do NOT include
-  // the malformed prior response — never trust output that just
-  // misbehaved as part of a subsequent prompt.
-  const retrySignal = AbortSignal.timeout(timeoutMs);
-  const retry = await withSpan(
-    SPAN_LLM_CALL,
-    {
-      ...phaseAttrs,
-      [GEN_AI_REQUEST_TEMPERATURE]: 0,
-      [GEN_AI_REQUEST_MAX_TOKENS]: maxTokens,
-    },
-    async (span) => {
-      const response = await opts.provider.chat(
-        [...opts.messages, { role: 'user', content: opts.retryUserMessage }],
-        {
-          model: opts.model,
-          temperature: 0,
-          maxTokens,
-          timeoutMs,
-          signal: retrySignal,
-          ...(responseFormat ? { responseFormat } : {}),
-        }
-      );
-      setSpanAttributes(span, {
-        [GEN_AI_RESPONSE_MODEL]: opts.model,
-        [GEN_AI_USAGE_INPUT_TOKENS]: response.usage.inputTokens,
-        [GEN_AI_USAGE_OUTPUT_TOKENS]: response.usage.outputTokens,
-        [GEN_AI_USAGE_TOTAL_TOKENS]: response.usage.inputTokens + response.usage.outputTokens,
-      });
-      return response;
-    }
+  // A truncation gets the retry too. Skipping it needs "the same cap cannot
+  // fit this", and the only signal available is `responseFormat` — which
+  // records what we SENT, not what the server honoured. Plenty of hosts
+  // ignore it (Ollama, LM Studio, vLLM, older gateways) and can still emit a
+  // preamble the retry's "respond ONLY with a JSON object" would remove. Skip
+  // on that proxy and a recoverable call hard-fails; run it and a doomed one
+  // costs a call. Not symmetric, so it runs.
+  //
+  // Not, note, because the retry appends a message: `max_tokens` /
+  // `max_completion_tokens` bound the COMPLETION on both providers, so prompt
+  // length does not shrink the output budget.
+  //
+  // The malformed prior response is NOT included — never trust output that
+  // just misbehaved as part of a subsequent prompt.
+  const retry = await attempt(
+    [...opts.messages, { role: 'user', content: opts.retryUserMessage }],
+    0
   );
 
-  const retryParsed = opts.parse(retry.content);
-  if (retryParsed === null) {
+  // Both attempts are spent. Only now is the cap provably the problem.
+  //
+  // Report BOTH attempts' tokens: each was billed, and a truncated attempt is
+  // a full cap's worth of output. Attributing only one of them under-reports
+  // the most expensive failure shape there is.
+  if (retry.truncated) {
+    const billed = {
+      inputTokens: (first.usage?.inputTokens ?? 0) + (retry.usage?.inputTokens ?? 0),
+      outputTokens: (first.usage?.outputTokens ?? 0) + (retry.usage?.outputTokens ?? 0),
+    };
+    // Omit rather than report zeros, matching the adapter guards: a consumer
+    // doing `if (err.usage) logCost(...)` would otherwise write the "this turn
+    // was free" row those guards exist to avoid. Both attempts can come back
+    // usage-less from a host that ignores `stream_options.include_usage`.
+    throw truncationError(
+      opts.model,
+      maxTokens,
+      billed.inputTokens > 0 || billed.outputTokens > 0 ? billed : undefined
+    );
+  }
+
+  if (retry.parsed === null) {
     if (opts.onFinalFailure) throw opts.onFinalFailure();
     throw new Error('Structured completion response was not valid JSON after retry');
   }
 
-  const inputTokens = first.usage.inputTokens + retry.usage.inputTokens;
-  const outputTokens = first.usage.outputTokens + retry.usage.outputTokens;
+  // Both attempts are billed, so both are counted — including a first attempt
+  // that was truncated, which is by definition a full cap's worth of output
+  // and so the LARGEST component of the bill.
+  const inputTokens = (first.usage?.inputTokens ?? 0) + (retry.usage?.inputTokens ?? 0);
+  const outputTokens = (first.usage?.outputTokens ?? 0) + (retry.usage?.outputTokens ?? 0);
   return {
-    value: retryParsed,
+    value: retry.parsed,
     tokenUsage: { input: inputTokens, output: outputTokens },
     costUsd: calculateCost(opts.model, inputTokens, outputTokens).totalCostUsd,
+    finishReason: retry.finishReason ?? 'stop',
   };
 }

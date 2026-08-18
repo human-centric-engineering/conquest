@@ -4,15 +4,45 @@ Multi-format document parsing for the knowledge base. Converts uploaded files in
 
 ## Supported Formats
 
-| Format      | Extension | Reliability | Parser           | Notes                                                                            |
-| ----------- | --------- | ----------- | ---------------- | -------------------------------------------------------------------------------- |
-| Markdown    | `.md`     | ~95%        | Passthrough      | Existing `chunkMarkdownDocument()` handles splitting                             |
-| Plain text  | `.txt`    | ~90%        | `txt-parser.ts`  | Splits on ALL CAPS headings and underline-style headings                         |
-| CSV         | `.csv`    | ~95%        | `csv-parser.ts`  | RFC 4180 with delimiter sniffing; one chunk per row (batched above 5k rows)      |
-| EPUB        | `.epub`   | ~85%        | `epub-parser.ts` | Best format for books. Extracts chapters via XHTML structure                     |
-| DOCX        | `.docx`   | ~80%        | `docx-parser.ts` | Uses `mammoth` for markdown conversion, then heading split                       |
-| PDF         | `.pdf`    | 40-70%      | `pdf-parser.ts`  | **Requires preview step.** Uses `pdf-parse` v2                                   |
-| Scanned PDF | N/A       | N/A         | Not supported    | Use macOS Preview / Adobe Acrobat / `ocrmypdf` to OCR externally, then re-upload |
+| Format      | Extension | Reliability | Parser           | Notes                                                                              |
+| ----------- | --------- | ----------- | ---------------- | ---------------------------------------------------------------------------------- |
+| Markdown    | `.md`     | ~95%        | Passthrough      | Existing `chunkMarkdownDocument()` handles splitting                               |
+| Plain text  | `.txt`    | ~90%        | `txt-parser.ts`  | Splits on ALL CAPS headings and underline-style headings                           |
+| CSV         | `.csv`    | ~95%        | `csv-parser.ts`  | RFC 4180 with delimiter sniffing; one chunk per row (batched above 5k rows)        |
+| EPUB        | `.epub`   | unmeasured  | `epub-parser.ts` | Chapters via the OPF spine; NCX titles are read but dropped downstream — see below |
+| DOCX        | `.docx`   | ~80%        | `docx-parser.ts` | Uses `mammoth` for markdown conversion, then heading split                         |
+| PDF         | `.pdf`    | 40-70%      | `pdf-parser.ts`  | **Requires preview step.** Uses `pdf-parse` v2                                     |
+| Scanned PDF | N/A       | N/A         | Not supported    | Use macOS Preview / Adobe Acrobat / `ocrmypdf` to OCR externally, then re-upload   |
+
+> **The EPUB figure was withdrawn rather than revised.** It read `~85%` — and
+> "Best format for books" — while the parser returned an **empty document for
+> every EPUB ever ingested**: filename as the title, zero sections, no warning
+> (#606). The number described an intention, not a measurement, and it is the
+> reason nobody looked.
+>
+> What replaces it is narrower and checkable.
+> `tests/unit/lib/orchestration/knowledge/parsers/epub-parser-archive.test.ts`
+> parses a spec-valid EPUB 2 archive end to end — deflated, as real books are —
+> and asserts on the extracted chapter text, the NCX titles and the flow order.
+> That is a proof the parser works, not a reliability rate: it has not been run
+> against a corpus of real books, so no percentage is quoted. Quote one only
+> once something has measured it.
+>
+> One limit worth knowing, verified rather than assumed: **the section titles do
+> not survive ingestion.** `uploadDocument()` is handed `parsed.fullText` only,
+> so `parsed.sections` and their NCX titles are dropped, and the book is
+> re-split by `chunkMarkdownDocument()`. Chapter _headings_ do survive as
+> markdown — `dom-text.ts` renders `<h1>`–`<h6>` as `#` — so the chunker splits
+> along them; it is the `ParsedSection.title` field specifically that goes
+> nowhere ([#615](https://github.com/human-centric-engineering/sunrise/issues/615)).
+>
+> **Run `npm run smoke:epub` against a production build after touching this
+> parser.** Not the unit suite — a production build. This path has broken twice
+> in ways vitest could not see (#606, and jsdom's ESM move before it), and it
+> now carries both of those risks at once: extraction goes through jsdom again,
+> and `epub` is ESM-only. Whether it survives bundling is a question only a real
+> server answers. The script uploads a real EPUB through the real admin route
+> and asserts the book's prose is in the stored chunks.
 
 ## Architecture
 
@@ -41,6 +71,7 @@ Upload (multipart form)
 | `lib/orchestration/knowledge/parsers/txt-parser.ts`  | Plain text → sections                                                                                                                                                                              |
 | `lib/orchestration/knowledge/parsers/csv-parser.ts`  | CSV → row-per-section (RFC 4180, delimiter sniffing, header detect)                                                                                                                                |
 | `lib/orchestration/knowledge/parsers/docx-parser.ts` | DOCX → markdown → sections                                                                                                                                                                         |
+| `lib/orchestration/knowledge/parsers/dom-text.ts`    | Shared jsdom text extraction — used by the HTML and EPUB parsers                                                                                                                                   |
 | `lib/orchestration/knowledge/parsers/epub-parser.ts` | EPUB → chapters → sections                                                                                                                                                                         |
 | `lib/orchestration/knowledge/parsers/pdf-parser.ts`  | PDF → pages → sections                                                                                                                                                                             |
 | `lib/orchestration/knowledge/parsers/types.ts`       | `ParsedDocument`, `ParsedSection` types                                                                                                                                                            |
@@ -328,7 +359,7 @@ CSV files use a dedicated path:
 | Package     | Version | Used by     |
 | ----------- | ------- | ----------- |
 | `mammoth`   | ^1.12   | DOCX parser |
-| `epub2`     | ^3.0    | EPUB parser |
+| `epub`      | ^2.1    | EPUB parser |
 | `pdf-parse` | ^2.4    | PDF parser  |
 
 CSV parsing is in-house (no third-party dependency).
