@@ -26,6 +26,7 @@
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
 import {
+  ROUTING_ANALYSIS_MAX_GAPS,
   ROUTING_ANALYSIS_MAX_RULES,
   ROUTING_ANALYSIS_MAX_TOPICS,
 } from '@/lib/app/questionnaire/scope/analysis-schema';
@@ -134,6 +135,24 @@ ${SCOPE_RULE_OPERATORS.join(', ')}.
 - "action" is "include" (always ask this topic) or "exclude" (never ask it). Exclude beats include.
 - Propose at most ${ROUTING_ANALYSIS_MAX_RULES} rules. Zero is the common and correct answer.
 
+## Gaps — what you recognized but could not formalize
+
+Sometimes the document plainly states a routing or eligibility instruction, but you cannot turn it \
+into a clean topic or hard rule — the condition names something not in DATA SLOTS, it depends on \
+information no question captures, it contradicts another instruction, or it is simply too vague to \
+act on ("use judgement for edge cases"). Do not silently drop this. Do not force it into a topic's \
+criteria or a rule just to have somewhere to put it, and do not paraphrase around the problem.
+
+Report it as a GAP instead:
+- "sourceQuote" is REQUIRED and must be the exact span that states the instruction. A gap you cannot \
+quote is not a gap — if you cannot point to the words, you have nothing to report here.
+- "explanation" says what you recognized and specifically why you could not formalize it (missing \
+data slot, contradicts another rule, too vague to test mechanically, references something \
+undefined).
+
+Report at most ${ROUTING_ANALYSIS_MAX_GAPS} gaps. Zero is the common and correct answer — most \
+instruments state nothing you cannot formalize. Never invent a gap to seem thorough.
+
 ## Breadth
 
 If the document states how many areas one session should cover ("no more than three", "cover two \
@@ -167,6 +186,12 @@ Output ONLY a single JSON object — no prose, no code fences:
       "topicKey": "<key of one of your proposed topics>",
       "rationale": "<one sentence>",
       "sourceQuote": "<exact span — omit if inferred>"
+    }
+  ],
+  "gaps": [
+    {
+      "sourceQuote": "<exact span that states an instruction you could not formalize>",
+      "explanation": "<what you recognized, and specifically why you could not turn it into a topic or rule>"
     }
   ],
   "maxConditionalTopics": <number — omit unless the document states one>,
@@ -256,7 +281,8 @@ export function buildRoutingAnalysisRetryMessage(): string {
     'Your previous response did not match the required JSON schema. Respond again with ONLY the ' +
     'JSON object: a "topics" array where every entry has a lowercase_snake_case "key", a "label", ' +
     'a "phase", a "rationale", and — for every entry whose phase is "conditional" — a non-empty ' +
-    '"criteria". Topic keys must be unique. Also include "rules" (may be empty), a "summary", and ' +
+    '"criteria". Topic keys must be unique. Also include "rules" (may be empty), "gaps" (may be ' +
+    'empty, but every entry needs a non-empty "sourceQuote" and "explanation"), a "summary", and ' +
     'the boolean "fromDocument". No prose, no code fences.'
   );
 }

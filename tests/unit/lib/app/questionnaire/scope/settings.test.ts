@@ -261,6 +261,12 @@ describe('narrowProposedTopicSet', () => {
           rationale: 'Stated on the guardrails tab.',
         },
       ],
+      gaps: [
+        {
+          sourceQuote: 'Use judgement for respondents outside these categories.',
+          explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
+        },
+      ],
       maxConditionalTopics: 3,
       summary: 'Read from the routing tab.',
       fromDocument: true,
@@ -278,8 +284,31 @@ describe('narrowProposedTopicSet', () => {
     expect(set?.topics[0]?.sourceQuote).toBe('Only cover pipeline for sales-led businesses.');
     expect(set?.topics[0]?.replacesExisting).toBe(true);
     expect(set?.rules[0]?.operator).toBe('gt');
+    expect(set?.gaps[0]).toEqual({
+      sourceQuote: 'Use judgement for respondents outside these categories.',
+      explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
+    });
     expect(set?.maxConditionalTopics).toBe(3);
     expect(set?.fromDocument).toBe(true);
+  });
+
+  it('defaults gaps to an empty array when absent (pre-Phase-2 drafts)', () => {
+    const { gaps: _gaps, ...withoutGaps } = stored();
+    const set = narrowProposedTopicSet(withoutGaps);
+    expect(set?.gaps).toEqual([]);
+  });
+
+  it('drops a gap missing a source quote or explanation rather than keeping an ungrounded one', () => {
+    const set = narrowProposedTopicSet(
+      stored({
+        gaps: [
+          { sourceQuote: '', explanation: 'No quote to trace this to.' },
+          { sourceQuote: 'Some clause.', explanation: '' },
+          { sourceQuote: 'Kept clause.', explanation: 'Kept explanation.' },
+        ],
+      })
+    );
+    expect(set?.gaps).toEqual([{ sourceQuote: 'Kept clause.', explanation: 'Kept explanation.' }]);
   });
 
   it.each([null, undefined, 'nonsense', 42, [], { v: 2, topics: [] }])(

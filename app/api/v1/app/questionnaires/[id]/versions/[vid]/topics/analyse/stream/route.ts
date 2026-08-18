@@ -79,6 +79,10 @@ function toProposedSet(
       rationale: rule.rationale,
       ...(rule.sourceQuote ? { sourceQuote: rule.sourceQuote } : {}),
     })),
+    gaps: result.gaps.map((gap) => ({
+      sourceQuote: gap.sourceQuote,
+      explanation: gap.explanation,
+    })),
     ...(result.maxConditionalTopics !== undefined
       ? { maxConditionalTopics: result.maxConditionalTopics }
       : {}),
@@ -242,6 +246,7 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
           topicCount: draft.topics.length,
           conditionalCount: draft.topics.filter((t) => t.phase === 'conditional').length,
           ruleCount: draft.rules.length,
+          gapCount: draft.gaps.length,
           replacedCount,
           uncoveredQuestionCount,
           fromDocument: draft.fromDocument,
@@ -260,6 +265,7 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
           versionId: vid,
           topicCount: draft.topics.length,
           ruleCount: draft.rules.length,
+          gapCount: draft.gaps.length,
           fromDocument: draft.fromDocument,
         },
         clientIp,
@@ -269,6 +275,7 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
         versionId: vid,
         topicCount: draft.topics.length,
         ruleCount: draft.rules.length,
+        gapCount: draft.gaps.length,
         fromDocument: draft.fromDocument,
         uncoveredQuestionCount,
       });

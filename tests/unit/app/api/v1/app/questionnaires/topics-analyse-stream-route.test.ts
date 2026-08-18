@@ -156,6 +156,12 @@ const ANALYSIS = {
     },
   ],
   rules: [],
+  gaps: [
+    {
+      sourceQuote: 'Use judgement for respondents outside these categories.',
+      explanation: 'Too vague to test mechanically.',
+    },
+  ],
   summary: 'One conditional topic covering stress.',
   fromDocument: true,
 };
@@ -176,6 +182,12 @@ const SAVED_DRAFT = {
     },
   ],
   rules: [],
+  gaps: [
+    {
+      sourceQuote: 'Use judgement for respondents outside these categories.',
+      explanation: 'Too vague to test mechanically.',
+    },
+  ],
   summary: 'One conditional topic covering stress.',
   fromDocument: true,
   generatedAt: '2026-01-01T00:00:00.000Z',
@@ -340,6 +352,12 @@ describe('POST …/topics/analyse/stream — the run', () => {
       VID,
       expect.objectContaining({
         topics: expect.arrayContaining([expect.objectContaining({ key: 'wellbeing' })]),
+        gaps: [
+          {
+            sourceQuote: 'Use judgement for respondents outside these categories.',
+            explanation: 'Too vague to test mechanically.',
+          },
+        ],
       })
     );
     expect(events.at(-1)).toMatchObject({
@@ -377,7 +395,13 @@ describe('POST …/topics/analyse/stream — the run', () => {
         kind: 'routing_analysis',
         status: 'succeeded',
         triggeredByUserId: 'admin-1',
-        detail: expect.objectContaining({ topicCount: 1, usedDocument: false }),
+        detail: expect.objectContaining({
+          topicCount: 1,
+          conditionalCount: 1,
+          ruleCount: 0,
+          gapCount: 1,
+          usedDocument: false,
+        }),
       })
     );
     expect(logAdminAction).toHaveBeenCalledWith(

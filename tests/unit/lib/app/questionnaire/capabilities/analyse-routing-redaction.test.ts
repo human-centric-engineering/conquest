@@ -130,6 +130,12 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
               sourceQuote: 'always include Partner Channel when channel_type is reseller',
             },
           ],
+          gaps: [
+            {
+              sourceQuote: 'Use judgement for respondents outside these categories.',
+              explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
+            },
+          ],
           summary: 'Found one conditional section gated on channel structure.',
           fromDocument: true,
         },
@@ -140,6 +146,7 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
     expect(resultPreview).toContain('"topicCount":2');
     expect(resultPreview).toContain('"conditionalCount":1');
     expect(resultPreview).toContain('"ruleCount":1');
+    expect(resultPreview).toContain('"gapCount":1');
     expect(resultPreview).toContain('"fromDocument":true');
     // The criteria, rationale and — critically — the quoted document spans must not appear.
     expect(resultPreview).not.toContain('sell through partners');
@@ -147,6 +154,7 @@ describe('AppAnalyseRoutingCapability.redactProvenance', () => {
     expect(resultPreview).not.toContain('Only ask the Partner Channel section');
     expect(resultPreview).not.toContain('always include Partner Channel');
     expect(resultPreview).not.toContain('reseller');
+    expect(resultPreview).not.toContain('Use judgement for respondents');
   });
 
   it('omits the document and instructions markers entirely when neither was supplied', () => {

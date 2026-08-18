@@ -71,6 +71,7 @@ function draftSet(over: Partial<ProposedTopicSet> = {}): ProposedTopicSet {
     v: 1,
     topics: [],
     rules: [],
+    gaps: [],
     summary: 'Summary',
     fromDocument: true,
     generatedAt: '2025-01-01T00:00:00.000Z',

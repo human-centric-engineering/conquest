@@ -412,6 +412,21 @@ analyst declare which it did:
 
 Uncovered questions are counted **server-side** before the accept, never trusted from the model.
 
+### Gaps — what the proposal admits it left out (F17.19 Phase 2)
+
+The rubric above is about the analyst being right; `gaps` is about it being **honest when it isn't
+sure**. Real routing prose does not always cleanly become a topic or a hard rule — a condition names
+something no data slot captures, an instruction contradicts another one, or the document just says
+"use judgement" for the cases it does not enumerate. Before this, that language was silently dropped:
+the proposal looked complete, and an admin had no way to know the document said more than it covered.
+
+`gaps[]` is a small, capped (15) list where each entry is `{ sourceQuote, explanation }` — and unlike
+a topic or rule, **`sourceQuote` is never optional**. A gap that cannot be traced to the document's own
+words is not a gap; the whole point of the field is admitting what the document said, not inventing a
+new proposal. The review surface renders these separately from the topic/rule list, under "Recognized
+but not formalized" — accepting the proposal does **not** cover them, and the admin decides whether to
+add a topic, a criterion, or a rule by hand.
+
 ### Finding out it exists (F17.19)
 
 Everything above is **manual** — an admin has to already know the tab exists and click "Run". A

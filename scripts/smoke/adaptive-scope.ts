@@ -254,6 +254,7 @@ async function main() {
         },
       ],
       rules: [],
+      gaps: [],
       summary: 'smoke',
       fromDocument: true,
       generatedAt: new Date().toISOString(),

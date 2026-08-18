@@ -319,6 +319,18 @@ export interface ProposedScopeRule {
 }
 
 /**
+ * Routing language the analyst recognized but could not formalize into a topic or a hard rule
+ * (Phase 2, F17.19) — a vague eligibility clause, a rule that would need a data slot the instrument
+ * never produced, an instruction that contradicts another one. Unlike a topic or rule, `sourceQuote`
+ * is never optional: a gap exists to admit what the document said that the proposal above does not
+ * cover, so it must always be traceable to the document's own words.
+ */
+export interface ProposedGap {
+  sourceQuote: string;
+  explanation: string;
+}
+
+/**
  * The reviewable proposal stored on `AppQuestionnaireTopicDraft.topics`.
  *
  * Topics and rules travel together on purpose: the analyst reads a document's routing instructions
@@ -330,6 +342,8 @@ export interface ProposedTopicSet {
   v: 1;
   topics: ProposedTopic[];
   rules: ProposedScopeRule[];
+  /** Routing language recognized but not formalized into a topic or rule (Phase 2, F17.19). */
+  gaps: ProposedGap[];
   /**
    * The topic limit the document itself implies, when it states one ("no more than three areas per
    * session"). Absent when the document says nothing about breadth — proposing a default here
@@ -968,6 +982,16 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
       })
     : [];
 
+  const gaps: ProposedGap[] = Array.isArray(value.gaps)
+    ? value.gaps.flatMap((g): ProposedGap[] => {
+        if (!isRecord(g)) return [];
+        const sourceQuote = asText(g.sourceQuote, TOPIC_CRITERIA_MAX_LENGTH, '');
+        const explanation = asText(g.explanation, SCOPE_RATIONALE_MAX_LENGTH, '');
+        if (sourceQuote.length === 0 || explanation.length === 0) return [];
+        return [{ sourceQuote, explanation }];
+      })
+    : [];
+
   const cap =
     typeof value.maxConditionalTopics === 'number'
       ? Math.round(
@@ -984,6 +1008,7 @@ export function narrowProposedTopicSet(value: unknown): ProposedTopicSet | null 
     v: 1,
     topics,
     rules,
+    gaps,
     ...(cap !== null ? { maxConditionalTopics: cap } : {}),
     summary: asText(value.summary, SCOPE_RATIONALE_MAX_LENGTH, ''),
     fromDocument: asBool(value.fromDocument, false),
