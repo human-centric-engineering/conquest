@@ -16,8 +16,10 @@
  *
  * Copied into the fork: goal/audience + provenance, the section→question graph,
  * (F2.2) the tag vocabulary with its question assignments re-linked to the copies,
- * and (F3.1) the run-time config row when one exists (so the draft launches with
- * the same settings; the config is 1:1 with the version, not a child addressed by URL).
+ * (F3.1) the run-time config row when one exists (so the draft launches with
+ * the same settings; the config is 1:1 with the version, not a child addressed by URL),
+ * and (F17.19) the cached Adaptive Scope candidacy verdict — it describes the SOURCE
+ * DOCUMENT's own words, which the fork still carries, so it stays true of the copy.
  *
  * Deliberately NOT copied into the fork:
  *   - `AppQuestionnaireExtractionChange` records — a fork starts a clean editorial
@@ -179,6 +181,7 @@ export async function forkVersionIfLaunched(
           audience: true,
           goalProvenance: true,
           audienceProvenance: true,
+          adaptiveScopeCandidate: true,
         },
       });
 
@@ -200,6 +203,7 @@ export async function forkVersionIfLaunched(
           audience: jsonInput(source.audience),
           goalProvenance: source.goalProvenance,
           audienceProvenance: jsonInput(source.audienceProvenance),
+          adaptiveScopeCandidate: jsonInput(source.adaptiveScopeCandidate),
         },
         select: { id: true },
       });

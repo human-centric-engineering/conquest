@@ -4,7 +4,7 @@
  * Runs on every fresh questionnaire ingestion (new ingest + re-ingest, streaming and non-streaming)
  * and decides whether the uploaded document is worth flagging as a routing candidate — NOT the
  * Routing Analyst itself, which does the actual topic/rule proposal and is auto-triggered from the
- * Topics tab when this check fires (`loadAutoTriggerState`, Phase 3).
+ * Topics tab when this check fires (`resolveAutoTriggerPending`, Phase 3).
  *
  * Fail-soft throughout, the same discipline as the ingest verify/repair pass
  * (`orchestrate-extraction.ts`): a missing agent, no provider, a timeout, or an unparseable reply
@@ -45,6 +45,32 @@ type RouteLogger = Awaited<ReturnType<typeof getRouteLogger>>;
 const MAX_CANDIDACY_DOCUMENT_CHARS = 20_000;
 
 /**
+ * Trim a validated candidacy result to the {@link ScopeCandidacyVerdict} shape carried across the
+ * ingest response/stream and the Topics tab — `signals` (which may hold document quotes) stays
+ * server-side. One place, so the ingest-response verdict and the auto-trigger verdict can't drift.
+ */
+function trimCandidacyVerdict(result: ScopeCandidacyResult): ScopeCandidacyVerdict {
+  return {
+    isCandidate: result.isCandidate,
+    confidence: result.confidence,
+    summary: result.summary,
+  };
+}
+
+/**
+ * A version is "untouched" by Adaptive Scope when none of these three facts hold — the one
+ * predicate both the ingestion-time candidacy check and the Phase 3 auto-trigger gate on, so a
+ * future fourth condition can't be added to one and silently forgotten on the other.
+ */
+function isVersionUntouchedByAdaptiveScope(current: {
+  enabled: boolean;
+  hasDraft: boolean;
+  hasAuthoredTopic: boolean;
+}): boolean {
+  return !current.enabled && !current.hasDraft && !current.hasAuthoredTopic;
+}
+
+/**
  * Is this version worth checking at all? A detector for a FRESH, unrouted document — not a recheck
  * of one an admin has already looked at. The check is a no-op (no LLM call, no `AppAiRun`) when:
  *  - Adaptive Scope is already enabled for the version, or
@@ -68,10 +94,11 @@ export async function isEligibleForScopeCandidacy(versionId: string): Promise<bo
       select: { id: true },
     }),
   ]);
-  if (draft) return false;
-  if (authoredTopic) return false;
-  if (config && narrowAdaptiveScopeSettings(config.adaptiveScope).enabled) return false;
-  return true;
+  return isVersionUntouchedByAdaptiveScope({
+    enabled: Boolean(config && narrowAdaptiveScopeSettings(config.adaptiveScope).enabled),
+    hasDraft: Boolean(draft),
+    hasAuthoredTopic: Boolean(authoredTopic),
+  });
 }
 
 export interface CheckAdaptiveScopeCandidacyParams {
@@ -202,11 +229,7 @@ export async function checkAdaptiveScopeCandidacy(
     log.warn('scope candidacy: version became ineligible while checking; skipping persistence', {
       versionId,
     });
-    return {
-      isCandidate: result.isCandidate,
-      confidence: result.confidence,
-      summary: result.summary,
-    };
+    return trimCandidacyVerdict(result);
   }
 
   void recordAiRun({
@@ -235,42 +258,25 @@ export async function checkAdaptiveScopeCandidacy(
     });
   }
 
-  return {
-    isCandidate: result.isCandidate,
-    confidence: result.confidence,
-    summary: result.summary,
-  };
+  return trimCandidacyVerdict(result);
 }
 
 /* -------------------------------------------------------------------------- */
 /* Auto-trigger eligibility (F17.19 Phase 3)                                  */
 /* -------------------------------------------------------------------------- */
 
-export interface AutoTriggerState {
-  /** The cached verdict (Phase 1), trimmed for client display. Null if never checked, ineligible
-   *  at check time, or malformed. */
-  candidacy: ScopeCandidacyVerdict | null;
-  /** True only when the Routing Analyst should be invoked automatically, right now, unprompted. */
-  pending: boolean;
-}
-
 /**
- * Decide whether the Topics tab should auto-invoke the Routing Analyst right now.
+ * Read the cached candidacy verdict (Phase 1), trimmed for client display. Null if never checked,
+ * ineligible at check time, or malformed.
  *
- * The candidacy check only ever WRITES a verdict at ingestion time; whether it still applies by
- * the time an admin opens the tab is a later-in-time question, so everything here is read fresh:
- * a draft may have landed since (from this very auto-trigger, or a manual run), a topic may have
- * been hand-authored, or the version may already be enabled.
- *
- * `hasAuthoredTopic` / `hasDraft` / `enabled` are passed in rather than re-queried — the Topics
- * route's GET handler already loaded the topic set, the draft and the settings for its own
- * response, and re-querying the same three facts here could disagree with what it actually
- * returns in the same payload.
+ * Split out from {@link resolveAutoTriggerPending} so a caller that already runs several
+ * independent queries in a `Promise.all` (the Topics route's GET handler does) can fold this one
+ * in alongside them — this read has no dependency on the topic set, draft or settings, unlike the
+ * eligibility check that follows it.
  */
-export async function loadAutoTriggerState(
-  versionId: string,
-  current: { hasAuthoredTopic: boolean; hasDraft: boolean; enabled: boolean }
-): Promise<AutoTriggerState> {
+export async function loadCachedCandidacyVerdict(
+  versionId: string
+): Promise<ScopeCandidacyVerdict | null> {
   const version = await prisma.appQuestionnaireVersion.findUnique({
     where: { id: versionId },
     select: { adaptiveScopeCandidate: true },
@@ -278,18 +284,38 @@ export async function loadAutoTriggerState(
   const validated = version?.adaptiveScopeCandidate
     ? validateScopeCandidacy(version.adaptiveScopeCandidate)
     : null;
-  if (!validated?.ok) return { candidacy: null, pending: false };
+  return validated?.ok ? trimCandidacyVerdict(validated.value) : null;
+}
 
-  const candidacy: ScopeCandidacyVerdict = {
-    isCandidate: validated.value.isCandidate,
-    confidence: validated.value.confidence,
-    summary: validated.value.summary,
-  };
-
-  if (!candidacy.isCandidate) return { candidacy, pending: false };
-  if (current.enabled || current.hasDraft || current.hasAuthoredTopic) {
-    return { candidacy, pending: false };
-  }
+/**
+ * Decide whether the Topics tab should auto-invoke the Routing Analyst right now, given the
+ * verdict {@link loadCachedCandidacyVerdict} already read.
+ *
+ * The candidacy check only ever WRITES a verdict at ingestion time; whether it still applies by
+ * the time an admin opens the tab is a later-in-time question, so eligibility is read fresh here:
+ * a draft may have landed since (from this very auto-trigger, or a manual run), a topic may have
+ * been hand-authored, or the version may already be enabled.
+ *
+ * `hasAuthoredTopic` / `hasDraft` / `enabled` are passed in rather than re-queried — the Topics
+ * route's GET handler already loaded the topic set, the draft and the settings for its own
+ * response, and re-querying the same three facts here could disagree with what it actually
+ * returns in the same payload.
+ *
+ * **Not locked.** Two GETs for the same version racing before either has produced an `AppAiRun`
+ * row can both see `pending: true` and both auto-fire — the same class of risk the manual "Run"
+ * button already carries if two admins click it at once (no reservation there either). Accepted
+ * rather than solved with a lock: the failure mode is a doubled LLM call and a later draft POST
+ * silently winning over an earlier one (`AppQuestionnaireTopicDraft.versionId` is unique, so it's
+ * last-write-wins, not corruption), and it needs two tabs open on the same fresh version within
+ * the same request window to happen at all.
+ */
+export async function resolveAutoTriggerPending(
+  versionId: string,
+  candidacy: ScopeCandidacyVerdict | null,
+  current: { hasAuthoredTopic: boolean; hasDraft: boolean; enabled: boolean }
+): Promise<boolean> {
+  if (!candidacy?.isCandidate) return false;
+  if (!isVersionUntouchedByAdaptiveScope(current)) return false;
 
   // The durable "already tried" signal. Unlike the draft — which a discard deletes — this survives
   // a rejected proposal, so declining what the analyst proposed never re-fires the same auto-run
@@ -303,5 +329,5 @@ export async function loadAutoTriggerState(
     select: { id: true },
   });
 
-  return { candidacy, pending: priorRun === null };
+  return priorRun === null;
 }

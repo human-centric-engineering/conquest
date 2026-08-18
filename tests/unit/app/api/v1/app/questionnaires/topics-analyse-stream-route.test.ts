@@ -480,6 +480,30 @@ describe('POST …/topics/analyse/stream — failures', () => {
     expect(saveTopicDraft).not.toHaveBeenCalled();
   });
 
+  it('records a FAILED run when the payload is malformed, same as a dispatch failure', async () => {
+    // F17.19 Phase 3 relies on `routing_analysis` AppAiRun existence as the "already tried" signal
+    // for the Topics tab's auto-trigger — a shape failure that recorded nothing would look
+    // identical to "never attempted" and auto-fire again on every visit.
+    (capabilityDispatcher.dispatch as Mock).mockResolvedValue({
+      success: true,
+      data: { result: { topics: [{ key: 'ego' }] } },
+    });
+
+    await invoke();
+    await drain();
+
+    expect(recordAiRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subjectKind: 'version',
+        subjectId: VID,
+        versionId: VID,
+        kind: 'routing_analysis',
+        status: 'failed',
+        triggeredByUserId: 'admin-1',
+      })
+    );
+  });
+
   it('rejects a payload with no result at all', async () => {
     (capabilityDispatcher.dispatch as Mock).mockResolvedValue({ success: true, data: {} });
 

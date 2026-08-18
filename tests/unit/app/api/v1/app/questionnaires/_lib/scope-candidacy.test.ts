@@ -39,7 +39,8 @@ vi.mock('@/lib/app/questionnaire/ai-run/store', () => ({ recordAiRun: vi.fn() })
 
 import {
   checkAdaptiveScopeCandidacy,
-  loadAutoTriggerState,
+  loadCachedCandidacyVerdict,
+  resolveAutoTriggerPending,
 } from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import { prisma } from '@/lib/db/client';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
@@ -360,7 +361,7 @@ describe('checkAdaptiveScopeCandidacy — happy path', () => {
   });
 });
 
-// ─── loadAutoTriggerState (F17.19 Phase 3) ─────────────────────────────────
+// ─── loadCachedCandidacyVerdict / resolveAutoTriggerPending (F17.19 Phase 3) ───
 
 const ELIGIBLE_CURRENT = { hasAuthoredTopic: false, hasDraft: false, enabled: false };
 
@@ -370,57 +371,71 @@ function seedCandidateVersion(overrides: Partial<typeof VERDICT_RESULT> = {}) {
   });
 }
 
-describe('loadAutoTriggerState', () => {
-  it('returns candidacy: null, pending: false when the version was never checked', async () => {
+describe('loadCachedCandidacyVerdict', () => {
+  it('returns null when the version was never checked', async () => {
     (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
       adaptiveScopeCandidate: null,
     });
 
-    const result = await loadAutoTriggerState('ver-1', ELIGIBLE_CURRENT);
+    const result = await loadCachedCandidacyVerdict('ver-1');
 
-    expect(result).toEqual({ candidacy: null, pending: false });
-    expect(prisma.appAiRun.findFirst).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
-  it('returns candidacy: null, pending: false when the cached verdict is malformed', async () => {
+  it('returns null when the cached verdict is malformed', async () => {
     (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
       adaptiveScopeCandidate: { isCandidate: 'yes' /* not a boolean */ },
     });
 
-    const result = await loadAutoTriggerState('ver-1', ELIGIBLE_CURRENT);
+    const result = await loadCachedCandidacyVerdict('ver-1');
 
-    expect(result).toEqual({ candidacy: null, pending: false });
+    expect(result).toBeNull();
   });
 
-  it('trims the verdict (drops signals) and reports pending: false when the document was not a candidate', async () => {
+  it('trims the verdict (drops signals)', async () => {
     seedCandidateVersion({ isCandidate: false });
 
-    const result = await loadAutoTriggerState('ver-1', ELIGIBLE_CURRENT);
+    const result = await loadCachedCandidacyVerdict('ver-1');
 
     expect(result).toEqual({
-      candidacy: {
-        isCandidate: false,
-        confidence: VERDICT_RESULT.confidence,
-        summary: VERDICT_RESULT.summary,
-      },
-      pending: false,
+      isCandidate: false,
+      confidence: VERDICT_RESULT.confidence,
+      summary: VERDICT_RESULT.summary,
     });
+  });
+});
+
+describe('resolveAutoTriggerPending', () => {
+  const CANDIDACY = {
+    isCandidate: true,
+    confidence: VERDICT_RESULT.confidence,
+    summary: VERDICT_RESULT.summary,
+  };
+
+  it('returns false without querying when there is no candidacy verdict', async () => {
+    const result = await resolveAutoTriggerPending('ver-1', null, ELIGIBLE_CURRENT);
+
+    expect(result).toBe(false);
     expect(prisma.appAiRun.findFirst).not.toHaveBeenCalled();
   });
 
-  it('reports pending: true for a flagged, untouched version with no prior analyst run', async () => {
-    seedCandidateVersion();
+  it('returns false without querying when the document was not a candidate', async () => {
+    const result = await resolveAutoTriggerPending(
+      'ver-1',
+      { ...CANDIDACY, isCandidate: false },
+      ELIGIBLE_CURRENT
+    );
 
-    const result = await loadAutoTriggerState('ver-1', ELIGIBLE_CURRENT);
+    expect(result).toBe(false);
+    expect(prisma.appAiRun.findFirst).not.toHaveBeenCalled();
+  });
 
-    expect(result).toEqual({
-      candidacy: {
-        isCandidate: VERDICT_RESULT.isCandidate,
-        confidence: VERDICT_RESULT.confidence,
-        summary: VERDICT_RESULT.summary,
-      },
-      pending: true,
-    });
+  it('returns true for a flagged, untouched version with no prior analyst run', async () => {
+    (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
+
+    const result = await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT);
+
+    expect(result).toBe(true);
     expect(prisma.appAiRun.findFirst).toHaveBeenCalledWith({
       where: { versionId: 'ver-1', kind: 'routing_analysis' },
       select: { id: true },
@@ -431,23 +446,18 @@ describe('loadAutoTriggerState', () => {
     ['enabled', { ...ELIGIBLE_CURRENT, enabled: true }],
     ['a pending draft', { ...ELIGIBLE_CURRENT, hasDraft: true }],
     ['an already-authored topic', { ...ELIGIBLE_CURRENT, hasAuthoredTopic: true }],
-  ])('reports pending: false when the version already has %s', async (_label, current) => {
-    seedCandidateVersion();
+  ])('returns false when the version already has %s', async (_label, current) => {
+    const result = await resolveAutoTriggerPending('ver-1', CANDIDACY, current);
 
-    const result = await loadAutoTriggerState('ver-1', current);
-
-    expect(result.pending).toBe(false);
+    expect(result).toBe(false);
     expect(prisma.appAiRun.findFirst).not.toHaveBeenCalled();
   });
 
-  it('reports pending: false once a routing_analysis run already exists — surviving a discard', async () => {
-    seedCandidateVersion();
+  it('returns false once a routing_analysis run already exists — surviving a discard', async () => {
     (prisma.appAiRun.findFirst as Mock).mockResolvedValue({ id: 'run-1' });
 
-    const result = await loadAutoTriggerState('ver-1', ELIGIBLE_CURRENT);
+    const result = await resolveAutoTriggerPending('ver-1', CANDIDACY, ELIGIBLE_CURRENT);
 
-    expect(result.pending).toBe(false);
-    // The verdict itself is still reported — only the auto-fire is suppressed.
-    expect(result.candidacy?.isCandidate).toBe(true);
+    expect(result).toBe(false);
   });
 });

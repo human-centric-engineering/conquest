@@ -138,6 +138,11 @@ async function readAnalysisStream(
   return { ok: true, done };
 }
 
+/** The sky-toned "grounded in the document" banner — shared by the candidacy note and the
+ *  `fromDocument` proposal banner, so a restyle is a one-line change rather than two. */
+const SKY_BANNER_CLASSNAME =
+  'space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200';
+
 export function RoutingAnalystCard({
   questionnaireId,
   versionId,
@@ -160,6 +165,12 @@ export function RoutingAnalystCard({
   const autoTriggeredRef = useRef(false);
 
   const run = async (opts?: { silent?: boolean }) => {
+    // A silent (auto-triggered) run never shows an error banner for a click the admin never
+    // made — one gate here rather than repeating `if (!opts?.silent)` at every failure site below.
+    const reportError = (message: string) => {
+      if (!opts?.silent) setError(message);
+    };
+
     setAnalysing(true);
     setError(null);
     // `status` is set here unconditionally, so `status ?? '…'` in the render below never actually
@@ -188,15 +199,13 @@ export function RoutingAnalystCard({
         } catch {
           // Non-JSON body — fall through to the generic message.
         }
-        if (!opts?.silent) {
-          setError(message ?? `The analysis could not start (${res.status}). Try again.`);
-        }
+        reportError(message ?? `The analysis could not start (${res.status}). Try again.`);
         return;
       }
 
       const result = await readAnalysisStream(res.body, setStatus);
       if (!result.ok) {
-        if (!opts?.silent) setError(result.message);
+        reportError(result.message);
         return;
       }
       // Apply the returned proposal directly: `router.refresh()` re-runs the server component but
@@ -205,9 +214,7 @@ export function RoutingAnalystCard({
       setDraft(result.done.draft);
       router.refresh();
     } catch (err) {
-      if (!opts?.silent) {
-        setError(err instanceof Error ? err.message : 'The analysis failed. Try again.');
-      }
+      reportError(err instanceof Error ? err.message : 'The analysis failed. Try again.');
     } finally {
       setAnalysing(false);
       setStatus(null);
@@ -328,9 +335,13 @@ export function RoutingAnalystCard({
         {draft === null ? (
           <div className="space-y-3">
             {candidacy?.isCandidate && (
-              <div className="space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200">
+              <div className={SKY_BANNER_CLASSNAME}>
                 <p className="font-medium">
-                  {autoStarted
+                  {/* `analysing` gates the present-progressive wording, not `autoStarted` alone —
+                      `autoStarted` never resets, so without this a SILENT auto-run that failed
+                      (rate limited, unseeded agent) would claim to be "drafting automatically"
+                      forever, right beside a button that had gone back to idle underneath it. */}
+                  {autoStarted && analysing
                     ? 'This document reads like it describes routing — drafting a starting point automatically.'
                     : 'This document reads like it describes routing.'}
                 </p>
@@ -372,7 +383,7 @@ export function RoutingAnalystCard({
             <div
               className={
                 draft.fromDocument
-                  ? 'space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
+                  ? SKY_BANNER_CLASSNAME
                   : 'space-y-1 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
               }
             >

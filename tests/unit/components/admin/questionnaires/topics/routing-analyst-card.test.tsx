@@ -398,6 +398,10 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
     // Give the (rejected) promise chain a tick to settle.
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    // The banner must not keep claiming a draft is being generated once the attempt has settled —
+    // `autoStarted` never resets, so this pins the `analysing` gate that stops it lying forever.
+    expect(screen.queryByText(/drafting a starting point automatically/i)).not.toBeInTheDocument();
+    expect(screen.getByText('This document reads like it describes routing.')).toBeInTheDocument();
     // The button is still there, ready for the admin to try manually — which reports normally.
     expect(
       screen.getByRole('button', { name: /Propose topics from the document/ })

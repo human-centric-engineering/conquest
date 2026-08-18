@@ -138,6 +138,7 @@ function sourceGraph() {
     audience: { role: 'new hire' },
     goalProvenance: 'admin-supplied',
     audienceProvenance: { role: 'inferred' },
+    adaptiveScopeCandidate: { isCandidate: true, confidence: 0.8, signals: [] },
     sections: [
       {
         id: 'oldsec-1',
@@ -340,6 +341,36 @@ describe('forkVersionIfLaunched — fork', () => {
           goalProvenance: 'admin-supplied',
           audienceProvenance: { role: 'inferred' },
         }),
+      })
+    );
+  });
+
+  it('carries the cached Adaptive Scope candidacy verdict into the fork (F17.19)', async () => {
+    // The verdict describes the source DOCUMENT's own words, which the fork still carries — so it
+    // stays true of the copy, and the Topics tab's auto-trigger (Phase 3) must still be able to see
+    // it on whichever version ends up editable after a launch forks it.
+    await forkVersionIfLaunched(scoped(), { userId: 'admin-1' });
+
+    expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          adaptiveScopeCandidate: { isCandidate: true, confidence: 0.8, signals: [] },
+        }),
+      })
+    );
+  });
+
+  it('writes SQL-NULL for a source with no cached candidacy verdict', async () => {
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...sourceGraph(),
+      adaptiveScopeCandidate: null,
+    });
+
+    await forkVersionIfLaunched(scoped());
+
+    expect(tx.appQuestionnaireVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ adaptiveScopeCandidate: Prisma.JsonNull }),
       })
     );
   });
