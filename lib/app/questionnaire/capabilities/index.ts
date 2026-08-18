@@ -128,3 +128,9 @@ export {
   type AnalyseRoutingArgs,
   type AnalyseRoutingData,
 } from '@/lib/app/questionnaire/capabilities/analyse-routing';
+
+export {
+  AppDetectScopeCandidacyCapability,
+  type DetectScopeCandidacyArgs,
+  type DetectScopeCandidacyData,
+} from '@/lib/app/questionnaire/capabilities/detect-scope-candidacy';

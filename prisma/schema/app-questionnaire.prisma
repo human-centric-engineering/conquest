@@ -54,10 +54,10 @@ model AppQuestionnaire {
 /// are inferred by the F1.1 extractor (recorded as infer_goal / infer_audience
 /// change records) or admin-set, with admin-wins-per-field merge.
 model AppQuestionnaireVersion {
-  id                 String    @id @default(cuid())
-  questionnaireId    String
-  versionNumber      Int       @default(1)
-  status             String    @default("draft")
+  id                     String    @id @default(cuid())
+  questionnaireId        String
+  versionNumber          Int       @default(1)
+  status                 String    @default("draft")
   // Per-version soft-archive — ORTHOGONAL to `status` (mirrors AppQuestionnaire.archivedAt).
   // Non-null = archived: the version is hidden from the default admin version list (selector +
   // history) but fully recoverable (Restore nulls it). Deliberately NOT a `status` value: the
@@ -66,13 +66,19 @@ model AppQuestionnaireVersion {
   // in-flight respondent sessions pinned to it untouched. Set on demand, or offered when an edit to a
   // launched version forks a new draft (archive the superseded version). Respondent-facing resolution
   // is intentionally unchanged. See .context/app/questionnaire/archiving.md.
-  archivedAt         DateTime?
-  goal               String? // inferred (infer_goal change) or admin-set
-  audience           Json? // structured AudienceShape (types.ts); inferred or admin-set
-  goalProvenance     String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
-  audienceProvenance Json? // AudienceProvenance (types.ts): per-field FieldProvenance map
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  archivedAt             DateTime?
+  goal                   String? // inferred (infer_goal change) or admin-set
+  audience               Json? // structured AudienceShape (types.ts); inferred or admin-set
+  goalProvenance         String? // FieldProvenance (types.ts): admin-supplied | inferred | pre-existing
+  audienceProvenance     Json? // AudienceProvenance (types.ts): per-field FieldProvenance map
+  // Adaptive Scope (P17.19): the ingestion-time candidacy check's verdict, cached for cheap reads
+  // without joining AppAiRun (kind 'scope_candidacy' carries the full record). ScopeCandidacyVerdict
+  // (scope/candidacy-schema.ts): { isCandidate, confidence, summary }. Null until the check has run,
+  // or when it was skipped as ineligible (scope already on, or the version already carries authored
+  // topics or a pending draft).
+  adaptiveScopeCandidate Json?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   questionnaire    AppQuestionnaire                   @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
   sections         AppQuestionnaireSection[]

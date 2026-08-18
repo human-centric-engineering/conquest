@@ -286,6 +286,8 @@ for P17. Bringing the plan itself up to date across P10–P17 is a separate job,
   [`f17.17.md`](./f17.17.md) — the follow-ups above, as they shipped
 - [`f17.18.md`](./f17.18.md) — the routing map. Not on the list below either: every surface stated the
   pipeline in prose, and the order of its three tiers is the thing authors most reliably misread
+- [`f17.19.md`](./f17.19.md) — ingestion-time candidacy detection. Also not on the list below: it is
+  new work (not a follow-up to F17.1–F17.7), and only Phase 1 (detection) has shipped so far
 - [`../../questionnaire/adaptive-scope.md`](../../questionnaire/adaptive-scope.md) — the domain doc
 - The pilot client research notes (held outside this repo) — the
   capability table (C1–C11) these are numbered against

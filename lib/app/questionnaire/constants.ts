@@ -1215,3 +1215,43 @@ export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition =
     required: ['questions'],
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* Adaptive Scope — ingestion-time candidacy detection (P17.19)               */
+/* -------------------------------------------------------------------------- */
+
+/** Slug of the candidacy-check capability — a cheap triage read, not the Routing Analyst. */
+export const DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG = 'app_detect_adaptive_scope_candidacy';
+
+/** `AiCapability.executionHandler` for the check — the class the dispatcher resolves. */
+export const DETECT_SCOPE_CANDIDACY_HANDLER = 'AppDetectScopeCandidacyCapability';
+
+/** Slug of the seeded candidacy-check `AiAgent` (empty provider/model → dynamic resolution). */
+export const QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG = 'app-questionnaire-scope-candidacy';
+
+/**
+ * The candidacy-check capability's OpenAI-compatible function definition — one source of truth
+ * shared by the `BaseCapability` subclass and the `AiCapability` seed, so they can't drift.
+ * Dispatched programmatically by the ingest pipeline; persists nothing itself (the route caches
+ * the verdict and records an `AppAiRun`).
+ */
+export const DETECT_SCOPE_CANDIDACY_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: DETECT_SCOPE_CANDIDACY_CAPABILITY_SLUG,
+  description:
+    'Read a freshly-uploaded questionnaire document and decide, cheaply and fast, whether its ' +
+    'own words describe routing different respondents through different parts of it (eligibility ' +
+    'notes, a "Routing"/"Guardrails" page, skip logic). Returns a candidate verdict for the ' +
+    'ingestion pipeline to act on; proposes no topics or rules — that is the Routing Analyst’s job.',
+  parameters: {
+    type: 'object',
+    properties: {
+      documentText: {
+        type: 'string',
+        description: 'The uploaded document’s parsed text (may be truncated for this cheap read).',
+      },
+      documentFileName: { type: 'string', description: 'Original file name (prompt context).' },
+      versionId: { type: 'string', description: 'Optional stable identity for cost-log metadata.' },
+    },
+    required: ['documentText'],
+  },
+};

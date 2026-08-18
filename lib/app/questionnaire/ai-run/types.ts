@@ -91,6 +91,17 @@ export const APP_AI_RUN_KINDS = [
    * means paying for the same call again to learn the same thing.
    */
   'routing_analysis',
+  /**
+   * Adaptive Scope candidacy check (P17.19) — the cheap ingestion-time triage read that decides
+   * whether a freshly-uploaded document is worth flagging as a routing candidate.
+   *
+   * Recorded because the verdict drives an automatic action downstream (the Routing Analyst
+   * auto-run) and because it is a calibration signal worth a trend: if this check systematically
+   * over- or under-fires, that is only visible with a history of what it actually said. Not
+   * recorded at all when the version was ineligible (scope already on, already authored) — that is
+   * a skip, not a run.
+   */
+  'scope_candidacy',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

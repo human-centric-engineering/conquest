@@ -1,0 +1,11 @@
+-- Adaptive Scope (P17.19): the ingestion-time candidacy check's verdict, cached on the version for
+-- cheap reads without joining AppAiRun. Nullable: null until the check has run, or when it was
+-- skipped as ineligible (scope already on, or the version already carries authored topics or a
+-- pending draft).
+--
+-- Hand-authored (no reachable dev database in this environment to run `prisma migrate dev`).
+-- Mirrors the plain nullable-Json-column shape of prior app_questionnaire_version migrations
+-- (e.g. 20260601144112_app_questionnaire_ingestion's "audience" column) — verify against a real
+-- `prisma migrate dev --create-only` diff before merging, and strip any phantom pgvector
+-- DROP INDEX / DROP DEFAULT statements it reports (see schema.md's migrate-dev footgun note).
+ALTER TABLE "app_questionnaire_version" ADD COLUMN     "adaptiveScopeCandidate" JSONB;

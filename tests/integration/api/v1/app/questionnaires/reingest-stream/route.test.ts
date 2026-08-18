@@ -69,6 +69,14 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/rate-limit', () => ({
   INGEST_RATE_LIMIT_INTERVAL_MS: 60_000,
 }));
 
+// Adaptive Scope candidacy (P17.19) is mocked at the module boundary — its own Prisma-branch
+// logic is unit-tested in `_lib/scope-candidacy.test.ts`. These integration tests only prove
+// the stream route wires the result into the `checking_scope` phase + terminal `done` frame.
+vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-candidacy', () => ({
+  checkAdaptiveScopeCandidacy: vi.fn(),
+  isEligibleForScopeCandidacy: vi.fn(),
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { POST } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/reingest/stream/route';
@@ -83,6 +91,10 @@ import {
   ReingestNotDraftError,
 } from '@/app/api/v1/app/questionnaires/_lib/reingest';
 import { ingestLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
+import {
+  checkAdaptiveScopeCandidacy,
+  isEligibleForScopeCandidacy,
+} from '@/app/api/v1/app/questionnaires/_lib/scope-candidacy';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -209,6 +221,11 @@ beforeEach(() => {
     data: structuredClone(COHERENT_EXTRACTION),
   });
   (reingestVersion as Mock).mockResolvedValue(REINGEST_RESULT);
+  // Default: eligible (so the pre-check the route runs before announcing "checking…" doesn't
+  // itself suppress the phase), but the check finds nothing — keeps every pre-existing test's
+  // frame sequence and done-event shape (no `adaptiveScopeCandidate` key) unchanged.
+  (isEligibleForScopeCandidacy as Mock).mockResolvedValue(true);
+  (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(null);
 });
 
 // ─── Gates (pre-stream — JSON envelope, not SSE) ───────────────────────────────
@@ -475,5 +492,64 @@ describe('POST …/reingest/stream — mid-stream failures', () => {
       code: 'PERSIST_FAILED',
     });
     expect(logAdminAction).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Adaptive Scope candidacy wiring (P17.19) ───────────────────────────────────
+// `checkAdaptiveScopeCandidacy` itself is mocked at the module boundary — its Prisma-branch
+// logic is unit-tested in `_lib/scope-candidacy.test.ts`. These tests only prove this route
+// wires the result into its own `checking_scope` phase frame and terminal `done` frame,
+// scoped to the non-deduped success path — the deduped short-circuit returns before the
+// candidacy check ever runs, so it needs no coverage here (see the dedup describe block above).
+
+describe('POST …/reingest/stream — adaptive scope candidacy wiring', () => {
+  it('emits a checking_scope phase frame before the terminal done frame', async () => {
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
+    expect(phaseNames).toContain('checking_scope');
+    expect(frames[frames.length - 1].type).toBe('done');
+  });
+
+  it('carries adaptiveScopeCandidate on the done frame when the check resolves a verdict', async () => {
+    const verdict = { isCandidate: true, confidence: 0.8, summary: 'Has conditional branches.' };
+    (checkAdaptiveScopeCandidacy as Mock).mockResolvedValue(verdict);
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect(doneFrame.data.adaptiveScopeCandidate).toEqual(verdict);
+  });
+
+  it('omits adaptiveScopeCandidate from the done frame when the check resolves null', async () => {
+    // beforeEach already defaults the mock to null — pins the omission (not
+    // present-and-undefined) directly against the parsed SSE frame data.
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
+  });
+
+  it('does not announce a checking_scope phase when the version is pre-check ineligible', async () => {
+    // A re-ingest, unlike a fresh ingest, may land on a version that already has scope on or
+    // authored topics. Announcing "checking…" for a version the route already knows is
+    // ineligible would read as "checked, found nothing" rather than "not applicable" — the route
+    // pre-checks and skips the phase (and the check itself) entirely in that case.
+    (isEligibleForScopeCandidacy as Mock).mockResolvedValue(false);
+
+    const res = await POST(makeRequest('onboarding.md'), ctx(PARAMS));
+    const frames = await drainSse(res);
+
+    const phaseNames = frames.filter((f) => f.type === 'phase').map((f) => f.data.phase);
+    expect(phaseNames).not.toContain('checking_scope');
+    expect(checkAdaptiveScopeCandidacy).not.toHaveBeenCalled();
+    const doneFrame = frames[frames.length - 1];
+    expect(doneFrame.type).toBe('done');
+    expect('adaptiveScopeCandidate' in doneFrame.data).toBe(false);
   });
 });
