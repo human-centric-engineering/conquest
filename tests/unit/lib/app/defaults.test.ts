@@ -44,6 +44,7 @@ import { initAppGuardEventContributors } from '@/lib/app/guard-event-contributor
 import { appAgentFields } from '@/lib/app/agent-fields';
 import { appProtectedRoutes } from '@/lib/app/protected-routes';
 import { appEnvSchema } from '@/lib/app/env';
+import { footerCopyright } from '@/lib/app/footer';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
@@ -131,6 +132,11 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(appAuthLandingRoute).toBeNull();
       expect(appAuthLandingLabel).toBeNull();
     },
+  },
+  {
+    seam: 'lib/app/footer.ts',
+    risk: 'a stray value would rewrite — or silently remove — the attribution line on every install, on both the public and authenticated footers',
+    assert: () => expect(footerCopyright).toBeNull(),
   },
   {
     seam: 'lib/app/emails.ts',
