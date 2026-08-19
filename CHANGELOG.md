@@ -99,13 +99,25 @@ release process.
 
 ### Changed
 
-- **Root `<title>` and `<meta description>` no longer hardcode the starter
-  identity.** `app/layout.tsx` shipped `"${BRAND.name} - Next.js Starter"` and a
-  description advertising "a production-ready Next.js starter template" from
-  every fork, on any page not declaring its own title. Both now come from the
-  `BRAND` seam, and the title uses the object form so un-templated pages inherit
-  `%s - ${BRAND.name}`. Route groups declaring their own `title.template` are
-  unaffected.
+- **Metadata no longer hardcodes the starter identity.** `app/layout.tsx`
+  shipped `"${BRAND.name} - Next.js Starter"` and a description advertising "a
+  production-ready Next.js starter template"; `app/(public)/layout.tsx` shipped
+  the same blurb again, and the landing and About pages hardcoded the literal
+  `Sunrise` in their titles and social cards. All of it now comes from the
+  `BRAND` seam, and the root title uses the object form so un-templated pages
+  inherit `%s - ${BRAND.name}`. Route groups declaring their own
+  `title.template` are unaffected.
+
+  **Fixing the root layout alone is not enough, and that is worth knowing if you
+  carry a patch here.** Next resolves metadata at the nearest segment that
+  defines a field, so any route group declaring `description` overrides the root
+  outright — all four of Sunrise's do. `tests/unit/app/layout-metadata.test.ts`
+  now scans every `export const metadata` block under `app/` rather than
+  checking the root object, because the first version of that test passed while
+  the blurb was still live.
+
+  Page **body copy** remains fork-owned and deliberately out of scope — the seam
+  covers the brand name, not marketing prose (see `lib/brand.ts`).
 
 - **The public footer's copyright moved inline, and dropped ". All rights
   reserved."** It had a dedicated centred row costing ~44px; `ProtectedFooter`

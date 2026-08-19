@@ -22,12 +22,17 @@
  * operator-facing detail that is wrong on an end-user surface, so turn them off
  * rather than discovering them in production:
  *
- *   - `showInlineTrace` — the tool-call trace strip. On a personal or
- *     customer-facing surface this replays the user's own input back through a
- *     component with different redaction rules than the surface it sits on.
- *   - the per-turn cost and token breakdown, rendered whenever the stream
- *     supplies it — a price tag on someone thinking out loud.
- *   - approval cards, which assume an operator with authority to approve.
+ *   - `showInlineTrace` (default `false`) gates BOTH the tool-call trace strip
+ *     and the per-turn cost / token breakdown — one switch, not two. Leaving it
+ *     off is the whole of what you need to do here. On a customer-facing
+ *     surface the trace replays the user's own input through a component with
+ *     different redaction rules than the surface it sits on, and a cost readout
+ *     puts a price tag on someone thinking out loud.
+ *   - **Approval cards have no switch.** `ApprovalCard` renders whenever a turn
+ *     carries `pendingApproval`, and there is no prop to suppress it. If your
+ *     surface's users are not operators with authority to approve, either
+ *     ensure the agent never emits an approval step, or rebuild the rendering.
+ *     This is the one item on this list you cannot turn off.
  *
  * **If you are weighing a rebuild**, the parts that are genuinely the
  * platform's contract and worth reusing directly are `parseChatStreamEvent`
@@ -1150,6 +1155,7 @@ export function ChatInterface({
     },
     [
       agentSlug,
+      streamEndpoint,
       conversationId,
       contextType,
       contextId,
@@ -1223,7 +1229,7 @@ export function ChatInterface({
     setWarning(null);
     typing.reset();
     onConversationCleared?.();
-  }, [conversationId, typing, onConversationCleared]);
+  }, [conversationId, deleteConversationEndpoint, typing, onConversationCleared]);
 
   const handleDownload = useCallback(() => {
     if (typeof window === 'undefined' || messages.length === 0) return;

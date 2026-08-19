@@ -13,21 +13,28 @@ import {
   Search,
 } from 'lucide-react';
 import { Hero, Section, Features, Pricing, FAQ, CTA } from '@/components/marketing';
+import { BRAND } from '@/lib/brand';
 
-const heroDescription =
-  'Build production-ready applications faster with Sunrise. A Next.js 16 starter template with authentication, database, email, Docker — plus a complete AI agent orchestration layer for building agents, workflows, and knowledge bases.';
+// Landing-page copy is fork-owned — you are expected to rewrite this wholesale.
+// It reads from BRAND rather than hardcoding "Sunrise" so that a fork which has
+// set NEXT_PUBLIC_APP_NAME but not yet rewritten the page still gets its own
+// name in search results and social cards, rather than advertising Sunrise
+// (#519).
+const heroDescription = `Build production-ready applications faster with ${BRAND.name}. A Next.js 16 starter template with authentication, database, email, Docker — plus a complete AI agent orchestration layer for building agents, workflows, and knowledge bases.`;
+
+const heroTitle = `${BRAND.name} - Production-Ready Next.js Starter Template`;
 
 export const metadata: Metadata = {
-  title: 'Sunrise - Production-Ready Next.js Starter Template',
+  title: heroTitle,
   description: heroDescription,
   openGraph: {
-    title: 'Sunrise - Production-Ready Next.js Starter Template',
+    title: heroTitle,
     description: heroDescription,
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Sunrise - Production-Ready Next.js Starter Template',
+    title: heroTitle,
     description: heroDescription,
   },
 };

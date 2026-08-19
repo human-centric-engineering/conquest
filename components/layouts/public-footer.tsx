@@ -36,7 +36,15 @@ export function PublicFooter() {
               surfaces forks host in this group. Inline also matches
               ProtectedFooter, which never had a separate row — the two footers
               disagreed about the same content until now. */}
-          {copyright && <p className="text-muted-foreground text-sm">{copyright}</p>}
+          {/* `order-last` on mobile keeps the reading order the dedicated row
+              used to give: nav, then legal, then attribution. Without it, moving
+              the element to the top of the flex column also moves it to the top
+              of the page and of the screen-reader order. On `sm:` the row is
+              horizontal, so source order is the visual order and the override
+              is dropped. */}
+          {copyright && (
+            <p className="text-muted-foreground order-last text-sm sm:order-none">{copyright}</p>
+          )}
 
           {/* Navigation Links */}
           <nav className="flex flex-wrap justify-center gap-x-6 gap-y-2">

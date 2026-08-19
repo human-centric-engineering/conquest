@@ -781,8 +781,11 @@ await prisma.$transaction(
 ```
 
 The trap is easy to miss because **there is no in-repo example to pattern-match
-against**: of the 26 `$transaction` call sites in core, 24 use the callback form
-(`$transaction(async (tx) => …)`) and **none** use the array form. A fork writing
+against**: all 26 `$transaction` call sites in core use the callback form
+(`$transaction(async (tx) => …)`) and **none** use the array form. Two of them
+read array-shaped at a glance and are not —
+`lib/orchestration/capabilities/built-in/apply-audit-changes.ts` wraps its
+callback across lines, and `lib/db/utils.ts` passes one through as a variable. A fork writing
 its first batched write is therefore writing it from the Prisma docs, where the
 array form is presented without this caveat.
 

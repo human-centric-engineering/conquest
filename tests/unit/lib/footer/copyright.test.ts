@@ -56,14 +56,22 @@ describe('resolveFooterCopyright', () => {
     expect(await resolve(2026, 'Acme')).toBeNull();
   });
 
-  it('treats an empty string as an explicit empty line, not as unset', async () => {
-    // `''` is falsy but is not `false`, and the seam's contract is a tri-state.
-    // Documented here because the obvious `footerCopyright || default` refactor
-    // would silently change this.
+  it('passes an empty string through rather than falling back to the default', async () => {
+    // `''` is falsy but is not `false`, so `footerCopyright || default` would
+    // silently resurrect the platform line for a fork that set an empty string.
+    // The resolver therefore distinguishes them.
+    //
+    // Note what BOTH footers then do: they render `{copyright && <p>…}`, so an
+    // empty string collapses to the same output as `false`. That is fine — the
+    // seam documents `false` as the way to omit the line — but it means this
+    // assertion pins the resolver's contract, not an observable difference on
+    // the page. Do not "fix" the footers to render on `!== null`; an empty
+    // `<p>` is not a feature.
     vi.resetModules();
     vi.doMock('@/lib/app/footer', () => ({ footerCopyright: '' }));
 
     expect(await resolve(2026, 'Acme')).toBe('');
+    expect(await resolve(2026, 'Acme')).not.toContain('©');
   });
 
   it('uses the year it is given rather than reading the clock', async () => {

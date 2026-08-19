@@ -27,17 +27,29 @@ import { join } from 'node:path';
 const REPO_ROOT = process.cwd();
 
 /**
- * Directories Sunrise reserves but never populates. A `.gitkeep` (or a
- * `README`) explaining the reservation is the only permitted content — the
- * directory has to exist in git for a fork to find it.
+ * Reserved directories that must EXIST in git — a reservation a fork cannot
+ * find is not a reservation. Both were invented independently by forks before
+ * Sunrise named them, which is the whole argument for shipping the directory
+ * rather than only writing it down.
  */
-const EMPTY_RESERVATIONS = [
-  'components/app',
-  'components/framework',
+const MATERIALISED_RESERVATIONS = ['components/app', 'components/framework'] as const;
+
+/**
+ * Reserved namespaces Sunrise does not currently ship a placeholder for. Still
+ * asserted empty — the promise is "core creates nothing here" either way — but
+ * NOT asserted to exist, because they never have.
+ *
+ * The distinction matters: without it these rows pass vacuously (a missing
+ * directory trivially contains no platform files), so the test would report
+ * success on a reservation nobody can act on.
+ */
+const UNMATERIALISED_RESERVATIONS = [
   'lib/framework',
   '.context/framework',
   '.context/app',
 ] as const;
+
+const EMPTY_RESERVATIONS = [...MATERIALISED_RESERVATIONS, ...UNMATERIALISED_RESERVATIONS] as const;
 
 const PLACEHOLDER_NAMES = new Set(['.gitkeep', '.gitignore', 'README.md']);
 
@@ -70,11 +82,17 @@ describe('reserved fork tiers', () => {
     ).toEqual([]);
   });
 
-  it('components/app exists in git so a fork can find it', () => {
+  it.each(MATERIALISED_RESERVATIONS)('%s exists in git so a fork can find it', (dir) => {
     // An unreserved-but-undocumented directory is how two forks ended up
-    // inventing `components/app/` independently. It has to be discoverable.
-    expect(existsSync(join(REPO_ROOT, 'components/app'))).toBe(true);
-    expect(filesUnder('components/app').length).toBeGreaterThan(0);
+    // inventing `components/app/` independently, and a third inventing
+    // `components/hub/`. Writing the reservation down is not enough — the
+    // directory has to be there when someone goes looking.
+    expect(
+      existsSync(join(REPO_ROOT, dir)),
+      `"${dir}" is named as a reserved tier in CLAUDE.md and CUSTOMIZATION.md but ` +
+        `does not exist, so nobody can find it. Ship a .gitkeep explaining the reservation.`
+    ).toBe(true);
+    expect(filesUnder(dir).length).toBeGreaterThan(0);
   });
 
   it('prisma/schema/app.prisma declares no models', () => {
