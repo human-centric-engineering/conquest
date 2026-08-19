@@ -190,8 +190,10 @@ export function registerAppSubjectSources(contribution: AppSubjectSourceContribu
       continue;
     }
     if ((entry.reason ?? '').trim().length < MIN_REASON) {
-      // The reason is the whole value of an exclusion — it is what a reader
-      // (and, through the manifest, a regulator) is shown in place of the data.
+      // The reason is the whole value of an exclusion, and it is not filing:
+      // `exportUserData()` puts it in the bundle's `meta.excluded`, so this
+      // string is what the data subject — and any regulator auditing the
+      // response — is shown in place of the table's contents.
       reject(tier, model, `reason must be at least ${MIN_REASON} characters`);
       continue;
     }

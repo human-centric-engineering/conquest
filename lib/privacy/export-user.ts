@@ -20,7 +20,8 @@
  * deliberate, and it follows from which failure the subject can detect.
  *
  * @see lib/privacy/export-sources.ts — the manifest and its coverage guard
- * @see lib/privacy/subject-source-registry.ts — where a fork tier declares its own
+ * @see lib/privacy/subject-source-registry.ts — where a fork tier declares its
+ *      own sources and exclusions; both reach the subject through `meta`
  * @see lib/privacy/erase-user.ts — the Art. 17 counterpart
  * @see .context/privacy/data-export.md — the guide
  */
@@ -34,7 +35,10 @@ import {
   type ExcludedSource,
   type SubjectQuery,
 } from '@/lib/privacy/export-sources';
-import { getAppSubjectSources } from '@/lib/privacy/subject-source-registry';
+import {
+  getAppSubjectSources,
+  getAppExcludedSubjectSources,
+} from '@/lib/privacy/subject-source-registry';
 
 /**
  * Bundle format version. Bump on any breaking change to the shape below — a
@@ -218,7 +222,14 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
       subjectUserId: userId,
       exported,
       attribution,
-      excluded: EXCLUDED_SOURCES,
+      // Core's exclusions AND the fork tier's. A table withheld from an export
+      // is disclosed with its reason so the subject can see the boundary of
+      // what they received rather than having to infer it — and that has to
+      // hold for a fork's tables too, or a fork install's bundle states the
+      // boundary for core's half and stays silent about the other. The
+      // exclusion path is otherwise the only accounting option with nothing
+      // holding it to anything after the build.
+      excluded: [...EXCLUDED_SOURCES, ...getAppExcludedSubjectSources()],
     },
     account,
     personalData,

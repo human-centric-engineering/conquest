@@ -445,6 +445,40 @@ describe('exportUserData', () => {
     });
   });
 
+  describe('a fork tier’s exclusions reach the subject', () => {
+    it('discloses them in meta.excluded, alongside core’s', async () => {
+      // The reason a tier writes is what the subject is shown in place of the
+      // table's contents. Without this, a fork install's bundle states the
+      // boundary for core's tables and stays silent about the fork's — the
+      // subject cannot tell "we hold nothing about you" from "we decided not
+      // to give it to you".
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          excluded: [
+            {
+              model: 'AppCountry',
+              reason: 'Reference list of countries — holds no personal data.',
+            },
+          ],
+        });
+      });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.excluded).toEqual([
+        ...EXCLUDED_SOURCES,
+        { model: 'AppCountry', reason: 'Reference list of countries — holds no personal data.' },
+      ]);
+    });
+
+    it('leaves meta.excluded as core’s alone in vanilla Sunrise', async () => {
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.excluded).toEqual(EXCLUDED_SOURCES);
+    });
+  });
+
   describe('meta', () => {
     it('reports the format version', async () => {
       const bundle = await exportUserData(PARAMS);

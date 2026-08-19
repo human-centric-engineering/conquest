@@ -33,7 +33,10 @@
 import { prisma } from '@/lib/db/client';
 import { exportUserData, SubjectNotFoundError } from '@/lib/privacy/export-user';
 import { SUBJECT_DATA_SOURCES } from '@/lib/privacy/export-sources';
-import { getAppSubjectSources } from '@/lib/privacy/subject-source-registry';
+import {
+  getAppSubjectSources,
+  getAppExcludedSubjectSources,
+} from '@/lib/privacy/subject-source-registry';
 import { isEmptySection } from '@/scripts/smoke/export-assertions';
 
 const PREFIX = 'smoke-test-export';
@@ -303,6 +306,24 @@ async function main(): Promise<void> {
       'meta summarises every source'
     );
     check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
+
+    // A fork tier's exclusions are disclosed on the same terms as core's. This
+    // is the only check on the exclusion path after the build: a declared
+    // `source` is held to its promise by DeclaredAppSourceMissingError below,
+    // while a declared `excluded` is otherwise trusted forever.
+    const declaredAppExclusions = getAppExcludedSubjectSources();
+    const undisclosed = declaredAppExclusions
+      .filter((entry) => !bundle.meta.excluded.some((shown) => shown.model === entry.model))
+      .map((entry) => entry.model);
+    check(
+      undisclosed.length === 0,
+      undisclosed.length > 0
+        ? `app exclusion(s) ${undisclosed.join(', ')} were declared but are absent from ` +
+            'meta.excluded — the subject is not told the table was withheld, or why'
+        : declaredAppExclusions.length === 0
+          ? 'no app exclusions declared (vanilla Sunrise) — nothing to disclose'
+          : `all ${declaredAppExclusions.length} declared app exclusion(s) disclosed to the subject`
+    );
 
     // FORK NOTE — this asserts your declarations, not their absence.
     //
