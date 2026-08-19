@@ -18,6 +18,63 @@ release process.
 
 ### Added
 
+- **`lib/app/api-key-scopes.ts` + `withAuth(handler, { scope })` — least
+  privilege is available to forks.** `AiApiKey.scopes` is a `String[]`, but the
+  two places deciding what may go in it were closed lists in platform files, so
+  a fork could *check* a scope of its own and no user could ever *create* one to
+  check. `APP_API_KEY_SCOPES` unions into both. The enforcement half ships with
+  it, because a wider scope list on its own is just labels: `withAuth` accepted
+  a key of any scope, so the key on someone's phone reached every authenticated
+  route as them. `{ scope }` applies to API-key callers only — a browser session
+  is the full user — and is opt-in per route, so no shipped endpoint changes.
+  `GET /api/v1/user/api-keys` now also returns `availableScopes`.
+
+- **`lib/auth/api-key-scopes.ts`** — the scope vocabulary
+  (`CORE_API_KEY_SCOPES`, `validateScopes`, `hasScope`, `listValidApiKeyScopes`,
+  `ApiKeyScope`), split out of `lib/auth/api-keys.ts` so `createApiKeySchema`
+  can read it without dragging Prisma into the client bundle. `api-keys.ts`
+  re-exports all of it, so existing imports are unchanged.
+
+- **`lib/app/account-sections.ts` + `lib/account-sections/registry.ts` — extra
+  sections on `/profile` and `/settings`.** The account surface is where a fork
+  commonly adds an account connection, a billing panel or an integrations list,
+  and it had no extension point — so the only way in was editing a
+  Sunrise-owned page and conflicting on every sync. `registerAccountSection({
+  id, surfaces?, order?, Component })` renders at the foot of either page (or
+  both, the default); `Component` receives `{ userId }`. The account-surface
+  analogue of `lib/admin-nav/registry.ts`. Empty registry renders no node at
+  all, so vanilla Sunrise is unchanged, and a throwing init rolls back anything
+  it had already registered rather than half-rendering the account surface.
+
+- **`lib/app/evaluations.ts` — fork-owned evaluation graders.** The grader
+  registry advertised pluggability that only held for core: `registerGrader` was
+  exported, but the only caller was the package's own barrel, and the batch
+  worker runs in the **route** realm — so a grader registered from `initApp()`
+  filled a map the worker never read. It either never reached the metric picker
+  or threw `No grader registered for slug` mid-drain, after the subject calls
+  were already paid for. `initAppGraders()` now runs once, lazily, before the
+  registry's first lookup, so every route-realm reader sees it. Replacing a
+  built-in slug still works (that is how a mock is swapped in) but is now logged
+  at warn. A throwing init **rolls back** the registrations it had already
+  made — otherwise a grader that had shadowed `exact_match` would keep rescoring
+  every run while the log said none were registered.
+
+- **`lib/app/mcp-resources.ts` — fork-owned MCP resource handlers.** MCP *tools*
+  had a fork seam (`lib/app/capabilities.ts`); *resources* did not, so a
+  read path a host could preload had to ship as a tool call. Fill in
+  `initAppMcpResources()` with
+  `registerMcpResourceHandler({ resourceType, uriScheme, handler })` and an app
+  type flows through `resources/list|read|subscribe`, templates, caching,
+  `resources:read` scoping, `McpExposedResource` gating and audit exactly like a
+  core one. `uriScheme` is required — a fork resource silently inheriting
+  `sunrise://` would advertise the starter's identity to every MCP client that
+  lists it — and a built-in `resourceType` cannot be shadowed. The scheme binds
+  to the type: `sunrise://…` filed under a fork type is a 400, and so is the
+  inverse (`isUriSchemeValidForResourceType`, `mcpResourceUriSchemeFor`). A
+  throwing init rolls back its own partial registrations, so a half-configured
+  resource is never left dispatchable. Rows still default to
+  `isEnabled: false`.
+
 - **`components/app/**` and `components/framework/**` are now reserved fork
   tiers.** Sunrise creates nothing under either, so a fork's own React
   components merge cleanly on upgrade. This closes a live collision: the
@@ -56,6 +113,14 @@ release process.
   literal in the component.
 
 ### Fixed
+
+- **A parameterised MCP resource URI now matches when its `{param}` is not the
+  last path segment.** `hub://projects/{id}/plan` collapsed to
+  `hub://projects//plan` under the strip-then-`startsWith` test, which no
+  concrete URI starts with, so the read returned `null`. Every core template
+  happens to be trailing, which is why nothing noticed. The prefix test is kept
+  alongside the new exact-fill test, so every URI that resolved before still
+  resolves.
 
 - **Timers are cancelled on unmount across 19 components.** Every unmanaged
   `setTimeout` in `components/**` — one not stored in a ref that a cleanup
@@ -97,7 +162,47 @@ release process.
   [`.context/architecture/ci.md`](./.context/architecture/ci.md) — and lower it
   to fit before flipping a repo private**, where `ubuntu-latest` is 2 vCPU / 8GB.
 
+### Security
+
+- **Minting *or revoking* an API key now requires a browser session.** `POST`
+  and `DELETE` on `/api/v1/user/api-keys` used `withAuth`, which accepts a key
+  of any scope. Minting was privilege laundering — a key scoped to one narrow
+  job could mint a `chat` key and reach every authenticated route as its owner,
+  so least privilege that can self-escalate is not least privilege. Revoking is
+  destructive rather than escalating, but `GET` returns every key's id, so a
+  leaked `chat`-scoped key could enumerate its owner's keys and revoke all of
+  them, `admin` included. Both now 403 for a key-authenticated caller,
+  mirroring the existing refusals on `PATCH /api/v1/users/me` (email) and
+  `GET /api/v1/users/me/export`. Browser sessions are unchanged, and no
+  headless flow loses anything it still had — a rotate-and-revoke script needs
+  `POST` too.
+
 ### Changed
+
+- **`ApiKeyScope` is an open type and `validateScopes` returns `boolean`.**
+  `ApiKeyScope` was a closed union and is now `CoreApiKeyScope | (string & {})`,
+  which keeps autocomplete on the five core names while accepting a fork's.
+  `validateScopes` consequently returns a plain `boolean` rather than the type
+  predicate `scopes is ApiKeyScope[]` — against an open type that predicate
+  narrowed nothing while reading as a guarantee it could not make. The runtime
+  check is unchanged.
+
+- **`CreateExposedResource['resourceType']` and
+  `ListExposedResourcesQuery['resourceType']` are now `string`, and
+  `createExposedResourceSchema.uri` no longer requires `sunrise://`.** Both
+  schemas and both inferred types are exported, so a fork consuming them sees a
+  weaker type. That is the type-level shadow of the validation change below —
+  the *runtime* surface is equal-or-stricter, because membership moved to the
+  route rather than being dropped.
+
+- **MCP resource `uri` and `resourceType` are validated against what can
+  dispatch, not against a closed enum.** `POST /api/v1/admin/orchestration/mcp/resources`
+  now rejects a URI whose scheme nothing registered and a `resourceType` with no
+  handler. This is strictly stricter than the Zod enum it replaces — that enum
+  could not see a core type whose handler had gone missing — while letting a
+  fork create `hub://projects/{id}/plan`. The Zod schema keeps a format check
+  only; membership moved to the route because `lib/validations/mcp.ts` is
+  imported by client components and the registry reaches `lib/app/`.
 
 - **Metadata no longer hardcodes the starter identity.** `app/layout.tsx`
   shipped `"${BRAND.name} - Next.js Starter"` and a description advertising "a

@@ -11,7 +11,16 @@ import { successResponse, paginatedResponse } from '@/lib/api/responses';
 import { validateRequestBody, validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { Prisma } from '@prisma/client';
-import { clearMcpResourceCache, broadcastMcpResourcesChanged } from '@/lib/orchestration/mcp';
+import {
+  clearMcpResourceCache,
+  broadcastMcpResourcesChanged,
+  isDispatchableMcpResourceType,
+  isAllowedMcpResourceUri,
+  isUriSchemeValidForResourceType,
+  mcpResourceUriSchemeFor,
+  listAllowedMcpResourceUriSchemes,
+} from '@/lib/orchestration/mcp';
+import { ValidationError } from '@/lib/api/errors';
 import {
   createExposedResourceSchema,
   listExposedResourcesQuerySchema,
@@ -47,6 +56,45 @@ export const GET = withAdminAuth(async (request) => {
 export const POST = withAdminAuth(async (request, session) => {
   const log = await getRouteLogger(request);
   const body = await validateRequestBody(request, createExposedResourceSchema);
+
+  // Membership checks live here rather than in the Zod schema: the schema
+  // module is imported by client components, and the registry reaches the
+  // fork's `lib/app/mcp-resources.ts` (#462 realm split). See the docblock on
+  // `resourceTypeSchema`.
+  //
+  // Together these reject a row that could never serve a read — which is what
+  // #540 reported: an inserted row whose type has no handler dispatches to
+  // `null` and logs "no handler for type", long after whoever created it has
+  // stopped looking.
+  if (!isAllowedMcpResourceUri(body.uri)) {
+    const schemes = listAllowedMcpResourceUriSchemes()
+      .map((s) => `${s}://`)
+      .join(', ');
+    throw new ValidationError(`URI must use a registered scheme (${schemes})`, {
+      uri: [`Allowed schemes: ${schemes}`],
+    });
+  }
+
+  if (!isDispatchableMcpResourceType(body.resourceType)) {
+    throw new ValidationError(`No handler is registered for resourceType '${body.resourceType}'`, {
+      resourceType: [
+        'Register a handler with registerMcpResourceHandler() from lib/app/mcp-resources.ts first.',
+      ],
+    });
+  }
+
+  // The two checks above are independent, and independent is not enough: with
+  // `project_plan` registered under `hub`, a URI of `sunrise://projects/x/plan`
+  // satisfies both and then serves fork data under the platform's own scheme to
+  // every MCP client that lists it. Requiring `uriScheme` at registration only
+  // means anything if the pair is enforced here.
+  if (!isUriSchemeValidForResourceType(body.uri, body.resourceType)) {
+    const expected = mcpResourceUriSchemeFor(body.resourceType);
+    throw new ValidationError(
+      `resourceType '${body.resourceType}' is registered under the '${expected}://' scheme`,
+      { uri: [`Must use ${expected}://`] }
+    );
+  }
 
   const resource = await prisma.mcpExposedResource.create({
     data: {

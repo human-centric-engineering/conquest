@@ -396,6 +396,10 @@ small and conflict-free.)
 | `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                        |
 | `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
 | `lib/app/data-export.ts`                   | app tables in a subject-access export              | `exportUserData()` (server route-handler)                             |
+| `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                      |
+| `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)          | the grader registry (server route-handler)                            |
+| `lib/app/account-sections.ts`              | extra sections on `/profile` + `/settings`         | `<AccountSections/>` on both account pages (server)                   |
+| `lib/app/api-key-scopes.ts`                | extra API-key scopes (`APP_API_KEY_SCOPES`)        | `lib/auth/api-key-scopes.ts` + `createApiKeySchema` (server + client) |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -623,6 +627,144 @@ To render your own brand lockup as the section header instead of the default
 uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
+
+**API-key scopes — `lib/app/api-key-scopes.ts`.** `AiApiKey.scopes` is a
+`String[]` in the schema, but the two places that decided what may go in it were
+closed lists in platform files. A fork could _check_ a scope of its own; no user
+could ever _create_ one to check — so least privilege was unavailable
+downstream, and the workaround was always a credential wider than the job:
+
+```ts
+// lib/app/api-key-scopes.ts — yours to edit (ships empty)
+export const APP_API_KEY_SCOPES: readonly string[] = ['capture'];
+
+// app/api/v1/app/capture/route.ts — the other half
+export const POST = withAuth(handler, { scope: 'capture' });
+```
+
+**Both halves, or neither.** `withAuth` accepts an API key of **any** scope, so
+a wider scope list on its own is just labels: the key on someone's phone still
+reaches every authenticated route as them. The `scope` option on `withAuth` is
+what makes the name mean something. It applies **only** to API-key callers — a
+browser session is the full user, and gating it on a scope would lock a person
+out of their own page. `admin` satisfies every scope, and still requires an
+ADMIN user to mint.
+
+`scope` is opt-in per route, and no core route sets it yet: adding a requirement
+to a shipped endpoint would revoke access from keys that work today. Set it on
+your own routes.
+
+Names are lower snake_case, must not collide with a core scope (`chat`,
+`analytics`, `knowledge`, `webhook`, `admin`), and a malformed or colliding
+entry is dropped with a logged error rather than widening what can be minted —
+this list is the allowlist `POST /api/v1/user/api-keys` issues against. That
+endpoint's `GET` returns `availableScopes`, so your key UI does not have to
+restate the list. See
+[`.context/orchestration/api-keys.md`](./.context/orchestration/api-keys.md).
+
+**Account sections — `lib/app/account-sections.ts`.** The authenticated account
+surface (`/profile`, `/settings`) is the one place a fork commonly needs to add
+something of its own — an account connection, a billing panel, an integrations
+list — and it had no extension point, so the only way in was editing a
+Sunrise-owned page and taking a conflict on every sync. Fill in the auto-wired
+`initAppAccountSections()` with `registerAccountSection({ … })` calls:
+
+```ts
+// lib/app/account-sections.ts — yours to edit (ships empty)
+import { registerAccountSection } from '@/lib/account-sections/registry';
+import { GitHubConnectSection } from '@/components/app/account/github-connect';
+
+export function initAppAccountSections(): void {
+  registerAccountSection({
+    id: 'github-connect', // dedupe + React key
+    surfaces: ['profile', 'settings'], // the default; narrow it if you need to
+    order: 10, // ascending; equal values keep registration order
+    Component: GitHubConnectSection, // receives { userId }
+  });
+}
+```
+
+Your component lives in `components/app/**`, not in `lib/app/` — the `lib/app/**`
+boundary forbids runtime framework imports, so this file holds the registration
+and the import, never the JSX. The section renders at the **foot of the page**,
+below the profile cards or below the settings tabs; it is deliberately not a
+fifth tab, because the tab list is a fixed four-column grid and a fork's section
+is not always tab-shaped. If you want the account surface in your own shell
+entirely, take a route group instead — see
+[§ When a surface needs a different frame](#when-a-surface-needs-a-different-frame--give-it-a-route-group).
+
+Empty registry renders nothing, so vanilla Sunrise is visually unchanged, and a
+throwing _registration_ degrades to no sections — including any made before the
+throw, which are rolled back, so "no sections" is literally true rather than
+approximately. **Render is a different
+matter**: a section that throws while rendering fails the page, which falls to
+`app/(protected)/error.tsx` — the user is still off the page they came to change
+a password on. There is no per-section boundary, because a React error boundary
+is a client component and cannot catch a throw inside an async server section,
+so it would guard some and not others. Handle failure inside your section.
+
+**Evaluation graders — `lib/app/evaluations.ts`.** Fill in the auto-wired
+`initAppGraders()` with `registerGrader(yourGrader)` calls; the grader registry
+runs it once before its first lookup, which covers the batch worker, the
+run-creation validator and the metric picker alike. Import `registerGrader` from
+`@/lib/orchestration/evaluations/graders/registry` rather than the barrel — the
+barrel's job is to side-effect-import every core grader.
+
+Reach for this when the metric is **deterministic**. `judge_agent` is the right
+answer for a model grader (a new metric is a new agent, no code), but an LLM
+judging set equality adds its own variance to the number you are reading a
+regression out of, and costs money per case for arithmetic.
+
+Re-registering a slug replaces the previous entry, so an app grader _can_
+replace a built-in. That is deliberate — it is how a mock gets swapped in — but
+it is logged at warn, because a silently replaced `exact_match` changes every
+score an admin reads without changing anything they can see. See
+[`.context/orchestration/evaluations.md`](./.context/orchestration/evaluations.md).
+
+**App-owned MCP resources — `lib/app/mcp-resources.ts`.** MCP _tools_ already had
+a seam (`lib/app/capabilities.ts`); _resources_ did not, so a read path a host
+could preload had to ship as a tool call instead. Fill in the auto-wired
+`initAppMcpResources()` with `registerMcpResourceHandler({ resourceType,
+uriScheme, handler })` calls:
+
+```ts
+// lib/app/mcp-resources.ts — yours to edit (ships empty)
+import { registerMcpResourceHandler } from '@/lib/orchestration/mcp/resource-registry';
+import { handleProjectPlan } from '@/lib/app/mcp/project-plan';
+
+export function initAppMcpResources(): void {
+  registerMcpResourceHandler({
+    resourceType: 'project_plan',
+    uriScheme: 'hub', // → hub://projects/{id}/plan
+    handler: handleProjectPlan,
+  });
+}
+```
+
+Then create the `McpExposedResource` row (a seed, or
+`POST /api/v1/admin/orchestration/mcp/resources`). Four rules worth knowing
+before you do:
+
+- **`uriScheme` is required, not defaulted.** A fork resource that silently
+  inherited `sunrise://` would advertise the starter's identity to every MCP
+  client that lists it. Pass `'sunrise'` deliberately if that is what you want.
+- **The `uriScheme` binds to the `resourceType`, and the pair is enforced.**
+  Creating `sunrise://projects/x/plan` under a `project_plan` registered as
+  `hub` is a 400, and so is the inverse. Checking "is this scheme allowed" and
+  "does this type dispatch" independently would let a fork's resource list
+  itself to every MCP client under the platform's own scheme, which is the whole
+  reason `uriScheme` is required.
+- **You cannot shadow a built-in `resourceType`.** Sunrise seeds rows for its own
+  types and `resourceType` is the only thing tying a row to its handler, so an
+  override would change what `sunrise://agents` returns to an external client.
+  The registration is refused and logged.
+- **The row is validated against what can actually dispatch.** Creating a
+  resource whose type has no registered handler is a 400, rather than a row that
+  returns `null` and logs "no handler for type" the first time a client reads it.
+
+The admin create form's type dropdown still lists core types only — an app type
+goes in through a seed or the API. See
+[`.context/orchestration/mcp.md`](./.context/orchestration/mcp.md).
 
 **Third-party iframes — `lib/app/csp.ts`.** `frame-src` is `'self'` in both the
 dev and prod CSP. If your app embeds a third-party iframe (an onboarding or

@@ -47,16 +47,33 @@ vi.mock('@/lib/api/context', () => ({
   getRouteLogger: vi.fn(() => Promise.resolve({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })),
 }));
 
-vi.mock('@/lib/orchestration/mcp', () => ({
+// Only the two side-effect helpers are stubbed. The dispatchability checks the
+// POST handler runs (`isAllowedMcpResourceUri`, `isDispatchableMcpResourceType`)
+// come through REAL — stubbing them would leave the 400s below asserting on a
+// mock's return value rather than on what the registry can actually serve.
+vi.mock('@/lib/orchestration/mcp', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/orchestration/mcp')>()),
   clearMcpResourceCache: vi.fn(),
   broadcastMcpResourcesChanged: vi.fn(),
+}));
+
+// The fork seam ships empty; the app-type test below fills it explicitly.
+vi.mock('@/lib/app/mcp-resources', () => ({
+  initAppMcpResources: vi.fn(),
 }));
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
+// The two spies come from the MOCKED barrel; the registrar comes from the real
+// module the barrel re-exports, so a registration here is visible to the route.
 import { clearMcpResourceCache, broadcastMcpResourcesChanged } from '@/lib/orchestration/mcp';
+import {
+  registerMcpResourceHandler,
+  __resetAppMcpResourcesForTests,
+} from '@/lib/orchestration/mcp/resource-registry';
+import { initAppMcpResources } from '@/lib/app/mcp-resources';
 import {
   mockAdminUser,
   mockUnauthenticatedUser,
@@ -116,6 +133,7 @@ const VALID_RESOURCE_BODY = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetAppMcpResourcesForTests();
 });
 
 describe('GET /mcp/resources', () => {
@@ -231,6 +249,113 @@ describe('POST /mcp/resources', () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  it('rejects a resourceType with no registered handler, naming the seam', async () => {
+    // Stronger than the closed enum this replaced: it also catches a CORE type
+    // whose handler has gone missing, which the enum could not see.
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+
+    const response = await POST(
+      makePostRequest({ ...VALID_RESOURCE_BODY, resourceType: 'project_plan' })
+    );
+    const body = await parseJson<{ error: { message: string } }>(response);
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain('project_plan');
+    expect(prisma.mcpExposedResource.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a fork resourceType and URI scheme once the seam registers them', async () => {
+    // The whole point of #563: this same request 400s on vanilla Sunrise.
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+    vi.mocked(prisma.mcpExposedResource.create).mockResolvedValue(
+      makeResource({ uri: 'hub://projects/{id}/plan', resourceType: 'project_plan' })
+    );
+
+    const response = await POST(
+      makePostRequest({
+        ...VALID_RESOURCE_BODY,
+        uri: 'hub://projects/{id}/plan',
+        resourceType: 'project_plan',
+      })
+    );
+
+    expect(response.status).toBe(201);
+    expect(prisma.mcpExposedResource.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          uri: 'hub://projects/{id}/plan',
+          resourceType: 'project_plan',
+        }),
+      })
+    );
+  });
+
+  it('rejects a fork type filed under the core scheme, naming the right one', async () => {
+    // `sunrise://` + a registered fork type passes both independent checks; only
+    // the pair check catches it. Left open, a fork resource would list itself to
+    // every MCP client under the platform's own scheme — the inheritance
+    // `uriScheme` is required in order to prevent.
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+
+    const response = await POST(
+      makePostRequest({
+        ...VALID_RESOURCE_BODY,
+        uri: 'sunrise://projects/x/plan',
+        resourceType: 'project_plan',
+      })
+    );
+    const body = await parseJson<{ error: { message: string } }>(response);
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain('hub://');
+    expect(prisma.mcpExposedResource.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a core type filed under a fork scheme', async () => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+
+    const response = await POST(
+      makePostRequest({ ...VALID_RESOURCE_BODY, uri: 'hub://agents', resourceType: 'agent_list' })
+    );
+
+    expect(response.status).toBe(400);
+    expect(prisma.mcpExposedResource.create).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a fork URI scheme that nothing registered', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+
+    const response = await POST(
+      makePostRequest({ ...VALID_RESOURCE_BODY, uri: 'obsiddy://today' })
+    );
+    const body = await parseJson<{ error: { message: string } }>(response);
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain('sunrise://');
+    expect(prisma.mcpExposedResource.create).not.toHaveBeenCalled();
   });
 
   it('rejects missing name', async () => {

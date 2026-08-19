@@ -563,10 +563,19 @@ describe('listExposedResourcesQuerySchema', () => {
     }
   });
 
-  it('rejects an invalid resourceType', () => {
+  it('accepts a resourceType no handler serves — this is a FILTER, not a create', () => {
+    // Filtering by a type a fork has retired, or by one whose seam is not
+    // registered in this realm, is a legitimate query. Dispatchability is
+    // checked when a row is created, not when the list is filtered.
     expect(
       listExposedResourcesQuerySchema.safeParse({ resourceType: 'unknown_type' }).success
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it('still rejects a malformed resourceType filter', () => {
+    for (const resourceType of ['Bad-Type', 'has space', '', 'UPPER']) {
+      expect(listExposedResourcesQuerySchema.safeParse({ resourceType }).success).toBe(false);
+    }
   });
 
   it('correctly parses boolean strings for isEnabled', () => {
@@ -635,10 +644,22 @@ describe('createExposedResourceSchema', () => {
     expect(result.success && result.data.isEnabled).toBe(false);
   });
 
-  it('rejects URI not starting with sunrise://', () => {
+  it('accepts a fork URI scheme — the allowlist moved to the route', () => {
+    // `^sunrise://` here is what stopped a fork exposing `hub://…` (#563). The
+    // schema now checks SHAPE; which schemes are allowed depends on what the
+    // fork registered, which is a server-realm question. Enforcement is covered
+    // in tests/unit/app/api/v1/admin/orchestration/mcp/resources/route.test.ts,
+    // including that `https://` and an unregistered fork scheme are still 400.
     expect(
-      createExposedResourceSchema.safeParse({ ...validInput, uri: 'https://example.com' }).success
-    ).toBe(false);
+      createExposedResourceSchema.safeParse({ ...validInput, uri: 'hub://projects/{id}/plan' })
+        .success
+    ).toBe(true);
+  });
+
+  it('rejects a URI with no scheme at all', () => {
+    for (const uri of ['not-a-uri', '://missing', 'sunrise:/single-slash', '1bad://x']) {
+      expect(createExposedResourceSchema.safeParse({ ...validInput, uri }).success).toBe(false);
+    }
   });
 
   it('rejects missing uri', () => {
@@ -661,10 +682,20 @@ describe('createExposedResourceSchema', () => {
     expect(createExposedResourceSchema.safeParse(rest).success).toBe(false);
   });
 
-  it('rejects invalid resourceType', () => {
+  it('accepts a fork resourceType — membership moved to the route', () => {
+    // Same reason as the URI scheme above: whether `project_plan` can be served
+    // depends on `registerMcpResourceHandler`, not on a constant in this file.
     expect(
-      createExposedResourceSchema.safeParse({ ...validInput, resourceType: 'bad_type' }).success
-    ).toBe(false);
+      createExposedResourceSchema.safeParse({ ...validInput, resourceType: 'project_plan' }).success
+    ).toBe(true);
+  });
+
+  it('rejects a malformed resourceType', () => {
+    for (const resourceType of ['Bad-Type', 'has space', '', '9lives', 'a'.repeat(65)]) {
+      expect(createExposedResourceSchema.safeParse({ ...validInput, resourceType }).success).toBe(
+        false
+      );
+    }
   });
 
   it('accepts all valid resourceTypes', () => {

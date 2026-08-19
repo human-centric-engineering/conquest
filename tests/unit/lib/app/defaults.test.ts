@@ -45,6 +45,8 @@ import { appAgentFields } from '@/lib/app/agent-fields';
 import { appProtectedRoutes } from '@/lib/app/protected-routes';
 import { appEnvSchema } from '@/lib/app/env';
 import { footerCopyright } from '@/lib/app/footer';
+import { APP_API_KEY_SCOPES } from '@/lib/app/api-key-scopes';
+import { listValidApiKeyScopes, CORE_API_KEY_SCOPES } from '@/lib/auth/api-key-scopes';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
@@ -52,6 +54,20 @@ import { collectAppSubjectData } from '@/lib/app/data-export';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
+import {
+  listAppMcpResourceTypes,
+  listAllowedMcpResourceUriSchemes,
+  __resetAppMcpResourcesForTests,
+} from '@/lib/orchestration/mcp/resource-registry';
+import {
+  listGraders,
+  __resetGraderRegistryForTests,
+} from '@/lib/orchestration/evaluations/graders/registry';
+import {
+  ACCOUNT_SURFACES,
+  getRegisteredAccountSections,
+  __resetAccountSectionRegistryForTests,
+} from '@/lib/account-sections/registry';
 
 /**
  * One row per `lib/app/*` seam.
@@ -214,6 +230,49 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     assert: () => expect(initAppUserCreatedHooks()).toBeUndefined(),
   },
   {
+    seam: 'lib/app/mcp-resources.ts',
+    risk: 'a stray handler would expose app data over MCP to every install\u2019s connected clients',
+    assert: () => {
+      __resetAppMcpResourcesForTests();
+      // Both readers trigger the lazy init, so this exercises the REAL seam.
+      expect(listAppMcpResourceTypes()).toEqual([]);
+      // Core's own scheme, and nothing else.
+      expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+    },
+  },
+  {
+    seam: 'lib/app/evaluations.ts',
+    risk: 'a stray grader would appear in every install\u2019s metric picker \u2014 and, on a slug core already uses, would silently rescore every run',
+    assert: () => {
+      // The registry module is driven directly, so core's barrel has not
+      // side-effect-registered anything: whatever listGraders() returns here
+      // came from the seam. The read triggers the lazy init, so this exercises
+      // the REAL file.
+      __resetGraderRegistryForTests();
+      expect(listGraders()).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/account-sections.ts',
+    risk: 'a stray section would appear on every install\u2019s /profile and /settings',
+    assert: () => {
+      __resetAccountSectionRegistryForTests();
+      // The read triggers the lazy init, so this exercises the REAL seam.
+      for (const surface of ACCOUNT_SURFACES) {
+        expect(getRegisteredAccountSections(surface)).toEqual([]);
+      }
+    },
+  },
+  {
+    seam: 'lib/app/api-key-scopes.ts',
+    risk: 'a stray scope would be mintable on every install \u2014 and a name colliding with a core scope would change what an existing key satisfies',
+    assert: () => {
+      expect(APP_API_KEY_SCOPES).toEqual([]);
+      // …and the union it feeds is exactly core, by value not just by length.
+      expect(listValidApiKeyScopes()).toEqual([...CORE_API_KEY_SCOPES]);
+    },
+  },
+  {
     seam: 'lib/app/csp.ts',
     risk: 'a stray origin would widen the iframe policy on every install',
     // These values are spliced straight into a response header, so an
@@ -224,6 +283,7 @@ const SEAM_DEFAULTS: SeamDefault[] = [
 
 afterEach(() => {
   __resetNavRegistryForTests();
+  __resetAccountSectionRegistryForTests();
 });
 
 describe('lib/app/ seams ship empty', () => {

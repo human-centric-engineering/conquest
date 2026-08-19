@@ -147,6 +147,51 @@ A parity test asserts every slug in `KNOWN_GRADER_SLUGS` is registered
 after the barrel import — a grader file that forgets `registerGrader`
 fails CI rather than silently disappearing from the picker.
 
+### Fork-owned graders (`lib/app/evaluations.ts`)
+
+`registerGrader` was always exported, but nothing outside this package's
+own barrel called it, and the barrel is imported from the **route**
+realm: the tick route (`POST /api/v1/admin/orchestration/maintenance/tick`)
+calls `runMaintenanceTick()`, which runs the `evaluationRuns` entry in
+`PLATFORM_JOBS`, which calls `processPendingEvaluationRuns()`. None of
+that shares a module graph with `instrumentation.ts`, so a grader
+registered from `initApp()` filled a map the worker never read (#541,
+the same realm split as #462). The lazy init below is realm-agnostic
+anyway — it fires on whichever reader gets there first. The result was a grader that either
+never appeared in the metric picker, or — if submitted by slug anyway —
+threw `No grader registered for slug` **mid-drain**, after the run was
+queued and the subject calls had already been paid for.
+
+```ts
+// lib/app/evaluations.ts — ships empty
+import { registerGrader } from '@/lib/orchestration/evaluations/graders/registry';
+
+export function initAppGraders(): void {
+  registerGrader(triageAccuracyGrader);
+}
+```
+
+The registry runs `initAppGraders()` once, lazily, before its first
+lookup — so `getGrader`, `getPairwiseGrader`, `hasGrader`, `listGraders`
+and `getRegisteredSlugs` all see it, whichever route-realm caller got
+there first. A throwing init is logged and degrades to "no app graders"
+rather than failing the tick — and it means it: registrations made
+**before** the throw are rolled back, so an init that registers three
+graders and dies on the fourth leaves zero, not three. All-or-nothing is
+the only contract a fork can reason about, and without it a grader that
+had already shadowed `exact_match` would keep rescoring every run while
+the log said none were registered.
+
+Import from `.../graders/registry`, not the barrel: the barrel's job is
+to side-effect-import every core grader, which makes the cycle longer
+than it needs to be.
+
+**Replacing a built-in is allowed and logged.** `registerGrader`
+overwrites by slug — that is how a mock is swapped in — so an app grader
+named `exact_match` wins. A `logger.warn` names the slug, because a
+silently replaced heuristic changes every score an admin reads while
+changing nothing they can see.
+
 ### Built-ins
 
 **Heuristic** (deterministic, no LLM call, ~0ms):
