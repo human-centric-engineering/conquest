@@ -3,20 +3,23 @@
 /**
  * The Adaptive Scope judge panel — a second, structural review alongside the design-evaluation
  * panel, scoring the SCOPE CONFIG (topics, hard rules, planner instructions, budget) rather than
- * the question structure (F17.21 phase A).
+ * the question structure.
  *
- * Ephemeral, like F5.1's own preview: this card runs the panel and shows the result in place. There
- * is no run history yet — persistence, a review queue, and one-click apply are a later phase, the
- * same F5.1 → F5.2 → F5.3 sequencing the design-evaluation panel went through.
+ * Ephemeral, like F5.1's own preview: this card runs the panel against the `evaluate-preview`
+ * route and shows the result in place, without persisting anything — the fast way to sanity-check
+ * a change before committing to a saved run. A "View past runs" link opens the persisted run
+ * history (F17.21 phase B/C: saved runs, a review queue, and one-click apply), which is where an
+ * admin actually triages and applies findings.
  *
  * Findings are shown per dimension rather than grouped by target: with four judges and a config
  * small enough to read topic-by-topic already (the list above this card), the by-question grouping
- * F5.3's review queue needed to tame dozens of questions across seven judges would be over-built
- * here for now.
+ * the persisted review queue needs to tame dozens of questions across seven judges would be
+ * over-built for this quick preview.
  */
 
 import { useState } from 'react';
-import { Gavel, Loader2, PlayCircle } from 'lucide-react';
+import Link from 'next/link';
+import { Gavel, History, Loader2, PlayCircle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -159,6 +162,14 @@ export function ScopeEvaluationCard({
               <PlayCircle className="mr-1.5 h-4 w-4" aria-hidden="true" />
             )}
             {running ? 'Evaluating…' : 'Run evaluation'}
+          </Button>
+          <Button asChild type="button" variant="ghost" size="sm">
+            <Link
+              href={`/admin/questionnaires/${questionnaireId}/v/${versionId}/topics/evaluations`}
+            >
+              <History className="mr-1.5 h-4 w-4" aria-hidden="true" />
+              View past runs
+            </Link>
           </Button>
           {result && (
             <span className="text-muted-foreground text-xs">

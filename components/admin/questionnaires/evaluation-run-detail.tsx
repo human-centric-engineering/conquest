@@ -427,7 +427,7 @@ export function EvaluationRunDetail({
                       dimension={dim.dimension}
                       busy={retrying === dim.dimension}
                       disabled={retrying !== null}
-                      onRetry={retryJudge}
+                      onRetry={(d) => retryJudge(d as EvaluationDimension)}
                       className="ml-auto"
                     />
                   </div>

@@ -62,3 +62,17 @@ export {
   type ScopeEvaluationPanelResult,
   type ScopeJudgeAgentRef,
 } from '@/lib/app/questionnaire/scope-evaluation/run-panel';
+
+export {
+  scopeReviewFindingSchema,
+  type ScopeReviewFindingInput,
+} from '@/lib/app/questionnaire/scope-evaluation/review-schema';
+
+export {
+  SCOPE_GROUP_SORTS,
+  groupScopeFindingsByTarget,
+  tallyScopeSeverities,
+  type ScopeGroupSort,
+  type ScopeFindingGroup,
+  type ScopeSeverityCounts,
+} from '@/lib/app/questionnaire/scope-evaluation/group-findings';
