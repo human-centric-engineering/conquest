@@ -58,6 +58,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
+      adaptiveScope: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
     sections: [section()],
@@ -79,6 +80,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
     },
     setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
+    adaptiveScope: null,
     ...over,
   };
 }
@@ -390,6 +392,80 @@ describe('buildPackCsv', () => {
       );
       expect(csv).not.toContain(',=HYPERLINK');
       expect(csv).toContain("'=HYPERLINK");
+    });
+  });
+
+  describe('adaptive scope blocks', () => {
+    it('omits every adaptive scope block when the model field is null', () => {
+      const csv = buildPackCsv(model({ adaptiveScope: null }));
+      expect(csv).not.toContain('# Adaptive scope');
+    });
+
+    it('renders the summary, topics, and rules blocks after Definitions', () => {
+      const csv = buildPackCsv(
+        model({
+          adaptiveScope: {
+            enabled: true,
+            alwaysAskedTopics: [
+              {
+                key: 'background',
+                label: 'Background',
+                description: null,
+                alwaysAsked: true,
+                criteria: null,
+                sampledOnly: false,
+              },
+            ],
+            conditionalTopics: [
+              {
+                key: 'talent',
+                label: 'Talent & culture',
+                description: 'Hiring and retention.',
+                alwaysAsked: false,
+                criteria: 'Mentions hiring difficulty.',
+                sampledOnly: false,
+              },
+            ],
+            rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
+            maxConditionalTopics: 3,
+            includeCheckTopic: true,
+            sessionBudgetSeconds: 600,
+          },
+        })
+      );
+      const definitionsIdx = csv.indexOf('# Definitions');
+      const summaryIdx = csv.indexOf('# Adaptive scope');
+      const topicsIdx = csv.indexOf('# Adaptive scope topics');
+      const rulesIdx = csv.indexOf('# Adaptive scope rules');
+      expect(definitionsIdx).toBeGreaterThan(-1);
+      expect(definitionsIdx).toBeLessThan(summaryIdx);
+      expect(summaryIdx).toBeLessThan(topicsIdx);
+      expect(topicsIdx).toBeLessThan(rulesIdx);
+      expect(csv).toContain('Enabled,yes');
+      expect(csv).toContain('key,label,description,always_asked,criteria,sampled_only');
+      expect(csv).toContain('background,Background,,yes,,no');
+      expect(csv).toContain(
+        'talent,Talent & culture,Hiring and retention.,no,Mentions hiring difficulty.,no'
+      );
+      expect(csv).toContain('"Always include ""Talent & culture"" when ""Engagement"" exists."');
+    });
+
+    it('reports "no" for enabled and "no limit set" for an unset session budget', () => {
+      const csv = buildPackCsv(
+        model({
+          adaptiveScope: {
+            enabled: false,
+            alwaysAskedTopics: [],
+            conditionalTopics: [],
+            rules: [],
+            maxConditionalTopics: 3,
+            includeCheckTopic: false,
+            sessionBudgetSeconds: 0,
+          },
+        })
+      );
+      expect(csv).toContain('Enabled,no');
+      expect(csv).toContain('no limit set');
     });
   });
 });

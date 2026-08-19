@@ -3,8 +3,8 @@
  *
  * A real end-to-end render — {@link PackPdfDocument} through `@react-pdf/renderer`'s
  * `renderToBuffer` — asserting a genuine PDF comes out (the `%PDF` magic header, non-empty body).
- * Exercises the model's six optional sections (meta / setup / data slots / glossary / questions /
- * evaluations) in both their present and `null`/empty states, plus the per-question
+ * Exercises the model's seven optional sections (meta / setup / data slots / glossary / questions /
+ * evaluations / adaptive scope) in both their present and `null`/empty states, plus the per-question
  * option/constraint/guidance branches, so the document never throws on any shape `buildPackModel`
  * can produce.
  *
@@ -33,6 +33,7 @@ import type {
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
+import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope/types';
 
 function question(
   partial: Partial<QuestionSlotView> & Pick<QuestionSlotView, 'key' | 'type'>
@@ -89,6 +90,82 @@ const GLOSSARY: GlossaryAppendixView = {
   entries: [
     { term: 'Engagement', definitions: ['How committed a respondent feels'] },
     { term: 'NPS', definitions: ['Net Promoter Score', 'A loyalty metric'] },
+  ],
+};
+
+const SCOPE_TOPICS: Topic[] = [
+  {
+    id: 'top1',
+    key: 'background',
+    label: 'Background',
+    description: 'The opening questions.',
+    phase: 'opening',
+    criteria: null,
+    depth: 'full',
+    members: { dataSlotKeys: ['engagement'], questionKeys: ['q1'] },
+    ordinal: 0,
+    source: 'seeded',
+  },
+  {
+    id: 'top2',
+    key: 'talent',
+    label: 'Talent & culture',
+    description: 'Hiring, retention, and team dynamics.',
+    phase: 'conditional',
+    criteria: 'The respondent mentions hiring difficulty or turnover.',
+    depth: 'full',
+    members: { dataSlotKeys: [], questionKeys: ['q1'] },
+    ordinal: 1,
+    source: 'analyst',
+  },
+  {
+    id: 'top3',
+    key: 'compliance-check',
+    label: 'Compliance blind-spot check',
+    description: null,
+    phase: 'conditional',
+    criteria: 'Sampled lightly when not otherwise selected.',
+    depth: 'light',
+    members: { dataSlotKeys: ['engagement'], questionKeys: [] },
+    ordinal: 2,
+    source: 'manual',
+  },
+];
+
+const SCOPE_SETTINGS: AdaptiveScopeSettings = {
+  enabled: true,
+  maxConditionalTopics: 3,
+  includeCheckTopic: true,
+  checkTopicPreference: [],
+  minConfidence: 0.6,
+  fallbackTopicKeys: [],
+  announce: true,
+  allowRespondentAmendment: true,
+  plannerInstructions: '',
+  sessionBudgetSeconds: 600,
+  secondsPerQuestionType: {},
+  secondsPerDataSlot: 40,
+  limitOpeningProbes: false,
+  maxOpeningProbes: 1,
+  rules: [
+    {
+      id: 'rule1',
+      dataSlotKey: 'engagement',
+      operator: 'gt',
+      value: '50',
+      action: 'include',
+      topicKey: 'talent',
+      ordinal: 0,
+    },
+    {
+      id: 'rule2',
+      dataSlotKey: 'engagement',
+      operator: 'not_exists',
+      value: null,
+      action: 'exclude',
+      topicKey: 'compliance-check',
+      ordinal: 1,
+    },
   ],
 };
 
@@ -223,7 +300,8 @@ describe('renderPackPdf', () => {
       DATA_SLOTS,
       GLOSSARY,
       EVALUATION_RUN,
-      { ...DEFAULT_PACK_INCLUDE, evaluations: true },
+      { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+      { ...DEFAULT_PACK_INCLUDE, evaluations: true, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
 
@@ -241,12 +319,14 @@ describe('renderPackPdf', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
+      adaptiveScope: false,
     };
     const model = buildPackModel(
       'Bare Pack',
       graphOf([]),
       DATA_SLOTS,
       GLOSSARY,
+      null,
       null,
       include,
       '2026-08-10T00:00:00.000Z'
@@ -262,6 +342,7 @@ describe('renderPackPdf', () => {
       graphOf([]),
       [],
       GLOSSARY,
+      null,
       null,
       DEFAULT_PACK_INCLUDE,
       '2026-08-10T00:00:00.000Z'
@@ -282,6 +363,7 @@ describe('renderPackPdf', () => {
       'Sparse Pack',
       graphOf(sections),
       DATA_SLOTS,
+      null,
       null,
       null,
       DEFAULT_PACK_INCLUDE,
@@ -310,6 +392,7 @@ describe('renderPackPdf', () => {
       [],
       null,
       null,
+      null,
       DEFAULT_PACK_INCLUDE,
       '2026-08-10T00:00:00.000Z'
     );
@@ -325,6 +408,7 @@ describe('renderPackPdf', () => {
       [],
       null,
       null,
+      null,
       { ...DEFAULT_PACK_INCLUDE, evaluations: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -335,6 +419,47 @@ describe('renderPackPdf', () => {
       totalFindings: 0,
       scores: [],
       targets: [],
+    });
+
+    const pdf = await renderPackPdf(model);
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders "not enabled" for Adaptive scope when the version never turned it on', async () => {
+    const model = buildPackModel(
+      'Unrouted Pack',
+      graphOf([]),
+      [],
+      null,
+      null,
+      { topics: [], settings: { ...SCOPE_SETTINGS, enabled: false, rules: [] } },
+      { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+      '2026-08-10T00:00:00.000Z'
+    );
+
+    expect(model.adaptiveScope?.enabled).toBe(false);
+
+    const pdf = await renderPackPdf(model);
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the "none defined" state for Adaptive scope with no topics or rules', async () => {
+    const model = buildPackModel(
+      'Enabled But Empty Pack',
+      graphOf([]),
+      [],
+      null,
+      null,
+      { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] } },
+      { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+      '2026-08-10T00:00:00.000Z'
+    );
+
+    expect(model.adaptiveScope).toMatchObject({
+      enabled: true,
+      alwaysAskedTopics: [],
+      conditionalTopics: [],
+      rules: [],
     });
 
     const pdf = await renderPackPdf(model);

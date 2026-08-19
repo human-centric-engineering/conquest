@@ -67,6 +67,11 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes', () => ({
   loadLatestEvaluationRun: vi.fn(async () => null),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', () => ({
+  loadTopics: vi.fn(async () => []),
+  loadAdaptiveScopeSettings: vi.fn(async () => ({ enabled: false, rules: [] })),
+}));
+
 vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
   loadAcceptedGlossaryEntries: vi.fn(async () => []),
 }));
@@ -105,6 +110,10 @@ import { prisma } from '@/lib/db/client';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
+import {
+  loadAdaptiveScopeSettings,
+  loadTopics,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { buildGlossaryAppendix } from '@/lib/app/questionnaire/glossary/report-appendix';
 import { buildPackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
@@ -145,6 +154,8 @@ beforeEach(() => {
   (getVersionGraph as Mock).mockResolvedValue(GRAPH);
   (loadDataSlots as Mock).mockResolvedValue([]);
   (loadLatestEvaluationRun as Mock).mockResolvedValue(null);
+  (loadTopics as Mock).mockResolvedValue([]);
+  (loadAdaptiveScopeSettings as Mock).mockResolvedValue({ enabled: false, rules: [] });
   (buildPackModel as Mock).mockReturnValue(PACK_MODEL);
 });
 
@@ -203,6 +214,7 @@ describe('GET pack — include flags', () => {
       [],
       null,
       null,
+      null,
       {
         meta: true,
         questions: true,
@@ -211,6 +223,7 @@ describe('GET pack — include flags', () => {
         setup: true,
         setupTechnical: false,
         evaluations: false,
+        adaptiveScope: false,
       },
       expect.any(String)
     );
@@ -228,6 +241,7 @@ describe('GET pack — include flags', () => {
       [],
       null,
       null,
+      null,
       {
         meta: true,
         questions: true,
@@ -236,6 +250,7 @@ describe('GET pack — include flags', () => {
         setup: false,
         setupTechnical: false,
         evaluations: false,
+        adaptiveScope: false,
       },
       expect.any(String)
     );
@@ -251,6 +266,7 @@ describe('GET pack — include flags', () => {
       QUESTIONNAIRE_ROW.title,
       GRAPH,
       [],
+      null,
       null,
       null,
       expect.objectContaining({ setup: true, setupTechnical: true }),
@@ -281,6 +297,7 @@ describe('GET pack — include flags', () => {
       [],
       null,
       null,
+      null,
       expect.objectContaining({ evaluations: false }),
       expect.any(String)
     );
@@ -303,7 +320,50 @@ describe('GET pack — include flags', () => {
       [],
       null,
       run,
+      null,
       expect.objectContaining({ evaluations: true }),
+      expect.any(String)
+    );
+  });
+
+  it('does not load topics/settings when adaptiveScope=false (default)', async () => {
+    await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
+    expect(loadTopics).not.toHaveBeenCalled();
+    expect(loadAdaptiveScopeSettings).not.toHaveBeenCalled();
+    expect(buildPackModel).toHaveBeenCalledWith(
+      QUESTIONNAIRE_ROW.title,
+      GRAPH,
+      [],
+      null,
+      null,
+      null,
+      expect.objectContaining({ adaptiveScope: false }),
+      expect.any(String)
+    );
+  });
+
+  it('loads topics + settings and threads them through when adaptiveScope=true', async () => {
+    const topics = [{ id: 't1', key: 'topic-1' }];
+    const settings = { enabled: true, rules: [] };
+    (loadTopics as Mock).mockResolvedValue(topics);
+    (loadAdaptiveScopeSettings as Mock).mockResolvedValue(settings);
+
+    await GET(
+      makeRequest(QN_ID, VID, { format: 'md', adaptiveScope: 'true' }),
+      ADMIN_SESSION,
+      makeContext()
+    );
+
+    expect(loadTopics).toHaveBeenCalledWith(VID);
+    expect(loadAdaptiveScopeSettings).toHaveBeenCalledWith(VID);
+    expect(buildPackModel).toHaveBeenCalledWith(
+      QUESTIONNAIRE_ROW.title,
+      GRAPH,
+      [],
+      null,
+      null,
+      { topics, settings },
+      expect.objectContaining({ adaptiveScope: true }),
       expect.any(String)
     );
   });

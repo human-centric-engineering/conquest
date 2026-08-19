@@ -30,6 +30,7 @@ import type {
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
+import type { AdaptiveScopeSettings, Topic } from '@/lib/app/questionnaire/scope/types';
 
 function question(
   partial: Partial<QuestionSlotView> & Pick<QuestionSlotView, 'key' | 'type'>
@@ -214,6 +215,91 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   ],
 };
 
+const SCOPE_TOPICS: Topic[] = [
+  {
+    id: 'top-opening',
+    key: 'background',
+    label: 'Background',
+    description: 'The opening questions.',
+    phase: 'opening',
+    criteria: null,
+    depth: 'full',
+    members: { dataSlotKeys: ['engagement'], questionKeys: ['q1'] },
+    ordinal: 0,
+    source: 'seeded',
+  },
+  {
+    id: 'top-conditional',
+    key: 'talent',
+    label: 'Talent & culture',
+    description: 'Hiring, retention, and team dynamics.',
+    phase: 'conditional',
+    criteria: 'The respondent mentions hiring difficulty or turnover.',
+    depth: 'full',
+    members: { dataSlotKeys: [], questionKeys: ['q1'] },
+    ordinal: 1,
+    source: 'analyst',
+  },
+  {
+    id: 'top-check',
+    key: 'compliance-check',
+    label: 'Compliance blind-spot check',
+    description: null,
+    phase: 'conditional',
+    criteria: 'Sampled when nothing else pointed at compliance.',
+    depth: 'light',
+    members: { dataSlotKeys: ['engagement'], questionKeys: [] },
+    ordinal: 2,
+    source: 'manual',
+  },
+];
+
+const SCOPE_SETTINGS: AdaptiveScopeSettings = {
+  enabled: true,
+  maxConditionalTopics: 3,
+  includeCheckTopic: true,
+  checkTopicPreference: [],
+  minConfidence: 0.6,
+  fallbackTopicKeys: [],
+  announce: true,
+  allowRespondentAmendment: true,
+  plannerInstructions: '',
+  sessionBudgetSeconds: 600,
+  secondsPerQuestionType: {},
+  secondsPerDataSlot: 40,
+  limitOpeningProbes: false,
+  maxOpeningProbes: 1,
+  rules: [
+    {
+      id: 'rule-include',
+      dataSlotKey: 'engagement',
+      operator: 'gt',
+      value: '50',
+      action: 'include',
+      topicKey: 'talent',
+      ordinal: 0,
+    },
+    {
+      id: 'rule-exclude',
+      dataSlotKey: 'engagement',
+      operator: 'not_exists',
+      value: null,
+      action: 'exclude',
+      topicKey: 'compliance-check',
+      ordinal: 1,
+    },
+    {
+      id: 'rule-orphan',
+      dataSlotKey: 'deleted-slot',
+      operator: 'exists',
+      value: null,
+      action: 'include',
+      topicKey: 'deleted-topic',
+      ordinal: 2,
+    },
+  ],
+};
+
 describe('buildPackModel', () => {
   it('includes every default-on section, but not evaluations, by default', () => {
     const model = buildPackModel(
@@ -222,6 +308,7 @@ describe('buildPackModel', () => {
       DATA_SLOTS,
       GLOSSARY,
       EVALUATION_RUN,
+      null,
       DEFAULT_PACK_INCLUDE,
       '2026-08-10T00:00:00.000Z'
     );
@@ -246,12 +333,14 @@ describe('buildPackModel', () => {
       setup: false,
       setupTechnical: false,
       evaluations: false,
+      adaptiveScope: false,
     };
     const model = buildPackModel(
       'T',
       graphOf(SECTIONS),
       DATA_SLOTS,
       GLOSSARY,
+      null,
       null,
       include,
       'now'
@@ -271,6 +360,7 @@ describe('buildPackModel', () => {
       DATA_SLOTS,
       null,
       null,
+      null,
       { ...DEFAULT_PACK_INCLUDE, questions: false },
       'now'
     );
@@ -284,6 +374,7 @@ describe('buildPackModel', () => {
       'T',
       graphOf(SECTIONS),
       DATA_SLOTS,
+      null,
       null,
       null,
       DEFAULT_PACK_INCLUDE,
@@ -302,6 +393,7 @@ describe('buildPackModel', () => {
       'T',
       graphOf(SECTIONS),
       DATA_SLOTS,
+      null,
       null,
       null,
       DEFAULT_PACK_INCLUDE,
@@ -324,6 +416,7 @@ describe('buildPackModel', () => {
       DATA_SLOTS,
       GLOSSARY,
       null,
+      null,
       { ...DEFAULT_PACK_INCLUDE, definitions: false },
       'now'
     );
@@ -340,6 +433,7 @@ describe('buildPackModel', () => {
         'T',
         graphOf(SECTIONS, configOverrides),
         [],
+        null,
         null,
         null,
         include,
@@ -451,6 +545,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: false },
         'now'
       );
@@ -462,6 +557,7 @@ describe('buildPackModel', () => {
         'T',
         graphOf(SECTIONS),
         [],
+        null,
         null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
@@ -483,6 +579,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -504,6 +601,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -526,6 +624,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -542,6 +641,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -584,6 +684,7 @@ describe('buildPackModel', () => {
         [],
         null,
         twice,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -600,6 +701,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -622,6 +724,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -639,6 +742,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -658,6 +762,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -675,6 +780,7 @@ describe('buildPackModel', () => {
         [],
         null,
         { ...EVALUATION_RUN, reconciled: [] },
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -688,6 +794,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -703,6 +810,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -720,10 +828,196 @@ describe('buildPackModel', () => {
         [],
         null,
         { ...EVALUATION_RUN, completedAt: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
       expect(model.evaluations?.runAt).toBe('2026-08-10T00:00:00.000Z');
+    });
+  });
+
+  describe('adaptive scope appendix', () => {
+    it('is null when excluded, even if topics/settings were passed in', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
+        'now'
+      );
+      expect(model.adaptiveScope).toBeNull();
+    });
+
+    it('is null when included but no source was passed in', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        null,
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope).toBeNull();
+    });
+
+    it('carries enabled/maxConditionalTopics/includeCheckTopic/sessionBudgetSeconds straight off the settings', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope).toMatchObject({
+        enabled: true,
+        maxConditionalTopics: 3,
+        includeCheckTopic: true,
+        sessionBudgetSeconds: 600,
+      });
+    });
+
+    it('reports enabled: false when the version never turned it on, without dropping the topic lists', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: { ...SCOPE_SETTINGS, enabled: false } },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.enabled).toBe(false);
+      expect(model.adaptiveScope?.alwaysAskedTopics).toHaveLength(1);
+      expect(model.adaptiveScope?.conditionalTopics).toHaveLength(2);
+    });
+
+    it('splits topics into always-asked (opening/core/closing) vs conditional, in authored order', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.alwaysAskedTopics.map((t) => t.key)).toEqual(['background']);
+      expect(model.adaptiveScope?.conditionalTopics.map((t) => t.key)).toEqual([
+        'talent',
+        'compliance-check',
+      ]);
+    });
+
+    it('carries criteria only for conditional topics, never for an always-asked one', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.alwaysAskedTopics[0].criteria).toBeNull();
+      expect(model.adaptiveScope?.conditionalTopics[0].criteria).toBe(
+        'The respondent mentions hiring difficulty or turnover.'
+      );
+    });
+
+    it('flags sampledOnly for a light-depth topic and not for a full-depth one', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      const talent = model.adaptiveScope?.conditionalTopics.find((t) => t.key === 'talent');
+      const check = model.adaptiveScope?.conditionalTopics.find(
+        (t) => t.key === 'compliance-check'
+      );
+      expect(talent?.sampledOnly).toBe(false);
+      expect(check?.sampledOnly).toBe(true);
+    });
+
+    it('renders a hard rule with an operand as a plain sentence naming the topic and data-slot labels', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        DATA_SLOTS,
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.rules[0].sentence).toBe(
+        'Always include "Talent & culture" when "Engagement" is greater than "50".'
+      );
+    });
+
+    it('renders a valueless (not_exists) rule without a trailing operand', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        DATA_SLOTS,
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.rules[1].sentence).toBe(
+        'Never include "Compliance blind-spot check" when "Engagement" was never answered.'
+      );
+    });
+
+    it('falls back to the raw key when a rule points at a topic or data slot that no longer resolves', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        DATA_SLOTS,
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.rules[2].sentence).toBe(
+        'Always include "deleted-topic" when "deleted-slot" has any answer.'
+      );
+    });
+
+    it('produces empty topic/rule lists, not a crash, for a version with no topics or rules at all', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] } },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope).toMatchObject({
+        alwaysAskedTopics: [],
+        conditionalTopics: [],
+        rules: [],
+      });
     });
   });
 });

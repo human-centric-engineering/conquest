@@ -3,8 +3,9 @@
 /**
  * PackExportDialog — download a branded Questionnaire Pack (PDF/CSV/Markdown).
  *
- * Lets the admin pick which of the pack's six sections to include (all ticked by default except
- * "Evaluation findings", which is opt-in — see its description) and the output format, then
+ * Lets the admin pick which of the pack's seven sections to include (all ticked by default except
+ * "Evaluation findings" and "Adaptive scope", which are opt-in — see their descriptions) and the
+ * output format, then
  * triggers the same-origin authenticated download from `GET …/versions/:vid/pack`. "Experience
  * setup" carries one nested sub-option — the technical/tuning settings tier — which is indented
  * under its parent and disabled while the parent is off, so it reads as a refinement of that
@@ -62,7 +63,8 @@ const FORMAT_LABELS: Record<PackFormat, string> = {
 };
 
 interface SectionOption {
-  key: 'meta' | 'questions' | 'dataSlots' | 'definitions' | 'setup' | 'evaluations';
+  key:
+    'meta' | 'questions' | 'dataSlots' | 'definitions' | 'setup' | 'evaluations' | 'adaptiveScope';
   label: string;
   description: string;
 }
@@ -102,6 +104,12 @@ const SECTIONS: SectionOption[] = [
     description:
       "The AI judge panel's latest scores and findings for this version, including suggestions not yet reviewed. Off by default — review before sharing externally.",
   },
+  {
+    key: 'adaptiveScope',
+    label: 'Adaptive scope',
+    description:
+      'How this questionnaire routes respondents — which topics everyone gets, which depend on their answers, and the rules that decide — explained in plain language. Off by default.',
+  },
 ];
 
 export function PackExportDialog({
@@ -113,7 +121,7 @@ export function PackExportDialog({
   const [included, setIncluded] = useState<PackInclude>(DEFAULT_PACK_INCLUDE);
   const [format, setFormat] = useState<PackFormat>('pdf');
 
-  // Only the six SECTIONS count — `setupTechnical` on its own produces nothing to download.
+  // Only the seven SECTIONS count — `setupTechnical` on its own produces nothing to download.
   const nothingIncluded = SECTIONS.every((section) => !included[section.key]);
 
   function handleDownload() {

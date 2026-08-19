@@ -2,18 +2,19 @@
  * Questionnaire Pack download.
  *
  * GET /api/v1/app/questionnaires/:id/versions/:vid/pack?format=pdf|csv|md
- *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=
+ *     &meta=&questions=&dataSlots=&definitions=&setup=&setupTechnical=&evaluations=&adaptiveScope=
  *   Admin-only. Downloads a branded, shareable "pack" covering how the questionnaire is set up —
  *   title/version/goals, the question structure, the data slots (with linked questions), the
- *   definitions/glossary, the experience-setup summary, and (opt-in) the latest F5.1–F5.3
- *   design-evaluation run's judge findings — as a PDF, CSV, or Markdown file. Each of the six
- *   sections can be toggled off via its query flag; all default `true` except `evaluations`, which
- *   defaults `false` (unreviewed AI critique — the admin opts in per download). `setupTechnical`
- *   (also `false` by default) widens the setup summary from the standard tier to every setting,
- *   including numeric tuning and cost/abuse thresholds — see
- *   `lib/app/questionnaire/settings-registry.ts`. Distinct from the brand-free `…/instrument`
- *   export (F14.9), which is the design-time reviewer copy of just the questions — this is the
- *   external/showcase artifact.
+ *   definitions/glossary, the experience-setup summary, (opt-in) the latest F5.1–F5.3
+ *   design-evaluation run's judge findings, and (opt-in) the Adaptive Scope routing logic (topics,
+ *   criteria, hard rules) in plain language — as a PDF, CSV, or Markdown file. Each of the seven
+ *   sections can be toggled off via its query flag; all default `true` except `evaluations` and
+ *   `adaptiveScope`, which default `false` (unreviewed AI critique, and routing design a stakeholder
+ *   pack doesn't always need — the admin opts in per download). `setupTechnical` (also `false` by
+ *   default) widens the setup summary from the standard tier to every setting, including numeric
+ *   tuning and cost/abuse thresholds — see `lib/app/questionnaire/settings-registry.ts`. Distinct
+ *   from the brand-free `…/instrument` export (F14.9), which is the design-time reviewer copy of
+ *   just the questions — this is the external/showcase artifact.
  *
  * Node runtime — `@react-pdf/renderer` needs Node. Bulk read: the same `exportLimiter` sub-cap the
  * instrument/definition routes use. Version-scoped.
@@ -37,6 +38,10 @@ import { loadAcceptedGlossaryEntries } from '@/lib/app/questionnaire/glossary/re
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
+import {
+  loadAdaptiveScopeSettings,
+  loadTopics,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { renderPackPdf } from '@/app/api/v1/app/questionnaires/[id]/versions/[vid]/pack/render-pack-pdf';
 
 // React-PDF requires the Node runtime (not edge).
@@ -61,6 +66,8 @@ const querySchema = z.object({
   setupTechnical: includeParam('false'),
   // Unreviewed AI critique — opt-in, unlike every other section (see the route JSDoc).
   evaluations: includeParam('false'),
+  // Routing design, not questionnaire content — opt-in, same reasoning as `evaluations`.
+  adaptiveScope: includeParam('false'),
 });
 
 const handleGet = withAdminAuth<{ id: string; vid: string }>(
@@ -72,8 +79,17 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     const { id, vid } = await params;
 
     const { searchParams } = new URL(request.url);
-    const { format, meta, questions, dataSlots, definitions, setup, setupTechnical, evaluations } =
-      validateQueryParams(searchParams, querySchema);
+    const {
+      format,
+      meta,
+      questions,
+      dataSlots,
+      definitions,
+      setup,
+      setupTechnical,
+      evaluations,
+      adaptiveScope,
+    } = validateQueryParams(searchParams, querySchema);
     const include = {
       meta,
       questions,
@@ -82,6 +98,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setup,
       setupTechnical,
       evaluations,
+      adaptiveScope,
     };
 
     // Definitions / glossary (P16): accepted-only, same as the instrument's reviewer copy — this is
@@ -99,10 +116,18 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     }
     const glossary = glossaryEntries ? buildGlossaryAppendix(glossaryEntries) : null;
 
-    // The latest design-evaluation run (F5.1–F5.3), if the admin opted in — `null` when the
-    // section is excluded (the common case, since it defaults off) or the version has never
-    // been evaluated.
-    const evaluationRun = evaluations ? await loadLatestEvaluationRun(vid) : null;
+    // The latest design-evaluation run (F5.1–F5.3) and Adaptive Scope's topics + settings
+    // (F17.19 Phase 4) — both `null` when their section is excluded (the common case, since both
+    // default off) or, for evaluations, when the version has never been evaluated. Independent of
+    // each other, so they load in parallel rather than serially when an admin opts into both.
+    const [evaluationRun, adaptiveScopeSource] = await Promise.all([
+      evaluations ? loadLatestEvaluationRun(vid) : Promise.resolve(null),
+      adaptiveScope
+        ? Promise.all([loadTopics(vid), loadAdaptiveScopeSettings(vid)]).then(
+            ([topics, settings]) => ({ topics, settings })
+          )
+        : Promise.resolve(null),
+    ]);
 
     const model = buildPackModel(
       questionnaire.title,
@@ -110,6 +135,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       dataSlotViews,
       glossary,
       evaluationRun,
+      adaptiveScopeSource,
       include,
       new Date().toISOString()
     );

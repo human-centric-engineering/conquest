@@ -442,8 +442,11 @@ a reviewed draft already waiting rather than an empty card. A banner names why i
 here auto-enables `adaptiveScope.enabled` or writes to the live topic set; a proposal is still only
 ever accepted by hand. The "already tried" signal that stops a discarded auto-proposal from
 re-proposing itself on every visit is the analyst's own `AppAiRun` (kind `routing_analysis`), not a
-new column — see [`f17.19.md`](../planning/features/f17.19.md) for the phased plan, what Phase 3
-shipped, and what's still open (a Questionnaire Pack section explaining the routing logic, Phase 4).
+new column — see [`f17.19.md`](../planning/features/f17.19.md) for the full phased history. Phase 4
+put the routing logic itself into the [Questionnaire Pack](./questionnaire-pack.md) — an off-by-default
+"Adaptive scope" section that explains the topics, criteria, and hard rules in plain language for a
+stakeholder audience, distinct from every other Adaptive Scope surface (all authoring tools, not
+distribution artifacts).
 
 ## Reports and scoring (F17.5)
 
