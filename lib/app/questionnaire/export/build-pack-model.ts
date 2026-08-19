@@ -5,9 +5,10 @@
  * evaluation run) into a presentation-ready {@link PackModel} — a branded, shareable artifact that
  * covers everything about how the questionnaire is set up: title/version/goals, the question
  * structure, the semantic data slots (with their linked questions), the definitions/glossary, the
- * experience-setup summary, and (opt-in) the F5.1–F5.3 judge panel's findings for this version. The
- * admin picks which of those six sections to include via {@link PackInclude}; excluded sections are
- * `null` on the model so every serialiser (PDF/CSV/Markdown) skips them the same way.
+ * experience-setup summary, (opt-in) the F5.1–F5.3 judge panel's findings for this version, and
+ * (opt-in) the Adaptive Scope routing logic in plain language. The admin picks which of those seven
+ * sections to include via {@link PackInclude}; excluded sections are `null` on the model so every
+ * serialiser (PDF/CSV/Markdown) skips them the same way.
  *
  * The setup summary is DERIVED from `lib/app/questionnaire/settings-registry.ts`, not hand-listed —
  * a new config field appears in the pack automatically (and cannot compile until it is classified).
@@ -24,6 +25,15 @@ import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/type
 import type { EvaluationRunDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
 import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/settings-registry';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
+import {
+  ALWAYS_PHASES,
+  SCOPE_RULE_ACTION_LABELS,
+  SCOPE_RULE_OPERATOR_LABELS,
+  VALUELESS_SCOPE_OPERATORS,
+  type AdaptiveScopeSettings,
+  type ScopeRule,
+  type Topic,
+} from '@/lib/app/questionnaire/scope/types';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
@@ -42,8 +52,8 @@ import {
 } from '@/lib/app/questionnaire/export/build-instrument-model';
 
 /**
- * Which of the pack's six sections to include, plus the one sub-option (`setupTechnical`). All
- * default `true` except `evaluations` and `setupTechnical`.
+ * Which of the pack's seven sections to include, plus the one sub-option (`setupTechnical`). All
+ * default `true` except `evaluations`, `adaptiveScope`, and `setupTechnical`.
  */
 export interface PackInclude {
   /** Title, version, goal, audience. */
@@ -70,11 +80,20 @@ export interface PackInclude {
    * console — an admin opts in deliberately rather than shipping it by accident.
    */
   evaluations: boolean;
+  /**
+   * The routing logic — which topics are always asked, which are conditional (and on what
+   * criteria), and the hard rules — explained in plain language for a stakeholder audience. Defaults
+   * `false`, like `evaluations`: it is the routing *design*, not the questionnaire content, and not
+   * every reader of the pack needs (or should see) how a client's instrument routes respondents
+   * before the admin has decided to share that. See {@link file://./build-pack-model.ts}'s
+   * `buildAdaptiveScopeSection`.
+   */
+  adaptiveScope: boolean;
 }
 
 /**
- * The export dialog's default checkbox state — every section except `evaluations`, and the
- * standard settings tier only.
+ * The export dialog's default checkbox state — every section except `evaluations` and
+ * `adaptiveScope`, and the standard settings tier only.
  */
 export const DEFAULT_PACK_INCLUDE: PackInclude = {
   meta: true,
@@ -84,6 +103,7 @@ export const DEFAULT_PACK_INCLUDE: PackInclude = {
   setup: true,
   setupTechnical: false,
   evaluations: false,
+  adaptiveScope: false,
 };
 
 /** One data slot, resolved for the pack — its linked questions carry their prompt, not just a key. */
@@ -205,6 +225,56 @@ export interface PackEvaluations {
   targets: PackEvaluationTarget[];
 }
 
+/**
+ * One topic, resolved for the pack's plain-language Adaptive scope section — a stakeholder reading
+ * this has never seen `TopicPhase` or `TopicDepth` and shouldn't need to.
+ */
+export interface PackAdaptiveScopeTopic {
+  key: string;
+  label: string;
+  description: string | null;
+  /**
+   * `true` for `opening` / `core` / `closing` — always run, never chosen between. `false` for
+   * `conditional`, the only phase the planner ever selects among.
+   */
+  alwaysAsked: boolean;
+  /** The admin's own plain-English criteria for a conditional topic; `null` on an always-asked one
+   *  (there is nothing to decide). */
+  criteria: string | null;
+  /** `true` when only the topic's highest-weight members are ever asked, not the whole thing. */
+  sampledOnly: boolean;
+}
+
+/**
+ * One hard rule, rendered as a plain sentence — e.g. `Always include "Team & culture" when
+ * "employee count" is greater than "50".` — rather than the operator/action enum a stakeholder was
+ * never meant to learn.
+ */
+export interface PackAdaptiveScopeRule {
+  sentence: string;
+}
+
+/**
+ * The Adaptive scope appendix — the routing logic in plain language. `enabled: false` still renders
+ * (it is informative in its own right: every respondent gets the full instrument), the same "state
+ * a fact rather than omit the section" choice `PackEvaluations.hasRun` makes.
+ */
+export interface PackAdaptiveScope {
+  /** Whether this version has Adaptive scope switched on at all. */
+  enabled: boolean;
+  /** Opening / core / closing topics, in authored order. */
+  alwaysAskedTopics: PackAdaptiveScopeTopic[];
+  /** Conditional topics, in authored order. */
+  conditionalTopics: PackAdaptiveScopeTopic[];
+  rules: PackAdaptiveScopeRule[];
+  /** How many conditional topics one interview may cover at most. */
+  maxConditionalTopics: number;
+  /** Whether one additional, unselected topic is sampled lightly to check for blind spots. */
+  includeCheckTopic: boolean;
+  /** Seconds; `0` means no time limit was set. */
+  sessionBudgetSeconds: number;
+}
+
 /** The full Questionnaire Pack model the serialisers render. */
 export interface PackModel {
   title: string;
@@ -219,6 +289,7 @@ export interface PackModel {
   glossary: GlossaryAppendixView | null;
   setup: PackSetupItem[] | null;
   evaluations: PackEvaluations | null;
+  adaptiveScope: PackAdaptiveScope | null;
 }
 
 /** Resolve a data slot's `questionKeys` to `{ key, prompt }` pairs against a pre-built prompt map. */
@@ -316,6 +387,86 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
   };
 }
 
+/**
+ * Render one hard rule as a plain sentence, resolving its topic/data-slot keys to their authored
+ * names so a stakeholder never has to read a key. An unresolved key (a rule pointing at a topic or
+ * slot since deleted — silently skipped everywhere else in this feature, per
+ * `.context/app/questionnaire/adaptive-scope.md`) falls back to the raw key rather than dropping the
+ * rule, so a stale rule is still visible as *something* an admin should clean up.
+ */
+function describeScopeRule(
+  rule: ScopeRule,
+  topicLabels: Map<string, string>,
+  dataSlotLabels: Map<string, string>
+): string {
+  const topicLabel = topicLabels.get(rule.topicKey) ?? rule.topicKey;
+  const slotLabel = dataSlotLabels.get(rule.dataSlotKey) ?? rule.dataSlotKey;
+  const operator = SCOPE_RULE_OPERATOR_LABELS[rule.operator];
+  const clause = (VALUELESS_SCOPE_OPERATORS as readonly string[]).includes(rule.operator)
+    ? `"${slotLabel}" ${operator}`
+    : `"${slotLabel}" ${operator} "${rule.value ?? ''}"`;
+  const action = SCOPE_RULE_ACTION_LABELS[rule.action];
+  const capitalizedAction = action.charAt(0).toUpperCase() + action.slice(1);
+  return `${capitalizedAction} "${topicLabel}" when ${clause}.`;
+}
+
+/**
+ * Build the Adaptive scope appendix from the version's topics and settings — the routing logic
+ * explained in plain language, for a stakeholder who has never seen the authoring surface.
+ *
+ * Topics split into `alwaysAskedTopics` / `conditionalTopics` up front rather than carrying a raw
+ * `phase` for the serialisers to branch on: every serialiser wants exactly this grouping ("what
+ * everyone gets" vs "what depends"), and deriving it three times would be the same drift risk the
+ * settings registry exists to avoid elsewhere in this file.
+ */
+function buildAdaptiveScopeSection(
+  topics: Topic[],
+  settings: AdaptiveScopeSettings,
+  dataSlots: DataSlotView[]
+): PackAdaptiveScope {
+  const topicLabels = new Map(topics.map((topic) => [topic.key, topic.label]));
+  const dataSlotLabels = new Map(dataSlots.map((slot) => [slot.key, slot.name]));
+  const alwaysAskedPhases = ALWAYS_PHASES as readonly string[];
+
+  const alwaysAskedTopics: PackAdaptiveScopeTopic[] = [];
+  const conditionalTopics: PackAdaptiveScopeTopic[] = [];
+  for (const topic of topics) {
+    const alwaysAsked = alwaysAskedPhases.includes(topic.phase);
+    const row: PackAdaptiveScopeTopic = {
+      key: topic.key,
+      label: topic.label,
+      description: topic.description,
+      alwaysAsked,
+      criteria: alwaysAsked ? null : topic.criteria,
+      sampledOnly: topic.depth === 'light',
+    };
+    (alwaysAsked ? alwaysAskedTopics : conditionalTopics).push(row);
+  }
+
+  return {
+    enabled: settings.enabled,
+    alwaysAskedTopics,
+    conditionalTopics,
+    rules: settings.rules.map((rule) => ({
+      sentence: describeScopeRule(rule, topicLabels, dataSlotLabels),
+    })),
+    maxConditionalTopics: settings.maxConditionalTopics,
+    includeCheckTopic: settings.includeCheckTopic,
+    sessionBudgetSeconds: settings.sessionBudgetSeconds,
+  };
+}
+
+/**
+ * The routing data behind the Adaptive scope section — loaded by the route only when
+ * `include.adaptiveScope` is set (the same "skip the query when the section is excluded" pattern
+ * `evaluationRun` already uses), so the common download pays no extra cost for a section that
+ * defaults off.
+ */
+export interface PackAdaptiveScopeSource {
+  topics: Topic[];
+  settings: AdaptiveScopeSettings;
+}
+
 /** Assemble the Questionnaire Pack model. Pure. */
 export function buildPackModel(
   title: string,
@@ -323,6 +474,7 @@ export function buildPackModel(
   dataSlots: DataSlotView[],
   glossary: GlossaryAppendixView | null,
   evaluationRun: EvaluationRunDetail | null,
+  adaptiveScopeSource: PackAdaptiveScopeSource | null,
   include: PackInclude,
   generatedAt: string
 ): PackModel {
@@ -357,5 +509,13 @@ export function buildPackModel(
     glossary: include.definitions ? glossary : null,
     setup: include.setup ? buildSettingRows(graph.config, include.setupTechnical) : null,
     evaluations: include.evaluations ? buildEvaluationsSection(evaluationRun) : null,
+    adaptiveScope:
+      include.adaptiveScope && adaptiveScopeSource
+        ? buildAdaptiveScopeSection(
+            adaptiveScopeSource.topics,
+            adaptiveScopeSource.settings,
+            dataSlots
+          )
+        : null,
   };
 }

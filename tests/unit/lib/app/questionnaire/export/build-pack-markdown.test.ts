@@ -58,6 +58,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setup: true,
       setupTechnical: false,
       evaluations: false,
+      adaptiveScope: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
     sections: [section()],
@@ -82,6 +83,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
     },
     setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
+    adaptiveScope: null,
     ...over,
   };
 }
@@ -548,6 +550,152 @@ describe('buildPackMarkdown', () => {
       );
       expect(md).toContain('### gone');
       expect(md).toContain('no longer in the questionnaire');
+    });
+  });
+
+  describe('adaptive scope section', () => {
+    it('omits the section entirely when the model field is null', () => {
+      const md = buildPackMarkdown(model({ adaptiveScope: null }));
+      expect(md).not.toContain('## Adaptive scope');
+    });
+
+    it('states plainly that scope is not enabled, without listing topics', () => {
+      const md = buildPackMarkdown(
+        model({
+          adaptiveScope: {
+            enabled: false,
+            alwaysAskedTopics: [
+              {
+                key: 'background',
+                label: 'Background',
+                description: null,
+                alwaysAsked: true,
+                criteria: null,
+                sampledOnly: false,
+              },
+            ],
+            conditionalTopics: [],
+            rules: [],
+            maxConditionalTopics: 3,
+            includeCheckTopic: true,
+            sessionBudgetSeconds: 0,
+          },
+        })
+      );
+      expect(md).toContain('## Adaptive scope');
+      expect(md).toContain(
+        'Adaptive scope is not enabled for this version — every respondent is asked the full instrument.'
+      );
+      expect(md).not.toContain('### Always asked');
+      expect(md).not.toContain('Background');
+    });
+
+    it('lists always-asked and conditional topics under their own headings, with criteria on the conditional ones', () => {
+      const md = buildPackMarkdown(
+        model({
+          adaptiveScope: {
+            enabled: true,
+            alwaysAskedTopics: [
+              {
+                key: 'background',
+                label: 'Background',
+                description: 'The opening questions.',
+                alwaysAsked: true,
+                criteria: null,
+                sampledOnly: false,
+              },
+            ],
+            conditionalTopics: [
+              {
+                key: 'talent',
+                label: 'Talent & culture',
+                description: 'Hiring and retention.',
+                alwaysAsked: false,
+                criteria: 'Mentions hiring difficulty.',
+                sampledOnly: false,
+              },
+              {
+                key: 'compliance-check',
+                label: 'Compliance blind-spot check',
+                description: null,
+                alwaysAsked: false,
+                criteria: 'Sampled when nothing else pointed at compliance.',
+                sampledOnly: true,
+              },
+            ],
+            rules: [],
+            maxConditionalTopics: 3,
+            includeCheckTopic: true,
+            sessionBudgetSeconds: 600,
+          },
+        })
+      );
+      expect(md).toContain('### Always asked');
+      expect(md).toContain('**Background**');
+      expect(md).toContain('The opening questions.');
+      expect(md).toContain('### Asked when it fits');
+      expect(md).toContain('**Talent & culture**');
+      expect(md).toContain('_Included when: Mentions hiring difficulty._');
+      expect(md).toContain(
+        '**Compliance blind-spot check** _(sampled lightly, not asked in full)_'
+      );
+      // Up to N / minutes summary line and the check-topic fact.
+      expect(md).toContain('Up to 3 conditional topic(s) per interview');
+      expect(md).toContain('one additional, unselected topic is sampled lightly');
+      expect(md).toContain('interviews are budgeted to about 10 minute(s)');
+    });
+
+    it('renders hard rules under their own heading, and omits it when there are none', () => {
+      const withRules = buildPackMarkdown(
+        model({
+          adaptiveScope: {
+            enabled: true,
+            alwaysAskedTopics: [],
+            conditionalTopics: [],
+            rules: [{ sentence: 'Always include "Talent & culture" when "Engagement" exists.' }],
+            maxConditionalTopics: 3,
+            includeCheckTopic: false,
+            sessionBudgetSeconds: 0,
+          },
+        })
+      );
+      expect(withRules).toContain('### Hard rules');
+      expect(withRules).toContain('Always include "Talent & culture" when "Engagement" exists.');
+
+      const withoutRules = buildPackMarkdown(
+        model({
+          adaptiveScope: {
+            enabled: true,
+            alwaysAskedTopics: [],
+            conditionalTopics: [],
+            rules: [],
+            maxConditionalTopics: 3,
+            includeCheckTopic: false,
+            sessionBudgetSeconds: 0,
+          },
+        })
+      );
+      expect(withoutRules).not.toContain('### Hard rules');
+    });
+
+    it('renders "None defined." under each heading when a version has no topics at all', () => {
+      const md = buildPackMarkdown(
+        model({
+          adaptiveScope: {
+            enabled: true,
+            alwaysAskedTopics: [],
+            conditionalTopics: [],
+            rules: [],
+            maxConditionalTopics: 3,
+            includeCheckTopic: false,
+            sessionBudgetSeconds: 0,
+          },
+        })
+      );
+      expect(md).toContain('### Always asked');
+      expect(md).toContain('### Asked when it fits');
+      // Both sections render the same empty-state text.
+      expect(md.match(/_None defined\._/g)).toHaveLength(2);
     });
   });
 });

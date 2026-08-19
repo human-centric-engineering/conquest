@@ -208,5 +208,49 @@ export function buildPackCsv(model: PackModel): string {
     ]);
   }
 
+  if (model.adaptiveScope) {
+    blocks.push([
+      '# Adaptive scope',
+      row(['field', 'value']),
+      row(['Enabled', model.adaptiveScope.enabled ? 'yes' : 'no']),
+      row([
+        'Max conditional topics per interview',
+        String(model.adaptiveScope.maxConditionalTopics),
+      ]),
+      row([
+        'Samples one unselected topic to check for blind spots',
+        model.adaptiveScope.includeCheckTopic ? 'yes' : 'no',
+      ]),
+      row([
+        'Session time budget',
+        model.adaptiveScope.sessionBudgetSeconds > 0
+          ? `${model.adaptiveScope.sessionBudgetSeconds}s`
+          : 'no limit set',
+      ]),
+    ]);
+
+    blocks.push([
+      '# Adaptive scope topics',
+      row(['key', 'label', 'description', 'always_asked', 'criteria', 'sampled_only']),
+      ...[...model.adaptiveScope.alwaysAskedTopics, ...model.adaptiveScope.conditionalTopics].map(
+        (topic) =>
+          row([
+            topic.key,
+            topic.label,
+            topic.description ?? '',
+            topic.alwaysAsked ? 'yes' : 'no',
+            topic.criteria ?? '',
+            topic.sampledOnly ? 'yes' : 'no',
+          ])
+      ),
+    ]);
+
+    blocks.push([
+      '# Adaptive scope rules',
+      row(['rule']),
+      ...model.adaptiveScope.rules.map((rule) => row([rule.sentence])),
+    ]);
+  }
+
   return `${blocks.map((block) => block.join('\r\n')).join('\r\n\r\n')}\r\n`;
 }

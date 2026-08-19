@@ -6,9 +6,9 @@
  * brand-free {@link file://./instrument-pdf-document.tsx}: same question-block styling, but this one
  * carries the ConQuest wordmark/tagline/website in the header and a closing "About ConQuest" page —
  * it's the external/showcase artifact, not the design-time reviewer copy. Renders whichever of
- * meta / experience-setup / data-slots / questions / definitions / evaluations the model includes
- * (`null` fields are simply skipped). Evaluations render last, right before the closing page — the
- * appendix position.
+ * meta / experience-setup / data-slots / questions / definitions / evaluations / adaptive scope the
+ * model includes (`null` fields are simply skipped). Evaluations and adaptive scope render last,
+ * right before the closing page — the appendix position.
  *
  * No font is registered — `@react-pdf/renderer` ships Helvetica by default and no other document in
  * this app registers a custom font, so the wordmark is approximated with Helvetica-Bold + the brand
@@ -18,7 +18,11 @@
 import { Document, Page, Text, View, Link, StyleSheet } from '@react-pdf/renderer';
 
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
-import type { PackModel, PackSetupItem } from '@/lib/app/questionnaire/export/build-pack-model';
+import type {
+  PackAdaptiveScopeTopic,
+  PackModel,
+  PackSetupItem,
+} from '@/lib/app/questionnaire/export/build-pack-model';
 import type { InstrumentQuestion } from '@/lib/app/questionnaire/export/build-instrument-model';
 
 const COLORS = {
@@ -276,6 +280,53 @@ const styles = StyleSheet.create({
     color: COLORS.faint,
     fontFamily: 'Helvetica-Oblique',
   },
+  scopeIntro: {
+    fontSize: 8,
+    color: COLORS.faint,
+    fontFamily: 'Helvetica-Oblique',
+    marginTop: 2,
+  },
+  scopeFacts: {
+    fontSize: 9,
+    color: COLORS.muted,
+    marginTop: 6,
+  },
+  scopeSubheading: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 10,
+  },
+  scopeTopic: {
+    marginTop: 6,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.hairline,
+  },
+  scopeTopicLabel: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+  },
+  scopeTopicMeta: {
+    fontSize: 8,
+    color: COLORS.faint,
+    marginTop: 1,
+  },
+  scopeTopicDescription: {
+    fontSize: 9,
+    color: COLORS.muted,
+    marginTop: 2,
+  },
+  scopeTopicCriteria: {
+    fontSize: 9,
+    color: COLORS.muted,
+    marginTop: 2,
+    fontFamily: 'Helvetica-Oblique',
+  },
+  scopeRule: {
+    fontSize: 9,
+    marginTop: 3,
+    marginLeft: 8,
+  },
   closingHeading: {
     fontSize: 15,
     fontFamily: 'Helvetica-Bold',
@@ -361,6 +412,23 @@ function QuestionBlock({ q }: { q: InstrumentQuestion }) {
       ))}
       {q.guidelines && q.guidelines.trim().length > 0 && (
         <Text style={styles.guidance}>{`Guidance: ${q.guidelines.trim()}`}</Text>
+      )}
+    </View>
+  );
+}
+
+/** One Adaptive scope topic — label, an optional description, and (for a conditional topic) its
+ *  plain-English inclusion criteria. */
+function ScopeTopicBlock({ topic }: { topic: PackAdaptiveScopeTopic }) {
+  return (
+    <View style={styles.scopeTopic} wrap={false}>
+      <Text style={styles.scopeTopicLabel}>{topic.label}</Text>
+      {topic.sampledOnly && (
+        <Text style={styles.scopeTopicMeta}>Sampled lightly, not asked in full</Text>
+      )}
+      {topic.description && <Text style={styles.scopeTopicDescription}>{topic.description}</Text>}
+      {topic.criteria && (
+        <Text style={styles.scopeTopicCriteria}>{`Included when: ${topic.criteria}`}</Text>
       )}
     </View>
   );
@@ -551,6 +619,65 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                       )}
                     </View>
                   ))
+                )}
+              </>
+            )}
+          </View>
+        )}
+
+        {model.adaptiveScope && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Adaptive scope</Text>
+            <Text style={styles.scopeIntro}>
+              How this questionnaire adapts to each respondent — which parts everyone gets, which
+              parts depend on what they say, and the rules that decide.
+            </Text>
+            {!model.adaptiveScope.enabled ? (
+              <Text style={styles.empty}>
+                Adaptive scope is not enabled for this version — every respondent is asked the full
+                instrument.
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.scopeFacts}>
+                  {[
+                    `Up to ${model.adaptiveScope.maxConditionalTopics} conditional topic(s) per interview`,
+                    model.adaptiveScope.includeCheckTopic
+                      ? 'one additional, unselected topic is sampled lightly to check for blind spots'
+                      : null,
+                    model.adaptiveScope.sessionBudgetSeconds > 0
+                      ? `interviews are budgeted to about ${Math.round(model.adaptiveScope.sessionBudgetSeconds / 60)} minute(s)`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join('  ·  ')}
+                </Text>
+
+                <Text style={styles.scopeSubheading}>Always asked</Text>
+                {model.adaptiveScope.alwaysAskedTopics.length === 0 ? (
+                  <Text style={styles.empty}>None defined.</Text>
+                ) : (
+                  model.adaptiveScope.alwaysAskedTopics.map((topic) => (
+                    <ScopeTopicBlock key={topic.key} topic={topic} />
+                  ))
+                )}
+
+                <Text style={styles.scopeSubheading}>Asked when it fits</Text>
+                {model.adaptiveScope.conditionalTopics.length === 0 ? (
+                  <Text style={styles.empty}>None defined.</Text>
+                ) : (
+                  model.adaptiveScope.conditionalTopics.map((topic) => (
+                    <ScopeTopicBlock key={topic.key} topic={topic} />
+                  ))
+                )}
+
+                {model.adaptiveScope.rules.length > 0 && (
+                  <>
+                    <Text style={styles.scopeSubheading}>Hard rules</Text>
+                    {model.adaptiveScope.rules.map((rule, i) => (
+                      <Text key={i} style={styles.scopeRule}>{`•  ${rule.sentence}`}</Text>
+                    ))}
+                  </>
                 )}
               </>
             )}

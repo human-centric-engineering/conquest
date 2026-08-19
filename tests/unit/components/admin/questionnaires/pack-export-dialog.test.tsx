@@ -5,7 +5,8 @@
  * download URL built from that state.
  *
  * Test Coverage:
- * - Five of the six section checkboxes are checked by default; "Evaluation findings" is not
+ * - Five of the seven section checkboxes are checked by default; "Evaluation findings" and
+ *   "Adaptive scope" are not
  * - The nested "Technical & tuning settings" sub-option: off by default, disabled with its parent,
  *   and not counted as a section by the "pick at least one" gate
  * - Download is disabled once every SECTION checkbox is unchecked, with a hint message
@@ -33,7 +34,7 @@ function renderDialog(onOpenChange = vi.fn()) {
   return onOpenChange;
 }
 
-/** The six section checkboxes, in document order — excludes the nested technical sub-option. */
+/** The seven section checkboxes, in document order — excludes the nested technical sub-option. */
 function sectionBoxes(): HTMLElement[] {
   return screen
     .getAllByRole('checkbox')
@@ -60,12 +61,13 @@ afterEach(() => {
 
 describe('PackExportDialog', () => {
   describe('section checkboxes', () => {
-    it('renders six section checkboxes, all checked by default except "Evaluation findings"', () => {
+    it('renders seven section checkboxes, all checked by default except "Evaluation findings" and "Adaptive scope"', () => {
       renderDialog();
       const boxes = sectionBoxes();
-      expect(boxes).toHaveLength(6);
+      expect(boxes).toHaveLength(7);
       for (const box of boxes.slice(0, 5)) expect(box).toBeChecked();
       expect(boxes[5]).not.toBeChecked();
+      expect(boxes[6]).not.toBeChecked();
     });
 
     it('starts the nested technical sub-option unchecked, enabled under a checked parent', () => {
@@ -118,7 +120,7 @@ describe('PackExportDialog', () => {
   });
 
   describe('download URL', () => {
-    it('navigates to the pack URL with format=pdf, evaluations=false, and every other include flag true by default', async () => {
+    it('navigates to the pack URL with format=pdf, evaluations=false, adaptiveScope=false, and every other include flag true by default', async () => {
       const user = userEvent.setup();
       const onOpenChange = renderDialog();
 
@@ -132,6 +134,7 @@ describe('PackExportDialog', () => {
       expect(window.location.href).toContain('definitions=true');
       expect(window.location.href).toContain('setup=true');
       expect(window.location.href).toContain('evaluations=false');
+      expect(window.location.href).toContain('adaptiveScope=false');
       expect(window.location.href).toContain('setupTechnical=false');
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -152,11 +155,22 @@ describe('PackExportDialog', () => {
       const user = userEvent.setup();
       renderDialog();
 
-      // "Evaluation findings" is the sixth (last) section checkbox in document order.
+      // "Evaluation findings" is the sixth section checkbox in document order.
       await user.click(sectionBoxes()[5]);
       await user.click(screen.getByRole('button', { name: /download/i }));
 
       expect(window.location.href).toContain('evaluations=true');
+    });
+
+    it('checking "Adaptive scope" reflects as adaptiveScope=true in the URL', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      // "Adaptive scope" is the seventh (last) section checkbox in document order.
+      await user.click(sectionBoxes()[6]);
+      await user.click(screen.getByRole('button', { name: /download/i }));
+
+      expect(window.location.href).toContain('adaptiveScope=true');
     });
 
     it('checking "Technical & tuning settings" reflects as setupTechnical=true in the URL', async () => {
