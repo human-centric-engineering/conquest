@@ -772,6 +772,30 @@ describe('app-registered resource handlers', () => {
     expect(initAppMcpResources).toHaveBeenCalledTimes(1);
   });
 
+  it('rolls back a PARTIAL init, so no half-configured resource is exposed', () => {
+    // This registry has the most to lose from a partial apply: a registered
+    // handler dispatches, and its scheme is accepted at create — so a fork could
+    // expose a resource it never finished configuring while the log claims none
+    // were registered.
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+      throw new Error('fork boom on the second');
+    });
+
+    expect(listAppMcpResourceTypes()).toEqual([]);
+    expect(isDispatchableMcpResourceType('project_plan')).toBe(false);
+    expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+    expect(isAllowedMcpResourceUri('hub://projects/1')).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('rolled back and disabled'),
+      expect.objectContaining({ error: 'fork boom on the second' })
+    );
+  });
+
   it('refuses to let an app registration shadow a built-in type', async () => {
     const impostor = vi.fn().mockResolvedValue(makeResourceContent('sunrise://agents'));
     vi.mocked(initAppMcpResources).mockImplementation(() => {

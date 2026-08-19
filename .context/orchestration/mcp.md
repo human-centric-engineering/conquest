@@ -205,6 +205,8 @@ export function initAppMcpResources(): void {
 
 `resourceType` must be lower snake_case, max 64 characters — the same shape `createExposedResourceSchema` enforces, validated at registration too so a `projectPlan` fails loudly here rather than reporting dispatchable and then 400ing every create with a message that never mentions the registration.
 
+A throwing init rolls back every registration it had already made, so a half-configured resource is never left dispatchable — this registry has the most to lose from a partial apply, because a registered handler serves reads and its scheme is accepted at create.
+
 The registry calls `initAppMcpResources()` once, lazily, before the first dispatch **and** before the admin create route validates a row — both are route-realm reads, so a registration made from `initApp()` would fill a map the MCP route never sees.
 
 An app type then flows through `resources/list|read|subscribe`, templates, the 5-minute cache, `resources:read` scoping, `McpExposedResource` gating and audit exactly like a core one. Rows still default to `isEnabled: false`, so this widens what an admin can turn on, not who can turn it on.

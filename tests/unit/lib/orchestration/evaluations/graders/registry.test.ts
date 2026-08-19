@@ -209,6 +209,30 @@ describe('app grader registrations', () => {
     expect(initAppGraders).toHaveBeenCalledTimes(1);
   });
 
+  it('rolls back a PARTIAL init, so the log and the registry agree', () => {
+    // The dangerous shape: an init that registers something and then throws.
+    // Without rollback those registrations stay live while the log says "app
+    // graders disabled" — and if one of them replaced a built-in slug, the
+    // override warn is skipped too, so every score changes with nothing saying
+    // so anywhere.
+    const builtIn = makeHeuristicGrader('exact_match', 'core');
+    registerGrader(builtIn);
+
+    vi.mocked(initAppGraders).mockImplementation(() => {
+      registerGrader(makeHeuristicGrader('exact_match', 'fork')); // shadows a built-in
+      registerGrader(makeHeuristicGrader('app_triage_accuracy')); // and adds one
+      throw new Error('fork boom on the third');
+    });
+
+    expect(listGraders()).toEqual([builtIn]);
+    expect(getGrader('exact_match')).toBe(builtIn);
+    expect(hasGrader('app_triage_accuracy')).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('rolled back and disabled'),
+      expect.objectContaining({ error: 'fork boom on the third' })
+    );
+  });
+
   it('lets an app grader replace a built-in slug, but says so', () => {
     // Overwrite-by-slug is the documented behaviour and swapping in a mock is
     // why. Silence is the part that was wrong: a replaced `exact_match` changes

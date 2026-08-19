@@ -85,12 +85,20 @@ export function registerAccountSection(section: AccountSection): void {
 function ensureAppAccountSectionsInited(): void {
   if (appInited) return;
   appInited = true;
+
+  const before = new Map(sections);
   try {
     initAppAccountSections();
   } catch (err) {
-    logger.error('account-sections: initAppAccountSections threw — app account sections disabled', {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    // Roll back rather than keeping the registrations made before the throw.
+    // Half a fork's account surface rendering on /profile and /settings, while
+    // the log says none of it did, is worse than none of it rendering.
+    sections.clear();
+    for (const [id, section] of before) sections.set(id, section);
+    logger.error(
+      'account-sections: initAppAccountSections threw — app sections rolled back and disabled',
+      { error: err instanceof Error ? err.message : String(err) }
+    );
   }
 }
 

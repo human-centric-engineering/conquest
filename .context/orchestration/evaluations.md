@@ -175,7 +175,12 @@ The registry runs `initAppGraders()` once, lazily, before its first
 lookup — so `getGrader`, `getPairwiseGrader`, `hasGrader`, `listGraders`
 and `getRegisteredSlugs` all see it, whichever route-realm caller got
 there first. A throwing init is logged and degrades to "no app graders"
-rather than failing the tick.
+rather than failing the tick — and it means it: registrations made
+**before** the throw are rolled back, so an init that registers three
+graders and dies on the fourth leaves zero, not three. All-or-nothing is
+the only contract a fork can reason about, and without it a grader that
+had already shadowed `exact_match` would keep rescoring every run while
+the log said none were registered.
 
 Import from `.../graders/registry`, not the barrel: the barrel's job is
 to side-effect-import every core grader, which makes the cycle longer

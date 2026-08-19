@@ -77,7 +77,8 @@ export default async function McpResourcesPage() {
         </h1>
         <p className="text-muted-foreground text-sm">
           Read-only data endpoints that MCP clients can browse — your knowledge base, agents, and
-          workflows exposed via the <code>sunrise://</code> URI scheme.
+          workflows exposed via the <code>sunrise://</code> URI scheme, plus any resource types this
+          app registered in <code>lib/app/mcp-resources.ts</code> under their own scheme.
         </p>
       </header>
 

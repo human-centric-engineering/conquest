@@ -43,7 +43,8 @@ release process.
   id, surfaces?, order?, Component })` renders at the foot of either page (or
   both, the default); `Component` receives `{ userId }`. The account-surface
   analogue of `lib/admin-nav/registry.ts`. Empty registry renders no node at
-  all, so vanilla Sunrise is unchanged.
+  all, so vanilla Sunrise is unchanged, and a throwing init rolls back anything
+  it had already registered rather than half-rendering the account surface.
 
 - **`lib/app/evaluations.ts` — fork-owned evaluation graders.** The grader
   registry advertised pluggability that only held for core: `registerGrader` was
@@ -54,7 +55,9 @@ release process.
   were already paid for. `initAppGraders()` now runs once, lazily, before the
   registry's first lookup, so every route-realm reader sees it. Replacing a
   built-in slug still works (that is how a mock is swapped in) but is now logged
-  at warn.
+  at warn. A throwing init **rolls back** the registrations it had already
+  made — otherwise a grader that had shadowed `exact_match` would keep rescoring
+  every run while the log said none were registered.
 
 - **`lib/app/mcp-resources.ts` — fork-owned MCP resource handlers.** MCP *tools*
   had a fork seam (`lib/app/capabilities.ts`); *resources* did not, so a
@@ -67,8 +70,10 @@ release process.
   `sunrise://` would advertise the starter's identity to every MCP client that
   lists it — and a built-in `resourceType` cannot be shadowed. The scheme binds
   to the type: `sunrise://…` filed under a fork type is a 400, and so is the
-  inverse (`isUriSchemeValidForResourceType`, `mcpResourceUriSchemeFor`). Rows
-  still default to `isEnabled: false`.
+  inverse (`isUriSchemeValidForResourceType`, `mcpResourceUriSchemeFor`). A
+  throwing init rolls back its own partial registrations, so a half-configured
+  resource is never left dispatchable. Rows still default to
+  `isEnabled: false`.
 
 - **`components/app/**` and `components/framework/**` are now reserved fork
   tiers.** Sunrise creates nothing under either, so a fork's own React

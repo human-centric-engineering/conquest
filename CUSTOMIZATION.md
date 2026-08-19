@@ -694,7 +694,9 @@ entirely, take a route group instead — see
 [§ When a surface needs a different frame](#when-a-surface-needs-a-different-frame--give-it-a-route-group).
 
 Empty registry renders nothing, so vanilla Sunrise is visually unchanged, and a
-throwing _registration_ degrades to no sections. **Render is a different
+throwing _registration_ degrades to no sections — including any made before the
+throw, which are rolled back, so "no sections" is literally true rather than
+approximately. **Render is a different
 matter**: a section that throws while rendering fails the page, which falls to
 `app/(protected)/error.tsx` — the user is still off the page they came to change
 a password on. There is no per-section boundary, because a React error boundary
@@ -740,7 +742,7 @@ export function initAppMcpResources(): void {
 ```
 
 Then create the `McpExposedResource` row (a seed, or
-`POST /api/v1/admin/orchestration/mcp/resources`). Three rules worth knowing
+`POST /api/v1/admin/orchestration/mcp/resources`). Four rules worth knowing
 before you do:
 
 - **`uriScheme` is required, not defaulted.** A fork resource that silently

@@ -179,12 +179,25 @@ export function registerMcpResourceHandler(registration: AppMcpResourceRegistrat
 function ensureAppMcpResourcesInited(): void {
   if (appInited) return;
   appInited = true;
+
+  const beforeHandlers = new Map(appHandlers);
+  const beforeSchemes = new Map(appUriSchemes);
   try {
     initAppMcpResources();
   } catch (err) {
-    logger.error('mcp-resources: initAppMcpResources threw — app MCP resources disabled', {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    // Roll back rather than keeping the registrations made before the throw.
+    // This registry has the most to lose from a partial apply: a half-registered
+    // handler still dispatches, and its scheme is still accepted at create — so
+    // a fork could expose a resource it never finished configuring, while the
+    // log claims none were registered.
+    appHandlers.clear();
+    for (const [type, handler] of beforeHandlers) appHandlers.set(type, handler);
+    appUriSchemes.clear();
+    for (const [type, scheme] of beforeSchemes) appUriSchemes.set(type, scheme);
+    logger.error(
+      'mcp-resources: initAppMcpResources threw — app MCP resources rolled back and disabled',
+      { error: err instanceof Error ? err.message : String(err) }
+    );
   }
 }
 

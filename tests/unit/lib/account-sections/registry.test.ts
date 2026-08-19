@@ -111,6 +111,22 @@ describe('account-section registry', () => {
     expect(initAppAccountSections).toHaveBeenCalledTimes(1);
   });
 
+  it('rolls back a PARTIAL init rather than half-rendering the account surface', () => {
+    vi.mocked(initAppAccountSections).mockImplementation(() => {
+      registerAccountSection({ id: 'github-connect', Component: stubComponent('GitHub') });
+      throw new Error('fork boom on the second');
+    });
+
+    // Half a fork's account surface rendering while the log says none of it did
+    // is worse than none of it rendering.
+    expect(getRegisteredAccountSections('profile')).toEqual([]);
+    expect(getRegisteredAccountSections('settings')).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('rolled back and disabled'),
+      expect.objectContaining({ error: 'fork boom on the second' })
+    );
+  });
+
   it('degrades to no sections when the fork init throws', () => {
     vi.mocked(initAppAccountSections).mockImplementation(() => {
       throw new Error('fork boom');

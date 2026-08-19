@@ -56,7 +56,16 @@ function ensureAppGradersInited(): void {
   try {
     initAppGraders();
   } catch (err) {
-    logger.error('graders: initAppGraders threw — app graders disabled', {
+    // ROLL BACK, do not just log. An init that registers three graders and
+    // throws on the fourth would otherwise leave those three live while the log
+    // says none are — and if one of them replaced `exact_match`, the
+    // built-in-override warn below never runs, so every score silently changes
+    // with nothing anywhere saying so. All-or-nothing is also the only contract
+    // a fork author can reason about: "some of your graders applied, we will
+    // not say which" is not one.
+    registry.clear();
+    for (const [slug, grader] of before) registry.set(slug, grader);
+    logger.error('graders: initAppGraders threw — app graders rolled back and disabled', {
       error: err instanceof Error ? err.message : String(err),
     });
     return;
