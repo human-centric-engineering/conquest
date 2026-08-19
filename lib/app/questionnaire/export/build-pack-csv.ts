@@ -250,6 +250,61 @@ export function buildPackCsv(model: PackModel): string {
       row(['rule']),
       ...model.adaptiveScope.rules.map((rule) => row([rule.sentence])),
     ]);
+
+    const evaluation = model.adaptiveScope.evaluation;
+    blocks.push([
+      '# Scope evaluation judge scores',
+      row(['dimension', 'judge', 'score', 'diagnostic', 'finding_count']),
+      ...evaluation.scores.map((judge) =>
+        row([
+          judge.dimension,
+          judge.label,
+          judge.score !== null ? String(judge.score) : '',
+          judge.diagnostic ?? '',
+          String(judge.findingCount),
+        ])
+      ),
+    ]);
+
+    // One row per (target, judge) pair, target columns first — same "the target's text repeats"
+    // rule the design-evaluation findings block follows, for the same reason (a CSV row must
+    // stand alone under a sort/filter/pivot).
+    const scopeFindingRows = evaluation.targets.flatMap((target) =>
+      target.judges.map((judge) =>
+        row([
+          target.key,
+          target.kind,
+          target.label,
+          target.removed ? 'yes' : 'no',
+          judge.dimension,
+          judge.label,
+          judge.severity,
+          judge.status,
+          judge.proposedChange,
+          judge.rationale,
+          judge.proposedEditSummary ?? '',
+          judge.sourceQuote ?? '',
+        ])
+      )
+    );
+    blocks.push([
+      '# Scope evaluation findings',
+      row([
+        'target_key',
+        'target_kind',
+        'target',
+        'target_removed',
+        'dimension',
+        'judge',
+        'severity',
+        'status',
+        'proposed_change',
+        'rationale',
+        'proposed_edit',
+        'source_quote',
+      ]),
+      ...scopeFindingRows,
+    ]);
   }
 
   return `${blocks.map((block) => block.join('\r\n')).join('\r\n\r\n')}\r\n`;

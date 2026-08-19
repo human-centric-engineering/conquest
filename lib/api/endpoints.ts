@@ -513,6 +513,37 @@ export const API = {
        */
       versionTopicsPreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/preview`,
+      /**
+       * Run the Adaptive Scope evaluation judge panel over a version (POST — F17.21). Ephemeral:
+       * writes nothing, returns each judge's score + findings.
+       */
+      versionScopeEvaluatePreview: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluate-preview`,
+      /** Persisted scope-evaluation runs for a version (GET list, POST run + persist — F17.21). */
+      versionScopeEvaluations: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluations`,
+      /** One persisted scope-evaluation run with its findings (GET — F17.21). */
+      versionScopeEvaluationById: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluations/${runId}`,
+      /** Re-run one failed scope judge into an existing run (POST — F17.21). */
+      versionScopeEvaluationRetryJudge: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluations/${runId}/retry`,
+      /** Review one scope-evaluation finding (PATCH accept/decline/edit/mark_applied — F17.21). */
+      versionScopeEvaluationFinding: (
+        id: string,
+        versionId: string,
+        runId: string,
+        findingId: string
+      ): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluations/${runId}/findings/${findingId}`,
+      /** Apply one scope-evaluation finding's structured edit to the draft (POST — F17.21). */
+      versionScopeEvaluationFindingApply: (
+        id: string,
+        versionId: string,
+        runId: string,
+        findingId: string
+      ): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluations/${runId}/findings/${findingId}/apply`,
       /** Curated glossary for a version (GET terms + document, PUT replace-set the reviewed set). */
       versionGlossary: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary`,

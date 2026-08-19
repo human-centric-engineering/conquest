@@ -755,38 +755,127 @@ route loads it (`loadMaxDataSlotAttempts`) for no other reason.
 
 ---
 
+## Scope evaluation (F17.21)
+
+`validateAdaptiveScope` (above) and the cost model answer "is this configuration well-formed and
+what does it cost" — both mechanical, both free. Neither answers "is this a **good** routing
+design toward the module's own goal" — minimize respondent burden while never silently dropping a
+topic that genuinely applies (the [one invariant](#the-one-invariant): hard rules always win, "when
+in doubt, ask", exclude-beats-include). That is a judgement call, not a rule, so it is a second
+judge panel — sibling to the design-evaluation panel (F5.1–F5.3) that reviews question structure,
+but reading the scope config instead.
+
+**Structural only, v1.** The four judges read the authored topics, hard rules, planner
+instructions, and budget — the same inputs `validateAdaptiveScope` and the cost model read. They do
+not read live session data or the routing-analytics engine (F17.16); a later phase could layer that
+signal in, but v1 answers "is this well-designed" from the config alone.
+
+| Dimension             | Judges                                                                                                                                  | Does NOT re-derive                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `criteria_quality`    | Is each conditional topic's criteria specific and observable from an opening conversation? Do two topics' criteria overlap or conflict? | `orphaned_questions` / duplicate membership                                    |
+| `rule_integrity`      | Internal rule conflicts, redundant rules, a rule that excludes on weak/ambiguous evidence ("when in doubt, ask" violations)             | `rule_slot_unreachable` / `rule_veto_always_fires` / `rule_names_always_topic` |
+| `budget_realism`      | Does the budget leave realistic room for topics that matter; is `maxConditionalTopics` too tight or too loose for the topic mix         | the cost arithmetic itself — judges are fed the pre-computed numbers           |
+| `coverage_and_burden` | Topics with no realistic path to selection (a blind spot), unconditional bloat, overall burden vs. budget                               | `orphaned_questions`                                                           |
+
+Each judge is blind to the others, same as the design-evaluation panel's judges — and unlike that
+panel, **there is no reconcile step**. The four dimensions target different fields of different
+objects (a topic's criteria text, the rules array, the settings blob), so the collision case the
+design-evaluation reconciler exists for — two judges rewriting the same question prompt
+differently — mostly cannot occur here. A deliberate v1 cut, not an oversight.
+
+### Findings and the apply flow
+
+A finding names its subject with a `targetKey`: `topic:<key>` | `rule:<id>` | `settings`. Most also
+carry a machine-applicable `proposedEdit` — one of eight ops, each writing to exactly one field a
+finding could plausibly ask for:
+
+| Op                                       | Touches                                                              | Writer                                  |
+| ---------------------------------------- | -------------------------------------------------------------------- | --------------------------------------- |
+| `edit_topic_criteria`                    | `AppQuestionnaireTopic.criteria`                                     | single-row update by `(versionId, key)` |
+| `edit_topic_depth`                       | `AppQuestionnaireTopic.depth`                                        | single-row update                       |
+| `add_rule` / `edit_rule` / `delete_rule` | `AppQuestionnaireConfig.adaptiveScope.rules[]`                       | `patchAdaptiveScopeSettings` merge      |
+| `adjust_budget`                          | `sessionBudgetSeconds` / `maxOpeningProbes` / `maxConditionalTopics` | `patchAdaptiveScopeSettings`            |
+| `edit_planner_instructions`              | `plannerInstructions`                                                | `patchAdaptiveScopeSettings`            |
+| `add_fallback_topic`                     | `fallbackTopicKeys[]`                                                | `patchAdaptiveScopeSettings`            |
+
+There is no `add_topic` / `delete_topic` — every op edits something that already exists, keeping
+one-click-apply blast radius small. A finding that thinks a topic shouldn't exist at all stays
+prose-only, the same as an off-mission finding in the design-evaluation panel.
+
+The review queue (accept / decline / edit / apply) and staleness derivation mirror the
+design-evaluation panel's own machinery: applying re-checks the finding against the live config,
+forks a launched version via `forkVersionIfLaunched` exactly like every other authoring write on
+this tab, and staleness is derived at read time by diffing the run's `scopeSnapshot` against the
+live structure rather than stored as a flag that would rot.
+
+### Where it lives
+
+A sibling module, `lib/app/questionnaire/scope-evaluation/`, not an extension of
+`lib/app/questionnaire/evaluation/` (F5.1–F5.3): that module's `EVALUATION_DIMENSIONS` tuple and
+`ProposedEdit` union are closed, compile-time-locked to question/section/goal/audience vocabulary.
+The two modules share only generic leaf vocabulary (`FindingSeverity`, `FindingReviewStatus`,
+`FindingApplicability`) and the fan-out/persist/apply _pattern_ — not a type.
+
+The card lives on the Topics tab (`ScopeEvaluationCard`, alongside the Routing Analyst and plan
+preview) as an ephemeral preview — "Run evaluation" writes nothing — with a "View past runs" link
+into a persisted run-history + review-queue surface at `.../topics/evaluations`, the same
+ephemeral-preview-then-persisted-review split as the design-evaluation panel's own F5.1 → F5.2/F5.3
+progression, done here in two PRs instead of three since the surface is small enough that
+splitting run-history from apply would be an artificial seam.
+
+### In the Questionnaire Pack
+
+The latest run's judge scores and findings nest inside the pack's existing `adaptiveScope` section
+as `PackAdaptiveScope.evaluation` — not an eighth top-level section — because it is a judgement
+_about_ the routing design printed just above it, not a separate subject. `evaluation.hasRun: false`
+still renders (the same "state a fact rather than omit the section" choice the design-evaluation
+appendix makes) so a pack downloaded before the panel has ever run says so explicitly rather than
+silently having nothing there. No new `PackInclude` flag: it rides along with `adaptiveScope`,
+which already defaults off.
+
+---
+
 ## Files
 
-| Path                                                                | What                                                                                                                                                                              |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/app/questionnaire/scope/types.ts`                              | Vocabulary, settings, plan shape, narrowers. A **leaf** — it carries its own `narrowToEnum` copy so `types.ts` can hold an `AdaptiveScopeSettings` without a runtime import cycle |
-| `lib/app/questionnaire/scope/resolve.ts`                            | The pure filter                                                                                                                                                                   |
-| `lib/app/questionnaire/scope/rules.ts`                              | Hard-rule evaluator                                                                                                                                                               |
-| `lib/app/questionnaire/scope/guardrails.ts`                         | Cap, fallback, the time fit, check topic                                                                                                                                          |
-| `lib/app/questionnaire/scope/budget.ts`                             | What an interview costs in seconds — per-type pricing, per-topic cost at both depths, the floor and the allowance                                                                 |
-| `lib/app/questionnaire/scope/planner.ts`                            | The model call; never throws                                                                                                                                                      |
-| `lib/app/questionnaire/scope/probe.ts`                              | The opening's follow-up counter (G03) — pure, so the orchestrator can import it                                                                                                   |
-| `lib/app/questionnaire/scope/routability.ts`                        | "Could the plan already be decided?" — the check that decides whether a probe is worth spending; returns null on every failure                                                    |
-| `lib/app/questionnaire/scope/amendment.ts`                          | Cue gate, label match, plan mutation (F17.6) — pure                                                                                                                               |
-| `lib/app/questionnaire/scope/analysis-schema.ts`                    | The Routing Analyst's output contract                                                                                                                                             |
-| `lib/app/questionnaire/scope/analysis-prompt.ts`                    | Its rubric — mostly about quoting versus inferring                                                                                                                                |
-| `lib/app/questionnaire/capabilities/analyse-routing.ts`             | The analyst capability                                                                                                                                                            |
-| `lib/app/questionnaire/scope/seed.ts`                               | One topic per section, pure                                                                                                                                                       |
-| `lib/app/questionnaire/scope/validate.ts`                           | Coherence findings                                                                                                                                                                |
-| `lib/app/questionnaire/scope/comparability.ts`                      | What routing does to a scoring scale (F17.15) — which scales it can narrow, and which no plan can ever cover                                                                      |
-| `lib/app/questionnaire/scope/graph.ts`                              | The routing map's graph (F17.18) — pure, laid out, and carrying no React Flow import                                                                                              |
-| `lib/app/questionnaire/scope/criteria-format.ts`                    | Reads an author's criteria text as the list it already is — recovery only, never rewriting                                                                                        |
-| `lib/app/questionnaire/analytics/routing.ts`                        | Routing quality (F17.16) — what the planner actually did across a version's interviews, and the findings the counts support                                                       |
-| `app/api/v1/app/questionnaires/_lib/session-scope.ts`               | The DB seam                                                                                                                                                                       |
-| `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                 | Seeding + reconcile-after-rewrite                                                                                                                                                 |
-| `app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`          | The post-turn trigger                                                                                                                                                             |
-| `app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/route.ts` | GET / PUT / PATCH                                                                                                                                                                 |
-| `.../topics/preview/route.ts`                                       | The plan dry-run (F17.14) — the planner over a synthetic opening; writes nothing                                                                                                  |
-| `.../analytics/routing/route.ts`                                    | Routing quality (F17.16) — per-topic selection / exclusion / amendment counts over the window                                                                                     |
-| `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                 | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                         |
-| `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`  | Run the analyst (SSE) · accept or discard its proposal                                                                                                                            |
-| `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`          | The amendment trigger                                                                                                                                                             |
-| `components/admin/questionnaires/topics/**`                         | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                   |
+| Path                                                                                                   | What                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/app/questionnaire/scope/types.ts`                                                                 | Vocabulary, settings, plan shape, narrowers. A **leaf** — it carries its own `narrowToEnum` copy so `types.ts` can hold an `AdaptiveScopeSettings` without a runtime import cycle                                                                                 |
+| `lib/app/questionnaire/scope/resolve.ts`                                                               | The pure filter                                                                                                                                                                                                                                                   |
+| `lib/app/questionnaire/scope/rules.ts`                                                                 | Hard-rule evaluator                                                                                                                                                                                                                                               |
+| `lib/app/questionnaire/scope/guardrails.ts`                                                            | Cap, fallback, the time fit, check topic                                                                                                                                                                                                                          |
+| `lib/app/questionnaire/scope/budget.ts`                                                                | What an interview costs in seconds — per-type pricing, per-topic cost at both depths, the floor and the allowance                                                                                                                                                 |
+| `lib/app/questionnaire/scope/planner.ts`                                                               | The model call; never throws                                                                                                                                                                                                                                      |
+| `lib/app/questionnaire/scope/probe.ts`                                                                 | The opening's follow-up counter (G03) — pure, so the orchestrator can import it                                                                                                                                                                                   |
+| `lib/app/questionnaire/scope/routability.ts`                                                           | "Could the plan already be decided?" — the check that decides whether a probe is worth spending; returns null on every failure                                                                                                                                    |
+| `lib/app/questionnaire/scope/amendment.ts`                                                             | Cue gate, label match, plan mutation (F17.6) — pure                                                                                                                                                                                                               |
+| `lib/app/questionnaire/scope/analysis-schema.ts`                                                       | The Routing Analyst's output contract                                                                                                                                                                                                                             |
+| `lib/app/questionnaire/scope/analysis-prompt.ts`                                                       | Its rubric — mostly about quoting versus inferring                                                                                                                                                                                                                |
+| `lib/app/questionnaire/capabilities/analyse-routing.ts`                                                | The analyst capability                                                                                                                                                                                                                                            |
+| `lib/app/questionnaire/scope/seed.ts`                                                                  | One topic per section, pure                                                                                                                                                                                                                                       |
+| `lib/app/questionnaire/scope/validate.ts`                                                              | Coherence findings                                                                                                                                                                                                                                                |
+| `lib/app/questionnaire/scope/comparability.ts`                                                         | What routing does to a scoring scale (F17.15) — which scales it can narrow, and which no plan can ever cover                                                                                                                                                      |
+| `lib/app/questionnaire/scope/graph.ts`                                                                 | The routing map's graph (F17.18) — pure, laid out, and carrying no React Flow import                                                                                                                                                                              |
+| `lib/app/questionnaire/scope/criteria-format.ts`                                                       | Reads an author's criteria text as the list it already is — recovery only, never rewriting                                                                                                                                                                        |
+| `lib/app/questionnaire/analytics/routing.ts`                                                           | Routing quality (F17.16) — what the planner actually did across a version's interviews, and the findings the counts support                                                                                                                                       |
+| `app/api/v1/app/questionnaires/_lib/session-scope.ts`                                                  | The DB seam                                                                                                                                                                                                                                                       |
+| `app/api/v1/app/questionnaires/_lib/seed-topics.ts`                                                    | Seeding + reconcile-after-rewrite                                                                                                                                                                                                                                 |
+| `app/api/v1/app/questionnaire-sessions/_lib/plan-scope.ts`                                             | The post-turn trigger                                                                                                                                                                                                                                             |
+| `app/api/v1/app/questionnaires/[id]/versions/[vid]/topics/route.ts`                                    | GET / PUT / PATCH                                                                                                                                                                                                                                                 |
+| `.../topics/preview/route.ts`                                                                          | The plan dry-run (F17.14) — the planner over a synthetic opening; writes nothing                                                                                                                                                                                  |
+| `.../analytics/routing/route.ts`                                                                       | Routing quality (F17.16) — per-topic selection / exclusion / amendment counts over the window                                                                                                                                                                     |
+| `app/api/v1/app/questionnaires/_lib/plan-inputs.ts`                                                    | The shared version-side planner inputs, so the dry-run and the interview price the instrument identically                                                                                                                                                         |
+| `.../topics/analyse/stream/route.ts` · `.../topics/draft/route.ts`                                     | Run the analyst (SSE) · accept or discard its proposal                                                                                                                                                                                                            |
+| `app/api/v1/app/questionnaire-sessions/_lib/amend-plan.ts`                                             | The amendment trigger                                                                                                                                                                                                                                             |
+| `components/admin/questionnaires/topics/**`                                                            | The Adaptive scope tab: explainer, settings, rules, topic editor, analyst review, and the routing map's dialog / canvas / nodes                                                                                                                                   |
+| `lib/app/questionnaire/scope-evaluation/**`                                                            | Scope evaluation (F17.21) — dimension registry, judge schema/prompt, structure DTO + Zod, fail-soft fan-out (`run-panel.ts`), by-target grouping, and `describe-op.ts`'s plain-English rendering of a `ScopeProposedEdit`, shared by the review card and the pack |
+| `lib/app/questionnaire/scope/rule-format.ts`                                                           | `describeScopeRule` — promoted out of the pack builder in F17.21 Phase A so the pack and the scope-evaluation judge prompt share one rule-sentence implementation                                                                                                 |
+| `lib/app/questionnaire/capabilities/evaluate-scope.ts`                                                 | The scope-evaluation judge-dispatch capability                                                                                                                                                                                                                    |
+| `prisma/seeds/app-questionnaire/091-scope-evaluation-judges.ts` · `092-scope-evaluation-capability.ts` | Seeds the four judge agents and the capability row                                                                                                                                                                                                                |
+| `app/api/v1/app/questionnaires/_lib/scope-evaluation-*.ts`                                             | The DB seam: structure loader, run persist/list/detail, staleness derivation, target resolution, apply engine — mirrors the `_lib/evaluation-*.ts` split                                                                                                          |
+| `.../topics/evaluate-preview/route.ts`                                                                 | Ephemeral panel run — writes nothing                                                                                                                                                                                                                              |
+| `.../topics/evaluations/**`                                                                            | Persisted run create/list/detail/retry and the finding review/apply routes                                                                                                                                                                                        |
+| `components/admin/questionnaires/topics/scope-evaluation-*.tsx` · `scope-finding-review-card.tsx`      | The preview card, the run-history table, the run-detail view, and the finding review card                                                                                                                                                                         |
+| `app/admin/questionnaires/[id]/v/[vid]/topics/evaluations/**`                                          | Run history and run detail pages                                                                                                                                                                                                                                  |
 
 ## Try it — the plan preview (F17.14)
 

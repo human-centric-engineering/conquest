@@ -31,6 +31,13 @@ import type {
   ProposedEdit,
   ReconciledSuggestion,
 } from '@/lib/app/questionnaire/evaluation';
+// F17.21: scope-evaluation run views reuse the SAME severity/status/applicability vocabulary
+// (imported above) plus their own dimension + edit-op vocabulary — see `scope-evaluation/types.ts`
+// for why these are a separate module rather than an extension of `evaluation/`.
+import type {
+  ScopeEvaluationDimension,
+  ScopeProposedEdit,
+} from '@/lib/app/questionnaire/scope-evaluation';
 // Ref-lookup turns carry their full inspector call trace so the admin evaluator can show the raw
 // prompt of every call (same shape the preview drawer / diagnostics render).
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector/types';
@@ -309,6 +316,84 @@ export interface EvaluationRunDetail extends EvaluationRunListItem {
    * predates reconciliation entirely; consumers then show the judges' own suggestions unchanged.
    */
   reconciled: ReconciledSuggestion[];
+}
+
+/**
+ * What a scope-evaluation finding's `targetKey` refers to (F17.21) — the sibling of
+ * {@link FindingTargetKind} for the Adaptive Scope judge panel. `topic:<key>` / `rule:<id>` /
+ * `settings` rather than question/section/goal/audience, since the panel judges the scope config,
+ * not the question structure.
+ */
+export type ScopeFindingTargetKind = 'topic' | 'rule' | 'settings' | 'unknown';
+
+/** The resolved subject of a scope finding (see {@link ScopeFindingTargetKind}). */
+export interface ScopeFindingTargetView {
+  kind: ScopeFindingTargetKind;
+  /** The raw `targetKey`, unchanged — still the handle apply reconciles against. */
+  key: string;
+  /** Human label: the topic's label, the rule's rendered sentence, or "Adaptive scope settings". */
+  label: string;
+  /** The target exists only in the run's snapshot — it was removed from the live config since. */
+  removed: boolean;
+}
+
+/** One persisted scope-evaluation finding (F17.21) — client-safe projection of the DB row. */
+export interface ScopeEvaluationFindingView {
+  id: string;
+  dimension: ScopeEvaluationDimension;
+  /** Presentation order within (run, dimension). */
+  ordinal: number;
+  /** `topic:<key>`, `rule:<id>`, or `settings`. */
+  targetKey: string;
+  /** `targetKey` resolved to its subject for display, derived at read time, never stored. */
+  target: ScopeFindingTargetView | null;
+  severity: FindingSeverity;
+  proposedChange: string;
+  rationale: string;
+  sourceQuote: string | null;
+  /** Review lifecycle: `pending` | `accepted` | `declined` | `applied`. */
+  status: FindingReviewStatus;
+  proposedEdit: ScopeProposedEdit | null;
+  /** The admin's edited op, which takes precedence over `proposedEdit` at apply; `null` if unedited. */
+  editedOverride: ScopeProposedEdit | null;
+  decidedByUserId: string | null;
+  decidedAt: string | null;
+  appliedAt: string | null;
+  appliedToVersionId: string | null;
+  /** Derived at read time, never stored: whether intervening edits made this suggestion obsolete. */
+  stale: boolean;
+  applicable: FindingApplicability;
+}
+
+/** One row in the scope-evaluation-runs list for a version (F17.21), newest-first. */
+export interface ScopeEvaluationRunListItem {
+  id: string;
+  status: string;
+  dimensionsRequested: number;
+  dimensionsRun: number;
+  dimensionsFailed: number;
+  totalFindings: number;
+  dimensionSummary: ScopeEvaluationDimensionSummary[];
+  triggeredByUserId: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+/** One dimension's outcome captured on a scope-evaluation run (F17.21). */
+export interface ScopeEvaluationDimensionSummary {
+  dimension: ScopeEvaluationDimension;
+  score: number | null;
+  findingCount: number;
+  diagnostic: string | null;
+}
+
+/** Full scope-evaluation-run detail (F17.21) — the list row plus its findings and run context. */
+export interface ScopeEvaluationRunDetail extends ScopeEvaluationRunListItem {
+  versionId: string;
+  questionnaireId: string;
+  error: string | null;
+  findings: ScopeEvaluationFindingView[];
 }
 
 /**

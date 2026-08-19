@@ -72,6 +72,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', () => ({
   loadAdaptiveScopeSettings: vi.fn(async () => ({ enabled: false, rules: [] })),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes', () => ({
+  loadLatestScopeEvaluationRun: vi.fn(async () => null),
+}));
+
 vi.mock('@/lib/app/questionnaire/glossary/resolve', () => ({
   loadAcceptedGlossaryEntries: vi.fn(async () => []),
 }));
@@ -114,6 +118,7 @@ import {
   loadAdaptiveScopeSettings,
   loadTopics,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { loadLatestScopeEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes';
 import { buildGlossaryAppendix } from '@/lib/app/questionnaire/glossary/report-appendix';
 import { buildPackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
@@ -156,6 +161,7 @@ beforeEach(() => {
   (loadLatestEvaluationRun as Mock).mockResolvedValue(null);
   (loadTopics as Mock).mockResolvedValue([]);
   (loadAdaptiveScopeSettings as Mock).mockResolvedValue({ enabled: false, rules: [] });
+  (loadLatestScopeEvaluationRun as Mock).mockResolvedValue(null);
   (buildPackModel as Mock).mockReturnValue(PACK_MODEL);
 });
 
@@ -326,10 +332,11 @@ describe('GET pack — include flags', () => {
     );
   });
 
-  it('does not load topics/settings when adaptiveScope=false (default)', async () => {
+  it('does not load topics/settings/scope-evaluation-run when adaptiveScope=false (default)', async () => {
     await GET(makeRequest(QN_ID, VID, { format: 'md' }), ADMIN_SESSION, makeContext());
     expect(loadTopics).not.toHaveBeenCalled();
     expect(loadAdaptiveScopeSettings).not.toHaveBeenCalled();
+    expect(loadLatestScopeEvaluationRun).not.toHaveBeenCalled();
     expect(buildPackModel).toHaveBeenCalledWith(
       QUESTIONNAIRE_ROW.title,
       GRAPH,
@@ -342,11 +349,13 @@ describe('GET pack — include flags', () => {
     );
   });
 
-  it('loads topics + settings and threads them through when adaptiveScope=true', async () => {
+  it('loads topics + settings + the latest scope-evaluation run and threads them through when adaptiveScope=true', async () => {
     const topics = [{ id: 't1', key: 'topic-1' }];
     const settings = { enabled: true, rules: [] };
+    const scopeEvaluationRun = { id: 'scope-run1' };
     (loadTopics as Mock).mockResolvedValue(topics);
     (loadAdaptiveScopeSettings as Mock).mockResolvedValue(settings);
+    (loadLatestScopeEvaluationRun as Mock).mockResolvedValue(scopeEvaluationRun);
 
     await GET(
       makeRequest(QN_ID, VID, { format: 'md', adaptiveScope: 'true' }),
@@ -356,13 +365,14 @@ describe('GET pack — include flags', () => {
 
     expect(loadTopics).toHaveBeenCalledWith(VID);
     expect(loadAdaptiveScopeSettings).toHaveBeenCalledWith(VID);
+    expect(loadLatestScopeEvaluationRun).toHaveBeenCalledWith(VID);
     expect(buildPackModel).toHaveBeenCalledWith(
       QUESTIONNAIRE_ROW.title,
       GRAPH,
       [],
       null,
       null,
-      { topics, settings },
+      { topics, settings, scopeEvaluationRun },
       expect.objectContaining({ adaptiveScope: true }),
       expect.any(String)
     );

@@ -390,3 +390,37 @@ export const scopePreviewLimiter = createRateLimiter({
   interval: SCOPE_PREVIEW_RATE_LIMIT_INTERVAL_MS,
   maxRequests: SCOPE_PREVIEW_RATE_LIMIT_MAX,
 });
+
+/**
+ * Scope-evaluation preview sub-cap (Adaptive Scope, F17.21). One call fans out to **four** judge
+ * LLM completions (the whole panel) — the same paid class as the design-evaluation panel, just a
+ * smaller fan-out (4 judges vs. 7), so the same 20/min ceiling leaves at least as much headroom.
+ * Keyed on the admin user id, who owns the spend.
+ */
+export const SCOPE_EVALUATION_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link scopeEvaluationLimiter}, in milliseconds. */
+export const SCOPE_EVALUATION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const scopeEvaluationLimiter = createRateLimiter({
+  interval: SCOPE_EVALUATION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: SCOPE_EVALUATION_RATE_LIMIT_MAX,
+});
+
+/**
+ * Scope-evaluation-apply sub-cap (F17.21). Applying a finding is not LLM work, but it mutates the
+ * scope config and may **fork** a launched version — costlier than a plain edit, so it takes its
+ * own per-admin sub-cap rather than only the section 100/min. Same value as the design-evaluation
+ * apply cap (`evaluationApplyLimiter`) — an apply here is cheaper (a single-row topic update or a
+ * settings-blob upsert, never a multi-row deep copy of a question graph), so 60/min is if anything
+ * more headroom, not less. Keyed on the admin user id, who owns the version.
+ */
+export const SCOPE_EVALUATION_APPLY_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link scopeEvaluationApplyLimiter}, in milliseconds. */
+export const SCOPE_EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const scopeEvaluationApplyLimiter = createRateLimiter({
+  interval: SCOPE_EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: SCOPE_EVALUATION_APPLY_RATE_LIMIT_MAX,
+});

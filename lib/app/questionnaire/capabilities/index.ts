@@ -134,3 +134,9 @@ export {
   type DetectScopeCandidacyArgs,
   type DetectScopeCandidacyData,
 } from '@/lib/app/questionnaire/capabilities/detect-scope-candidacy';
+
+export {
+  AppEvaluateScopeCapability,
+  type EvaluateScopeArgs,
+  type EvaluateScopeData,
+} from '@/lib/app/questionnaire/capabilities/evaluate-scope';

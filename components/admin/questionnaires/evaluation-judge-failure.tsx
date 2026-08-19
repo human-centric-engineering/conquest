@@ -12,13 +12,16 @@
  *    on. The code is kept alongside it (as a `title`) — it's what support asks for.
  *  - {@link RetryJudgeButton} re-dispatches that one judge. Presentational only: the fetch and the
  *    run state live in `EvaluationRunDetail`, which is the component that owns the run.
+ *
+ * Dimension-agnostic (`dimension: string`) so the scope-evaluation panel (F17.21) — a second judge
+ * panel with its own dimension vocabulary — shares this treatment rather than duplicating it; the
+ * diagnostic codes both panels' `run-panel.ts` produce are the same small set.
  */
 
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import type { EvaluationDimension } from '@/lib/app/questionnaire/evaluation';
 
 /**
  * Diagnostic code → what actually went wrong, in the admin's terms. The codes come from
@@ -40,12 +43,12 @@ export function judgeFailureReason(diagnostic: string): string {
 }
 
 interface RetryProps {
-  dimension: EvaluationDimension;
+  dimension: string;
   /** True while *this* judge is being re-dispatched. */
   busy: boolean;
   /** True while any judge is being re-dispatched — retries are serialised. */
   disabled?: boolean;
-  onRetry: (dimension: EvaluationDimension) => void;
+  onRetry: (dimension: string) => void;
   className?: string;
 }
 

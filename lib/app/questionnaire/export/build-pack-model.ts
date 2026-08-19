@@ -6,9 +6,12 @@
  * covers everything about how the questionnaire is set up: title/version/goals, the question
  * structure, the semantic data slots (with their linked questions), the definitions/glossary, the
  * experience-setup summary, (opt-in) the F5.1–F5.3 judge panel's findings for this version, and
- * (opt-in) the Adaptive Scope routing logic in plain language. The admin picks which of those seven
- * sections to include via {@link PackInclude}; excluded sections are `null` on the model so every
- * serialiser (PDF/CSV/Markdown) skips them the same way.
+ * (opt-in) the Adaptive Scope routing logic in plain language — nesting the F17.21 scope-evaluation
+ * judge panel's verdict on that routing design as {@link PackAdaptiveScope.evaluation}, rather than
+ * an eighth top-level section, since it is a judgement ABOUT the section above it, not a separate
+ * subject. The admin picks which of those seven top-level sections to include via
+ * {@link PackInclude}; excluded sections are `null` on the model so every serialiser
+ * (PDF/CSV/Markdown) skips them the same way.
  *
  * The setup summary is DERIVED from `lib/app/questionnaire/settings-registry.ts`, not hand-listed —
  * a new config field appears in the pack automatically (and cannot compile until it is classified).
@@ -21,19 +24,21 @@
  * deterministic in its input.
  */
 
+import type {
+  EvaluationRunDetail,
+  ScopeEvaluationRunDetail,
+  ScopeFindingTargetKind,
+  VersionGraphView,
+} from '@/lib/app/questionnaire/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
-import type { EvaluationRunDetail, VersionGraphView } from '@/lib/app/questionnaire/views';
 import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/settings-registry';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
   ALWAYS_PHASES,
-  SCOPE_RULE_ACTION_LABELS,
-  SCOPE_RULE_OPERATOR_LABELS,
-  VALUELESS_SCOPE_OPERATORS,
   type AdaptiveScopeSettings,
-  type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
+import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
@@ -46,6 +51,14 @@ import {
   groupFindingsByTarget,
   type SeverityCounts,
 } from '@/lib/app/questionnaire/evaluation/group-findings';
+import {
+  SCOPE_EVALUATION_DIMENSIONS,
+  SCOPE_EVALUATION_DIMENSION_SPECS,
+  describeScopeProposedEdit,
+  groupScopeFindingsByTarget,
+  type ScopeEvaluationDimension,
+  type ScopeSeverityCounts,
+} from '@/lib/app/questionnaire/scope-evaluation';
 import {
   buildInstrumentModel,
   type InstrumentSection,
@@ -255,6 +268,71 @@ export interface PackAdaptiveScopeRule {
 }
 
 /**
+ * What ONE scope judge said about ONE flagged topic/rule/settings target — the scope-evaluation
+ * sibling of {@link PackEvaluationJudgeView}.
+ */
+export interface PackScopeEvaluationJudgeView {
+  dimension: ScopeEvaluationDimension;
+  /** The judge's display name ("Criteria-Quality Judge"), so a reader needn't know the slug. */
+  label: string;
+  severity: FindingSeverity;
+  status: FindingReviewStatus;
+  proposedChange: string;
+  rationale: string;
+  sourceQuote: string | null;
+  /** Plain-English rendering of the structured edit this finding proposes; `null` when prose-only. */
+  proposedEditSummary: string | null;
+}
+
+/**
+ * One flagged scope target — a topic, a rule, or the settings as a whole — with every judge's
+ * view of it gathered underneath. The scope-evaluation sibling of {@link PackEvaluationTarget};
+ * simpler, because the panel has no reconcile step (see `run-panel.ts`'s module doc) so there is
+ * no `alternatives`/`unresolvedBy` to carry.
+ */
+export interface PackScopeEvaluationTarget {
+  /** `topic:<key>` / `rule:<id>` / `settings`, resolved when possible, else the raw `targetKey`. */
+  key: string;
+  kind: ScopeFindingTargetKind;
+  /** The topic's label, the rule's rendered sentence, or "Adaptive scope settings". */
+  label: string;
+  /** The target is gone from the live structure (named from the run's snapshot). */
+  removed: boolean;
+  counts: ScopeSeverityCounts;
+  /** Every verdict on this target, in `(dimension, ordinal)` order. */
+  judges: PackScopeEvaluationJudgeView[];
+}
+
+/** One scope judge's scoreboard line — the score without its findings, which live under the targets. */
+export interface PackScopeEvaluationScore {
+  dimension: ScopeEvaluationDimension;
+  label: string;
+  /** Score in [0, 1]; `null` when the judge failed (see `diagnostic`). */
+  score: number | null;
+  diagnostic: string | null;
+  /** How many findings this judge contributed across all targets. */
+  findingCount: number;
+}
+
+/**
+ * The scope-evaluation appendix — the latest F17.21 run for this version, if one has ever been
+ * made. Nested under {@link PackAdaptiveScope} (not a sibling pack section) because it is a
+ * judgement ABOUT the routing design directly above it, not a separate subject — see the module
+ * doc's "extends the existing `adaptiveScope` section" note.
+ */
+export interface PackScopeEvaluation {
+  /** `false` when the version has never been scope-evaluated — every other field is empty/null. */
+  hasRun: boolean;
+  /** ISO timestamp the run finished (or started, if still incomplete); `null` when `!hasRun`. */
+  runAt: string | null;
+  totalFindings: number;
+  /** All four judges' scores, in `SCOPE_EVALUATION_DIMENSIONS` order; `[]` when `!hasRun`. */
+  scores: PackScopeEvaluationScore[];
+  /** One entry per flagged topic/rule/settings, settings-then-topics-then-rules order. */
+  targets: PackScopeEvaluationTarget[];
+}
+
+/**
  * The Adaptive scope appendix — the routing logic in plain language. `enabled: false` still renders
  * (it is informative in its own right: every respondent gets the full instrument), the same "state
  * a fact rather than omit the section" choice `PackEvaluations.hasRun` makes.
@@ -273,6 +351,8 @@ export interface PackAdaptiveScope {
   includeCheckTopic: boolean;
   /** Seconds; `0` means no time limit was set. */
   sessionBudgetSeconds: number;
+  /** The F17.21 judge panel's verdict on this routing design — see {@link PackScopeEvaluation}. */
+  evaluation: PackScopeEvaluation;
 }
 
 /** The full Questionnaire Pack model the serialisers render. */
@@ -388,26 +468,60 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
 }
 
 /**
- * Render one hard rule as a plain sentence, resolving its topic/data-slot keys to their authored
- * names so a stakeholder never has to read a key. An unresolved key (a rule pointing at a topic or
- * slot since deleted — silently skipped everywhere else in this feature, per
- * `.context/app/questionnaire/adaptive-scope.md`) falls back to the raw key rather than dropping the
- * rule, so a stale rule is still visible as *something* an admin should clean up.
+ * Build the scope-evaluation appendix from the latest F17.21 run for this version. `run` is
+ * `null` when the version has never been scope-evaluated. Mirrors `buildEvaluationsSection`'s
+ * shape split (`scores` vs `targets`) without a reconcile step: the panel has none (see
+ * `run-panel.ts`'s module doc), so every finding renders where the judge put it, with no
+ * alternatives to fold in.
+ *
+ * Grouping is `groupScopeFindingsByTarget`, the same pure function the admin run-detail view uses
+ * — the pack and the console must not disagree about what counts as one target.
  */
-function describeScopeRule(
-  rule: ScopeRule,
-  topicLabels: Map<string, string>,
-  dataSlotLabels: Map<string, string>
-): string {
-  const topicLabel = topicLabels.get(rule.topicKey) ?? rule.topicKey;
-  const slotLabel = dataSlotLabels.get(rule.dataSlotKey) ?? rule.dataSlotKey;
-  const operator = SCOPE_RULE_OPERATOR_LABELS[rule.operator];
-  const clause = (VALUELESS_SCOPE_OPERATORS as readonly string[]).includes(rule.operator)
-    ? `"${slotLabel}" ${operator}`
-    : `"${slotLabel}" ${operator} "${rule.value ?? ''}"`;
-  const action = SCOPE_RULE_ACTION_LABELS[rule.action];
-  const capitalizedAction = action.charAt(0).toUpperCase() + action.slice(1);
-  return `${capitalizedAction} "${topicLabel}" when ${clause}.`;
+function buildScopeEvaluationSection(run: ScopeEvaluationRunDetail | null): PackScopeEvaluation {
+  if (!run) return { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] };
+
+  const scores: PackScopeEvaluationScore[] = SCOPE_EVALUATION_DIMENSIONS.map((dimension) => {
+    const summary = run.dimensionSummary.find((s) => s.dimension === dimension) ?? null;
+    return {
+      dimension,
+      label: SCOPE_EVALUATION_DIMENSION_SPECS[dimension].label,
+      score: summary?.score ?? null,
+      diagnostic: summary?.diagnostic ?? null,
+      findingCount: run.findings.filter((f) => f.dimension === dimension).length,
+    };
+  });
+
+  const targets: PackScopeEvaluationTarget[] = groupScopeFindingsByTarget(
+    run.findings,
+    'natural'
+  ).map((group) => ({
+    key: group.key,
+    kind: group.kind,
+    label: group.label,
+    removed: group.removed,
+    counts: group.counts,
+    judges: group.findings.map((f) => {
+      const op = f.editedOverride ?? f.proposedEdit;
+      return {
+        dimension: f.dimension,
+        label: SCOPE_EVALUATION_DIMENSION_SPECS[f.dimension].label,
+        severity: f.severity,
+        status: f.status,
+        proposedChange: f.proposedChange,
+        rationale: f.rationale,
+        sourceQuote: f.sourceQuote,
+        proposedEditSummary: op ? describeScopeProposedEdit(op) : null,
+      };
+    }),
+  }));
+
+  return {
+    hasRun: true,
+    runAt: run.completedAt ?? run.startedAt,
+    totalFindings: run.totalFindings,
+    scores,
+    targets,
+  };
 }
 
 /**
@@ -422,7 +536,8 @@ function describeScopeRule(
 function buildAdaptiveScopeSection(
   topics: Topic[],
   settings: AdaptiveScopeSettings,
-  dataSlots: DataSlotView[]
+  dataSlots: DataSlotView[],
+  scopeEvaluationRun: ScopeEvaluationRunDetail | null
 ): PackAdaptiveScope {
   const topicLabels = new Map(topics.map((topic) => [topic.key, topic.label]));
   const dataSlotLabels = new Map(dataSlots.map((slot) => [slot.key, slot.name]));
@@ -453,6 +568,7 @@ function buildAdaptiveScopeSection(
     maxConditionalTopics: settings.maxConditionalTopics,
     includeCheckTopic: settings.includeCheckTopic,
     sessionBudgetSeconds: settings.sessionBudgetSeconds,
+    evaluation: buildScopeEvaluationSection(scopeEvaluationRun),
   };
 }
 
@@ -460,11 +576,14 @@ function buildAdaptiveScopeSection(
  * The routing data behind the Adaptive scope section — loaded by the route only when
  * `include.adaptiveScope` is set (the same "skip the query when the section is excluded" pattern
  * `evaluationRun` already uses), so the common download pays no extra cost for a section that
- * defaults off.
+ * defaults off. `scopeEvaluationRun` is `null` both when the section is excluded and when the
+ * version has never been scope-evaluated — `buildScopeEvaluationSection` folds both into
+ * `hasRun: false`.
  */
 export interface PackAdaptiveScopeSource {
   topics: Topic[];
   settings: AdaptiveScopeSettings;
+  scopeEvaluationRun: ScopeEvaluationRunDetail | null;
 }
 
 /** Assemble the Questionnaire Pack model. Pure. */
@@ -514,7 +633,8 @@ export function buildPackModel(
         ? buildAdaptiveScopeSection(
             adaptiveScopeSource.topics,
             adaptiveScopeSource.settings,
-            dataSlots
+            dataSlots,
+            adaptiveScopeSource.scopeEvaluationRun
           )
         : null,
   };

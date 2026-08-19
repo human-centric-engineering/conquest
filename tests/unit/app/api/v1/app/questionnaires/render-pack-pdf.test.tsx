@@ -30,6 +30,7 @@ import type {
   SectionView,
   QuestionSlotView,
   EvaluationRunDetail,
+  ScopeEvaluationRunDetail,
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
@@ -274,6 +275,53 @@ const EVALUATION_RUN: EvaluationRunDetail = {
   ],
 };
 
+const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {
+  id: 'scope-run1',
+  versionId: 'v1',
+  questionnaireId: 'q1',
+  status: 'partial',
+  dimensionsRequested: 4,
+  dimensionsRun: 3,
+  dimensionsFailed: 1,
+  totalFindings: 1,
+  dimensionSummary: [
+    { dimension: 'criteria_quality', score: 0.7, findingCount: 1, diagnostic: null },
+    { dimension: 'rule_integrity', score: 1, findingCount: 0, diagnostic: null },
+    { dimension: 'budget_realism', score: null, findingCount: 0, diagnostic: 'judge_error' },
+    { dimension: 'coverage_and_burden', score: 0.9, findingCount: 0, diagnostic: null },
+  ],
+  triggeredByUserId: 'admin-1',
+  error: null,
+  startedAt: '2026-08-10T00:00:00.000Z',
+  completedAt: '2026-08-10T00:00:05.000Z',
+  createdAt: '2026-08-10T00:00:00.000Z',
+  findings: [
+    {
+      id: 'sf1',
+      dimension: 'criteria_quality',
+      ordinal: 0,
+      targetKey: 'topic:talent',
+      target: { kind: 'topic', key: 'talent', label: 'Talent & culture', removed: false },
+      severity: 'major',
+      proposedChange: 'Make the criteria more specific and observable',
+      rationale: 'The current wording is too broad to reliably trigger this topic',
+      sourceQuote: null,
+      status: 'pending',
+      proposedEdit: {
+        op: 'edit_topic_criteria',
+        criteria: 'The respondent names a specific hiring or attrition problem.',
+      },
+      editedOverride: null,
+      decidedByUserId: null,
+      decidedAt: null,
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'apply',
+    },
+  ],
+};
+
 describe('renderPackPdf', () => {
   it('renders a full pack (every section included) without throwing', async () => {
     const sections: SectionView[] = [
@@ -300,7 +348,7 @@ describe('renderPackPdf', () => {
       DATA_SLOTS,
       GLOSSARY,
       EVALUATION_RUN,
-      { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+      { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: SCOPE_EVALUATION_RUN },
       { ...DEFAULT_PACK_INCLUDE, evaluations: true, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -432,7 +480,11 @@ describe('renderPackPdf', () => {
       [],
       null,
       null,
-      { topics: [], settings: { ...SCOPE_SETTINGS, enabled: false, rules: [] } },
+      {
+        topics: [],
+        settings: { ...SCOPE_SETTINGS, enabled: false, rules: [] },
+        scopeEvaluationRun: null,
+      },
       { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -450,7 +502,7 @@ describe('renderPackPdf', () => {
       [],
       null,
       null,
-      { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] } },
+      { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
       { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -460,6 +512,30 @@ describe('renderPackPdf', () => {
       alwaysAskedTopics: [],
       conditionalTopics: [],
       rules: [],
+    });
+
+    const pdf = await renderPackPdf(model);
+    expect(startsWithPdfMagic(pdf)).toBe(true);
+  }, 20000);
+
+  it('renders the "no scope evaluation run yet" state when adaptiveScope is included but no run exists', async () => {
+    const model = buildPackModel(
+      'Unscored Pack',
+      graphOf([]),
+      [],
+      null,
+      null,
+      { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+      { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+      '2026-08-10T00:00:00.000Z'
+    );
+
+    expect(model.adaptiveScope?.evaluation).toEqual({
+      hasRun: false,
+      runAt: null,
+      totalFindings: 0,
+      scores: [],
+      targets: [],
     });
 
     const pdf = await renderPackPdf(model);

@@ -247,7 +247,7 @@ export function EvaluationRunHeadline({
                       dimension={dim.dimension}
                       busy={retryingDimension === dim.dimension}
                       disabled={retryingDimension !== null}
-                      onRetry={onRetryJudge}
+                      onRetry={(d) => onRetryJudge(d as EvaluationDimension)}
                     />
                   </div>
                 ) : (

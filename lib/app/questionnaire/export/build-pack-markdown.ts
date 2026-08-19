@@ -260,6 +260,61 @@ export function buildPackMarkdown(model: PackModel): string {
         }
         lines.push('');
       }
+
+      const evaluation = model.adaptiveScope.evaluation;
+      lines.push('### Scope evaluation');
+      lines.push('');
+      lines.push(
+        '*AI judge panel over the routing design above — includes findings not yet reviewed; treat as suggestions, not conclusions.*'
+      );
+      lines.push('');
+      if (!evaluation.hasRun) {
+        lines.push('_No scope evaluation has been run for this version yet._');
+        lines.push('');
+      } else {
+        lines.push(
+          `Last run ${evaluation.runAt} · ${evaluation.totalFindings} finding(s) across ${evaluation.targets.length} flagged item(s)`
+        );
+        lines.push('');
+
+        lines.push('| Judge | Score | Findings |');
+        lines.push('| --- | --- | --- |');
+        for (const judge of evaluation.scores) {
+          const score = judge.diagnostic
+            ? `unavailable (${cell(judge.diagnostic)})`
+            : judge.score !== null
+              ? `${Math.round(judge.score * 100)}%`
+              : 'n/a';
+          lines.push(`| ${cell(judge.label)} | ${score} | ${judge.findingCount} |`);
+        }
+        lines.push('');
+
+        if (evaluation.targets.length === 0) {
+          lines.push('_No findings raised._');
+          lines.push('');
+        } else {
+          for (const target of evaluation.targets) {
+            lines.push(`#### ${cell(target.label)}`);
+            const facts = [
+              `${target.judges.length} finding(s)`,
+              target.counts.major > 0 ? `${target.counts.major} major` : null,
+              target.removed ? 'no longer in the scope config' : null,
+            ].filter((f): f is string => f !== null);
+            lines.push(`_${facts.join(' · ')}_`);
+            lines.push('');
+            for (const judge of target.judges) {
+              lines.push(
+                `- **${judge.label}** [${judge.severity} · ${judge.status}] — ${judge.proposedChange}`
+              );
+              lines.push(`  ${judge.rationale}`);
+              if (judge.proposedEditSummary)
+                lines.push(`  Proposed edit: ${judge.proposedEditSummary}`);
+              if (judge.sourceQuote) lines.push(`  > ${cell(judge.sourceQuote)}`);
+            }
+            lines.push('');
+          }
+        }
+      }
     }
   }
 

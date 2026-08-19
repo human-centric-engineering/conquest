@@ -1255,3 +1255,56 @@ export const DETECT_SCOPE_CANDIDACY_FUNCTION_DEFINITION: CapabilityFunctionDefin
     required: ['documentText'],
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* Adaptive Scope — the scope-evaluation judge panel (F17.21)                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Slug of the evaluate-scope capability. One source of truth shared by the `BaseCapability`
+ * subclass, its `AiCapability` seed row, and the evaluate-preview route that dispatches it once
+ * per dimension — the sibling of `EVALUATE_STRUCTURE_CAPABILITY_SLUG` for Adaptive Scope's own
+ * judge panel. The judge agents themselves are slugged in `scope-evaluation/dimensions.ts`.
+ */
+export const EVALUATE_SCOPE_CAPABILITY_SLUG = 'app_evaluate_scope';
+
+/**
+ * `AiCapability.executionHandler` value for the evaluate-scope capability — the class name the
+ * dispatcher resolves the in-memory handler by. Must match the class registered in
+ * `lib/app/capabilities.ts`.
+ */
+export const EVALUATE_SCOPE_HANDLER = 'AppEvaluateScopeCapability';
+
+/**
+ * The evaluate-scope capability's OpenAI-compatible function definition — the single source of
+ * truth shared by the `BaseCapability` subclass and the `AiCapability` seed row. Dispatched
+ * programmatically by the scope evaluate-preview route — not exposed to a chat tool loop.
+ * `structure` is passed as an opaque object (the pure `ScopeStructureInput` DTO); the capability
+ * validates it with Zod at execute time.
+ */
+export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: EVALUATE_SCOPE_CAPABILITY_SLUG,
+  description:
+    "Judge one dimension of a questionnaire version's Adaptive Scope configuration (criteria quality, rule integrity, budget realism, or coverage and burden) — the authored topics, hard rules, planner instructions, and time budget — via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension by the scope evaluate-preview route; persists nothing.",
+  parameters: {
+    type: 'object',
+    properties: {
+      dimension: {
+        type: 'string',
+        description:
+          'Which dimension to judge: criteria_quality | rule_integrity | budget_realism | coverage_and_burden.',
+      },
+      structure: {
+        type: 'object',
+        description:
+          'The scope structure DTO to judge — { topics[], rules[], settings, costs, knownIssues[] }.',
+        additionalProperties: true,
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['dimension', 'structure'],
+  },
+};

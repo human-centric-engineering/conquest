@@ -28,6 +28,7 @@ import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issu
 import { ScopeSettingsCard } from '@/components/admin/questionnaires/topics/scope-settings-card';
 import { PlanPreviewCard } from '@/components/admin/questionnaires/topics/plan-preview-card';
 import { RoutingQualityCard } from '@/components/admin/questionnaires/topics/routing-quality-card';
+import { ScopeEvaluationCard } from '@/components/admin/questionnaires/topics/scope-evaluation-card';
 import {
   TopicListEditor,
   type DraftTopic,
@@ -224,6 +225,19 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         versionId={versionId}
         enabled={payload.settings.enabled}
         conditionalCount={payload.topics.filter((t) => t.phase === 'conditional').length}
+      />
+
+      {/* A second, structural opinion — independent of the coherence checks above and of the
+          behavioural evidence RoutingQualityCard reports. Sits beside its siblings on the tab
+          rather than under the design-evaluation "Evaluations" tab: it judges topics/rules/
+          settings, not questions, so it belongs with the surface it reviews. */}
+      <ScopeEvaluationCard
+        questionnaireId={questionnaireId}
+        versionId={versionId}
+        topics={payload.topics}
+        rules={payload.settings.rules}
+        dataSlots={payload.inventory.dataSlots}
+        disabled={busy}
       />
 
       <ScopeSettingsCard
