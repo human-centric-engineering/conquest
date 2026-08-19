@@ -213,9 +213,13 @@ describe('registerAppSubjectSources', () => {
       expect(getAppExcludedSubjectSources()).toEqual([]);
     });
 
-    it('refuses the same clash the other way round — excluded first, then a source', () => {
-      // Order matters to the implementation (two loops, exclusions second), so
-      // the mirror case is not the same code path as the one above.
+    it('lets a SOURCE supersede an existing exclusion, rather than refusing it', () => {
+      // Deliberately not symmetric with the case above. Refusing here left a
+      // model that could never move from `excluded` to `sources` — and a
+      // still-"accounted" model keeps the coverage guard green while
+      // `meta.excluded` tells the subject the table was withheld and the
+      // collector may be returning it. Between two claims, the one saying the
+      // table DOES hold personal data is the safe answer.
       seam(() => {
         registerAppSubjectSources({
           tier: 'app',
@@ -224,8 +228,32 @@ describe('registerAppSubjectSources', () => {
         registerAppSubjectSources({ tier: 'app', sources: [VALID] });
       });
 
-      expect(getAppSubjectSources()).toEqual([]);
-      expect(getAppExcludedSubjectSources()).toHaveLength(1);
+      expect(getAppSubjectSources()).toEqual([VALID]);
+      expect(getAppExcludedSubjectSources()).toEqual([]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'subject-sources: a source declaration replaced an exclusion',
+        expect.objectContaining({ model: 'AppInvoice' })
+      );
+    });
+
+    it('lets a leaf tier supersede a framework tier’s exclusion', () => {
+      // The cross-tier version, which is the one that actually happens: the
+      // framework excludes a shared table at boot, the leaf knows it holds its
+      // users' data. Ownership moves with the claim.
+      seam(() => {
+        registerAppSubjectSources({
+          tier: 'framework',
+          excluded: [{ model: 'SharedTag', reason: 'Framework tier sees no personal data here.' }],
+        });
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [{ ...VALID, model: 'SharedTag', section: 'tags' }],
+        });
+      });
+
+      expect(getAppSubjectSources()).toEqual([{ ...VALID, model: 'SharedTag', section: 'tags' }]);
+      expect(getAppExcludedSubjectSources()).toEqual([]);
+      expect([...getAccountedAppModels()]).toEqual(['SharedTag']);
     });
 
     it('refuses an exclusion with an empty model name', () => {

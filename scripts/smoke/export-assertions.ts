@@ -17,9 +17,14 @@
  * particular shape here would invent a contract the seam does not have, and the
  * property being checked — "this subject owns none of it" — does not need one.
  *
- * Anything else (a string, a number, a boolean) counts as **not** empty. The
- * smoke script uses this to detect a collector returning a stranger's rows, so
- * the unknown case has to fail loudly rather than be waved through.
+ * Anything else (a string, a number, a boolean) counts as **not** empty, so an
+ * unexpected shape is never mistaken for "nothing here".
+ *
+ * The leak check does NOT go through this — it tests `Array.isArray(value) &&
+ * value.length > 0` directly, because only a row list can be assessed for a
+ * stranger's rows. This reconciles `meta.app`'s row counts against the payload
+ * the subject receives, where "is there anything in it" is the whole question.
+ * An earlier version of this paragraph claimed the leak check used it.
  */
 export function isEmptySection(value: unknown): boolean {
   if (value === null || value === undefined) return true;

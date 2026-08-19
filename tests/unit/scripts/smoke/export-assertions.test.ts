@@ -1,11 +1,14 @@
 /**
  * Tests: scripts/smoke/export-assertions.ts
  *
- * `isEmptySection` decides whether `smoke:export` reports a leak. The smoke
- * subject is created seconds before the export and owns nothing of a fork's, so
- * a declared section with anything in it means the collector matched a
- * stranger's rows (#530). A predicate that answered "empty" too readily would
- * turn that detection green while looking healthy.
+ * `isEmptySection` reconciles `meta.app`'s row counts against the payload the
+ * subject actually receives: a section the manifest says holds nothing must
+ * hold nothing, and the reverse. A predicate that answered "empty" too readily
+ * would let `meta` and the bundle disagree while looking healthy.
+ *
+ * It is deliberately NOT the leak check — that tests `Array.isArray(value) &&
+ * value.length > 0` directly, since only a row list can be assessed for a
+ * stranger's rows. An earlier version of this docblock said otherwise.
  *
  * @see scripts/smoke/export.ts
  */

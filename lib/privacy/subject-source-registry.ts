@@ -77,7 +77,17 @@ export interface AppSubjectDataSource {
   model: string;
   /** Key this source lands under inside the bundle's `app` section. */
   section: string;
-  /** `export` for the subject's own data; `attribution` for config they created. */
+  /**
+   * `export` for the subject's own data; `attribution` for config they created.
+   *
+   * **Advisory, and shown to the subject as such.** For core, `attribution` is
+   * a promise the manifest keeps — those sources return id + label + date and
+   * nothing else, because core owns the `fetch`. Here the rows come from your
+   * `collectAppSubjectData()`, which core does not inspect, so this is your
+   * tier's statement of intent rather than something enforced. Declaring
+   * `attribution` and returning full config content is not something core can
+   * detect; the honest way to read it is as the label you chose.
+   */
   disposition: SourceDisposition;
   /** One line on why this is the subject's data. Shown to a reader of the manifest. */
   description: string;
@@ -161,13 +171,29 @@ export function registerAppSubjectSources(contribution: AppSubjectSourceContribu
       reject(tier, model, `description must be at least ${MIN_DESCRIPTION} characters`);
       continue;
     }
-    if (excluded.has(model)) {
-      reject(tier, model, 'already declared as an exclusion — a model is one or the other');
-      continue;
+    // A source BEATS an existing exclusion, rather than being refused.
+    //
+    // Refusing left a model that could never move from `excluded` to `sources`:
+    // a framework tier excluding `SharedTag` at boot, and a leaf later declaring
+    // it a source, produced a rejected source, a still-"accounted" model, a
+    // green coverage guard — and a bundle whose `meta.excluded` told the subject
+    // the table was withheld while `collectAppSubjectData()` may well have been
+    // returning it. Between two tiers disagreeing about whether a table holds
+    // personal data, the one saying it DOES is the safe answer, and it is the
+    // one that keeps `meta` matching the payload.
+    const supersededExclusion = excluded.get(model);
+    if (supersededExclusion) {
+      excluded.delete(model);
+      logger.warn('subject-sources: a source declaration replaced an exclusion', {
+        tier,
+        model,
+        previousOwner: owners.get(model),
+        previousReason: supersededExclusion.reason,
+      });
     }
 
     const owner = owners.get(model);
-    if (owner !== undefined && owner !== tier) {
+    if (owner !== undefined && owner !== tier && supersededExclusion === undefined) {
       reject(tier, model, `already declared by tier '${owner}'`);
       continue;
     }

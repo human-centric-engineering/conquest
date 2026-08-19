@@ -64,15 +64,20 @@ const SEAM_SPECIFIER = /['"](@\/lib\/app\/[A-Za-z0-9_.-]+)['"]/g;
 /**
  * A Vitest mock of a specific seam module.
  *
- * `doUnmock` counts as mocking: a file that unmocks inside one test has a
- * `doMock` elsewhere and is driving the seam deliberately, which is the
- * fork-safe pattern this rule wants.
+ * **`doUnmock` deliberately does NOT count.** An earlier version accepted it,
+ * reasoning that a file which unmocks in one place must be driving the seam on
+ * purpose elsewhere. Half true, and the wrong half: the `doUnmock` in these
+ * files sits in `afterEach`, so the *default-case* tests ran against whatever
+ * the seam actually exports. Measured, that exempted four layout suites in
+ * which filling the nav and footer seams failed 9 assertions — the exact defect
+ * this rule exists to find, hidden by the rule itself.
  *
- * Case matters — an earlier draft wrote `(?:Mock|Unmock)`, which does not match
- * `vi.mock`, and it reported 23 coupled files instead of 4. The list looked
- * entirely plausible.
+ * Case matters too — an earlier draft wrote `(?:Mock|Unmock)`, which does not
+ * match `vi.mock`, and reported 23 coupled files instead of 4. Both drafts
+ * looked entirely plausible, which is why the fixtures below test the predicate
+ * rather than only surveying a tree that satisfies it.
  */
-const SEAM_MOCK = /vi\.(?:mock|doMock|unmock|doUnmock)\(\s*['"](@\/lib\/app\/[A-Za-z0-9_.-]+)['"]/g;
+const SEAM_MOCK = /vi\.(?:mock|doMock)\(\s*['"](@\/lib\/app\/[A-Za-z0-9_.-]+)['"]/g;
 
 /** The marker a coupled file must carry. Global — every occurrence is judged. */
 const FORK_NOTE = /FORK NOTE/g;
@@ -212,12 +217,19 @@ describe('unmockedSeams', () => {
     expect(unmockedSeams(src)).toEqual([]);
   });
 
-  it('ignores a seam driven through doMock / doUnmock', () => {
+  it('ignores a seam driven through doMock', () => {
     const src = [
-      `vi.doUnmock('${SEAM}/footer');`,
       `vi.doMock('${SEAM}/footer', () => ({ footerCopyright: false }));`,
+      `vi.doMock('${SEAM}/footer', () => ({ footerCopyright: null }));`,
     ].join('\n');
     expect(unmockedSeams(src)).toEqual([]);
+  });
+
+  it('does NOT accept doUnmock as mocking', () => {
+    // The hole this rule had. `doUnmock` in an `afterEach` leaves every
+    // default-case test in the file reading the shipped seam, so the file is
+    // coupled — accepting it exempted exactly the suites the rule is for.
+    expect(unmockedSeams(`vi.doUnmock('${SEAM}/footer');`)).toEqual([`${SEAM}/footer`]);
   });
 
   it('flags the unmocked one when a file mocks a different seam', () => {

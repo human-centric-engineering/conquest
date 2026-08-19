@@ -6,7 +6,14 @@
  * `BRAND` resolves env at module load, so the legal-name case stubs the env and
  * re-imports the component fresh.
  *
- * @see components/layouts/protected-footer.tsx · lib/brand.ts
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — filling `footerCopyright` is EXPECTED to fail cases here
+ * ---------------------------------------------------------------------------
+ * The `afterEach` only `doUnmock`s `lib/app/footer.ts`, so the default-case
+ * tests below render whatever it exports. Pin your own value rather than
+ * deleting them. See #636.
+ *
+ * @see components/layouts/protected-footer.tsx · lib/brand.ts · lib/app/footer.ts
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';

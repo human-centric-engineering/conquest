@@ -69,6 +69,18 @@ function check(cond: boolean, msg: string): void {
   console.log(`  ✓ ${msg}`);
 }
 
+/**
+ * Report something the run cannot assess, without failing it.
+ *
+ * The distinction matters for a fork: a failing `check` means "you have a bug",
+ * and this means "this script cannot tell". Conflating them is how a fork ends
+ * up with a red pipeline and no fork-owned way to green it — the shape of the
+ * issues this whole change exists to fix.
+ */
+function warn(msg: string): void {
+  console.log(`  ! ${msg}`);
+}
+
 async function main(): Promise<void> {
   if (!(await dbReachable())) {
     console.log('smoke:export skipped — no database reachable (DATABASE_URL unset or DB down).');
@@ -405,22 +417,33 @@ async function main(): Promise<void> {
       .filter((source) => !Array.isArray(bundle.app[source.section]))
       .map((source) => source.section);
 
+    // A shape this script cannot assess is NOT a failure. `AppSubjectData` is
+    // `Record<string, unknown>`, `countAppRows` handles a single-record object
+    // deliberately, and `export-user.test.ts` pins that behaviour — so failing
+    // here would hand a fork with a one-record `profile` section a red pipeline
+    // and no fork-owned way to green it, which is exactly #530's shape. The
+    // previous version of this check did precisely that.
+    if (unrecognised.length > 0) {
+      warn(
+        `app section(s) ${unrecognised.join(', ')} returned something other than a row list, ` +
+          'so the leak check cannot assess them. Core accepts that shape; return an array if ' +
+          'you want this script to check the section for a stranger’s rows.'
+      );
+    }
+
     check(
-      leaked.length === 0 && unrecognised.length === 0,
+      leaked.length === 0,
       leaked.length > 0
         ? // `check` prints its message on failure too, so the failing branch has to
           // describe the failure — otherwise a leak reports itself as "assertion
           // failed: all sections are empty", which reads as the opposite.
           `app section(s) ${leaked.join(', ')} returned rows for a subject created ` +
             'seconds ago who owns nothing — the collector is matching rows that are not theirs'
-        : unrecognised.length > 0
-          ? `app section(s) ${unrecognised.join(', ')} returned something other than a row ` +
-            'list, so this check cannot tell whether it holds another person’s data — ' +
-            'return an array for a declared section'
-          : declaredAppSources.length === 0
-            ? 'no app subject sources declared (vanilla Sunrise) — nothing to check'
-            : `all ${declaredAppSources.length} declared app section(s) arrived and are empty ` +
-              'for a subject who owns none of them'
+        : declaredAppSources.length === 0
+          ? 'no app subject sources declared (vanilla Sunrise) — nothing to check'
+          : `${declaredAppSources.length - unrecognised.length} of ` +
+            `${declaredAppSources.length} declared app section(s) checked, and empty for a ` +
+            'subject who owns none of them'
     );
 
     // A missing subject is a distinct, catchable failure — not a silent empty bundle.
