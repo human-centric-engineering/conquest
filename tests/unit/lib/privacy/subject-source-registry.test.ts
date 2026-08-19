@@ -212,9 +212,107 @@ describe('registerAppSubjectSources', () => {
       expect(getAppSubjectSources()).toEqual([VALID]);
       expect(getAppExcludedSubjectSources()).toEqual([]);
     });
+
+    it('refuses the same clash the other way round — excluded first, then a source', () => {
+      // Order matters to the implementation (two loops, exclusions second), so
+      // the mirror case is not the same code path as the one above.
+      seam(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          excluded: [{ model: 'AppInvoice', reason: 'Decided this holds no personal data.' }],
+        });
+        registerAppSubjectSources({ tier: 'app', sources: [VALID] });
+      });
+
+      expect(getAppSubjectSources()).toEqual([]);
+      expect(getAppExcludedSubjectSources()).toHaveLength(1);
+    });
+
+    it('refuses an exclusion with an empty model name', () => {
+      seam(() =>
+        registerAppSubjectSources({
+          tier: 'app',
+          excluded: [{ model: '   ', reason: 'A reason attached to nothing in particular.' }],
+        })
+      );
+
+      expect(getAppExcludedSubjectSources()).toEqual([]);
+    });
+
+    it('refuses an exclusion for a model another tier already excluded', () => {
+      // Two tiers writing off the same table with different reasons: the
+      // second reason would replace the first, and the manifest would show a
+      // regulator whichever one happened to register last.
+      seam(() => {
+        registerAppSubjectSources({
+          tier: 'framework',
+          excluded: [{ model: 'SharedTag', reason: 'Join table owned by the framework tier.' }],
+        });
+        registerAppSubjectSources({
+          tier: 'app',
+          excluded: [{ model: 'SharedTag', reason: 'Trying to write off another tier’s table.' }],
+        });
+      });
+
+      expect(getAppExcludedSubjectSources()).toEqual([
+        { model: 'SharedTag', reason: 'Join table owned by the framework tier.' },
+      ]);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'subject-sources: declaration rejected',
+        expect.objectContaining({ tier: 'app', reason: expect.stringContaining('framework') })
+      );
+    });
+
+    it('survives rows whose fields are missing entirely', () => {
+      // The optional chaining and `?? ''` exist for a fork's JS, or a value read
+      // from config, where the type gives no protection. `undefined.trim()`
+      // would throw out of the seam and take the whole contribution with it, so
+      // every field a caller could omit is exercised here.
+      seam(() =>
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            { ...VALID, model: undefined as unknown as string },
+            { ...VALID, model: 'A', section: undefined as unknown as string },
+            { ...VALID, model: 'B', description: undefined as unknown as string },
+          ],
+          excluded: [
+            { model: undefined as unknown as string, reason: 'A reason with no model.' },
+            { model: 'C', reason: undefined as unknown as string },
+          ],
+        })
+      );
+
+      expect(getAppSubjectSources()).toEqual([]);
+      expect(getAppExcludedSubjectSources()).toEqual([]);
+      expect(getAccountedAppModels().size).toBe(0);
+    });
   });
 
   describe('a throwing init', () => {
+    it('keeps declarations made before the init ran', () => {
+      // The restore half of the rollback, which the case below cannot reach:
+      // starting from an empty registry, "roll back" and "clear" are the same
+      // thing. A framework tier that registers at boot — from `initFramework()`
+      // via `lib/app/bootstrap.ts`, before anything reads the export — is
+      // already in the registry when the leaf's init runs, and must not be
+      // destroyed by the leaf's mistake.
+      registerAppSubjectSources({
+        tier: 'framework',
+        sources: [{ ...VALID, model: 'FrameworkTask', section: 'tasks' }],
+        excluded: [{ model: 'FrameworkTag', reason: 'Join table — holds no personal data.' }],
+      });
+
+      seam(() => {
+        registerAppSubjectSources({ tier: 'app', sources: [VALID] });
+        throw new Error('typo in the leaf manifest');
+      });
+
+      expect(getAppSubjectSources()).toEqual([{ ...VALID, model: 'FrameworkTask', section: 'tasks' }]); // prettier-ignore
+      expect(getAppExcludedSubjectSources()).toHaveLength(1);
+      expect([...getAccountedAppModels()].sort()).toEqual(['FrameworkTag', 'FrameworkTask']);
+    });
+
     it('rolls back the declarations it managed before the throw', () => {
       seam(() => {
         registerAppSubjectSources({ tier: 'app', sources: [VALID] });

@@ -34,6 +34,7 @@ import { prisma } from '@/lib/db/client';
 import { exportUserData, SubjectNotFoundError } from '@/lib/privacy/export-user';
 import { SUBJECT_DATA_SOURCES } from '@/lib/privacy/export-sources';
 import { getAppSubjectSources } from '@/lib/privacy/subject-source-registry';
+import { isEmptySection } from '@/scripts/smoke/export-assertions';
 
 const PREFIX = 'smoke-test-export';
 const stamp = Date.now();
@@ -63,21 +64,6 @@ async function dbReachable(): Promise<boolean> {
 function check(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`assertion failed: ${msg}`);
   console.log(`  ✓ ${msg}`);
-}
-
-/**
- * Whether an app section carries no rows.
- *
- * Shape-tolerant on purpose: `AppSubjectData` is `Record<string, unknown>`, so
- * a tier may return a list, a keyed object, or nothing at all. Asserting a
- * particular shape here would invent a contract the seam does not have, and the
- * property being checked — "this subject owns none of it" — does not need one.
- */
-function isEmptySection(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (Array.isArray(value)) return value.length === 0;
-  if (typeof value === 'object') return Object.keys(value).length === 0;
-  return false;
 }
 
 async function main(): Promise<void> {
