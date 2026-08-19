@@ -74,8 +74,8 @@ const SEAM_SPECIFIER = /['"](@\/lib\/app\/[A-Za-z0-9_.-]+)['"]/g;
  */
 const SEAM_MOCK = /vi\.(?:mock|doMock|unmock|doUnmock)\(\s*['"](@\/lib\/app\/[A-Za-z0-9_.-]+)['"]/g;
 
-/** The marker a coupled file must carry. */
-const FORK_NOTE = /FORK NOTE/;
+/** The marker a coupled file must carry. Global — every occurrence is judged. */
+const FORK_NOTE = /FORK NOTE/g;
 
 /**
  * How much text has to follow the marker before it counts as a note.
@@ -116,10 +116,19 @@ export function unmockedSeams(source: string): string[] {
  * exactly that string.
  */
 function hasSubstantiveForkNote(source: string): boolean {
-  const at = source.search(FORK_NOTE);
-  if (at === -1) return false;
+  // EVERY occurrence, not just the first. A file may mention the marker in
+  // passing — a cross-reference, a code sample, a one-line pointer — and carry
+  // the real note further down; judging only the first would tell the author to
+  // write a note they had already written.
+  for (const match of source.matchAll(FORK_NOTE)) {
+    if (noteBodyAt(source, match.index + match[0].length).length >= MIN_NOTE_CHARS) return true;
+  }
+  return false;
+}
 
-  const [markerLine, ...rest] = source.slice(at + 'FORK NOTE'.length).split('\n');
+/** The comment text following `from`, bounded by the comment it sits in. */
+function noteBodyAt(source: string, from: number): string {
+  const [markerLine, ...rest] = source.slice(from).split('\n');
   const commentLines = [markerLine];
   for (const line of rest) {
     const trimmed = line.trim();
@@ -132,11 +141,10 @@ function hasSubstantiveForkNote(source: string): boolean {
 
   // Strip comment furniture so a box of asterisks and dashes cannot pad the
   // count up to the threshold.
-  const note = commentLines
+  return commentLines
     .join(' ')
     .replace(/[*/\-—\s]+/g, ' ')
     .trim();
-  return note.length >= MIN_NOTE_CHARS;
 }
 
 describe('core artifacts coupled to a lib/app seam', () => {

@@ -33,6 +33,7 @@ import {
   SUBJECT_DATA_SOURCES,
   EXCLUDED_SOURCES,
   type ExcludedSource,
+  type SourceDisposition,
   type SubjectQuery,
 } from '@/lib/privacy/export-sources';
 import {
@@ -66,16 +67,40 @@ export interface ExportedSourceSummary {
   rows: number;
 }
 
+/**
+ * What one app-tier source contributed. The core equivalent for tables declared
+ * through `registerAppSubjectSources()`.
+ *
+ * Kept in its own list rather than folded into {@link SubjectExportMeta.exported}
+ * because the two are read differently: an `exported` entry's `section` is a key
+ * of `personalData`, an `attribution` entry's is a key of `attributions`, and
+ * these are keys of `app`. Folding them together would leave a reader looking up
+ * a section in the wrong object.
+ */
+export interface AppSourceSummary {
+  model: string;
+  /** Key this source occupies under the bundle's `app`. */
+  section: string;
+  disposition: SourceDisposition;
+  description: string;
+  rows: number;
+}
+
 export interface SubjectExportMeta {
   formatVersion: number;
   generatedAt: string;
   subjectUserId: string;
-  /** Sources returned in full, with row counts. */
+  /** Core sources returned in full, with row counts. Sections of `personalData`. */
   exported: ExportedSourceSummary[];
-  /** Sources returned as id + label + date only, with row counts. */
+  /** Core sources returned as id + label + date only. Sections of `attributions`. */
   attribution: ExportedSourceSummary[];
-  /** Tables deliberately left out, with the reason. */
+  /** Tables deliberately left out, with the reason — core's and the app tier's. */
   excluded: ExcludedSource[];
+  /**
+   * App-tier sources a fork declared, with row counts. Sections of `app`.
+   * Empty in vanilla Sunrise, where nothing is declared.
+   */
+  app: AppSourceSummary[];
 }
 
 export interface SubjectExport {
@@ -127,6 +152,21 @@ export class DeclaredAppSourceMissingError extends Error {
     this.name = 'DeclaredAppSourceMissingError';
     this.sections = sections;
   }
+}
+
+/**
+ * Row count for one app section.
+ *
+ * The documented shape for a declared section is a row list, and that is what a
+ * count means. Anything else is one record or none — deliberately not a number
+ * invented to fill the field, since the count is shown to the subject as the
+ * size of what they received.
+ */
+function countAppRows(value: unknown): number {
+  if (Array.isArray(value)) return value.length;
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0 ? 0 : 1;
+  return 1;
 }
 
 /**
@@ -203,7 +243,8 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
   // key and serialises to `{}`, so a `hasOwn` check passes while the delivered
   // export is short exactly the section it just certified. `null` is left
   // alone — it survives serialisation, so the section is disclosed.
-  const undelivered = getAppSubjectSources()
+  const declaredAppSources = getAppSubjectSources();
+  const undelivered = declaredAppSources
     .filter((source) => app[source.section] === undefined)
     .map((source) => source.section);
   if (undelivered.length > 0) {
@@ -222,6 +263,19 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
     appSections: Object.keys(app).length,
   });
 
+  // Summarise the app tier on the same terms as core. Without this the subject
+  // receives sections under `app` that the bundle's own manifest never mentions
+  // — no description of what a section is, no row count — while `meta` reads as
+  // a complete summary and names the tables that were *withheld*. The
+  // `description` each tier is required to write has nowhere else to go.
+  const appSummaries: AppSourceSummary[] = declaredAppSources.map((source) => ({
+    model: source.model,
+    section: source.section,
+    disposition: source.disposition,
+    description: source.description,
+    rows: countAppRows(app[source.section]),
+  }));
+
   return {
     meta: {
       formatVersion: EXPORT_FORMAT_VERSION,
@@ -229,6 +283,7 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
       subjectUserId: userId,
       exported,
       attribution,
+      app: appSummaries,
       // Core's exclusions AND the fork tier's. A table withheld from an export
       // is disclosed with its reason so the subject can see the boundary of
       // what they received rather than having to infer it — and that has to

@@ -465,6 +465,109 @@ describe('exportUserData', () => {
     });
   });
 
+  describe('a fork tier’s sources reach meta (#530 review)', () => {
+    it('summarises each declared source with its description and row count', async () => {
+      // Without this the subject receives `app.invoices` with nothing in the
+      // bundle's own manifest saying what it is or how much of it there is —
+      // while the same manifest names the tables that were withheld. The
+      // `description` every tier is required to write has nowhere else to go.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppInvoice',
+              section: 'invoices',
+              disposition: 'export',
+              description: 'Invoices raised against your account.',
+            },
+            {
+              model: 'AppAgreement',
+              section: 'agreements',
+              disposition: 'attribution',
+              description: 'Agreements you authored, by name and date.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({
+        invoices: [{ id: 'inv-1' }, { id: 'inv-2' }],
+        agreements: [],
+      });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.app).toEqual([
+        {
+          model: 'AppInvoice',
+          section: 'invoices',
+          disposition: 'export',
+          description: 'Invoices raised against your account.',
+          rows: 2,
+        },
+        {
+          model: 'AppAgreement',
+          section: 'agreements',
+          disposition: 'attribution',
+          description: 'Agreements you authored, by name and date.',
+          rows: 0,
+        },
+      ]);
+    });
+
+    it('keeps app sections out of meta.exported, which maps to personalData', async () => {
+      // The two lists are read against different objects. Folding them would
+      // leave a reader looking up `invoices` in `personalData`, where it is not.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppInvoice',
+              section: 'invoices',
+              disposition: 'export',
+              description: 'Invoices raised against your account.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [] });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.exported.map((entry) => entry.section)).not.toContain('invoices');
+      expect(bundle.personalData).not.toHaveProperty('invoices');
+      expect(bundle.app).toHaveProperty('invoices');
+    });
+
+    it('counts a non-list section as one record rather than inventing a number', async () => {
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppProfile',
+              section: 'profile',
+              disposition: 'export',
+              description: 'The single profile record we hold for you.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({ profile: { nickname: 'sam' } });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.app[0].rows).toBe(1);
+    });
+
+    it('is an empty list in vanilla Sunrise', async () => {
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.app).toEqual([]);
+    });
+  });
+
   describe('a fork tier’s exclusions reach the subject', () => {
     it('discloses them in meta.excluded, alongside core’s', async () => {
       // The reason a tier writes is what the subject is shown in place of the

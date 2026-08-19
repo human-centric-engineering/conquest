@@ -246,8 +246,27 @@ function ensureAppSubjectSourcesInited(): void {
 
     logger.error(
       'subject-sources: initAppSubjectSources threw — app declarations rolled back and disabled',
-      { error: err instanceof Error ? err.message : String(err) }
+      { error: describeThrown(err) }
     );
+  }
+}
+
+/**
+ * A log-safe description of whatever a seam threw.
+ *
+ * `String(err)` is the usual fallback and it can itself throw:
+ * `String(Object.create(null))` raises "Cannot convert object to primitive
+ * value". Here that would escape the catch, after the rollback has already run,
+ * and surface as a 500 on the export route with no log line saying why — a
+ * fork's bad seam turned into an unexplained failure of the thing this module
+ * protects.
+ */
+function describeThrown(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  try {
+    return String(err);
+  } catch {
+    return 'a value that cannot be converted to a string';
   }
 }
 

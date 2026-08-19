@@ -303,7 +303,26 @@ async function main(): Promise<void> {
 
     check(
       bundle.meta.exported.length + bundle.meta.attribution.length === sections.length,
-      'meta summarises every source'
+      'meta summarises every core source'
+    );
+
+    const declaredAppSources = getAppSubjectSources();
+
+    // The app tier's half of the same claim. `meta.exported` covers core only —
+    // the two lists are read against different objects — so a fork's sections
+    // would otherwise appear in the bundle with nothing in `meta` naming them.
+    const summarised = new Set(bundle.meta.app.map((entry) => entry.section));
+    const unsummarised = declaredAppSources
+      .filter((source) => !summarised.has(source.section))
+      .map((source) => source.section);
+    check(
+      unsummarised.length === 0,
+      unsummarised.length > 0
+        ? `app section(s) ${unsummarised.join(', ')} reached the bundle with no entry in ` +
+            'meta.app — the subject is given data the manifest does not describe'
+        : declaredAppSources.length === 0
+          ? 'no app sources declared (vanilla Sunrise) — nothing to summarise'
+          : `all ${declaredAppSources.length} declared app source(s) summarised in meta.app`
     );
     check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
 
@@ -340,22 +359,41 @@ async function main(): Promise<void> {
     // moments ago, owning nothing of yours — so a declared section with rows in
     // it means the collector matched a *stranger's*, which is the leak this
     // whole script exists to detect and which the old check could not see.
-    const declaredAppSources = getAppSubjectSources();
-    const populated = declaredAppSources
-      .filter((source) => !isEmptySection(bundle.app[source.section]))
+    // Split by shape. A declared section is documented as a row list, so a
+    // non-empty ARRAY for a subject who owns nothing is a leak and says so. A
+    // non-empty object is off-contract rather than incriminating — a fork
+    // returning `{ count: 0, currency: 'GBP' }` is doing something the seam
+    // permits and this check cannot reason about, and telling them they had
+    // leaked a stranger's rows would be a false accusation.
+    const leaked = declaredAppSources
+      .filter((source) => {
+        const value = bundle.app[source.section];
+        return Array.isArray(value) && value.length > 0;
+      })
       .map((source) => source.section);
+    const unrecognised = declaredAppSources
+      .filter((source) => {
+        const value = bundle.app[source.section];
+        return !Array.isArray(value) && !isEmptySection(value);
+      })
+      .map((source) => source.section);
+
     check(
-      populated.length === 0,
-      populated.length > 0
+      leaked.length === 0 && unrecognised.length === 0,
+      leaked.length > 0
         ? // `check` prints its message on failure too, so the failing branch has to
           // describe the failure — otherwise a leak reports itself as "assertion
           // failed: all sections are empty", which reads as the opposite.
-          `app section(s) ${populated.join(', ')} returned rows for a subject created ` +
+          `app section(s) ${leaked.join(', ')} returned rows for a subject created ` +
             'seconds ago who owns nothing — the collector is matching rows that are not theirs'
-        : declaredAppSources.length === 0
-          ? 'no app subject sources declared (vanilla Sunrise) — nothing to check'
-          : `all ${declaredAppSources.length} declared app section(s) arrived and are empty ` +
-            'for a subject who owns none of them'
+        : unrecognised.length > 0
+          ? `app section(s) ${unrecognised.join(', ')} returned something other than a row ` +
+            'list, so this check cannot tell whether it holds another person’s data — ' +
+            'return an array for a declared section'
+          : declaredAppSources.length === 0
+            ? 'no app subject sources declared (vanilla Sunrise) — nothing to check'
+            : `all ${declaredAppSources.length} declared app section(s) arrived and are empty ` +
+              'for a subject who owns none of them'
     );
 
     // A missing subject is a distinct, catchable failure — not a silent empty bundle.

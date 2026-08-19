@@ -352,8 +352,6 @@ describe('registerAppSubjectSources', () => {
     });
 
     it('survives a throw that is not an Error', () => {
-      // `String(err)` on a null-prototype object throws, which would turn a
-      // fork's bad throw into an unhandled one inside the catch.
       seam(() => {
         // The lint rule below is exactly why this case exists: a fork's seam
         // can throw a non-Error, and the catch has to survive it.
@@ -365,6 +363,25 @@ describe('registerAppSubjectSources', () => {
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('rolled back and disabled'),
         { error: 'plain string' }
+      );
+    });
+
+    it('survives a throw that cannot be converted to a string', () => {
+      // `String(Object.create(null))` throws "Cannot convert object to
+      // primitive value". Rollback has already run by then, so the throw would
+      // escape the catch and 500 the export route with no log line saying why.
+      // The previous version of this case *described* this and then threw a
+      // plain string, which `String()` handles — so it asserted a protection
+      // neither it nor the code provided.
+      seam(() => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw Object.create(null) as never;
+      });
+
+      expect(() => getAppSubjectSources()).not.toThrow();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('rolled back and disabled'),
+        { error: 'a value that cannot be converted to a string' }
       );
     });
   });

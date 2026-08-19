@@ -103,8 +103,21 @@ describe('VerifyCallbackClientContent', () => {
       // Assert: Success message appears
       await waitFor(() => {
         expect(screen.getByText(/email verified!/i)).toBeInTheDocument();
+        // Matched without a regex on purpose: `AUTH_LANDING_LABEL` is free-form
+        // fork copy, so interpolating it into a pattern makes 'Projects (beta)'
+        // match text the page never renders and 'Hub (' throw SyntaxError. In a
+        // change whose point is making core tests fork-satisfiable, that is the
+        // wrong way round.
         expect(
-          screen.getByText(new RegExp(`redirecting to ${AUTH_LANDING_LABEL}`, 'i'))
+          screen.getByText((_, element) => {
+            // Only the innermost element: every ancestor's textContent contains
+            // the copy too, and a matcher that accepts them finds "multiple
+            // elements" rather than the one that renders it.
+            if (!element || element.children.length > 0) return false;
+            return (element.textContent ?? '')
+              .toLowerCase()
+              .includes(`redirecting to ${AUTH_LANDING_LABEL}`.toLowerCase());
+          })
         ).toBeInTheDocument();
       });
     });

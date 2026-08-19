@@ -40,6 +40,14 @@ release process.
   which is what this module's "a partial export is worse than no export" rule
   already said. Cannot fire in vanilla Sunrise, where nothing is declared.
 
+- **`meta.app` — a fork tier's declared sources are summarised for the subject.**
+  Each declared source contributes `{ model, section, disposition, description,
+  rows }`, so a section under `app` is named and counted in the bundle's own
+  manifest the way core's are. Its own list rather than folded into
+  `meta.exported`, because an `exported` entry's `section` is a key of
+  `personalData` and these are keys of `app` — folding them would send a reader
+  looking in the wrong object. Empty in vanilla Sunrise.
+
 - **A fork tier's exclusions are disclosed to the data subject.**
   `bundle.meta.excluded` now carries the registry's `excluded` rows alongside
   core's, so a fork table withheld from an export is named with its reason on
@@ -150,8 +158,9 @@ release process.
   coverage guard (above), the capability registry's idempotency count (which
   reported "expected 13, got 27" under a test named *is idempotent*, sending the
   reader after a double-registration bug in wiring that was already correct),
-  eleven assertions across seven files that wrote `/dashboard` and `Dashboard`
-  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL`, and
+  eleven test cases across seven files that wrote `/dashboard` and `Dashboard`
+  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL` (measured:
+  that is how many go red with the seam filled), and
   `smoke:export`. `tests/unit/fork-seam-coupling.test.ts` now requires any core
   artifact reading a `lib/app/*` seam unmocked to carry a `FORK NOTE`.
 

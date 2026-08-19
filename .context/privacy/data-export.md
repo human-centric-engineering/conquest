@@ -318,7 +318,7 @@ anyway.
 The failure names the models:
 
 ```
-These models live in a fork-reserved schema file and no tier has said what a
+These models live in a fork-owned schema file and no tier has said what a
 data subject receives from them: AppAnswerOption, AppQuestionnaireResponse.
 ```
 

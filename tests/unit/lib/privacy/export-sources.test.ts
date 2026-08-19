@@ -29,7 +29,7 @@
  * ---------------------------------------------------------------------------
  * FORK NOTE — you satisfy this from your own code, and it still checks you
  * ---------------------------------------------------------------------------
-Every schema file in `prisma/schema/` that is not one of Sunrise's own — the
+ * Every schema file in `prisma/schema/` that is not one of Sunrise's own — the
  * list is `CORE_SCHEMA_FILES` below — is yours, whatever you named it. Models
  * in one are held to a stricter rule than core holds itself: **every** model
  * must be declared through `registerAppSubjectSources()` — as a source or as an
