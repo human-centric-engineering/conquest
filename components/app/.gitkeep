@@ -1,0 +1,7 @@
+Reserved for downstream forks — see CUSTOMIZATION.md "The app/platform model".
+
+Sunrise core never creates files here. Unlike `lib/app/`, which ships scaffolds
+you fill in, this directory ships empty: build whatever structure suits your
+product (`components/app/marketing/`, `components/app/public/`, and so on).
+
+Delete this file once you add something real.

@@ -69,12 +69,27 @@ findable in the same place in every fork.)
 
 **Two reserved fork tiers — `/app` (leaf) and `/framework`.** The `/app` surface
 above is the **leaf-fork** tier: fork Sunrise directly and build your product in
-`lib/app/**`, `.context/app/`, and `prisma/schema/app.prisma`. Some forks instead build a reusable
+`lib/app/**`, `components/app/**`, `.context/app/`, and
+`prisma/schema/app.prisma`. Some forks instead build a reusable
 **framework layer** that sits _between_ Sunrise and their own leaf forks (e.g.
 Daybreak). For those, Sunrise reserves a second tier one level up —
-`lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`, and
-the `framework_` table prefix. **Sunrise core never creates files or tables
-under either tier**, so both merge cleanly on upgrade. A framework fork owns
+`lib/framework/`, `components/framework/`, `.context/framework/`,
+`prisma/schema/framework-*.prisma`, and the `framework_` table prefix.
+**Sunrise core never creates files or tables under either tier**, so both merge
+cleanly on upgrade.
+
+**`components/app/**` is where your React components go**, and it is reserved
+for the same reason as `lib/app/**`: so an upgrade never lands a platform file
+on top of one of yours. Note the difference in kind between the two. `lib/app/`
+ships _scaffolds_ — files Sunrise creates once, exporting `null` or an empty
+function, that you fill in. `components/app/` ships **nothing at all**: it is an
+empty reservation, and you create whatever structure suits your product.
+
+That matters because `lib/app/**` is required to stay framework-agnostic (no
+runtime framework imports, no `react-dom`), which is why every seam there is
+_data_ — a list of nav items, a boolean, a string. A component cannot live
+there. `components/app/**` is the other half: it has no such restriction, and it
+is where a fork's own frames, pages and widgets belong. A framework fork owns
 `/framework` and re-exposes `/app` to _its_ leaf forks; boot both through the
 `lib/app/bootstrap.ts` seam ([§4](#4-configuration--environment--the-libapp-surface)).
 
