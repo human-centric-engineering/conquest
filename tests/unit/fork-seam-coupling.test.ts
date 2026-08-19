@@ -37,7 +37,7 @@
  * contributes", because that is a semantic property with no syntax. What does
  * see it is filling every seam and running the suite — the failures are the
  * roster, exactly, with no false positives. That sweep is worth building and is
- * filed separately; this file is the cheap half, and it is documented here so
+ * filed as #636; this file is the cheap half, and it is documented here so
  * nobody mistakes it for the whole rule.
  *
  * @see tests/unit/lib/app/defaults.test.ts — the pin table this generalises
