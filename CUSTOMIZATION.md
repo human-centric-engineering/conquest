@@ -838,6 +838,54 @@ if you remove `/privacy` or `/contact` outright, repoint (or keep) the banner /
 error link so it doesn't 404 — point it at your own equivalent, or leave the page
 in place.
 
+### When a surface needs a different frame — give it a route group
+
+`(public)` ships one frame: `AppHeader` + `PublicFooter`, sized for a scrolling
+marketing document. That is the right default and the wrong fit for a **no-login
+app surface** — a questionnaire a respondent sits in for twenty minutes, an
+embedded widget, a kiosk view — where the chrome is competing for the same
+vertical space as the thing the page is for.
+
+**The answer is a sibling route group, not an edit to the platform component.**
+Route groups are the Next-native unit of "these pages share a frame", and each
+one gets its own `layout.tsx`:
+
+```
+app/
+├── (public)/          # marketing: header + full footer
+│   ├── layout.tsx
+│   ├── about/
+│   └── pricing/
+└── (programme)/       # your app surface: its own frame entirely
+    ├── layout.tsx     # renders YOUR header/footer from components/app/
+    └── q/[id]/
+```
+
+Your layout imports from `components/app/**` ([the reserved tier](#the-appplatform-model))
+and touches no Sunrise file, so an upgrade merges around it rather than through
+it. You are free to render a minimal footer, a different one per group, or none
+at all.
+
+**Two rules if you take your own frame.** First, **Cookie Preferences has to
+appear somewhere** — consent is a legal requirement in many jurisdictions, and
+it is the one control the platform footer renders unconditionally. A frame that
+opts out of the platform footer has to supply a real one of its own; import
+`useConsent` from `@/lib/consent` and render an `openPreferences` control.
+Second, register any authenticated prefixes in `lib/app/protected-routes.ts` as
+usual — a new route group does not change proxy behaviour.
+
+**Why this section exists.** Two forks hit exactly this and answered it
+differently. One created a `(programme)` group with its own `SiteFooter` in
+`components/app/public/` — three swapped components, no platform file touched.
+The other put its respondent surfaces _inside_ `(public)`, so a single layout had
+to serve both a marketing page and a full-height chat, and the only lever left
+was deleting the copyright row from `components/layouts/public-footer.tsx` — a
+deletion held against a platform file, with a comment reminding them to re-apply
+it after every sync. Same requirement, and the difference was entirely whether
+they knew a route group was the tool. (#561 also gave the attribution line its
+own seam, so that specific deletion is no longer needed either — see
+`lib/app/footer.ts`.)
+
 ### Making it an auth-only app
 
 For an internal tool where **every** route requires a login, you don't need a
