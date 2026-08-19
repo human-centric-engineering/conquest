@@ -7,8 +7,6 @@
  * the same way.
  */
 
-import type { Prisma } from '@prisma/client';
-
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
@@ -79,11 +77,15 @@ export async function loadTopics(versionId: string): Promise<Topic[]> {
 }
 
 /**
- * The Prisma surface these two settings helpers need — satisfied by both the global client and a
- * transaction client, so a caller can run a read-modify-write inside its own transaction (e.g.
- * the scope-evaluation apply engine writes a settings op + stamps the finding applied atomically).
+ * The Prisma surface these two settings helpers need — a structural `Pick`, not `Prisma.TransactionClient`,
+ * so both the global client and either shape of transaction client this codebase produces satisfy it:
+ * `prisma.$transaction`'s own callback client, and `executeTransaction`'s (`lib/db/utils.ts`), whose
+ * callback type additionally omits `$transaction` and is therefore NOT assignable to
+ * `Prisma.TransactionClient` itself. A caller can run a read-modify-write inside its own transaction
+ * either way (e.g. the scope-evaluation apply engine writes a settings op + stamps the finding applied
+ * atomically; the definition importer seeds Adaptive Scope settings inside its create-only transaction).
  */
-type DbClient = Prisma.TransactionClient;
+type DbClient = Pick<typeof prisma, 'appQuestionnaireConfig'>;
 
 /** A version's resolved Adaptive Scope settings — defaults when no config row exists. */
 export async function loadAdaptiveScopeSettings(

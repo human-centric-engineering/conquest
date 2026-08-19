@@ -53,6 +53,7 @@ interface ImportResult {
   sectionCount: number;
   questionCount: number;
   dataSlotCount: number;
+  topicCount: number;
 }
 
 /** What the staged file carries, for the confirm preview. */
@@ -63,6 +64,7 @@ interface Preview {
   sectionCount: number;
   questionCount: number;
   dataSlotCount: number;
+  topicCount: number;
   hasScoring: boolean;
 }
 
@@ -126,6 +128,7 @@ export function ImportDefinitionDialog({
         sectionCount: envelope.version.sections.length,
         questionCount,
         dataSlotCount: envelope.version.dataSlots?.length ?? 0,
+        topicCount: envelope.version.topics?.length ?? 0,
         hasScoring: Boolean(envelope.version.scoringSchema),
       });
     } catch (err) {
@@ -178,7 +181,8 @@ export function ImportDefinitionDialog({
               <p>
                 Pick a JSON file written by <strong>Export definition</strong> on a questionnaire’s
                 Structure tab. It carries the full design — sections, questions, tags, settings,
-                data slots, and scoring — and is imported as a fresh draft you own.
+                data slots, adaptive scope topics, and scoring — and is imported as a fresh draft
+                you own.
               </p>
               <p className="mt-2">
                 Embeddings are regenerated after import, so the new questionnaire is ready to launch
@@ -225,6 +229,9 @@ export function ImportDefinitionDialog({
               {preview.questionCount} question{preview.questionCount === 1 ? '' : 's'}
               {preview.dataSlotCount > 0
                 ? ` · ${preview.dataSlotCount} data slot${preview.dataSlotCount === 1 ? '' : 's'}`
+                : ''}
+              {preview.topicCount > 0
+                ? ` · ${preview.topicCount} adaptive scope topic${preview.topicCount === 1 ? '' : 's'}`
                 : ''}
               {preview.hasScoring ? ' · scoring schema' : ''}
             </p>

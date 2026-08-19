@@ -72,13 +72,19 @@ const tx = {
     ),
   },
   appQuestionSlotTag: { createMany: vi.fn(async () => ({ count: 0 })) },
-  appQuestionnaireConfig: { create: vi.fn(async () => ({ id: 'cfg-1' })) },
+  appQuestionnaireConfig: {
+    create: vi.fn(async () => ({ id: 'cfg-1' })),
+    // Consulted by `patchAdaptiveScopeSettings` (Adaptive Scope) — no existing row for a fresh import.
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async () => ({ id: 'cfg-1' })),
+  },
   appDataSlot: {
     createManyAndReturn: vi.fn(async ({ data }: { data: Row[] }) =>
       shuffled(data.map((row) => ({ id: `slot-${String(row.key)}`, key: row.key })))
     ),
   },
   appDataSlotQuestion: { createMany: vi.fn(async () => ({ count: 0 })) },
+  appQuestionnaireTopic: { createMany: vi.fn(async () => ({ count: 0 })) },
   appScoringSchema: { create: vi.fn(async () => ({ id: 'schema-1' })) },
 };
 
@@ -123,6 +129,8 @@ function makeEnvelope(
         },
       ],
       dataSlots: [],
+      // Adaptive Scope (P17) — empty/absent here; the topic-persistence tests have their own cases.
+      topics: [],
       ...versionOverrides,
     },
   };
@@ -682,6 +690,197 @@ describe('persistDefinitionImport', () => {
     // The slot itself is still written; only the (empty) link batch is skipped.
     expect(tx.appDataSlot.createManyAndReturn).toHaveBeenCalledTimes(1);
     expect(tx.appDataSlotQuestion.createMany).not.toHaveBeenCalled();
+  });
+
+  // Adaptive Scope (P17) — regression coverage for the bug this persister was fixed to close:
+  // topics were previously absent from the import envelope entirely, and `adaptiveScope` was
+  // silently dropped because it rode inside `config` (validated by `updateConfigSchema`, which has
+  // no such field). See lib/app/questionnaire/authoring/definition-export.ts.
+  describe('Adaptive Scope topics + settings', () => {
+    it('creates a topic row, remapping questionKeys/dataSlotKeys from original to deduped keys', async () => {
+      const envelope = makeEnvelope({
+        sections: [
+          {
+            ordinal: 0,
+            title: 'S',
+            description: null,
+            questions: [
+              {
+                ordinal: 0,
+                key: 'morale',
+                prompt: 'How is morale?',
+                guidelines: null,
+                rationale: null,
+                type: 'free_text',
+                required: true,
+                weight: 1,
+                tagLabels: [],
+              },
+            ],
+          },
+        ],
+        dataSlots: [
+          {
+            key: 'morale_slot',
+            name: 'Morale',
+            description: '',
+            theme: 'wellbeing',
+            ordinal: 0,
+            weight: 1,
+            questionKeys: ['morale'],
+          },
+        ],
+        topics: [
+          {
+            key: 'morale_deep_dive',
+            label: 'Morale deep dive',
+            description: null,
+            phase: 'conditional',
+            criteria: 'Morale sounds low',
+            depth: 'full',
+            ordinal: 0,
+            source: 'analyst',
+            questionKeys: ['morale'],
+            dataSlotKeys: ['morale_slot'],
+          },
+        ],
+      });
+      const result = await persistDefinitionImport(input({ envelope }));
+
+      expect(tx.appQuestionnaireTopic.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              versionId: 'ver-1',
+              key: 'morale_deep_dive',
+              label: 'Morale deep dive',
+              phase: 'conditional',
+              criteria: 'Morale sounds low',
+              depth: 'full',
+              ordinal: 0,
+              source: 'analyst',
+              members: { dataSlotKeys: ['morale_slot'], questionKeys: ['morale'] },
+            }),
+          ],
+        })
+      );
+      expect(result.topicCount).toBe(1);
+    });
+
+    it('remaps a topic member key that collided and was deduplicated', async () => {
+      // Both questions share the original key 'score' — the second is deduplicated to 'score_2'
+      // (mirroring the data-slot dedup test above). A topic naming the original 'score' key must
+      // resolve to whichever key that original key maps to (last write wins, same as data slots).
+      const envelope = makeEnvelope({
+        sections: [
+          {
+            ordinal: 0,
+            title: 'Scores',
+            description: null,
+            questions: [
+              {
+                ordinal: 0,
+                key: 'score',
+                prompt: 'First?',
+                guidelines: null,
+                rationale: null,
+                type: 'numeric',
+                required: true,
+                weight: 1,
+                tagLabels: [],
+              },
+              {
+                ordinal: 1,
+                key: 'score',
+                prompt: 'Second?',
+                guidelines: null,
+                rationale: null,
+                type: 'numeric',
+                required: false,
+                weight: 1,
+                tagLabels: [],
+              },
+            ],
+          },
+        ],
+        topics: [
+          {
+            key: 'scoring_topic',
+            label: 'Scoring',
+            description: null,
+            phase: 'core',
+            criteria: null,
+            depth: 'full',
+            ordinal: 0,
+            source: 'manual',
+            questionKeys: ['score'],
+            dataSlotKeys: [],
+          },
+        ],
+      });
+      await persistDefinitionImport(input({ envelope }));
+
+      const topicRow = batchData(tx.appQuestionnaireTopic.createMany as Mock)[0] as Row & {
+        members: { questionKeys: string[]; dataSlotKeys: string[] };
+      };
+      expect(topicRow.members.questionKeys).toEqual(['score_2']);
+    });
+
+    it('silently drops an unresolvable topic member key instead of failing the import', async () => {
+      const envelope = makeEnvelope({
+        topics: [
+          {
+            key: 'orphan_topic',
+            label: 'Orphan',
+            description: null,
+            phase: 'core',
+            criteria: null,
+            depth: 'full',
+            ordinal: 0,
+            source: 'manual',
+            questionKeys: ['no_such_question'],
+            dataSlotKeys: ['no_such_slot'],
+          },
+        ],
+      });
+      const result = await persistDefinitionImport(input({ envelope }));
+
+      const topicRow = batchData(tx.appQuestionnaireTopic.createMany as Mock)[0] as Row & {
+        members: { questionKeys: string[]; dataSlotKeys: string[] };
+      };
+      expect(topicRow.members).toEqual({ questionKeys: [], dataSlotKeys: [] });
+      expect(result.topicCount).toBe(1);
+    });
+
+    it('does not call createMany when the envelope has no topics', async () => {
+      await persistDefinitionImport(input());
+
+      expect(tx.appQuestionnaireTopic.createMany).not.toHaveBeenCalled();
+    });
+
+    it('writes adaptiveScope settings via the same merge helper the Topics tab PATCH uses', async () => {
+      const envelope = makeEnvelope({
+        adaptiveScope: { enabled: true, maxConditionalTopics: 4 },
+      });
+      await persistDefinitionImport(input({ envelope }));
+
+      expect(tx.appQuestionnaireConfig.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { versionId: 'ver-1' },
+          create: expect.objectContaining({ versionId: 'ver-1' }),
+        })
+      );
+      const call = (tx.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0] as {
+        create: { adaptiveScope: unknown };
+      };
+      expect(call.create.adaptiveScope).toMatchObject({ enabled: true, maxConditionalTopics: 4 });
+    });
+
+    it('does not touch appQuestionnaireConfig.upsert when adaptiveScope is absent', async () => {
+      await persistDefinitionImport(input());
+
+      expect(tx.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
+    });
   });
 
   it('creates the scoring schema with source manual and createdBy equal to adminId', async () => {

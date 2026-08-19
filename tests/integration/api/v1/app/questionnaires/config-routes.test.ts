@@ -345,6 +345,55 @@ describe('upsert + response', () => {
     expect((await res.json()).data.respondentReport).toEqual(respondentReport);
   });
 
+  it('merges an `adaptiveScope` key via patchAdaptiveScopeSettings instead of dropping it', async () => {
+    // Regression: `adaptiveScope` used to ride inside the body validated by `updateConfigSchema`,
+    // which has no such field — Zod silently stripped it, so a full settings-export round-trip
+    // (which PATCHes this endpoint with every exported key) never restored Adaptive Scope.
+    const res = await configPATCH(
+      req({ voiceEnabled: true, adaptiveScope: { enabled: true, maxConditionalTopics: 5 } }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(200);
+
+    // Two upserts: the adaptiveScope merge-write, then the main scalar config write.
+    expect(prismaMock.appQuestionnaireConfig.upsert).toHaveBeenCalledTimes(2);
+    const [scopeCall, configCall] = (
+      prismaMock.appQuestionnaireConfig.upsert as Mock
+    ).mock.calls.map((c) => c[0]);
+    expect(scopeCall.where).toEqual({ versionId: 'v1' });
+    expect(scopeCall.update.adaptiveScope).toMatchObject({
+      enabled: true,
+      maxConditionalTopics: 5,
+    });
+    expect(configCall.update).toMatchObject({ voiceEnabled: true });
+    expect(configCall.update).not.toHaveProperty('adaptiveScope');
+
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_adaptive_scope.update', entityId: 'v1' })
+    );
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_config.update', entityId: 'v1' })
+    );
+  });
+
+  it('does not touch adaptiveScope when the key is absent from the body', async () => {
+    const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionnaireConfig.upsert).toHaveBeenCalledTimes(1);
+    expect(logAdminAction).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_adaptive_scope.update' })
+    );
+  });
+
+  it('400s on an invalid adaptiveScope value without writing anything', async () => {
+    const res = await configPATCH(
+      req({ adaptiveScope: { maxConditionalTopics: -1 } }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
+  });
+
   it('forks a launched version and writes to the new draft', async () => {
     prismaMock.appQuestionnaireVersion.findFirst.mockResolvedValue({
       id: 'v1',
