@@ -27,6 +27,16 @@ async function loadLegalName(legal: string, appName: string): Promise<string> {
   return BRAND.legalName;
 }
 
+// description derives from NEXT_PUBLIC_APP_DESCRIPTION, then the product name.
+// Deliberately NOT a sentence default — see the seam docblock and #519.
+async function loadDescription(description: string, appName: string): Promise<string> {
+  vi.resetModules();
+  vi.stubEnv('NEXT_PUBLIC_APP_NAME', appName);
+  vi.stubEnv('NEXT_PUBLIC_APP_DESCRIPTION', description);
+  const { BRAND } = await import('@/lib/brand');
+  return BRAND.description;
+}
+
 async function renderWelcomeWith(value: string): Promise<string> {
   vi.resetModules();
   vi.stubEnv('NEXT_PUBLIC_APP_NAME', value);
@@ -62,6 +72,35 @@ describe('BRAND.name', () => {
 
   it('trims surrounding whitespace from a custom value', async () => {
     expect(await loadBrandName('  Acme Corp  ')).toBe('Acme Corp');
+  });
+});
+
+describe('BRAND.description', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('uses NEXT_PUBLIC_APP_DESCRIPTION verbatim when set', async () => {
+    expect(await loadDescription('Everything your team needs', 'Acme')).toBe(
+      'Everything your team needs'
+    );
+  });
+
+  it('falls back to the product name, not to a sentence', async () => {
+    expect(await loadDescription('', 'Acme')).toBe('Acme');
+  });
+
+  it('never returns the starter blurb (#519 — the whole point of the seam)', async () => {
+    // The old hardcoded root description shipped from every fork that had not
+    // edited app/layout.tsx. Assert on the substring, not the whole sentence,
+    // so a reworded blurb cannot sneak back in.
+    expect(await loadDescription('', 'Acme')).not.toMatch(/starter template/i);
+    expect(await loadDescription('', '')).not.toMatch(/starter template/i);
+  });
+
+  it('trims surrounding whitespace', async () => {
+    expect(await loadDescription('  Spaced out  ', 'Acme')).toBe('Spaced out');
   });
 });
 

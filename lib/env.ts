@@ -226,6 +226,14 @@ const clientEnvSchema = z.object({
     .optional()
     .describe('Legal entity / copyright holder for the footer. Defaults to NEXT_PUBLIC_APP_NAME.'),
 
+  // Consumed via `lib/brand.ts` (`BRAND.description`), same client-safe pattern.
+  // Root <meta name="description"> for any page that does not set its own;
+  // defaults to the product name rather than a sentence (#519).
+  NEXT_PUBLIC_APP_DESCRIPTION: z
+    .string()
+    .optional()
+    .describe('Root meta description for search/social cards. Defaults to NEXT_PUBLIC_APP_NAME.'),
+
   // Analytics (optional - auto-detected based on available credentials)
   NEXT_PUBLIC_ANALYTICS_PROVIDER: z
     .enum(['ga4', 'posthog', 'plausible', 'console'])
@@ -312,6 +320,7 @@ const parsed = isBrowser
       NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
       NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME,
       NEXT_PUBLIC_LEGAL_NAME: process.env.NEXT_PUBLIC_LEGAL_NAME,
+      NEXT_PUBLIC_APP_DESCRIPTION: process.env.NEXT_PUBLIC_APP_DESCRIPTION,
       // Analytics (optional)
       NEXT_PUBLIC_ANALYTICS_PROVIDER: process.env.NEXT_PUBLIC_ANALYTICS_PROVIDER,
       NEXT_PUBLIC_GA4_MEASUREMENT_ID: process.env.NEXT_PUBLIC_GA4_MEASUREMENT_ID,

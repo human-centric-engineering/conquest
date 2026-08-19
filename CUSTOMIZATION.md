@@ -69,12 +69,27 @@ findable in the same place in every fork.)
 
 **Two reserved fork tiers — `/app` (leaf) and `/framework`.** The `/app` surface
 above is the **leaf-fork** tier: fork Sunrise directly and build your product in
-`lib/app/**`, `.context/app/`, and `prisma/schema/app.prisma`. Some forks instead build a reusable
+`lib/app/**`, `components/app/**`, `.context/app/`, and
+`prisma/schema/app.prisma`. Some forks instead build a reusable
 **framework layer** that sits _between_ Sunrise and their own leaf forks (e.g.
 Daybreak). For those, Sunrise reserves a second tier one level up —
-`lib/framework/`, `.context/framework/`, `prisma/schema/framework-*.prisma`, and
-the `framework_` table prefix. **Sunrise core never creates files or tables
-under either tier**, so both merge cleanly on upgrade. A framework fork owns
+`lib/framework/`, `components/framework/`, `.context/framework/`,
+`prisma/schema/framework-*.prisma`, and the `framework_` table prefix.
+**Sunrise core never creates files or tables under either tier**, so both merge
+cleanly on upgrade.
+
+**`components/app/**` is where your React components go**, and it is reserved
+for the same reason as `lib/app/**`: so an upgrade never lands a platform file
+on top of one of yours. Note the difference in kind between the two. `lib/app/`
+ships _scaffolds_ — files Sunrise creates once, exporting `null` or an empty
+function, that you fill in. `components/app/` ships **nothing at all**: it is an
+empty reservation, and you create whatever structure suits your product.
+
+That matters because `lib/app/**` is required to stay framework-agnostic (no
+runtime framework imports, no `react-dom`), which is why every seam there is
+_data_ — a list of nav items, a boolean, a string. A component cannot live
+there. `components/app/**` is the other half: it has no such restriction, and it
+is where a fork's own frames, pages and widgets belong. A framework fork owns
 `/framework` and re-exposes `/app` to _its_ leaf forks; boot both through the
 `lib/app/bootstrap.ts` seam ([§4](#4-configuration--environment--the-libapp-surface)).
 
@@ -631,6 +646,47 @@ using the probe factories from `@/lib/db/drift-probes` (`indexExists`,
 `User`-table FK below in §5. Full reference:
 [`.context/database/prisma-unmodelled-objects.md`](./.context/database/prisma-unmodelled-objects.md#forks-registering-your-own-unmodelled-objects).
 
+**Per-user scheduled runs — ownership lives in `scope`, not `userId`.** A
+schedule-triggered run is **system-owned**: `processDueSchedules` writes
+`userId: null` on the `AiWorkflowExecution` and passes `null` into the engine, so
+`CapabilityContext.userId` is `null` for every scheduled run. That is deliberate
+and should not be worked around — `AiWorkflowExecution.userId` is
+`onDelete: Cascade`, so naming the operator meant erasing one person destroyed
+the organisation's whole scheduled-run history, and a subject-access export
+handed them rows that were never theirs.
+
+But `AiWorkflowSchedule` is also the natural home for **one row per user** — a
+per-person briefing or digest at that person's local time — and for those,
+`createdBy` was not attribution, it was ownership. **`scope` is where that
+ownership now lives.** Set `AiWorkflowSchedule.scope` (a `Json?` carrier,
+e.g. `{ userId }` or `{ projectId }`) and the scheduler stamps it onto the
+execution, from where it reaches `CapabilityContext.scope`:
+
+```ts
+await prisma.aiWorkflowSchedule.create({
+  data: {
+    workflowId,
+    name: `Morning briefing — ${user.email}`,
+    cronExpression: '15 3 * * *',
+    scope: { userId: user.id },
+  },
+});
+
+// …and in your capability, read ownership from scope, never from context.userId:
+const ownerId = capabilityContext.scope?.userId;
+```
+
+**Why this is called out rather than left to be discovered.** The change that
+made runs system-owned is silent in every way that normally catches something:
+`CapabilityContext.userId` is typed `string | null`, so a tier reading it still
+type-checks; unit tests mock the capability boundary, so they stay green on both
+sides; and the failure is nocturnal — a scheduled briefing simply stops
+arriving. One framework-tier fork had all four of its background workflows fail
+at their first `tool_call` step after an upgrade, with a fully green suite. Forks
+with per-user schedules inherit this for rows **already in the database**, so
+audit existing `AiWorkflowSchedule` rows for a missing `scope` as part of the
+upgrade rather than only new ones.
+
 ---
 
 ## 5. Database schema
@@ -822,6 +878,54 @@ footer's legal links are overridable via `public-nav.ts`'s `footerLegalItems`, b
 if you remove `/privacy` or `/contact` outright, repoint (or keep) the banner /
 error link so it doesn't 404 — point it at your own equivalent, or leave the page
 in place.
+
+### When a surface needs a different frame — give it a route group
+
+`(public)` ships one frame: `AppHeader` + `PublicFooter`, sized for a scrolling
+marketing document. That is the right default and the wrong fit for a **no-login
+app surface** — a questionnaire a respondent sits in for twenty minutes, an
+embedded widget, a kiosk view — where the chrome is competing for the same
+vertical space as the thing the page is for.
+
+**The answer is a sibling route group, not an edit to the platform component.**
+Route groups are the Next-native unit of "these pages share a frame", and each
+one gets its own `layout.tsx`:
+
+```
+app/
+├── (public)/          # marketing: header + full footer
+│   ├── layout.tsx
+│   ├── about/
+│   └── pricing/
+└── (programme)/       # your app surface: its own frame entirely
+    ├── layout.tsx     # renders YOUR header/footer from components/app/
+    └── q/[id]/
+```
+
+Your layout imports from `components/app/**` ([the reserved tier](#the-appplatform-model))
+and touches no Sunrise file, so an upgrade merges around it rather than through
+it. You are free to render a minimal footer, a different one per group, or none
+at all.
+
+**Two rules if you take your own frame.** First, **Cookie Preferences has to
+appear somewhere** — consent is a legal requirement in many jurisdictions, and
+it is the one control the platform footer renders unconditionally. A frame that
+opts out of the platform footer has to supply a real one of its own; import
+`useConsent` from `@/lib/consent` and render an `openPreferences` control.
+Second, register any authenticated prefixes in `lib/app/protected-routes.ts` as
+usual — a new route group does not change proxy behaviour.
+
+**Why this section exists.** Two forks hit exactly this and answered it
+differently. One created a `(programme)` group with its own `SiteFooter` in
+`components/app/public/` — three swapped components, no platform file touched.
+The other put its respondent surfaces _inside_ `(public)`, so a single layout had
+to serve both a marketing page and a full-height chat, and the only lever left
+was deleting the copyright row from `components/layouts/public-footer.tsx` — a
+deletion held against a platform file, with a comment reminding them to re-apply
+it after every sync. Same requirement, and the difference was entirely whether
+they knew a route group was the tool. (#561 also gave the attribution line its
+own seam, so that specific deletion is no longer needed either — see
+`lib/app/footer.ts`.)
 
 ### Making it an auth-only app
 

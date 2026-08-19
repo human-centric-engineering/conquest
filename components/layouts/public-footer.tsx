@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useConsent } from '@/lib/consent';
 import { BRAND } from '@/lib/brand';
+import { resolveFooterCopyright } from '@/lib/footer/copyright';
 import { footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { DEFAULT_FOOTER_NAV, DEFAULT_FOOTER_LEGAL } from '@/lib/public-nav/types';
 
@@ -10,7 +11,8 @@ import { DEFAULT_FOOTER_NAV, DEFAULT_FOOTER_LEGAL } from '@/lib/public-nav/types
  * Public Footer Component
  *
  * Footer for public/marketing pages.
- * Includes navigation links, legal links, and copyright.
+ * Includes navigation links, legal links, and the attribution line
+ * (fork-overridable via `lib/app/footer.ts`).
  *
  * Phase 3.5: Landing Page & Marketing
  */
@@ -22,6 +24,7 @@ const legalLinks = footerLegalItems ?? DEFAULT_FOOTER_LEGAL;
 export function PublicFooter() {
   const currentYear = new Date().getFullYear();
   const { openPreferences } = useConsent();
+  const copyright = resolveFooterCopyright(currentYear, BRAND.legalName);
 
   return (
     <footer className="border-t">
@@ -60,11 +63,19 @@ export function PublicFooter() {
               Cookie Preferences
             </button>
           </nav>
-        </div>
 
-        {/* Copyright */}
-        <div className="text-muted-foreground mt-6 text-center text-sm">
-          &copy; {currentYear} {BRAND.legalName}. All rights reserved.
+          {/* Attribution — last in the DOM, and last visually in both layouts
+              (#561). It used to sit on a dedicated centred row below, costing
+              ~44px: free on a scrolling marketing page, expensive on the
+              no-login app surfaces forks host in this group. Inline also
+              matches ProtectedFooter, which never had a separate row.
+
+              Placed last rather than first with `order-last`: CSS `order`
+              changes only the visual order, never the DOM or the accessibility
+              tree, so ordering it visually while leaving it first in the source
+              would put the reading order and the visual order in disagreement
+              (WCAG 1.3.2). Source order is the honest way to say "last". */}
+          {copyright && <p className="text-muted-foreground text-sm">{copyright}</p>}
         </div>
       </div>
     </footer>

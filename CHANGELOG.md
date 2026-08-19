@@ -16,6 +16,45 @@ release process.
 
 ## [Unreleased]
 
+### Added
+
+- **`components/app/**` and `components/framework/**` are now reserved fork
+  tiers.** Sunrise creates nothing under either, so a fork's own React
+  components merge cleanly on upgrade. This closes a live collision: the
+  reserved list previously named only `.context/app/`, `lib/app/**` and
+  `prisma/schema/app.prisma`, while forks were already shipping
+  `components/app/` — if Sunrise had ever added a file there it would have
+  landed on top of fork code. Note the difference in kind from `lib/app/`,
+  which ships *scaffolds* you fill in: `components/app/` ships **nothing**, and
+  you invent the structure. It exists because `lib/app/**` must stay
+  framework-agnostic (no runtime framework imports, no `react-dom`), so every
+  seam there is data and a component cannot live there. Enforced by
+  `tests/unit/reserved-fork-tiers.test.ts`.
+
+- **`lib/app/footer.ts` — `footerCopyright`.** The footer attribution line is now
+  fork-owned: `null` keeps the platform default (`© {year} {BRAND.legalName}`),
+  a string replaces it verbatim, `false` renders nothing. Read by **both**
+  `PublicFooter` and `ProtectedFooter` so they cannot drift. `false` is the
+  white-label case — a public surface that is an end-user artefact rather than a
+  marketing site, where naming the platform operator is a leak rather than a
+  credit. The **Cookie Preferences** control is unaffected and remains
+  non-overridable.
+
+- **`BRAND.description`, backed by `NEXT_PUBLIC_APP_DESCRIPTION`.** The root
+  `<meta name="description">` for any page that does not set its own. Defaults
+  to the product name rather than a sentence — a wrong sentence is worse than a
+  short one.
+
+- **`ChatInterface` endpoint props: `streamEndpoint`, `transcribeEndpoint`,
+  `deleteConversationEndpoint`.** All default to today's admin routes, so
+  existing callers are unchanged. A non-admin surface — a consumer page, or an
+  app-owned route pinning `contextType`/`contextId` server-side — can now reuse
+  the component. Its docblock also names which features are admin-only
+  (`showInlineTrace`, the cost/token strip, approval cards) so a fork can decide
+  what to turn off rather than concluding it must rebuild. `CHAT_TRANSCRIBE` is
+  now registered in `lib/api/endpoints.ts` rather than living as a string
+  literal in the component.
+
 ### Fixed
 
 - **Timers are cancelled on unmount across 19 components.** Every unmanaged
@@ -59,6 +98,36 @@ release process.
   to fit before flipping a repo private**, where `ubuntu-latest` is 2 vCPU / 8GB.
 
 ### Changed
+
+- **Metadata no longer hardcodes the starter identity.** `app/layout.tsx`
+  shipped `"${BRAND.name} - Next.js Starter"` and a description advertising "a
+  production-ready Next.js starter template"; `app/(public)/layout.tsx` shipped
+  the same blurb again, and the landing and About pages hardcoded the literal
+  `Sunrise` in their titles and social cards. All of it now comes from the
+  `BRAND` seam, and the root title uses the object form so un-templated pages
+  inherit `%s - ${BRAND.name}`. Route groups declaring their own
+  `title.template` are unaffected.
+
+  **Fixing the root layout alone is not enough, and that is worth knowing if you
+  carry a patch here.** Next resolves metadata at the nearest segment that
+  defines a field, so any route group declaring `description` overrides the root
+  outright — all four of Sunrise's do. `tests/unit/app/layout-metadata.test.ts`
+  now scans every `export const metadata` block under `app/` rather than
+  checking the root object, because the first version of that test passed while
+  the blurb was still live.
+
+  Page **body copy** remains fork-owned and deliberately out of scope — the seam
+  covers the brand name, not marketing prose (see `lib/brand.ts`).
+
+- **The public footer's copyright moved inline, and dropped ". All rights
+  reserved."** It had a dedicated centred row costing ~44px; `ProtectedFooter`
+  has always rendered the same content inline for free. Forks hosting no-login
+  app surfaces in `(public)` — where vertical space is scarce — get that back
+  with no configuration. The shorter wording matches `ProtectedFooter`; the
+  phrase is legally inert under Berne, and because `legalName` falls back to the
+  *product* name, the old default had personal and internal forks asserting all
+  rights on behalf of a product rather than a company. Set `footerCopyright` to
+  a string to restore any wording you want.
 
 - **`npm run lint` runs under an explicit Node heap cap.** Node derives its
   default heap from machine RAM and stops there — 4288MB on a 16GB host,

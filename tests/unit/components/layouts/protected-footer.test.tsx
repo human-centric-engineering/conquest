@@ -21,6 +21,7 @@ vi.mock('@/lib/consent', () => ({
 
 afterEach(() => {
   vi.resetModules();
+  vi.doUnmock('@/lib/app/footer');
   vi.unstubAllEnvs();
   openPreferences.mockClear();
 });
@@ -44,5 +45,33 @@ describe('ProtectedFooter', () => {
     const copyright = screen.getByText(/©/);
     expect(copyright).toHaveTextContent('All Too Human Ltd');
     expect(copyright).not.toHaveTextContent('ConQuest');
+  });
+
+  // ---- footerCopyright seam (#561) --------------------------------------
+  // The seam exists on BOTH footers precisely so they cannot drift apart on
+  // what the attribution says — they already had, before #561: this one
+  // rendered "© {year} {legalName}" inline while PublicFooter rendered
+  // "…All rights reserved." on a dedicated centred row.
+
+  it('renders no attribution line when the seam is false', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/app/footer', () => ({ footerCopyright: false }));
+    const { ProtectedFooter } = await import('@/components/layouts/protected-footer');
+    render(React.createElement(ProtectedFooter));
+
+    expect(screen.queryByText(/©/)).not.toBeInTheDocument();
+    // Cookie Preferences is not fork-overridable and must survive.
+    expect(screen.getByRole('button', { name: 'Cookie Preferences' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Help & Support' })).toBeInTheDocument();
+  });
+
+  it('renders a fork string verbatim', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/app/footer', () => ({ footerCopyright: 'An All Too Human production' }));
+    const { ProtectedFooter } = await import('@/components/layouts/protected-footer');
+    render(React.createElement(ProtectedFooter));
+
+    expect(screen.getByText('An All Too Human production')).toBeInTheDocument();
+    expect(screen.queryByText(/©/)).not.toBeInTheDocument();
   });
 });

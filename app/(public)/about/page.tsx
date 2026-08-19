@@ -16,20 +16,23 @@ import {
 } from 'lucide-react';
 import { Hero, Section, Features, CTA } from '@/components/marketing';
 import { Card, CardContent } from '@/components/ui/card';
+import { BRAND } from '@/lib/brand';
 
-const aboutDescription =
-  'Learn about Sunrise, a production-ready Next.js starter template designed for rapid application development with AI assistance — including a complete AI agent orchestration layer.';
+// Metadata, not body copy — this const feeds `description`, `openGraph` and
+// `twitter` and is never rendered on the page, so the fork-owned-copy exemption
+// does not apply to it (#519).
+const aboutDescription = `Learn about ${BRAND.name}.`;
 
 export const metadata: Metadata = {
   title: 'About',
   description: aboutDescription,
   openGraph: {
-    title: 'About - Sunrise',
+    title: `About - ${BRAND.name}`,
     description: aboutDescription,
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'About - Sunrise',
+    title: `About - ${BRAND.name}`,
     description: aboutDescription,
   },
 };

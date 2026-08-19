@@ -1,0 +1,8 @@
+Reserved for framework-tier forks — see CUSTOMIZATION.md "The app/platform model".
+
+A framework-layer fork sits between Sunrise and its own leaf forks (e.g.
+Daybreak). Sunrise core never creates files here, and neither should a leaf
+fork — leaf components go in `components/app/`.
+
+Ships empty: build whatever structure suits your framework. Delete this file
+once you add something real.

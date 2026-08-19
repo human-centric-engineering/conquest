@@ -161,6 +161,77 @@ describe('ChatInterface', () => {
     expect(screen.getByRole('button', { name: 'Help me' })).toBeInTheDocument();
   });
 
+  // ---- endpoint props (#526) --------------------------------------------
+  // The component described itself as reusable while pinning three admin URLs,
+  // so no non-admin surface could use it. Defaults keep every existing caller
+  // unchanged; these assert both halves.
+
+  it('POSTs the turn to the admin stream route by default', async () => {
+    const user = userEvent.setup();
+    const stream = makeSseStream([startFrame('c1', 'm1'), contentFrame('Hi'), doneFrame()]);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: stream });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ChatInterface agentSlug="test-agent" starterPrompts={['Hello']} />);
+    await user.click(screen.getByRole('button', { name: 'Hello' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/orchestration/chat/stream');
+  });
+
+  it('POSTs the turn to streamEndpoint when supplied', async () => {
+    const user = userEvent.setup();
+    const stream = makeSseStream([startFrame('c1', 'm1'), contentFrame('Hi'), doneFrame()]);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: stream });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ChatInterface
+        agentSlug="test-agent"
+        streamEndpoint="/api/v1/app/second-brain/chat"
+        starterPrompts={['Hello']}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Hello' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/app/second-brain/chat');
+    // The wire shape is unchanged — that is the whole premise of the prop.
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as Record<string, unknown>;
+    expect(body.agentSlug).toBe('test-agent');
+  });
+
+  it('DELETEs to deleteConversationEndpoint when clearing', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      body: makeSseStream([startFrame('conv-42', 'msg-1'), contentFrame('Hi!'), doneFrame()]),
+    });
+    fetchMock.mockResolvedValueOnce({ ok: true }); // the DELETE
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ChatInterface
+        agentSlug="test-agent"
+        showClearButton
+        deleteConversationEndpoint={(id) => `/api/v1/app/threads/${id}`}
+      />
+    );
+
+    await user.type(screen.getByPlaceholderText(/type a message/i), 'Hello');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText('Hi!')).toBeInTheDocument());
+
+    // Trigger, then confirm in the AlertDialog.
+    await user.click(screen.getByRole('button', { name: /clear conversation/i }));
+    await user.click(screen.getByRole('button', { name: /^clear$/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1][1].method).toBe('DELETE');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/app/threads/conv-42');
+  });
+
   it('does not render starter prompts when none provided', () => {
     render(<ChatInterface agentSlug="test-agent" />);
 
