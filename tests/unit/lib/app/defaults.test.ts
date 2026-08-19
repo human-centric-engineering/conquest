@@ -51,6 +51,11 @@ import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
 import { collectAppSubjectData } from '@/lib/app/data-export';
+import {
+  getAppSubjectSources,
+  getAppExcludedSubjectSources,
+  __resetAppSubjectSourceRegistryForTests,
+} from '@/lib/privacy/subject-source-registry';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
@@ -161,11 +166,18 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   },
   {
     seam: 'lib/app/data-export.ts',
-    risk: 'a stray collector would leak app rows into every install’s subject-access export',
-    assert: async () =>
+    risk: 'a stray collector would leak app rows into every install’s subject-access export, and a stray declaration would pre-account for a table nobody decided about',
+    assert: async () => {
       expect(await collectAppSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
         {}
-      ),
+      );
+      // The declaration half (#533). The reads trigger the lazy init, so this
+      // exercises the REAL seam. A stray source here would also silence the
+      // fork-accounting rule in export-sources.test.ts for that model.
+      __resetAppSubjectSourceRegistryForTests();
+      expect(getAppSubjectSources()).toEqual([]);
+      expect(getAppExcludedSubjectSources()).toEqual([]);
+    },
   },
   {
     seam: 'lib/app/bootstrap.ts',

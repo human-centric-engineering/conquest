@@ -20,6 +20,7 @@
  * deliberate, and it follows from which failure the subject can detect.
  *
  * @see lib/privacy/export-sources.ts — the manifest and its coverage guard
+ * @see lib/privacy/subject-source-registry.ts — where a fork tier declares its own
  * @see lib/privacy/erase-user.ts — the Art. 17 counterpart
  * @see .context/privacy/data-export.md — the guide
  */
@@ -33,6 +34,7 @@ import {
   type ExcludedSource,
   type SubjectQuery,
 } from '@/lib/privacy/export-sources';
+import { getAppSubjectSources } from '@/lib/privacy/subject-source-registry';
 
 /**
  * Bundle format version. Bump on any breaking change to the shape below — a
@@ -91,6 +93,35 @@ export class SubjectNotFoundError extends Error {
   constructor(userId: string) {
     super(`No user with id ${userId}`);
     this.name = 'SubjectNotFoundError';
+  }
+}
+
+/**
+ * Raised when a tier declared a subject source whose section the collector did
+ * not produce — the app half of "a partial export is worse than no export".
+ *
+ * This throws rather than logging because the two parties who could notice
+ * cannot: the subject has no way to tell a missing section from a table they
+ * have no rows in, and the operator sending the bundle has no way either. The
+ * declaration in `initAppSubjectSources()` is the only statement of what the
+ * answer should contain, so a bundle that contradicts it is not an answer.
+ *
+ * Fix it in the collector, not by deleting the declaration: return the key with
+ * an empty array when the subject owns nothing.
+ */
+export class DeclaredAppSourceMissingError extends Error {
+  /** Sections that were declared but absent from `collectAppSubjectData()`. */
+  readonly sections: string[];
+
+  constructor(sections: string[]) {
+    super(
+      `collectAppSubjectData() did not return declared section(s): ${sections.join(', ')}. ` +
+        'Every source registered through registerAppSubjectSources() must produce its ' +
+        'section — return an empty array when the subject has no rows, rather than ' +
+        'omitting the key. See lib/app/data-export.ts.'
+    );
+    this.name = 'DeclaredAppSourceMissingError';
+    this.sections = sections;
   }
 }
 
@@ -157,6 +188,16 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
   });
 
   const app = await collectAppSubjectData(subject);
+
+  // Hold the collector to what the tier declared. Extra sections are fine — a
+  // fork may export a derived view that is not a table — but a declared one
+  // that never arrived is a short answer wearing the shape of a complete one.
+  const undelivered = getAppSubjectSources()
+    .filter((source) => !Object.hasOwn(app, source.section))
+    .map((source) => source.section);
+  if (undelivered.length > 0) {
+    throw new DeclaredAppSourceMissingError(undelivered);
+  }
 
   const totalRows =
     results.reduce((sum, { rows }) => sum + rows.length, 0) + erasureReceipts.length;

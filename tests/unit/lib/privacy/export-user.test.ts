@@ -76,12 +76,21 @@ const { mockPrisma, delegateFor, resetDelegates, mockUserFindUnique, mockLogger 
   }
 );
 
+const mockInitAppSubjectSources = vi.fn();
+
 vi.mock('@/lib/db/client', () => ({ prisma: mockPrisma }));
 vi.mock('@/lib/logging', () => ({ logger: mockLogger }));
 
 const mockCollectAppSubjectData = vi.fn().mockResolvedValue({});
+/**
+ * Stubbed alongside the collector, not omitted. Leaving it out does not fail —
+ * the registry catches the resulting TypeError, logs it and rolls back — so the
+ * suite would go green while every declaration test below silently exercised
+ * the error path instead of the contract.
+ */
 vi.mock('@/lib/app/data-export', () => ({
   collectAppSubjectData: (...args: unknown[]) => mockCollectAppSubjectData(...args),
+  initAppSubjectSources: () => mockInitAppSubjectSources(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -89,8 +98,13 @@ vi.mock('@/lib/app/data-export', () => ({
 import {
   exportUserData,
   SubjectNotFoundError,
+  DeclaredAppSourceMissingError,
   EXPORT_FORMAT_VERSION,
 } from '@/lib/privacy/export-user';
+import {
+  registerAppSubjectSources,
+  __resetAppSubjectSourceRegistryForTests,
+} from '@/lib/privacy/subject-source-registry';
 import {
   SUBJECT_DATA_SOURCES,
   EXCLUDED_SOURCES,
@@ -124,6 +138,8 @@ beforeEach(() => {
   resetDelegates();
   mockUserFindUnique.mockResolvedValue(SUBJECT);
   mockCollectAppSubjectData.mockResolvedValue({});
+  mockInitAppSubjectSources.mockReset();
+  __resetAppSubjectSourceRegistryForTests();
 });
 
 describe('exportUserData', () => {
@@ -346,6 +362,86 @@ describe('exportUserData', () => {
       mockCollectAppSubjectData.mockRejectedValue(new Error('app db down'));
 
       await expect(exportUserData(PARAMS)).rejects.toThrow('app db down');
+    });
+  });
+
+  describe('the declared-source contract (#533)', () => {
+    /** Register one app source through the seam the registry runs lazily. */
+    const declare = (model: string, section: string): void => {
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            { model, section, disposition: 'export', description: 'Declared for this test.' },
+          ],
+        });
+      });
+    };
+
+    it('fails the export when a declared section never arrives', async () => {
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
+      await expect(exportUserData(PARAMS)).rejects.toThrow(/invoices/);
+    });
+
+    it('names every missing section, not just the first', async () => {
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppInvoice',
+              section: 'invoices',
+              disposition: 'export',
+              description: 'Invoices raised against the account.',
+            },
+            {
+              model: 'AppBooking',
+              section: 'bookings',
+              disposition: 'export',
+              description: 'Bookings made by the subject.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      const error = await exportUserData(PARAMS).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(DeclaredAppSourceMissingError);
+      expect((error as DeclaredAppSourceMissingError).sections).toEqual(['invoices', 'bookings']);
+    });
+
+    it('accepts an empty array — the contract is the key, not the rows', async () => {
+      // The reason this is a key check and not a truthiness one: a subject who
+      // owns nothing must still see the section, or "no rows" and "not asked"
+      // look identical in the bundle.
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [] });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.app).toEqual({ invoices: [] });
+    });
+
+    it('allows sections the tier did not declare', async () => {
+      // A derived view is not a table, so it has nothing to declare. Extra keys
+      // are the subject receiving more, which is not the failure being guarded.
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [], activitySummary: { runs: 3 } });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.app).toEqual({ invoices: [], activitySummary: { runs: 3 } });
+    });
+
+    it('is inert in vanilla Sunrise, where nothing is declared', async () => {
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.app).toEqual({});
     });
   });
 
