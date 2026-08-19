@@ -302,13 +302,18 @@ Core runs this once, lazily, before its first read — no wiring step — and fo
 what you declared into the same guard that holds its own manifest level with the
 schema.
 
-**Every model in `app.prisma` / `framework-*.prisma` must be declared or
-excluded.** That is stricter than the `userId`/`createdBy` heuristic core
-applies to itself, and deliberately so: core reads its own column vocabulary and
-cannot read yours, so a table keyed `authorId` or `respondentId` is invisible to
-that scan — and the tables it cannot see are exactly the ones nobody remembers.
-A lookup or join table is one `excluded` line with a reason, which is the note a
-DPO wants anyway.
+**Every model in a schema file that is not Sunrise's own must be declared or
+excluded** — `app.prisma`, `framework-*.prisma`, or any other name you pick.
+Core identifies its own eleven files by name and treats everything else in
+`prisma/schema/` as a fork tier's, because splitting a domain across files is
+normal and core cannot know what you will call them.
+
+That is stricter than the `userId`/`createdBy` heuristic core applies to itself,
+and deliberately so: core reads its own column vocabulary and cannot read yours,
+so a table keyed `authorId` or `respondentId` is invisible to that scan — and
+the tables it cannot see are exactly the ones nobody remembers. A lookup or join
+table is one `excluded` line with a reason, which is the note a DPO wants
+anyway.
 
 The failure names the models:
 

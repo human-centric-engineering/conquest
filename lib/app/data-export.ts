@@ -35,8 +35,9 @@
  * (`export-sources.test.ts`) diffs `prisma/schema/*.prisma` against the core
  * manifest so a new core table can't quietly narrow the export, and it holds
  * your tier's schema file to the same rule against your declarations: **every**
- * model in `app.prisma` / `framework-*.prisma` must be declared as a source or
- * excluded with a reason, or the suite fails naming it.
+ * model in a schema file that is not one of Sunrise's own — `app.prisma`,
+ * `framework-*.prisma`, or any other name you choose — must be declared as a
+ * source or excluded with a reason, or the suite fails naming it.
  *
  * Full accounting, rather than the user-id heuristic core applies to itself,
  * because core reads its own column vocabulary and cannot read yours: a table

@@ -34,10 +34,20 @@ release process.
 
 - **`DeclaredAppSourceMissingError` (`lib/privacy/export-user.ts`).** Thrown when
   a tier declared a source whose `section` `collectAppSubjectData()` did not
-  return. Return the key with an empty array when the subject owns nothing — a
-  bundle short by a section reads exactly like a complete answer, which is what
-  this module's "a partial export is worse than no export" rule already said.
-  Cannot fire in vanilla Sunrise, where nothing is declared.
+  return — including one set to `undefined`, which `JSON.stringify` drops from
+  the delivered bundle. Return the key with an empty array when the subject owns
+  nothing; a bundle short by a section reads exactly like a complete answer,
+  which is what this module's "a partial export is worse than no export" rule
+  already said. Cannot fire in vanilla Sunrise, where nothing is declared.
+
+- **A fork tier's exclusions are disclosed to the data subject.**
+  `bundle.meta.excluded` now carries the registry's `excluded` rows alongside
+  core's, so a fork table withheld from an export is named with its reason on
+  the same terms as `AiMessageEmbedding`. Without it a fork install's bundle
+  stated the boundary for core's tables and stayed silent about the fork's, and
+  a subject could not tell "we hold nothing about you" from "we decided not to
+  give it to you". No bundle shape change — the row type is identical — so no
+  `EXPORT_FORMAT_VERSION` bump.
 
 - **`lib/app/api-key-scopes.ts` + `withAuth(handler, { scope })` — least
   privilege is available to forks.** `AiApiKey.scopes` is a `String[]`, but the
@@ -249,11 +259,13 @@ release process.
 ### Changed
 
 - **A fork-owned schema file must now account for every model it declares.**
-  Models in `app.prisma` / `framework-*.prisma` are held to full accounting —
-  each declared as a source or excluded with a reason — rather than core's
-  `userId`/`createdBy` heuristic. Core reads its own column vocabulary and
-  cannot read yours, so a table keyed `authorId` or `respondentId` was invisible
-  to that scan. No effect on vanilla Sunrise, where `app.prisma` ships empty.
+  Any file in `prisma/schema/` that is not one of Sunrise's own eleven — not
+  just `app.prisma` and `framework-*.prisma` — is treated as a fork tier's and
+  held to full accounting: each model declared as a source, or excluded with a
+  reason, rather than run through core's `userId`/`createdBy` heuristic. Core
+  reads its own column vocabulary and cannot read yours, so a table keyed
+  `authorId` or `respondentId` was invisible to that scan. No effect on vanilla
+  Sunrise, where `app.prisma` ships empty.
 
 - **`npm run smoke:export` asserts the app seam works rather than that it is
   untouched.** It checked `Object.keys(bundle.app).length === 0`, which

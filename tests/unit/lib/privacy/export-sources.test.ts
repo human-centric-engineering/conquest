@@ -29,9 +29,10 @@
  * ---------------------------------------------------------------------------
  * FORK NOTE — you satisfy this from your own code, and it still checks you
  * ---------------------------------------------------------------------------
- * Models in the fork-reserved schema files (`app.prisma`, `framework-*.prisma`)
- * are held to a stricter rule than core holds itself: **every** model must be
- * declared through `registerAppSubjectSources()` — as a source or as an
+Every schema file in `prisma/schema/` that is not one of Sunrise's own — the
+ * list is `CORE_SCHEMA_FILES` below — is yours, whatever you named it. Models
+ * in one are held to a stricter rule than core holds itself: **every** model
+ * must be declared through `registerAppSubjectSources()` — as a source or as an
  * exclusion with a reason — from `lib/app/data-export.ts` or your framework
  * tier's own init. Nothing here needs editing, and nothing is skipped (#533).
  *
@@ -85,12 +86,43 @@ const USER_SCALAR_FIELD =
   /^\s*(userId|createdBy|uploadedBy|ownerId|actorUserId|subjectUserId)\s+String/;
 
 /**
- * Schema files reserved for a fork tier, which core promises never to write to
- * (CLAUDE.md, "Two namespace tiers are reserved for downstream forks"). Models
- * here are accounted for through the registry, not the core manifest.
+ * Sunrise's own schema files. **Everything else in `prisma/schema/` belongs to a
+ * fork tier**, whatever it is named.
+ *
+ * Stated as an allowlist rather than a pattern for the fork-reserved names,
+ * because core knows its own files exactly and cannot know what a fork will
+ * call theirs. Matching only `app.prisma` and `framework-*.prisma` left a fork
+ * that splits its domain across `app-billing.prisma` — normal enough that core
+ * itself has eleven of these — classified as core-owned, held to core's column
+ * heuristic, and unable to satisfy the result from fork-owned code. That is
+ * #533 again, one filename away.
+ *
+ * Adding a core schema file means adding it here. The failure is loud and the
+ * message says so: until it is listed, its models are treated as a fork tier's
+ * and the accounting rule asks someone to declare them.
+ */
+const CORE_SCHEMA_FILES = new Set([
+  'auth.prisma',
+  'base.prisma',
+  'mcp.prisma',
+  'orchestration-agents.prisma',
+  'orchestration-conversations.prisma',
+  'orchestration-evaluation.prisma',
+  'orchestration-knowledge.prisma',
+  'orchestration-ops.prisma',
+  'orchestration-providers.prisma',
+  'orchestration-workflows.prisma',
+  // Sunrise's own app-domain models (ContactSubmission, FeatureFlag,
+  // AuthBootstrap) live here, NOT in the fork-reserved app.prisma.
+  'platform.prisma',
+]);
+
+/**
+ * Whether a schema file belongs to a fork tier. Models here are accounted for
+ * through the registry, not the core manifest.
  */
 function isForkOwnedSchemaFile(file: string): boolean {
-  return file === 'app.prisma' || /^framework-.*\.prisma$/.test(file);
+  return !CORE_SCHEMA_FILES.has(file);
 }
 
 /**
@@ -228,9 +260,23 @@ describe('subject-data source manifest', () => {
     it('knows which schema files belong to a fork tier', () => {
       expect(isForkOwnedSchemaFile('app.prisma')).toBe(true);
       expect(isForkOwnedSchemaFile('framework-tasks.prisma')).toBe(true);
+      // The reason this is an allowlist and not a pattern: a fork splitting its
+      // domain across files is normal, and core cannot enumerate their names.
+      expect(isForkOwnedSchemaFile('app-billing.prisma')).toBe(true);
+      expect(isForkOwnedSchemaFile('obsiddy.prisma')).toBe(true);
       // Sunrise's own app-domain models live here, and stay core's problem.
       expect(isForkOwnedSchemaFile('platform.prisma')).toBe(false);
       expect(isForkOwnedSchemaFile('orchestration-agents.prisma')).toBe(false);
+    });
+
+    it('lists every core schema file that is actually on disk', () => {
+      // Drift guard, in the direction that matters for core: a rename or a
+      // removal leaves a name here matching nothing, and the file it used to
+      // cover would be silently reclassified as a fork tier's.
+      const onDisk = new Set(readSchemaFiles().map((file) => file.name));
+      const stale = [...CORE_SCHEMA_FILES].filter((name) => !onDisk.has(name)).sort();
+
+      expect(stale, 'CORE_SCHEMA_FILES names a file that no longer exists').toEqual([]);
     });
   });
 
@@ -305,7 +351,7 @@ describe('subject-data source manifest', () => {
   });
 
   describe('fork-owned schema files', () => {
-    it('accounts for every model in a fork-reserved schema file', () => {
+    it('accounts for every model in a fork-owned schema file', () => {
       // Core's own manifest counts as accounting too. A framework tier moving
       // rows out of `SUBJECT_DATA_SOURCES` and into the registry is doing the
       // right thing, and failing them twice while they do it is noise, not
@@ -323,13 +369,15 @@ describe('subject-data source manifest', () => {
         missing,
         missing.length === 0
           ? ''
-          : `These models live in a fork-reserved schema file and no tier has said ` +
+          : `These models live in a fork-owned schema file and no tier has said ` +
               `what a data subject receives from them: ${missing.join(', ')}. Declare ` +
               `each through registerAppSubjectSources() — as a \`source\` if it holds ` +
               `data about a person, or in \`excluded\` with a reason if it does not. ` +
               `Core cannot read your column vocabulary, so it asks for every model ` +
               `rather than guessing which hold a user id. ` +
-              `See lib/app/data-export.ts and .context/privacy/data-export.md.`
+              `See lib/app/data-export.ts and .context/privacy/data-export.md. ` +
+              `(Sunrise maintainers: if you just added a CORE schema file, add its ` +
+              `name to CORE_SCHEMA_FILES in this file instead.)`
       ).toEqual([]);
     });
   });
