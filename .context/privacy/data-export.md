@@ -18,6 +18,7 @@ The two paths answer the same question — _which tables hold this person's data
 | Admin exports another user      | `GET /api/v1/users/[id]/export` (admin only)             |
 | Decide what a new table exports | `SUBJECT_DATA_SOURCES` — `lib/privacy/export-sources.ts` |
 | Add a fork's own tables         | `collectAppSubjectData()` — `lib/app/data-export.ts`     |
+| Declare them for the guard      | `initAppSubjectSources()` — `lib/app/data-export.ts`     |
 
 ### Anti-Pattern
 
@@ -251,30 +252,119 @@ export async function collectAppSubjectData({
 }
 ```
 
-**It is a plain function, not a registry.** The erasure sibling
+**The collector is a plain function, not a registry.** The erasure sibling
 (`lib/privacy/erasure-hooks.ts`) is a boot-time registry; this seam deliberately
 is not, for the same reason the service fails whole. Erasure fails loudly if a
 hook never registers — the rows are still sitting there afterwards. An
 unregistered export collector yields a bundle that looks complete and is not. A
 static import cannot be missed.
 
-### Copy the guard, not just the seam
+The _declaration_ below is a registry, and that is not a contradiction: it
+carries no rows, and a declaration that fails to register is caught at build
+time by the coverage guard rather than shipping a short bundle. The rows stay on
+the static import.
 
-Core's coverage guard protects core's tables. Yours need the same protection,
-and core cannot write it for you. The pattern worth stealing:
+### Declare your tables — core's guard covers them too
+
+Core's coverage guard used to protect only core's tables while _scanning_ yours,
+which meant a fork that filled the seam correctly still had a red
+`export-sources.test.ts` and no fork-owned way to green it (#533). Now you
+declare, in `initAppSubjectSources()` in the same file:
 
 ```ts
-/** Every app table represented in the subject export. */
-export const EXPORTED_APP_SOURCES = ['app_invoice', 'app_enquiry', 'app_booking'] as const;
+import { registerAppSubjectSources } from '@/lib/privacy/subject-source-registry';
+
+export function initAppSubjectSources(): void {
+  registerAppSubjectSources({
+    tier: 'app',
+    sources: [
+      {
+        model: 'AppInvoice',
+        section: 'invoices',
+        disposition: 'export',
+        description: 'Invoices raised against your account.',
+      },
+      {
+        model: 'AppEnquiry',
+        section: 'enquiries',
+        disposition: 'export',
+        description: 'Enquiries you sent us.',
+      },
+    ],
+    excluded: [
+      { model: 'AppCountry', reason: 'Reference list of countries — holds no personal data.' },
+    ],
+  });
+}
 ```
 
-…plus a test that greps your schema file for `@@map("app_…")` and asserts every
-mapped table appears in that list. Then adding a table without extending the
-export fails your build instead of shipping a short answer to a data subject.
+Core runs this once, lazily, before its first read — no wiring step — and folds
+what you declared into the same guard that holds its own manifest level with the
+schema.
 
-A table that genuinely holds no personal data (lookup tables, org config with no
-person in it) is fine to leave out — but list it with a reason, so the omission
-reads as a decision rather than an oversight.
+**Every model in `app.prisma` / `framework-*.prisma` must be declared or
+excluded.** That is stricter than the `userId`/`createdBy` heuristic core
+applies to itself, and deliberately so: core reads its own column vocabulary and
+cannot read yours, so a table keyed `authorId` or `respondentId` is invisible to
+that scan — and the tables it cannot see are exactly the ones nobody remembers.
+A lookup or join table is one `excluded` line with a reason, which is the note a
+DPO wants anyway.
+
+The failure names the models:
+
+```
+These models live in a fork-reserved schema file and no tier has said what a
+data subject receives from them: AppAnswerOption, AppQuestionnaireResponse.
+```
+
+**Declaring is a promise the export keeps.** Every `section` you declare must
+appear in what `collectAppSubjectData()` returns, or `exportUserData()` throws
+`DeclaredAppSourceMissingError`. Return the key with an empty array when the
+subject owns nothing:
+
+```ts
+return { invoices, enquiries }; // both keys always present, `[]` when empty
+```
+
+`npm run smoke:export` asserts the other half against real Postgres: the subject
+it creates is seconds old and owns nothing of yours, so a declared section that
+comes back with rows in it means the collector matched a stranger's.
+
+### Two tiers, declaring independently
+
+`CLAUDE.md` reserves `/app` for a leaf fork and `/framework` for a tier sitting
+between Sunrise and its own leaf forks. This is a registry rather than one
+exported constant precisely so both can declare: a single slot means a framework
+tier consumes the seam its leaves are entitled to.
+
+A framework tier registers from its own init with `tier: 'framework'`, reached
+from the leaf's `initAppSubjectSources()` — the same bridge shape as
+`bootstrap.ts → initFramework()`:
+
+```ts
+// lib/framework/privacy/export-sources.ts
+export function initFrameworkSubjectSources(): void {
+  registerAppSubjectSources({ tier: 'framework', sources: [...], excluded: [...] });
+}
+```
+
+The `tier` string appears only in diagnostics, so a rejected row says who tried
+to register it. A model claimed by two tiers keeps the first claim and logs the
+second — it is never silently overwritten.
+
+### What a malformed declaration does
+
+A row is dropped, with `logger.error`, if it has an empty model or section, a
+disposition that is neither `export` nor `attribution`, a description under 10
+characters, an exclusion reason under 20, a section already in use, a model
+claimed by another tier, or the same model as both a source and an exclusion.
+
+Dropped is not silently accepted: the model stays unaccounted for, so the
+coverage guard fails naming it. Throwing instead would abort the rest of your
+tier's valid declarations. For the same reason a **throwing** init rolls the
+whole registry back rather than keeping the rows registered before the throw —
+half a contribution would give a failure list that moves with the position of
+the bug.
 
 ## The Bundle
 
@@ -358,5 +448,6 @@ transport (streaming, an expiring download) rather than by dropping rows.
 - [Account Deletion & Right to Erasure](./data-erasure.md) — the Art. 17 counterpart
 - [Privacy & Cookie Consent](./overview.md) — consent system
 - `lib/privacy/export-sources.ts` — the manifest
-- `lib/app/data-export.ts` — the fork seam
+- `lib/app/data-export.ts` — the fork seam (collector + declarations)
+- `lib/privacy/subject-source-registry.ts` — where a fork tier's declarations land
 - [`CUSTOMIZATION.md`](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface) — the full `lib/app/` surface

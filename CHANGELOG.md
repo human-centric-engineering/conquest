@@ -18,6 +18,27 @@ release process.
 
 ### Added
 
+- **`lib/privacy/subject-source-registry.ts` + `initAppSubjectSources()` — a
+  fork tier declares its own subject-access sources.** The Art. 15 coverage
+  guard scanned every `prisma/schema/*.prisma`, including the fork-reserved
+  `app.prisma` and `framework-*.prisma`, but checked them against a manifest
+  only core can write to — so a fork that filled `collectAppSubjectData()`
+  exactly as documented still had a red core test and no fork-owned way to green
+  it. `registerAppSubjectSources({ tier, sources, excluded })` is that way. A
+  registry rather than one exported constant because `CLAUDE.md` reserves two
+  fork tiers, and a single slot means a framework tier consumes the seam its
+  leaf forks are entitled to. Skipping the reserved namespaces would have been
+  smaller and was rejected: it trades a noisy false positive for a silent false
+  negative, and an access request cannot survive silence. Vanilla Sunrise
+  declares nothing and is unchanged.
+
+- **`DeclaredAppSourceMissingError` (`lib/privacy/export-user.ts`).** Thrown when
+  a tier declared a source whose `section` `collectAppSubjectData()` did not
+  return. Return the key with an empty array when the subject owns nothing — a
+  bundle short by a section reads exactly like a complete answer, which is what
+  this module's "a partial export is worse than no export" rule already said.
+  Cannot fire in vanilla Sunrise, where nothing is declared.
+
 - **`lib/app/api-key-scopes.ts` + `withAuth(handler, { scope })` — least
   privilege is available to forks.** `AiApiKey.scopes` is a `String[]`, but the
   two places deciding what may go in it were closed lists in platform files, so
@@ -113,6 +134,21 @@ release process.
   literal in the component.
 
 ### Fixed
+
+- **Core tests a fork could not satisfy (#480, #525, #530, #533).** Filling a
+  seam correctly turned the suite red in four places: the subject-access
+  coverage guard (above), the capability registry's idempotency count (which
+  reported "expected 13, got 27" under a test named *is idempotent*, sending the
+  reader after a double-registration bug in wiring that was already correct),
+  eleven assertions across seven files that wrote `/dashboard` and `Dashboard`
+  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL`, and
+  `smoke:export`. `tests/unit/fork-seam-coupling.test.ts` now requires any core
+  artifact reading a `lib/app/*` seam unmocked to carry a `FORK NOTE`.
+
+- **Four proxy assertions compared a redirect with `toContain('/dashboard')`,**
+  which matches a query string or a longer path — and for a fork landing on `/`
+  matches every URL there is. They compare the parsed pathname exactly now,
+  which is stronger for vanilla Sunrise too.
 
 - **A parameterised MCP resource URI now matches when its `{param}` is not the
   last path segment.** `hub://projects/{id}/plan` collapsed to
@@ -211,6 +247,20 @@ release process.
   `POST` too.
 
 ### Changed
+
+- **A fork-owned schema file must now account for every model it declares.**
+  Models in `app.prisma` / `framework-*.prisma` are held to full accounting —
+  each declared as a source or excluded with a reason — rather than core's
+  `userId`/`createdBy` heuristic. Core reads its own column vocabulary and
+  cannot read yours, so a table keyed `authorId` or `respondentId` was invisible
+  to that scan. No effect on vanilla Sunrise, where `app.prisma` ships empty.
+
+- **`npm run smoke:export` asserts the app seam works rather than that it is
+  untouched.** It checked `Object.keys(bundle.app).length === 0`, which
+  implementing the seam makes false by construction — and the script is not in
+  `validate` or `npm test`, so a fork got a green local run and a red pipeline.
+  It now asserts every declared section arrived and is empty for a subject who
+  owns nothing, which also catches a collector matching a stranger's rows.
 
 - **`ApiKeyScope` is an open type and `validateScopes` returns `boolean`.**
   `ApiKeyScope` was a closed union and is now `CoreApiKeyScope | (string & {})`,

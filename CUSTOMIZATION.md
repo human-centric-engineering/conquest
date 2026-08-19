@@ -372,34 +372,34 @@ the export name and signature; everything inside is free to change. (Detailed
 examples live here in this guide, not in the files, precisely so the files stay
 small and conflict-free.)
 
-| Edit this file                             | To register                                        | Auto-wired by (runtime)                                               |
-| ------------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------- |
-| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                   | `lib/env.ts` startup parse (server)                                   |
-| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                           | rate-limit middleware (middleware runtime)                            |
-| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)               | `proxy.ts` edge redirect-to-login (proxy runtime)                     |
-| `lib/app/capabilities.ts`                  | agent capabilities (tools)                         | the capability registry (server route-handler)                        |
-| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)      | the chat context builder (server route-handler)                       |
-| `lib/app/admin-nav.ts`                     | admin sidebar sections                             | `admin-sidebar.tsx` (client)                                          |
-| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                       | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                          |
-| `lib/app/public-nav.ts`                    | public nav / footer link lists                     | `public-nav.tsx`, `public-footer.tsx` (client)                        |
-| `lib/app/protected-nav.ts`                 | authenticated nav link list                        | `protected-nav.tsx` (client)                                          |
-| `lib/app/auth-landing.ts`                  | where a signed-in user lands, and its label        | `lib/auth-landing/route.ts` → a dozen sites (proxy + server + client) |
-| `lib/app/emails.ts`                        | auth email template overrides                      | `lib/email/registry.ts` (server)                                      |
-| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)              | `instrumentation.ts` `register()` (server, all envs)                  |
-| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`) | better-auth `user.create.after` (server)                              |
-| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)          | the maintenance tick (server)                                         |
-| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)         | root `eslint.config.mjs` spread (lint)                                |
-| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                  | `resolveAgentDocumentAccess()` (server route-handler)                 |
-| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards            | the chat handler's `collectGuardFloors()` (server route-handler)      |
-| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                | the chat handler's `emitGuardEvent()` (server route-handler)          |
-| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                      | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)           |
-| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                        |
-| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
-| `lib/app/data-export.ts`                   | app tables in a subject-access export              | `exportUserData()` (server route-handler)                             |
-| `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                      |
-| `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)          | the grader registry (server route-handler)                            |
-| `lib/app/account-sections.ts`              | extra sections on `/profile` + `/settings`         | `<AccountSections/>` on both account pages (server)                   |
-| `lib/app/api-key-scopes.ts`                | extra API-key scopes (`APP_API_KEY_SCOPES`)        | `lib/auth/api-key-scopes.ts` + `createApiKeySchema` (server + client) |
+| Edit this file                             | To register                                             | Auto-wired by (runtime)                                               |
+| ------------------------------------------ | ------------------------------------------------------- | --------------------------------------------------------------------- |
+| `lib/app/env.ts`                           | server env vars (`appEnvSchema`)                        | `lib/env.ts` startup parse (server)                                   |
+| `lib/app/rate-limit.ts`                    | rate-limit tiers / rules                                | rate-limit middleware (middleware runtime)                            |
+| `lib/app/protected-routes.ts`              | extra authed route prefixes (append)                    | `proxy.ts` edge redirect-to-login (proxy runtime)                     |
+| `lib/app/capabilities.ts`                  | agent capabilities (tools)                              | the capability registry (server route-handler)                        |
+| `lib/app/context-contributors.ts`          | prompt-context loaders (`buildContext` types)           | the chat context builder (server route-handler)                       |
+| `lib/app/admin-nav.ts`                     | admin sidebar sections                                  | `admin-sidebar.tsx` (client)                                          |
+| `lib/app/db-drift.ts`                      | Prisma-unmodelled DB objects                            | `scripts/db/check-drift.ts` (CI / `/pre-pr`)                          |
+| `lib/app/public-nav.ts`                    | public nav / footer link lists                          | `public-nav.tsx`, `public-footer.tsx` (client)                        |
+| `lib/app/protected-nav.ts`                 | authenticated nav link list                             | `protected-nav.tsx` (client)                                          |
+| `lib/app/auth-landing.ts`                  | where a signed-in user lands, and its label             | `lib/auth-landing/route.ts` → a dozen sites (proxy + server + client) |
+| `lib/app/emails.ts`                        | auth email template overrides                           | `lib/email/registry.ts` (server)                                      |
+| `lib/app/bootstrap.ts`                     | one-time server boot work (`initApp`)                   | `instrumentation.ts` `register()` (server, all envs)                  |
+| `lib/app/user-created.ts`                  | react to a new account (`initAppUserCreatedHooks`)      | better-auth `user.create.after` (server)                              |
+| `lib/app/jobs.ts`                          | recurring background work (`initAppJobs`)               | the maintenance tick (server)                                         |
+| `lib/app/eslint.config.mjs`                | ESLint import-boundary blocks (fork tiers)              | root `eslint.config.mjs` spread (lint)                                |
+| `lib/app/knowledge-access-contributors.ts` | extra docs for a restricted agent                       | `resolveAgentDocumentAccess()` (server route-handler)                 |
+| `lib/app/guard-floor-contributors.ts`      | per-turn minimum for inline chat guards                 | the chat handler's `collectGuardFloors()` (server route-handler)      |
+| `lib/app/guard-event-contributors.ts`      | observe an inline chat guard firing                     | the chat handler's `emitGuardEvent()` (server route-handler)          |
+| `lib/app/csp.ts`                           | extra CSP `frame-src` origins                           | `lib/security/headers.ts` → `proxy.ts` (middleware runtime)           |
+| `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                           | the agent field registry (server + agent form)                        |
+| `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`               | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
+| `lib/app/data-export.ts`                   | app tables in a subject-access export, + declaring them | `exportUserData()` (server) + the coverage guard (test)               |
+| `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme               | the MCP resource registry (server route-handler)                      |
+| `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)               | the grader registry (server route-handler)                            |
+| `lib/app/account-sections.ts`              | extra sections on `/profile` + `/settings`              | `<AccountSections/>` on both account pages (server)                   |
+| `lib/app/api-key-scopes.ts`                | extra API-key scopes (`APP_API_KEY_SCOPES`)             | `lib/auth/api-key-scopes.ts` + `createApiKeySchema` (server + client) |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -409,6 +409,18 @@ small and conflict-free.)
 > deletion). Pinning keeps the protection for the seams you have _not_ filled.
 > One row per seam, so your diff stays a line — see the FORK NOTE at the top of
 > that file.
+>
+> **That is the only core test filling a seam should cost you.** Where a core
+> assertion measured something a seam contributes to, it was a bug and has been
+> fixed: the subject-access coverage guard now reads your declarations
+> (`registerAppSubjectSources()`), the capability idempotency count stubs the
+> seam, the post-auth landing assertions import `AUTH_LANDING_ROUTE` instead of
+> writing `/dashboard`, and `smoke:export` asserts your sections arrived rather
+> than that you have none (#480, #525, #530, #533). Any core artifact that still
+> reads a seam for real has to carry a `FORK NOTE` saying so —
+> `tests/unit/fork-seam-coupling.test.ts` enforces that, and its docblock is
+> honest about the shapes a grep cannot catch. If you hit one that has no note,
+> that is a bug worth filing.
 
 **Why one file per concern and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
