@@ -41,7 +41,19 @@ vi.mock('@/components/admin/questionnaires/authoring-mutate', async () => {
 
 // The cards are stubbed to the callbacks the panel hands them. Each has its own test file.
 vi.mock('@/components/admin/questionnaires/topics/routing-analyst-card', () => ({
-  RoutingAnalystCard: () => <div data-testid="analyst-card" />,
+  RoutingAnalystCard: ({
+    candidacy,
+    autoTriggerPending,
+  }: {
+    candidacy: { isCandidate: boolean } | null;
+    autoTriggerPending: boolean;
+  }) => (
+    <div
+      data-testid="analyst-card"
+      data-is-candidate={candidacy?.isCandidate ?? ''}
+      data-auto-trigger-pending={autoTriggerPending}
+    />
+  ),
 }));
 vi.mock('@/components/admin/questionnaires/topics/plan-preview-card', () => ({
   PlanPreviewCard: () => <div data-testid="preview-card" />,
@@ -528,6 +540,19 @@ describe('TopicsPanel — composition', () => {
     expect(screen.getByTestId('quality-card')).toBeInTheDocument();
     expect(screen.getByTestId('save-settings')).toBeInTheDocument();
     expect(screen.getByTestId('save-topics')).toBeInTheDocument();
+  });
+
+  it('passes the candidacy verdict and auto-trigger flag through to the analyst card (F17.19 Phase 3)', () => {
+    renderPanel(
+      payload({
+        candidacy: { isCandidate: true, confidence: 0.9, summary: 'Reads like a screener.' },
+        autoTriggerPending: true,
+      })
+    );
+
+    const card = screen.getByTestId('analyst-card');
+    expect(card).toHaveAttribute('data-is-candidate', 'true');
+    expect(card).toHaveAttribute('data-auto-trigger-pending', 'true');
   });
 
   it('tells the routing-quality card how many topics are conditional', () => {

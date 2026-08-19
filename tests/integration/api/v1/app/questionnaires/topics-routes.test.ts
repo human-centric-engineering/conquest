@@ -31,6 +31,9 @@ vi.mock('@/lib/db/client', () => ({
     // G03: the route reads the per-slot re-ask cap so the tab can flag a follow-up limit that
     // cannot bind. Defaults to a null row (⇒ the config default) unless a case says otherwise.
     appQuestionnaireConfig: { findUnique: vi.fn() },
+    // F17.19 Phase 3: the cached candidacy verdict, and whether the analyst has already run.
+    appQuestionnaireVersion: { findUnique: vi.fn() },
+    appAiRun: { findFirst: vi.fn() },
   },
 }));
 
@@ -180,6 +183,11 @@ beforeEach(() => {
   // Most versions do not score — the comparability checks (F17.15) then have nothing to say.
   (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue(null);
   (prisma.appQuestionnaireConfig.findUnique as Mock).mockResolvedValue(null);
+  // No cached candidacy verdict by default — most cases have nothing to say about auto-trigger.
+  (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
+    adaptiveScopeCandidate: null,
+  });
+  (prisma.appAiRun.findFirst as Mock).mockResolvedValue(null);
 });
 
 // ─── GET ──────────────────────────────────────────────────────────────────────
@@ -307,6 +315,78 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
     expect(
       body.data.issues.filter((i: { code: string }) => i.code.startsWith('scale_'))
     ).toHaveLength(0);
+  });
+
+  // ─── Candidacy + auto-trigger (F17.19 Phase 3) ─────────────────────────────
+
+  describe('candidacy / autoTriggerPending', () => {
+    const VERDICT = { isCandidate: true, confidence: 0.8, summary: 'Reads like a screener.' };
+
+    it('reports candidacy: null, autoTriggerPending: false when never checked', async () => {
+      const res = await GET(getReq(), ctx(PARAMS));
+      const body = await res.json();
+      expect(body.data.candidacy).toBeNull();
+      expect(body.data.autoTriggerPending).toBe(false);
+    });
+
+    it('reports pending: true for a flagged version with only a seeded topic and no prior run', async () => {
+      (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
+        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+      });
+      (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'seeded' })]);
+
+      const res = await GET(getReq(), ctx(PARAMS));
+      const body = await res.json();
+
+      expect(body.data.candidacy).toEqual(VERDICT);
+      expect(body.data.autoTriggerPending).toBe(true);
+    });
+
+    it('reports pending: false when the version already has a hand-authored topic', async () => {
+      (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
+        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+      });
+      (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'manual' })]);
+
+      const res = await GET(getReq(), ctx(PARAMS));
+      const body = await res.json();
+
+      expect(body.data.candidacy).toEqual(VERDICT);
+      expect(body.data.autoTriggerPending).toBe(false);
+    });
+
+    it('reports pending: false when a draft is already pending review', async () => {
+      (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
+        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+      });
+      (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'seeded' })]);
+      (loadTopicDraft as Mock).mockResolvedValue({
+        v: 1,
+        topics: [],
+        rules: [],
+        summary: 'x',
+        fromDocument: true,
+        generatedAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const res = await GET(getReq(), ctx(PARAMS));
+      const body = await res.json();
+
+      expect(body.data.autoTriggerPending).toBe(false);
+    });
+
+    it('reports pending: false once the analyst has already run for this version', async () => {
+      (prisma.appQuestionnaireVersion.findUnique as Mock).mockResolvedValue({
+        adaptiveScopeCandidate: { ...VERDICT, signals: [] },
+      });
+      (loadTopics as Mock).mockResolvedValue([sampleTopic({ source: 'seeded' })]);
+      (prisma.appAiRun.findFirst as Mock).mockResolvedValue({ id: 'run-1' });
+
+      const res = await GET(getReq(), ctx(PARAMS));
+      const body = await res.json();
+
+      expect(body.data.autoTriggerPending).toBe(false);
+    });
   });
 });
 

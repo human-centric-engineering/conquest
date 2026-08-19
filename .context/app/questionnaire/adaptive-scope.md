@@ -429,14 +429,21 @@ add a topic, a criterion, or a rule by hand.
 
 ### Finding out it exists (F17.19)
 
-Everything above is **manual** — an admin has to already know the tab exists and click "Run". A
-cheap, fail-soft candidacy check now runs during ingestion itself (all four entry points: new
-ingest + re-ingest, plain + streaming) and decides, at the fast `routing` tier rather than this
-analyst's `reasoning` tier, whether the document's own words describe conditional routing at all.
-Ingestion-time detection **only** so far — the verdict is recorded (`AppAiRun` kind
-`scope_candidacy`) and cached on the version, but nothing yet auto-runs this analyst from it or
-surfaces it in any UI. See [`f17.19.md`](../planning/features/f17.19.md) for the phased plan and
-what's still open.
+Everything above used to be entirely **manual** — an admin had to already know the tab exists and
+click "Run". A cheap, fail-soft candidacy check runs during ingestion itself (all four entry points:
+new ingest + re-ingest, plain + streaming) and decides, at the fast `routing` tier rather than this
+analyst's `reasoning` tier, whether the document's own words describe conditional routing at all. The
+verdict is recorded (`AppAiRun` kind `scope_candidacy`) and cached on the version.
+
+The Topics tab now acts on it: when the cached verdict says a fresh, untouched version is a
+candidate, `RoutingAnalystCard` invokes the same analyst run the "Run" button makes, on its own, the
+first time the tab is opened — so an admin who discovers the feature by opening the tab at all finds
+a reviewed draft already waiting rather than an empty card. A banner names why it started. Nothing
+here auto-enables `adaptiveScope.enabled` or writes to the live topic set; a proposal is still only
+ever accepted by hand. The "already tried" signal that stops a discarded auto-proposal from
+re-proposing itself on every visit is the analyst's own `AppAiRun` (kind `routing_analysis`), not a
+new column — see [`f17.19.md`](../planning/features/f17.19.md) for the phased plan, what Phase 3
+shipped, and what's still open (a Questionnaire Pack section explaining the routing logic, Phase 4).
 
 ## Reports and scoring (F17.5)
 

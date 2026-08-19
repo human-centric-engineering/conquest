@@ -549,6 +549,8 @@ function makeTopicsPayload(over: Partial<TopicsPayload> = {}): TopicsPayload {
     costs: { budgetSeconds: 0, alwaysSeconds: 0, routedAllowanceSeconds: 0, byTopicKey: {} },
     draft: null,
     preview: { openingQuestions: [], fillTargets: [] },
+    candidacy: null,
+    autoTriggerPending: false,
     ...over,
   };
 }
@@ -1063,5 +1065,33 @@ describe('getEvaluationAddQuestionSeed', () => {
     expect(seed).not.toBeNull();
     expect(seed!.sectionKey).toBeNull();
     expect(seed!.prompt).toBe('What is your budget?');
+  });
+
+  describe('fetch throws path', () => {
+    it('returns null when serverFetch rejects', async () => {
+      // Arrange
+      mockServerFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+      // Act
+      const seed = await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+
+      // Assert: documented fallback on thrown error is null
+      expect(seed).toBeNull();
+    });
+
+    it('logs the error via logger.error when serverFetch throws', async () => {
+      // Arrange
+      const fetchError = new Error('Network failure');
+      mockServerFetch.mockRejectedValueOnce(fetchError);
+
+      // Act
+      await getEvaluationAddQuestionSeed('qn-1', 'ver-1', 'run-1:find-1');
+
+      // Assert: error is surfaced through structured logging, not swallowed silently
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'workspace: evaluation seed fetch failed',
+        fetchError
+      );
+    });
   });
 });

@@ -107,6 +107,8 @@ function renderCard(props: Partial<ComponentProps<typeof RoutingAnalystCard>> = 
       initialDraft={null}
       questionKeys={['q1']}
       liveTopicCount={0}
+      candidacy={null}
+      autoTriggerPending={false}
       {...props}
     />
   );
@@ -207,6 +209,242 @@ describe('RoutingAnalystCard — no pending draft', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Too many requests, slow down.')
     );
+  });
+
+  it('shows an error when the request itself throws (network failure)', async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) return Promise.reject(new Error('Network down.'));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard();
+    await user.click(screen.getByRole('button', { name: /Propose topics from the document/ }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Network down.'));
+  });
+});
+
+describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
+  const CANDIDACY = {
+    isCandidate: true,
+    confidence: 0.82,
+    summary: 'The intro page describes screening by role.',
+  };
+
+  it('does not call the analyst on mount when autoTriggerPending is false', () => {
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not call the analyst on mount when there is no candidacy verdict', () => {
+    renderCard({ candidacy: null, autoTriggerPending: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('runs itself on mount when autoTriggerPending is true, without any click', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve(
+          sseResponse([
+            {
+              type: 'done',
+              versionId: VID,
+              draft: draft(),
+              replacedCount: 0,
+              uncoveredQuestionCount: 0,
+            },
+          ])
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    // No click — the request fires on its own, and the proposal it returns still renders.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.getByText('Pipeline')).toBeInTheDocument());
+  });
+
+  it('shows a distinct initial status before any phase event arrives', async () => {
+    // The first `read()` never resolves, so the component is stuck on whatever `run()` seeded
+    // `status` to before the stream produced anything — this is what pins the auto-run's initial
+    // label as reachable, rather than being permanently shadowed by the unconditional `setStatus`
+    // call at the top of `run()`.
+    const release: { current: (() => void) | null } = { current: null };
+    const hang = new Promise<void>((resolve) => {
+      release.current = resolve;
+    });
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                await hang;
+                return { done: true, value: undefined };
+              },
+            }),
+          },
+        } as unknown as Response);
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(screen.getByText('Drafting a proposal…')).toBeInTheDocument());
+
+    release.current?.();
+  });
+
+  it('explains the auto-run while it is in flight', async () => {
+    // A stream that emits a phase but never a terminal event, so the component stays in its
+    // `draft === null` / analysing state long enough to assert the banner.
+    const release: { current: (() => void) | null } = { current: null };
+    const hang = new Promise<void>((resolve) => {
+      release.current = resolve;
+    });
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        const encoder = new TextEncoder();
+        let sentFirst = false;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (!sentFirst) {
+                  sentFirst = true;
+                  return {
+                    done: false,
+                    value: encoder.encode(
+                      `event: phase\ndata: ${JSON.stringify({ type: 'phase', phase: 'reading', message: 'Reading…' })}\n\n`
+                    ),
+                  };
+                }
+                await hang;
+                return { done: true, value: undefined };
+              },
+            }),
+          },
+        } as unknown as Response);
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(screen.getByText('Reading…')).toBeInTheDocument());
+    // The banner explains the auto-run rather than leaving the admin wondering why it started.
+    expect(screen.getByText(/drafting a starting point automatically/i)).toBeInTheDocument();
+    expect(screen.getByText(CANDIDACY.summary)).toBeInTheDocument();
+
+    release.current?.();
+  });
+
+  it('fires only once even if the effect re-runs, and never on a re-render alone', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve(sseResponse([{ type: 'phase', phase: 'reading', message: 'x' }]));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { rerender } = render(
+      <RoutingAnalystCard
+        questionnaireId={QN_ID}
+        versionId={VID}
+        initialDraft={null}
+        questionKeys={['q1']}
+        liveTopicCount={0}
+        candidacy={CANDIDACY}
+        autoTriggerPending={true}
+      />
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <RoutingAnalystCard
+        questionnaireId={QN_ID}
+        versionId={VID}
+        initialDraft={null}
+        questionKeys={['q1']}
+        liveTopicCount={0}
+        candidacy={CANDIDACY}
+        autoTriggerPending={true}
+      />
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show an error banner when an auto-triggered run fails', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve(
+          jsonResponse({ error: { message: 'Too many requests, slow down.' } }, 429)
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    // Give the (rejected) promise chain a tick to settle.
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    // The banner must not keep claiming a draft is being generated once the attempt has settled —
+    // `autoStarted` never resets, so this pins the `analysing` gate that stops it lying forever.
+    expect(screen.queryByText(/drafting a starting point automatically/i)).not.toBeInTheDocument();
+    expect(screen.getByText('This document reads like it describes routing.')).toBeInTheDocument();
+    // The button is still there, ready for the admin to try manually — which reports normally.
+    expect(
+      screen.getByRole('button', { name: /Propose topics from the document/ })
+    ).toBeInTheDocument();
+  });
+
+  it('does not show an error banner when an auto-triggered run ends in a terminal SSE error', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve(
+          sseResponse([
+            { type: 'error', code: 'ROUTING_ANALYSIS_FAILED', message: 'The model timed out.' },
+          ])
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
+
+  it('does not show an error banner when an auto-triggered run throws', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) return Promise.reject(new Error('Network down.'));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: CANDIDACY, autoTriggerPending: true });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
+
+  it('does not auto-run when the card already has a pending draft', () => {
+    renderCard({
+      candidacy: CANDIDACY,
+      autoTriggerPending: true,
+      initialDraft: draft(),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -26,9 +26,21 @@
  *   accepted proposal does NOT cover.
  *
  * Accepting is a single POST of the reviewed set; nothing here writes live until then.
+ *
+ * ## Auto-trigger (Phase 3, F17.19)
+ *
+ * When the server says `autoTriggerPending`, this card runs itself on mount — the same `run()` the
+ * "Propose topics from the document" button calls, just not waiting for the click. The point is
+ * closing the discovery gap Phase 1 named: an admin who never opens this tab, or opens it and does
+ * not know to look for a button, still finds a reviewed draft waiting. It fires at most once per
+ * mount (`autoTriggeredRef`) and never a second time for the same version — the server recomputes
+ * `autoTriggerPending` from whether an `AppAiRun` now exists, so a discarded auto-proposal does not
+ * keep re-proposing itself every time the admin comes back to this tab. A failure during an
+ * auto-triggered run stays silent (`{ silent: true }`) rather than surfacing an error banner for an
+ * action the admin never took — they can still press the button themselves, which reports normally.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -64,6 +76,7 @@ import {
   ForkCancelledError,
 } from '@/components/admin/questionnaires/authoring-mutate';
 import type { RoutingAnalysisEvent } from '@/lib/app/questionnaire/scope/analysis-events';
+import type { ScopeCandidacyVerdict } from '@/lib/app/questionnaire/scope/candidacy-schema';
 import {
   SCOPE_RULE_ACTION_LABELS,
   SCOPE_RULE_OPERATOR_LABELS,
@@ -80,6 +93,10 @@ export interface RoutingAnalystCardProps {
   questionKeys: readonly string[];
   /** Live topic count, so the banner can say what accepting would replace. */
   liveTopicCount: number;
+  /** The ingestion-time candidacy verdict (F17.19 Phase 1), or null. Explains an auto-run. */
+  candidacy: ScopeCandidacyVerdict | null;
+  /** True when this card should invoke the analyst itself, on mount (F17.19 Phase 3). */
+  autoTriggerPending: boolean;
   disabled?: boolean;
 }
 
@@ -121,12 +138,19 @@ async function readAnalysisStream(
   return { ok: true, done };
 }
 
+/** The sky-toned "grounded in the document" banner — shared by the candidacy note and the
+ *  `fromDocument` proposal banner, so a restyle is a one-line change rather than two. */
+const SKY_BANNER_CLASSNAME =
+  'space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200';
+
 export function RoutingAnalystCard({
   questionnaireId,
   versionId,
   initialDraft,
   questionKeys,
   liveTopicCount,
+  candidacy,
+  autoTriggerPending,
   disabled = false,
 }: RoutingAnalystCardProps) {
   const router = useRouter();
@@ -137,11 +161,21 @@ export function RoutingAnalystCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmAccept, setConfirmAccept] = useState(false);
+  const [autoStarted, setAutoStarted] = useState(false);
+  const autoTriggeredRef = useRef(false);
 
-  const run = async () => {
+  const run = async (opts?: { silent?: boolean }) => {
+    // A silent (auto-triggered) run never shows an error banner for a click the admin never
+    // made — one gate here rather than repeating `if (!opts?.silent)` at every failure site below.
+    const reportError = (message: string) => {
+      if (!opts?.silent) setError(message);
+    };
+
     setAnalysing(true);
     setError(null);
-    setStatus('Starting…');
+    // `status` is set here unconditionally, so `status ?? '…'` in the render below never actually
+    // falls through to its default — the auto-run/manual distinction has to be made HERE, not there.
+    setStatus(opts?.silent ? 'Drafting a proposal…' : 'Starting…');
     try {
       const res = await fetch(
         API.APP.QUESTIONNAIRES.versionTopicsAnalyseStream(questionnaireId, versionId),
@@ -165,13 +199,13 @@ export function RoutingAnalystCard({
         } catch {
           // Non-JSON body — fall through to the generic message.
         }
-        setError(message ?? `The analysis could not start (${res.status}). Try again.`);
+        reportError(message ?? `The analysis could not start (${res.status}). Try again.`);
         return;
       }
 
       const result = await readAnalysisStream(res.body, setStatus);
       if (!result.ok) {
-        setError(result.message);
+        reportError(result.message);
         return;
       }
       // Apply the returned proposal directly: `router.refresh()` re-runs the server component but
@@ -180,12 +214,27 @@ export function RoutingAnalystCard({
       setDraft(result.done.draft);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The analysis failed. Try again.');
+      reportError(err instanceof Error ? err.message : 'The analysis failed. Try again.');
     } finally {
       setAnalysing(false);
       setStatus(null);
     }
   };
+
+  // F17.19 Phase 3: run itself, unprompted, the first time the server says a fresh candidate is
+  // waiting. Guarded by a ref (not just `draft === null`) so React 19's double-invoked dev-mode
+  // effect can't fire it twice on the same mount, and `{ silent: true }` so a failure here — a rate
+  // limit, an unseeded agent — never shows an error banner for a click the admin never made.
+  useEffect(() => {
+    if (!autoTriggerPending || draft !== null || disabled || autoTriggeredRef.current) return;
+    autoTriggeredRef.current = true;
+    setAutoStarted(true);
+    void run({ silent: true });
+    // `run` closes over `instructions`, which is always empty before this fires; including it
+    // in the deps below would re-run this effect on every keystroke in that field for no
+    // behavioural change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTriggerPending, draft, disabled]);
 
   const discard = async () => {
     setBusy(true);
@@ -285,6 +334,20 @@ export function RoutingAnalystCard({
 
         {draft === null ? (
           <div className="space-y-3">
+            {candidacy?.isCandidate && (
+              <div className={SKY_BANNER_CLASSNAME}>
+                <p className="font-medium">
+                  {/* `analysing` gates the present-progressive wording, not `autoStarted` alone —
+                      `autoStarted` never resets, so without this a SILENT auto-run that failed
+                      (rate limited, unseeded agent) would claim to be "drafting automatically"
+                      forever, right beside a button that had gone back to idle underneath it. */}
+                  {autoStarted && analysing
+                    ? 'This document reads like it describes routing — drafting a starting point automatically.'
+                    : 'This document reads like it describes routing.'}
+                </p>
+                <p>{candidacy.summary}</p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs">
                 Where are the routing rules? (optional){' '}
@@ -320,7 +383,7 @@ export function RoutingAnalystCard({
             <div
               className={
                 draft.fromDocument
-                  ? 'space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
+                  ? SKY_BANNER_CLASSNAME
                   : 'space-y-1 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
               }
             >

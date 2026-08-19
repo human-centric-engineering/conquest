@@ -201,11 +201,20 @@ const handleAnalyseStream = withAdminAuth<{ id: string; vid: string }>(
           versionId: vid,
           issues: parsed.issues.map((issue) => issue.path.join('.')),
         });
-        yield {
-          type: 'error',
-          code: 'ROUTING_ANALYSIS_INVALID',
-          message: 'The routing analysis returned an unexpected result. Please try again.',
-        };
+        const message = 'The routing analysis returned an unexpected result. Please try again.';
+        void recordAiRun({
+          subjectKind: 'version',
+          subjectId: vid,
+          versionId: vid,
+          kind: 'routing_analysis',
+          status: 'failed',
+          provider: agent!.provider || 'resolved-at-runtime',
+          model: agent!.model || 'resolved-at-runtime',
+          durationMs: Date.now() - startedAt,
+          error: message,
+          triggeredByUserId: adminId,
+        });
+        yield { type: 'error', code: 'ROUTING_ANALYSIS_INVALID', message };
         return;
       }
       const result: RoutingAnalysisResult = parsed.value;
