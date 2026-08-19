@@ -196,8 +196,15 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
   // Hold the collector to what the tier declared. Extra sections are fine — a
   // fork may export a derived view that is not a table — but a declared one
   // that never arrived is a short answer wearing the shape of a complete one.
+  //
+  // Compared against `undefined` rather than tested with `Object.hasOwn`: the
+  // promise is about the bundle the subject *receives*, and `JSON.stringify`
+  // drops a key whose value is `undefined`. `{ invoices: undefined }` owns the
+  // key and serialises to `{}`, so a `hasOwn` check passes while the delivered
+  // export is short exactly the section it just certified. `null` is left
+  // alone — it survives serialisation, so the section is disclosed.
   const undelivered = getAppSubjectSources()
-    .filter((source) => !Object.hasOwn(app, source.section))
+    .filter((source) => app[source.section] === undefined)
     .map((source) => source.section);
   if (undelivered.length > 0) {
     throw new DeclaredAppSourceMissingError(undelivered);

@@ -326,6 +326,10 @@ subject owns nothing:
 return { invoices, enquiries }; // both keys always present, `[]` when empty
 ```
 
+`undefined` counts as missing, not as empty — `JSON.stringify` drops the key, so
+`rows.length ? rows : undefined` would certify a section and then ship a bundle
+without it. `null` is fine; it survives serialisation.
+
 `npm run smoke:export` asserts the other half against real Postgres: the subject
 it creates is seconds old and owns nothing of yours, so a declared section that
 comes back with rows in it means the collector matched a stranger's.

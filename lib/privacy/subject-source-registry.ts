@@ -44,7 +44,9 @@
  * appear in what `collectAppSubjectData()` returns — `exportUserData()` throws
  * if one is missing, because a bundle short by a section reads exactly like a
  * complete answer to the person receiving it. Return the key with an empty
- * array when the subject has no rows; do not omit it.
+ * array when the subject has no rows; do not omit it, and do not set it to
+ * `undefined` — `JSON.stringify` drops that key, so the section would be
+ * certified in memory and absent from what the subject receives.
  *
  * **Realm.** Declarations are plain data, so this module imports no Prisma and
  * is safe for `lib/app/**` to reach. The check that a declaration does not

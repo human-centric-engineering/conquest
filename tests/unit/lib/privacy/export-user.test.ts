@@ -425,6 +425,26 @@ describe('exportUserData', () => {
       expect(bundle.app).toEqual({ invoices: [] });
     });
 
+    it('rejects a declared section whose value is undefined', async () => {
+      // `JSON.stringify({ invoices: undefined })` is `{}`, so the key exists in
+      // memory and not in the bundle the subject receives. A collector doing
+      // `rows.length ? rows : undefined` would otherwise certify a section it
+      // then drops.
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: undefined });
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
+    });
+
+    it('accepts a declared section that is null — null survives serialisation', async () => {
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: null });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(JSON.parse(JSON.stringify(bundle)).app).toEqual({ invoices: null });
+    });
+
     it('allows sections the tier did not declare', async () => {
       // A derived view is not a table, so it has nothing to declare. Extra keys
       // are the subject receiving more, which is not the failure being guarded.

@@ -96,7 +96,9 @@ export type AppSubjectData = Record<string, unknown>;
  * **Every `section` you declare must appear in what `collectAppSubjectData()`
  * returns** — `exportUserData()` throws if one is missing. Return the key with
  * an empty array when the subject has no rows rather than omitting it: a bundle
- * short by a section reads exactly like a complete answer.
+ * short by a section reads exactly like a complete answer. `undefined` counts
+ * as missing, because `JSON.stringify` drops the key — so
+ * `rows.length ? rows : undefined` is the shape to avoid.
  */
 export function initAppSubjectSources(): void {
   // No app subject sources by default.
