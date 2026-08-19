@@ -664,7 +664,12 @@ execution, from where it reaches `CapabilityContext.scope`:
 
 ```ts
 await prisma.aiWorkflowSchedule.create({
-  data: { workflowId, cron: '15 3 * * *', scope: { userId: user.id } },
+  data: {
+    workflowId,
+    name: `Morning briefing — ${user.email}`,
+    cronExpression: '15 3 * * *',
+    scope: { userId: user.id },
+  },
 });
 
 // …and in your capability, read ownership from scope, never from context.userId:

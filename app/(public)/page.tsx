@@ -1,265 +1,202 @@
 import type { Metadata } from 'next';
 import {
-  Zap,
-  Shield,
-  Mail,
-  Database,
-  Settings,
-  Code,
-  Package,
   Rocket,
-  FileCode,
   Brain,
+  Package,
+  BookOpen,
+  Shield,
+  Database,
+  Mail,
+  Paintbrush,
+  Code,
+  CheckCircle2,
+  Bot,
+  Network,
   Search,
 } from 'lucide-react';
-import { Hero, Section, Features, Pricing, FAQ, CTA } from '@/components/marketing';
+import { Hero, Section, Features, CTA } from '@/components/marketing';
+import { Card, CardContent } from '@/components/ui/card';
 import { BRAND } from '@/lib/brand';
 
-// Landing-page copy is fork-owned — you are expected to rewrite this wholesale.
-// It reads from BRAND rather than hardcoding "Sunrise" so that a fork which has
-// set NEXT_PUBLIC_APP_NAME but not yet rewritten the page still gets its own
-// name in search results and social cards, rather than advertising Sunrise
-// (#519).
-const heroDescription = `Build production-ready applications faster with ${BRAND.name}. A Next.js 16 starter template with authentication, database, email, Docker — plus a complete AI agent orchestration layer for building agents, workflows, and knowledge bases.`;
-
-const heroTitle = `${BRAND.name} - Production-Ready Next.js Starter Template`;
+// Metadata, not body copy — this const feeds `description`, `openGraph` and
+// `twitter` and is never rendered on the page, so the fork-owned-copy exemption
+// does not apply to it (#519).
+const aboutDescription = `Learn about ${BRAND.name}.`;
 
 export const metadata: Metadata = {
-  title: heroTitle,
-  description: heroDescription,
+  title: 'About',
+  description: aboutDescription,
   openGraph: {
-    title: heroTitle,
-    description: heroDescription,
-    type: 'website',
+    title: `About - ${BRAND.name}`,
+    description: aboutDescription,
   },
   twitter: {
     card: 'summary_large_image',
-    title: heroTitle,
-    description: heroDescription,
+    title: `About - ${BRAND.name}`,
+    description: aboutDescription,
   },
 };
 
-const features = [
+const principles = [
   {
-    icon: Zap,
-    title: 'Next.js 16',
-    description:
-      'Built with the latest App Router and React Server Components for optimal performance.',
-  },
-  {
-    icon: FileCode,
-    title: 'TypeScript',
-    description: 'Full type safety with strict mode enabled throughout the entire codebase.',
-  },
-  {
-    icon: Shield,
-    title: 'Authentication',
-    description:
-      'Secure authentication with better-auth, supporting email/password and OAuth providers.',
-  },
-  {
-    icon: Database,
-    title: 'PostgreSQL + Prisma',
-    description: 'Production-ready database setup with Prisma ORM for type-safe data access.',
-  },
-  {
-    icon: Mail,
-    title: 'Email System',
-    description: 'Transactional email support with React Email templates and Resend integration.',
-  },
-  {
-    icon: Package,
-    title: 'Docker-Ready',
-    description: 'Multi-stage Docker builds for optimized production deployments anywhere.',
+    icon: Rocket,
+    title: 'Production-Ready',
+    description: 'Every feature is battle-tested and ready for production deployment from day one.',
   },
   {
     icon: Brain,
-    title: 'Agent Orchestration',
+    title: 'AI-Optimized',
     description:
-      'Design, deploy, and monitor AI agents with capabilities, workflows, and provider fallback — all admin-configured.',
+      'Comprehensive documentation and clear patterns enable AI assistants to generate high-quality code.',
   },
   {
-    icon: Search,
-    title: 'Knowledge Base & RAG',
+    icon: Bot,
+    title: 'Agent-Ready',
     description:
-      'Upload documents, chunk, embed (pgvector), and let agents answer grounded questions via semantic search.',
+      'Full agent orchestration built in: providers, agents, capabilities, workflows, knowledge bases.',
+  },
+  {
+    icon: Network,
+    title: 'API-First',
+    description:
+      'Every action is accessible via versioned APIs, an MCP server, and agent capabilities — ready for integrations.',
+  },
+  {
+    icon: Package,
+    title: 'Docker-First',
+    description:
+      'Multi-stage Docker builds ensure consistent, portable deployments across any environment.',
+  },
+  {
+    icon: BookOpen,
+    title: 'Well-Documented',
+    description:
+      'Detailed guides for every domain help developers and AI assistants understand the codebase.',
   },
 ];
 
-const howItWorks = [
-  {
-    icon: Code,
-    title: 'Fork & Clone',
-    description: 'Start by forking the repository and cloning it to your local machine.',
-  },
-  {
-    icon: Settings,
-    title: 'Configure',
-    description: 'Set up your environment variables and customize to your needs.',
-  },
-  {
-    icon: Rocket,
-    title: 'Deploy',
-    description: 'Deploy with Docker, Vercel, or your preferred platform.',
-  },
-];
-
-const pricingTiers = [
-  {
-    name: 'Open Source',
-    description: 'Free forever for everyone',
-    price: '$0',
-    priceDetail: 'forever',
-    features: [
-      'Full source code access',
-      'All core features included',
-      'MIT License',
-      'Community support via GitHub',
-      'Regular updates',
-    ],
-    ctaText: 'Get Started',
-    ctaHref: 'https://github.com/human-centric-engineering/sunrise',
-  },
-  {
-    name: 'Pro Support',
-    description: 'For teams that need extra help',
-    price: '$499',
-    priceDetail: 'one-time',
-    features: [
-      'Everything in Open Source',
-      '3 months email support',
-      'Priority bug fixes',
-      'Architecture review session',
-      'Custom feature guidance',
-    ],
-    ctaText: 'Contact Us',
-    ctaHref: '/contact',
-    featured: true,
-    badge: 'Popular',
-  },
-  {
-    name: 'Enterprise',
-    description: 'For large-scale deployments',
-    price: 'Custom',
-    features: [
-      'Everything in Pro Support',
-      'Dedicated support channel',
-      'Custom feature development',
-      'On-boarding assistance',
-      'SLA guarantee',
-    ],
-    ctaText: 'Contact Sales',
-    ctaHref: '/contact',
-  },
-];
-
-const faqItems = [
-  {
-    question: 'What is Sunrise?',
-    answer:
-      'Sunrise is a production-ready Next.js starter template designed for rapid application development. It includes authentication, database setup, email integration, Docker deployment, and follows best practices for AI-assisted development.',
-  },
-  {
-    question: 'Is Sunrise really free?',
-    answer:
-      'Yes! Sunrise is open source under the MIT License. You can use it for personal and commercial projects without any restrictions. We offer paid support packages for teams that want additional assistance.',
-  },
-  {
-    question: 'What technologies does Sunrise use?',
-    answer:
-      'Sunrise is built with Next.js 16, TypeScript, PostgreSQL with Prisma ORM, better-auth for authentication, Tailwind CSS with shadcn/ui components, React Email with Resend, and Docker for deployment.',
-  },
-  {
-    question: 'How is Sunrise optimized for AI development?',
-    answer:
-      'Two ways. First, AI-assisted development: comprehensive documentation in CLAUDE.md and the .context/ substrate helps AI assistants understand the codebase and follow established patterns when generating code. Second, AI agent capabilities for the apps you build: a complete orchestration layer for designing, deploying, and monitoring AI agents.',
-  },
-  {
-    question: 'Can I build AI agents with Sunrise?',
-    answer:
-      'Yes. Sunrise ships with a full agent orchestration layer at /admin/orchestration: configure LLM providers, define agents with system instructions and budgets, create custom capabilities (tools), build multi-step workflows as DAGs, ingest documents into pgvector-backed knowledge bases for RAG, expose agents via an MCP server or embed widget, and monitor everything with execution tracing, evaluations, and an audit log. Built on the 21 agentic design patterns from Antonio Gullí.',
-  },
-  {
-    question: 'Can I use Sunrise for commercial projects?',
-    answer:
-      'Absolutely! Sunrise is released under the MIT License, which allows commercial use, modification, and distribution. You just need to include the original license in any copies of the software.',
-  },
-  {
-    question: 'How do I get support?',
-    answer:
-      'For free support, you can open issues on GitHub or participate in community discussions. For priority support, architecture reviews, or custom development, check out our Pro Support and Enterprise packages.',
-  },
+const techStack = [
+  { name: 'Next.js 16', category: 'Framework', icon: Code },
+  { name: 'TypeScript', category: 'Language', icon: Code },
+  { name: 'PostgreSQL', category: 'Database', icon: Database },
+  { name: 'Prisma', category: 'ORM', icon: Database },
+  { name: 'pgvector', category: 'Vector Search', icon: Search },
+  { name: 'better-auth', category: 'Authentication', icon: Shield },
+  { name: 'Tailwind CSS', category: 'Styling', icon: Paintbrush },
+  { name: 'shadcn/ui', category: 'Components', icon: Paintbrush },
+  { name: 'React Email', category: 'Email', icon: Mail },
+  { name: 'Agent Orchestration', category: 'AI', icon: Brain },
+  { name: 'MCP Server', category: 'AI', icon: Network },
+  { name: 'Docker', category: 'Deployment', icon: Package },
+  { name: 'Sentry', category: 'Monitoring', icon: Shield },
 ];
 
 /**
- * Landing Page
+ * About Page
  *
- * Public landing page showcasing Sunrise features and encouraging adoption.
- * Uses reusable marketing components for consistent styling.
+ * Tells the story of Sunrise: mission, values, and technology stack.
  *
  * Phase 3.5: Landing Page & Marketing
  */
-export default function LandingPage() {
+export default function AboutPage() {
   return (
     <>
       {/* Hero Section */}
       <Hero
-        badge="Next.js 16 Ready"
-        title="Build Production Apps Faster"
-        description="Sunrise is a production-ready Next.js starter template designed for rapid application development. Authentication, database, email, Docker — all pre-configured and ready to go, plus a production AI agent orchestration layer for building agents, workflows, and knowledge bases."
-        primaryAction={{ label: 'Get Started', href: '/signup' }}
-        secondaryAction={{
-          label: 'View on GitHub',
-          href: 'https://github.com/human-centric-engineering/sunrise',
-          variant: 'outline',
-        }}
+        title="About Sunrise"
+        description="A production-ready Next.js starter template built to help developers ship faster while maintaining high standards for code quality, security, and maintainability — including a complete AI agent orchestration layer."
+        variant="centered"
+        className="py-12 md:py-16"
       />
 
-      {/* Features Section */}
+      {/* Mission Section */}
+      <Section variant="muted">
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="mb-6 text-3xl font-bold tracking-tight">Our Mission</h2>
+          <p className="text-muted-foreground mb-6 text-lg leading-relaxed">
+            Modern web development involves countless decisions — frameworks, authentication,
+            databases, deployment, testing, and more. Each choice requires research, implementation,
+            and debugging. This takes time away from building the features that matter most.
+          </p>
+          <p className="text-muted-foreground mb-6 text-lg leading-relaxed">
+            <strong className="text-foreground">Sunrise solves this problem</strong> by providing a
+            complete, production-ready foundation. We&apos;ve made the hard decisions, implemented
+            best practices, and documented everything thoroughly. You get a head start measured in
+            weeks, not hours.
+          </p>
+          <p className="text-muted-foreground text-lg leading-relaxed">
+            And because modern apps increasingly include AI agents, Sunrise ships with a complete
+            orchestration layer too: providers, agents, capabilities, workflows, knowledge bases,
+            and observability. The boring stuff done well — plus the modern agentic primitives so
+            your app can include AI agents from day one.
+          </p>
+        </div>
+      </Section>
+
+      {/* Principles Section */}
       <Section
-        id="features"
-        title="Everything You Need"
-        description="Sunrise comes with all the essential features pre-configured so you can focus on building your application."
+        title="Design Principles"
+        description="The guiding principles that shape every decision in Sunrise."
+      >
+        <Features features={principles} columns={3} variant="card" />
+      </Section>
+
+      {/* Tech Stack Section */}
+      <Section
+        title="Technology Stack"
+        description="Built with modern, proven technologies that scale."
         variant="muted"
       >
-        <Features features={features} columns={3} variant="card" />
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+          {techStack.map((tech) => {
+            const Icon = tech.icon;
+            return (
+              <Card key={tech.name} className="text-center">
+                <CardContent className="pt-6">
+                  <div className="bg-primary/10 text-primary mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="font-medium">{tech.name}</div>
+                  <div className="text-muted-foreground text-sm">{tech.category}</div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </Section>
 
-      {/* How It Works Section */}
-      <Section
-        id="how-it-works"
-        title="Get Started in Minutes"
-        description="Three simple steps to go from zero to production-ready."
-      >
-        <Features features={howItWorks} columns={3} variant="icon-top" />
-      </Section>
-
-      {/* Pricing Section */}
-      <Section
-        id="pricing"
-        title="Simple, Transparent Pricing"
-        description="Start for free with open source. Upgrade for priority support and custom development."
-        variant="muted"
-      >
-        <Pricing tiers={pricingTiers} />
-      </Section>
-
-      {/* FAQ Section */}
-      <Section
-        id="faq"
-        title="Frequently Asked Questions"
-        description="Got questions? We have answers."
-      >
-        <FAQ items={faqItems} />
+      {/* Why Sunrise Section */}
+      <Section title="Why Choose Sunrise?" description="What makes Sunrise different.">
+        <div className="mx-auto max-w-2xl space-y-4">
+          {[
+            'Complete authentication system with email/password and OAuth support',
+            'Database schema and migrations ready for user management',
+            'Transactional email with beautiful React templates',
+            'Docker configuration for development and production',
+            'Comprehensive security: rate limiting, CORS, CSP, input sanitization',
+            'Structured logging with environment-aware output',
+            'Error monitoring with Sentry integration',
+            'AI-friendly documentation in CLAUDE.md and .context/ substrate',
+            'AI agent orchestration: providers, agents, capabilities, workflows',
+            'Knowledge base with document ingestion and pgvector semantic search',
+            'MCP server for Claude Code integration and AI-assisted development',
+            'MIT licensed for commercial and personal use',
+          ].map((item) => (
+            <div key={item} className="flex items-start gap-3">
+              <CheckCircle2 className="text-primary mt-0.5 h-5 w-5 shrink-0" />
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
       </Section>
 
       {/* CTA Section */}
       <CTA
-        title="Ready to Build Something Great?"
-        description="Join developers who are building production applications faster with Sunrise."
-        primaryAction={{ label: 'Get Started Free', href: '/signup' }}
+        title="Ready to Get Started?"
+        description="Join developers building production applications faster with Sunrise."
+        primaryAction={{ label: 'Start Building', href: '/signup' }}
         secondaryAction={{
-          label: 'View Documentation',
+          label: 'View Source',
           href: 'https://github.com/human-centric-engineering/sunrise',
           variant: 'outline',
         }}

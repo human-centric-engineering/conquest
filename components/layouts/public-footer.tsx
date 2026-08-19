@@ -30,22 +30,6 @@ export function PublicFooter() {
     <footer className="border-t">
       <div className="container mx-auto px-4 py-8">
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
-          {/* Attribution — inline in this row rather than on a dedicated centred
-              row beneath it (#561). The old row cost ~44px of vertical budget:
-              free on a scrolling marketing page, expensive on the no-login app
-              surfaces forks host in this group. Inline also matches
-              ProtectedFooter, which never had a separate row — the two footers
-              disagreed about the same content until now. */}
-          {/* `order-last` on mobile keeps the reading order the dedicated row
-              used to give: nav, then legal, then attribution. Without it, moving
-              the element to the top of the flex column also moves it to the top
-              of the page and of the screen-reader order. On `sm:` the row is
-              horizontal, so source order is the visual order and the override
-              is dropped. */}
-          {copyright && (
-            <p className="text-muted-foreground order-last text-sm sm:order-none">{copyright}</p>
-          )}
-
           {/* Navigation Links */}
           <nav className="flex flex-wrap justify-center gap-x-6 gap-y-2">
             {navigationLinks.map((link) => (
@@ -79,6 +63,19 @@ export function PublicFooter() {
               Cookie Preferences
             </button>
           </nav>
+
+          {/* Attribution — last in the DOM, and last visually in both layouts
+              (#561). It used to sit on a dedicated centred row below, costing
+              ~44px: free on a scrolling marketing page, expensive on the
+              no-login app surfaces forks host in this group. Inline also
+              matches ProtectedFooter, which never had a separate row.
+
+              Placed last rather than first with `order-last`: CSS `order`
+              changes only the visual order, never the DOM or the accessibility
+              tree, so ordering it visually while leaving it first in the source
+              would put the reading order and the visual order in disagreement
+              (WCAG 1.3.2). Source order is the honest way to say "last". */}
+          {copyright && <p className="text-muted-foreground text-sm">{copyright}</p>}
         </div>
       </div>
     </footer>

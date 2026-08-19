@@ -71,7 +71,15 @@ function filesUnder(dir: string): string[] {
 
 describe('reserved fork tiers', () => {
   it.each(EMPTY_RESERVATIONS)('%s holds nothing but a placeholder', (dir) => {
-    const unexpected = filesUnder(dir).filter((f) => !PLACEHOLDER_NAMES.has(f.split('/').pop()!));
+    // Placeholders are exempt only at the reservation ROOT. Matching on
+    // basename at any depth would let a platform-created
+    // `components/app/whatever/README.md` through — the exemption is for the
+    // one file that explains the reservation, not for any file that happens to
+    // be named like one.
+    const unexpected = filesUnder(dir).filter((f) => {
+      const rel = f.slice(dir.length + 1);
+      return rel.includes('/') || !PLACEHOLDER_NAMES.has(rel);
+    });
 
     expect(
       unexpected,

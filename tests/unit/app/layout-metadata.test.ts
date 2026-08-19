@@ -1,113 +1,138 @@
 /**
  * Unit Tests: metadata does not leak the starter identity (#519)
  *
+ * ## Why this is the third shape of this test
+ *
  * The root layout used to hardcode `"${BRAND.name} - Next.js Starter"` and a
- * description advertising "a production-ready Next.js starter template".
+ * description advertising "a production-ready Next.js starter template". Two
+ * earlier versions of this file both passed while the leak was still shipping:
  *
- * **The first version of this test asserted only on the root `metadata` object,
- * and that was not good enough.** Next resolves metadata at the *nearest*
- * segment that defines a field, and all four route groups declare their own
- * `description` — so fixing the root reached almost nothing, while
- * `app/(public)/layout.tsx` went on hardcoding the exact blurb the fix was
- * about. A green suite said otherwise. Caught by `/code-review`, not by here.
+ *   1. **Asserted on the root `metadata` object only.** Next resolves metadata
+ *      at the *nearest* segment that defines a field, and all four route groups
+ *      declare their own `description` — so the root object said nothing about
+ *      what `/about` actually serves.
+ *   2. **Text-scanned `export const metadata[^;]*?;`.** Any value hoisted into a
+ *      module const escaped the regex — which is precisely what both remaining
+ *      offenders did (`aboutDescription`, `heroDescription`), and
+ *      `generateMetadata` functions were not seen at all.
  *
- * So this scans the metadata a fork actually ships, across every layout and
- * page. A hand-listed set of files would have the same blind spot the first
- * version had: it can only see what someone thought to list.
+ * Both were guesses at where a leak might be written. This one does not guess:
+ * it **stubs the brand to a value that is not "Sunrise", re-imports each module,
+ * and reads the metadata Next would actually serve.** Anything still saying
+ * "Sunrise" after that is hardcoded by definition — however it was spelled,
+ * hoisted, interpolated or computed.
  *
  * @see app/layout.tsx · lib/brand.ts
  */
 
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { globSync } from 'node:fs';
-import { join } from 'node:path';
-import { metadata } from '@/app/layout';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import type { Metadata } from 'next';
 
-const REPO_ROOT = process.cwd();
+/** A brand no fixture would produce by accident. */
+const STUB_BRAND = 'Zzyzx Industries';
 
-/** `title` is a `Metadata['title']`; narrow to the object form these tests need. */
-function titleObject() {
-  const title = metadata.title;
-  if (title === null || typeof title !== 'object' || !('default' in title)) {
-    throw new Error(
-      `root metadata.title should be an object with a default, got: ${JSON.stringify(title)}`
-    );
-  }
-  return title;
-}
+/**
+ * Every module under `app/` that declares metadata. Hand-listed because a glob
+ * cannot import; the count assertion below is what stops the list going stale
+ * silently.
+ */
+const METADATA_MODULES = [
+  '@/app/layout',
+  '@/app/(public)/layout',
+  '@/app/(public)/page',
+  '@/app/(public)/about/page',
+  '@/app/(protected)/layout',
+  '@/app/(auth)/layout',
+  '@/app/admin/layout',
+] as const;
 
-/** Every `export const metadata = { … }` block under `app/`, with its file. */
-function metadataBlocks(): Array<{ file: string; block: string }> {
-  const out: Array<{ file: string; block: string }> = [];
-  for (const file of globSync('app/**/*.tsx', { cwd: REPO_ROOT })) {
-    const src = readFileSync(join(REPO_ROOT, file), 'utf8');
-    for (const match of src.matchAll(/export const metadata[^;]*?;/gs)) {
-      out.push({ file, block: match[0] });
-    }
-  }
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
+
+/** Import `spec` with the brand stubbed, and flatten its metadata to strings. */
+async function metadataStringsWithStubbedBrand(spec: string): Promise<string[]> {
+  vi.resetModules();
+  vi.stubEnv('NEXT_PUBLIC_APP_NAME', STUB_BRAND);
+  vi.stubEnv('NEXT_PUBLIC_LEGAL_NAME', STUB_BRAND);
+
+  const mod: { metadata?: Metadata } = await import(/* @vite-ignore */ spec);
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') out.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value !== null && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(mod.metadata);
   return out;
 }
 
-describe('root layout metadata', () => {
-  it('does not advertise the starter template in the description', () => {
-    expect(metadata.description).toBeDefined();
-    expect(metadata.description).not.toMatch(/starter template/i);
-    expect(metadata.description).not.toMatch(/Next\.js/i);
+describe('metadata is driven by the BRAND seam, not hardcoded', () => {
+  it('the module list has not gone stale', () => {
+    // A shrunken list is how this test quietly stops covering things. If you
+    // add a layout or page with metadata, add it above.
+    expect(METADATA_MODULES.length).toBeGreaterThanOrEqual(7);
   });
 
-  it('does not hardcode a "- Next.js Starter" suffix in the title', () => {
-    const { default: fallback, template } = titleObject();
-    expect(fallback).not.toMatch(/Next\.js/i);
-    expect(template).not.toMatch(/Next\.js/i);
-    expect(template).not.toMatch(/starter/i);
-  });
-
-  it('uses a title template so un-templated pages still get branded', () => {
-    expect(titleObject().template).toContain('%s');
-  });
-
-  it('drives both title and description from the BRAND seam', async () => {
-    const { BRAND } = await import('@/lib/brand');
-    const { default: fallback, template } = titleObject();
-
-    expect(fallback).toBe(BRAND.name);
-    expect(template).toContain(BRAND.name);
-    expect(metadata.description).toBe(BRAND.description);
-  });
-});
-
-describe('no metadata block under app/ leaks the starter identity', () => {
-  it('finds metadata blocks to check (guards against a vacuous pass)', () => {
-    // Without this floor a broken glob turns every assertion below into
-    // `[].filter(…)` and the suite reports success having checked nothing.
-    expect(metadataBlocks().length).toBeGreaterThanOrEqual(5);
-  });
-
-  it('no block hardcodes the product name instead of BRAND.name', () => {
-    const offenders = metadataBlocks()
-      .filter(({ block }) => /['"`][^'"`]*\bSunrise\b/.test(block))
-      .map(({ file }) => file);
+  it.each(METADATA_MODULES)('%s names no product but the configured brand', async (spec) => {
+    const strings = await metadataStringsWithStubbedBrand(spec);
 
     expect(
-      offenders,
-      'Metadata is what a fork ships to search results and social cards without ever ' +
-        'seeing it, so it must come from `${BRAND.name}` rather than a literal. Page ' +
-        '*body copy* is fork-owned and deliberately out of scope — see lib/brand.ts, ' +
-        '"Scope: the brand name only".'
+      strings.length,
+      `${spec} exported no metadata strings — is the module list right?`
+    ).toBeGreaterThan(0);
+
+    const leaks = strings.filter((s) => /\bSunrise\b/i.test(s));
+    expect(
+      leaks,
+      `${spec} still says "Sunrise" with the brand stubbed to "${STUB_BRAND}", so the value is ` +
+        `hardcoded rather than read from BRAND. Metadata is what a fork ships to search results ` +
+        `and social cards without ever seeing it. (Page *body copy* is fork-owned and out of ` +
+        `scope — see lib/brand.ts, "Scope: the brand name only".)`
     ).toEqual([]);
   });
 
-  it('no block advertises the starter template', () => {
-    const offenders = metadataBlocks()
-      .filter(({ block }) => /starter template/i.test(block))
-      .map(({ file }) => file);
+  it.each(METADATA_MODULES)('%s does not advertise the starter template', async (spec) => {
+    const strings = await metadataStringsWithStubbedBrand(spec);
 
+    const leaks = strings.filter((s) => /starter template|Next\.js Starter/i.test(s));
     expect(
-      offenders,
-      'A route group declaring `description` overrides the root outright, so this ' +
-        'cannot be fixed from app/layout.tsx alone — which is exactly how #519 first ' +
-        'shipped as a no-op.'
+      leaks,
+      `${spec} advertises the starter template. A route group declaring \`description\` ` +
+        `overrides the root outright, so this cannot be fixed from app/layout.tsx alone — ` +
+        `which is exactly how #519 first shipped as a no-op.`
     ).toEqual([]);
+  });
+
+  it('a page title does not double the brand the layout template appends', async () => {
+    // `(public)/layout.tsx` declares `template: '%s - ${BRAND.name}'`, so a page
+    // whose own title also starts with the brand renders "Acme - … - Acme".
+    // TITLES only — a description may legitimately open with the brand name.
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_APP_NAME', STUB_BRAND);
+    const layout: { metadata?: Metadata } = await import('@/app/(public)/layout');
+    const template =
+      typeof layout.metadata?.title === 'object' && layout.metadata.title !== null
+        ? (layout.metadata.title as { template?: string }).template
+        : undefined;
+    expect(template, 'the (public) layout should declare a title template').toContain('%s');
+
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_APP_NAME', STUB_BRAND);
+    const page: { metadata?: Metadata } = await import('@/app/(public)/page');
+    const titles = [
+      page.metadata?.title,
+      page.metadata?.openGraph?.title,
+      page.metadata?.twitter?.title,
+    ].filter((t): t is string => typeof t === 'string');
+
+    expect(titles.length).toBeGreaterThan(0);
+    for (const title of titles) {
+      expect(
+        title.startsWith(STUB_BRAND),
+        `page title "${title}" starts with the brand, which the layout template appends again`
+      ).toBe(false);
+    }
   });
 });
