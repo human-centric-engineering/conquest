@@ -16,6 +16,9 @@
  * - **The focus nonce.** "Edit this topic" on the routing map must move the list even when the same
  *   topic is asked for twice — a bare key would be unchanged state and the editor's effect would
  *   never re-fire.
+ * - **The seed nonce (F17.20).** "Turn into topic" on a Routing Analyst gap carries the same nonce
+ *   shape, for the same reason: turning a second gap into a topic must add a second row even if the
+ *   panel has nothing else to distinguish the two requests by.
  *
  * The children are stubbed down to the callbacks the panel hands them, so what is asserted here is the
  * panel's own behaviour rather than a second rendering of six cards.
@@ -44,15 +47,25 @@ vi.mock('@/components/admin/questionnaires/topics/routing-analyst-card', () => (
   RoutingAnalystCard: ({
     candidacy,
     autoTriggerPending,
+    onTurnGapIntoTopic,
   }: {
     candidacy: { isCandidate: boolean } | null;
     autoTriggerPending: boolean;
+    onTurnGapIntoTopic?: (gap: { sourceQuote: string; explanation: string }) => void;
   }) => (
     <div
       data-testid="analyst-card"
       data-is-candidate={candidacy?.isCandidate ?? ''}
       data-auto-trigger-pending={autoTriggerPending}
-    />
+    >
+      <button
+        type="button"
+        data-testid="turn-gap-into-topic"
+        onClick={() => onTurnGapIntoTopic?.(GAP_FIXTURE)}
+      >
+        Turn into topic
+      </button>
+    </div>
   ),
 }));
 vi.mock('@/components/admin/questionnaires/topics/plan-preview-card', () => ({
@@ -108,11 +121,15 @@ vi.mock('@/components/admin/questionnaires/topics/topic-list-editor', () => ({
     busy,
     focusTopic,
     onFocusHandled,
+    seedTopic,
+    onSeedHandled,
   }: {
     onSave: (t: unknown[]) => Promise<boolean>;
     busy: boolean;
     focusTopic: { key: string; nonce: number } | null;
     onFocusHandled?: () => void;
+    seedTopic?: { description: string; criteria: string; nonce: number } | null;
+    onSeedHandled?: () => void;
   }) => (
     <div>
       <div
@@ -123,6 +140,15 @@ vi.mock('@/components/admin/questionnaires/topics/topic-list-editor', () => ({
       {/* Stands in for the real editor's effect, which reports once it has acted on a request. */}
       <button type="button" data-testid="focus-handled" onClick={() => onFocusHandled?.()}>
         handled
+      </button>
+      <div
+        data-testid="seed"
+        data-description={seedTopic?.description ?? ''}
+        data-criteria={seedTopic?.criteria ?? ''}
+        data-nonce={seedTopic?.nonce ?? ''}
+      />
+      <button type="button" data-testid="seed-handled" onClick={() => onSeedHandled?.()}>
+        seed handled
       </button>
       <button
         type="button"
@@ -152,6 +178,12 @@ import { EMPTY_TOPICS_PAYLOAD, type TopicsPayload } from '@/lib/app/questionnair
 
 const ENDPOINT = '/api/v1/app/questionnaires/q1/versions/v1/topics';
 
+/** The gap the stubbed analyst card's "Turn into topic" button acts on. */
+const GAP_FIXTURE = {
+  sourceQuote: 'Use judgement for respondents outside these categories.',
+  explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
+};
+
 /**
  * A settings blob with every field set to something other than its default, so a field the panel
  * forgets to enumerate shows up as a missing key rather than as a coincidentally-equal value.
@@ -170,6 +202,8 @@ const SETTINGS_FIXTURE: AdaptiveScopeSettings = {
   announce: false,
   allowRespondentAmendment: false,
   plannerInstructions: 'prefer breadth',
+  limitOpeningProbes: true,
+  maxOpeningProbes: 2,
   rules: [
     {
       id: 'r1',
@@ -329,6 +363,8 @@ describe('TopicsPanel — saving the settings', () => {
       announce: false,
       allowRespondentAmendment: false,
       plannerInstructions: 'prefer breadth',
+      limitOpeningProbes: true,
+      maxOpeningProbes: 2,
     });
   });
 
@@ -521,6 +557,50 @@ describe('TopicsPanel — focusing a topic from the routing map', () => {
     // is that dropping a request does not make the next one unreachable.
     expect(screen.getByTestId('focus')).toHaveAttribute('data-key', 'pricing');
     expect(screen.getByTestId('focus')).toHaveAttribute('data-nonce', '1');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Turning a Routing Analyst gap into a topic (F17.20)                        */
+/* -------------------------------------------------------------------------- */
+
+describe('TopicsPanel — turning a gap into a topic (F17.20)', () => {
+  it('passes no seed request until a gap is turned into a topic', () => {
+    renderPanel();
+
+    expect(screen.getByTestId('seed')).toHaveAttribute('data-nonce', '');
+  });
+
+  it('hands the gap down to the list editor, criteria from the quote and description from the explanation', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByTestId('turn-gap-into-topic'));
+
+    const seed = screen.getByTestId('seed');
+    expect(seed).toHaveAttribute('data-criteria', GAP_FIXTURE.sourceQuote);
+    expect(seed).toHaveAttribute('data-description', GAP_FIXTURE.explanation);
+    expect(seed).toHaveAttribute('data-nonce', '1');
+  });
+
+  it('increments the nonce on a repeat request, so a second gap still adds a second row', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByTestId('turn-gap-into-topic'));
+    await user.click(screen.getByTestId('turn-gap-into-topic'));
+
+    expect(screen.getByTestId('seed')).toHaveAttribute('data-nonce', '2');
+  });
+
+  it('drops the request once the list reports it handled', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('turn-gap-into-topic'));
+
+    await user.click(screen.getByTestId('seed-handled'));
+
+    expect(screen.getByTestId('seed')).toHaveAttribute('data-nonce', '');
   });
 });
 

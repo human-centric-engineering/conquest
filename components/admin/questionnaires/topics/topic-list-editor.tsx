@@ -152,6 +152,30 @@ function toDraft(topic: Topic, index: number): DraftTopic {
   };
 }
 
+/**
+ * A blank conditional draft topic, ready for an admin to name and fill in — shared by `add()` and
+ * the gap-seeding effect below (F17.20). `seed` pre-fills `description`/`criteria`; omit it for an
+ * empty row.
+ */
+function blankDraftTopic(
+  clientId: string,
+  key: string,
+  seed?: { description: string; criteria: string }
+): DraftTopic {
+  return {
+    clientId,
+    key,
+    label: '',
+    description: seed?.description ?? '',
+    phase: 'conditional',
+    criteria: seed?.criteria ?? '',
+    depth: 'full',
+    questionKeys: [],
+    dataSlotKeys: [],
+    source: 'new',
+  };
+}
+
 export interface TopicListEditorProps {
   topics: readonly Topic[];
   inventory: TopicsPayload['inventory'];
@@ -176,6 +200,16 @@ export interface TopicListEditorProps {
    * admin's filter is cleared and the view yanked back to a topic they have moved on from.
    */
   onFocusHandled?: () => void;
+  /**
+   * A new topic another surface has asked to seed — today, the Routing Analyst card's "Turn into
+   * topic" action on an unformalized gap (F17.20).
+   *
+   * Carries a `nonce` for the same reason {@link focusTopic} does: asking to turn a second gap into
+   * a topic must add a second row even if the two gaps happen to produce identical text.
+   */
+  seedTopic?: { description: string; criteria: string; nonce: number } | null;
+  /** Called once a {@link seedTopic} request has been honoured, so the caller can drop it. */
+  onSeedHandled?: () => void;
 }
 
 export function TopicListEditor({
@@ -186,6 +220,8 @@ export function TopicListEditor({
   enabled,
   focusTopic,
   onFocusHandled,
+  seedTopic,
+  onSeedHandled,
 }: TopicListEditorProps) {
   // Per-item seconds, keyed once. The route priced every question and data slot against this
   // version's own overrides, so the browser never re-derives a per-type estimate.
@@ -285,32 +321,62 @@ export function TopicListEditor({
     else rowRefs.current.delete(clientId);
   };
 
+  /**
+   * Clears the active filter, marks a row expanded, and scrolls to it one frame later — shared by
+   * the routing map's "Edit this topic" handoff and the Routing Analyst gap's "Turn into topic"
+   * seed below. One frame later because the row may have only just been revealed (by the filter
+   * reset, or because this IS the row's first render), so it does not exist in the DOM at the
+   * moment the caller runs. Clearing the filter is safe — it is a view preference, and the
+   * alternative (silently failing to honour an explicit request) is worse.
+   */
+  const revealRow = (clientId: string): (() => void) => {
+    setFilter('all');
+    setExpanded((prev) => new Set(prev).add(clientId));
+    const raf = requestAnimationFrame(() => {
+      rowRefs.current.get(clientId)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+  };
+
   // "Edit this topic", arriving from the routing map.
-  //
-  // The filter is cleared first, and that is the whole reason this is an effect rather than a call:
-  // a topic hidden by the current filter has no row to expand, so setting `expanded` alone would look
-  // to the admin like the button did nothing. Clearing is safe — the filter is a view preference, and
-  // the alternative (silently failing to honour an explicit request) is worse.
   useEffect(() => {
     if (!focusTopic) return;
     const target = drafts.find((d) => d.key === focusTopic.key);
     if (!target) return;
-    setFilter('all');
-    setExpanded((prev) => new Set(prev).add(target.clientId));
     // Retire the request now it has been acted on. A remount must not replay it.
     onFocusHandled?.();
-    // One frame later: the row may have only just been revealed by the filter reset above, so it does
-    // not exist yet at the moment this effect runs.
-    const raf = requestAnimationFrame(() => {
-      rowRefs.current
-        .get(target.clientId)
-        ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-    });
-    return () => cancelAnimationFrame(raf);
+    return revealRow(target.clientId);
     // `drafts` is deliberately not a dependency: this must fire when a request ARRIVES, not every
     // time the admin types a character into a topic.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTopic]);
+
+  // "Turn into topic", arriving from a Routing Analyst gap (F17.20).
+  //
+  // A new row rather than a call inside the click handler because the row does not exist to scroll
+  // to until this component has re-rendered with it. Unlike `add()`, the new row starts with
+  // `description` and `criteria` filled in from the gap the admin acted on, so "turn into topic"
+  // saves the trip back to re-read what the analyst already found — the admin still names it and
+  // picks its members.
+  useEffect(() => {
+    if (!seedTopic) return;
+    const clientId = `gap-${seedTopic.nonce}`;
+    const taken = new Set(drafts.map((d) => d.key));
+    setDirty(true);
+    setDrafts((prev) => [
+      ...prev,
+      blankDraftTopic(clientId, nextAvailableKey('new_topic', taken), {
+        description: seedTopic.description,
+        criteria: seedTopic.criteria,
+      }),
+    ]);
+    // Retire the request now it has been acted on. A remount must not replay it.
+    onSeedHandled?.();
+    return revealRow(clientId);
+    // `drafts` is deliberately not a dependency, for the same reason as the effect above: this must
+    // fire once per seed REQUEST (a nonce change), not on every keystroke in an existing draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedTopic]);
 
   const setOpen = (clientId: string, open: boolean) => {
     setExpanded((prev) => {
@@ -350,21 +416,7 @@ export function TopicListEditor({
     setFilter('all');
     // A topic you just created is the one you are about to fill in — open it.
     setOpen(clientId, true);
-    setDrafts((prev) => [
-      ...prev,
-      {
-        clientId,
-        key: nextAvailableKey('new_topic', taken),
-        label: '',
-        description: '',
-        phase: 'conditional',
-        criteria: '',
-        depth: 'full',
-        questionKeys: [],
-        dataSlotKeys: [],
-        source: 'new',
-      },
-    ]);
+    setDrafts((prev) => [...prev, blankDraftTopic(clientId, nextAvailableKey('new_topic', taken))]);
   };
 
   /** Derive the key from the name, but only while the admin has not hand-set one. */

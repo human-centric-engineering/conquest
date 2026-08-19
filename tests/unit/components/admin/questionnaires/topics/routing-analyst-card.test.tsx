@@ -237,9 +237,37 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not call the analyst on mount when there is no candidacy verdict', () => {
+  it('does not call the analyst on mount when both autoTriggerPending and candidacy are absent', () => {
     renderCard({ candidacy: null, autoTriggerPending: false });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('runs itself on mount even with no candidacy verdict — the gate is autoTriggerPending alone', async () => {
+    // `candidacy` only drives which banner sentence renders; the effect's own gate (`if
+    // (!autoTriggerPending || draft !== null || disabled || autoTriggeredRef.current) return`)
+    // never reads it. A prior version of this test set `autoTriggerPending: false` here too, which
+    // made it identical to the sibling above and proved nothing about candidacy's role.
+    fetchMock.mockImplementation((url: string) => {
+      if (url === STREAM_URL) {
+        return Promise.resolve(
+          sseResponse([
+            {
+              type: 'done',
+              versionId: VID,
+              draft: draft(),
+              replacedCount: 0,
+              uncoveredQuestionCount: 0,
+            },
+          ])
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ candidacy: null, autoTriggerPending: true });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.getByText('Pipeline')).toBeInTheDocument());
   });
 
   it('runs itself on mount when autoTriggerPending is true, without any click', async () => {
@@ -459,6 +487,24 @@ describe('RoutingAnalystCard — reviewing a pending draft', () => {
     expect(screen.queryByText(/Recognized but not formalized/)).not.toBeInTheDocument();
   });
 
+  it('does not render a "Turn into topic" action when the caller has no handler for it', () => {
+    renderCard({ initialDraft: draft() });
+    expect(screen.queryByRole('button', { name: /Turn into topic/ })).not.toBeInTheDocument();
+  });
+
+  it('calls onTurnGapIntoTopic with the gap when "Turn into topic" is clicked (F17.20)', async () => {
+    const user = userEvent.setup();
+    const onTurnGapIntoTopic = vi.fn();
+    renderCard({ initialDraft: draft(), onTurnGapIntoTopic });
+
+    await user.click(screen.getByRole('button', { name: /Turn into topic/ }));
+
+    expect(onTurnGapIntoTopic).toHaveBeenCalledExactlyOnceWith({
+      sourceQuote: 'Use judgement for respondents outside these categories.',
+      explanation: 'Too vague to test mechanically — no data slot captures "judgement".',
+    });
+  });
+
   it('warns about questions the proposal left in no topic', () => {
     renderCard({ initialDraft: draft(), questionKeys: ['q1', 'q2'] });
     expect(screen.getByText(/1 question would belong to no/)).toBeInTheDocument();
@@ -652,5 +698,27 @@ describe('RoutingAnalystCard — reviewing a pending draft', () => {
         screen.getByRole('button', { name: /Propose topics from the document/ })
       ).toBeInTheDocument()
     );
+  });
+
+  it('shows an error banner when discarding fails, and keeps the draft on screen', async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === DRAFT_URL && init?.method === 'DELETE') {
+        return Promise.resolve(
+          jsonResponse(
+            { success: false, error: { code: 'INTERNAL_ERROR', message: 'Could not delete.' } },
+            500
+          )
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderCard({ initialDraft: draft() });
+    await user.click(screen.getByRole('button', { name: /Discard/ }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not delete.'));
+    // The draft is still there to review — nothing was discarded.
+    expect(screen.getByText('Pipeline')).toBeInTheDocument();
   });
 });

@@ -427,6 +427,15 @@ new proposal. The review surface renders these separately from the topic/rule li
 but not formalized" — accepting the proposal does **not** cover them, and the admin decides whether to
 add a topic, a criterion, or a rule by hand.
 
+**"Turn into topic" (F17.20)** shortens that last step without pretending to finish it. Each gap
+carries a button that seeds a new draft row in the topic list below — `criteria` from the gap's
+`sourceQuote` (the document's own words), `description` from its `explanation` (why the analyst
+couldn't formalize it, kept as a note for whoever finishes the row) — expanded and scrolled into view.
+Nothing is inferred beyond that: the row has no label, no members and defaults to `conditional`, so
+the admin still names it, picks its questions and data slots, and reviews the wording before it is
+part of the set. Purely a local seed into the editor's unsaved draft — it writes nothing until the
+admin saves the topic list, same as adding a topic by hand.
+
 ### Finding out it exists (F17.19)
 
 Everything above used to be entirely **manual** — an admin had to already know the tab exists and
