@@ -20,6 +20,7 @@ import { prisma } from '@/lib/db/client';
 import { parseUserPreferences } from '@/lib/validations/user';
 import { SettingsTabs } from '@/components/settings/settings-tabs';
 import { getInitials } from '@/lib/utils/initials';
+import { AccountSections } from '@/components/account/account-sections';
 
 export const metadata: Metadata = {
   title: 'Settings',
@@ -103,6 +104,11 @@ export default async function SettingsPage() {
         oauthProviders={oauthProviders}
         initials={initials}
       />
+
+      {/* Fork-registered sections (#595). Renders nothing in vanilla Sunrise.
+          Below the tabs rather than as a fifth one: the tab list is a fixed
+          four-column grid, and a fork's section is not always tab-shaped. */}
+      <AccountSections surface="settings" userId={user.id} />
     </div>
   );
 }

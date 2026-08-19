@@ -398,6 +398,7 @@ small and conflict-free.)
 | `lib/app/data-export.ts`                   | app tables in a subject-access export              | `exportUserData()` (server route-handler)                             |
 | `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                      |
 | `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)          | the grader registry (server route-handler)                            |
+| `lib/app/account-sections.ts`              | extra sections on `/profile` + `/settings`         | `<AccountSections/>` on both account pages (server)                   |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -625,6 +626,41 @@ To render your own brand lockup as the section header instead of the default
 uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
+
+**Account sections — `lib/app/account-sections.ts`.** The authenticated account
+surface (`/profile`, `/settings`) is the one place a fork commonly needs to add
+something of its own — an account connection, a billing panel, an integrations
+list — and it had no extension point, so the only way in was editing a
+Sunrise-owned page and taking a conflict on every sync. Fill in the auto-wired
+`initAppAccountSections()` with `registerAccountSection({ … })` calls:
+
+```ts
+// lib/app/account-sections.ts — yours to edit (ships empty)
+import { registerAccountSection } from '@/lib/account-sections/registry';
+import { GitHubConnectSection } from '@/components/app/account/github-connect';
+
+export function initAppAccountSections(): void {
+  registerAccountSection({
+    id: 'github-connect', // dedupe + React key
+    surfaces: ['profile', 'settings'], // the default; narrow it if you need to
+    order: 10, // ascending; equal values keep registration order
+    Component: GitHubConnectSection, // receives { userId }
+  });
+}
+```
+
+Your component lives in `components/app/**`, not in `lib/app/` — the `lib/app/**`
+boundary forbids runtime framework imports, so this file holds the registration
+and the import, never the JSX. The section renders at the **foot of the page**,
+below the profile cards or below the settings tabs; it is deliberately not a
+fifth tab, because the tab list is a fixed four-column grid and a fork's section
+is not always tab-shaped. If you want the account surface in your own shell
+entirely, take a route group instead — see
+[§ When a surface needs a different frame](#when-a-surface-needs-a-different-frame--give-it-a-route-group).
+
+Empty registry renders nothing, so vanilla Sunrise is visually unchanged, and a
+throwing registration degrades to no sections rather than 500ing the page a user
+went to in order to change their password.
 
 **Evaluation graders — `lib/app/evaluations.ts`.** Fill in the auto-wired
 `initAppGraders()` with `registerGrader(yourGrader)` calls; the grader registry

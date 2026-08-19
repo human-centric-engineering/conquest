@@ -18,6 +18,16 @@ release process.
 
 ### Added
 
+- **`lib/app/account-sections.ts` + `lib/account-sections/registry.ts` — extra
+  sections on `/profile` and `/settings`.** The account surface is where a fork
+  commonly adds an account connection, a billing panel or an integrations list,
+  and it had no extension point — so the only way in was editing a
+  Sunrise-owned page and conflicting on every sync. `registerAccountSection({
+  id, surfaces?, order?, Component })` renders at the foot of either page (or
+  both, the default); `Component` receives `{ userId }`. The account-surface
+  analogue of `lib/admin-nav/registry.ts`. Empty registry renders no node at
+  all, so vanilla Sunrise is unchanged.
+
 - **`lib/app/evaluations.ts` — fork-owned evaluation graders.** The grader
   registry advertised pluggability that only held for core: `registerGrader` was
   exported, but the only caller was the package's own barrel, and the batch

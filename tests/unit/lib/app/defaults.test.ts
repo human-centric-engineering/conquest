@@ -61,6 +61,11 @@ import {
   listGraders,
   __resetGraderRegistryForTests,
 } from '@/lib/orchestration/evaluations/graders/registry';
+import {
+  ACCOUNT_SURFACES,
+  getRegisteredAccountSections,
+  __resetAccountSectionRegistryForTests,
+} from '@/lib/account-sections/registry';
 
 /**
  * One row per `lib/app/*` seam.
@@ -246,6 +251,17 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     },
   },
   {
+    seam: 'lib/app/account-sections.ts',
+    risk: 'a stray section would appear on every install\u2019s /profile and /settings',
+    assert: () => {
+      __resetAccountSectionRegistryForTests();
+      // The read triggers the lazy init, so this exercises the REAL seam.
+      for (const surface of ACCOUNT_SURFACES) {
+        expect(getRegisteredAccountSections(surface)).toEqual([]);
+      }
+    },
+  },
+  {
     seam: 'lib/app/csp.ts',
     risk: 'a stray origin would widen the iframe policy on every install',
     // These values are spliced straight into a response header, so an
@@ -256,6 +272,7 @@ const SEAM_DEFAULTS: SeamDefault[] = [
 
 afterEach(() => {
   __resetNavRegistryForTests();
+  __resetAccountSectionRegistryForTests();
 });
 
 describe('lib/app/ seams ship empty', () => {

@@ -61,6 +61,9 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
+/** The account-section fork seam ships empty; one test below fills it. */
+vi.mock('@/lib/app/account-sections', () => ({ initAppAccountSections: vi.fn() }));
+
 /**
  * Mock SettingsTabs — heavy client component; we just verify it receives
  * the correct props rather than rendering the full tab tree.
@@ -94,6 +97,11 @@ vi.mock('@/components/settings/settings-tabs', () => ({
 }));
 
 import SettingsPage, { metadata } from '@/app/(protected)/settings/page';
+import {
+  registerAccountSection,
+  __resetAccountSectionRegistryForTests,
+  type AccountSectionProps,
+} from '@/lib/account-sections/registry';
 import { getServerSession } from '@/lib/auth/utils';
 import { clearInvalidSession } from '@/lib/auth/clear-session';
 import { prisma } from '@/lib/db/client';
@@ -537,6 +545,47 @@ describe('SettingsPage', () => {
 
       // Assert: getInitials('Madonna') → 'M'
       expect(screen.getByTestId('settings-tabs')).toHaveAttribute('data-initials', 'M');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fork-registered account sections (#595)
+  // -------------------------------------------------------------------------
+
+  describe('account sections', () => {
+    beforeEach(() => {
+      __resetAccountSectionRegistryForTests();
+    });
+
+    it('renders nothing extra when no fork has registered a section', async () => {
+      vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(makeFullUser() as never);
+
+      const Component = await SettingsPage();
+      render(Component);
+
+      expect(screen.queryByTestId('app-section')).not.toBeInTheDocument();
+    });
+
+    it('renders a registered section, and hands it the signed-in user id', async () => {
+      // The seam is only worth anything if the SLOT is on the page. Registry
+      // unit tests cannot see a missing `<AccountSections/>` in page.tsx.
+      const { initAppAccountSections } = await import('@/lib/app/account-sections');
+      vi.mocked(initAppAccountSections).mockImplementation(() =>
+        registerAccountSection({
+          id: 'github-connect',
+          Component: ({ userId }: AccountSectionProps) => (
+            <div data-testid="app-section" data-user-id={userId} />
+          ),
+        })
+      );
+      vi.mocked(getServerSession).mockResolvedValue(MOCK_SESSION);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(makeFullUser() as never);
+
+      const Component = await SettingsPage();
+      render(Component);
+
+      expect(screen.getByTestId('app-section')).toHaveAttribute('data-user-id', 'user_abc');
     });
   });
 });
