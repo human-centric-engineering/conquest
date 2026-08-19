@@ -45,6 +45,8 @@ import { appAgentFields } from '@/lib/app/agent-fields';
 import { appProtectedRoutes } from '@/lib/app/protected-routes';
 import { appEnvSchema } from '@/lib/app/env';
 import { footerCopyright } from '@/lib/app/footer';
+import { APP_API_KEY_SCOPES } from '@/lib/app/api-key-scopes';
+import { listValidApiKeyScopes, CORE_API_KEY_SCOPES } from '@/lib/auth/api-key-scopes';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
@@ -259,6 +261,15 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       for (const surface of ACCOUNT_SURFACES) {
         expect(getRegisteredAccountSections(surface)).toEqual([]);
       }
+    },
+  },
+  {
+    seam: 'lib/app/api-key-scopes.ts',
+    risk: 'a stray scope would be mintable on every install \u2014 and a name colliding with a core scope would change what an existing key satisfies',
+    assert: () => {
+      expect(APP_API_KEY_SCOPES).toEqual([]);
+      // …and the union it feeds is exactly core, by value not just by length.
+      expect(listValidApiKeyScopes()).toEqual([...CORE_API_KEY_SCOPES]);
     },
   },
   {

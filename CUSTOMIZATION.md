@@ -399,6 +399,7 @@ small and conflict-free.)
 | `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                      |
 | `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)          | the grader registry (server route-handler)                            |
 | `lib/app/account-sections.ts`              | extra sections on `/profile` + `/settings`         | `<AccountSections/>` on both account pages (server)                   |
+| `lib/app/api-key-scopes.ts`                | extra API-key scopes (`APP_API_KEY_SCOPES`)        | `lib/auth/api-key-scopes.ts` + `createApiKeySchema` (server + client) |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -626,6 +627,40 @@ To render your own brand lockup as the section header instead of the default
 uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
+
+**API-key scopes — `lib/app/api-key-scopes.ts`.** `AiApiKey.scopes` is a
+`String[]` in the schema, but the two places that decided what may go in it were
+closed lists in platform files. A fork could _check_ a scope of its own; no user
+could ever _create_ one to check — so least privilege was unavailable
+downstream, and the workaround was always a credential wider than the job:
+
+```ts
+// lib/app/api-key-scopes.ts — yours to edit (ships empty)
+export const APP_API_KEY_SCOPES: readonly string[] = ['capture'];
+
+// app/api/v1/app/capture/route.ts — the other half
+export const POST = withAuth(handler, { scope: 'capture' });
+```
+
+**Both halves, or neither.** `withAuth` accepts an API key of **any** scope, so
+a wider scope list on its own is just labels: the key on someone's phone still
+reaches every authenticated route as them. The `scope` option on `withAuth` is
+what makes the name mean something. It applies **only** to API-key callers — a
+browser session is the full user, and gating it on a scope would lock a person
+out of their own page. `admin` satisfies every scope, and still requires an
+ADMIN user to mint.
+
+`scope` is opt-in per route, and no core route sets it yet: adding a requirement
+to a shipped endpoint would revoke access from keys that work today. Set it on
+your own routes.
+
+Names are lower snake_case, must not collide with a core scope (`chat`,
+`analytics`, `knowledge`, `webhook`, `admin`), and a malformed or colliding
+entry is dropped with a logged error rather than widening what can be minted —
+this list is the allowlist `POST /api/v1/user/api-keys` issues against. That
+endpoint's `GET` returns `availableScopes`, so your key UI does not have to
+restate the list. See
+[`.context/orchestration/api-keys.md`](./.context/orchestration/api-keys.md).
 
 **Account sections — `lib/app/account-sections.ts`.** The authenticated account
 surface (`/profile`, `/settings`) is the one place a fork commonly needs to add

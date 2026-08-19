@@ -844,6 +844,97 @@ describe('API-key fallback', () => {
       expect(res.status).toBe(200);
       expect(auth.api.getSession).toHaveBeenCalledOnce();
     });
+
+    // ---------------------------------------------------------------------
+    // `options.scope` — the enforcement half of #542
+    // ---------------------------------------------------------------------
+
+    it('403s an API key that lacks the scope the route asked for', async () => {
+      mockApiKey(['chat']);
+      const handler = vi.fn();
+      const wrapped = withAuth(handler, { scope: 'capture' });
+
+      const res = await wrapped(createRequest());
+
+      expect(res.status).toBe(403);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('does not name the scopes the key holds in the 403', async () => {
+      // A 403 that echoed the key's scopes would be a scope-enumeration oracle
+      // for anyone who found the key but not what it is for.
+      mockApiKey(['analytics', 'knowledge']);
+      const wrapped = withAuth(vi.fn(), { scope: 'capture' });
+
+      const body = (await (await wrapped(createRequest())).json()) as {
+        error: { message: string };
+      };
+
+      expect(body.error.message).toContain('capture');
+      expect(body.error.message).not.toContain('analytics');
+      expect(body.error.message).not.toContain('knowledge');
+    });
+
+    it('admits an API key that holds the scope', async () => {
+      const session = mockApiKey(['capture']);
+      const handler = vi.fn(async () => Response.json({ success: true, data: { ok: true } }));
+      const wrapped = withAuth(handler, { scope: 'capture' });
+
+      const res = await wrapped(createRequest());
+
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalledWith(expect.anything(), session);
+    });
+
+    it('admits an admin-scoped key for any scope, per hasScope', async () => {
+      mockApiKey(['admin']);
+      const handler = vi.fn(async () => Response.json({ success: true, data: null }));
+
+      const res = await withAuth(handler, { scope: 'capture' })(createRequest());
+
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('does not apply the scope requirement to a cookie session', async () => {
+      // Scopes narrow a CREDENTIAL below the user it belongs to. A browser
+      // session IS the user, so gating it on a scope would lock a person out
+      // of their own page.
+      vi.mocked(resolveApiKey).mockResolvedValue(null);
+      vi.mocked(auth.api.getSession).mockResolvedValue(createMockSession('USER') as never);
+      const handler = vi.fn(async () => Response.json({ success: true, data: null }));
+
+      const res = await withAuth(handler, { scope: 'capture' })(createRequest());
+
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('accepts any scope when the route asks for none — today\u2019s behaviour', async () => {
+      // Explicit, because it is the property that makes `{ scope }` opt-in:
+      // adding a requirement to a shipped route would revoke access from keys
+      // that work today, so no core route sets it yet.
+      mockApiKey(['analytics']);
+      const handler = vi.fn(async () => Response.json({ success: true, data: null }));
+
+      const res = await withAuth(handler)(createRequest());
+
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('enforces the scope on a route that also takes params', async () => {
+      // The second overload is a separate signature; a scope option that only
+      // worked on the no-params one would be an easy thing to ship broken.
+      mockApiKey(['chat']);
+      const handler = vi.fn();
+      const wrapped = withAuth<{ id: string }>(handler, { scope: 'capture' });
+
+      const res = await wrapped(createRequest(), { params: Promise.resolve({ id: 'x' }) });
+
+      expect(res.status).toBe(403);
+      expect(handler).not.toHaveBeenCalled();
+    });
   });
 
   describe('withAdminAuth', () => {

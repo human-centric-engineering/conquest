@@ -18,6 +18,23 @@ release process.
 
 ### Added
 
+- **`lib/app/api-key-scopes.ts` + `withAuth(handler, { scope })` — least
+  privilege is available to forks.** `AiApiKey.scopes` is a `String[]`, but the
+  two places deciding what may go in it were closed lists in platform files, so
+  a fork could *check* a scope of its own and no user could ever *create* one to
+  check. `APP_API_KEY_SCOPES` unions into both. The enforcement half ships with
+  it, because a wider scope list on its own is just labels: `withAuth` accepted
+  a key of any scope, so the key on someone's phone reached every authenticated
+  route as them. `{ scope }` applies to API-key callers only — a browser session
+  is the full user — and is opt-in per route, so no shipped endpoint changes.
+  `GET /api/v1/user/api-keys` now also returns `availableScopes`.
+
+- **`lib/auth/api-key-scopes.ts`** — the scope vocabulary
+  (`CORE_API_KEY_SCOPES`, `validateScopes`, `hasScope`, `listValidApiKeyScopes`,
+  `ApiKeyScope`), split out of `lib/auth/api-keys.ts` so `createApiKeySchema`
+  can read it without dragging Prisma into the client bundle. `api-keys.ts`
+  re-exports all of it, so existing imports are unchanged.
+
 - **`lib/app/account-sections.ts` + `lib/account-sections/registry.ts` — extra
   sections on `/profile` and `/settings`.** The account surface is where a fork
   commonly adds an account connection, a billing panel or an integrations list,
@@ -138,7 +155,26 @@ release process.
   [`.context/architecture/ci.md`](./.context/architecture/ci.md) — and lower it
   to fit before flipping a repo private**, where `ubuntu-latest` is 2 vCPU / 8GB.
 
+### Security
+
+- **Minting an API key now requires a browser session.** `POST
+  /api/v1/user/api-keys` used `withAuth`, which accepts a key of any scope — so
+  a key scoped to one narrow job could mint a `chat` key and reach every
+  authenticated route as its owner. Least privilege that can self-escalate is
+  not least privilege, which is why this ships alongside the scope seam rather
+  than after it. A key-authenticated caller now gets a 403, mirroring the
+  existing refusals on `PATCH /api/v1/users/me` (email) and
+  `POST /api/v1/users/me/export`. Browser-session minting is unchanged.
+
 ### Changed
+
+- **`ApiKeyScope` is an open type and `validateScopes` returns `boolean`.**
+  `ApiKeyScope` was a closed union and is now `CoreApiKeyScope | (string & {})`,
+  which keeps autocomplete on the five core names while accepting a fork's.
+  `validateScopes` consequently returns a plain `boolean` rather than the type
+  predicate `scopes is ApiKeyScope[]` — against an open type that predicate
+  narrowed nothing while reading as a guarantee it could not make. The runtime
+  check is unchanged.
 
 - **MCP resource `uri` and `resourceType` are validated against what can
   dispatch, not against a closed enum.** `POST /api/v1/admin/orchestration/mcp/resources`

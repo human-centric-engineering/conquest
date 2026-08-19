@@ -4,8 +4,11 @@
  * GET  /api/v1/user/api-keys — List the current user's API keys
  * POST /api/v1/user/api-keys — Generate a new API key
  *
- * Self-service key management. Keys are scoped (chat, analytics,
- * knowledge, admin) and the raw key is returned only once at creation.
+ * Self-service key management. Keys are scoped — `chat`, `analytics`,
+ * `knowledge`, `webhook`, `admin`, plus whatever a fork declared in
+ * `lib/app/api-key-scopes.ts` — and the raw key is returned only once at
+ * creation. `GET` also reports the scopes this install can mint, so a caller
+ * does not have to guess from a 400.
  */
 
 import { withAuth } from '@/lib/auth/guards';
@@ -14,7 +17,14 @@ import { successResponse } from '@/lib/api/responses';
 import { ForbiddenError } from '@/lib/api/errors';
 import { validateRequestBody } from '@/lib/api/validation';
 import { createApiKeySchema } from '@/lib/validations/orchestration';
-import { generateApiKey, hashApiKey, keyPrefix } from '@/lib/auth/api-keys';
+import {
+  generateApiKey,
+  hashApiKey,
+  keyPrefix,
+  isApiKeySession,
+  listValidApiKeyScopes,
+} from '@/lib/auth/api-keys';
+import { getRouteLogger } from '@/lib/api/context';
 
 export const GET = withAuth(async (_request, session) => {
   const keys = await prisma.aiApiKey.findMany({
@@ -32,10 +42,25 @@ export const GET = withAuth(async (_request, session) => {
     },
   });
 
-  return successResponse({ keys });
+  return successResponse({ keys, availableScopes: listValidApiKeyScopes() });
 });
 
 export const POST = withAuth(async (request, session) => {
+  // Minting a credential over a credential is privilege laundering: a key
+  // scoped to one narrow job could mint a `chat` key and reach every
+  // authenticated route as its owner, so the narrow scope it was issued with
+  // would bound nothing. Least privilege that can self-escalate is not least
+  // privilege — which is the whole argument of #542, so it is fixed alongside
+  // the seam rather than after it.
+  //
+  // Same refusal, and the same reasoning, as `PATCH /api/v1/users/me` (email)
+  // and `POST /api/v1/users/me/export`. Browser session required.
+  if (isApiKeySession(session)) {
+    const log = await getRouteLogger(request);
+    log.warn('Rejected API-key attempt to mint another API key', { userId: session.user.id });
+    throw new ForbiddenError('Creating an API key requires a browser session');
+  }
+
   const body = await validateRequestBody(request, createApiKeySchema);
 
   if (body.scopes.includes('admin') && session.user.role !== 'ADMIN') {
