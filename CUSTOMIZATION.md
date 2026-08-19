@@ -646,6 +646,42 @@ using the probe factories from `@/lib/db/drift-probes` (`indexExists`,
 `User`-table FK below in §5. Full reference:
 [`.context/database/prisma-unmodelled-objects.md`](./.context/database/prisma-unmodelled-objects.md#forks-registering-your-own-unmodelled-objects).
 
+**Per-user scheduled runs — ownership lives in `scope`, not `userId`.** A
+schedule-triggered run is **system-owned**: `processDueSchedules` writes
+`userId: null` on the `AiWorkflowExecution` and passes `null` into the engine, so
+`CapabilityContext.userId` is `null` for every scheduled run. That is deliberate
+and should not be worked around — `AiWorkflowExecution.userId` is
+`onDelete: Cascade`, so naming the operator meant erasing one person destroyed
+the organisation's whole scheduled-run history, and a subject-access export
+handed them rows that were never theirs.
+
+But `AiWorkflowSchedule` is also the natural home for **one row per user** — a
+per-person briefing or digest at that person's local time — and for those,
+`createdBy` was not attribution, it was ownership. **`scope` is where that
+ownership now lives.** Set `AiWorkflowSchedule.scope` (a `Json?` carrier,
+e.g. `{ userId }` or `{ projectId }`) and the scheduler stamps it onto the
+execution, from where it reaches `CapabilityContext.scope`:
+
+```ts
+await prisma.aiWorkflowSchedule.create({
+  data: { workflowId, cron: '15 3 * * *', scope: { userId: user.id } },
+});
+
+// …and in your capability, read ownership from scope, never from context.userId:
+const ownerId = capabilityContext.scope?.userId;
+```
+
+**Why this is called out rather than left to be discovered.** The change that
+made runs system-owned is silent in every way that normally catches something:
+`CapabilityContext.userId` is typed `string | null`, so a tier reading it still
+type-checks; unit tests mock the capability boundary, so they stay green on both
+sides; and the failure is nocturnal — a scheduled briefing simply stops
+arriving. One framework-tier fork had all four of its background workflows fail
+at their first `tool_call` step after an upgrade, with a fully green suite. Forks
+with per-user schedules inherit this for rows **already in the database**, so
+audit existing `AiWorkflowSchedule` rows for a missing `scope` as part of the
+upgrade rather than only new ones.
+
 ---
 
 ## 5. Database schema

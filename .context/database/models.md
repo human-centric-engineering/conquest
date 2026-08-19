@@ -752,6 +752,45 @@ try {
 - `P2003`: Foreign key constraint violation
 - `P2034`: Transaction conflict
 
+### `update` vs `updateMany` inside a batched `$transaction`
+
+`P2025 → NOT_FOUND → 404` (see `lib/api/errors.ts`) is exactly right for a
+**single** scoped write: `prisma.task.update({ where: { id, userId } })` throwing
+when the row is not the caller's is a clean 404, and it makes an owner-scoped
+`update` double as an authorisation check.
+
+**Inside `$transaction([...])` the same throw stops being an authorisation
+signal and becomes a rollback trigger for unrelated work.**
+
+```ts
+// ✗ One row deleted by its owner between the read and the write → P2025 →
+//   the ENTIRE batch rolls back, including every other row's update.
+await prisma.$transaction(
+  rows.map(({ id, hash }) =>
+    prisma.thing.update({ where: { id, ...ownerWhere(scope) }, data: { indexedHash: hash } })
+  )
+);
+
+// ✓ A miss is `count: 0`, not a throw — which is the right semantics anyway:
+//   the row is gone, so it no longer needs stamping.
+await prisma.$transaction(
+  rows.map(({ id, hash }) =>
+    prisma.thing.updateMany({ where: { id, ...ownerWhere(scope) }, data: { indexedHash: hash } })
+  )
+);
+```
+
+The trap is easy to miss because **there is no in-repo example to pattern-match
+against**: of the 26 `$transaction` call sites in core, 24 use the callback form
+(`$transaction(async (tx) => …)`) and **none** use the array form. A fork writing
+its first batched write is therefore writing it from the Prisma docs, where the
+array form is presented without this caveat.
+
+Rule of thumb: in the array form, prefer `updateMany`/`deleteMany` for any write
+whose `where` includes an ownership or scope predicate. Reach for `update` there
+only when a missing row genuinely _should_ abort the batch — and say so in a
+comment, because the next reader will assume it was an oversight.
+
 ## Agent Orchestration Models
 
 The Agent Orchestration Layer adds 13 Prisma models under the `ai_*` table prefix. They support configurable AI agents, workflow execution, chat conversations, a vector-backed knowledge base, evaluation sessions, cost tracking, and provider configuration.
