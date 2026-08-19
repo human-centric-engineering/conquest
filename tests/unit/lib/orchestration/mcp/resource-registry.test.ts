@@ -818,7 +818,7 @@ describe('app-registered resource handlers', () => {
     );
   });
 
-  it('accepts an app scheme case-insensitively but records it lowercased', () => {
+  it('lowercases a registered scheme but will not accept an uppercase URI', () => {
     vi.mocked(initAppMcpResources).mockImplementation(() => {
       registerMcpResourceHandler({
         resourceType: 'project_plan',
@@ -827,8 +827,15 @@ describe('app-registered resource handlers', () => {
       });
     });
 
+    // Forgiving about the fork's config…
     expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise', 'hub']);
-    expect(isAllowedMcpResourceUri('HUB://projects/1')).toBe(true);
+    expect(isAllowedMcpResourceUri('hub://projects/1')).toBe(true);
+
+    // …exact about a stored URI. `readMcpResource` looks a row up by EXACT
+    // uri, so accepting `HUB://` at creation would mint a row that can never
+    // dispatch — the failure this check exists to prevent (#540).
+    expect(isAllowedMcpResourceUri('HUB://projects/1')).toBe(false);
+    expect(isAllowedMcpResourceUri('SUNRISE://agents')).toBe(false);
   });
 
   it('does not treat an unregistered scheme as allowed', () => {

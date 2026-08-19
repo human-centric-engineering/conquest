@@ -203,11 +203,19 @@ export function isDispatchableMcpResourceType(resourceType: string): boolean {
 /**
  * Whether a resource URI uses an allowed scheme — `sunrise://`, or one a fork
  * contributed via `registerMcpResourceHandler`.
+ *
+ * **Case-sensitive, deliberately.** An earlier version matched the scheme with
+ * `/i` and lowercased it, which accepted `SUNRISE://agents` — a row that stores
+ * verbatim and then never dispatches, because `readMcpResource` looks the URI up
+ * by exact match. That is precisely the "row that could never serve a read"
+ * this check exists to reject (#540), so accepting it here would have made the
+ * check's own promise false. `registerMcpResourceHandler` still lowercases the
+ * scheme a fork *registers*: forgiving about config, exact about stored data.
  */
 export function isAllowedMcpResourceUri(uri: string): boolean {
-  const match = /^([a-z][a-z0-9+.-]*):\/\//i.exec(uri);
+  const match = /^([a-z][a-z0-9+.-]*):\/\//.exec(uri);
   if (!match) return false;
-  const scheme = match[1].toLowerCase();
+  const scheme = match[1];
   if (scheme === CORE_URI_SCHEME) return true;
   ensureAppMcpResourcesInited();
   return appUriSchemes.has(scheme);

@@ -207,13 +207,14 @@ The registry calls `initAppMcpResources()` once, lazily, before the first dispat
 
 An app type then flows through `resources/list|read|subscribe`, templates, the 5-minute cache, `resources:read` scoping, `McpExposedResource` gating and audit exactly like a core one. Rows still default to `isEnabled: false`, so this widens what an admin can turn on, not who can turn it on.
 
-Three constraints:
+Four constraints:
 
-| Constraint                                        | Why                                                                                                                                                       |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `uriScheme` is required                           | A fork resource inheriting `sunrise://` advertises the starter's identity to every client that lists it. Pass `'sunrise'` explicitly if that is intended. |
-| A built-in `resourceType` cannot be overridden    | `resourceType` is the only link between a seeded row and its handler, so a shadowing registration would change what `sunrise://agents` returns.           |
-| `http(s)`, `file`, `data`, `javascript`, … banned | A resource URI is echoed to clients in `resources/list`; none of them should look like a fetchable web address.                                           |
+| Constraint                                            | Why                                                                                                                                                                                                                                           |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uriScheme` is required                               | A fork resource inheriting `sunrise://` advertises the starter's identity to every client that lists it. Pass `'sunrise'` explicitly if that is intended.                                                                                     |
+| A built-in `resourceType` cannot be overridden        | `resourceType` is the only link between a seeded row and its handler, so a shadowing registration would change what `sunrise://agents` returns.                                                                                               |
+| `http(s)`, `file`, `data`, `javascript`, … banned     | A resource URI is echoed to clients in `resources/list`; none of them should look like a fetchable web address.                                                                                                                               |
+| A stored URI's scheme is matched **case-sensitively** | `readMcpResource` looks a row up by exact URI, so `SUNRISE://agents` would store fine and then never dispatch. `registerMcpResourceHandler` still lowercases the scheme a fork _registers_ — forgiving about config, exact about stored data. |
 
 Validation on create is **dispatchability**, not a constant: `POST /api/v1/admin/orchestration/mcp/resources` calls `isDispatchableMcpResourceType()` and `isAllowedMcpResourceUri()`. That is strictly stronger than the closed Zod enum it replaced — it also rejects a core type whose handler has gone missing. It lives in the route rather than in `lib/validations/mcp.ts` because that module is imported by `'use client'` components and the registry reaches whatever the fork imports in `lib/app/`.
 
