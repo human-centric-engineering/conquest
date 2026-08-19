@@ -694,8 +694,12 @@ entirely, take a route group instead — see
 [§ When a surface needs a different frame](#when-a-surface-needs-a-different-frame--give-it-a-route-group).
 
 Empty registry renders nothing, so vanilla Sunrise is visually unchanged, and a
-throwing registration degrades to no sections rather than 500ing the page a user
-went to in order to change their password.
+throwing _registration_ degrades to no sections. **Render is a different
+matter**: a section that throws while rendering fails the page, which falls to
+`app/(protected)/error.tsx` — the user is still off the page they came to change
+a password on. There is no per-section boundary, because a React error boundary
+is a client component and cannot catch a throw inside an async server section,
+so it would guard some and not others. Handle failure inside your section.
 
 **Evaluation graders — `lib/app/evaluations.ts`.** Fill in the auto-wired
 `initAppGraders()` with `registerGrader(yourGrader)` calls; the grader registry
@@ -742,6 +746,12 @@ before you do:
 - **`uriScheme` is required, not defaulted.** A fork resource that silently
   inherited `sunrise://` would advertise the starter's identity to every MCP
   client that lists it. Pass `'sunrise'` deliberately if that is what you want.
+- **The `uriScheme` binds to the `resourceType`, and the pair is enforced.**
+  Creating `sunrise://projects/x/plan` under a `project_plan` registered as
+  `hub` is a 400, and so is the inverse. Checking "is this scheme allowed" and
+  "does this type dispatch" independently would let a fork's resource list
+  itself to every MCP client under the platform's own scheme, which is the whole
+  reason `uriScheme` is required.
 - **You cannot shadow a built-in `resourceType`.** Sunrise seeds rows for its own
   types and `resourceType` is the only thing tying a row to its handler, so an
   override would change what `sunrise://agents` returns to an external client.

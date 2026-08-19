@@ -82,6 +82,12 @@ const FORBIDDEN_URI_SCHEMES = new Set([
   'wss',
 ]);
 
+/** Shape of a `resourceType`, mirroring `createExposedResourceSchema`. */
+const RESOURCE_TYPE_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** Shape of a URI scheme, without the `://`. */
+const URI_SCHEME_NAME = /^[a-z][a-z0-9+.-]{0,31}$/;
+
 /** A fork's registration of one resource type. */
 export interface AppMcpResourceRegistration {
   /**
@@ -104,8 +110,15 @@ export interface AppMcpResourceRegistration {
 
 /** App-registered handlers, keyed by resourceType. */
 const appHandlers = new Map<string, ResourceHandler>();
-/** Schemes contributed by app registrations, lowercased. */
-const appUriSchemes = new Set<string>();
+/**
+ * The scheme each app resourceType is registered under, lowercased.
+ *
+ * Keyed by type rather than a flat set so the create route can check that a
+ * row's URI scheme is the one registered FOR THAT TYPE. Independent checks
+ * would let a fork file `sunrise://projects/x/plan` under its own
+ * `project_plan` handler — the exact inheritance `uriScheme` exists to prevent.
+ */
+const appUriSchemes = new Map<string, string>();
 /** Whether the auto-wired app resource init has run. */
 let appInited = false;
 
@@ -133,8 +146,20 @@ export function registerMcpResourceHandler(registration: AppMcpResourceRegistrat
     return;
   }
 
+  // The same shape `createExposedResourceSchema` enforces. Checked here too
+  // because otherwise a registration of `projectPlan` succeeds, reports
+  // dispatchable, and then every attempt to create the row 400s at Zod with a
+  // message that never mentions the registration.
+  if (!RESOURCE_TYPE_NAME.test(resourceType)) {
+    logger.error('mcp-resources: refusing to register a malformed resourceType', {
+      resourceType,
+      expected: 'lower snake_case, max 64 chars',
+    });
+    return;
+  }
+
   const scheme = uriScheme.toLowerCase();
-  if (!/^[a-z][a-z0-9+.-]{0,31}$/.test(scheme) || FORBIDDEN_URI_SCHEMES.has(scheme)) {
+  if (!URI_SCHEME_NAME.test(scheme) || FORBIDDEN_URI_SCHEMES.has(scheme)) {
     logger.error('mcp-resources: refusing to register an unusable URI scheme', {
       resourceType,
       uriScheme,
@@ -143,7 +168,7 @@ export function registerMcpResourceHandler(registration: AppMcpResourceRegistrat
   }
 
   appHandlers.set(resourceType, handler);
-  appUriSchemes.add(scheme);
+  appUriSchemes.set(resourceType, scheme);
 }
 
 /**
@@ -213,12 +238,42 @@ export function isDispatchableMcpResourceType(resourceType: string): boolean {
  * scheme a fork *registers*: forgiving about config, exact about stored data.
  */
 export function isAllowedMcpResourceUri(uri: string): boolean {
-  const match = /^([a-z][a-z0-9+.-]*):\/\//.exec(uri);
-  if (!match) return false;
-  const scheme = match[1];
+  const scheme = uriScheme(uri);
+  if (scheme === null) return false;
   if (scheme === CORE_URI_SCHEME) return true;
   ensureAppMcpResourcesInited();
-  return appUriSchemes.has(scheme);
+  return [...appUriSchemes.values()].includes(scheme);
+}
+
+/** The scheme of `uri` (no `://`), or null when it is not a well-formed URI. */
+function uriScheme(uri: string): string | null {
+  const match = /^([a-z][a-z0-9+.-]*):\/\//.exec(uri);
+  return match ? match[1] : null;
+}
+
+/**
+ * The URI scheme a resource of `resourceType` must use — `sunrise` for a
+ * built-in, whatever the fork registered for an app type, `undefined` if the
+ * type has no handler.
+ */
+export function mcpResourceUriSchemeFor(resourceType: string): string | undefined {
+  ensureAppMcpResourcesInited();
+  if (isBuiltInResourceType(resourceType)) return CORE_URI_SCHEME;
+  return appUriSchemes.get(resourceType);
+}
+
+/**
+ * Whether `uri`'s scheme is the one registered for `resourceType`.
+ *
+ * Checking the two independently is not enough: with `project_plan` registered
+ * under `hub`, `{ uri: 'sunrise://projects/x/plan', resourceType: 'project_plan' }`
+ * passes both and then serves fork data under the platform's own scheme to
+ * every MCP client that lists it. That inheritance is the thing `uriScheme` is
+ * required for, so it has to be enforced as a PAIR.
+ */
+export function isUriSchemeValidForResourceType(uri: string, resourceType: string): boolean {
+  const expected = mcpResourceUriSchemeFor(resourceType);
+  return expected !== undefined && uriScheme(uri) === expected;
 }
 
 /**
@@ -234,7 +289,7 @@ export function listAppMcpResourceTypes(): string[] {
 /** Every URI scheme a resource may currently use — for error messages and docs. */
 export function listAllowedMcpResourceUriSchemes(): string[] {
   ensureAppMcpResourcesInited();
-  return [CORE_URI_SCHEME, ...appUriSchemes];
+  return [...new Set([CORE_URI_SCHEME, ...appUriSchemes.values()])];
 }
 
 /**

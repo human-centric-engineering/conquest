@@ -51,6 +51,8 @@ import {
   registerMcpResourceHandler,
   isDispatchableMcpResourceType,
   isAllowedMcpResourceUri,
+  isUriSchemeValidForResourceType,
+  mcpResourceUriSchemeFor,
   listAppMcpResourceTypes,
   listAllowedMcpResourceUriSchemes,
   __resetAppMcpResourcesForTests,
@@ -842,6 +844,69 @@ describe('app-registered resource handlers', () => {
     expect(isAllowedMcpResourceUri('obsiddy://today')).toBe(false);
     expect(isAllowedMcpResourceUri('sunrise://agents')).toBe(true);
     expect(isAllowedMcpResourceUri('not-a-uri')).toBe(false);
+  });
+
+  it('binds a resourceType to the scheme it was registered under', () => {
+    // Checking "is this scheme allowed?" and "does this type dispatch?"
+    // independently is not enough. With `project_plan` registered under `hub`,
+    // both pass for `sunrise://projects/x/plan` — and the row then serves fork
+    // data under the PLATFORM's scheme to every MCP client that lists it, which
+    // is the inheritance `uriScheme` is required in order to prevent.
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+
+    // Both independent checks pass for the mismatched pair…
+    expect(isAllowedMcpResourceUri('sunrise://projects/x/plan')).toBe(true);
+    expect(isDispatchableMcpResourceType('project_plan')).toBe(true);
+    // …and the pair check is what rejects it.
+    expect(isUriSchemeValidForResourceType('sunrise://projects/x/plan', 'project_plan')).toBe(
+      false
+    );
+    expect(isUriSchemeValidForResourceType('hub://projects/x/plan', 'project_plan')).toBe(true);
+  });
+
+  it('pins a built-in resourceType to the core scheme', () => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+
+    expect(mcpResourceUriSchemeFor('agent_list')).toBe('sunrise');
+    expect(mcpResourceUriSchemeFor('project_plan')).toBe('hub');
+    expect(mcpResourceUriSchemeFor('nope')).toBeUndefined();
+    // The inverse of the case above: a core type may not move to a fork scheme.
+    expect(isUriSchemeValidForResourceType('hub://agents', 'agent_list')).toBe(false);
+  });
+
+  it.each([
+    ['projectPlan', 'camelCase'],
+    ['Project_Plan', 'upper case'],
+    ['project-plan', 'a hyphen'],
+    ['9plan', 'a leading digit'],
+    ['', 'empty'],
+    ['a'.repeat(65), 'over the 64-char cap'],
+  ])('refuses the malformed resourceType %j (%s)', (resourceType) => {
+    // Without this, registering `projectPlan` succeeds and reports
+    // dispatchable, and then every attempt to create the row 400s at Zod with a
+    // message that never mentions the registration.
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({ resourceType, uriScheme: 'hub', handler: vi.fn() });
+    });
+
+    expect(listAppMcpResourceTypes()).toEqual([]);
+    expect(isDispatchableMcpResourceType(resourceType)).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('malformed resourceType'),
+      expect.objectContaining({ resourceType })
+    );
   });
 
   it('does not resolve an inherited Object property as a handler', () => {

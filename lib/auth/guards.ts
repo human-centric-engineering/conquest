@@ -27,7 +27,13 @@ import { NextRequest } from 'next/server';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/auth/config';
 import { UnauthorizedError, ForbiddenError, handleAPIError } from '@/lib/api/errors';
-import { resolveApiKey, hasScope, type ApiKeyScope } from '@/lib/auth/api-keys';
+import {
+  resolveApiKey,
+  hasScope,
+  listValidApiKeyScopes,
+  type ApiKeyScope,
+} from '@/lib/auth/api-keys';
+import { logger } from '@/lib/logging';
 
 /**
  * Session type from better-auth (matches AuthSession in utils.ts)
@@ -130,6 +136,22 @@ export function withAuth(
   handler: (...args: any[]) => Response | Promise<Response>,
   options?: WithAuthOptions
 ) {
+  // Opening `ApiKeyScope` to `CoreApiKeyScope | (string & {})` is what lets a
+  // fork name its own scope — and it also means `{ scope: 'knowlege' }`
+  // type-checks. No user can ever hold a scope nothing declared, so the route
+  // would 403 every non-`admin` key forever, and the 403 deliberately does not
+  // echo the key's scopes, leaving nothing to diagnose from the outside.
+  //
+  // Warned at route-definition time rather than per request, so it surfaces at
+  // boot even if nobody calls the endpoint. Not an error: a fork may legitimately
+  // define a route before filling `lib/app/api-key-scopes.ts`.
+  if (options?.scope && !listValidApiKeyScopes().includes(options.scope)) {
+    logger.warn('withAuth: route requires a scope no install declares — every API key will 403', {
+      scope: options.scope,
+      declared: listValidApiKeyScopes(),
+    });
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (...args: any[]): Promise<Response> => {
     try {

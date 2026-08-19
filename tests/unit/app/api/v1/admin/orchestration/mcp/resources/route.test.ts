@@ -299,6 +299,52 @@ describe('POST /mcp/resources', () => {
     );
   });
 
+  it('rejects a fork type filed under the core scheme, naming the right one', async () => {
+    // `sunrise://` + a registered fork type passes both independent checks; only
+    // the pair check catches it. Left open, a fork resource would list itself to
+    // every MCP client under the platform's own scheme — the inheritance
+    // `uriScheme` is required in order to prevent.
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+
+    const response = await POST(
+      makePostRequest({
+        ...VALID_RESOURCE_BODY,
+        uri: 'sunrise://projects/x/plan',
+        resourceType: 'project_plan',
+      })
+    );
+    const body = await parseJson<{ error: { message: string } }>(response);
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain('hub://');
+    expect(prisma.mcpExposedResource.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a core type filed under a fork scheme', async () => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn(),
+      });
+    });
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+
+    const response = await POST(
+      makePostRequest({ ...VALID_RESOURCE_BODY, uri: 'hub://agents', resourceType: 'agent_list' })
+    );
+
+    expect(response.status).toBe(400);
+    expect(prisma.mcpExposedResource.create).not.toHaveBeenCalled();
+  });
+
   it('still rejects a fork URI scheme that nothing registered', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
 

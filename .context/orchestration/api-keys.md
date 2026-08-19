@@ -64,7 +64,9 @@ Returns: `{ keys: [{ id, name, keyPrefix, scopes, lastUsedAt, expiresAt, revoked
 
 Create a new API key. The raw key is returned in the response — store it securely, it cannot be retrieved again.
 
-**Requires a browser session.** A caller who authenticated with an API key gets a 403: minting a credential over a credential is privilege laundering — a key scoped to one narrow job could mint a `chat` key and reach every authenticated route as its owner, so the narrow scope it was issued with would bound nothing. Same refusal, and the same reasoning, as `PATCH /api/v1/users/me` (email) and `GET /api/v1/users/me/export`.
+**Requires a browser session** — as does `DELETE /api/v1/user/api-keys/:keyId`. A caller who authenticated with an API key gets a 403 from both: minting a credential over a credential is privilege laundering — a key scoped to one narrow job could mint a `chat` key and reach every authenticated route as its owner, so the narrow scope it was issued with would bound nothing. Revocation is destructive rather than escalating, but `GET` returns every key's id, so a leaked `chat`-scoped key could otherwise enumerate its owner's keys and revoke all of them, `admin` included. Same refusal, and the same reasoning, as `PATCH /api/v1/users/me` (email) and `GET /api/v1/users/me/export`.
+
+No legitimate flow loses anything: a headless rotate-and-revoke script needs `POST` too.
 
 Body:
 

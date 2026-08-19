@@ -53,12 +53,28 @@ vi.mock('@/lib/auth/api-keys', () => ({
   resolveApiKey: vi.fn().mockResolvedValue(null),
   hasScope: (scopes: string[], required: string) =>
     scopes.includes(required) || scopes.includes('admin'),
+  // `capture` stands in for a scope a fork declared in
+  // `lib/app/api-key-scopes.ts`, which is the situation `{ scope }` exists for.
+  // The undeclared-scope warning has its own test below.
+  listValidApiKeyScopes: vi.fn(() => [
+    'chat',
+    'analytics',
+    'knowledge',
+    'webhook',
+    'admin',
+    'capture',
+  ]),
+}));
+
+vi.mock('@/lib/logging', () => ({
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 // Import mocked modules
 import { headers } from 'next/headers';
 import { auth } from '@/lib/auth/config';
 import { resolveApiKey } from '@/lib/auth/api-keys';
+import { logger } from '@/lib/logging';
 
 /**
  * Test helpers
@@ -921,6 +937,26 @@ describe('API-key fallback', () => {
 
       expect(res.status).toBe(200);
       expect(handler).toHaveBeenCalled();
+    });
+
+    it('warns at route-definition time for a scope no install declares', async () => {
+      // Opening `ApiKeyScope` to accept a fork's name also means a typo
+      // type-checks. No key can hold `knowlege`, so the route would 403 every
+      // caller forever — and the 403 deliberately says nothing about the key's
+      // scopes, so there is nothing to diagnose from outside.
+      withAuth(vi.fn(), { scope: 'knowlege' });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('no install declares'),
+        expect.objectContaining({ scope: 'knowlege' })
+      );
+    });
+
+    it('does not warn for a declared scope, and never warns without one', async () => {
+      withAuth(vi.fn(), { scope: 'capture' });
+      withAuth(vi.fn());
+
+      expect(logger.warn).not.toHaveBeenCalled();
     });
 
     it('enforces the scope on a route that also takes params', async () => {

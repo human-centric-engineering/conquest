@@ -34,6 +34,8 @@ export {
   registerMcpResourceHandler,
   isDispatchableMcpResourceType,
   isAllowedMcpResourceUri,
+  isUriSchemeValidForResourceType,
+  mcpResourceUriSchemeFor,
   listAppMcpResourceTypes,
   listAllowedMcpResourceUriSchemes,
   type AppMcpResourceRegistration,

@@ -65,8 +65,10 @@ release process.
   `resources:read` scoping, `McpExposedResource` gating and audit exactly like a
   core one. `uriScheme` is required — a fork resource silently inheriting
   `sunrise://` would advertise the starter's identity to every MCP client that
-  lists it — and a built-in `resourceType` cannot be shadowed. Rows still
-  default to `isEnabled: false`.
+  lists it — and a built-in `resourceType` cannot be shadowed. The scheme binds
+  to the type: `sunrise://…` filed under a fork type is a 400, and so is the
+  inverse (`isUriSchemeValidForResourceType`, `mcpResourceUriSchemeFor`). Rows
+  still default to `isEnabled: false`.
 
 - **`components/app/**` and `components/framework/**` are now reserved fork
   tiers.** Sunrise creates nothing under either, so a fork's own React
@@ -157,14 +159,18 @@ release process.
 
 ### Security
 
-- **Minting an API key now requires a browser session.** `POST
-  /api/v1/user/api-keys` used `withAuth`, which accepts a key of any scope — so
-  a key scoped to one narrow job could mint a `chat` key and reach every
-  authenticated route as its owner. Least privilege that can self-escalate is
-  not least privilege, which is why this ships alongside the scope seam rather
-  than after it. A key-authenticated caller now gets a 403, mirroring the
-  existing refusals on `PATCH /api/v1/users/me` (email) and
-  `GET /api/v1/users/me/export`. Browser-session minting is unchanged.
+- **Minting *or revoking* an API key now requires a browser session.** `POST`
+  and `DELETE` on `/api/v1/user/api-keys` used `withAuth`, which accepts a key
+  of any scope. Minting was privilege laundering — a key scoped to one narrow
+  job could mint a `chat` key and reach every authenticated route as its owner,
+  so least privilege that can self-escalate is not least privilege. Revoking is
+  destructive rather than escalating, but `GET` returns every key's id, so a
+  leaked `chat`-scoped key could enumerate its owner's keys and revoke all of
+  them, `admin` included. Both now 403 for a key-authenticated caller,
+  mirroring the existing refusals on `PATCH /api/v1/users/me` (email) and
+  `GET /api/v1/users/me/export`. Browser sessions are unchanged, and no
+  headless flow loses anything it still had — a rotate-and-revoke script needs
+  `POST` too.
 
 ### Changed
 
@@ -175,6 +181,14 @@ release process.
   predicate `scopes is ApiKeyScope[]` — against an open type that predicate
   narrowed nothing while reading as a guarantee it could not make. The runtime
   check is unchanged.
+
+- **`CreateExposedResource['resourceType']` and
+  `ListExposedResourcesQuery['resourceType']` are now `string`, and
+  `createExposedResourceSchema.uri` no longer requires `sunrise://`.** Both
+  schemas and both inferred types are exported, so a fork consuming them sees a
+  weaker type. That is the type-level shadow of the validation change below —
+  the *runtime* surface is equal-or-stricter, because membership moved to the
+  route rather than being dropped.
 
 - **MCP resource `uri` and `resourceType` are validated against what can
   dispatch, not against a closed enum.** `POST /api/v1/admin/orchestration/mcp/resources`

@@ -70,9 +70,17 @@ export function registerAccountSection(section: AccountSection): void {
 
 /**
  * Run the fork's auto-wired init exactly once, lazily. Latch BEFORE running so
- * a throwing init neither retries nor propagates — a broken registration
- * degrades to "no app sections" rather than 500ing the account page a user
- * went there to fix something on.
+ * a throwing init neither retries nor propagates — a broken *registration*
+ * degrades to "no app sections".
+ *
+ * **This covers registration, not render.** A section that throws while
+ * rendering still fails the page, which then falls to
+ * `app/(protected)/error.tsx` rather than a blank 500 — but the user is off the
+ * page they came to change a password or delete an account on. Sunrise does not
+ * wrap each section in a boundary of its own, because a React error boundary is
+ * a client component and cannot catch a throw inside an async server section,
+ * so it would guard some sections and not others. If your section can fail on
+ * data (a missing subscription row is the usual one), handle that inside it.
  */
 function ensureAppAccountSectionsInited(): void {
   if (appInited) return;

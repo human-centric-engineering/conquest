@@ -16,6 +16,8 @@ import {
   broadcastMcpResourcesChanged,
   isDispatchableMcpResourceType,
   isAllowedMcpResourceUri,
+  isUriSchemeValidForResourceType,
+  mcpResourceUriSchemeFor,
   listAllowedMcpResourceUriSchemes,
 } from '@/lib/orchestration/mcp';
 import { ValidationError } from '@/lib/api/errors';
@@ -79,6 +81,19 @@ export const POST = withAdminAuth(async (request, session) => {
         'Register a handler with registerMcpResourceHandler() from lib/app/mcp-resources.ts first.',
       ],
     });
+  }
+
+  // The two checks above are independent, and independent is not enough: with
+  // `project_plan` registered under `hub`, a URI of `sunrise://projects/x/plan`
+  // satisfies both and then serves fork data under the platform's own scheme to
+  // every MCP client that lists it. Requiring `uriScheme` at registration only
+  // means anything if the pair is enforced here.
+  if (!isUriSchemeValidForResourceType(body.uri, body.resourceType)) {
+    const expected = mcpResourceUriSchemeFor(body.resourceType);
+    throw new ValidationError(
+      `resourceType '${body.resourceType}' is registered under the '${expected}://' scheme`,
+      { uri: [`Must use ${expected}://`] }
+    );
   }
 
   const resource = await prisma.mcpExposedResource.create({

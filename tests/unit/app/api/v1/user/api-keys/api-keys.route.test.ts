@@ -353,6 +353,46 @@ describe('API Key Endpoints', () => {
       expect(prisma.aiApiKey.update).not.toHaveBeenCalled();
     });
 
+    it('refuses a revoke from a caller who authenticated with a key', async () => {
+      // Same rule as POST: a narrow credential does not manage credentials.
+      // GET returns every key's id, so without this a leaked `chat` key could
+      // enumerate its owner's keys and revoke all of them, `admin` included.
+      vi.mocked(prisma.aiApiKey.findFirst).mockResolvedValue({
+        id: KEY_ID,
+        userId: USER_ID,
+        scopes: ['chat'],
+        rateLimitRpm: null,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: new Date(),
+        user: {
+          id: USER_ID,
+          name: 'Key Owner',
+          email: 'owner@example.com',
+          emailVerified: true,
+          image: null,
+          role: 'USER',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      } as never);
+
+      const request = new Request('http://localhost/test', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer sk_deadbeefdeadbeefdeadbeefdeadbeef' },
+      }) as unknown as NextRequest;
+
+      const res = await DELETE(request, { params: Promise.resolve({ keyId: KEY_ID }) });
+
+      expect(res.status).toBe(403);
+      // `update` IS called once — `resolveApiKey` stamps `lastUsedAt`
+      // fire-and-forget on every key auth. What must not happen is the revoke.
+      const revokes = vi
+        .mocked(prisma.aiApiKey.update)
+        .mock.calls.filter(([arg]) => 'revokedAt' in (arg as { data: object }).data);
+      expect(revokes).toEqual([]);
+    });
+
     it('returns 404 for unknown key', async () => {
       vi.mocked(prisma.aiApiKey.findFirst).mockResolvedValue(null);
 
