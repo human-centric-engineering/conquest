@@ -9,7 +9,7 @@
  * - verify-callback-content.tsx - Client component with verification logic (tested here)
  *
  * Test Coverage:
- * - Success state (no error param) - redirects to dashboard
+ * - Success state (no error param) - redirects to the auth landing route
  * - Error state (error=invalid_token) - shows expired message
  * - Resend flow - email input, button click, API call
  * - Loading states during resend
@@ -26,6 +26,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VerifyCallbackClientContent } from '@/app/(auth)/verify-email/callback/verify-callback-content';
 import { createMockRouter, type MockRouter } from '@/tests/types/mocks';
+import { AUTH_LANDING_LABEL, AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Mock next/navigation
 vi.mock('next/navigation', async () => {
@@ -102,7 +103,9 @@ describe('VerifyCallbackClientContent', () => {
       // Assert: Success message appears
       await waitFor(() => {
         expect(screen.getByText(/email verified!/i)).toBeInTheDocument();
-        expect(screen.getByText(/redirecting to dashboard/i)).toBeInTheDocument();
+        expect(
+          screen.getByText(new RegExp(`redirecting to ${AUTH_LANDING_LABEL}`, 'i'))
+        ).toBeInTheDocument();
       });
     });
 
@@ -120,13 +123,13 @@ describe('VerifyCallbackClientContent', () => {
       });
     });
 
-    it('should redirect to dashboard when no error param', async () => {
+    it('should redirect to the auth landing route when no error param', async () => {
       // Arrange & Act
       render(<VerifyCallbackClientContent />);
 
-      // Assert: Router replace is called with /dashboard
+      // Assert: Router replace is called with the resolved landing route
       await waitFor(() => {
-        expect(mockRouter.replace).toHaveBeenCalledWith('/dashboard');
+        expect(mockRouter.replace).toHaveBeenCalledWith(AUTH_LANDING_ROUTE);
       });
     });
 

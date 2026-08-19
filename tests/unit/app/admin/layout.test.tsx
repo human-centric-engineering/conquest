@@ -8,7 +8,7 @@
  *
  * Branches covered:
  * - No session → redirect('/login')
- * - Authenticated non-admin → redirect('/dashboard')
+ * - Authenticated non-admin → redirect(AUTH_LANDING_ROUTE)
  * - Authenticated admin → renders children
  *
  * @see /Users/simonholmes/Documents/Dev/studio/sunrise/app/admin/layout.tsx
@@ -19,6 +19,7 @@ import { render, screen } from '@testing-library/react';
 
 import AdminLayout from '@/app/admin/layout';
 import { createMockSession } from '@/tests/types/mocks';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((path: string) => {
@@ -59,15 +60,15 @@ describe('AdminLayout', () => {
     expect(redirect).toHaveBeenCalledTimes(1);
   });
 
-  it('redirects authenticated non-admin users to /dashboard', async () => {
+  it('redirects authenticated non-admin users to the auth landing route', async () => {
     // Arrange
     vi.mocked(getServerSession).mockResolvedValue(createMockSession({ user: { role: 'USER' } }));
 
     // Act + Assert
     await expect(AdminLayout({ children: <div>protected</div> })).rejects.toThrow(
-      'NEXT_REDIRECT:/dashboard'
+      `NEXT_REDIRECT:${AUTH_LANDING_ROUTE}`
     );
-    expect(redirect).toHaveBeenCalledWith('/dashboard');
+    expect(redirect).toHaveBeenCalledWith(AUTH_LANDING_ROUTE);
     expect(redirect).not.toHaveBeenCalledWith('/login');
   });
 
