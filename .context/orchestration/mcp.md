@@ -184,7 +184,40 @@ For older protocol negotiations (`2024-11-05`) the annotations field is omitted 
 
 Each `McpExposedResource` has an optional `handlerConfig` JSON field passed to the resource handler as its second argument, allowing per-resource configuration (e.g., custom search parameters, filters). Stored as Prisma JSON and validated as `Record<string, unknown> | null`.
 
-When a URI does not match any registered resource exactly, `readMcpResource` falls back to pattern matching against all enabled resources. Pattern matching uses first-match-wins order (database insertion order). If multiple resource patterns could match the same URI, the first match is used. Both exact and pattern-match handler calls are wrapped in try-catch — handler failures return an error content block instead of propagating.
+When a URI does not match any registered resource exactly, `readMcpResource` falls back to pattern matching against all enabled resources. A row matches if the requested URI either **starts with** the template's fixed prefix (the template stripped of its `{param}`s) **or** fills the template exactly, one path segment per `{param}`. The prefix test alone only ever worked for a template whose `{param}` was the last segment — `hub://projects/{id}/plan` collapses to `hub://projects//plan`, which no concrete URI starts with — so the exact-fill test was added alongside it rather than replacing it. Pattern matching uses first-match-wins order (database insertion order). If multiple resource patterns could match the same URI, the first match is used. Both exact and pattern-match handler calls are wrapped in try-catch — handler failures return an error content block instead of propagating.
+
+### Fork-owned resource types (`lib/app/mcp-resources.ts`)
+
+Sunrise's four types above are built in. A fork adds its own without editing core, mirroring the capability seam:
+
+```ts
+// lib/app/mcp-resources.ts — ships empty
+import { registerMcpResourceHandler } from '@/lib/orchestration/mcp/resource-registry';
+
+export function initAppMcpResources(): void {
+  registerMcpResourceHandler({
+    resourceType: 'project_plan',
+    uriScheme: 'hub', // → hub://projects/{id}/plan
+    handler: handleProjectPlan, // (uri, config, callContext) => Promise<McpResourceContent>
+  });
+}
+```
+
+The registry calls `initAppMcpResources()` once, lazily, before the first dispatch **and** before the admin create route validates a row — both are route-realm reads, so a registration made from `initApp()` would fill a map the MCP route never sees.
+
+An app type then flows through `resources/list|read|subscribe`, templates, the 5-minute cache, `resources:read` scoping, `McpExposedResource` gating and audit exactly like a core one. Rows still default to `isEnabled: false`, so this widens what an admin can turn on, not who can turn it on.
+
+Three constraints:
+
+| Constraint                                        | Why                                                                                                                                                       |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uriScheme` is required                           | A fork resource inheriting `sunrise://` advertises the starter's identity to every client that lists it. Pass `'sunrise'` explicitly if that is intended. |
+| A built-in `resourceType` cannot be overridden    | `resourceType` is the only link between a seeded row and its handler, so a shadowing registration would change what `sunrise://agents` returns.           |
+| `http(s)`, `file`, `data`, `javascript`, … banned | A resource URI is echoed to clients in `resources/list`; none of them should look like a fetchable web address.                                           |
+
+Validation on create is **dispatchability**, not a constant: `POST /api/v1/admin/orchestration/mcp/resources` calls `isDispatchableMcpResourceType()` and `isAllowedMcpResourceUri()`. That is strictly stronger than the closed Zod enum it replaced — it also rejects a core type whose handler has gone missing. It lives in the route rather than in `lib/validations/mcp.ts` because that module is imported by `'use client'` components and the registry reaches whatever the fork imports in `lib/app/`.
+
+The admin create form's type dropdown lists core types only; create an app-typed row from a seed or the API.
 
 After creation, **`uri` and `resourceType` are immutable** — the registry routes reads by URI prefix and dispatches by `resourceType`, so changing either mid-life would orphan in-flight client subscriptions. To rename or re-type a resource, delete it and create a new one (per the dialog warning in the admin UI).
 

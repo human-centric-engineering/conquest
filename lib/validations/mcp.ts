@@ -12,7 +12,7 @@ import {
   queryBooleanSchema,
   capabilityScopeSchema,
 } from '@/lib/validations/common';
-import { McpScope, ALL_MCP_SCOPES, McpResourceType } from '@/types/mcp';
+import { McpScope, ALL_MCP_SCOPES } from '@/types/mcp';
 
 // ============================================================================
 // Shared
@@ -133,22 +133,42 @@ export type ListExposedToolsQuery = z.infer<typeof listExposedToolsQuerySchema>;
 // Exposed Resources
 // ============================================================================
 
-const resourceTypeSchema = z.enum([
-  McpResourceType.KNOWLEDGE_SEARCH,
-  McpResourceType.AGENT_LIST,
-  McpResourceType.PATTERN_DETAIL,
-  McpResourceType.WORKFLOW_LIST,
-]);
+/**
+ * `resourceType` — FORMAT only. Membership is checked at the route, not here.
+ *
+ * This used to be `z.enum([...McpResourceType])`, which is why a fork could not
+ * create a resource of its own type without editing core (#563). Whether a type
+ * is usable is not a fact about a constant: it is whether a handler is
+ * registered for it, which includes handlers a fork adds via
+ * `registerMcpResourceHandler`. So the create route calls
+ * `isDispatchableMcpResourceType()` — a check that is strictly stronger than the
+ * old enum, because it also rejects a core type whose handler has gone missing.
+ *
+ * It cannot happen here: this module is imported by `'use client'` components
+ * (`mcp-resources-list.tsx` and friends), and the registry reaches
+ * `lib/app/mcp-resources.ts` and therefore whatever a fork imports there. That
+ * is a server module graph. Keeping membership at the route keeps it out of the
+ * client bundle — the realm split of #462.
+ */
+const resourceTypeSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9_]*$/, 'resourceType must be lower snake_case');
 
 /**
  * Create exposed resource (POST /api/v1/admin/orchestration/mcp/resources)
  */
 export const createExposedResourceSchema = z.object({
+  // Scheme FORMAT only — which schemes are allowed is decided at the route by
+  // `isAllowedMcpResourceUri()`, because a fork contributes its own
+  // (`hub://projects/{id}/plan`) through `registerMcpResourceHandler`. Same
+  // realm reason as `resourceTypeSchema` above.
   uri: z
     .string()
     .min(1)
     .max(500)
-    .regex(/^sunrise:\/\//, 'URI must use the sunrise:// scheme'),
+    .regex(/^[a-z][a-z0-9+.-]*:\/\/.+/i, 'URI must be <scheme>://<path>'),
   name: z.string().min(1).max(100).trim(),
   description: z.string().min(1).max(5000).trim(),
   mimeType: z.string().min(1).max(100).default('application/json'),

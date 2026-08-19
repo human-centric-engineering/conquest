@@ -29,18 +29,31 @@ vi.mock('@/lib/orchestration/mcp/resources/workflow-list', () => ({
   handleWorkflowList: vi.fn(),
 }));
 
+// The fork seam ships empty; tests that need an app resource register one
+// explicitly through the public registrar rather than re-mocking this.
+vi.mock('@/lib/app/mcp-resources', () => ({
+  initAppMcpResources: vi.fn(),
+}));
+
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { handleKnowledgeSearch } from '@/lib/orchestration/mcp/resources/knowledge-search';
 import { handlePatternDetail } from '@/lib/orchestration/mcp/resources/pattern-detail';
 import { handleAgentList } from '@/lib/orchestration/mcp/resources/agent-list';
 import { handleWorkflowList } from '@/lib/orchestration/mcp/resources/workflow-list';
+import { initAppMcpResources } from '@/lib/app/mcp-resources';
 import {
   listMcpResources,
   readMcpResource,
   clearMcpResourceCache,
   listMcpResourceTemplates,
   isRegisteredMcpResourceUri,
+  registerMcpResourceHandler,
+  isDispatchableMcpResourceType,
+  isAllowedMcpResourceUri,
+  listAppMcpResourceTypes,
+  listAllowedMcpResourceUriSchemes,
+  __resetAppMcpResourcesForTests,
 } from '@/lib/orchestration/mcp/resource-registry';
 
 // ---------------------------------------------------------------------------
@@ -306,6 +319,44 @@ describe('readMcpResource', () => {
       apiKeyId: 'key-1',
     });
     expect(result).not.toBeNull();
+  });
+
+  it('matches a template whose {param} is NOT the last path segment', async () => {
+    // `sunrise://projects/{id}/plan` collapses to `sunrise://projects//plan`
+    // under the strip-then-startsWith test, which no concrete URI starts with —
+    // so this returned null before the template matcher was added. Every core
+    // template happens to be trailing, which is why nothing noticed.
+    vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.mcpExposedResource.findMany).mockResolvedValue([
+      makeResourceRow({ uri: 'sunrise://projects/{id}/plan', resourceType: 'pattern_detail' }),
+    ] as never);
+    vi.mocked(handlePatternDetail).mockResolvedValue(
+      makeResourceContent('sunrise://projects/p1/plan')
+    );
+
+    const result = await readMcpResource('sunrise://projects/p1/plan', {
+      scopedAgentId: null,
+      apiKeyId: 'key-1',
+    });
+
+    expect(result).toEqual(makeResourceContent('sunrise://projects/p1/plan'));
+  });
+
+  it('does not let a mid-path {param} swallow extra path segments', async () => {
+    // `{id}` is one segment, not "the rest of the path" — otherwise the new
+    // matcher would be looser than the prefix test it sits beside.
+    vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.mcpExposedResource.findMany).mockResolvedValue([
+      makeResourceRow({ uri: 'sunrise://projects/{id}/plan', resourceType: 'pattern_detail' }),
+    ] as never);
+
+    const result = await readMcpResource('sunrise://projects/p1/nested/plan', {
+      scopedAgentId: null,
+      apiKeyId: 'key-1',
+    });
+
+    expect(result).toBeNull();
+    expect(handlePatternDetail).not.toHaveBeenCalled();
   });
 
   it('returns null from pattern matching when no patterns match', async () => {
@@ -610,5 +661,177 @@ describe('isRegisteredMcpResourceUri', () => {
     ] as never);
 
     expect(await isRegisteredMcpResourceUri('sunrise://agents/foo')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// App-owned resource handlers — the #563 / #540 fork seam
+// ---------------------------------------------------------------------------
+
+describe('app-registered resource handlers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearMcpResourceCache();
+    __resetAppMcpResourcesForTests();
+  });
+
+  it('ships with no app types and only the core URI scheme', () => {
+    expect(listAppMcpResourceTypes()).toEqual([]);
+    expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+  });
+
+  it('dispatches a read to an app handler for an app resourceType', async () => {
+    const handler = vi.fn().mockResolvedValue(makeResourceContent('hub://projects/p1/plan'));
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({ resourceType: 'project_plan', uriScheme: 'hub', handler });
+    });
+    vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(
+      makeResourceRow({
+        uri: 'hub://projects/p1/plan',
+        resourceType: 'project_plan',
+        handlerConfig: { depth: 2 },
+      }) as never
+    );
+
+    const result = await readMcpResource('hub://projects/p1/plan', {
+      scopedAgentId: null,
+      apiKeyId: 'key-1',
+    });
+
+    expect(result).toEqual(makeResourceContent('hub://projects/p1/plan'));
+    // Same three-argument contract the built-ins get, config included.
+    expect(handler).toHaveBeenCalledWith(
+      'hub://projects/p1/plan',
+      { depth: 2 },
+      { scopedAgentId: null, apiKeyId: 'key-1' }
+    );
+  });
+
+  it('runs the fork init exactly once across many reads', async () => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'hub',
+        handler: vi.fn().mockResolvedValue(makeResourceContent('hub://x')),
+      });
+    });
+
+    isDispatchableMcpResourceType('project_plan');
+    isDispatchableMcpResourceType('project_plan');
+    isAllowedMcpResourceUri('hub://x');
+    listAppMcpResourceTypes();
+
+    expect(initAppMcpResources).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades to no app resources when the fork init throws', async () => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      throw new Error('fork boom');
+    });
+
+    // The throw must not propagate out of an MCP read...
+    expect(isDispatchableMcpResourceType('project_plan')).toBe(false);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('initAppMcpResources threw'),
+      expect.objectContaining({ error: 'fork boom' })
+    );
+
+    // ...and the latch means it is not retried on every subsequent read.
+    isDispatchableMcpResourceType('project_plan');
+    expect(initAppMcpResources).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to let an app registration shadow a built-in type', async () => {
+    const impostor = vi.fn().mockResolvedValue(makeResourceContent('sunrise://agents'));
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'agent_list',
+        uriScheme: 'sunrise',
+        handler: impostor,
+      });
+    });
+    vi.mocked(handleAgentList).mockResolvedValue(makeResourceContent('sunrise://agents'));
+    vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(
+      makeResourceRow({ uri: 'sunrise://agents', resourceType: 'agent_list' }) as never
+    );
+
+    await readMcpResource('sunrise://agents', { scopedAgentId: null, apiKeyId: 'key-1' });
+
+    // The seeded core resource still answers with core's handler — otherwise a
+    // fork could silently change what an external MCP client is served.
+    expect(handleAgentList).toHaveBeenCalledTimes(1);
+    expect(impostor).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('refusing to override a built-in resource type'),
+      { resourceType: 'agent_list' }
+    );
+  });
+
+  it.each([
+    ['https', 'a scheme an MCP client could mistake for a fetchable address'],
+    ['javascript', 'a scheme that is dangerous anywhere it is dereferenced'],
+    ['', 'an empty scheme'],
+    ['has space', 'a scheme that is not a valid URI scheme'],
+  ])('refuses the URI scheme %j — %s', (uriScheme) => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme,
+        handler: vi.fn(),
+      });
+    });
+
+    expect(listAppMcpResourceTypes()).toEqual([]);
+    expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('refusing to register an unusable URI scheme'),
+      expect.objectContaining({ resourceType: 'project_plan' })
+    );
+  });
+
+  it('accepts an app scheme case-insensitively but records it lowercased', () => {
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({
+        resourceType: 'project_plan',
+        uriScheme: 'Hub',
+        handler: vi.fn(),
+      });
+    });
+
+    expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise', 'hub']);
+    expect(isAllowedMcpResourceUri('HUB://projects/1')).toBe(true);
+  });
+
+  it('does not treat an unregistered scheme as allowed', () => {
+    expect(isAllowedMcpResourceUri('obsiddy://today')).toBe(false);
+    expect(isAllowedMcpResourceUri('sunrise://agents')).toBe(true);
+    expect(isAllowedMcpResourceUri('not-a-uri')).toBe(false);
+  });
+
+  it('does not resolve an inherited Object property as a handler', () => {
+    // `resourceType` comes off a DB row; a bare object lookup would answer
+    // `constructor` with something that is not a handler.
+    expect(isDispatchableMcpResourceType('constructor')).toBe(false);
+    expect(isDispatchableMcpResourceType('__proto__')).toBe(false);
+  });
+
+  it('dispatches an app handler through the parameterised-URI path too', async () => {
+    const handler = vi.fn().mockResolvedValue(makeResourceContent('hub://projects/p1/plan'));
+    vi.mocked(initAppMcpResources).mockImplementation(() => {
+      registerMcpResourceHandler({ resourceType: 'project_plan', uriScheme: 'hub', handler });
+    });
+    // No exact row → falls through to readMcpResourceByPattern.
+    vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.mcpExposedResource.findMany).mockResolvedValue([
+      makeResourceRow({ uri: 'hub://projects/{id}/plan', resourceType: 'project_plan' }),
+    ] as never);
+
+    const result = await readMcpResource('hub://projects/p1/plan', {
+      scopedAgentId: null,
+      apiKeyId: 'key-1',
+    });
+
+    expect(result).toEqual(makeResourceContent('hub://projects/p1/plan'));
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });

@@ -396,6 +396,7 @@ small and conflict-free.)
 | `lib/app/agent-fields.ts`                  | extra `AiAgent` config fields                      | the agent field registry (server + agent form)                        |
 | `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
 | `lib/app/data-export.ts`                   | app tables in a subject-access export              | `exportUserData()` (server route-handler)                             |
+| `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                      |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -623,6 +624,45 @@ To render your own brand lockup as the section header instead of the default
 uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
+
+**App-owned MCP resources — `lib/app/mcp-resources.ts`.** MCP _tools_ already had
+a seam (`lib/app/capabilities.ts`); _resources_ did not, so a read path a host
+could preload had to ship as a tool call instead. Fill in the auto-wired
+`initAppMcpResources()` with `registerMcpResourceHandler({ resourceType,
+uriScheme, handler })` calls:
+
+```ts
+// lib/app/mcp-resources.ts — yours to edit (ships empty)
+import { registerMcpResourceHandler } from '@/lib/orchestration/mcp/resource-registry';
+import { handleProjectPlan } from '@/lib/app/mcp/project-plan';
+
+export function initAppMcpResources(): void {
+  registerMcpResourceHandler({
+    resourceType: 'project_plan',
+    uriScheme: 'hub', // → hub://projects/{id}/plan
+    handler: handleProjectPlan,
+  });
+}
+```
+
+Then create the `McpExposedResource` row (a seed, or
+`POST /api/v1/admin/orchestration/mcp/resources`). Three rules worth knowing
+before you do:
+
+- **`uriScheme` is required, not defaulted.** A fork resource that silently
+  inherited `sunrise://` would advertise the starter's identity to every MCP
+  client that lists it. Pass `'sunrise'` deliberately if that is what you want.
+- **You cannot shadow a built-in `resourceType`.** Sunrise seeds rows for its own
+  types and `resourceType` is the only thing tying a row to its handler, so an
+  override would change what `sunrise://agents` returns to an external client.
+  The registration is refused and logged.
+- **The row is validated against what can actually dispatch.** Creating a
+  resource whose type has no registered handler is a 400, rather than a row that
+  returns `null` and logs "no handler for type" the first time a client reads it.
+
+The admin create form's type dropdown still lists core types only — an app type
+goes in through a seed or the API. See
+[`.context/orchestration/mcp.md`](./.context/orchestration/mcp.md).
 
 **Third-party iframes — `lib/app/csp.ts`.** `frame-src` is `'self'` in both the
 dev and prod CSP. If your app embeds a third-party iframe (an onboarding or

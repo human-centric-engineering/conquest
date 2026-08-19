@@ -18,6 +18,18 @@ release process.
 
 ### Added
 
+- **`lib/app/mcp-resources.ts` — fork-owned MCP resource handlers.** MCP *tools*
+  had a fork seam (`lib/app/capabilities.ts`); *resources* did not, so a
+  read path a host could preload had to ship as a tool call. Fill in
+  `initAppMcpResources()` with
+  `registerMcpResourceHandler({ resourceType, uriScheme, handler })` and an app
+  type flows through `resources/list|read|subscribe`, templates, caching,
+  `resources:read` scoping, `McpExposedResource` gating and audit exactly like a
+  core one. `uriScheme` is required — a fork resource silently inheriting
+  `sunrise://` would advertise the starter's identity to every MCP client that
+  lists it — and a built-in `resourceType` cannot be shadowed. Rows still
+  default to `isEnabled: false`.
+
 - **`components/app/**` and `components/framework/**` are now reserved fork
   tiers.** Sunrise creates nothing under either, so a fork's own React
   components merge cleanly on upgrade. This closes a live collision: the
@@ -56,6 +68,14 @@ release process.
   literal in the component.
 
 ### Fixed
+
+- **A parameterised MCP resource URI now matches when its `{param}` is not the
+  last path segment.** `hub://projects/{id}/plan` collapsed to
+  `hub://projects//plan` under the strip-then-`startsWith` test, which no
+  concrete URI starts with, so the read returned `null`. Every core template
+  happens to be trailing, which is why nothing noticed. The prefix test is kept
+  alongside the new exact-fill test, so every URI that resolved before still
+  resolves.
 
 - **Timers are cancelled on unmount across 19 components.** Every unmanaged
   `setTimeout` in `components/**` — one not stored in a ref that a cleanup
@@ -98,6 +118,15 @@ release process.
   to fit before flipping a repo private**, where `ubuntu-latest` is 2 vCPU / 8GB.
 
 ### Changed
+
+- **MCP resource `uri` and `resourceType` are validated against what can
+  dispatch, not against a closed enum.** `POST /api/v1/admin/orchestration/mcp/resources`
+  now rejects a URI whose scheme nothing registered and a `resourceType` with no
+  handler. This is strictly stricter than the Zod enum it replaces — that enum
+  could not see a core type whose handler had gone missing — while letting a
+  fork create `hub://projects/{id}/plan`. The Zod schema keeps a format check
+  only; membership moved to the route because `lib/validations/mcp.ts` is
+  imported by client components and the registry reaches `lib/app/`.
 
 - **Metadata no longer hardcodes the starter identity.** `app/layout.tsx`
   shipped `"${BRAND.name} - Next.js Starter"` and a description advertising "a

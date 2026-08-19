@@ -30,6 +30,13 @@ export {
   listMcpResourceTemplates,
   clearMcpResourceCache,
   isRegisteredMcpResourceUri,
+  // Fork seam (#563) — app-owned resource types + URI schemes.
+  registerMcpResourceHandler,
+  isDispatchableMcpResourceType,
+  isAllowedMcpResourceUri,
+  listAppMcpResourceTypes,
+  listAllowedMcpResourceUriSchemes,
+  type AppMcpResourceRegistration,
 } from '@/lib/orchestration/mcp/resource-registry';
 export {
   listMcpPrompts,

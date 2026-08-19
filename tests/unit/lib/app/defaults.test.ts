@@ -52,6 +52,11 @@ import { collectAppSubjectData } from '@/lib/app/data-export';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
+import {
+  listAppMcpResourceTypes,
+  listAllowedMcpResourceUriSchemes,
+  __resetAppMcpResourcesForTests,
+} from '@/lib/orchestration/mcp/resource-registry';
 
 /**
  * One row per `lib/app/*` seam.
@@ -212,6 +217,17 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     seam: 'lib/app/user-created.ts',
     risk: 'a stray hook would run on every signup on every install',
     assert: () => expect(initAppUserCreatedHooks()).toBeUndefined(),
+  },
+  {
+    seam: 'lib/app/mcp-resources.ts',
+    risk: 'a stray handler would expose app data over MCP to every install\u2019s connected clients',
+    assert: () => {
+      __resetAppMcpResourcesForTests();
+      // Both readers trigger the lazy init, so this exercises the REAL seam.
+      expect(listAppMcpResourceTypes()).toEqual([]);
+      // Core's own scheme, and nothing else.
+      expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+    },
   },
   {
     seam: 'lib/app/csp.ts',
