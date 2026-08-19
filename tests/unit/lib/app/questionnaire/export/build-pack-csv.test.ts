@@ -12,11 +12,24 @@
 import { describe, it, expect } from 'vitest';
 
 import { buildPackCsv } from '@/lib/app/questionnaire/export/build-pack-csv';
-import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
+import type {
+  PackModel,
+  PackScopeEvaluation,
+} from '@/lib/app/questionnaire/export/build-pack-model';
 import type {
   InstrumentQuestion,
   InstrumentSection,
 } from '@/lib/app/questionnaire/export/build-instrument-model';
+
+/** The empty scope-evaluation state — reused by every adaptive-scope fixture that isn't testing
+ *  the evaluation blocks themselves. */
+const EMPTY_SCOPE_EVALUATION: PackScopeEvaluation = {
+  hasRun: false,
+  runAt: null,
+  totalFindings: 0,
+  scores: [],
+  targets: [],
+};
 
 function question(over: Partial<InstrumentQuestion> = {}): InstrumentQuestion {
   return {
@@ -430,6 +443,7 @@ describe('buildPackCsv', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: true,
             sessionBudgetSeconds: 600,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
@@ -461,11 +475,80 @@ describe('buildPackCsv', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: false,
             sessionBudgetSeconds: 0,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
       expect(csv).toContain('Enabled,no');
       expect(csv).toContain('no limit set');
+    });
+  });
+
+  describe('scope evaluation blocks', () => {
+    const baseScope = {
+      enabled: true,
+      alwaysAskedTopics: [],
+      conditionalTopics: [],
+      rules: [],
+      maxConditionalTopics: 3,
+      includeCheckTopic: false,
+      sessionBudgetSeconds: 0,
+    };
+
+    it('renders header-only score/finding blocks when the version has never been scope-evaluated', () => {
+      const csv = buildPackCsv(
+        model({ adaptiveScope: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
+      );
+      expect(csv).toContain('# Scope evaluation judge scores');
+      expect(csv).toContain('# Scope evaluation findings');
+      expect(csv).toContain(
+        'dimension,judge,score,diagnostic,finding_count\r\n\r\n# Scope evaluation findings'
+      );
+    });
+
+    it('renders one row per (target, judge) pair, repeating the target text down the rows', () => {
+      const evaluation: PackScopeEvaluation = {
+        hasRun: true,
+        runAt: '2026-08-10T00:00:05.000Z',
+        totalFindings: 1,
+        scores: [
+          {
+            dimension: 'criteria_quality',
+            label: 'Criteria-Quality Judge',
+            score: 0.7,
+            diagnostic: null,
+            findingCount: 1,
+          },
+        ],
+        targets: [
+          {
+            key: 'talent',
+            kind: 'topic',
+            label: 'Talent & culture',
+            removed: false,
+            counts: { major: 1, minor: 0, info: 0, total: 1 },
+            judges: [
+              {
+                dimension: 'criteria_quality',
+                label: 'Criteria-Quality Judge',
+                severity: 'major',
+                status: 'pending',
+                proposedChange: 'Make the criteria more specific',
+                rationale: 'Too broad to reliably trigger this topic',
+                sourceQuote: null,
+                proposedEditSummary: 'Rewrite the topic’s criteria',
+              },
+            ],
+          },
+        ],
+      };
+      const csv = buildPackCsv(model({ adaptiveScope: { ...baseScope, evaluation } }));
+      expect(csv).toContain(
+        'target_key,target_kind,target,target_removed,dimension,judge,severity,status,proposed_change,rationale,proposed_edit,source_quote'
+      );
+      expect(csv).toContain(
+        'talent,topic,Talent & culture,no,criteria_quality,Criteria-Quality Judge,major,pending,Make the criteria more specific,Too broad to reliably trigger this topic,Rewrite the topic’s criteria,'
+      );
     });
   });
 });

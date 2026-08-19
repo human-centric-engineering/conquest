@@ -28,9 +28,11 @@ import { prisma } from '@/lib/db/client';
 import {
   SCOPE_EVALUATION_DIMENSIONS,
   SCOPE_EVALUATION_DIMENSION_SPECS,
-  runScopeEvaluationPanel,
   type ScopeEvaluationDimension,
 } from '@/lib/app/questionnaire/scope-evaluation';
+// Imported from its own leaf, not the barrel above — see that barrel's comment on why
+// `run-panel.ts` (it imports the capability dispatcher → Prisma) is never re-exported there.
+import { runScopeEvaluationPanel } from '@/lib/app/questionnaire/scope-evaluation/run-panel';
 import { buildScopeEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-structure';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { scopeEvaluationLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';

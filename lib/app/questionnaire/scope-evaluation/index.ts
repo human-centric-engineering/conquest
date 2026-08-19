@@ -55,13 +55,13 @@ export {
   scopeStructureSchema,
 } from '@/lib/app/questionnaire/scope-evaluation/structure-schema';
 
-export {
-  runScopeEvaluationPanel,
-  type ScopeDimensionResult,
-  type ScopeEvaluationPanelSummary,
-  type ScopeEvaluationPanelResult,
-  type ScopeJudgeAgentRef,
-} from '@/lib/app/questionnaire/scope-evaluation/run-panel';
+// `run-panel.ts` is NOT re-exported here, unlike every other leaf module — it imports the
+// capability dispatcher, which imports Prisma. A client component importing anything from this
+// barrel (e.g. `scope-evaluation-card.tsx` for `SCOPE_EVALUATION_DIMENSION_SPECS`) would pull the
+// whole `pg` driver into the browser bundle. Server-side callers (the evaluate-preview and
+// evaluations routes) import `runScopeEvaluationPanel` directly from
+// `@/lib/app/questionnaire/scope-evaluation/run-panel` — mirrors `evaluation/index.ts`'s identical
+// omission of its own `run-panel.ts`.
 
 export {
   scopeReviewFindingSchema,
@@ -76,3 +76,5 @@ export {
   type ScopeFindingGroup,
   type ScopeSeverityCounts,
 } from '@/lib/app/questionnaire/scope-evaluation/group-findings';
+
+export { describeScopeProposedEdit } from '@/lib/app/questionnaire/scope-evaluation/describe-op';

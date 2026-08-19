@@ -24,7 +24,10 @@ import { createRateLimitResponse } from '@/lib/security/rate-limit';
 import { loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
 import { scopeEvaluationApplyLimiter } from '@/app/api/v1/app/questionnaires/_lib/rate-limit';
 import { buildScopeEvaluationStructure } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-structure';
-import { applyScopeFinding } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-apply';
+import {
+  applyScopeFinding,
+  findRunReviewDraft,
+} from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-apply';
 import {
   buildScopedScopeFindingView,
   loadScopedScopeFinding,
@@ -54,7 +57,14 @@ const handleApply = withAdminAuth<Params>(async (request, session, { params }) =
     return errorResponse('Finding already applied', { code: 'CONFLICT', status: 409 });
   }
 
-  const current = await buildScopeEvaluationStructure(id, vid);
+  // Build `current` against the version this apply will actually write to, NOT unconditionally
+  // against `vid`: once this run's first apply has forked a launched version, every later apply
+  // from the same run reuses that draft (see `findRunReviewDraft`) — `vid` itself is never
+  // touched again. Reading `current` from `vid` there would compare staleness against a version
+  // nothing ever edits, blinding the check to a second finding overwriting the first finding's
+  // already-applied edit on the same topic/rule.
+  const reuseDraft = await findRunReviewDraft(runId, scopedVersion.questionnaireId);
+  const current = await buildScopeEvaluationStructure(id, reuseDraft?.id ?? vid);
   if (!current) throw new NotFoundError('Questionnaire version not found');
 
   const outcome = await applyScopeFinding({

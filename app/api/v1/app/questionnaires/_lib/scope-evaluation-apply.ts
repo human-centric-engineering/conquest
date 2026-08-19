@@ -19,6 +19,8 @@
  * `scope-evaluation-staleness.ts`; this file is the I/O.
  */
 
+import type { Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import type {
@@ -35,6 +37,8 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { deriveScopeFindingState } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-staleness';
 
+type DbClient = Prisma.TransactionClient;
+
 /** The finding fields the apply engine needs (a row subset). */
 export interface ApplyScopeFindingRow {
   id: string;
@@ -47,8 +51,12 @@ export interface ApplyScopeFindingRow {
  * Find the draft this run is already editing, if any — the same fork-lineage convergence
  * `findRunReviewDraft` gives the design-evaluation panel: repeated applies from one run land on
  * ONE draft rather than re-forking the launched original each time.
+ *
+ * Exported so the apply route can resolve the correct version to build `current` against
+ * *before* calling {@link applyScopeFinding} — see that function's doc for why the route can't
+ * just use its own `vid`.
  */
-async function findRunReviewDraft(
+export async function findRunReviewDraft(
   runId: string,
   questionnaireId: string
 ): Promise<{ id: string; versionNumber: number } | null> {
@@ -121,6 +129,14 @@ async function validateScopeOpAgainst(
  * version and loaded the run's `snapshot` + the live `current` structure (for the apply-time
  * staleness re-check). Returns a discriminated outcome — never throws for an expected
  * unapplicable case.
+ *
+ * **`current` MUST be built against the version this apply will actually write to** — the run's
+ * existing review draft (via {@link findRunReviewDraft}) when one exists, the route's own `vid`
+ * only when it doesn't. Building it from `vid` unconditionally would compare the staleness check
+ * against the never-touched original every time a launched version has already been forked,
+ * silently blinding it to an earlier finding from the SAME run that already edited the draft —
+ * a second finding on the same topic/rule would then overwrite the first with no staleness
+ * signal. The route resolves this before calling in; see its own comment at the call site.
  */
 export async function applyScopeFinding(args: {
   finding: ApplyScopeFindingRow;
@@ -166,26 +182,26 @@ export async function applyScopeFinding(args: {
     editVersionNumber = fork.versionNumber;
   }
 
-  // 4. Execute the op + stamp the finding applied. Topic writes are a single-row update (outside
-  //    the settings blob); every other op goes through `patchAdaptiveScopeSettings`'s
-  //    read-narrow-merge-write, which is already transactional at the row level. The finding stamp
-  //    is written in its own follow-up write — acceptable here (unlike the question-structure apply,
-  //    which pairs a raw `tx.appQuestionSlot.update` with the finding stamp in one transaction)
-  //    because `patchAdaptiveScopeSettings` itself has no partial-failure window a second write
-  //    could observe: it is one upsert, not a multi-statement mutation.
-  const written = await writeScopeOp(editVersionId, op, finding.targetKey);
-  if (written) return { status: 'unapplicable', reason: written };
-
-  await prisma.appQuestionnaireScopeEvaluationFinding.update({
-    where: { id: finding.id },
-    data: {
-      status: 'applied',
-      appliedAt: new Date(),
-      appliedToVersionId: editVersionId,
-      decidedByUserId: audit.userId,
-      decidedAt: new Date(),
-    },
+  // 4. Execute the op + stamp the finding applied, in one transaction — mirrors
+  //    `evaluation-apply.ts`'s posture exactly, so a crash or client retry between the two writes
+  //    can never leave a non-idempotent op (`add_rule` appends unconditionally) applied twice
+  //    while the finding still reads as pending.
+  let written: UnapplicableScopeReason | null = null;
+  await prisma.$transaction(async (tx) => {
+    written = await writeScopeOp(tx, editVersionId, op, finding.targetKey);
+    if (written) return;
+    await tx.appQuestionnaireScopeEvaluationFinding.update({
+      where: { id: finding.id },
+      data: {
+        status: 'applied',
+        appliedAt: new Date(),
+        appliedToVersionId: editVersionId,
+        decidedByUserId: audit.userId,
+        decidedAt: new Date(),
+      },
+    });
   });
+  if (written) return { status: 'unapplicable', reason: written };
 
   logAdminAction({
     userId: audit.userId,
@@ -212,9 +228,12 @@ export async function applyScopeFinding(args: {
 /**
  * Write one validated op to the editable version. Returns an {@link UnapplicableScopeReason} when
  * the write can't proceed (a race removed the target between validation and write), or `null` on
- * success.
+ * success. `tx` is the transaction client the caller opened around this write + the finding stamp
+ * (see {@link applyScopeFinding}) — every Prisma call in here MUST go through it, never the bare
+ * `prisma` singleton, or it would run outside the transaction and defeat the point of opening one.
  */
 async function writeScopeOp(
+  tx: DbClient,
   editVersionId: string,
   op: ScopeProposedEdit,
   targetKey: string
@@ -224,9 +243,14 @@ async function writeScopeOp(
     case 'edit_topic_depth': {
       const key = targetKey.slice(TOPIC_PREFIX.length);
       try {
-        await prisma.appQuestionnaireTopic.update({
+        await tx.appQuestionnaireTopic.update({
           where: { versionId_key: { versionId: editVersionId, key } },
-          data: op.op === 'edit_topic_criteria' ? { criteria: op.criteria } : { depth: op.depth },
+          // `source: 'manual'` — same rule `replaceTopics` follows: once an admin-approved apply
+          // has touched this topic, calling it an untouched auto-seed would be a lie.
+          data:
+            op.op === 'edit_topic_criteria'
+              ? { criteria: op.criteria, source: 'manual' }
+              : { depth: op.depth, source: 'manual' },
         });
       } catch (err) {
         logger.error('apply_scope_finding: topic write failed', {
@@ -240,26 +264,30 @@ async function writeScopeOp(
     }
 
     case 'add_rule': {
-      const settings = await loadAdaptiveScopeSettings(editVersionId);
-      await patchAdaptiveScopeSettings(editVersionId, {
-        rules: [
-          ...settings.rules,
-          {
-            dataSlotKey: op.dataSlotKey,
-            operator: op.operator,
-            value: op.value,
-            action: op.action,
-            topicKey: op.topicKey,
-          },
-        ],
-      });
+      const settings = await loadAdaptiveScopeSettings(editVersionId, tx);
+      await patchAdaptiveScopeSettings(
+        editVersionId,
+        {
+          rules: [
+            ...settings.rules,
+            {
+              dataSlotKey: op.dataSlotKey,
+              operator: op.operator,
+              value: op.value,
+              action: op.action,
+              topicKey: op.topicKey,
+            },
+          ],
+        },
+        tx
+      );
       return null;
     }
 
     case 'edit_rule':
     case 'delete_rule': {
       const id = targetKey.slice(RULE_PREFIX.length);
-      const settings = await loadAdaptiveScopeSettings(editVersionId);
+      const settings = await loadAdaptiveScopeSettings(editVersionId, tx);
       const exists = settings.rules.some((r) => r.id === id);
       if (!exists) return 'target_gone';
       const rules =
@@ -277,36 +305,44 @@ async function writeScopeOp(
                   }
                 : r
             );
-      await patchAdaptiveScopeSettings(editVersionId, { rules });
+      await patchAdaptiveScopeSettings(editVersionId, { rules }, tx);
       return null;
     }
 
     case 'adjust_budget': {
-      await patchAdaptiveScopeSettings(editVersionId, {
-        ...(op.sessionBudgetSeconds !== undefined
-          ? { sessionBudgetSeconds: op.sessionBudgetSeconds }
-          : {}),
-        ...(op.maxOpeningProbes !== undefined ? { maxOpeningProbes: op.maxOpeningProbes } : {}),
-        ...(op.maxConditionalTopics !== undefined
-          ? { maxConditionalTopics: op.maxConditionalTopics }
-          : {}),
-      });
+      await patchAdaptiveScopeSettings(
+        editVersionId,
+        {
+          ...(op.sessionBudgetSeconds !== undefined
+            ? { sessionBudgetSeconds: op.sessionBudgetSeconds }
+            : {}),
+          ...(op.maxOpeningProbes !== undefined ? { maxOpeningProbes: op.maxOpeningProbes } : {}),
+          ...(op.maxConditionalTopics !== undefined
+            ? { maxConditionalTopics: op.maxConditionalTopics }
+            : {}),
+        },
+        tx
+      );
       return null;
     }
 
     case 'edit_planner_instructions': {
-      await patchAdaptiveScopeSettings(editVersionId, {
-        plannerInstructions: op.plannerInstructions,
-      });
+      await patchAdaptiveScopeSettings(
+        editVersionId,
+        { plannerInstructions: op.plannerInstructions },
+        tx
+      );
       return null;
     }
 
     case 'add_fallback_topic': {
-      const settings = await loadAdaptiveScopeSettings(editVersionId);
+      const settings = await loadAdaptiveScopeSettings(editVersionId, tx);
       if (settings.fallbackTopicKeys.includes(op.topicKey)) return null; // already there
-      await patchAdaptiveScopeSettings(editVersionId, {
-        fallbackTopicKeys: [...settings.fallbackTopicKeys, op.topicKey],
-      });
+      await patchAdaptiveScopeSettings(
+        editVersionId,
+        { fallbackTopicKeys: [...settings.fallbackTopicKeys, op.topicKey] },
+        tx
+      );
       return null;
     }
   }

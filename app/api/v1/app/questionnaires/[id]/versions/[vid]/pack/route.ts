@@ -7,14 +7,16 @@
  *   title/version/goals, the question structure, the data slots (with linked questions), the
  *   definitions/glossary, the experience-setup summary, (opt-in) the latest F5.1–F5.3
  *   design-evaluation run's judge findings, and (opt-in) the Adaptive Scope routing logic (topics,
- *   criteria, hard rules) in plain language — as a PDF, CSV, or Markdown file. Each of the seven
- *   sections can be toggled off via its query flag; all default `true` except `evaluations` and
- *   `adaptiveScope`, which default `false` (unreviewed AI critique, and routing design a stakeholder
- *   pack doesn't always need — the admin opts in per download). `setupTechnical` (also `false` by
- *   default) widens the setup summary from the standard tier to every setting, including numeric
- *   tuning and cost/abuse thresholds — see `lib/app/questionnaire/settings-registry.ts`. Distinct
- *   from the brand-free `…/instrument` export (F14.9), which is the design-time reviewer copy of
- *   just the questions — this is the external/showcase artifact.
+ *   criteria, hard rules) in plain language — carrying the latest F17.21 scope-evaluation judge
+ *   panel's verdict on that routing design nested inside it — as a PDF, CSV, or Markdown file. Each
+ *   of the seven top-level sections can be toggled off via its query flag; all default `true` except
+ *   `evaluations` and `adaptiveScope`, which default `false` (unreviewed AI critique, and routing
+ *   design a stakeholder pack doesn't always need — the admin opts in per download). `setupTechnical`
+ *   (also `false` by default) widens the setup summary from the standard tier to every setting,
+ *   including numeric tuning and cost/abuse thresholds — see
+ *   `lib/app/questionnaire/settings-registry.ts`. Distinct from the brand-free `…/instrument` export
+ *   (F14.9), which is the design-time reviewer copy of just the questions — this is the
+ *   external/showcase artifact.
  *
  * Node runtime — `@react-pdf/renderer` needs Node. Bulk read: the same `exportLimiter` sub-cap the
  * instrument/definition routes use. Version-scoped.
@@ -38,6 +40,7 @@ import { loadAcceptedGlossaryEntries } from '@/lib/app/questionnaire/glossary/re
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
+import { loadLatestScopeEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes';
 import {
   loadAdaptiveScopeSettings,
   loadTopics,
@@ -116,16 +119,24 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     }
     const glossary = glossaryEntries ? buildGlossaryAppendix(glossaryEntries) : null;
 
-    // The latest design-evaluation run (F5.1–F5.3) and Adaptive Scope's topics + settings
-    // (F17.19 Phase 4) — both `null` when their section is excluded (the common case, since both
-    // default off) or, for evaluations, when the version has never been evaluated. Independent of
-    // each other, so they load in parallel rather than serially when an admin opts into both.
+    // The latest design-evaluation run (F5.1–F5.3) and Adaptive Scope's topics + settings + latest
+    // F17.21 scope-evaluation run — both top-level entries `null` when their section is excluded
+    // (the common case, since both default off) or, for evaluations, when the version has never
+    // been evaluated. Independent of each other, so they load in parallel rather than serially
+    // when an admin opts into both; the scope-evaluation run rides along with the topics/settings
+    // load since it only matters when `adaptiveScope` is included.
     const [evaluationRun, adaptiveScopeSource] = await Promise.all([
       evaluations ? loadLatestEvaluationRun(vid) : Promise.resolve(null),
       adaptiveScope
-        ? Promise.all([loadTopics(vid), loadAdaptiveScopeSettings(vid)]).then(
-            ([topics, settings]) => ({ topics, settings })
-          )
+        ? Promise.all([
+            loadTopics(vid),
+            loadAdaptiveScopeSettings(vid),
+            loadLatestScopeEvaluationRun(vid),
+          ]).then(([topics, settings, scopeEvaluationRun]) => ({
+            topics,
+            settings,
+            scopeEvaluationRun,
+          }))
         : Promise.resolve(null),
     ]);
 

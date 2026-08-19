@@ -8,7 +8,9 @@
  * it's the external/showcase artifact, not the design-time reviewer copy. Renders whichever of
  * meta / experience-setup / data-slots / questions / definitions / evaluations / adaptive scope the
  * model includes (`null` fields are simply skipped). Evaluations and adaptive scope render last,
- * right before the closing page — the appendix position.
+ * right before the closing page — the appendix position. The F17.21 scope-evaluation judge panel's
+ * verdict renders as the last subsection of adaptive scope, after the hard rules — a judgement about
+ * the routing design above it, not a section of its own.
  *
  * No font is registered — `@react-pdf/renderer` ships Helvetica by default and no other document in
  * this app registers a custom font, so the wordmark is approximated with Helvetica-Bold + the brand
@@ -326,6 +328,12 @@ const styles = StyleSheet.create({
     fontSize: 9,
     marginTop: 3,
     marginLeft: 8,
+  },
+  scopeEvaluationEdit: {
+    fontSize: 8,
+    color: COLORS.muted,
+    marginTop: 1,
+    fontFamily: 'Helvetica-Oblique',
   },
   closingHeading: {
     fontSize: 15,
@@ -677,6 +685,62 @@ export function PackPdfDocument({ model }: PackPdfDocumentProps) {
                     {model.adaptiveScope.rules.map((rule, i) => (
                       <Text key={i} style={styles.scopeRule}>{`•  ${rule.sentence}`}</Text>
                     ))}
+                  </>
+                )}
+
+                <Text style={styles.scopeSubheading}>Scope evaluation</Text>
+                <Text style={styles.evaluationIntro}>
+                  AI judge panel over the routing design above — includes findings not yet reviewed;
+                  treat as suggestions, not conclusions.
+                </Text>
+                {!model.adaptiveScope.evaluation.hasRun ? (
+                  <Text style={styles.empty}>
+                    No scope evaluation has been run for this version yet.
+                  </Text>
+                ) : (
+                  <>
+                    {model.adaptiveScope.evaluation.scores.map((judge) => (
+                      <Text key={judge.dimension} style={styles.evaluationScore}>
+                        {judge.diagnostic
+                          ? `${judge.label} — unavailable: ${judge.diagnostic}`
+                          : `${judge.label} — ${judge.score !== null ? `${Math.round(judge.score * 100)}%` : 'n/a'} · ${judge.findingCount} finding(s)`}
+                      </Text>
+                    ))}
+
+                    {model.adaptiveScope.evaluation.targets.length === 0 ? (
+                      <Text style={styles.empty}>No findings raised.</Text>
+                    ) : (
+                      model.adaptiveScope.evaluation.targets.map((target) => (
+                        <View key={target.key} style={styles.evaluationTarget}>
+                          <Text style={styles.evaluationTargetLabel}>{target.label}</Text>
+                          <Text style={styles.evaluationTargetMeta}>
+                            {[
+                              `${target.judges.length} finding(s)`,
+                              target.counts.major > 0 ? `${target.counts.major} major` : null,
+                              target.removed ? 'no longer in the scope config' : null,
+                            ]
+                              .filter(Boolean)
+                              .join('  ·  ')}
+                          </Text>
+                          {target.judges.map((judge, i) => (
+                            <View key={i} style={styles.evaluationFinding} wrap={false}>
+                              <Text
+                                style={styles.evaluationFindingHeader}
+                              >{`${judge.label}  [${judge.severity} · ${judge.status}]`}</Text>
+                              <Text style={styles.evaluationFindingBody}>
+                                {judge.proposedChange}
+                              </Text>
+                              <Text style={styles.evaluationFindingBody}>{judge.rationale}</Text>
+                              {judge.proposedEditSummary && (
+                                <Text style={styles.scopeEvaluationEdit}>
+                                  {`Proposed edit: ${judge.proposedEditSummary}`}
+                                </Text>
+                              )}
+                            </View>
+                          ))}
+                        </View>
+                      ))
+                    )}
                   </>
                 )}
               </>

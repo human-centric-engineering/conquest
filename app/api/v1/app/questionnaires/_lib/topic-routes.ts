@@ -7,6 +7,8 @@
  * the same way.
  */
 
+import type { Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
@@ -76,9 +78,19 @@ export async function loadTopics(versionId: string): Promise<Topic[]> {
   return rows.map(toTopic);
 }
 
+/**
+ * The Prisma surface these two settings helpers need — satisfied by both the global client and a
+ * transaction client, so a caller can run a read-modify-write inside its own transaction (e.g.
+ * the scope-evaluation apply engine writes a settings op + stamps the finding applied atomically).
+ */
+type DbClient = Prisma.TransactionClient;
+
 /** A version's resolved Adaptive Scope settings — defaults when no config row exists. */
-export async function loadAdaptiveScopeSettings(versionId: string): Promise<AdaptiveScopeSettings> {
-  const config = await prisma.appQuestionnaireConfig.findUnique({
+export async function loadAdaptiveScopeSettings(
+  versionId: string,
+  client: DbClient = prisma
+): Promise<AdaptiveScopeSettings> {
+  const config = await client.appQuestionnaireConfig.findUnique({
     where: { versionId },
     select: { adaptiveScope: true },
   });
@@ -149,9 +161,10 @@ export async function replaceTopics(versionId: string, topics: TopicInput[]): Pr
  */
 export async function patchAdaptiveScopeSettings(
   versionId: string,
-  patch: AdaptiveScopeSettingsPatch
+  patch: AdaptiveScopeSettingsPatch,
+  client: DbClient = prisma
 ): Promise<AdaptiveScopeSettings> {
-  const current = await loadAdaptiveScopeSettings(versionId);
+  const current = await loadAdaptiveScopeSettings(versionId, client);
 
   const rules: ScopeRule[] = (patch.rules ?? current.rules).map((r, i) => ({
     id: 'id' in r && typeof r.id === 'string' && r.id.length > 0 ? r.id : `rule-${i}`,
@@ -165,7 +178,7 @@ export async function patchAdaptiveScopeSettings(
 
   const merged: AdaptiveScopeSettings = { ...current, ...patch, rules };
 
-  await prisma.appQuestionnaireConfig.upsert({
+  await client.appQuestionnaireConfig.upsert({
     where: { versionId },
     update: { adaptiveScope: jsonInput(merged) },
     create: { versionId, adaptiveScope: jsonInput(merged) },

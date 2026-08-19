@@ -26,6 +26,7 @@ import { API } from '@/lib/api/endpoints';
 import { parseApiResponse } from '@/lib/api/parse-response';
 import {
   SCOPE_EVALUATION_DIMENSION_SPECS,
+  describeScopeProposedEdit,
   type ScopeProposedEdit,
 } from '@/lib/app/questionnaire/scope-evaluation';
 import type { ScopeEvaluationFindingView } from '@/lib/app/questionnaire/views';
@@ -52,34 +53,6 @@ interface Props {
   runId: string;
   canApply: boolean;
   onUpdate: (next: ScopeEvaluationFindingView, meta?: ApplyMeta) => void;
-}
-
-/** A one-line, human description of what a structured op will do when applied. */
-function describeScopeOp(op: ScopeProposedEdit): string {
-  switch (op.op) {
-    case 'edit_topic_criteria':
-      return 'Rewrite the topic’s criteria';
-    case 'edit_topic_depth':
-      return `Change depth → ${op.depth}`;
-    case 'add_rule':
-      return `Add a rule: ${op.action} “${op.topicKey}” when “${op.dataSlotKey}” ${op.operator}${op.value ? ` “${op.value}”` : ''}`;
-    case 'edit_rule':
-      return `Rewrite this rule: ${op.action} “${op.topicKey}” when “${op.dataSlotKey}” ${op.operator}${op.value ? ` “${op.value}”` : ''}`;
-    case 'delete_rule':
-      return 'Delete this rule';
-    case 'adjust_budget': {
-      const parts: string[] = [];
-      if (op.sessionBudgetSeconds !== undefined) parts.push(`budget → ${op.sessionBudgetSeconds}s`);
-      if (op.maxOpeningProbes !== undefined) parts.push(`opening probes → ${op.maxOpeningProbes}`);
-      if (op.maxConditionalTopics !== undefined)
-        parts.push(`topic cap → ${op.maxConditionalTopics}`);
-      return parts.join(', ') || 'Adjust the budget';
-    }
-    case 'edit_planner_instructions':
-      return 'Replace the planner instructions';
-    case 'add_fallback_topic':
-      return `Add “${op.topicKey}” to the fallback set`;
-  }
 }
 
 /** Ops the inline form can edit — the two free-text fields. Others are apply-as-proposed. */
@@ -254,7 +227,7 @@ export function ScopeFindingReviewCard({
         {op && (
           <LabelledField label="Edit">
             <p className="text-xs">
-              <span className="font-medium">{describeScopeOp(op)}</span>
+              <span className="font-medium">{describeScopeProposedEdit(op)}</span>
               {finding.editedOverride && <span className="text-muted-foreground"> · edited</span>}
             </p>
           </LabelledField>
@@ -337,7 +310,7 @@ export function ScopeFindingReviewCard({
                       </Tip>
                     )}
                     <Tip
-                      label={`Changes the config now — ${describeScopeOp(op).toLowerCase()}. A launched version is forked to a new draft first.`}
+                      label={`Changes the config now — ${describeScopeProposedEdit(op).toLowerCase()}. A launched version is forked to a new draft first.`}
                     >
                       <Button
                         size="sm"

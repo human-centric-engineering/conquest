@@ -12,11 +12,24 @@ import { describe, it, expect } from 'vitest';
 
 import { buildPackMarkdown } from '@/lib/app/questionnaire/export/build-pack-markdown';
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
-import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
+import type {
+  PackModel,
+  PackScopeEvaluation,
+} from '@/lib/app/questionnaire/export/build-pack-model';
 import type {
   InstrumentQuestion,
   InstrumentSection,
 } from '@/lib/app/questionnaire/export/build-instrument-model';
+
+/** The empty scope-evaluation state — reused by every adaptive-scope fixture that isn't testing
+ *  the evaluation block itself. */
+const EMPTY_SCOPE_EVALUATION: PackScopeEvaluation = {
+  hasRun: false,
+  runAt: null,
+  totalFindings: 0,
+  scores: [],
+  targets: [],
+};
 
 function question(over: Partial<InstrumentQuestion> = {}): InstrumentQuestion {
   return {
@@ -579,6 +592,7 @@ describe('buildPackMarkdown', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: true,
             sessionBudgetSeconds: 0,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
@@ -627,6 +641,7 @@ describe('buildPackMarkdown', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: true,
             sessionBudgetSeconds: 600,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
@@ -656,6 +671,7 @@ describe('buildPackMarkdown', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: false,
             sessionBudgetSeconds: 0,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
@@ -672,6 +688,7 @@ describe('buildPackMarkdown', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: false,
             sessionBudgetSeconds: 0,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
@@ -689,6 +706,7 @@ describe('buildPackMarkdown', () => {
             maxConditionalTopics: 3,
             includeCheckTopic: false,
             sessionBudgetSeconds: 0,
+            evaluation: EMPTY_SCOPE_EVALUATION,
           },
         })
       );
@@ -696,6 +714,80 @@ describe('buildPackMarkdown', () => {
       expect(md).toContain('### Asked when it fits');
       // Both sections render the same empty-state text.
       expect(md.match(/_None defined\._/g)).toHaveLength(2);
+    });
+  });
+
+  describe('scope evaluation subsection', () => {
+    const baseScope = {
+      enabled: true,
+      alwaysAskedTopics: [],
+      conditionalTopics: [],
+      rules: [],
+      maxConditionalTopics: 3,
+      includeCheckTopic: false,
+      sessionBudgetSeconds: 0,
+    };
+
+    it('renders the "no run yet" fallback under its own heading when hasRun is false', () => {
+      const md = buildPackMarkdown(
+        model({ adaptiveScope: { ...baseScope, evaluation: EMPTY_SCOPE_EVALUATION } })
+      );
+      expect(md).toContain('### Scope evaluation');
+      expect(md).toContain('_No scope evaluation has been run for this version yet._');
+    });
+
+    it('renders the judge scoreboard and one finding grouped under its target', () => {
+      const evaluation: PackScopeEvaluation = {
+        hasRun: true,
+        runAt: '2026-08-10T00:00:05.000Z',
+        totalFindings: 1,
+        scores: [
+          {
+            dimension: 'criteria_quality',
+            label: 'Criteria-Quality Judge',
+            score: 0.7,
+            diagnostic: null,
+            findingCount: 1,
+          },
+          {
+            dimension: 'budget_realism',
+            label: 'Budget-Realism Judge',
+            score: null,
+            diagnostic: 'judge_error',
+            findingCount: 0,
+          },
+        ],
+        targets: [
+          {
+            key: 'talent',
+            kind: 'topic',
+            label: 'Talent & culture',
+            removed: false,
+            counts: { major: 1, minor: 0, info: 0, total: 1 },
+            judges: [
+              {
+                dimension: 'criteria_quality',
+                label: 'Criteria-Quality Judge',
+                severity: 'major',
+                status: 'pending',
+                proposedChange: 'Make the criteria more specific',
+                rationale: 'Too broad to reliably trigger this topic',
+                sourceQuote: null,
+                proposedEditSummary: 'Rewrite the topic’s criteria',
+              },
+            ],
+          },
+        ],
+      };
+      const md = buildPackMarkdown(model({ adaptiveScope: { ...baseScope, evaluation } }));
+      expect(md).toContain('### Scope evaluation');
+      expect(md).toContain('Criteria-Quality Judge');
+      expect(md).toContain('70%');
+      expect(md).toContain('Budget-Realism Judge');
+      expect(md).toContain('unavailable (judge_error)');
+      expect(md).toContain('#### Talent & culture');
+      expect(md).toContain('Make the criteria more specific');
+      expect(md).toContain('Proposed edit: Rewrite the topic’s criteria');
     });
   });
 });

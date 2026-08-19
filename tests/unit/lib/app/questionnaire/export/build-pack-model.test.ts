@@ -27,6 +27,7 @@ import type {
   SectionView,
   QuestionSlotView,
   EvaluationRunDetail,
+  ScopeEvaluationRunDetail,
 } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
@@ -296,6 +297,73 @@ const SCOPE_SETTINGS: AdaptiveScopeSettings = {
       action: 'include',
       topicKey: 'deleted-topic',
       ordinal: 2,
+    },
+  ],
+};
+
+const SCOPE_EVALUATION_RUN: ScopeEvaluationRunDetail = {
+  id: 'scope-run1',
+  versionId: 'v1',
+  questionnaireId: 'q1',
+  status: 'partial',
+  dimensionsRequested: 4,
+  dimensionsRun: 3,
+  dimensionsFailed: 1,
+  totalFindings: 2,
+  dimensionSummary: [
+    { dimension: 'criteria_quality', score: 0.7, findingCount: 1, diagnostic: null },
+    { dimension: 'budget_realism', score: null, findingCount: 0, diagnostic: 'judge_error' },
+  ],
+  triggeredByUserId: 'admin-1',
+  error: null,
+  startedAt: '2026-08-10T00:00:00.000Z',
+  completedAt: '2026-08-10T00:00:05.000Z',
+  createdAt: '2026-08-10T00:00:00.000Z',
+  findings: [
+    {
+      id: 'sf1',
+      dimension: 'criteria_quality',
+      ordinal: 0,
+      targetKey: 'topic:talent',
+      target: { kind: 'topic', key: 'talent', label: 'Talent & culture', removed: false },
+      severity: 'major',
+      proposedChange: 'Make the criteria more specific and observable',
+      rationale: 'The current wording is too broad to reliably trigger this topic',
+      sourceQuote: null,
+      status: 'pending',
+      proposedEdit: {
+        op: 'edit_topic_criteria',
+        criteria: 'The respondent names a specific hiring or attrition problem.',
+      },
+      editedOverride: null,
+      decidedByUserId: null,
+      decidedAt: null,
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'apply',
+    },
+    // A second, prose-only finding on the same target — exercises `judgeCount`/grouping and the
+    // `proposedEditSummary: null` branch for a finding with no structured op.
+    {
+      id: 'sf2',
+      dimension: 'criteria_quality',
+      ordinal: 1,
+      targetKey: 'topic:talent',
+      target: { kind: 'topic', key: 'talent', label: 'Talent & culture', removed: false },
+      severity: 'minor',
+      proposedChange: 'Consider splitting this into two narrower topics',
+      rationale: 'It currently covers both hiring and retention concerns',
+      sourceQuote: null,
+      status: 'declined',
+      proposedEdit: null,
+      editedOverride: null,
+      decidedByUserId: 'admin-1',
+      decidedAt: '2026-08-10T00:01:00.000Z',
+      appliedAt: null,
+      appliedToVersionId: null,
+      stale: false,
+      applicable: 'manual',
     },
   ],
 };
@@ -844,7 +912,7 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
         'now'
       );
@@ -872,7 +940,7 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -891,7 +959,11 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: { ...SCOPE_SETTINGS, enabled: false } },
+        {
+          topics: SCOPE_TOPICS,
+          settings: { ...SCOPE_SETTINGS, enabled: false },
+          scopeEvaluationRun: null,
+        },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -907,7 +979,7 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -925,7 +997,7 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -942,7 +1014,7 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -961,7 +1033,7 @@ describe('buildPackModel', () => {
         DATA_SLOTS,
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -977,7 +1049,7 @@ describe('buildPackModel', () => {
         DATA_SLOTS,
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -993,7 +1065,7 @@ describe('buildPackModel', () => {
         DATA_SLOTS,
         null,
         null,
-        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS },
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1009,7 +1081,7 @@ describe('buildPackModel', () => {
         [],
         null,
         null,
-        { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] } },
+        { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1018,6 +1090,113 @@ describe('buildPackModel', () => {
         conditionalTopics: [],
         rules: [],
       });
+    });
+  });
+
+  describe('scope evaluation appendix (nested under adaptive scope)', () => {
+    it('reports hasRun: false with no scores/targets when included but no run was passed in', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.evaluation).toEqual({
+        hasRun: false,
+        runAt: null,
+        totalFindings: 0,
+        scores: [],
+        targets: [],
+      });
+    });
+
+    it('is absent (adaptiveScope itself is null) when the section is excluded, even with a run passed in', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        {
+          topics: SCOPE_TOPICS,
+          settings: SCOPE_SETTINGS,
+          scopeEvaluationRun: SCOPE_EVALUATION_RUN,
+        },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
+        'now'
+      );
+      expect(model.adaptiveScope).toBeNull();
+    });
+
+    it('carries all four judge scores, in SCOPE_EVALUATION_DIMENSIONS order, even ones the run never mentions', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        {
+          topics: SCOPE_TOPICS,
+          settings: SCOPE_SETTINGS,
+          scopeEvaluationRun: SCOPE_EVALUATION_RUN,
+        },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      expect(model.adaptiveScope?.evaluation.scores.map((d) => d.dimension)).toEqual([
+        'criteria_quality',
+        'rule_integrity',
+        'budget_realism',
+        'coverage_and_burden',
+      ]);
+      const byDimension = new Map(
+        model.adaptiveScope?.evaluation.scores.map((d) => [d.dimension, d])
+      );
+      expect(byDimension.get('criteria_quality')).toMatchObject({
+        label: 'Criteria-Quality Judge',
+        score: 0.7,
+        diagnostic: null,
+        findingCount: 2,
+      });
+      expect(byDimension.get('budget_realism')).toMatchObject({
+        score: null,
+        diagnostic: 'judge_error',
+      });
+      // `rule_integrity` has no dimensionSummary entry in the fixture — n/a, not 0.
+      expect(byDimension.get('rule_integrity')).toMatchObject({ score: null, diagnostic: null });
+    });
+
+    it('names a flagged topic ONCE, with both findings beneath it — one carrying a plain-English proposed edit', () => {
+      const model = buildPackModel(
+        'T',
+        graphOf(SECTIONS),
+        [],
+        null,
+        null,
+        {
+          topics: SCOPE_TOPICS,
+          settings: SCOPE_SETTINGS,
+          scopeEvaluationRun: SCOPE_EVALUATION_RUN,
+        },
+        { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
+        'now'
+      );
+      const targets = model.adaptiveScope?.evaluation.targets ?? [];
+      expect(targets).toHaveLength(1);
+      expect(targets[0]).toMatchObject({
+        key: 'talent',
+        kind: 'topic',
+        label: 'Talent & culture',
+        removed: false,
+        counts: { major: 1, minor: 1, info: 0, total: 2 },
+      });
+      expect(targets[0].judges.map((j) => j.status)).toEqual(['pending', 'declined']);
+      expect(targets[0].judges[0].proposedEditSummary).toBe('Rewrite the topic’s criteria');
+      expect(targets[0].judges[1].proposedEditSummary).toBeNull();
     });
   });
 });
