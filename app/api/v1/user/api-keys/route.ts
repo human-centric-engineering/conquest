@@ -54,7 +54,7 @@ export const POST = withAuth(async (request, session) => {
   // the seam rather than after it.
   //
   // Same refusal, and the same reasoning, as `PATCH /api/v1/users/me` (email)
-  // and `POST /api/v1/users/me/export`. Browser session required.
+  // and `GET /api/v1/users/me/export`. Browser session required.
   if (isApiKeySession(session)) {
     const log = await getRouteLogger(request);
     log.warn('Rejected API-key attempt to mint another API key', { userId: session.user.id });

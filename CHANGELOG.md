@@ -164,7 +164,7 @@ release process.
   not least privilege, which is why this ships alongside the scope seam rather
   than after it. A key-authenticated caller now gets a 403, mirroring the
   existing refusals on `PATCH /api/v1/users/me` (email) and
-  `POST /api/v1/users/me/export`. Browser-session minting is unchanged.
+  `GET /api/v1/users/me/export`. Browser-session minting is unchanged.
 
 ### Changed
 

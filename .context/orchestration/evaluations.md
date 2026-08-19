@@ -151,10 +151,13 @@ fails CI rather than silently disappearing from the picker.
 
 `registerGrader` was always exported, but nothing outside this package's
 own barrel called it, and the barrel is imported from the **route**
-realm — `processPendingEvaluationRuns()` runs from the maintenance tick
-route, which shares no module graph with `instrumentation.ts`. So a
-grader registered from `initApp()` filled a map the worker never read
-(#541, the same realm split as #462). The result was a grader that either
+realm: the tick route (`POST /api/v1/admin/orchestration/maintenance/tick`)
+calls `runMaintenanceTick()`, which runs the `evaluationRuns` entry in
+`PLATFORM_JOBS`, which calls `processPendingEvaluationRuns()`. None of
+that shares a module graph with `instrumentation.ts`, so a grader
+registered from `initApp()` filled a map the worker never read (#541,
+the same realm split as #462). The lazy init below is realm-agnostic
+anyway — it fires on whichever reader gets there first. The result was a grader that either
 never appeared in the metric picker, or — if submitted by slug anyway —
 threw `No grader registered for slug` **mid-drain**, after the run was
 queued and the subject calls had already been paid for.
