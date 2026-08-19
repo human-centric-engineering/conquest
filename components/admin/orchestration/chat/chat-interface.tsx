@@ -10,6 +10,33 @@
  * Used by the Learning Hub advisor tab and available for embedding in
  * other admin panels.
  *
+ * ## Reusing this outside admin
+ *
+ * The three endpoints it calls default to the admin routes but are all props —
+ * `streamEndpoint`, `transcribeEndpoint`, `deleteConversationEndpoint` — so a
+ * consumer page, an app-owned route that pins `contextType`/`contextId`
+ * server-side, or a fork's own surface can point them elsewhere. The wire shape
+ * is identical either way.
+ *
+ * **Admin-only by design, whatever you point the endpoints at.** These render
+ * operator-facing detail that is wrong on an end-user surface, so turn them off
+ * rather than discovering them in production:
+ *
+ *   - `showInlineTrace` — the tool-call trace strip. On a personal or
+ *     customer-facing surface this replays the user's own input back through a
+ *     component with different redaction rules than the surface it sits on.
+ *   - the per-turn cost and token breakdown, rendered whenever the stream
+ *     supplies it — a price tag on someone thinking out loud.
+ *   - approval cards, which assume an operator with authority to approve.
+ *
+ * **If you are weighing a rebuild**, the parts that are genuinely the
+ * platform's contract and worth reusing directly are `parseChatStreamEvent`
+ * (the Zod union over the wire format — a second copy is a second thing to keep
+ * in step with `streaming-handler.ts`) and `getUserFacingError`. Both are
+ * importable on their own. Rebuilding the rendering while reusing those two is
+ * a legitimate outcome; #526 exists because that should be a design judgement
+ * rather than a consequence of a hardcoded URL.
+ *
  * Streaming contract:
  *   - Uses `fetch` + `ReadableStream.getReader()` (not EventSource)
  *   - Parses standard SSE frames (`event:` + `data:` separated by `\n\n`)
@@ -139,6 +166,26 @@ const PERSISTENCE_TTL_MS = 24 * 60 * 60 * 1000;
 export interface ChatInterfaceProps {
   /** Agent slug to send to `POST /chat/stream`. */
   agentSlug: string;
+  /**
+   * Where to POST each turn. Defaults to the admin stream route.
+   *
+   * A non-admin surface supplies its own — a consumer page, or an app-owned
+   * route that pins `contextType`/`contextId` server-side (which the platform
+   * consumer route deliberately drops). The request and SSE response shapes are
+   * identical, so nothing else changes. (#526)
+   */
+  streamEndpoint?: string;
+  /**
+   * Where the mic button POSTs audio for transcription. Defaults to the admin
+   * transcribe route. Only consulted when `voiceInputEnabled` and `agentId`
+   * are both set.
+   */
+  transcribeEndpoint?: string;
+  /**
+   * Where "clear conversation" sends its DELETE. Defaults to the admin
+   * conversation route. Receives the conversation id; return the full URL.
+   */
+  deleteConversationEndpoint?: (conversationId: string) => string;
   /**
    * Agent row id — passed to the transcription endpoint so the
    * audio path can resolve the right `enableVoiceInput` row.
@@ -583,6 +630,11 @@ function serializeTranscript(
 
 export function ChatInterface({
   agentSlug,
+  // Endpoint props default to the admin routes, so every existing caller is
+  // unchanged. See the "Reusing this outside admin" note above. (#526)
+  streamEndpoint = API.ADMIN.ORCHESTRATION.CHAT_STREAM,
+  transcribeEndpoint = API.ADMIN.ORCHESTRATION.CHAT_TRANSCRIBE,
+  deleteConversationEndpoint = API.ADMIN.ORCHESTRATION.conversationById,
   agentId,
   voiceInputEnabled = false,
   imageInputEnabled = false,
@@ -838,7 +890,7 @@ export function ChatInterface({
 
       for (let attempt = 0; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
         try {
-          const res = await fetch(API.ADMIN.ORCHESTRATION.CHAT_STREAM, {
+          const res = await fetch(streamEndpoint, {
             method: 'POST',
             credentials: 'include',
             signal: controller.signal,
@@ -1156,7 +1208,7 @@ export function ChatInterface({
   const handleClear = useCallback(async () => {
     if (conversationId) {
       try {
-        await fetch(API.ADMIN.ORCHESTRATION.conversationById(conversationId), {
+        await fetch(deleteConversationEndpoint(conversationId), {
           method: 'DELETE',
           credentials: 'include',
         });
@@ -1616,7 +1668,7 @@ export function ChatInterface({
           {voiceInputEnabled && agentId && (
             <MicButton
               agentId={agentId}
-              endpoint="/api/v1/admin/orchestration/chat/transcribe"
+              endpoint={transcribeEndpoint}
               disabled={streaming}
               onTranscript={(text) =>
                 // Append to whatever the operator has already typed
