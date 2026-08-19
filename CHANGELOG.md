@@ -158,9 +158,10 @@ release process.
   coverage guard (above), the capability registry's idempotency count (which
   reported "expected 13, got 27" under a test named *is idempotent*, sending the
   reader after a double-registration bug in wiring that was already correct),
-  eleven test cases across seven files that wrote `/dashboard` and `Dashboard`
-  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL` (measured:
-  that is how many go red with the seam filled), and
+  twelve test cases across eight files that wrote `/dashboard` and `Dashboard`
+  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL` — measured by
+  filling the seam and running the **whole** suite, which is now down to the one
+  intended `SEAM_DEFAULTS` pin — and
   `smoke:export`. `tests/unit/fork-seam-coupling.test.ts` now requires any core
   artifact reading a `lib/app/*` seam unmocked to carry a `FORK NOTE`.
 

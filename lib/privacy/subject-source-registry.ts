@@ -110,6 +110,8 @@ const owners = new Map<string, string>();
 
 /** Whether the auto-wired app declaration init has run. */
 let appInited = false;
+/** Whether that init threw, leaving this tier's declarations unknown. */
+let appInitFailed = false;
 
 /** Mirrors the core manifest's own guard on `description`. */
 const MIN_DESCRIPTION = 10;
@@ -237,6 +239,7 @@ function ensureAppSubjectSourcesInited(): void {
   try {
     initAppSubjectSources();
   } catch (err) {
+    appInitFailed = true;
     sources.clear();
     for (const [model, source] of beforeSources) sources.set(model, source);
     excluded.clear();
@@ -270,6 +273,27 @@ function describeThrown(err: unknown): string {
   }
 }
 
+/**
+ * Whether the tier's declarations are unknown because its init threw.
+ *
+ * Rolling back and carrying on is right for a seam whose consumer can degrade —
+ * a missing nav section is visible. It is wrong here. `collectAppSubjectData()`
+ * is a separate static import and is unaffected by the throw, so the export
+ * would still carry the tier's rows while `meta.app` described none of them and
+ * the tier's `excluded` reasons silently vanished from `meta.excluded` — a
+ * bundle whose own manifest contradicts its contents, which is the failure
+ * `meta.app` exists to prevent, reached by a log line.
+ *
+ * `exportUserData()` refuses rather than shipping that. The build guard usually
+ * catches a throwing init first, but only if it throws in the test environment;
+ * one that throws on an env-dependent path would otherwise ship short bundles
+ * in production with nothing but an error log.
+ */
+export function appSubjectDeclarationsFailed(): boolean {
+  ensureAppSubjectSourcesInited();
+  return appInitFailed;
+}
+
 /** Every declared app-owned source, in registration order. */
 export function getAppSubjectSources(): AppSubjectDataSource[] {
   ensureAppSubjectSourcesInited();
@@ -298,4 +322,5 @@ export function __resetAppSubjectSourceRegistryForTests(): void {
   excluded.clear();
   owners.clear();
   appInited = false;
+  appInitFailed = false;
 }

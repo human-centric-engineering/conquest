@@ -308,31 +308,54 @@ async function main(): Promise<void> {
 
     const declaredAppSources = getAppSubjectSources();
 
-    // The app tier's half of the same claim. `meta.exported` covers core only —
-    // the two lists are read against different objects — so a fork's sections
-    // would otherwise appear in the bundle with nothing in `meta` naming them.
-    const summarised = new Set(bundle.meta.app.map((entry) => entry.section));
-    const unsummarised = declaredAppSources
-      .filter((source) => !summarised.has(source.section))
-      .map((source) => source.section);
+    // The app tier's half of the same claim, asserted against the SERIALISED
+    // bundle.
+    //
+    // The in-memory comparison this replaced could not fail: `meta.app` is built
+    // by mapping the same `getAppSubjectSources()` the script would have read
+    // back, so it compared the registry with itself. What the subject actually
+    // receives is JSON, and that is a different artifact — a value that does not
+    // survive `JSON.stringify` (a `Map`, a `Set`, `undefined`) leaves a section
+    // described in `meta.app` with nothing behind it, and the row counts are
+    // recomputed here from the delivered payload rather than trusting the ones
+    // the service wrote.
+    const delivered = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
+    const mismatched: string[] = [];
+    for (const summary of delivered.meta.app) {
+      const value = delivered.app[summary.section];
+      const actualRows = Array.isArray(value) ? value.length : isEmptySection(value) ? 0 : 1;
+      if (!Object.hasOwn(delivered.app, summary.section) || actualRows !== summary.rows) {
+        mismatched.push(`${summary.section} (meta says ${summary.rows}, bundle has ${actualRows})`);
+      }
+    }
     check(
-      unsummarised.length === 0,
-      unsummarised.length > 0
-        ? `app section(s) ${unsummarised.join(', ')} reached the bundle with no entry in ` +
-            'meta.app — the subject is given data the manifest does not describe'
-        : declaredAppSources.length === 0
-          ? 'no app sources declared (vanilla Sunrise) — nothing to summarise'
-          : `all ${declaredAppSources.length} declared app source(s) summarised in meta.app`
+      mismatched.length === 0 && delivered.meta.app.length === declaredAppSources.length,
+      mismatched.length > 0
+        ? `meta.app disagrees with the delivered bundle for ${mismatched.join('; ')} — the ` +
+            'subject is told about data that is not there, or given data that is miscounted'
+        : delivered.meta.app.length !== declaredAppSources.length
+          ? `meta.app describes ${delivered.meta.app.length} section(s) after serialisation, ` +
+            `but ${declaredAppSources.length} were declared`
+          : declaredAppSources.length === 0
+            ? 'no app sources declared (vanilla Sunrise) — nothing to summarise'
+            : `all ${declaredAppSources.length} declared app source(s) survive serialisation ` +
+              'with row counts matching the delivered payload'
     );
     check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
 
-    // A fork tier's exclusions are disclosed on the same terms as core's. This
-    // is the only check on the exclusion path after the build: a declared
-    // `source` is held to its promise by DeclaredAppSourceMissingError below,
-    // while a declared `excluded` is otherwise trusted forever.
+    // A fork tier's exclusions are disclosed on the same terms as core's, and
+    // this too is checked against the delivered JSON rather than the in-memory
+    // bundle — `meta.excluded` is spread from the same registry the script would
+    // read back, so comparing the two in memory checks nothing. What is worth
+    // proving here is that the reason a tier wrote reaches the subject verbatim.
     const declaredAppExclusions = getAppExcludedSubjectSources();
     const undisclosed = declaredAppExclusions
-      .filter((entry) => !bundle.meta.excluded.some((shown) => shown.model === entry.model))
+      .filter(
+        (entry) =>
+          !delivered.meta.excluded.some(
+            (shown) => shown.model === entry.model && shown.reason === entry.reason
+          )
+      )
       .map((entry) => entry.model);
     check(
       undisclosed.length === 0,
@@ -371,11 +394,15 @@ async function main(): Promise<void> {
         return Array.isArray(value) && value.length > 0;
       })
       .map((source) => source.section);
+    // Anything that is not an array, empty or not. `exportUserData()` tolerates
+    // a non-list section deliberately — it must not break a fork that is
+    // otherwise working — but this script is a diagnostic, and the shapes it
+    // cannot reason about are exactly the ones that lose data quietly: a `Map`
+    // serialises to `{}`, so the bundle stays internally consistent (meta says
+    // nought rows, the payload holds nought rows) while the subject's data is
+    // gone. Reporting the shape is the only place that gets caught.
     const unrecognised = declaredAppSources
-      .filter((source) => {
-        const value = bundle.app[source.section];
-        return !Array.isArray(value) && !isEmptySection(value);
-      })
+      .filter((source) => !Array.isArray(bundle.app[source.section]))
       .map((source) => source.section);
 
     check(

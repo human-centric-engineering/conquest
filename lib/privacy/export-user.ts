@@ -39,6 +39,7 @@ import {
 import {
   getAppSubjectSources,
   getAppExcludedSubjectSources,
+  appSubjectDeclarationsFailed,
 } from '@/lib/privacy/subject-source-registry';
 
 /**
@@ -122,6 +123,28 @@ export class SubjectNotFoundError extends Error {
   constructor(userId: string) {
     super(`No user with id ${userId}`);
     this.name = 'SubjectNotFoundError';
+  }
+}
+
+/**
+ * Raised when a tier's `initAppSubjectSources()` threw, so what its tables hold
+ * is unknown.
+ *
+ * The collector is a separate static import and keeps working, so continuing
+ * would hand the subject app rows that `meta.app` describes none of, with the
+ * tier's exclusions missing from `meta.excluded` — a bundle contradicting its
+ * own manifest. Refusing is the same call the module makes everywhere else: a
+ * partial export is worse than no export, because only this failure is visible.
+ */
+export class AppSubjectDeclarationsUnavailableError extends Error {
+  constructor() {
+    super(
+      'initAppSubjectSources() threw, so this app tier’s subject-data declarations ' +
+        'are unknown and the export cannot be certified complete. Fix the seam in ' +
+        'lib/app/data-export.ts — the failure was logged by ' +
+        'lib/privacy/subject-source-registry.ts.'
+    );
+    this.name = 'AppSubjectDeclarationsUnavailableError';
   }
 }
 
@@ -243,6 +266,13 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
   // key and serialises to `{}`, so a `hasOwn` check passes while the delivered
   // export is short exactly the section it just certified. `null` is left
   // alone — it survives serialisation, so the section is disclosed.
+  // Refuse before reading the declarations, not after: if the init threw they
+  // are empty, and every check below would pass vacuously on a bundle nobody
+  // can certify.
+  if (appSubjectDeclarationsFailed()) {
+    throw new AppSubjectDeclarationsUnavailableError();
+  }
+
   const declaredAppSources = getAppSubjectSources();
   const undelivered = declaredAppSources
     .filter((source) => app[source.section] === undefined)

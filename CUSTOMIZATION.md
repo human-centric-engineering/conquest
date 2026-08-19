@@ -410,17 +410,25 @@ small and conflict-free.)
 > One row per seam, so your diff stays a line — see the FORK NOTE at the top of
 > that file.
 >
-> **That is the only core test filling a seam should cost you.** Where a core
-> assertion measured something a seam contributes to, it was a bug and has been
-> fixed: the subject-access coverage guard now reads your declarations
-> (`registerAppSubjectSources()`), the capability idempotency count stubs the
-> seam, the post-auth landing assertions import `AUTH_LANDING_ROUTE` instead of
-> writing `/dashboard`, and `smoke:export` asserts your sections arrived rather
-> than that you have none (#480, #525, #530, #533). Any core artifact that still
-> reads a seam for real has to carry a `FORK NOTE` saying so —
-> `tests/unit/fork-seam-coupling.test.ts` enforces that, and its docblock is
-> honest about the shapes a grep cannot catch. If you hit one that has no note,
-> that is a bug worth filing.
+> **A `SEAM_DEFAULTS` pin is the only _unavoidable_ cost.** Where a core
+> assertion measured something a seam contributes to and had no business doing
+> so, it was a bug and has been fixed: the subject-access coverage guard now
+> reads your declarations (`registerAppSubjectSources()`), the capability
+> idempotency count stubs the seam, the post-auth landing assertions import
+> `AUTH_LANDING_ROUTE` instead of writing `/dashboard`, and `smoke:export`
+> asserts your sections arrived rather than that you have none (#480, #525,
+> #530, #533). Filling `lib/app/auth-landing.ts` now costs exactly one failing
+> row in the whole suite — measured, not assumed.
+>
+> A few core tests read a seam **deliberately**, and those still move when you
+> fill it: `drift-probes.test.ts` asserts your drift-probe seam is empty,
+> `surface.test.ts` pins the shipped surface classifier, and
+> `reserved-fork-tiers.test.ts` asserts `prisma/schema/app.prisma` declares no
+> models. Every one of them carries a `FORK NOTE` saying what to expect and what
+> to pin — `tests/unit/fork-seam-coupling.test.ts` enforces that a core artifact
+> reading a seam unmocked has one, and its docblock is honest about the shapes a
+> grep cannot catch. If you hit a core test that moves when you fill a seam and
+> it has **no** note, that is a bug worth filing.
 
 **Why one file per concern and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a

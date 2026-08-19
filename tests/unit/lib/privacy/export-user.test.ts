@@ -99,6 +99,7 @@ import {
   exportUserData,
   SubjectNotFoundError,
   DeclaredAppSourceMissingError,
+  AppSubjectDeclarationsUnavailableError,
   EXPORT_FORMAT_VERSION,
 } from '@/lib/privacy/export-user';
 import {
@@ -565,6 +566,38 @@ describe('exportUserData', () => {
       const bundle = await exportUserData(PARAMS);
 
       expect(bundle.meta.app).toEqual([]);
+    });
+  });
+
+  describe('a tier whose declarations failed to load', () => {
+    it('refuses the export rather than shipping a bundle it cannot certify', async () => {
+      // The collector is a separate static import, so it keeps working: without
+      // this the subject gets app rows that `meta.app` describes none of, and
+      // the tier's exclusions vanish from `meta.excluded`.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        throw new Error('typo in the manifest');
+      });
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [{ id: 'inv-1' }] });
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(AppSubjectDeclarationsUnavailableError);
+    });
+
+    it('refuses even when the collector returns nothing', async () => {
+      // "No rows" and "we could not read the declarations" are different
+      // answers, and only one of them can be certified.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        throw new Error('typo in the manifest');
+      });
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(AppSubjectDeclarationsUnavailableError);
+    });
+
+    it('exports normally when the init succeeds', async () => {
+      mockInitAppSubjectSources.mockImplementation(() => undefined);
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).resolves.toMatchObject({ app: {} });
     });
   });
 
