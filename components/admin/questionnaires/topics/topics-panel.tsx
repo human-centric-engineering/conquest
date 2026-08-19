@@ -34,7 +34,7 @@ import {
 } from '@/components/admin/questionnaires/topics/topic-list-editor';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
-import type { AdaptiveScopeSettings } from '@/lib/app/questionnaire/scope/types';
+import type { AdaptiveScopeSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
 export interface TopicsPanelProps {
@@ -52,6 +52,21 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // twice still moves the list — a plain key would be unchanged state on the second request and the
   // editor's effect would never re-fire.
   const [focusTopic, setFocusTopic] = useState<{ key: string; nonce: number } | null>(null);
+  // A gap the Routing Analyst reported it couldn't formalize, asked to become a topic (F17.20).
+  // Same nonce shape as `focusTopic`, and for the same reason — turning a second gap into a topic
+  // must still add a second row.
+  const [seedTopic, setSeedTopic] = useState<{
+    description: string;
+    criteria: string;
+    nonce: number;
+  } | null>(null);
+
+  const turnGapIntoTopic = (gap: ProposedGap) =>
+    setSeedTopic((prev) => ({
+      description: gap.explanation,
+      criteria: gap.sourceQuote,
+      nonce: (prev?.nonce ?? 0) + 1,
+    }));
 
   // Release the busy lock once the refreshed payload arrives — closing the window where a second
   // save could fire against the pre-fork version id.
@@ -118,6 +133,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       announce: settings.announce,
       allowRespondentAmendment: settings.allowRespondentAmendment,
       plannerInstructions: settings.plannerInstructions,
+      limitOpeningProbes: settings.limitOpeningProbes,
+      maxOpeningProbes: settings.maxOpeningProbes,
       rules: settings.rules.map((r) => ({
         id: r.id,
         dataSlotKey: r.dataSlotKey,
@@ -177,6 +194,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         liveTopicCount={payload.topics.length}
         candidacy={payload.candidacy}
         autoTriggerPending={payload.autoTriggerPending}
+        onTurnGapIntoTopic={turnGapIntoTopic}
         disabled={busy}
       />
 
@@ -257,6 +275,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           enabled={payload.settings.enabled}
           focusTopic={focusTopic}
           onFocusHandled={() => setFocusTopic(null)}
+          seedTopic={seedTopic}
+          onSeedHandled={() => setSeedTopic(null)}
         />
       </section>
     </div>

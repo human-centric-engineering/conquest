@@ -23,7 +23,11 @@
  *   else in the system reports it. The count is shown before accepting, not after.
  * - **`gaps`** (Phase 2, F17.19) — routing language the analyst recognized but could not formalize
  *   into a topic or rule. Previously silently dropped; now shown so the admin knows what the
- *   accepted proposal does NOT cover.
+ *   accepted proposal does NOT cover. Each gap carries a "Turn into topic" action (F17.20) that
+ *   seeds a new draft row in the topic editor below — `criteria` from the gap's `sourceQuote` (the
+ *   document's own words), `description` from the gap's `explanation` (why the analyst couldn't
+ *   formalize it, as a note for whoever finishes authoring the row) — rather than leaving the gap as
+ *   read-only text an admin has to re-derive a topic from by hand.
  *
  * Accepting is a single POST of the reviewed set; nothing here writes live until then.
  *
@@ -47,6 +51,7 @@ import {
   FileSearch,
   HelpCircle,
   Loader2,
+  Plus,
   Quote,
   Sparkles,
   Trash2,
@@ -81,6 +86,7 @@ import {
   SCOPE_RULE_ACTION_LABELS,
   SCOPE_RULE_OPERATOR_LABELS,
   TOPIC_PHASE_LABELS,
+  type ProposedGap,
   type ProposedTopicSet,
 } from '@/lib/app/questionnaire/scope/types';
 
@@ -97,6 +103,9 @@ export interface RoutingAnalystCardProps {
   candidacy: ScopeCandidacyVerdict | null;
   /** True when this card should invoke the analyst itself, on mount (F17.19 Phase 3). */
   autoTriggerPending: boolean;
+  /** Called when the admin asks to turn a gap into a new draft topic (F17.20). Optional so a
+   *  caller that doesn't yet host the topic editor (there is only one today) can omit it. */
+  onTurnGapIntoTopic?: (gap: ProposedGap) => void;
   disabled?: boolean;
 }
 
@@ -151,6 +160,7 @@ export function RoutingAnalystCard({
   liveTopicCount,
   candidacy,
   autoTriggerPending,
+  onTurnGapIntoTopic,
   disabled = false,
 }: RoutingAnalystCardProps) {
   const router = useRouter();
@@ -531,6 +541,17 @@ export function RoutingAnalystCard({
                         {gap.sourceQuote}
                       </p>
                       <p>{gap.explanation}</p>
+                      {onTurnGapIntoTopic && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 border-amber-300 bg-transparent text-[11px] text-amber-900 hover:bg-amber-100 dark:border-amber-500/30 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                          onClick={() => onTurnGapIntoTopic(gap)}
+                        >
+                          <Plus className="mr-1 h-3 w-3" aria-hidden="true" /> Turn into topic
+                        </Button>
+                      )}
                     </li>
                   ))}
                 </ul>
