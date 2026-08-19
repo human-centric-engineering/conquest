@@ -16,7 +16,9 @@
  *
  * Read-only against user data: creates a throwaway subject with a conversation
  * and an API key, exports it, and removes what it created. Never touches seed
- * data and never exports a real user.
+ * data and never exports a real user. That the subject is brand new is load
+ * bearing, not incidental — it is what makes "every declared app section is
+ * empty" a leak check rather than a formality.
  *
  * Skips cleanly (exit 0) when no database is reachable, so it is safe to invoke
  * anywhere — it only does real work where a DB exists (CI's `validate` job,
@@ -31,6 +33,7 @@
 import { prisma } from '@/lib/db/client';
 import { exportUserData, SubjectNotFoundError } from '@/lib/privacy/export-user';
 import { SUBJECT_DATA_SOURCES } from '@/lib/privacy/export-sources';
+import { getAppSubjectSources } from '@/lib/privacy/subject-source-registry';
 
 const PREFIX = 'smoke-test-export';
 const stamp = Date.now();
@@ -60,6 +63,21 @@ async function dbReachable(): Promise<boolean> {
 function check(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`assertion failed: ${msg}`);
   console.log(`  ✓ ${msg}`);
+}
+
+/**
+ * Whether an app section carries no rows.
+ *
+ * Shape-tolerant on purpose: `AppSubjectData` is `Record<string, unknown>`, so
+ * a tier may return a list, a keyed object, or nothing at all. Asserting a
+ * particular shape here would invent a contract the seam does not have, and the
+ * property being checked — "this subject owns none of it" — does not need one.
+ */
+function isEmptySection(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
 }
 
 async function main(): Promise<void> {
@@ -299,7 +317,39 @@ async function main(): Promise<void> {
       'meta summarises every source'
     );
     check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
-    check(Object.keys(bundle.app).length === 0, 'app seam is empty in vanilla Sunrise');
+
+    // FORK NOTE — this asserts your declarations, not their absence.
+    //
+    // It used to read `Object.keys(bundle.app).length === 0` ("app seam is
+    // empty in vanilla Sunrise"), which implementing `collectAppSubjectData`
+    // makes false by construction — and this script is not in `validate` or
+    // `npm test`, so a fork found out from a red pipeline after a green local
+    // run (#530).
+    //
+    // What replaces it is stronger in both directions. Reaching this line at
+    // all proves every declared section arrived: `exportUserData()` throws
+    // `DeclaredAppSourceMissingError` otherwise, and that throw has never run
+    // against real Postgres until here. And the subject is synthetic — created
+    // moments ago, owning nothing of yours — so a declared section with rows in
+    // it means the collector matched a *stranger's*, which is the leak this
+    // whole script exists to detect and which the old check could not see.
+    const declaredAppSources = getAppSubjectSources();
+    const populated = declaredAppSources
+      .filter((source) => !isEmptySection(bundle.app[source.section]))
+      .map((source) => source.section);
+    check(
+      populated.length === 0,
+      populated.length > 0
+        ? // `check` prints its message on failure too, so the failing branch has to
+          // describe the failure — otherwise a leak reports itself as "assertion
+          // failed: all sections are empty", which reads as the opposite.
+          `app section(s) ${populated.join(', ')} returned rows for a subject created ` +
+            'seconds ago who owns nothing — the collector is matching rows that are not theirs'
+        : declaredAppSources.length === 0
+          ? 'no app subject sources declared (vanilla Sunrise) — nothing to check'
+          : `all ${declaredAppSources.length} declared app section(s) arrived and are empty ` +
+            'for a subject who owns none of them'
+    );
 
     // A missing subject is a distinct, catchable failure — not a silent empty bundle.
     let notFound = false;
