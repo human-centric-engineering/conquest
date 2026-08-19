@@ -23,6 +23,7 @@ import {
   AppComposeQuestionnaireCapability,
   AppDetectContradictionsCapability,
   AppDetectScopeCandidacyCapability,
+  AppEvaluateScopeCapability,
   AppEvaluateStructureCapability,
   AppReconcileSuggestionsCapability,
   AppExtractAnswerSlotsCapability,
@@ -86,6 +87,11 @@ export function initAppCapabilities(): void {
   // whether a freshly-uploaded document is worth flagging as a routing candidate. Dispatched by the
   // ingest pipeline, on every fresh upload; writes nothing itself.
   registerAppCapability(new AppDetectScopeCandidacyCapability());
+
+  // Adaptive Scope (F17.21) — the scope-evaluation judge panel. One judge per dimension
+  // (criteria_quality, rule_integrity, budget_realism, coverage_and_burden) scoring the authored
+  // topics/rules/budget. Dispatched once per dimension by the scope evaluate-preview route.
+  registerAppCapability(new AppEvaluateScopeCapability());
 
   // Data Slots — the data-slot generator. Dispatched by the generate-data-slots route.
   registerAppCapability(new AppGenerateDataSlotsCapability());

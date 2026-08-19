@@ -513,6 +513,12 @@ export const API = {
        */
       versionTopicsPreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/preview`,
+      /**
+       * Run the Adaptive Scope evaluation judge panel over a version (POST — F17.21). Ephemeral:
+       * writes nothing, returns each judge's score + findings.
+       */
+      versionScopeEvaluatePreview: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/topics/evaluate-preview`,
       /** Curated glossary for a version (GET terms + document, PUT replace-set the reviewed set). */
       versionGlossary: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/glossary`,

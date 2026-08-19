@@ -18,8 +18,11 @@ import {
 } from '@/app/api/v1/app/questionnaires/_lib/topic-draft';
 import {
   ANALYSE_ROUTING_CAPABILITY_SLUG,
+  EVALUATE_SCOPE_CAPABILITY_SLUG,
+  EVALUATE_SCOPE_HANDLER,
   QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
 } from '@/lib/app/questionnaire/constants';
+import { SCOPE_EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/scope-evaluation';
 
 function ok(label: string, cond: boolean, detail = '') {
   console.log(`${cond ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -237,6 +240,28 @@ async function main() {
       'routing analysis capability is seeded and points at its handler',
       analystCapability?.isActive === true &&
         analystCapability.executionHandler === 'AppAnalyseRoutingCapability'
+    );
+
+    // 8b. The scope-evaluation judge panel (F17.21) is wired end to end — four judges plus the
+    // shared capability. Same posture as step 8: the panel CALL itself is not smoked (four paid
+    // reasoning-model calls); what is smoked is everything a missing seed would break silently.
+    const scopeJudges = await prisma.aiAgent.findMany({
+      where: { slug: { in: [...SCOPE_EVALUATION_JUDGE_SLUGS] } },
+      select: { kind: true, isActive: true },
+    });
+    ok(
+      'all 4 scope-evaluation judges are seeded and active',
+      scopeJudges.length === 4 && scopeJudges.every((j) => j.kind === 'judge' && j.isActive)
+    );
+
+    const scopeEvalCapability = await prisma.aiCapability.findUnique({
+      where: { slug: EVALUATE_SCOPE_CAPABILITY_SLUG },
+      select: { isActive: true, executionHandler: true },
+    });
+    ok(
+      'scope-evaluation capability is seeded and points at its handler',
+      scopeEvalCapability?.isActive === true &&
+        scopeEvalCapability.executionHandler === EVALUATE_SCOPE_HANDLER
     );
 
     await saveTopicDraft(v.id, {

@@ -27,13 +27,10 @@ import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/se
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
   ALWAYS_PHASES,
-  SCOPE_RULE_ACTION_LABELS,
-  SCOPE_RULE_OPERATOR_LABELS,
-  VALUELESS_SCOPE_OPERATORS,
   type AdaptiveScopeSettings,
-  type ScopeRule,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
+import { describeScopeRule } from '@/lib/app/questionnaire/scope/rule-format';
 import {
   EVALUATION_DIMENSIONS,
   EVALUATION_DIMENSION_SPECS,
@@ -385,29 +382,6 @@ function buildEvaluationsSection(run: EvaluationRunDetail | null): PackEvaluatio
     scores,
     targets,
   };
-}
-
-/**
- * Render one hard rule as a plain sentence, resolving its topic/data-slot keys to their authored
- * names so a stakeholder never has to read a key. An unresolved key (a rule pointing at a topic or
- * slot since deleted — silently skipped everywhere else in this feature, per
- * `.context/app/questionnaire/adaptive-scope.md`) falls back to the raw key rather than dropping the
- * rule, so a stale rule is still visible as *something* an admin should clean up.
- */
-function describeScopeRule(
-  rule: ScopeRule,
-  topicLabels: Map<string, string>,
-  dataSlotLabels: Map<string, string>
-): string {
-  const topicLabel = topicLabels.get(rule.topicKey) ?? rule.topicKey;
-  const slotLabel = dataSlotLabels.get(rule.dataSlotKey) ?? rule.dataSlotKey;
-  const operator = SCOPE_RULE_OPERATOR_LABELS[rule.operator];
-  const clause = (VALUELESS_SCOPE_OPERATORS as readonly string[]).includes(rule.operator)
-    ? `"${slotLabel}" ${operator}`
-    : `"${slotLabel}" ${operator} "${rule.value ?? ''}"`;
-  const action = SCOPE_RULE_ACTION_LABELS[rule.action];
-  const capitalizedAction = action.charAt(0).toUpperCase() + action.slice(1);
-  return `${capitalizedAction} "${topicLabel}" when ${clause}.`;
 }
 
 /**

@@ -390,3 +390,19 @@ export const scopePreviewLimiter = createRateLimiter({
   interval: SCOPE_PREVIEW_RATE_LIMIT_INTERVAL_MS,
   maxRequests: SCOPE_PREVIEW_RATE_LIMIT_MAX,
 });
+
+/**
+ * Scope-evaluation preview sub-cap (Adaptive Scope, F17.21). One call fans out to **four** judge
+ * LLM completions (the whole panel) — the same paid class as the design-evaluation panel, just a
+ * smaller fan-out (4 judges vs. 7), so the same 20/min ceiling leaves at least as much headroom.
+ * Keyed on the admin user id, who owns the spend.
+ */
+export const SCOPE_EVALUATION_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link scopeEvaluationLimiter}, in milliseconds. */
+export const SCOPE_EVALUATION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const scopeEvaluationLimiter = createRateLimiter({
+  interval: SCOPE_EVALUATION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: SCOPE_EVALUATION_RATE_LIMIT_MAX,
+});
