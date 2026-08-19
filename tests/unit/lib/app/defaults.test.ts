@@ -57,6 +57,10 @@ import {
   listAllowedMcpResourceUriSchemes,
   __resetAppMcpResourcesForTests,
 } from '@/lib/orchestration/mcp/resource-registry';
+import {
+  listGraders,
+  __resetGraderRegistryForTests,
+} from '@/lib/orchestration/evaluations/graders/registry';
 
 /**
  * One row per `lib/app/*` seam.
@@ -227,6 +231,18 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(listAppMcpResourceTypes()).toEqual([]);
       // Core's own scheme, and nothing else.
       expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+    },
+  },
+  {
+    seam: 'lib/app/evaluations.ts',
+    risk: 'a stray grader would appear in every install\u2019s metric picker \u2014 and, on a slug core already uses, would silently rescore every run',
+    assert: () => {
+      // The registry module is driven directly, so core's barrel has not
+      // side-effect-registered anything: whatever listGraders() returns here
+      // came from the seam. The read triggers the lazy init, so this exercises
+      // the REAL file.
+      __resetGraderRegistryForTests();
+      expect(listGraders()).toEqual([]);
     },
   },
   {

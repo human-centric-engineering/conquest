@@ -18,6 +18,17 @@ release process.
 
 ### Added
 
+- **`lib/app/evaluations.ts` — fork-owned evaluation graders.** The grader
+  registry advertised pluggability that only held for core: `registerGrader` was
+  exported, but the only caller was the package's own barrel, and the batch
+  worker runs in the **route** realm — so a grader registered from `initApp()`
+  filled a map the worker never read. It either never reached the metric picker
+  or threw `No grader registered for slug` mid-drain, after the subject calls
+  were already paid for. `initAppGraders()` now runs once, lazily, before the
+  registry's first lookup, so every route-realm reader sees it. Replacing a
+  built-in slug still works (that is how a mock is swapped in) but is now logged
+  at warn.
+
 - **`lib/app/mcp-resources.ts` — fork-owned MCP resource handlers.** MCP *tools*
   had a fork seam (`lib/app/capabilities.ts`); *resources* did not, so a
   read path a host could preload had to ship as a tool call. Fill in

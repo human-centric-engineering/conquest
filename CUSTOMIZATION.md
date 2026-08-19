@@ -397,6 +397,7 @@ small and conflict-free.)
 | `lib/app/surface.ts`                       | which URLs count as `admin` vs `consumer`          | `proxy.ts` classification + `<SurfaceSync>` (proxy + client)          |
 | `lib/app/data-export.ts`                   | app tables in a subject-access export              | `exportUserData()` (server route-handler)                             |
 | `lib/app/mcp-resources.ts`                 | app-owned MCP resource types + URI scheme          | the MCP resource registry (server route-handler)                      |
+| `lib/app/evaluations.ts`                   | app evaluation graders (`initAppGraders`)          | the grader registry (server route-handler)                            |
 
 > **Filling a seam is expected to fail one row of a core test.**
 > `tests/unit/lib/app/defaults.test.ts` asserts every seam ships empty — that
@@ -624,6 +625,24 @@ To render your own brand lockup as the section header instead of the default
 uppercase label, pass `titleNode` (any `ReactNode`); `title` stays required and
 remains the React key, the registry's dedupe key, and the heading's accessible
 name, so a wordmark image can't cost you the label.
+
+**Evaluation graders — `lib/app/evaluations.ts`.** Fill in the auto-wired
+`initAppGraders()` with `registerGrader(yourGrader)` calls; the grader registry
+runs it once before its first lookup, which covers the batch worker, the
+run-creation validator and the metric picker alike. Import `registerGrader` from
+`@/lib/orchestration/evaluations/graders/registry` rather than the barrel — the
+barrel's job is to side-effect-import every core grader.
+
+Reach for this when the metric is **deterministic**. `judge_agent` is the right
+answer for a model grader (a new metric is a new agent, no code), but an LLM
+judging set equality adds its own variance to the number you are reading a
+regression out of, and costs money per case for arithmetic.
+
+Re-registering a slug replaces the previous entry, so an app grader _can_
+replace a built-in. That is deliberate — it is how a mock gets swapped in — but
+it is logged at warn, because a silently replaced `exact_match` changes every
+score an admin reads without changing anything they can see. See
+[`.context/orchestration/evaluations.md`](./.context/orchestration/evaluations.md).
 
 **App-owned MCP resources — `lib/app/mcp-resources.ts`.** MCP _tools_ already had
 a seam (`lib/app/capabilities.ts`); _resources_ did not, so a read path a host
