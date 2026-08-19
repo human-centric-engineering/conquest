@@ -359,6 +359,35 @@ describe('readMcpResource', () => {
     expect(handlePatternDetail).not.toHaveBeenCalled();
   });
 
+  it('treats adjacent {params} as one segment rather than two quantifiers', async () => {
+    // `{a}{b}` compiling to `[^/]+[^/]+` backtracks polynomially against a long
+    // non-matching URI, and the URI side is client-supplied. Collapsing the run
+    // also gives the sane semantics: one value fills the pair.
+    vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.mcpExposedResource.findMany).mockResolvedValue([
+      makeResourceRow({ uri: 'sunrise://x/{a}{b}/plan', resourceType: 'pattern_detail' }),
+    ] as never);
+    vi.mocked(handlePatternDetail).mockResolvedValue(makeResourceContent('sunrise://x/one/plan'));
+
+    expect(
+      await readMcpResource('sunrise://x/one/plan', { scopedAgentId: null, apiKeyId: 'k' })
+    ).toEqual(makeResourceContent('sunrise://x/one/plan'));
+
+    // The pathological input returns promptly rather than backtracking.
+    // Measured: five adjacent placeholders against 120 non-matching characters
+    // takes ~13s uncollapsed and ~0.01ms collapsed, so the bound below has five
+    // orders of magnitude of headroom and cannot flake on a slow runner.
+    vi.mocked(prisma.mcpExposedResource.findMany).mockResolvedValue([
+      makeResourceRow({ uri: 'sunrise://x/{a}{b}{c}{d}{e}end', resourceType: 'pattern_detail' }),
+    ] as never);
+    const started = performance.now();
+    await readMcpResource(`sunrise://x/${'a'.repeat(120)}`, {
+      scopedAgentId: null,
+      apiKeyId: 'k',
+    });
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it('returns null from pattern matching when no patterns match', async () => {
     vi.mocked(prisma.mcpExposedResource.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.mcpExposedResource.findMany).mockResolvedValue([

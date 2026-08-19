@@ -334,8 +334,13 @@ function escapeRegExp(literal: string): string {
  */
 function matchesUriTemplate(uri: string, template: string): boolean {
   if (!/\{[^}]+\}/.test(template)) return false;
+  // A RUN of adjacent placeholders splits as one. `{a}{b}` would otherwise
+  // compile to `[^/]+[^/]+` — two unbounded quantifiers with nothing between
+  // them, which backtracks polynomially against a long non-matching URI. An
+  // admin writing that template is careless rather than hostile, but the URI
+  // side comes from an MCP client, so the hang would be theirs to trigger.
   const source = template
-    .split(/\{[^}]+\}/)
+    .split(/(?:\{[^}]+\})+/)
     .map(escapeRegExp)
     .join('[^/]+');
   return new RegExp(`^${source}$`).test(uri);
