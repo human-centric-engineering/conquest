@@ -36,6 +36,26 @@ release process.
   reported behind their own heading, because every commit on the branch counts
   as later for those. All of it is stated where the check is run.
 
+- **`lib/fork-init.ts` — one shared gate behind the lazy `lib/app/*` init seams.**
+  `createAppInitGate({ label, subject, init, snapshot, restore })` owns the
+  latch, the rollback, the log line and the log-safe error description — and
+  `ensure()` never throws, structurally: its body is wrapped, so a `snapshot` or
+  `restore` closure that fails cannot escape a public read on eleven registries,
+  several of which are documented as always-safe-to-call. A seam that returns a
+  **promise** is also called out at boot (`… must be synchronous, and the
+  all-or-nothing rollback does NOT apply`), with its rejection routed to the log;
+  `@typescript-eslint/no-misused-promises` already fails such a seam at lint, so
+  this is the backstop for a fork that does not lint. Eleven of
+  the thirteen `initApp*` seams run through it; the two that do not —
+  `initAppNav`, called at module scope from a client component, and `initApp`,
+  the boot hook that registers nothing itself — are pinned as exemptions with
+  their reasons by `tests/unit/fork-init-seams.test.ts`. That test derives the
+  seam list from `lib/app/`, fails when a new seam hand-rolls the gate, and diffs
+  the roster in
+  [`.context/architecture/fork-init-seams.md`](.context/architecture/fork-init-seams.md)
+  against the code in both directions rather than leaving it maintained by hand —
+  a prose roster is how #633 came to name four of the seven broken seams.
+
 - **`overrideReasons` in `package.json` — an `overrides` change now has somewhere
   to answer.** `check:lockfile` gated on any change to the `overrides` block and
   ended with the word "Intentional?", which is a question a build cannot be told
@@ -186,6 +206,39 @@ release process.
   literal in the component.
 
 ### Fixed
+
+- **A fork init that threw kept the registrations it had already made, while
+  logging that the feature was disabled.** Six seams — `jobs`,
+  `context-contributors`, `guard-floor-contributors`,
+  `guard-event-contributors`, `knowledge-access-contributors` and
+  `user-created` — caught the throw, said "disabled", and left everything
+  registered before it live. A job kept running on every maintenance tick (and
+  held the idle gate open at its interval) from a config its author believed had
+  not loaded; a knowledge-access contributor kept widening a restricted agent's
+  document set, which is the only direction those can move; a user-created hook
+  kept provisioning, emailing or billing every new account. All six now roll
+  back to the pre-init registry, so the message is literally true. A second
+  latent bug went with it: `String(err)` throws on a null-prototype value, and
+  only one of the eleven seams guarded it. In the nine others that had a catch,
+  the log call itself could throw and escape it — after the rollback, in the
+  three that had one — surfacing as an unexplained failure of the very thing the
+  catch protects (#633).
+
+- **One misdeclared app capability stopped the fork's others from registering.**
+  `capabilityDispatcher.register()` throws on an authoring mistake
+  (`processesPii = true` with no `redactProvenance()` override) and it threw
+  mid-flush, so a fork with 28 registrations and a bad one at position 12 got 11
+  in the dispatcher, 16 never reached, and every dispatch path throwing. The
+  flush now isolates per entry: the failing capability is named in the log and
+  skipped, the rest register. One case is not a clean skip and says so — when the
+  failed registration was replacing an existing slug via `register(cap, { slug })`,
+  the handler it was replacing stays live *without the fork's guard*, so it logs
+  that rather than "skipping it". **A throwing `initAppCapabilities()` itself still
+  re-raises** rather than degrading like the other seams — rollback costs the
+  fork its whole toolset, and an agent missing every tool answers from its own
+  weights with nothing marking the gap — but it is now latched before it runs,
+  so it no longer re-runs on every chat turn and every workflow step for the
+  life of the process (#633).
 
 - **Core tests a fork could not satisfy (#480, #525, #530, #533).** Filling a
   seam correctly turned the suite red in four places: the subject-access
