@@ -29,6 +29,9 @@ import { glossaryAnalysisWorkflow } from '@/lib/app/questionnaire/workflows/defi
 import { ingestionWorkflow } from '@/lib/app/questionnaire/workflows/definitions/ingestion';
 import { reportConfigAssistantWorkflow } from '@/lib/app/questionnaire/workflows/definitions/report-config-assistant';
 import { respondentReportWorkflow } from '@/lib/app/questionnaire/workflows/definitions/respondent-report';
+import { scopeEvaluationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/scope-evaluation';
+import { scopePlanningWorkflow } from '@/lib/app/questionnaire/workflows/definitions/scope-planning';
+import { scopeRoutingAnalysisWorkflow } from '@/lib/app/questionnaire/workflows/definitions/scope-routing-analysis';
 import { structureEditWorkflow } from '@/lib/app/questionnaire/workflows/definitions/structure-edit';
 import { turnEvaluationWorkflow } from '@/lib/app/questionnaire/workflows/definitions/turn-evaluation';
 import { turnInspectorWorkflow } from '@/lib/app/questionnaire/workflows/definitions/turn-inspector';
@@ -40,13 +43,16 @@ export const WORKFLOW_DIAGRAMS: readonly ConquestWorkflowDiagram[] = [
   structureEditWorkflow,
   dataSlotGenerationWorkflow,
   glossaryAnalysisWorkflow,
+  scopeRoutingAnalysisWorkflow,
   conversationTurnWorkflow,
   answerExtractionWorkflow,
   dataSlotTurnWorkflow,
+  scopePlanningWorkflow,
   respondentReportWorkflow,
   reportConfigAssistantWorkflow,
   cohortReportWorkflow,
   designEvaluationWorkflow,
+  scopeEvaluationWorkflow,
   configAdvisorWorkflow,
   agentSettingsAdvisorWorkflow,
   turnInspectorWorkflow,

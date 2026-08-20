@@ -28,6 +28,14 @@ import { buildExtractionPrompt } from '@/lib/app/questionnaire/ingestion/extract
 import { buildVerifyPrompt } from '@/lib/app/questionnaire/ingestion/verify-prompt';
 import { buildGlossaryAnalysisPrompt } from '@/lib/app/questionnaire/glossary/analysis-prompt';
 import { buildRepairPrompt } from '@/lib/app/questionnaire/ingestion/repair-prompt';
+import { buildScopeCandidacyPrompt } from '@/lib/app/questionnaire/scope/candidacy-prompt';
+import { buildRoutingAnalysisPrompt } from '@/lib/app/questionnaire/scope/analysis-prompt';
+import { buildScopeJudgePrompt } from '@/lib/app/questionnaire/scope-evaluation/judge-prompt';
+import { SCOPE_EVALUATION_DIMENSION_SPECS } from '@/lib/app/questionnaire/scope-evaluation/dimensions';
+import {
+  SCOPE_EVALUATION_DIMENSIONS,
+  type ScopeStructureInput,
+} from '@/lib/app/questionnaire/scope-evaluation/types';
 import {
   buildComposeFullPrompt,
   buildComposeOutlinePrompt,
@@ -75,7 +83,9 @@ import {
   QUESTIONNAIRE_EXTRACTOR_AGENT_SLUG,
   QUESTIONNAIRE_GLOSSARY_ANALYST_AGENT_SLUG,
   QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG,
+  QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
   QUESTIONNAIRE_SCALE_MATRIX_REPAIR_AGENT_SLUG,
+  QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG,
   QUESTIONNAIRE_SELECTOR_AGENT_SLUG,
   TURN_EVALUATOR_AGENT_SLUG,
   RECONCILER_AGENT_SLUG,
@@ -419,6 +429,67 @@ const SCALE_MATRIX_REPAIR: PromptAgentCatalogEntry = {
             },
             documentText: '{{ text extracted from the uploaded document }}',
             fileName: '{{ uploaded-file.pdf }}',
+          })
+        ),
+    }),
+  ],
+};
+
+const SCOPE_CANDIDACY_CHECK: PromptAgentCatalogEntry = {
+  slug: QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG,
+  name: 'Adaptive Scope candidacy check',
+  stage: 'authoring',
+  summary:
+    'A fast, routing-tier triage over a freshly uploaded document: do its own words describe routing different respondents through different parts of it? Never proposes topics or rules — only decides whether to invite the admin to run the Routing Analyst.',
+  dispatch: 'Automatically on every ingest (new + re-ingest, streaming and non-streaming).',
+  builderModule: 'lib/app/questionnaire/scope/candidacy-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: 'candidacy.default',
+      label: 'Ingestion-time candidacy check',
+      description:
+        'The prompt sent to decide whether a freshly uploaded document is worth flagging as a routing candidate.',
+      build: () =>
+        norm(
+          buildScopeCandidacyPrompt({
+            documentText:
+              '{{ text extracted from the uploaded document — its questions, sections, and any routing/eligibility instructions }}',
+            documentFileName: '{{ uploaded-file.pdf }}',
+          })
+        ),
+    }),
+  ],
+};
+
+const ROUTING_ANALYST: PromptAgentCatalogEntry = {
+  slug: QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
+  name: 'Routing Analyst',
+  stage: 'authoring',
+  summary:
+    'Reads the pages structure extraction discards — "Routing", "Guardrails", "How to use this", facilitator notes — plus the version\'s questions, and proposes the topic set, criteria and hard rules they describe. A proposer only; everything lands in a draft for review.',
+  dispatch: 'On demand from the Topics tab, or auto-invited when the candidacy check fires.',
+  builderModule: 'lib/app/questionnaire/scope/analysis-prompt.ts',
+  instructionsAreLoadBearing: false,
+  specimens: [
+    specimen({
+      id: 'analyse.default',
+      label: 'Propose topics and rules',
+      description:
+        "The prompt sent to propose a topic set, hard rules and gaps from the version's questions and its uploaded source document.",
+      build: () =>
+        norm(
+          buildRoutingAnalysisPrompt({
+            goal: '{{ questionnaire goal }}',
+            audience: SAMPLE_AUDIENCE,
+            questions: [
+              { key: 'q1', prompt: '{{ question 1 }}', sectionTitle: '{{ section 1 title }}' },
+              { key: 'q2', prompt: '{{ question 2 }}' },
+            ],
+            dataSlots: [{ key: 'slot_1', name: '{{ data slot 1 }}', theme: '{{ theme }}' }],
+            documentText:
+              '{{ text extracted from the uploaded document — its routing/eligibility pages }}',
+            documentFileName: '{{ uploaded-file.pdf }}',
           })
         ),
     }),
@@ -1070,6 +1141,72 @@ const JUDGES: PromptAgentCatalogEntry[] = EVALUATION_DIMENSIONS.map((dimension) 
 });
 
 // ---------------------------------------------------------------------------
+// Adaptive Scope evaluation judges — one agent per dimension (F17.21)
+// ---------------------------------------------------------------------------
+
+const SAMPLE_SCOPE_STRUCTURE: ScopeStructureInput = {
+  topics: [
+    {
+      key: 'topic_1',
+      label: '{{ topic 1 label }}',
+      phase: 'conditional',
+      criteria: '{{ the "choose when" criteria this topic\'s author wrote }}',
+      depth: 'full',
+      members: [{ key: 'q1', label: '{{ question 1 }}' }],
+    },
+  ],
+  rules: [
+    {
+      id: 'rule_1',
+      sentence: '{{ Never ask "topic 1" when "data slot 1" equals "no" }}',
+      dataSlotKey: 'slot_1',
+      topicKey: 'topic_1',
+      operator: 'equals',
+      action: 'exclude',
+    },
+  ],
+  settings: {
+    maxConditionalTopics: 3,
+    includeCheckTopic: true,
+    fallbackTopicKeys: [],
+    minConfidence: 0.6,
+    plannerInstructions: '{{ optional guidance authored for the planner }}',
+    sessionBudgetSeconds: 0,
+    limitOpeningProbes: false,
+    maxOpeningProbes: 0,
+  },
+  costs: {
+    budgetSeconds: 0,
+    alwaysSeconds: 30,
+    routedAllowanceSeconds: 0,
+    perTopic: [{ key: 'topic_1', fullSeconds: 60, lightSeconds: 30 }],
+  },
+  knownIssues: [],
+};
+
+const SCOPE_JUDGES: PromptAgentCatalogEntry[] = SCOPE_EVALUATION_DIMENSIONS.map((dimension) => {
+  const spec = SCOPE_EVALUATION_DIMENSION_SPECS[dimension];
+  return {
+    slug: spec.slug,
+    name: spec.label,
+    stage: 'evaluation' as const,
+    summary: spec.summary,
+    dispatch:
+      "Once per Adaptive Scope evaluation run, when the judge panel scores a version's scope config.",
+    builderModule: 'lib/app/questionnaire/scope-evaluation/judge-prompt.ts',
+    instructionsAreLoadBearing: false,
+    specimens: [
+      specimen({
+        id: `${spec.slug}.judge`,
+        label: `Judge: ${dimension}`,
+        description: `Scores the "${dimension}" dimension of a version's authored Adaptive Scope configuration, and proposes edits.`,
+        build: () => norm(buildScopeJudgePrompt(dimension, SAMPLE_SCOPE_STRUCTURE)),
+      }),
+    ],
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Suggestion reconciler — runs once after the panel, over the contested questions
 // ---------------------------------------------------------------------------
 
@@ -1150,6 +1287,8 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     EXTRACTION_VERIFIER,
     SCALE_MATRIX_REPAIR,
     GLOSSARY_ANALYST,
+    SCOPE_CANDIDACY_CHECK,
+    ROUTING_ANALYST,
     COMPOSER,
     DATA_SLOT_GENERATOR,
     // Live conversation
@@ -1162,6 +1301,7 @@ export function buildPromptCatalog(): PromptAgentCatalogEntry[] {
     // Evaluation
     TURN_EVALUATOR,
     ...JUDGES,
+    ...SCOPE_JUDGES,
     RECONCILER,
   ];
 }
