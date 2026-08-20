@@ -28,6 +28,7 @@ import type { MutationSpec } from '@/components/admin/questionnaires/version-edi
 import {
   DEFAULT_QUESTIONNAIRE_CONFIG,
   DEFAULT_INVITEE_FIELDS,
+  type HouseRule,
 } from '@/lib/app/questionnaire/types';
 import { DIMENSION_PHRASES, personaToneClause } from '@/lib/app/questionnaire/chat/tone';
 
@@ -1401,5 +1402,69 @@ describe('ConfigEditor', () => {
     clickSave();
     const personaSelection = bodyOf(specs).personaSelection as { allowRespondentSwitch: boolean };
     expect(personaSelection.allowRespondentSwitch).toBe(true);
+  });
+});
+
+describe('ConfigEditor — interviewer house rules', () => {
+  const ruleFor = (
+    over: Partial<HouseRule> & Pick<HouseRule, 'id' | 'kind' | 'text'>
+  ): HouseRule => ({
+    enabled: true,
+    ...over,
+  });
+
+  it('saves the stored block untouched when the admin does not open the section', () => {
+    const houseRules = {
+      enabled: true,
+      rules: [ruleFor({ id: 'a', kind: 'never', text: 'Give advice.' })],
+    };
+    const { specs } = setup({ houseRules });
+    clickSave();
+    // A config field that quietly resets on an unrelated save is the failure mode worth pinning.
+    expect(bodyOf(specs).houseRules).toEqual(houseRules);
+  });
+
+  it('trims rule text and triggers on save', () => {
+    const { specs } = setup({
+      houseRules: {
+        enabled: true,
+        rules: [
+          ruleFor({ id: 'a', kind: 'always', text: '  Ask for an example.  ' }),
+          ruleFor({
+            id: 'b',
+            kind: 'if_asked',
+            text: '  Fifteen minutes.  ',
+            trigger: '  how long  ',
+          }),
+        ],
+      },
+    });
+    clickSave();
+    expect(bodyOf(specs).houseRules).toEqual({
+      enabled: true,
+      rules: [
+        { id: 'a', kind: 'always', enabled: true, text: 'Ask for an example.' },
+        { id: 'b', kind: 'if_asked', enabled: true, text: 'Fifteen minutes.', trigger: 'how long' },
+      ],
+    });
+  });
+
+  it('drops rules the admin left incomplete rather than failing the save', () => {
+    const { specs } = setup({
+      houseRules: {
+        enabled: true,
+        rules: [
+          ruleFor({ id: 'a', kind: 'always', text: 'Keep this one.' }),
+          // An added-but-never-typed rule: the server rejects empty text, and a blocked save with no
+          // obvious cause is a worse outcome than silently dropping a rule that says nothing.
+          ruleFor({ id: 'b', kind: 'always', text: '   ' }),
+          // An if_asked rule whose trigger was never filled in can never fire.
+          ruleFor({ id: 'c', kind: 'if_asked', text: 'Only the team.', trigger: '' }),
+        ],
+      },
+    });
+    clickSave();
+    const saved = bodyOf(specs).houseRules as { rules: HouseRule[] };
+    expect(saved.rules.map((r) => r.id)).toEqual(['a']);
   });
 });

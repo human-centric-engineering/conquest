@@ -101,6 +101,49 @@ instructions, then prohibitions, then the reactive answers.
 illusion the product rests on. Clients needing exact wording (compliance, legal) are a known future
 need — see Deferred.
 
+## Authoring
+
+The **Interviewer house rules** card on the Settings tab (`id="house-rules"`, after Interviewer
+strategy so the three interviewer blocks read as one cluster). The card body is
+`components/admin/questionnaires/house-rules-panel.tsx` — its own file, because `config-editor.tsx`
+is already ~2900 lines and a rule list is a sub-editor, not a field.
+
+The hard part of this feature is not storing rules, it is **knowing what to write**. A blank rule
+list is why "custom instructions" features go unused, so the panel carries three pieces of decision
+support:
+
+- **Rule ideas** (`house-rules-library.tsx` + `lib/app/questionnaire/house-rules/presets.ts`) — ~20
+  ready-written rules across six categories: staying on topic, questions respondents ask, getting
+  useful detail, words and names, difficult subjects, claims and promises. Every preset carries a
+  **`why`** line that gets equal visual weight to the rule itself; that line is the decision support,
+  and the rule text is just the shortcut. Presets insert as **editable copies**, never locked values.
+- **A preview of the real block** — rendered by the same pure `buildHouseRulesInstructions` the
+  server calls, so what the admin reads is byte-for-byte what the interviewer is sent.
+- **Field help on writing a good rule** — one instruction per rule; describe behaviour, not a mood;
+  say what to do instead of only what to avoid; don't restate what tone, question order, scoring, or
+  report settings already control.
+
+Several presets deliberately contain a `__` placeholder (`HOUSE_RULE_PLACEHOLDER`) rather than
+guessing on the client's behalf — a confident wrong answer to "how long does this take?" is worse
+than none. The panel warns while any enabled rule still contains one, because the interviewer will
+otherwise read it out literally.
+
+Three invariants the panel maintains, so the editor, the Zod schema, and the read-path narrower
+never disagree:
+
+- Changing a rule's kind away from `if_asked` **drops its trigger** (the server rejects a trigger on
+  any other kind).
+- Changing a rule's kind **to** `if_asked` seeds an empty trigger to fill in.
+- New rule ids are checked against the existing list, not generated from a counter — stored rules can
+  carry positional ids from the narrower, and a duplicate fails the save.
+
+On save the editor trims text and triggers and **drops incomplete rules** (empty text, or `if_asked`
+with no trigger) rather than letting them fail server validation: a blocked save with no visible
+cause is a worse outcome than silently dropping a rule that says nothing.
+
+Rules can be individually switched off, which keeps their wording — drafting a rule and shipping it
+are different decisions.
+
 ## Runtime path
 
 ```

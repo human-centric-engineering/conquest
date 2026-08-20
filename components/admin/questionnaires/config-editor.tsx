@@ -27,6 +27,7 @@ import {
   Compass,
   Flag,
   Gauge,
+  Gavel,
   Hash,
   List,
   ListChecks,
@@ -82,6 +83,7 @@ import {
   PersonaLibraryPanel,
   PersonaLibraryIcon,
 } from '@/components/admin/questionnaires/persona-library-panel';
+import { HouseRulesPanel } from '@/components/admin/questionnaires/house-rules-panel';
 import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 import { personaToneClause } from '@/lib/app/questionnaire/chat/tone';
 import { API } from '@/lib/api/endpoints';
@@ -122,6 +124,7 @@ import {
   INTERVIEWER_APPROACH_LABELS,
   type InterviewerApproach,
   type InterviewerStrategySettings,
+  type HouseRulesSettings,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
@@ -668,6 +671,8 @@ export function ConfigEditor({
   const [interviewerStrategy, setInterviewerStrategy] = useState<InterviewerStrategySettings>(
     config.interviewerStrategy
   );
+  // Interviewer house rules (always / never / if-asked) — the whole block edited as one object.
+  const [houseRules, setHouseRules] = useState<HouseRulesSettings>(config.houseRules);
   // Respondent intro / splash (admin opt-in): the whole block edited as one object.
   const [intro, setIntro] = useState<IntroSettings>(config.intro);
 
@@ -721,6 +726,7 @@ export function ConfigEditor({
     setTone(config.tone);
     setPersonaSelection(config.personaSelection);
     setInterviewerStrategy(config.interviewerStrategy);
+    setHouseRules(config.houseRules);
     setIntro(config.intro);
   }, [config]);
 
@@ -992,6 +998,18 @@ export function ConfigEditor({
         personaSelection,
         // Interviewer strategy (questioning approach). Sent whole; off ⇒ default prompts unchanged.
         interviewerStrategy,
+        // Interviewer house rules. Sent whole; trim each rule's text/trigger, and drop rules the
+        // admin left blank — an empty rule fails server validation and is never what they meant.
+        houseRules: {
+          enabled: houseRules.enabled,
+          rules: houseRules.rules
+            .map((rule) => ({
+              ...rule,
+              text: rule.text.trim(),
+              ...(rule.kind === 'if_asked' ? { trigger: (rule.trigger ?? '').trim() } : {}),
+            }))
+            .filter((rule) => rule.text && (rule.kind !== 'if_asked' || rule.trigger)),
+        },
         // Respondent intro / splash. Sent whole; trim the background + button label. Requires the
         // platform intro-screen flag AND `enabled` to surface to a respondent.
         intro: {
@@ -2063,6 +2081,18 @@ export function ConfigEditor({
                 </div>
               </div>
             )}
+          </SettingsGroup>
+
+          {/* ── Interviewer house rules — what the interviewer may and may not do, per client. ── */}
+          <SettingsGroup
+            icon={Gavel}
+            accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+            id="house-rules"
+            title="Interviewer house rules"
+            description="Things the interviewer must always do, must never do, or should say if a respondent asks. Use these for a client's own boundaries — no advice, house terminology, consistent answers about who sees the results. Off by default."
+            conflicts={conflictsFor('house-rules')}
+          >
+            <HouseRulesPanel value={houseRules} onChange={setHouseRules} disabled={busy} />
           </SettingsGroup>
 
           {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
