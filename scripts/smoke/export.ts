@@ -326,11 +326,17 @@ async function main(): Promise<void> {
     // The in-memory comparison this replaced could not fail: `meta.app` is built
     // by mapping the same `getAppSubjectSources()` the script would have read
     // back, so it compared the registry with itself. What the subject actually
-    // receives is JSON, and that is a different artifact — a value that does not
-    // survive `JSON.stringify` (a `Map`, a `Set`, `undefined`) leaves a section
-    // described in `meta.app` with nothing behind it, and the row counts are
+    // receives is JSON, and that is a different artifact — so the row counts are
     // recomputed here from the delivered payload rather than trusting the ones
     // the service wrote.
+    //
+    // What that catches, precisely: a miscount, a section missing from the
+    // delivered JSON, and a value whose serialised form has a different size
+    // (a `Date` becomes a string). It does NOT catch a `Map` or a `Set` — both
+    // sides compute nought for those — nor `undefined`, which throws
+    // `DeclaredAppSourceMissingError` long before here. The `warn` above is
+    // what notices those shapes. An earlier version of this comment claimed
+    // otherwise, which is the overclaim this branch keeps making.
     const delivered = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
     const mismatched: string[] = [];
     for (const summary of delivered.meta.app) {

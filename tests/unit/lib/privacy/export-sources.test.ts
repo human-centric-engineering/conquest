@@ -270,13 +270,42 @@ describe('subject-data source manifest', () => {
     });
 
     it('lists every core schema file that is actually on disk', () => {
-      // Drift guard, in the direction that matters for core: a rename or a
-      // removal leaves a name here matching nothing, and the file it used to
-      // cover would be silently reclassified as a fork tier's.
+      // Drift guard, direction one: a rename or a removal leaves a name here
+      // matching nothing, and the file it used to cover would be silently
+      // reclassified as a fork tier's.
       const onDisk = new Set(readSchemaFiles().map((file) => file.name));
       const stale = [...CORE_SCHEMA_FILES].filter((name) => !onDisk.has(name)).sort();
 
       expect(stale, 'CORE_SCHEMA_FILES names a file that no longer exists').toEqual([]);
+    });
+
+    it('lists whichever file every core-manifest model actually lives in', () => {
+      // Drift guard, direction two — the one that matters more, because nothing
+      // else catches it. A NEW core schema file nobody adds to
+      // `CORE_SCHEMA_FILES` is treated as a fork tier's, which lifts its models
+      // out of core's strict rule. This finds it the moment core's own manifest
+      // names a model living there.
+      const coreManifestModels = new Set([
+        ...SUBJECT_DATA_SOURCES.map((source) => source.model),
+        ...EXCLUDED_SOURCES.map((source) => source.model),
+      ]);
+      const inCoreFiles = new Set(
+        readSchemaFiles()
+          .filter((file) => CORE_SCHEMA_FILES.has(file.name))
+          .flatMap((file) => [...file.contents.matchAll(/^model\s+(\w+)\s*\{/gm)])
+          .map((match) => match[1])
+      );
+      const elsewhere = [...coreManifestModels].filter((model) => !inCoreFiles.has(model)).sort();
+
+      expect(
+        elsewhere,
+        elsewhere.length === 0
+          ? ''
+          : `Core's manifest names models that are not in any file listed in ` +
+              `CORE_SCHEMA_FILES: ${elsewhere.join(', ')}. If you added a core schema ` +
+              `file, add its name to CORE_SCHEMA_FILES — until you do it is treated as ` +
+              `a fork tier's, and its User-linked models drop out of the strict rule.`
+      ).toEqual([]);
     });
   });
 
@@ -352,16 +381,19 @@ describe('subject-data source manifest', () => {
 
   describe('fork-owned schema files', () => {
     it('accounts for every model in a fork-owned schema file', () => {
-      // Core's own manifest counts as accounting too. A framework tier moving
-      // rows out of `SUBJECT_DATA_SOURCES` and into the registry is doing the
-      // right thing, and failing them twice while they do it is noise, not
-      // protection — the property this asserts is that *someone decided*, not
-      // which file they decided in.
-      const accounted = new Set([
-        ...getAccountedAppModels(),
-        ...declared,
-        ...EXCLUDED_SOURCES.map((source) => source.model),
-      ]);
+      // Core's `SUBJECT_DATA_SOURCES` counts as accounting — a framework tier
+      // moving rows out of it and into the registry is doing the right thing,
+      // and failing them twice while they do it is noise, not protection.
+      //
+      // `EXCLUDED_SOURCES` deliberately does NOT. It used to, and that opened a
+      // hole in the other direction: a NEW core schema file that nobody adds to
+      // `CORE_SCHEMA_FILES` is classified fork-owned, which lifts its models out
+      // of `userLinked` and so out of the strict core rule — where an exclusion
+      // is never an escape from a `User` relation. Accepting an exclusion here
+      // as well would let a User-linked CORE table be written off with one
+      // `EXCLUDED_SOURCES` row and a forgotten filename, and vanish from every
+      // Art. 15 export with the suite green.
+      const accounted = new Set([...getAccountedAppModels(), ...declared]);
       const scan = { userLinked, scalarLinked, allModels, forkModels };
       const missing = unaccountedForkModels(scan, accounted);
 

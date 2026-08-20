@@ -24,8 +24,15 @@
  * the collision the reservation exists to prevent. Each tier registers its own
  * contribution here and neither locks the other out.
  *
+ * A framework tier registers the same way, with `tier: 'framework'` — but it
+ * must be reached from the **leaf's** `initAppSubjectSources()`, not from
+ * `initFramework()` at boot. This registry re-runs only the lazy seam, so a
+ * contribution made at boot is lost the moment anything resets the registry
+ * (the coverage guard does exactly that) and never comes back.
+ *
  * ```ts
- * // lib/framework/privacy/export-sources.ts — called from initFramework()
+ * // lib/framework/privacy/export-sources.ts — called from the LEAF's
+ * // initAppSubjectSources(), the same bridge shape as bootstrap → initFramework
  * registerAppSubjectSources({
  *   tier: 'framework',
  *   sources: [
@@ -182,15 +189,6 @@ export function registerAppSubjectSources(contribution: AppSubjectSourceContribu
     // personal data, the one saying it DOES is the safe answer, and it is the
     // one that keeps `meta` matching the payload.
     const supersededExclusion = excluded.get(model);
-    if (supersededExclusion) {
-      excluded.delete(model);
-      logger.warn('subject-sources: a source declaration replaced an exclusion', {
-        tier,
-        model,
-        previousOwner: owners.get(model),
-        previousReason: supersededExclusion.reason,
-      });
-    }
 
     const owner = owners.get(model);
     if (owner !== undefined && owner !== tier && supersededExclusion === undefined) {
@@ -206,6 +204,23 @@ export function registerAppSubjectSources(contribution: AppSubjectSourceContribu
     if (collision) {
       reject(tier, model, `section '${section}' is already used by ${collision.model}`);
       continue;
+    }
+
+    // Supersede only now that the row is certain to be accepted.
+    //
+    // Deleting it earlier meant a source that was then REJECTED — by the
+    // section-collision check above — still destroyed a valid exclusion on the
+    // way past. `meta.excluded` silently stopped telling the subject that table
+    // was withheld and why, which is the disclosure gap this file exists to
+    // close, opened by the fix for a different one.
+    if (supersededExclusion) {
+      excluded.delete(model);
+      logger.warn('subject-sources: a source declaration replaced an exclusion', {
+        tier,
+        model,
+        previousOwner: owners.get(model),
+        previousReason: supersededExclusion.reason,
+      });
     }
 
     sources.set(model, { ...source, model, section });

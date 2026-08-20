@@ -236,6 +236,32 @@ describe('registerAppSubjectSources', () => {
       );
     });
 
+    it('does NOT destroy an exclusion when the superseding source is itself rejected', () => {
+      // The bug this ordering exists to prevent: the delete used to run before
+      // the section-collision check, so a source that never made it into the
+      // registry still took a valid exclusion with it — and `meta.excluded`
+      // stopped telling the subject that table was withheld and why.
+      seam(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [VALID],
+          excluded: [{ model: 'AppCountry', reason: 'Reference list — holds no personal data.' }],
+        });
+        // Same section as VALID, so this source is rejected by the collision
+        // check — after it would previously have deleted the exclusion.
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [{ ...VALID, model: 'AppCountry' }],
+        });
+      });
+
+      expect(getAppExcludedSubjectSources()).toEqual([
+        { model: 'AppCountry', reason: 'Reference list — holds no personal data.' },
+      ]);
+      expect(getAccountedAppModels().has('AppCountry')).toBe(true);
+      expect(getAppSubjectSources()).toEqual([VALID]);
+    });
+
     it('lets a leaf tier supersede a framework tier’s exclusion', () => {
       // The cross-tier version, which is the one that actually happens: the
       // framework excludes a shared table at boot, the leaf knows it holds its

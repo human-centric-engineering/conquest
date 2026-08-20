@@ -437,6 +437,16 @@ describe('exportUserData', () => {
       await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
     });
 
+    it('rejects a declared section named after an Object.prototype member', async () => {
+      // `app['constructor'] === undefined` is false on any plain object, so a
+      // bare lookup called this delivered and `countAppRows` then reported a
+      // count for a key the JSON does not contain.
+      declare('AppThing', 'constructor');
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
+    });
+
     it('accepts a declared section that is null — null survives serialisation', async () => {
       declare('AppInvoice', 'invoices');
       mockCollectAppSubjectData.mockResolvedValue({ invoices: null });

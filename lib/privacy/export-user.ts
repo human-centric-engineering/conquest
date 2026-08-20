@@ -275,7 +275,15 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
 
   const declaredAppSources = getAppSubjectSources();
   const undelivered = declaredAppSources
-    .filter((source) => app[source.section] === undefined)
+    .filter(
+      // `Object.hasOwn` first: a bare `[section] === undefined` reads the
+      // prototype chain, so a section declared as `constructor` or `toString`
+      // slips through as "delivered" and `countAppRows` then reports a
+      // fabricated count for a key the JSON does not contain. The `undefined`
+      // test still runs after it, because an own key holding `undefined` is
+      // dropped by `JSON.stringify` and is equally undelivered.
+      (source) => !Object.hasOwn(app, source.section) || app[source.section] === undefined
+    )
     .map((source) => source.section);
   if (undelivered.length > 0) {
     throw new DeclaredAppSourceMissingError(undelivered);
