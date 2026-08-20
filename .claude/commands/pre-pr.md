@@ -60,11 +60,20 @@ npm run check:lockfile -- --base "$BASE"
 ```
 
 Exit 1 means something needs a decision: platform metadata (`libc`/`os`/`cpu`)
-lost — including across a hoist — or `overrides` changed (adding, changing OR
-removing an entry). Lost metadata is the one that has actually bitten (#571).
-The cause is almost always **npm below 11.11.0**, which deletes `libc` from
-every entry it writes on every platform; check `npm -v`, then repair with `npm
-run fix:lockfile-libc` and re-run this.
+lost — including across a hoist — or an **unexplained** `overrides` change.
+Lost metadata is the one that has actually bitten (#571). The cause is almost
+always **npm below 11.11.0**, which deletes `libc` from every entry it writes on
+every platform; check `npm -v`, then repair with `npm run fix:lockfile-libc` and
+re-run this.
+
+**Answer an overrides change in `package.json`, not here.** Adding, re-pointing
+or removing an entry passes when that key's `overrideReasons` entry moves in the
+**same diff** — write the sentence, do not look for a flag. The rule is "the
+reason moved", not "a reason exists", which is what stops a reason landed in an
+earlier PR from waving a later change through, and what makes a revert restate
+its case. Deleting an override means deleting its reason too. Every override
+change is printed either way, with its standing reason, so read that block even
+on a pass: a reason you did not approve is the thing worth catching (#608).
 
 **Downgrades do not fail this check** — neither transitive nor direct. They are
 reported, direct ones in their own block. The direct rule used to gate; over 134
@@ -308,6 +317,32 @@ If no public-surface paths are in the diff, the check is silent (correct — mos
 
 This check is a **reminder, not a gate**. The agent reads the flag and decides; mechanical checks can't tell whether a `lib/auth/guards.ts` edit changed behaviour the public depends on or was an internal type tweak.
 
+**5e. CHANGELOG hygiene — an `[Unreleased]` bullet a later commit invalidated**
+
+5d stops at "is there an entry", and says so explicitly: _"If `CHANGELOG.md` IS in the diff, the check passes regardless of what was added."_ In a multi-round PR the likelier failure is the opposite — a bullet that was **accurate when written** and was falsified by a later commit on the same branch. It fired six times on #625 alone, and every one of them passed 5d.
+
+```bash
+npm run check:changelog-drift -- --base "$BASE"
+```
+
+It correlates the identifiers each bullet quotes **in backticks** against the commits that changed those strings later on the branch, per line rather than per bullet, and separately flags any commit SHA in the section that is not reachable from `origin/main` — a branch SHA stops resolving the moment the PR is squash-merged, so cite the PR or issue instead.
+
+**Read the output; it never gates.** Exit 1 means it could not run (an unusable `--base`), never that it disapproves of a bullet. Deliberately so: an unanswerable gate is the defect #608 fixed in `check:lockfile`, and shipping one here would be absurd.
+
+Findings come in two blocks and they do not deserve equal attention:
+
+- **Bullets this branch wrote** — the ones the check exists for. Read every one.
+- **Bullets already in `[Unreleased]`** before this branch, behind their own heading. Every branch commit counts as "later" for these, so they are much noisier. Glance, don't rewrite.
+
+**The dominant false positive is a commit that only _mentions_ the identifier** — in a docblock, a comment, or a test fixture. The pickaxe cannot tell a mention from a change. On the branch that added this check, all 11 inherited flags were of that shape, and so was its one branch-written flag: a bullet naming `check:lockfile`, linked to a commit that merely quoted the name in prose. Open the commit before believing the flag.
+
+**Two things it structurally cannot see**, so check them yourself rather than reading a clean run as an all-clear:
+
+- **A claim that was already wrong when written.** #625's "at 8192, the value the docs tell you to set" quoted a number an _earlier_ commit on the same branch had changed to 6144. Nothing later touched it, so nothing links it.
+- **An omission.** "`typecheck`, `lint`, `build` keep it" was stale because it left out `smoke`, `docker` and `lockfile`. No identifier changed; the missing ones were never named.
+
+**Then re-read `[Unreleased]` yourself, last.** After every other step, with the diff fresh, read the section you wrote and hunt claims your own later commits invalidated. That is what actually caught five of #625's six, and it is the half of this step no script replaces. Note that a manual pass has its own failure mode: the #625 audit introduced the sixth error while fixing the other five, by replacing a vague phrase with a branch SHA. That one the script does catch.
+
 ### Step 6: Output summary
 
 Output a clear summary in this format:
@@ -352,6 +387,7 @@ Output a clear summary in this format:
 - [ ] Changed docs accuracy: {CLEAN or issues found}
 - [ ] Docs missing/outdated for code changes: {CLEAN or issues found}
 - [ ] CHANGELOG hygiene (public-surface changes): {CLEAN or N/A (no public-surface change) or "{N} file(s) touched the public surface without a CHANGELOG entry"}
+- [ ] CHANGELOG hygiene (stale `[Unreleased]` bullets, step 5e): {CLEAN, or "{N} bullet(s) this branch wrote worth re-reading, {M} inherited, {K} doomed commit reference(s)" — say which you re-read and what you concluded, since the check never gates}
 
 ### Issues to Address
 {List each issue with file path, line number, and brief description}

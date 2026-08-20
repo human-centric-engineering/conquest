@@ -18,6 +18,40 @@ release process.
 
 ### Added
 
+- **`npm run check:changelog-drift` — a CHANGELOG bullet that a later commit
+  made untrue.** `/pre-pr` step 5d asks whether a public-surface change is
+  *missing* an entry and stops there; in a multi-round PR the likelier failure
+  is a bullet that was accurate when written and was falsified by a later commit
+  on the same branch. It fired six times on one PR (#625), and all six passed
+  5d because `CHANGELOG.md` was in the diff. The new check correlates the
+  identifiers a bullet quotes in backticks against the commits that changed
+  those strings afterwards — **per line, not per bullet**, so a partial rewrite
+  cannot make an older claim look fresh — and separately flags any commit SHA in
+  `[Unreleased]` that is not reachable from `origin/main`, because a branch SHA
+  stops resolving the moment the PR is squash-merged. It is wired into `/pre-pr`
+  as step 5e and **never gates**: the correlation is a heuristic, and it cannot
+  see a claim that was already wrong when written, or one that is stale by
+  omission, or tell a commit that *changed* an identifier from one that merely
+  mentioned it in a comment. Bullets an earlier PR left in `[Unreleased]` are
+  reported behind their own heading, because every commit on the branch counts
+  as later for those. All of it is stated where the check is run.
+
+- **`overrideReasons` in `package.json` — an `overrides` change now has somewhere
+  to answer.** `check:lockfile` gated on any change to the `overrides` block and
+  ended with the word "Intentional?", which is a question a build cannot be told
+  the answer to; wired into branch protection, its only routes past were
+  bypassing the protection or weakening the rule. A per-key override transition
+  now passes when that key's `overrideReasons` entry **moved in the same diff**.
+  "Moved", not "exists": a reason landed in an earlier PR cannot wave a later
+  change through, and a revert has to restate its case. Removing an override
+  means removing its reason too. Reasons for keys a diff did not touch are never
+  read, so a fork inheriting the whole upstream block is unaffected — the
+  fork-sync breakage that sank the previous attempt (#584) cannot recur here.
+  Forks with their own overrides should add a reason for each; nothing fails
+  until one of them is next added or re-pointed. Removing an override that never
+  had a reason is deliberately allowed — there is nothing to move, and failing
+  it would fail forks for state they inherited from before the block existed.
+
 - **`lib/privacy/subject-source-registry.ts` + `initAppSubjectSources()` — a
   fork tier declares its own subject-access sources.** The Art. 15 coverage
   guard scanned every `prisma/schema/*.prisma`, including the fork-reserved
