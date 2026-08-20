@@ -23,6 +23,23 @@ vi.mock('@/lib/logging', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+/**
+ * FORK NOTE — this stub is what keeps the count below yours to ignore.
+ *
+ * `registerBuiltInCapabilities()` calls `initAppCapabilities()` (registry.ts),
+ * the fork-owned `lib/app/capabilities.ts` scaffold CUSTOMIZATION.md §4 tells
+ * every fork to fill. Without this stub the spy counts core's registrations
+ * PLUS the fork's, and the failure reads "expected register to be called 13
+ * times, but got 27" under a test named *is idempotent* — asserting the
+ * opposite of what happened, and sending the reader after a double-registration
+ * bug in wiring that is behaving perfectly (#525).
+ *
+ * Stubbing it does not lose coverage: that the registry calls the seam at all
+ * is asserted below, and its behavioural reach into the dispatcher is covered
+ * by tests/unit/lib/app/bootstrap-wiring.test.ts against the real module.
+ */
+vi.mock('@/lib/app/capabilities', () => ({ initAppCapabilities: vi.fn() }));
+
 const { prisma } = await import('@/lib/db/client');
 const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/dispatcher');
 const {
@@ -34,6 +51,7 @@ const {
   __resetDivergenceWarningsForTests,
 } = await import('@/lib/orchestration/capabilities/registry');
 const { BaseCapability } = await import('@/lib/orchestration/capabilities/base-capability');
+const { initAppCapabilities } = await import('@/lib/app/capabilities');
 
 // ─── Test doubles: minimal real BaseCapability subclasses ────────────────────
 //
@@ -160,8 +178,20 @@ describe('registerBuiltInCapabilities', () => {
     const spy = vi.spyOn(capabilityDispatcher, 'register');
     registerBuiltInCapabilities();
     registerBuiltInCapabilities();
-    expect(spy).toHaveBeenCalledTimes(13); // only from the first call (was 12 before #24)
+    // 13 built-ins, from the first call only. The app seam is stubbed at the
+    // top of this file, so this counts core and nothing else.
+    expect(spy).toHaveBeenCalledTimes(13);
     spy.mockRestore();
+  });
+
+  it('still runs the app capability seam, exactly once', () => {
+    // The count above is only meaningful while the seam is stubbed, and a stub
+    // that outlived its wiring would hide the seam being dropped from
+    // registry.ts entirely. So assert the call rather than only its absence
+    // from the tally.
+    registerBuiltInCapabilities();
+    registerBuiltInCapabilities();
+    expect(initAppCapabilities).toHaveBeenCalledTimes(1);
   });
 });
 

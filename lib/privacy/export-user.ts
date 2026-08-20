@@ -20,6 +20,8 @@
  * deliberate, and it follows from which failure the subject can detect.
  *
  * @see lib/privacy/export-sources.ts — the manifest and its coverage guard
+ * @see lib/privacy/subject-source-registry.ts — where a fork tier declares its
+ *      own sources and exclusions; both reach the subject through `meta`
  * @see lib/privacy/erase-user.ts — the Art. 17 counterpart
  * @see .context/privacy/data-export.md — the guide
  */
@@ -31,8 +33,14 @@ import {
   SUBJECT_DATA_SOURCES,
   EXCLUDED_SOURCES,
   type ExcludedSource,
+  type SourceDisposition,
   type SubjectQuery,
 } from '@/lib/privacy/export-sources';
+import {
+  getAppSubjectSources,
+  getAppExcludedSubjectSources,
+  appSubjectDeclarationsFailed,
+} from '@/lib/privacy/subject-source-registry';
 
 /**
  * Bundle format version. Bump on any breaking change to the shape below — a
@@ -60,16 +68,40 @@ export interface ExportedSourceSummary {
   rows: number;
 }
 
+/**
+ * What one app-tier source contributed. The core equivalent for tables declared
+ * through `registerAppSubjectSources()`.
+ *
+ * Kept in its own list rather than folded into {@link SubjectExportMeta.exported}
+ * because the two are read differently: an `exported` entry's `section` is a key
+ * of `personalData`, an `attribution` entry's is a key of `attributions`, and
+ * these are keys of `app`. Folding them together would leave a reader looking up
+ * a section in the wrong object.
+ */
+export interface AppSourceSummary {
+  model: string;
+  /** Key this source occupies under the bundle's `app`. */
+  section: string;
+  disposition: SourceDisposition;
+  description: string;
+  rows: number;
+}
+
 export interface SubjectExportMeta {
   formatVersion: number;
   generatedAt: string;
   subjectUserId: string;
-  /** Sources returned in full, with row counts. */
+  /** Core sources returned in full, with row counts. Sections of `personalData`. */
   exported: ExportedSourceSummary[];
-  /** Sources returned as id + label + date only, with row counts. */
+  /** Core sources returned as id + label + date only. Sections of `attributions`. */
   attribution: ExportedSourceSummary[];
-  /** Tables deliberately left out, with the reason. */
+  /** Tables deliberately left out, with the reason — core's and the app tier's. */
   excluded: ExcludedSource[];
+  /**
+   * App-tier sources a fork declared, with row counts. Sections of `app`.
+   * Empty in vanilla Sunrise, where nothing is declared.
+   */
+  app: AppSourceSummary[];
 }
 
 export interface SubjectExport {
@@ -92,6 +124,72 @@ export class SubjectNotFoundError extends Error {
     super(`No user with id ${userId}`);
     this.name = 'SubjectNotFoundError';
   }
+}
+
+/**
+ * Raised when a tier's `initAppSubjectSources()` threw, so what its tables hold
+ * is unknown.
+ *
+ * The collector is a separate static import and keeps working, so continuing
+ * would hand the subject app rows that `meta.app` describes none of, with the
+ * tier's exclusions missing from `meta.excluded` — a bundle contradicting its
+ * own manifest. Refusing is the same call the module makes everywhere else: a
+ * partial export is worse than no export, because only this failure is visible.
+ */
+export class AppSubjectDeclarationsUnavailableError extends Error {
+  constructor() {
+    super(
+      'initAppSubjectSources() threw, so this app tier’s subject-data declarations ' +
+        'are unknown and the export cannot be certified complete. Fix the seam in ' +
+        'lib/app/data-export.ts — the failure was logged by ' +
+        'lib/privacy/subject-source-registry.ts.'
+    );
+    this.name = 'AppSubjectDeclarationsUnavailableError';
+  }
+}
+
+/**
+ * Raised when a tier declared a subject source whose section the collector did
+ * not produce — the app half of "a partial export is worse than no export".
+ *
+ * This throws rather than logging because the two parties who could notice
+ * cannot: the subject has no way to tell a missing section from a table they
+ * have no rows in, and the operator sending the bundle has no way either. The
+ * declaration in `initAppSubjectSources()` is the only statement of what the
+ * answer should contain, so a bundle that contradicts it is not an answer.
+ *
+ * Fix it in the collector, not by deleting the declaration: return the key with
+ * an empty array when the subject owns nothing.
+ */
+export class DeclaredAppSourceMissingError extends Error {
+  /** Sections that were declared but absent from `collectAppSubjectData()`. */
+  readonly sections: string[];
+
+  constructor(sections: string[]) {
+    super(
+      `collectAppSubjectData() did not return declared section(s): ${sections.join(', ')}. ` +
+        'Every source registered through registerAppSubjectSources() must produce its ' +
+        'section — return an empty array when the subject has no rows, rather than ' +
+        'omitting the key. See lib/app/data-export.ts.'
+    );
+    this.name = 'DeclaredAppSourceMissingError';
+    this.sections = sections;
+  }
+}
+
+/**
+ * Row count for one app section.
+ *
+ * The documented shape for a declared section is a row list, and that is what a
+ * count means. Anything else is one record or none — deliberately not a number
+ * invented to fill the field, since the count is shown to the subject as the
+ * size of what they received.
+ */
+function countAppRows(value: unknown): number {
+  if (Array.isArray(value)) return value.length;
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0 ? 0 : 1;
+  return 1;
 }
 
 /**
@@ -158,6 +256,39 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
 
   const app = await collectAppSubjectData(subject);
 
+  // Hold the collector to what the tier declared. Extra sections are fine — a
+  // fork may export a derived view that is not a table — but a declared one
+  // that never arrived is a short answer wearing the shape of a complete one.
+  //
+  // Compared against `undefined` rather than tested with `Object.hasOwn`: the
+  // promise is about the bundle the subject *receives*, and `JSON.stringify`
+  // drops a key whose value is `undefined`. `{ invoices: undefined }` owns the
+  // key and serialises to `{}`, so a `hasOwn` check passes while the delivered
+  // export is short exactly the section it just certified. `null` is left
+  // alone — it survives serialisation, so the section is disclosed.
+  // Refuse before reading the declarations, not after: if the init threw they
+  // are empty, and every check below would pass vacuously on a bundle nobody
+  // can certify.
+  if (appSubjectDeclarationsFailed()) {
+    throw new AppSubjectDeclarationsUnavailableError();
+  }
+
+  const declaredAppSources = getAppSubjectSources();
+  const undelivered = declaredAppSources
+    .filter(
+      // `Object.hasOwn` first: a bare `[section] === undefined` reads the
+      // prototype chain, so a section declared as `constructor` or `toString`
+      // slips through as "delivered" and `countAppRows` then reports a
+      // fabricated count for a key the JSON does not contain. The `undefined`
+      // test still runs after it, because an own key holding `undefined` is
+      // dropped by `JSON.stringify` and is equally undelivered.
+      (source) => !Object.hasOwn(app, source.section) || app[source.section] === undefined
+    )
+    .map((source) => source.section);
+  if (undelivered.length > 0) {
+    throw new DeclaredAppSourceMissingError(undelivered);
+  }
+
   const totalRows =
     results.reduce((sum, { rows }) => sum + rows.length, 0) + erasureReceipts.length;
 
@@ -170,6 +301,19 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
     appSections: Object.keys(app).length,
   });
 
+  // Summarise the app tier on the same terms as core. Without this the subject
+  // receives sections under `app` that the bundle's own manifest never mentions
+  // — no description of what a section is, no row count — while `meta` reads as
+  // a complete summary and names the tables that were *withheld*. The
+  // `description` each tier is required to write has nowhere else to go.
+  const appSummaries: AppSourceSummary[] = declaredAppSources.map((source) => ({
+    model: source.model,
+    section: source.section,
+    disposition: source.disposition,
+    description: source.description,
+    rows: countAppRows(app[source.section]),
+  }));
+
   return {
     meta: {
       formatVersion: EXPORT_FORMAT_VERSION,
@@ -177,7 +321,15 @@ export async function exportUserData(params: ExportUserParams): Promise<SubjectE
       subjectUserId: userId,
       exported,
       attribution,
-      excluded: EXCLUDED_SOURCES,
+      app: appSummaries,
+      // Core's exclusions AND the fork tier's. A table withheld from an export
+      // is disclosed with its reason so the subject can see the boundary of
+      // what they received rather than having to infer it — and that has to
+      // hold for a fork's tables too, or a fork install's bundle states the
+      // boundary for core's half and stays silent about the other. The
+      // exclusion path is otherwise the only accounting option with nothing
+      // holding it to anything after the build.
+      excluded: [...EXCLUDED_SOURCES, ...getAppExcludedSubjectSources()],
     },
     account,
     personalData,

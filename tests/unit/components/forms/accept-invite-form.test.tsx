@@ -11,6 +11,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AcceptInviteForm } from '@/components/forms/accept-invite-form';
 import { createMockRouter } from '@/tests/types/mocks';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Mock dependencies
 vi.mock('@/lib/api/client', () => ({
@@ -589,7 +590,7 @@ describe('components/forms/accept-invite-form', () => {
       });
     });
 
-    it('should redirect to dashboard after success', async () => {
+    it('should redirect to the auth landing route after success', async () => {
       // Arrange
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
@@ -615,7 +616,7 @@ describe('components/forms/accept-invite-form', () => {
 
       // Assert
       await waitFor(() => {
-        expect(mockPush).toHaveBeenCalledWith('/dashboard');
+        expect(mockPush).toHaveBeenCalledWith(AUTH_LANDING_ROUTE);
       });
     });
 

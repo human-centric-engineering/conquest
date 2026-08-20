@@ -8,6 +8,24 @@
  *
  * `usePathname` is globally mocked to '/' (tests/setup.ts), so Home is active.
  *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — filling `publicNavItems` is EXPECTED to fail cases here
+ * ---------------------------------------------------------------------------
+ * The `afterEach` only `doUnmock`s the seam, so the default-case tests below
+ * render whatever `lib/app/public-nav.ts` actually exports. Setting a non-null
+ * `publicNavItems` replaces the nav wholesale, and those cases go red.
+ *
+ * Pin your own list in them rather than deleting them — what they protect is
+ * that an override REPLACES rather than appends, which is worth keeping once
+ * the list is yours. Measured: filling the three `public-nav` exports plus
+ * `footerCopyright` fails 9 assertions across this file, `protected-nav`,
+ * `public-footer` and `lib/footer/copyright`.
+ *
+ * Pinning the seam here instead was tried and reverted: a `beforeEach` +
+ * `vi.doMock` made this file intermittently fail under full-suite parallelism.
+ * The durable fix is the seam-filled sweep in #636, which would let these be
+ * rewritten with confidence.
+ *
  * @see components/layouts/public-nav.tsx · lib/app/public-nav.ts · lib/public-nav/types.ts
  */
 

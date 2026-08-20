@@ -11,6 +11,14 @@
  * The attribution line resolves through `lib/app/footer.ts` (#561) — `null`
  * for the platform default, a string to replace it, `false` to omit it.
  *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — filling `footerCopyright` or the footer nav lists fails cases here
+ * ---------------------------------------------------------------------------
+ * The `afterEach` only `doUnmock`s the seams, so the default-case tests below
+ * render whatever `lib/app/footer.ts` and `lib/app/public-nav.ts` export. Pin
+ * your own values rather than deleting the cases — the assertion that Cookie
+ * Preferences survives a `false` seam is the one that must not rot. See #636.
+ *
  * @see components/layouts/public-footer.tsx · lib/app/public-nav.ts · lib/app/footer.ts
  */
 

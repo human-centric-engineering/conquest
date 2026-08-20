@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OAuthButton } from '@/components/forms/oauth-button';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Mock dependencies
 vi.mock('@/lib/auth/client', () => ({
@@ -154,7 +155,7 @@ describe('components/forms/oauth-button', () => {
       });
     });
 
-    it('should use default /dashboard callback when not provided', async () => {
+    it('should fall back to the auth landing route when no callback is provided', async () => {
       // Arrange
       const user = userEvent.setup();
       const { authClient } = await import('@/lib/auth/client');
@@ -168,7 +169,7 @@ describe('components/forms/oauth-button', () => {
       await waitFor(() => {
         expect(authClient.signIn.social).toHaveBeenCalledWith(
           expect.objectContaining({
-            callbackURL: '/dashboard',
+            callbackURL: AUTH_LANDING_ROUTE,
           })
         );
       });

@@ -18,6 +18,45 @@ release process.
 
 ### Added
 
+- **`lib/privacy/subject-source-registry.ts` + `initAppSubjectSources()` — a
+  fork tier declares its own subject-access sources.** The Art. 15 coverage
+  guard scanned every `prisma/schema/*.prisma`, including the fork-reserved
+  `app.prisma` and `framework-*.prisma`, but checked them against a manifest
+  only core can write to — so a fork that filled `collectAppSubjectData()`
+  exactly as documented still had a red core test and no fork-owned way to green
+  it. `registerAppSubjectSources({ tier, sources, excluded })` is that way. A
+  registry rather than one exported constant because `CLAUDE.md` reserves two
+  fork tiers, and a single slot means a framework tier consumes the seam its
+  leaf forks are entitled to. Skipping the reserved namespaces would have been
+  smaller and was rejected: it trades a noisy false positive for a silent false
+  negative, and an access request cannot survive silence. Vanilla Sunrise
+  declares nothing and is unchanged.
+
+- **`DeclaredAppSourceMissingError` (`lib/privacy/export-user.ts`).** Thrown when
+  a tier declared a source whose `section` `collectAppSubjectData()` did not
+  return — including one set to `undefined`, which `JSON.stringify` drops from
+  the delivered bundle. Return the key with an empty array when the subject owns
+  nothing; a bundle short by a section reads exactly like a complete answer,
+  which is what this module's "a partial export is worse than no export" rule
+  already said. Cannot fire in vanilla Sunrise, where nothing is declared.
+
+- **`meta.app` — a fork tier's declared sources are summarised for the subject.**
+  Each declared source contributes `{ model, section, disposition, description,
+  rows }`, so a section under `app` is named and counted in the bundle's own
+  manifest the way core's are. Its own list rather than folded into
+  `meta.exported`, because an `exported` entry's `section` is a key of
+  `personalData` and these are keys of `app` — folding them would send a reader
+  looking in the wrong object. Empty in vanilla Sunrise.
+
+- **A fork tier's exclusions are disclosed to the data subject.**
+  `bundle.meta.excluded` now carries the registry's `excluded` rows alongside
+  core's, so a fork table withheld from an export is named with its reason on
+  the same terms as `AiMessageEmbedding`. Without it a fork install's bundle
+  stated the boundary for core's tables and stayed silent about the fork's, and
+  a subject could not tell "we hold nothing about you" from "we decided not to
+  give it to you". No bundle shape change — the row type is identical — so no
+  `EXPORT_FORMAT_VERSION` bump.
+
 - **`lib/app/api-key-scopes.ts` + `withAuth(handler, { scope })` — least
   privilege is available to forks.** `AiApiKey.scopes` is a `String[]`, but the
   two places deciding what may go in it were closed lists in platform files, so
@@ -113,6 +152,23 @@ release process.
   literal in the component.
 
 ### Fixed
+
+- **Core tests a fork could not satisfy (#480, #525, #530, #533).** Filling a
+  seam correctly turned the suite red in four places: the subject-access
+  coverage guard (above), the capability registry's idempotency count (which
+  reported "expected 13, got 27" under a test named *is idempotent*, sending the
+  reader after a double-registration bug in wiring that was already correct),
+  twelve test cases across eight files that wrote `/dashboard` and `Dashboard`
+  instead of importing `AUTH_LANDING_ROUTE` / `AUTH_LANDING_LABEL` — measured by
+  filling the seam and running the **whole** suite, which is now down to the one
+  intended `SEAM_DEFAULTS` pin — and
+  `smoke:export`. `tests/unit/fork-seam-coupling.test.ts` now requires any core
+  artifact reading a `lib/app/*` seam unmocked to carry a `FORK NOTE`.
+
+- **Four proxy assertions compared a redirect with `toContain('/dashboard')`,**
+  which matches a query string or a longer path — and for a fork landing on `/`
+  matches every URL there is. They compare the parsed pathname exactly now,
+  which is stronger for vanilla Sunrise too.
 
 - **A parameterised MCP resource URI now matches when its `{param}` is not the
   last path segment.** `hub://projects/{id}/plan` collapsed to
@@ -211,6 +267,22 @@ release process.
   `POST` too.
 
 ### Changed
+
+- **A fork-owned schema file must now account for every model it declares.**
+  Any file in `prisma/schema/` that is not one of Sunrise's own eleven — not
+  just `app.prisma` and `framework-*.prisma` — is treated as a fork tier's and
+  held to full accounting: each model declared as a source, or excluded with a
+  reason, rather than run through core's `userId`/`createdBy` heuristic. Core
+  reads its own column vocabulary and cannot read yours, so a table keyed
+  `authorId` or `respondentId` was invisible to that scan. No effect on vanilla
+  Sunrise, where `app.prisma` ships empty.
+
+- **`npm run smoke:export` asserts the app seam works rather than that it is
+  untouched.** It checked `Object.keys(bundle.app).length === 0`, which
+  implementing the seam makes false by construction — and the script is not in
+  `validate` or `npm test`, so a fork got a green local run and a red pipeline.
+  It now asserts every declared section arrived and is empty for a subject who
+  owns nothing, which also catches a collector matching a stranger's rows.
 
 - **`ApiKeyScope` is an open type and `validateScopes` returns `boolean`.**
   `ApiKeyScope` was a closed union and is now `CoreApiKeyScope | (string & {})`,

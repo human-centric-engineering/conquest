@@ -30,18 +30,21 @@
  * collector yields a bundle that looks complete and is not, and neither the
  * subject nor the operator can tell. A static import cannot be missed.
  *
- * **Keep it complete.** The core guard test (`export-sources.test.ts`) diffs
- * `prisma/schema/*.prisma` against the core manifest so a new core table can't
- * quietly narrow the export. Your tables need the same protection, and core
- * cannot write it for you — the pattern worth copying is a constant listing the
- * tables you export plus a test that greps your own schema file for
- * `@@map("app_…")` and asserts each mapped table appears in it. Then adding a
- * table without extending the export fails your build instead of shipping a
- * short answer to a data subject.
+ * **Keep it complete — and core now checks that you did.** Declare your tables
+ * in `initAppSubjectSources()` below. The core guard test
+ * (`export-sources.test.ts`) diffs `prisma/schema/*.prisma` against the core
+ * manifest so a new core table can't quietly narrow the export, and it holds
+ * your tier's schema file to the same rule against your declarations: **every**
+ * model in a schema file that is not one of Sunrise's own — `app.prisma`,
+ * `framework-*.prisma`, or any other name you choose — must be declared as a
+ * source or excluded with a reason, or the suite fails naming it.
  *
- * A table holding no personal data (lookup tables, org config with no person in
- * it) is fine to leave out — but say so in a comment where you list them, so
- * the omission reads as a decision rather than an oversight.
+ * Full accounting, rather than the user-id heuristic core applies to itself,
+ * because core reads its own column vocabulary and cannot read yours: a table
+ * keyed `authorId` or `respondentId` is invisible to that scan, and the tables
+ * it cannot see are exactly the ones nobody remembers. A lookup or join table
+ * holding no personal data is an `excluded` row with a one-line reason — which
+ * is the note a DPO wants anyway, and it costs you a line once per table.
  *
  * Full guide: .context/privacy/data-export.md · CUSTOMIZATION.md §4
  */
@@ -59,6 +62,48 @@ export interface AppSubjectQuery {
  * `app.<section>` in the export bundle. Values must be JSON-serialisable.
  */
 export type AppSubjectData = Record<string, unknown>;
+
+/**
+ * Declare which of your tier's models hold data about a person, and which
+ * deliberately do not.
+ *
+ * **Fork-owned scaffold**, run once and lazily by
+ * `lib/privacy/subject-source-registry.ts` before its first read — so the
+ * coverage guard and the export both see your declarations with no wiring step.
+ *
+ * ```ts
+ * export function initAppSubjectSources(): void {
+ *   registerAppSubjectSources({
+ *     tier: 'app',
+ *     sources: [
+ *       {
+ *         model: 'AppInvoice',
+ *         section: 'invoices',
+ *         disposition: 'export',
+ *         description: 'Invoices raised against your account.',
+ *       },
+ *     ],
+ *     excluded: [
+ *       { model: 'AppCountry', reason: 'Reference list of countries — holds no personal data.' },
+ *     ],
+ *   });
+ * }
+ * ```
+ *
+ * A framework tier declares from its own init with `tier: 'framework'`; both
+ * tiers register independently, so filling this in does not consume the slot a
+ * leaf fork is entitled to.
+ *
+ * **Every `section` you declare must appear in what `collectAppSubjectData()`
+ * returns** — `exportUserData()` throws if one is missing. Return the key with
+ * an empty array when the subject has no rows rather than omitting it: a bundle
+ * short by a section reads exactly like a complete answer. `undefined` counts
+ * as missing, because `JSON.stringify` drops the key — so
+ * `rows.length ? rows : undefined` is the shape to avoid.
+ */
+export function initAppSubjectSources(): void {
+  // No app subject sources by default.
+}
 
 /**
  * Collect this app's data about one subject. Ships empty — vanilla Sunrise has

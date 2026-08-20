@@ -25,6 +25,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OAuthButtons } from '@/components/forms/oauth-buttons';
+import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 
 // Mock dependencies
 vi.mock('@/lib/auth/client', () => ({
@@ -134,7 +135,7 @@ describe('components/forms/oauth-buttons', () => {
         expect(authClient.signIn.social).toHaveBeenCalledWith(
           expect.objectContaining({
             provider: 'google',
-            callbackURL: '/dashboard',
+            callbackURL: AUTH_LANDING_ROUTE,
           })
         );
       });

@@ -76,12 +76,21 @@ const { mockPrisma, delegateFor, resetDelegates, mockUserFindUnique, mockLogger 
   }
 );
 
+const mockInitAppSubjectSources = vi.fn();
+
 vi.mock('@/lib/db/client', () => ({ prisma: mockPrisma }));
 vi.mock('@/lib/logging', () => ({ logger: mockLogger }));
 
 const mockCollectAppSubjectData = vi.fn().mockResolvedValue({});
+/**
+ * Stubbed alongside the collector, not omitted. Leaving it out does not fail —
+ * the registry catches the resulting TypeError, logs it and rolls back — so the
+ * suite would go green while every declaration test below silently exercised
+ * the error path instead of the contract.
+ */
 vi.mock('@/lib/app/data-export', () => ({
   collectAppSubjectData: (...args: unknown[]) => mockCollectAppSubjectData(...args),
+  initAppSubjectSources: () => mockInitAppSubjectSources(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -89,8 +98,14 @@ vi.mock('@/lib/app/data-export', () => ({
 import {
   exportUserData,
   SubjectNotFoundError,
+  DeclaredAppSourceMissingError,
+  AppSubjectDeclarationsUnavailableError,
   EXPORT_FORMAT_VERSION,
 } from '@/lib/privacy/export-user';
+import {
+  registerAppSubjectSources,
+  __resetAppSubjectSourceRegistryForTests,
+} from '@/lib/privacy/subject-source-registry';
 import {
   SUBJECT_DATA_SOURCES,
   EXCLUDED_SOURCES,
@@ -124,6 +139,8 @@ beforeEach(() => {
   resetDelegates();
   mockUserFindUnique.mockResolvedValue(SUBJECT);
   mockCollectAppSubjectData.mockResolvedValue({});
+  mockInitAppSubjectSources.mockReset();
+  __resetAppSubjectSourceRegistryForTests();
 });
 
 describe('exportUserData', () => {
@@ -346,6 +363,285 @@ describe('exportUserData', () => {
       mockCollectAppSubjectData.mockRejectedValue(new Error('app db down'));
 
       await expect(exportUserData(PARAMS)).rejects.toThrow('app db down');
+    });
+  });
+
+  describe('the declared-source contract (#533)', () => {
+    /** Register one app source through the seam the registry runs lazily. */
+    const declare = (model: string, section: string): void => {
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            { model, section, disposition: 'export', description: 'Declared for this test.' },
+          ],
+        });
+      });
+    };
+
+    it('fails the export when a declared section never arrives', async () => {
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
+      await expect(exportUserData(PARAMS)).rejects.toThrow(/invoices/);
+    });
+
+    it('names every missing section, not just the first', async () => {
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppInvoice',
+              section: 'invoices',
+              disposition: 'export',
+              description: 'Invoices raised against the account.',
+            },
+            {
+              model: 'AppBooking',
+              section: 'bookings',
+              disposition: 'export',
+              description: 'Bookings made by the subject.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      const error = await exportUserData(PARAMS).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(DeclaredAppSourceMissingError);
+      expect((error as DeclaredAppSourceMissingError).sections).toEqual(['invoices', 'bookings']);
+    });
+
+    it('accepts an empty array — the contract is the key, not the rows', async () => {
+      // The reason this is a key check and not a truthiness one: a subject who
+      // owns nothing must still see the section, or "no rows" and "not asked"
+      // look identical in the bundle.
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [] });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.app).toEqual({ invoices: [] });
+    });
+
+    it('rejects a declared section whose value is undefined', async () => {
+      // `JSON.stringify({ invoices: undefined })` is `{}`, so the key exists in
+      // memory and not in the bundle the subject receives. A collector doing
+      // `rows.length ? rows : undefined` would otherwise certify a section it
+      // then drops.
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: undefined });
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
+    });
+
+    it('rejects a declared section named after an Object.prototype member', async () => {
+      // `app['constructor'] === undefined` is false on any plain object, so a
+      // bare lookup called this delivered and `countAppRows` then reported a
+      // count for a key the JSON does not contain.
+      declare('AppThing', 'constructor');
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(DeclaredAppSourceMissingError);
+    });
+
+    it('accepts a declared section that is null — null survives serialisation', async () => {
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: null });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(JSON.parse(JSON.stringify(bundle)).app).toEqual({ invoices: null });
+    });
+
+    it('allows sections the tier did not declare', async () => {
+      // A derived view is not a table, so it has nothing to declare. Extra keys
+      // are the subject receiving more, which is not the failure being guarded.
+      declare('AppInvoice', 'invoices');
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [], activitySummary: { runs: 3 } });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.app).toEqual({ invoices: [], activitySummary: { runs: 3 } });
+    });
+
+    it('is inert in vanilla Sunrise, where nothing is declared', async () => {
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.app).toEqual({});
+    });
+  });
+
+  describe('a fork tier’s sources reach meta (#530 review)', () => {
+    it('summarises each declared source with its description and row count', async () => {
+      // Without this the subject receives `app.invoices` with nothing in the
+      // bundle's own manifest saying what it is or how much of it there is —
+      // while the same manifest names the tables that were withheld. The
+      // `description` every tier is required to write has nowhere else to go.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppInvoice',
+              section: 'invoices',
+              disposition: 'export',
+              description: 'Invoices raised against your account.',
+            },
+            {
+              model: 'AppAgreement',
+              section: 'agreements',
+              disposition: 'attribution',
+              description: 'Agreements you authored, by name and date.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({
+        invoices: [{ id: 'inv-1' }, { id: 'inv-2' }],
+        agreements: [],
+      });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.app).toEqual([
+        {
+          model: 'AppInvoice',
+          section: 'invoices',
+          disposition: 'export',
+          description: 'Invoices raised against your account.',
+          rows: 2,
+        },
+        {
+          model: 'AppAgreement',
+          section: 'agreements',
+          disposition: 'attribution',
+          description: 'Agreements you authored, by name and date.',
+          rows: 0,
+        },
+      ]);
+    });
+
+    it('keeps app sections out of meta.exported, which maps to personalData', async () => {
+      // The two lists are read against different objects. Folding them would
+      // leave a reader looking up `invoices` in `personalData`, where it is not.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppInvoice',
+              section: 'invoices',
+              disposition: 'export',
+              description: 'Invoices raised against your account.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [] });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.exported.map((entry) => entry.section)).not.toContain('invoices');
+      expect(bundle.personalData).not.toHaveProperty('invoices');
+      expect(bundle.app).toHaveProperty('invoices');
+    });
+
+    it('counts a non-list section as one record rather than inventing a number', async () => {
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          sources: [
+            {
+              model: 'AppProfile',
+              section: 'profile',
+              disposition: 'export',
+              description: 'The single profile record we hold for you.',
+            },
+          ],
+        });
+      });
+      mockCollectAppSubjectData.mockResolvedValue({ profile: { nickname: 'sam' } });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.app[0].rows).toBe(1);
+    });
+
+    it('is an empty list in vanilla Sunrise', async () => {
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.app).toEqual([]);
+    });
+  });
+
+  describe('a tier whose declarations failed to load', () => {
+    it('refuses the export rather than shipping a bundle it cannot certify', async () => {
+      // The collector is a separate static import, so it keeps working: without
+      // this the subject gets app rows that `meta.app` describes none of, and
+      // the tier's exclusions vanish from `meta.excluded`.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        throw new Error('typo in the manifest');
+      });
+      mockCollectAppSubjectData.mockResolvedValue({ invoices: [{ id: 'inv-1' }] });
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(AppSubjectDeclarationsUnavailableError);
+    });
+
+    it('refuses even when the collector returns nothing', async () => {
+      // "No rows" and "we could not read the declarations" are different
+      // answers, and only one of them can be certified.
+      mockInitAppSubjectSources.mockImplementation(() => {
+        throw new Error('typo in the manifest');
+      });
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).rejects.toThrow(AppSubjectDeclarationsUnavailableError);
+    });
+
+    it('exports normally when the init succeeds', async () => {
+      mockInitAppSubjectSources.mockImplementation(() => undefined);
+      mockCollectAppSubjectData.mockResolvedValue({});
+
+      await expect(exportUserData(PARAMS)).resolves.toMatchObject({ app: {} });
+    });
+  });
+
+  describe('a fork tier’s exclusions reach the subject', () => {
+    it('discloses them in meta.excluded, alongside core’s', async () => {
+      // The reason a tier writes is what the subject is shown in place of the
+      // table's contents. Without this, a fork install's bundle states the
+      // boundary for core's tables and stays silent about the fork's — the
+      // subject cannot tell "we hold nothing about you" from "we decided not
+      // to give it to you".
+      mockInitAppSubjectSources.mockImplementation(() => {
+        registerAppSubjectSources({
+          tier: 'app',
+          excluded: [
+            {
+              model: 'AppCountry',
+              reason: 'Reference list of countries — holds no personal data.',
+            },
+          ],
+        });
+      });
+
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.excluded).toEqual([
+        ...EXCLUDED_SOURCES,
+        { model: 'AppCountry', reason: 'Reference list of countries — holds no personal data.' },
+      ]);
+    });
+
+    it('leaves meta.excluded as core’s alone in vanilla Sunrise', async () => {
+      const bundle = await exportUserData(PARAMS);
+
+      expect(bundle.meta.excluded).toEqual(EXCLUDED_SOURCES);
     });
   });
 
