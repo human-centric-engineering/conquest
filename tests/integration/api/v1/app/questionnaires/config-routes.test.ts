@@ -159,6 +159,24 @@ describe('validation + scope', () => {
     expect(body.error.code).toBe('VALIDATION_ERROR');
     expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
+
+  it('400s on a malformed JSON body', async () => {
+    const malformed = {
+      url: 'http://localhost:3000/api/v1/app/questionnaires/qn-1/versions/v1/config',
+      headers: new Headers(),
+      json: async () => {
+        throw new SyntaxError('Unexpected end of JSON input');
+      },
+    } as unknown as NextRequest;
+
+    const res = await configPATCH(malformed, ctx(PARAMS));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toMatch(/invalid json/i);
+    expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe('upsert + response', () => {
@@ -343,6 +361,121 @@ describe('upsert + response', () => {
     expect(call.update.respondentReport).toEqual(respondentReport);
     // The response view carries the narrowed block back to the editor.
     expect((await res.json()).data.respondentReport).toEqual(respondentReport);
+  });
+
+  it('writes inviteeFields through the JSON boundary', async () => {
+    const inviteeFields = [
+      { key: 'firstName', shown: true, required: true },
+      { key: 'organisation', shown: true, required: false },
+    ];
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ inviteeFields }));
+
+    const res = await configPATCH(req({ inviteeFields }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.create.inviteeFields).toEqual(inviteeFields);
+    expect(call.update.inviteeFields).toEqual(inviteeFields);
+  });
+
+  it('writes the personaSelection block through the JSON boundary', async () => {
+    const personaSelection = {
+      enabled: true,
+      defaultPersonaKey: 'philosopher',
+      allowRespondentSwitch: true,
+      switcher: 'both' as const,
+    };
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ personaSelection }));
+
+    const res = await configPATCH(req({ personaSelection }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.create.personaSelection).toEqual(personaSelection);
+    expect(call.update.personaSelection).toEqual(personaSelection);
+  });
+
+  it('writes the cohortReport block through the JSON boundary', async () => {
+    const cohortReport = {
+      enabled: true,
+      generation: {
+        length: 'standard' as const,
+        detailLevel: 'standard' as const,
+        formality: 'business' as const,
+        instructions: 'Be concise.',
+        structure: 'Summary, themes, next steps.',
+        backgroundContext: 'Quarterly engagement pulse.',
+        useClientKnowledge: true,
+        useRoundContext: false,
+        useCohortContext: true,
+        scoringEnabled: true,
+      },
+    };
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ cohortReport }));
+
+    const res = await configPATCH(req({ cohortReport }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.create.cohortReport).toEqual(cohortReport);
+    expect(call.update.cohortReport).toEqual(cohortReport);
+  });
+
+  it('writes the intro block through the JSON boundary', async () => {
+    const intro = { enabled: true, background: 'A brief overview.', buttonLabel: 'Start' };
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue(configRow({ intro }));
+
+    const res = await configPATCH(req({ intro }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    const call = prismaMock.appQuestionnaireConfig.upsert.mock.calls[0][0];
+    expect(call.create.intro).toEqual(intro);
+    expect(call.update.intro).toEqual(intro);
+  });
+
+  it('merges an `adaptiveScope` key via patchAdaptiveScopeSettings instead of dropping it', async () => {
+    // Regression: `adaptiveScope` used to ride inside the body validated by `updateConfigSchema`,
+    // which has no such field — Zod silently stripped it, so a full settings-export round-trip
+    // (which PATCHes this endpoint with every exported key) never restored Adaptive Scope.
+    const res = await configPATCH(
+      req({ voiceEnabled: true, adaptiveScope: { enabled: true, maxConditionalTopics: 5 } }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(200);
+
+    // Two upserts: the adaptiveScope merge-write, then the main scalar config write.
+    expect(prismaMock.appQuestionnaireConfig.upsert).toHaveBeenCalledTimes(2);
+    const [scopeCall, configCall] = (
+      prismaMock.appQuestionnaireConfig.upsert as Mock
+    ).mock.calls.map((c) => c[0]);
+    expect(scopeCall.where).toEqual({ versionId: 'v1' });
+    expect(scopeCall.update.adaptiveScope).toMatchObject({
+      enabled: true,
+      maxConditionalTopics: 5,
+    });
+    expect(configCall.update).toMatchObject({ voiceEnabled: true });
+    expect(configCall.update).not.toHaveProperty('adaptiveScope');
+
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_adaptive_scope.update', entityId: 'v1' })
+    );
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_config.update', entityId: 'v1' })
+    );
+  });
+
+  it('does not touch adaptiveScope when the key is absent from the body', async () => {
+    const res = await configPATCH(req({ voiceEnabled: true }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionnaireConfig.upsert).toHaveBeenCalledTimes(1);
+    expect(logAdminAction).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_adaptive_scope.update' })
+    );
+  });
+
+  it('400s on an invalid adaptiveScope value without writing anything', async () => {
+    const res = await configPATCH(
+      req({ adaptiveScope: { maxConditionalTopics: -1 } }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionnaireConfig.upsert).not.toHaveBeenCalled();
   });
 
   it('forks a launched version and writes to the new draft', async () => {

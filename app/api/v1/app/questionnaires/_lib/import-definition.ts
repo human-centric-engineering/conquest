@@ -3,16 +3,18 @@
  *
  * Writes a validated {@link DefinitionImport} envelope into the app graph as a **brand-new**
  * questionnaire (v1 draft) — `AppQuestionnaire` → `AppQuestionnaireVersion` → sections → questions
- * (+ tags, config, data slots, scoring schema) — in one transaction, all-or-nothing. The import is
- * always create-only: it never touches an existing questionnaire, so a bad/duplicate file can't
- * clobber live work.
+ * (+ tags, config, data slots, Adaptive Scope topics + settings, scoring schema) — in one
+ * transaction, all-or-nothing. The import is always create-only: it never touches an existing
+ * questionnaire, so a bad/duplicate file can't clobber live work.
  *
  * This is the import counterpart of {@link file://./persist.ts}'s `persistIngestion`, written
  * separately because that path is lossy for a full-fidelity definition (it hard-codes weight, writes
  * no tags, and uses `createMany` so it can't attach per-question tags). Embeddings are NOT written
  * here — the route regenerates question + data-slot vectors after commit (they're reproducible from
  * the text). Cross-references survive by stable `key`: tags are remapped by normalised label,
- * data-slot↔question + scoring refs by question key.
+ * data-slot↔question + scoring refs by question key, and Adaptive Scope topic membership
+ * (`questionKeys`/`dataSlotKeys`) is remapped from the envelope's original keys to whatever key each
+ * question/slot actually landed on after dedup.
  *
  * Route-local DB seam — the `lib/app/questionnaire/**` module stays Prisma-free.
  */
@@ -26,6 +28,10 @@ import { normalizeTagLabel } from '@/lib/app/questionnaire/tagging';
 import { AUDIENCE_FIELDS } from '@/lib/app/questionnaire/types';
 import type { DefinitionImport } from '@/lib/app/questionnaire/authoring';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
+import {
+  buildTopicCreateInput,
+  patchAdaptiveScopeSettings,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 
 export interface ImportDefinitionInput {
   envelope: DefinitionImport;
@@ -42,6 +48,7 @@ export interface ImportDefinitionResult {
   questionCount: number;
   tagCount: number;
   dataSlotCount: number;
+  topicCount: number;
 }
 
 /**
@@ -139,6 +146,10 @@ export async function persistDefinitionImport(
       // deduped key is unique within the version, so we map it back to the original exported key.
       const takenKeys = new Set<string>();
       const originalKeyByDeduped = new Map<string, string>();
+      // Reverse of the above — lets Adaptive Scope topics (which reference questions by their
+      // ORIGINAL exported key) remap onto whatever key a question actually landed on. A duplicate
+      // original key resolves to the last-declared question, same as `questionIdByOriginalKey` below.
+      const dedupedQuestionKeyByOriginal = new Map<string, string>();
       const questionRows: Prisma.AppQuestionSlotCreateManyInput[] = [];
       let questionCount = 0;
       for (const section of version.sections) {
@@ -148,6 +159,7 @@ export async function persistDefinitionImport(
           const key = nextAvailableKey(q.key || slugifyKey(q.prompt), takenKeys);
           takenKeys.add(key);
           originalKeyByDeduped.set(key, q.key);
+          dedupedQuestionKeyByOriginal.set(q.key, key);
           questionRows.push({
             versionId,
             sectionId,
@@ -238,10 +250,13 @@ export async function persistDefinitionImport(
       const takenSlotKeys = new Set<string>();
       const slotRows: Prisma.AppDataSlotCreateManyInput[] = [];
       const slotQuestionKeysByDeduped = new Map<string, string[]>();
+      // Reverse map for Adaptive Scope topics (below), same reasoning as `dedupedQuestionKeyByOriginal`.
+      const dedupedSlotKeyByOriginal = new Map<string, string>();
       for (const slot of version.dataSlots) {
         const key = nextAvailableKey(slot.key || slugifyKey(slot.name), takenSlotKeys);
         takenSlotKeys.add(key);
         slotQuestionKeysByDeduped.set(key, slot.questionKeys);
+        dedupedSlotKeyByOriginal.set(slot.key, key);
         slotRows.push({
           versionId,
           key,
@@ -273,7 +288,54 @@ export async function persistDefinitionImport(
         }
       }
 
-      // 8. Scoring schema (1:1) — authored, so source 'manual'. Its item/band refs use question +
+      // 8. Adaptive Scope (P17) topics — membership is KEYS (never row ids), so each topic's
+      //    `questionKeys`/`dataSlotKeys` are remapped from the ORIGINAL exported key to whatever key
+      //    the question/slot actually landed on above; an unresolvable key is silently skipped, same
+      //    as everywhere else in this feature (a stale reference must never break the import).
+      const topicRows: Prisma.AppQuestionnaireTopicCreateManyInput[] = [];
+      for (const topic of version.topics) {
+        const questionKeys = topic.questionKeys
+          .map((k) => dedupedQuestionKeyByOriginal.get(k))
+          .filter((k): k is string => k !== undefined);
+        const dataSlotKeys = topic.dataSlotKeys
+          .map((k) => dedupedSlotKeyByOriginal.get(k))
+          .filter((k): k is string => k !== undefined);
+        topicRows.push(
+          buildTopicCreateInput(
+            versionId,
+            { ...topic, questionKeys, dataSlotKeys },
+            topic.ordinal,
+            topic.source
+          )
+        );
+      }
+      const topicCount = topicRows.length;
+      if (topicRows.length > 0) {
+        await tx.appQuestionnaireTopic.createMany({ data: topicRows });
+      }
+
+      // 8b. Adaptive Scope (P17) settings — a top-level envelope field, not part of `version.config`
+      //     (see definition-export.ts for why). Routed through the same read-narrow-merge-write
+      //     helper the Topics tab's settings PATCH uses, rather than a raw write, so rule ordinals get
+      //     re-stamped and every field is normalised exactly as a live read would produce — a fresh
+      //     version has no "current" settings to merge onto, so this effectively seeds from defaults.
+      //     Runs AFTER the data-slot dedup map (step 7) exists: a hard rule's `dataSlotKey` is a key
+      //     reference exactly like a topic's membership, and needs the same remap onto whatever key a
+      //     collided data slot actually landed on — `topicKey` needs no such remap because topic keys
+      //     are never deduped (uniqueness is enforced by the import schema, not `nextAvailableKey`).
+      if (version.adaptiveScope !== undefined) {
+        const rules = version.adaptiveScope.rules?.map((rule) => ({
+          ...rule,
+          dataSlotKey: dedupedSlotKeyByOriginal.get(rule.dataSlotKey) ?? rule.dataSlotKey,
+        }));
+        await patchAdaptiveScopeSettings(
+          versionId,
+          { ...version.adaptiveScope, ...(rules !== undefined ? { rules } : {}) },
+          tx
+        );
+      }
+
+      // 9. Scoring schema (1:1) — authored, so source 'manual'. Its item/band refs use question +
       //    data-slot keys, preserved above, so they need no remap.
       if (version.scoringSchema) {
         await tx.appScoringSchema.create({
@@ -288,7 +350,7 @@ export async function persistDefinitionImport(
         });
       }
 
-      // 9. Definitions / glossary (P16) — the curated vocabulary the questions were written
+      // 10. Definitions / glossary (P16) — the curated vocabulary the questions were written
       //    against. Carried at every status: a rejected term is a decision worth preserving, so
       //    a later analysis run on the imported copy doesn't resurrect it as a fresh proposal.
       for (let i = 0; i < version.glossary.length; i += 1) {
@@ -329,6 +391,7 @@ export async function persistDefinitionImport(
         questionCount,
         tagCount: tagIdByNormalized.size,
         dataSlotCount,
+        topicCount,
       };
       // Batched writes keep this short, but a very large import on a high-latency prod DB still
       // benefits from headroom over Prisma's 5s default interactive-transaction timeout.

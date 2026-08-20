@@ -106,6 +106,7 @@ const handleImport = withAdminAuth(async (request: NextRequest, session) => {
       sectionCount: result.sectionCount,
       questionCount: result.questionCount,
       dataSlotCount: result.dataSlotCount,
+      topicCount: result.topicCount,
       demoClientId: demoClientId ?? null,
     },
     clientIp,
@@ -116,6 +117,7 @@ const handleImport = withAdminAuth(async (request: NextRequest, session) => {
     versionId: result.versionId,
     sectionCount: result.sectionCount,
     questionCount: result.questionCount,
+    topicCount: result.topicCount,
   });
 
   return successResponse(result, undefined, { status: 201 });

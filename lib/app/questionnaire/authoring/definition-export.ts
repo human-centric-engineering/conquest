@@ -3,16 +3,24 @@
  *
  * The sibling of {@link file://./config-export.ts}, one level up: where that envelope carries only a
  * version's run-time *settings*, this one carries the whole authored **instrument** — structure
- * (sections → questions → tags), the run-time config, the semantic data slots, and the scoring
- * schema. Export serialises a {@link VersionGraphView} (+ data slots + scoring) into a portable JSON
- * file; import parses such a file back into a typed payload the route persists as a brand-new
- * questionnaire.
+ * (sections → questions → tags), the run-time config, the semantic data slots, the scoring
+ * schema, and (P17) the [Adaptive Scope](../../../../.context/app/questionnaire/adaptive-scope.md)
+ * topics + settings. Export serialises a {@link VersionGraphView} (+ data slots + topics + scoring)
+ * into a portable JSON file; import parses such a file back into a typed payload the route persists
+ * as a brand-new questionnaire.
  *
  * Pure: no Prisma / Next / DOM. Export reuses {@link extractConfig} so the config block can never
  * drift from the config shape. Import is the **external-data boundary** — {@link definitionImportSchema}
  * (Zod) validates an uploaded file before any of it reaches the persister, so nothing is ever cast
  * off untrusted JSON. Embeddings are deliberately NOT serialised: question + data-slot vectors are
  * regenerated on import (they're large, model-specific, and reproducible from the text).
+ *
+ * `adaptiveScope` travels as its own top-level field, validated on import via
+ * {@link adaptiveScopeSettingsSchema} — NOT nested inside `config` (which is validated via
+ * {@link updateConfigSchema}, and that schema deliberately has no `adaptiveScope` field; the topics
+ * route owns that shape). Topics reference questions/data slots by their stable `key` (never a row
+ * id — see {@link file://../scope/types.ts}), so they survive the persister's key-dedup the same way
+ * data-slot↔question links do.
  */
 
 import { z } from 'zod';
@@ -44,6 +52,16 @@ import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import { extractConfig } from '@/lib/app/questionnaire/authoring/config-export';
 import { updateConfigSchema } from '@/lib/app/questionnaire/authoring/config-schema';
+import {
+  topicInputSchema,
+  adaptiveScopeSettingsSchema,
+} from '@/lib/app/questionnaire/scope/schemas';
+import {
+  TOPIC_SOURCES,
+  type AdaptiveScopeSettings,
+  type Topic,
+  type TopicSource,
+} from '@/lib/app/questionnaire/scope/types';
 
 /** Discriminator stamped on an export so import can reject unrelated JSON (e.g. a settings file). */
 export const DEFINITION_EXPORT_KIND = 'conquest.questionnaire.definition';
@@ -92,6 +110,23 @@ export interface DefinitionDataSlot {
   questionKeys: string[];
 }
 
+/**
+ * One Adaptive Scope topic in the export — links to questions/data slots by their stable `key`
+ * (never a row id), same as {@link DefinitionDataSlot}.
+ */
+export interface DefinitionTopic {
+  key: string;
+  label: string;
+  description: string | null;
+  phase: Topic['phase'];
+  criteria: string | null;
+  depth: Topic['depth'];
+  ordinal: number;
+  source: TopicSource;
+  questionKeys: string[];
+  dataSlotKeys: string[];
+}
+
 /** One curated glossary term in an export. */
 export interface DefinitionGlossaryTerm {
   term: string;
@@ -127,6 +162,13 @@ export interface DefinitionExport {
     sections: DefinitionSection[];
     config: QuestionnaireConfigShape;
     dataSlots: DefinitionDataSlot[];
+    /** Adaptive Scope (P17) topics — see {@link DefinitionTopic}. */
+    topics: DefinitionTopic[];
+    /**
+     * Adaptive Scope (P17) settings — the master switch, budget, hard rules, planner instructions.
+     * A top-level sibling of `config`, not nested inside it (see the module docblock for why).
+     */
+    adaptiveScope: AdaptiveScopeSettings;
     scoringSchema: { name: string; content: ScoringSchemaContent } | null;
     /**
      * Definitions / glossary (P16). Carries the CURATED set — terms, their status, and every
@@ -139,15 +181,16 @@ export interface DefinitionExport {
 }
 
 /**
- * Build the export envelope from a version's graph, its data slots, and its scoring schema (or
- * null). The questionnaire `title` is passed separately (it lives on the questionnaire row, not the
- * version graph). Reuses {@link extractConfig} for the config block (drops the read-only `saved`
- * flag) and flattens each question's `tags` to bare labels.
+ * Build the export envelope from a version's graph, its data slots, its Adaptive Scope topics, and
+ * its scoring schema (or null). The questionnaire `title` is passed separately (it lives on the
+ * questionnaire row, not the version graph). Reuses {@link extractConfig} for the config block
+ * (drops the read-only `saved` flag) and flattens each question's `tags` to bare labels.
  */
 export function buildDefinitionExport(
   title: string,
   graph: VersionGraphView,
   dataSlots: DataSlotView[],
+  topics: Topic[],
   scoring: { name: string; content: ScoringSchemaContent } | null,
   exportedAt: string,
   glossary: DefinitionGlossaryTerm[] = []
@@ -161,6 +204,19 @@ export function buildDefinitionExport(
       goal: graph.goal,
       audience: graph.audience,
       tags: graph.tags.map((t) => ({ label: t.label, color: t.color })),
+      topics: topics.map((t) => ({
+        key: t.key,
+        label: t.label,
+        description: t.description,
+        phase: t.phase,
+        criteria: t.criteria,
+        depth: t.depth,
+        ordinal: t.ordinal,
+        source: t.source,
+        questionKeys: t.members.questionKeys,
+        dataSlotKeys: t.members.dataSlotKeys,
+      })),
+      adaptiveScope: graph.config.adaptiveScope,
       sections: graph.sections.map((s) => ({
         ordinal: s.ordinal,
         title: s.title,
@@ -245,6 +301,18 @@ const dataSlotImportSchema = z.object({
   questionKeys: z.array(z.string()),
 });
 
+/**
+ * One Adaptive Scope topic, as an import file carries it. Extends {@link topicInputSchema} (the same
+ * shape the Topics tab's bulk save validates) with `ordinal` and `source`, which a live topic has but
+ * a fresh save does not. `questionKeys`/`dataSlotKeys` are remapped by the persister against the
+ * freshly-created questions/data slots — an unresolvable key is silently skipped, same as everywhere
+ * else in this feature (see `.context/app/questionnaire/adaptive-scope.md#membership-is-keys-never-row-ids`).
+ */
+const definitionTopicImportSchema = topicInputSchema.extend({
+  ordinal: z.number().int().nonnegative(),
+  source: z.enum(TOPIC_SOURCES).default('manual'),
+});
+
 /** One curated glossary term, as an import file carries it. Lenient on vocabulary — a value the
  *  current build doesn't know is rejected by the enum, so a forward-compatible file fails loudly
  *  rather than importing a term in a state nothing can render. */
@@ -273,7 +341,8 @@ const glossaryTermImportSchema = z.object({
 /**
  * The full envelope validator — the external-data boundary. `config` reuses the all-optional
  * {@link updateConfigSchema} (so an import is validated exactly like a settings PATCH and unknown
- * keys are stripped); `scoringSchema` reuses {@link scoringSchemaContentSchema}. Both optional so a
+ * keys are stripped — this is why `adaptiveScope` travels as its own sibling field below rather than
+ * inside `config`); `scoringSchema` reuses {@link scoringSchemaContentSchema}. Both optional so a
  * hand-authored or partial file still imports.
  */
 export const definitionImportSchema = z.object({
@@ -288,6 +357,18 @@ export const definitionImportSchema = z.object({
     sections: z.array(sectionImportSchema),
     config: updateConfigSchema.optional(),
     dataSlots: z.array(dataSlotImportSchema).default([]),
+    // Adaptive Scope (P17). `.default([])`/`.optional()`, not a schemaVersion bump — same
+    // forward/backward-compatibility reasoning as `glossary` below: an old file (no topics) still
+    // imports, and a new file imports into older code too (Zod strips the unknown keys).
+    topics: z
+      .array(definitionTopicImportSchema)
+      .max(200)
+      .default([])
+      .refine(
+        (topics) => new Set(topics.map((t) => t.key)).size === topics.length,
+        'Two topics share a key'
+      ),
+    adaptiveScope: adaptiveScopeSettingsSchema.optional(),
     scoringSchema: z
       .object({ name: z.string().trim().min(1).max(120), content: scoringSchemaContentSchema })
       .nullable()

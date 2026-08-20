@@ -21,6 +21,7 @@ import { loadGlossaryForExport } from '@/app/api/v1/app/questionnaires/_lib/glos
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
+import { loadTopics } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 
 /** Slugify a title for a filename: lower-case, alphanumerics → single hyphens. */
 function slugify(title: string): string {
@@ -40,10 +41,11 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     const log = await getRouteLogger(request);
     const { id, vid } = await params;
 
-    const [questionnaire, graph, dataSlots, schemaRow] = await Promise.all([
+    const [questionnaire, graph, dataSlots, topics, schemaRow] = await Promise.all([
       prisma.appQuestionnaire.findUnique({ where: { id }, select: { title: true } }),
       getVersionGraph(id, vid),
       loadDataSlots(vid),
+      loadTopics(vid),
       prisma.appScoringSchema.findUnique({
         where: { versionId: vid },
         select: { name: true, content: true },
@@ -68,6 +70,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       questionnaire.title,
       graph,
       dataSlots,
+      topics,
       scoring,
       new Date().toISOString(),
       glossary
@@ -78,6 +81,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       versionId: vid,
       sectionCount: graph.sections.length,
       dataSlotCount: dataSlots.length,
+      topicCount: topics.length,
       hasScoring: scoring !== null,
     });
 

@@ -60,6 +60,10 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/data-slot-routes', () => ({
   loadDataSlots: vi.fn(),
 }));
 
+vi.mock('@/app/api/v1/app/questionnaires/_lib/topic-routes', () => ({
+  loadTopics: vi.fn(),
+}));
+
 // ─── Deferred imports (after vi.mock) ─────────────────────────────────────────
 
 type AnyRouteHandler = (...args: unknown[]) => Promise<Response>;
@@ -75,6 +79,7 @@ import { buildDefinitionExport } from '@/lib/app/questionnaire/authoring';
 import { narrowScoringSchemaContent } from '@/lib/app/questionnaire/scoring';
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
+import { loadTopics } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -135,6 +140,7 @@ beforeEach(() => {
   (prisma.appQuestionnaire.findUnique as Mock).mockResolvedValue(QUESTIONNAIRE_ROW);
   (getVersionGraph as Mock).mockResolvedValue(GRAPH);
   (loadDataSlots as Mock).mockResolvedValue([]);
+  (loadTopics as Mock).mockResolvedValue([]);
   (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue(null);
 
   // Builder returns a canonical envelope
@@ -225,6 +231,16 @@ describe('GET definition — happy path', () => {
     expect(disposition).toContain('-v3-');
   });
 
+  it('falls back to "questionnaire" when the title has no alphanumeric characters to slugify', async () => {
+    (prisma.appQuestionnaire.findUnique as Mock).mockResolvedValue({ title: '!!!' });
+
+    const req = makeRequest();
+    const res = await GET(req, ADMIN_SESSION, makeContext());
+
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    expect(disposition).toContain('definition-questionnaire-v3-');
+  });
+
   it('sets Cache-Control: no-store', async () => {
     const req = makeRequest();
     const res = await GET(req, ADMIN_SESSION, makeContext());
@@ -232,9 +248,12 @@ describe('GET definition — happy path', () => {
     expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  it('passes the questionnaire title, graph, data slots, and scoring to buildDefinitionExport', async () => {
+  it('passes the questionnaire title, graph, data slots, topics, and scoring to buildDefinitionExport', async () => {
     const dataSlots = [{ id: 'ds-1', name: 'Name', key: 'name', ordinal: 0 }];
     (loadDataSlots as Mock).mockResolvedValue(dataSlots);
+
+    const topics = [{ id: 'top-1', key: 'deep_dive', label: 'Deep dive' }];
+    (loadTopics as Mock).mockResolvedValue(topics);
 
     const schemaContent = { items: [], scales: [], bands: [] };
     (prisma.appScoringSchema.findUnique as Mock).mockResolvedValue({
@@ -250,6 +269,7 @@ describe('GET definition — happy path', () => {
       QUESTIONNAIRE_ROW.title,
       GRAPH,
       dataSlots,
+      topics,
       // scoring arg — the route narrows the schema content and wraps it
       expect.objectContaining({ name: 'Standard', content: schemaContent }),
       expect.any(String), // ISO timestamp
@@ -264,8 +284,15 @@ describe('GET definition — happy path', () => {
     await GET(req, ADMIN_SESSION, makeContext());
 
     const callArgs = (buildDefinitionExport as Mock).mock.calls[0] as unknown[];
-    const scoringArg = callArgs[3]; // 4th positional argument
+    const scoringArg = callArgs[4]; // 5th positional argument (title, graph, dataSlots, topics, scoring)
     expect(scoringArg).toBeNull();
+  });
+
+  it('uses the id and vid path params to scope the topics lookup', async () => {
+    const req = makeRequest('qn-999', 'ver-999');
+    await GET(req, ADMIN_SESSION, makeContext('qn-999', 'ver-999'));
+
+    expect(loadTopics).toHaveBeenCalledWith('ver-999');
   });
 
   it('serialises the envelope built by buildDefinitionExport, not the raw graph', async () => {

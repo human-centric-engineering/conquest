@@ -14,21 +14,35 @@
  *   Forks a new draft first if the target is launched (the editable id comes back
  *   in `meta`); the fork preamble copies any existing config into the draft, and
  *   this upsert then writes to the draft's row.
+ *
+ *   `adaptiveScope`, if present in the raw body, is validated and merged separately
+ *   through the same read-narrow-merge-write helper the Topics tab's settings PATCH
+ *   uses (`patchAdaptiveScopeSettings`) rather than through `updateConfigSchema` —
+ *   that schema deliberately has no `adaptiveScope` field (the topics route owns its
+ *   shape and merge semantics), so a blind pass-through here would either be rejected
+ *   or silently strip the key. This is what lets a full settings-export round-trip
+ *   (Settings tab "Import settings", which PATCHes this endpoint with every exported
+ *   key including `adaptiveScope`) restore Adaptive Scope instead of silently
+ *   dropping it. Both writes share the one fork decision above, so an import into a
+ *   launched version forks exactly once.
  */
+
+import { z } from 'zod';
 
 import { successResponse } from '@/lib/api/responses';
 import { getRouteLogger } from '@/lib/api/context';
-import { NotFoundError } from '@/lib/api/errors';
+import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { withAdminAuth } from '@/lib/auth/guards';
-import { validateRequestBody } from '@/lib/api/validation';
 import { getClientIP } from '@/lib/security/ip';
 import { prisma } from '@/lib/db/client';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 import { updateConfigSchema } from '@/lib/app/questionnaire/authoring';
+import { adaptiveScopeSettingsSchema } from '@/lib/app/questionnaire/scope/schemas';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { forkMeta, loadScopedVersion } from '@/app/api/v1/app/questionnaires/_lib/authoring-routes';
+import { patchAdaptiveScopeSettings } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
 
 const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
@@ -42,13 +56,63 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
       throw new NotFoundError('Questionnaire version not found');
     }
 
-    const body = await validateRequestBody(request, updateConfigSchema);
+    // The request body is read exactly once (a body stream can only be consumed once) and
+    // validated against two schemas: `updateConfigSchema` for the scalar/JSON config fields, and
+    // `adaptiveScopeSettingsSchema` for `adaptiveScope` — which `updateConfigSchema` deliberately
+    // has no field for (see the module docblock).
+    let rawBody: unknown;
+    try {
+      rawBody = await request.json();
+    } catch {
+      throw new ValidationError('Invalid JSON in request body');
+    }
+    const rawAdaptiveScope =
+      rawBody !== null && typeof rawBody === 'object' && !Array.isArray(rawBody)
+        ? (rawBody as Record<string, unknown>).adaptiveScope
+        : undefined;
+
+    let adaptiveScopePatch: z.infer<typeof adaptiveScopeSettingsSchema> | undefined;
+    let body: z.infer<typeof updateConfigSchema>;
+    try {
+      if (rawAdaptiveScope !== undefined) {
+        adaptiveScopePatch = adaptiveScopeSettingsSchema.parse(rawAdaptiveScope);
+      }
+      body = updateConfigSchema.parse(rawBody);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        throw new ValidationError('Invalid request body', {
+          errors: error.issues.map((err) => ({ path: err.path.join('.'), message: err.message })),
+        });
+      }
+      throw error;
+    }
 
     // Fork-if-launched preamble: all writes target the editable (possibly new) id.
     // The fork copies any existing config row into the draft; the upsert below then
     // edits that copy (or creates a fresh one on the no-config path).
     const fork = await forkVersionIfLaunched(scoped, { userId: session.user.id, clientIp });
     const editId = fork.versionId;
+
+    // Read the pre-edit row BEFORE the adaptiveScope patch (below) can create/touch it — otherwise
+    // a first-ever save that includes `adaptiveScope` would read back the row IT just created,
+    // misreporting `created` as false and silently excluding the adaptiveScope change from the
+    // audit diff (both sides would already carry the same patched value).
+    const before = await prisma.appQuestionnaireConfig.findUnique({
+      where: { versionId: editId },
+      select: CONFIG_SELECT,
+    });
+
+    if (adaptiveScopePatch !== undefined) {
+      const settings = await patchAdaptiveScopeSettings(editId, adaptiveScopePatch);
+      logAdminAction({
+        userId: session.user.id,
+        action: 'questionnaire_adaptive_scope.update',
+        entityType: 'questionnaire_version',
+        entityId: editId,
+        metadata: { questionnaireId: id, versionId: editId, enabled: settings.enabled },
+        clientIp,
+      });
+    }
 
     // Build the write payload from the provided keys only (partial save). `accessMode` is a scalar
     // (flows through `scalars`); `profileFields`, `inviteeFields`, `tone`, and `respondentReport`
@@ -77,12 +141,6 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
         ? { milestoneBannerThresholds: jsonInput(milestoneBannerThresholds) }
         : {}),
     };
-
-    // Read the pre-edit row for the audit diff (null on first save).
-    const before = await prisma.appQuestionnaireConfig.findUnique({
-      where: { versionId: editId },
-      select: CONFIG_SELECT,
-    });
 
     const updated = await prisma.appQuestionnaireConfig.upsert({
       where: { versionId: editId },

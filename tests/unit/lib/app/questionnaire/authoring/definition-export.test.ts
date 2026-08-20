@@ -3,10 +3,12 @@
  *
  * Pins what the helpers DO:
  *  - buildDefinitionExport stamps kind/version, carries the title, flattens tags → labels, reuses
- *    extractConfig (drops `saved`), and carries data slots + scoring
+ *    extractConfig (drops `saved`), and carries data slots + Adaptive Scope topics/settings + scoring
  *  - parseDefinitionImport round-trips an export, rejects junk / wrong kind / wrong schema version /
  *    malformed shape, and strips unknown config keys
- *  - cross-references survive: question.tagLabels, data-slot questionKeys, scoring refs
+ *  - cross-references survive: question.tagLabels, data-slot questionKeys, topic member keys,
+ *    scoring refs
+ *  - Adaptive Scope (`topics` + `adaptiveScope`) travels as a top-level field, not inside `config`
  *
  * @see lib/app/questionnaire/authoring/definition-export.ts
  */
@@ -21,8 +23,10 @@ import {
 } from '@/lib/app/questionnaire/authoring/definition-export';
 import { CONFIG_EXPORT_KIND } from '@/lib/app/questionnaire/authoring/config-export';
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
+import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
+import type { Topic } from '@/lib/app/questionnaire/scope/types';
 import type { ScoringSchemaContent } from '@/lib/app/questionnaire/scoring/types';
 
 const GRAPH: VersionGraphView = {
@@ -75,6 +79,21 @@ const DATA_SLOTS: DataSlotView[] = [
   },
 ];
 
+const TOPICS: Topic[] = [
+  {
+    id: 'top1',
+    key: 'morale_deep_dive',
+    label: 'Morale deep dive',
+    description: 'Asked when the opening suggests low morale',
+    phase: 'conditional',
+    criteria: 'Respondent describes morale as poor or declining',
+    depth: 'full',
+    members: { dataSlotKeys: ['morale_overall'], questionKeys: ['describe_morale'] },
+    ordinal: 0,
+    source: 'manual',
+  },
+];
+
 const SCORING: { name: string; content: ScoringSchemaContent } = {
   name: 'Morale score',
   content: {
@@ -93,6 +112,7 @@ describe('buildDefinitionExport', () => {
       'Staff Morale',
       GRAPH,
       DATA_SLOTS,
+      TOPICS,
       SCORING,
       '2026-06-28T00:00:00.000Z'
     );
@@ -103,13 +123,13 @@ describe('buildDefinitionExport', () => {
   });
 
   it('reuses extractConfig — full config, no `saved` flag', () => {
-    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, SCORING, 'now');
+    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now');
     expect(env.version.config).toEqual(DEFAULT_QUESTIONNAIRE_CONFIG);
     expect('saved' in env.version.config).toBe(false);
   });
 
   it('flattens tags to labels and carries structure / data slots / scoring', () => {
-    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, SCORING, 'now');
+    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now');
     expect(env.version.tags).toEqual([{ label: 'Wellbeing', color: 'green' }]);
     expect(env.version.sections[0].questions[0].tagLabels).toEqual(['Wellbeing']);
     expect(env.version.sections[0].questions[0].weight).toBe(0.7);
@@ -117,8 +137,27 @@ describe('buildDefinitionExport', () => {
     expect(env.version.scoringSchema?.name).toBe('Morale score');
   });
 
+  it('carries Adaptive Scope topics (by key) and settings as a sibling of `config`', () => {
+    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now');
+    expect(env.version.topics).toEqual([
+      {
+        key: 'morale_deep_dive',
+        label: 'Morale deep dive',
+        description: 'Asked when the opening suggests low morale',
+        phase: 'conditional',
+        criteria: 'Respondent describes morale as poor or declining',
+        depth: 'full',
+        ordinal: 0,
+        source: 'manual',
+        questionKeys: ['describe_morale'],
+        dataSlotKeys: ['morale_overall'],
+      },
+    ]);
+    expect(env.version.adaptiveScope).toEqual(DEFAULT_ADAPTIVE_SCOPE_SETTINGS);
+  });
+
   it('does not carry embedding vectors or captured respondent data', () => {
-    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, SCORING, 'now');
+    const env = buildDefinitionExport('T', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now');
     const json = JSON.stringify(env);
     // Design-time only — no vectors, no captured answers/fills, no respondent identity.
     expect(json).not.toContain('embedding');
@@ -130,7 +169,9 @@ describe('buildDefinitionExport', () => {
 
 describe('parseDefinitionImport', () => {
   const exported = () =>
-    JSON.stringify(buildDefinitionExport('Staff Morale', GRAPH, DATA_SLOTS, SCORING, 'now'));
+    JSON.stringify(
+      buildDefinitionExport('Staff Morale', GRAPH, DATA_SLOTS, TOPICS, SCORING, 'now')
+    );
 
   it('round-trips a built export', () => {
     const parsed = parseDefinitionImport(exported());
@@ -143,6 +184,47 @@ describe('parseDefinitionImport', () => {
     expect(parsed.version.config?.selectionStrategy).toBe(
       DEFAULT_QUESTIONNAIRE_CONFIG.selectionStrategy
     );
+  });
+
+  it('round-trips Adaptive Scope topics + settings — the bug this test pins', () => {
+    // Regression: `topics` used to be entirely absent from the envelope, and `adaptiveScope` was
+    // silently stripped on import because it rode inside `config` (validated by `updateConfigSchema`,
+    // which has no such field). Both must survive export → parse unchanged.
+    const graph: VersionGraphView = {
+      ...GRAPH,
+      config: {
+        ...GRAPH.config,
+        adaptiveScope: {
+          ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
+          enabled: true,
+          maxConditionalTopics: 2,
+          plannerInstructions: 'Prefer depth over breadth.',
+        },
+      },
+    };
+    const text = JSON.stringify(
+      buildDefinitionExport('Staff Morale', graph, DATA_SLOTS, TOPICS, SCORING, 'now')
+    );
+    const parsed = parseDefinitionImport(text);
+    expect(parsed.version.topics).toEqual([
+      expect.objectContaining({
+        key: 'morale_deep_dive',
+        phase: 'conditional',
+        questionKeys: ['describe_morale'],
+        dataSlotKeys: ['morale_overall'],
+        ordinal: 0,
+        source: 'manual',
+      }),
+    ]);
+    expect(parsed.version.adaptiveScope?.enabled).toBe(true);
+    expect(parsed.version.adaptiveScope?.maxConditionalTopics).toBe(2);
+    expect(parsed.version.adaptiveScope?.plannerInstructions).toBe('Prefer depth over breadth.');
+  });
+
+  it('rejects two topics sharing a key', () => {
+    const env = JSON.parse(exported());
+    env.version.topics.push({ ...env.version.topics[0] });
+    expect(() => parseDefinitionImport(JSON.stringify(env))).toThrow(/share a key/i);
   });
 
   it('round-trips the built-in-persona config, allowRespondentSwitch included', () => {
@@ -158,7 +240,9 @@ describe('parseDefinitionImport', () => {
       ...GRAPH,
       config: { ...GRAPH.config, personaSelection },
     };
-    const text = JSON.stringify(buildDefinitionExport('T', graph, DATA_SLOTS, SCORING, 'now'));
+    const text = JSON.stringify(
+      buildDefinitionExport('T', graph, DATA_SLOTS, TOPICS, SCORING, 'now')
+    );
     const parsed = parseDefinitionImport(text);
     expect(parsed.version.config?.personaSelection).toEqual(personaSelection);
   });
@@ -195,7 +279,7 @@ describe('parseDefinitionImport', () => {
     expect('bogusKey' in (parsed.version.config ?? {})).toBe(false);
   });
 
-  it('defaults absent optional collections (tags / dataSlots)', () => {
+  it('defaults absent optional collections (tags / dataSlots / topics / adaptiveScope)', () => {
     const env = {
       kind: DEFINITION_EXPORT_KIND,
       schemaVersion: DEFINITION_EXPORT_SCHEMA_VERSION,
@@ -205,5 +289,7 @@ describe('parseDefinitionImport', () => {
     const parsed = parseDefinitionImport(JSON.stringify(env));
     expect(parsed.version.tags).toEqual([]);
     expect(parsed.version.dataSlots).toEqual([]);
+    expect(parsed.version.topics).toEqual([]);
+    expect(parsed.version.adaptiveScope).toBeUndefined();
   });
 });
