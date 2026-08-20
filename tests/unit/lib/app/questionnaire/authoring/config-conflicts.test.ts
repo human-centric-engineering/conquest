@@ -12,6 +12,7 @@ import {
   detectConfigConflicts,
   type ConfigConflictInput,
 } from '@/lib/app/questionnaire/authoring/config-conflicts';
+import type { HouseRuleKind } from '@/lib/app/questionnaire/types';
 
 /** A coherent baseline — no conflicts. Override per case. */
 function input(over: Partial<ConfigConflictInput> = {}): ConfigConflictInput {
@@ -29,9 +30,23 @@ function input(over: Partial<ConfigConflictInput> = {}): ConfigConflictInput {
     questionCount: 10,
     sensitivityAwareness: false,
     supportMessage: '',
+    houseRulesEnabled: false,
+    houseRules: [],
     ...over,
   };
 }
+
+/** One enabled house rule — the shape most house-rule cases below vary. */
+const houseRule = (
+  kind: HouseRuleKind,
+  text: string,
+  trigger?: string
+): { kind: HouseRuleKind; enabled: boolean; text: string; trigger?: string } => ({
+  kind,
+  enabled: true,
+  text,
+  ...(trigger ? { trigger } : {}),
+});
 
 const ids = (over: Partial<ConfigConflictInput>) =>
   detectConfigConflicts(input(over)).map((c) => c.id);
@@ -181,5 +196,174 @@ describe('detectConfigConflicts', () => {
         'form-only-reasoning',
       ])
     );
+  });
+});
+
+describe('detectConfigConflicts — house rules', () => {
+  /** Turn the block on with the given rules. */
+  const withRules = (
+    rules: ReturnType<typeof houseRule>[],
+    over: Partial<ConfigConflictInput> = {}
+  ) => ids({ houseRulesEnabled: true, houseRules: rules, ...over });
+
+  it('checks nothing while the block is switched off', () => {
+    // A rule that would otherwise fire several checks, parked behind the master switch.
+    const loud = houseRule('always', 'Tell them it is completely anonymous and use bullet points.');
+    expect(ids({ houseRulesEnabled: false, houseRules: [loud] })).toEqual([]);
+  });
+
+  it('ignores an individually disabled rule — a draft is not a mistake', () => {
+    const draft = { ...houseRule('always', 'Reply using bullet points.'), enabled: false };
+    expect(withRules([draft])).not.toContain('house-rules-format-override');
+  });
+
+  it('ignores a rule with only whitespace for text', () => {
+    expect(withRules([houseRule('always', '   ')])).toContain('house-rules-empty');
+  });
+
+  it('notes when the block is on with nothing switched on', () => {
+    expect(withRules([])).toContain('house-rules-empty');
+    expect(withRules([houseRule('never', 'Give advice.')])).not.toContain('house-rules-empty');
+  });
+
+  it('notes that rules cannot apply to a form-only questionnaire', () => {
+    const rules = [houseRule('never', 'Give advice.')];
+    expect(withRules(rules, { presentationMode: 'form' })).toContain('form-only-house-rules');
+    expect(withRules(rules, { presentationMode: 'both' })).not.toContain('form-only-house-rules');
+  });
+
+  describe('anonymity', () => {
+    it('warns when a rule promises anonymity but the questionnaire is not anonymous', () => {
+      const rule = houseRule(
+        'if_asked',
+        'Yes — answers are completely anonymous.',
+        'is this anonymous'
+      );
+      expect(withRules([rule], { anonymousMode: false })).toContain(
+        'house-rules-overpromise-anonymity'
+      );
+      // Same rule on an actually-anonymous questionnaire is simply true.
+      expect(withRules([rule], { anonymousMode: true })).not.toContain(
+        'house-rules-overpromise-anonymity'
+      );
+    });
+
+    it('does not treat a "never" rule about confidentiality as an over-promise', () => {
+      // "Never claim answers are confidential" is the OPPOSITE of over-promising.
+      const rule = houseRule('never', 'Claim answers are confidential or untraceable.');
+      expect(withRules([rule], { anonymousMode: false })).not.toContain(
+        'house-rules-overpromise-anonymity'
+      );
+    });
+
+    it('warns when a rule asks for identifying details on an anonymous questionnaire', () => {
+      const rule = houseRule('always', 'Ask for their name and email before starting.');
+      expect(withRules([rule], { anonymousMode: true })).toContain(
+        'house-rules-identity-vs-anonymous'
+      );
+      expect(withRules([rule], { anonymousMode: false })).not.toContain(
+        'house-rules-identity-vs-anonymous'
+      );
+    });
+
+    it('does not flag a "never ask for names" rule under anonymous mode', () => {
+      // This rule is exactly right for an anonymous questionnaire — warning about it would be the
+      // panel arguing with a correct decision, which is how admins learn to ignore warnings.
+      const rule = houseRule('never', 'Ask for the names of other people.');
+      expect(withRules([rule], { anonymousMode: true })).not.toContain(
+        'house-rules-identity-vs-anonymous'
+      );
+    });
+  });
+
+  it('warns when a rule points at support that is not configured', () => {
+    const rule = houseRule('always', 'Offer them the support line if they seem distressed.');
+    // Safeguarding off entirely…
+    expect(withRules([rule], { sensitivityAwareness: false })).toContain(
+      'house-rules-support-not-configured'
+    );
+    // …or on but with no message to show.
+    expect(withRules([rule], { sensitivityAwareness: true, supportMessage: '  ' })).toContain(
+      'house-rules-support-not-configured'
+    );
+    // Configured properly ⇒ silent.
+    expect(
+      withRules([rule], { sensitivityAwareness: true, supportMessage: 'Call 0800 000 0000.' })
+    ).not.toContain('house-rules-support-not-configured');
+  });
+
+  it.each([
+    ['scoring', 'Score each answer out of ten.'],
+    ['question order', 'Ask the questions in the order they appear.'],
+    ['skipping', 'Skip the questions about pay.'],
+    ['report content', 'Include their answers in the report.'],
+  ])('warns about a rule directing %s — the interviewer does not control it', (_label, text) => {
+    // The highest-value check: these read as perfectly reasonable instructions, the phraser cannot
+    // honour any of them, and without this nothing tells the admin.
+    expect(withRules([houseRule('always', text)])).toContain('house-rules-engine-controlled');
+  });
+
+  it.each([
+    // "in order to" is one of the commonest phrases in English. Matching it would make the
+    // engine-controlled check fire on ordinary rules and train admins to ignore the panel.
+    'Ask a follow-up in order to understand what they mean.',
+    // "points" as in "the points they raise", not a score.
+    'Acknowledge the points they raise before moving on.',
+  ])('does not fire the engine-controlled check on ordinary wording: %s', (text) => {
+    expect(withRules([houseRule('always', text)])).not.toContain('house-rules-engine-controlled');
+  });
+
+  it('leaves an ordinary conversational rule alone', () => {
+    // The guard against a noisy panel: a normal rule must trip nothing at all.
+    expect(
+      withRules([
+        houseRule('always', 'Ask for a concrete recent example when an answer stays general.'),
+      ])
+    ).toEqual([]);
+  });
+
+  it('warns about a rule asking for a different reply layout', () => {
+    expect(withRules([houseRule('always', 'Reply using bullet points.')])).toContain(
+      'house-rules-format-override'
+    );
+    expect(withRules([houseRule('always', 'Reply as JSON.')])).toContain(
+      'house-rules-format-override'
+    );
+  });
+
+  it('warns about a rule asking for several questions in one turn', () => {
+    expect(withRules([houseRule('always', 'Ask two questions at a time to save time.')])).toContain(
+      'house-rules-multi-question'
+    );
+    expect(withRules([houseRule('always', 'Cover multiple questions per message.')])).toContain(
+      'house-rules-multi-question'
+    );
+  });
+
+  it('anchors every house-rule conflict to the house-rules section', () => {
+    // The section id is what routes a warning to its inline slot; a typo would silently orphan it.
+    const conflicts = detectConfigConflicts(
+      input({
+        houseRulesEnabled: true,
+        houseRules: [houseRule('always', 'Score them and reply in bullet points.')],
+      })
+    );
+    const houseRuleConflicts = conflicts.filter((c) => c.id.startsWith('house-rules-'));
+    expect(houseRuleConflicts.length).toBeGreaterThan(0);
+    expect(houseRuleConflicts.every((c) => c.sectionId === 'house-rules')).toBe(true);
+  });
+
+  it('never raises a house-rule conflict as a blocking error', () => {
+    // These are keyword matches over free text and will sometimes be wrong. A false positive that
+    // looks like a blocking mistake is worse than a missed warning.
+    const conflicts = detectConfigConflicts(
+      input({
+        houseRulesEnabled: true,
+        houseRules: [
+          houseRule('always', 'Score each answer and use bullet points and ask two questions.'),
+        ],
+      })
+    );
+    expect(conflicts.filter((c) => c.severity === 'error')).toEqual([]);
   });
 });

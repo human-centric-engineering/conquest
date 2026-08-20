@@ -144,6 +144,47 @@ cause is a worse outcome than silently dropping a rule that says nothing.
 Rules can be individually switched off, which keeps their wording — drafting a rule and shipping it
 are different decisions.
 
+### Conflict checks
+
+`detectConfigConflicts` (`lib/app/questionnaire/authoring/config-conflicts.ts`) reads the rules
+alongside the rest of the config and returns warnings anchored to `sectionId: 'house-rules'`, which
+the Settings card renders inline. Eight checks:
+
+| Id                                   | Severity | Catches                                                             |
+| ------------------------------------ | -------- | ------------------------------------------------------------------- |
+| `house-rules-empty`                  | info     | Block on with no rule switched on                                   |
+| `form-only-house-rules`              | info     | Rules set on a form-only questionnaire — no interviewer runs        |
+| `house-rules-overpromise-anonymity`  | warning  | A rule promises anonymity while anonymous mode is off               |
+| `house-rules-identity-vs-anonymous`  | warning  | A rule asks for a name/email while anonymous mode is on             |
+| `house-rules-support-not-configured` | warning  | A rule points at support with no support message configured         |
+| `house-rules-engine-controlled`      | warning  | A rule directs scoring, question order, skipping, or report content |
+| `house-rules-format-override`        | warning  | A rule asks for bullets/headings/JSON, which `<output_format>` wins |
+| `house-rules-multi-question`         | warning  | A rule asks for several questions in one turn                       |
+
+**`house-rules-engine-controlled` is the one that earns its keep.** "Score each answer out of ten"
+reads as a perfectly reasonable instruction, the phraser cannot honour any part of it, and without
+this check nothing anywhere tells the admin their rule is being ignored. It is the same trap
+`respondent-report.md` documents for report instructions.
+
+Three constraints keep the panel trustworthy, because these are keyword matches over free text and
+**will** sometimes be wrong:
+
+1. **Never `error`.** A false positive must not look like a blocking mistake. Pinned by test.
+2. **Word every message as "may".** The detector is guessing at intent; the admin is not.
+3. **Prefer a missed warning to a noisy one.** An admin who learns to ignore this panel is worse off
+   than one who never saw the warning. Two patterns were deliberately narrowed after they
+   false-fired in testing — `\bin order\b` (matches "in order to") and a bare `\bpoints\b` (matches
+   "acknowledge the points they raise"). Both have regression tests.
+
+Two checks deliberately exclude `never` rules: "never claim answers are confidential" is the
+_opposite_ of over-promising, and "never ask for names" is exactly right under anonymous mode.
+Flagging either would be the panel arguing with a correct decision.
+
+**Not implemented:** a tone-contradiction check ("never use humour" against an enabled humour dial).
+House rules sit after `<tone>` and therefore win, so it is not a conflict — and it would have to
+account for built-in persona mode replacing the version's dials entirely. Low signal for real
+complexity; left out on purpose.
+
 ## Runtime path
 
 ```

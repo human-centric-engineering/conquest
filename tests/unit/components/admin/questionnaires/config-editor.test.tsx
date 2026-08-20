@@ -1449,6 +1449,32 @@ describe('ConfigEditor — interviewer house rules', () => {
     });
   });
 
+  it('surfaces a house-rule conflict inline as the admin has it configured', () => {
+    // End-to-end through the real detector: a rule asking for a name on an anonymous questionnaire.
+    setup({
+      anonymousMode: true,
+      houseRules: {
+        enabled: true,
+        rules: [ruleFor({ id: 'a', kind: 'always', text: 'Ask for their name first.' })],
+      },
+    });
+    expect(
+      screen.getAllByText(/may ask for details this questionnaire doesn.t collect/i).length
+    ).toBeGreaterThan(0);
+  });
+
+  it('raises no house-rule conflict for an ordinary rule', () => {
+    setup({
+      houseRules: {
+        enabled: true,
+        rules: [ruleFor({ id: 'a', kind: 'never', text: 'Give advice.' })],
+      },
+    });
+    // The panel is only useful if a normal rule is silent.
+    expect(screen.queryByText(/won.t work as set/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/needs? a look/i)).not.toBeInTheDocument();
+  });
+
   it('drops rules the admin left incomplete rather than failing the save', () => {
     const { specs } = setup({
       houseRules: {

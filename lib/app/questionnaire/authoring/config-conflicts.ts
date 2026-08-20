@@ -13,7 +13,7 @@
  * never prevent saving (some combinations are deliberate mid-edit states).
  */
 
-import type { CaptureMode, PresentationMode } from '@/lib/app/questionnaire/types';
+import type { CaptureMode, HouseRuleKind, PresentationMode } from '@/lib/app/questionnaire/types';
 
 export type ConflictSeverity = 'error' | 'warning' | 'info';
 
@@ -46,7 +46,106 @@ export interface ConfigConflictInput {
   questionCount: number;
   sensitivityAwareness: boolean;
   supportMessage: string;
+  /** House-rules master switch — off ⇒ no rule can have any effect, so none are checked. */
+  houseRulesEnabled: boolean;
+  /** The version's house rules (all of them; the detector filters to the enabled ones itself). */
+  houseRules: ReadonlyArray<{
+    kind: HouseRuleKind;
+    enabled: boolean;
+    text: string;
+    trigger?: string;
+  }>;
 }
+
+/* ── House-rule text matching ─────────────────────────────────────────────────
+ *
+ * The house-rule checks below read free text an admin wrote, so they are keyword matches and will
+ * never be exact. Three rules keep that honest:
+ *
+ *   1. **Never `error`.** A false positive must not look like a blocking mistake. These warn.
+ *   2. **Word the message as "may not".** The detector is guessing at intent; the admin is not.
+ *   3. **Prefer a missed warning to a noisy one.** Patterns are anchored on word boundaries and
+ *      phrases rather than loose stems — an admin who learns to ignore this panel is worse off than
+ *      one who never saw the warning.
+ */
+
+/** Does any of `patterns` appear in the rule's text (or its trigger)? */
+function mentions(rule: { text: string; trigger?: string }, patterns: readonly RegExp[]): boolean {
+  const haystack = `${rule.text} ${rule.trigger ?? ''}`.toLowerCase();
+  return patterns.some((pattern) => pattern.test(haystack));
+}
+
+/** Claims about anonymity / confidentiality the interviewer would be making on the client's behalf. */
+const ANONYMITY_CLAIM = [
+  /\banonymous(ly)?\b/,
+  /\banonymised\b/,
+  /\banonymized\b/,
+  /\bconfidential(ly|ity)?\b/,
+  /\buntraceable\b/,
+  /\bcan(’|')?t be traced\b/,
+  /\bcannot be traced\b/,
+  /\bnobody will know\b/,
+  /\bno one will know\b/,
+] as const;
+
+/** Asking the respondent to identify themselves. */
+const IDENTITY_REQUEST = [
+  /\bnames?\b/,
+  /\be-?mail\b/,
+  /\bphone number\b/,
+  /\bcontact details\b/,
+  /\bjob title\b/,
+  /\bidentify themsel(f|ves)\b/,
+  /\bwho they are\b/,
+] as const;
+
+/** Pointing the respondent at a support service the safeguarding settings are supposed to supply. */
+const SUPPORT_RESOURCE = [
+  /\bsupport (link|line|service|resource|contact|details)\b/,
+  /\bhelpline\b/,
+  /\bhelp ?line\b/,
+  /\bsignpost\b/,
+] as const;
+
+/**
+ * Things the deterministic orchestrator owns, not the interviewer. This is the highest-value check
+ * here: an admin writes a perfectly reasonable-sounding instruction, the phraser has no ability to
+ * honour it, and nothing anywhere tells them. The same trap `respondent-report.md` documents.
+ */
+const ENGINE_CONTROLLED = [
+  /\bscor(e|es|ed|ing)\b/,
+  // NOT a bare `\bpoints\b`: "acknowledge the points they raise" is ordinary interviewing, and
+  // matching it fired this check on a perfectly good rule. `scor*` already covers real scoring.
+  /\bskip\b/,
+  /\bquestion order\b/,
+  /\border of (the )?questions\b/,
+  // "…in the order they appear". Deliberately not `\bin order\b`, which would match the extremely
+  // common "in order to" and make this check fire on half the rules an admin writes.
+  /\bin the order\b/,
+  /\bquestions in order\b/,
+  /\bwhich questions?\b/,
+  /\bnext question\b/,
+  /\bask (all|every) question\b/,
+  /\b(the|their|a) (final )?report\b/,
+] as const;
+
+/** Reply-shape instructions `<output_format>` will override. */
+const FORMAT_OVERRIDE = [
+  /\bbullet(ed| point| points)?\b/,
+  /\bnumbered list\b/,
+  /\bheadings?\b/,
+  /\bjson\b/,
+  /\bmarkdown\b/,
+  /\ba table\b/,
+] as const;
+
+/** Asking for more than one question in a turn — the one rule the prompt never relaxes. */
+const MULTI_QUESTION = [
+  /\b(several|multiple|two|three) questions\b/,
+  /\bmore than one question\b/,
+  /\ball (the |of the )?questions at once\b/,
+  /\bquestions at once\b/,
+] as const;
 
 /**
  * Inspect the config and return every active conflict, in a stable order (errors first, then warnings,
@@ -155,6 +254,144 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
       message:
         'Sensitivity awareness is on, but with no support message there’s nothing to show a ' +
         'respondent who raises something sensitive. Add a support message.',
+    });
+  }
+
+  /* ── House rules ────────────────────────────────────────────────────────────
+   *
+   * Only ENABLED rules are checked, and only while the block itself is on — a parked rule is a
+   * draft, and warning about a draft trains the admin to ignore the panel.
+   */
+  const activeRules = input.houseRulesEnabled
+    ? input.houseRules.filter((rule) => rule.enabled && rule.text.trim() !== '')
+    : [];
+
+  if (input.houseRulesEnabled) {
+    // 8 — House rules on with nothing to say. Not a mistake, but the admin probably meant to finish.
+    if (activeRules.length === 0) {
+      conflicts.push({
+        id: 'house-rules-empty',
+        severity: 'info',
+        sectionId: 'house-rules',
+        title: 'No house rules are switched on',
+        message:
+          'House rules are turned on but none are in use, so nothing is added to the interviewer. ' +
+          'Add a rule, or switch this off.',
+      });
+    }
+
+    // 9 — A form-only questionnaire never runs the interviewer, so no rule can take effect. Same
+    //     family as checks 2–5 above.
+    if (formOnly && activeRules.length > 0) {
+      conflicts.push({
+        id: 'form-only-house-rules',
+        severity: 'info',
+        sectionId: 'house-rules',
+        title: 'House rules won’t apply',
+        message:
+          'House rules shape the interviewer, and a form-only questionnaire has no conversation. ' +
+          'They apply once the conversation is enabled (Respondent experience → Presentation).',
+      });
+    }
+  }
+
+  // 10 — A rule promising anonymity on a questionnaire that isn't anonymous. The one that matters
+  //      most: over-promising anonymity is a claim the client has to stand behind afterwards.
+  const anonymityClaims = activeRules.filter(
+    (rule) => rule.kind !== 'never' && mentions(rule, ANONYMITY_CLAIM)
+  );
+  if (anonymityClaims.length > 0 && !input.anonymousMode) {
+    conflicts.push({
+      id: 'house-rules-overpromise-anonymity',
+      severity: 'warning',
+      sectionId: 'house-rules',
+      title: 'A rule may promise more anonymity than this questionnaire offers',
+      message:
+        'Anonymous mode is off, so answers are linked to the respondent. Check that any rule ' +
+        'mentioning anonymity or confidentiality says only what your invitation and privacy notice ' +
+        'actually say — or turn on Anonymous mode (Access & invitations).',
+    });
+  }
+
+  // 11 — The mirror image: asking for identifying details on an anonymous questionnaire. `never`
+  //      rules are excluded — "never ask for names" is exactly right under anonymous mode, not a
+  //      conflict, and flagging it would be the panel arguing with a correct decision.
+  const identityRequests = activeRules.filter(
+    (rule) => rule.kind !== 'never' && mentions(rule, IDENTITY_REQUEST)
+  );
+  if (identityRequests.length > 0 && input.anonymousMode) {
+    conflicts.push({
+      id: 'house-rules-identity-vs-anonymous',
+      severity: 'warning',
+      sectionId: 'house-rules',
+      title: 'A rule may ask for details this questionnaire doesn’t collect',
+      message:
+        'Anonymous mode is on, so identifying details are never collected. A rule asking for a ' +
+        'name, email, or contact details works against that — reword it, or turn off Anonymous ' +
+        'mode (Access & invitations).',
+    });
+  }
+
+  // 12 — Pointing at a support service that safeguarding isn't configured to provide.
+  const supportMentions = activeRules.filter((rule) => mentions(rule, SUPPORT_RESOURCE));
+  if (
+    supportMentions.length > 0 &&
+    (!input.sensitivityAwareness || input.supportMessage.trim() === '')
+  ) {
+    conflicts.push({
+      id: 'house-rules-support-not-configured',
+      severity: 'warning',
+      sectionId: 'house-rules',
+      title: 'A rule points at support that isn’t set up',
+      message:
+        'A rule refers to a support service, but there’s no support message configured for this ' +
+        'questionnaire — so there’s nothing for the interviewer to point to. Add one under Answer ' +
+        'quality & safeguarding.',
+    });
+  }
+
+  // 13 — Instructions the phraser structurally cannot honour. The highest-value check: without it
+  //      the admin has no way to learn their rule is being ignored.
+  const engineControlled = activeRules.filter((rule) => mentions(rule, ENGINE_CONTROLLED));
+  if (engineControlled.length > 0) {
+    conflicts.push({
+      id: 'house-rules-engine-controlled',
+      severity: 'warning',
+      sectionId: 'house-rules',
+      title: 'A rule may be asking for something the interviewer doesn’t control',
+      message:
+        'Scoring, which questions get asked and in what order, and what goes in the report are all ' +
+        'decided outside the conversation — the interviewer can’t change them, so a rule about them ' +
+        'has no effect. Use the Questions & completion, Definitions, or report settings instead.',
+    });
+  }
+
+  // 14 — Reply-shape instructions that `<output_format>` overrides (it sits after house rules).
+  const formatOverrides = activeRules.filter((rule) => mentions(rule, FORMAT_OVERRIDE));
+  if (formatOverrides.length > 0) {
+    conflicts.push({
+      id: 'house-rules-format-override',
+      severity: 'warning',
+      sectionId: 'house-rules',
+      title: 'A rule about layout won’t be followed',
+      message:
+        'The interviewer always replies in short conversational paragraphs — no lists, headings, or ' +
+        'tables — so a rule asking for a different layout is overridden.',
+    });
+  }
+
+  // 15 — Asking for more than one question a turn. The prompt's hardest rule; the only sanctioned
+  //      exception is the "batch related questions" tactic under Interviewer strategy.
+  const multiQuestion = activeRules.filter((rule) => mentions(rule, MULTI_QUESTION));
+  if (multiQuestion.length > 0) {
+    conflicts.push({
+      id: 'house-rules-multi-question',
+      severity: 'warning',
+      sectionId: 'house-rules',
+      title: 'A rule asking for several questions at once won’t be followed',
+      message:
+        'The interviewer asks one thing at a time, and a house rule can’t override that. To let it ' +
+        'group closely-related gaps, use “Batch related questions” under Interviewer strategy.',
     });
   }
 

@@ -857,6 +857,8 @@ export function ConfigEditor({
         questionCount,
         sensitivityAwareness,
         supportMessage,
+        houseRulesEnabled: houseRules.enabled,
+        houseRules: houseRules.rules,
       }),
     [
       anonymousMode,
@@ -872,6 +874,7 @@ export function ConfigEditor({
       questionCount,
       sensitivityAwareness,
       supportMessage,
+      houseRules,
     ]
   );
   const conflictsFor = (sectionId: string) => conflicts.filter((c) => c.sectionId === sectionId);
