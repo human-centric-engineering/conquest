@@ -25,6 +25,8 @@ import { EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/evaluation/dimen
 import { DEFAULT_QUESTIONNAIRE_CONFIG } from '@/lib/app/questionnaire/types';
 import * as experienceConstants from '@/lib/app/questionnaire/experiences/constants';
 import { DEFAULT_EXPERIENCE_SETTINGS } from '@/lib/app/questionnaire/experiences/types';
+import * as scopeConstants from '@/lib/app/questionnaire/scope/constants';
+import { SCOPE_EVALUATION_JUDGE_SLUGS } from '@/lib/app/questionnaire/scope-evaluation/dimensions';
 import { WORKFLOW_DIAGRAMS } from '@/lib/app/questionnaire/workflows/registry';
 import { WORKFLOW_CATEGORIES, categoryForSlug } from '@/lib/app/questionnaire/workflows/categories';
 import { getNodeMeta } from '@/lib/app/questionnaire/workflows/types';
@@ -46,6 +48,14 @@ const KNOWN_AGENT_SLUGS = new Set<string>([
   ...Object.entries(experienceConstants)
     .filter(([name, value]) => name.endsWith('_AGENT_SLUG') && typeof value === 'string')
     .map(([, value]) => value as string),
+  // The Scope Planner's slug lives in scope/constants.ts rather than the shared questionnaire
+  // constants — same `*_AGENT_SLUG` convention, so the same filter applies to that module. The
+  // four scope-evaluation judges mirror EVALUATION_JUDGE_SLUGS above: their slugs live in the
+  // scope-evaluation dimension registry, not constants.ts.
+  ...Object.entries(scopeConstants)
+    .filter(([name, value]) => name.endsWith('_AGENT_SLUG') && typeof value === 'string')
+    .map(([, value]) => value as string),
+  ...SCOPE_EVALUATION_JUDGE_SLUGS,
 ]);
 
 const catalog = buildPromptCatalog();
@@ -116,6 +126,10 @@ describe('workflow diagram integrity', () => {
     experienceConstants.EXPERIENCE_HANDOFF_AGENT_SLUG,
     experienceConstants.MEETING_SYNTHESIS_AGENT_SLUG,
     experienceConstants.EXPERIENCE_SYNTHESIS_AGENT_SLUG,
+    // The Scope Planner builds its prompt inline in `planner.ts` (candidate topics + what the
+    // respondent conveyed, assembled ahead of the live provider call) rather than through a
+    // separately exported pure builder, so there is no specimen the Prompt Library could render.
+    scopeConstants.SCOPE_PLANNER_AGENT_SLUG,
   ]);
 
   it('every agent-backed step exposes a catalogued prompt (or is a known exception)', () => {

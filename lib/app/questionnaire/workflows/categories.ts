@@ -48,6 +48,7 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
       'structure-edit',
       'data-slot-generation',
       'glossary-analysis',
+      'scope-routing-analysis',
     ],
   },
   {
@@ -60,7 +61,7 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
     id: 'conversation',
     label: 'Live conversation',
     description: 'What runs each turn while a respondent completes the questionnaire.',
-    slugs: ['conversation-turn', 'answer-extraction', 'data-slot-turn'],
+    slugs: ['conversation-turn', 'answer-extraction', 'data-slot-turn', 'scope-planning'],
   },
   {
     id: 'reporting',
@@ -71,8 +72,9 @@ export const WORKFLOW_CATEGORIES: readonly WorkflowCategoryMeta[] = [
   {
     id: 'evaluation',
     label: 'Evaluation & QA',
-    description: 'Inspecting and scoring a single preview turn.',
-    slugs: ['turn-inspector', 'turn-evaluation'],
+    description:
+      "Inspecting and scoring a preview turn, or a version's authored Adaptive Scope config.",
+    slugs: ['turn-inspector', 'turn-evaluation', 'scope-evaluation'],
   },
   // Last because an experience spans every stage above it: it composes questionnaires that were
   // created, configured, conversed through and reported on by the pipelines listed earlier. Reading
