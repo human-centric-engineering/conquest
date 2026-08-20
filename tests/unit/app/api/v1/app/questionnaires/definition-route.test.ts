@@ -231,6 +231,16 @@ describe('GET definition — happy path', () => {
     expect(disposition).toContain('-v3-');
   });
 
+  it('falls back to "questionnaire" when the title has no alphanumeric characters to slugify', async () => {
+    (prisma.appQuestionnaire.findUnique as Mock).mockResolvedValue({ title: '!!!' });
+
+    const req = makeRequest();
+    const res = await GET(req, ADMIN_SESSION, makeContext());
+
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    expect(disposition).toContain('definition-questionnaire-v3-');
+  });
+
   it('sets Cache-Control: no-store', async () => {
     const req = makeRequest();
     const res = await GET(req, ADMIN_SESSION, makeContext());

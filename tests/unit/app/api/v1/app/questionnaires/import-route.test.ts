@@ -108,6 +108,7 @@ const PERSIST_RESULT = {
   questionCount: 5,
   tagCount: 1,
   dataSlotCount: 3,
+  topicCount: 2,
 };
 
 const PARSED_ENVELOPE = { questionnaire: { title: 'Health Survey' }, version: {} };
@@ -280,6 +281,7 @@ describe('POST /api/v1/app/questionnaires/import — happy path', () => {
       sectionCount: PERSIST_RESULT.sectionCount,
       questionCount: PERSIST_RESULT.questionCount,
       dataSlotCount: PERSIST_RESULT.dataSlotCount,
+      topicCount: PERSIST_RESULT.topicCount,
     });
   });
 
@@ -316,6 +318,7 @@ describe('POST /api/v1/app/questionnaires/import — happy path', () => {
           sectionCount: PERSIST_RESULT.sectionCount,
           questionCount: PERSIST_RESULT.questionCount,
           dataSlotCount: PERSIST_RESULT.dataSlotCount,
+          topicCount: PERSIST_RESULT.topicCount,
         }),
       })
     );

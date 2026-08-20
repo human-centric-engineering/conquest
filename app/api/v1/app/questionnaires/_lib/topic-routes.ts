@@ -7,6 +7,8 @@
  * the same way.
  */
 
+import type { Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/db/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
@@ -20,6 +22,7 @@ import {
   type AdaptiveScopeSettings,
   type ScopeRule,
   type Topic,
+  type TopicSource,
 } from '@/lib/app/questionnaire/scope/types';
 import { DEFAULT_QUESTIONNAIRE_CONFIG, narrowToEnum } from '@/lib/app/questionnaire/types';
 
@@ -115,6 +118,43 @@ export async function loadMaxDataSlotAttempts(versionId: string): Promise<number
 }
 
 /**
+ * Build one `AppQuestionnaireTopic` create row from a `TopicInput`-shaped topic, given the ordinal
+ * and source a caller decides (a bulk save always stamps `manual` + array index; the definition
+ * importer carries the file's own `ordinal`/`source` through instead). Shared so the two call sites
+ * — {@link replaceTopics} below and the definition-import persister
+ * (`_lib/import-definition.ts`) — can't drift on field mapping.
+ */
+export function buildTopicCreateInput(
+  versionId: string,
+  topic: Pick<
+    TopicInput,
+    | 'key'
+    | 'label'
+    | 'description'
+    | 'phase'
+    | 'criteria'
+    | 'depth'
+    | 'questionKeys'
+    | 'dataSlotKeys'
+  >,
+  ordinal: number,
+  source: TopicSource
+): Prisma.AppQuestionnaireTopicCreateManyInput {
+  return {
+    versionId,
+    key: topic.key,
+    label: topic.label,
+    phase: topic.phase,
+    criteria: topic.criteria,
+    depth: topic.depth,
+    members: jsonInput({ questionKeys: topic.questionKeys, dataSlotKeys: topic.dataSlotKeys }),
+    ordinal,
+    source,
+    ...(topic.description !== null ? { description: topic.description } : {}),
+  };
+}
+
+/**
  * Replace a version's whole topic set with the reviewed one.
  *
  * Delete-then-write rather than a diff: the admin surface submits the complete set, so reconciling
@@ -127,21 +167,7 @@ export async function replaceTopics(versionId: string, topics: TopicInput[]): Pr
     await tx.appQuestionnaireTopic.deleteMany({ where: { versionId } });
     if (topics.length > 0) {
       await tx.appQuestionnaireTopic.createMany({
-        data: topics.map((t, i) => ({
-          versionId,
-          key: t.key,
-          label: t.label,
-          phase: t.phase,
-          criteria: t.criteria,
-          depth: t.depth,
-          members: jsonInput({
-            questionKeys: t.questionKeys,
-            dataSlotKeys: t.dataSlotKeys,
-          }),
-          ordinal: i,
-          source: 'manual',
-          ...(t.description !== null ? { description: t.description } : {}),
-        })),
+        data: topics.map((t, i) => buildTopicCreateInput(versionId, t, i, 'manual')),
       });
     }
     const rows = await tx.appQuestionnaireTopic.findMany({

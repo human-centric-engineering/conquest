@@ -93,6 +93,15 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
     const fork = await forkVersionIfLaunched(scoped, { userId: session.user.id, clientIp });
     const editId = fork.versionId;
 
+    // Read the pre-edit row BEFORE the adaptiveScope patch (below) can create/touch it — otherwise
+    // a first-ever save that includes `adaptiveScope` would read back the row IT just created,
+    // misreporting `created` as false and silently excluding the adaptiveScope change from the
+    // audit diff (both sides would already carry the same patched value).
+    const before = await prisma.appQuestionnaireConfig.findUnique({
+      where: { versionId: editId },
+      select: CONFIG_SELECT,
+    });
+
     if (adaptiveScopePatch !== undefined) {
       const settings = await patchAdaptiveScopeSettings(editId, adaptiveScopePatch);
       logAdminAction({
@@ -132,12 +141,6 @@ const handleConfigPatch = withAdminAuth<{ id: string; vid: string }>(
         ? { milestoneBannerThresholds: jsonInput(milestoneBannerThresholds) }
         : {}),
     };
-
-    // Read the pre-edit row for the audit diff (null on first save).
-    const before = await prisma.appQuestionnaireConfig.findUnique({
-      where: { versionId: editId },
-      select: CONFIG_SELECT,
-    });
 
     const updated = await prisma.appQuestionnaireConfig.upsert({
       where: { versionId: editId },

@@ -86,6 +86,7 @@ const tx = {
   appDataSlotQuestion: { createMany: vi.fn(async () => ({ count: 0 })) },
   appQuestionnaireTopic: { createMany: vi.fn(async () => ({ count: 0 })) },
   appScoringSchema: { create: vi.fn(async () => ({ id: 'schema-1' })) },
+  appGlossaryTerm: { create: vi.fn(async () => ({ id: 'term-1' })) },
 };
 
 /** The single `data` array passed to a batched creator's first call. */
@@ -613,6 +614,83 @@ describe('persistDefinitionImport', () => {
     expect(configData.maxQuestionsPerSession).toBe(5);
   });
 
+  it('writes every JSON config field through the boundary when the envelope provides one — the same silent-drop bug class this branch fixes for adaptiveScope', async () => {
+    const profileFields = [
+      {
+        key: 'role',
+        label: 'Role',
+        type: 'text' as const,
+        required: true,
+        validation: 'deterministic' as const,
+      },
+    ];
+    const inviteeFields = [{ key: 'firstName' as const, shown: true, required: true }];
+    const tone = {
+      empathy: { enabled: true, level: 5 },
+      mirroring: { enabled: false, level: 3 },
+      formality: { enabled: true, level: 1 },
+      mimicry: { enabled: false, level: 3 },
+      verbosity: { enabled: false, level: 3 },
+      warmth: { enabled: true, level: 4 },
+      curiosity: { enabled: false, level: 3 },
+      readingComplexity: { enabled: false, level: 3 },
+      humour: { enabled: false, level: 3 },
+      persona: { enabled: true, text: 'You are a supportive coach.' },
+    };
+    const respondentReport = {
+      enabled: true,
+      mode: 'raw_plus_insights' as const,
+      rawIncludes: { dataSlots: true, questionsAsPresented: true },
+      generation: {
+        narrativeStyle: 'flowing' as const,
+        instructions: 'Warm and concise.',
+        structure: 'Summary, themes, next steps.',
+        backgroundContext: '',
+        useClientKnowledge: true,
+        dataSlotInfluence: 60,
+        discountLowConfidence: false,
+      },
+      delivery: { onScreen: true, download: true, explainMethod: true },
+    };
+    const cohortReport = {
+      enabled: true,
+      generation: {
+        length: 'standard' as const,
+        detailLevel: 'standard' as const,
+        formality: 'business' as const,
+        instructions: 'Be concise.',
+        structure: 'Summary, themes, next steps.',
+        backgroundContext: '',
+        useClientKnowledge: true,
+        useRoundContext: false,
+        useCohortContext: true,
+        scoringEnabled: true,
+      },
+    };
+    const intro = { enabled: true, background: 'A brief overview.', buttonLabel: 'Start' };
+
+    const envelope = makeEnvelope({
+      config: {
+        voiceEnabled: true,
+        profileFields,
+        inviteeFields,
+        tone,
+        respondentReport,
+        cohortReport,
+        intro,
+      },
+    });
+    await persistDefinitionImport(input({ envelope }));
+
+    const configData = (tx.appQuestionnaireConfig.create as Mock).mock.calls[0][0].data as Row;
+    expect(configData.profileFields).toEqual(profileFields);
+    expect(configData.inviteeFields).toEqual(inviteeFields);
+    expect(configData.tone).toEqual(tone);
+    expect(configData.respondentReport).toEqual(respondentReport);
+    expect(configData.cohortReport).toEqual(cohortReport);
+    expect(configData.intro).toEqual(intro);
+  });
+
   it('does not create a config row when version.config is absent', async () => {
     const envelope = makeEnvelope({ config: undefined });
     await persistDefinitionImport(input({ envelope }));
@@ -734,7 +812,7 @@ describe('persistDefinitionImport', () => {
           {
             key: 'morale_deep_dive',
             label: 'Morale deep dive',
-            description: null,
+            description: 'Follows up on a low morale signal from the opening',
             phase: 'conditional',
             criteria: 'Morale sounds low',
             depth: 'full',
@@ -754,6 +832,7 @@ describe('persistDefinitionImport', () => {
               versionId: 'ver-1',
               key: 'morale_deep_dive',
               label: 'Morale deep dive',
+              description: 'Follows up on a low morale signal from the opening',
               phase: 'conditional',
               criteria: 'Morale sounds low',
               depth: 'full',
@@ -765,6 +844,29 @@ describe('persistDefinitionImport', () => {
         })
       );
       expect(result.topicCount).toBe(1);
+    });
+
+    it('omits description from the topic row when it is null', async () => {
+      const envelope = makeEnvelope({
+        topics: [
+          {
+            key: 'no_description_topic',
+            label: 'No description',
+            description: null,
+            phase: 'core',
+            criteria: null,
+            depth: 'full',
+            ordinal: 0,
+            source: 'manual',
+            questionKeys: [],
+            dataSlotKeys: [],
+          },
+        ],
+      });
+      await persistDefinitionImport(input({ envelope }));
+
+      const topicRow = batchData(tx.appQuestionnaireTopic.createMany as Mock)[0];
+      expect(topicRow).not.toHaveProperty('description');
     });
 
     it('remaps a topic member key that collided and was deduplicated', async () => {
@@ -876,6 +978,92 @@ describe('persistDefinitionImport', () => {
       expect(call.create.adaptiveScope).toMatchObject({ enabled: true, maxConditionalTopics: 4 });
     });
 
+    it("remaps a hard rule's dataSlotKey when its data slot collided and was deduplicated", async () => {
+      // Two data slots share the original key 'score' — the second is deduplicated to 'score_2'
+      // (mirroring the topic-member dedup test above). A hard rule naming the original 'score' key
+      // must resolve to whichever key that original key maps to, same as topic membership — a rule
+      // left pointing at a stale key would silently stop firing after import.
+      const envelope = makeEnvelope({
+        dataSlots: [
+          {
+            key: 'score',
+            name: 'Score A',
+            description: '',
+            theme: 'x',
+            ordinal: 0,
+            weight: 1,
+            questionKeys: [],
+          },
+          {
+            key: 'score',
+            name: 'Score B',
+            description: '',
+            theme: 'x',
+            ordinal: 1,
+            weight: 1,
+            questionKeys: [],
+          },
+        ],
+        topics: [
+          {
+            key: 'gated_topic',
+            label: 'Gated',
+            description: null,
+            phase: 'conditional',
+            criteria: null,
+            depth: 'full',
+            ordinal: 0,
+            source: 'manual',
+            questionKeys: [],
+            dataSlotKeys: [],
+          },
+        ],
+        adaptiveScope: {
+          rules: [
+            {
+              dataSlotKey: 'score',
+              operator: 'gt',
+              value: '3',
+              action: 'include',
+              topicKey: 'gated_topic',
+            },
+          ],
+        },
+      });
+      await persistDefinitionImport(input({ envelope }));
+
+      const call = (tx.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0] as {
+        create: { adaptiveScope: { rules: { dataSlotKey: string; topicKey: string }[] } };
+      };
+      // 'score' collided; the second data slot (which the rule was authored against, since the
+      // persister processes data slots in file order and the rule's own semantics are opaque to
+      // which one it meant) resolves through the same last-write-wins map as topic membership.
+      expect(call.create.adaptiveScope.rules[0].dataSlotKey).toBe('score_2');
+      expect(call.create.adaptiveScope.rules[0].topicKey).toBe('gated_topic');
+    });
+
+    it('leaves a hard rule dataSlotKey untouched when it has no colliding data slot to remap through', async () => {
+      const envelope = makeEnvelope({
+        adaptiveScope: {
+          rules: [
+            {
+              dataSlotKey: 'no_such_slot',
+              operator: 'exists',
+              value: null,
+              action: 'exclude',
+              topicKey: 'some_topic',
+            },
+          ],
+        },
+      });
+      await persistDefinitionImport(input({ envelope }));
+
+      const call = (tx.appQuestionnaireConfig.upsert as Mock).mock.calls[0][0] as {
+        create: { adaptiveScope: { rules: { dataSlotKey: string }[] } };
+      };
+      expect(call.create.adaptiveScope.rules[0].dataSlotKey).toBe('no_such_slot');
+    });
+
     it('does not touch appQuestionnaireConfig.upsert when adaptiveScope is absent', async () => {
       await persistDefinitionImport(input());
 
@@ -909,6 +1097,106 @@ describe('persistDefinitionImport', () => {
     await persistDefinitionImport(input({ envelope }));
 
     expect(tx.appScoringSchema.create).not.toHaveBeenCalled();
+  });
+
+  describe('glossary (P16)', () => {
+    it('creates a term with rationale/contextQuote/sourceQuote when present', async () => {
+      const envelope = makeEnvelope({
+        glossary: [
+          {
+            term: 'Churn',
+            aliases: ['Attrition'],
+            status: 'accepted',
+            source: 'ai_proposed',
+            rationale: 'Frequently used undefined by respondents',
+            contextQuote: 'we lose about 5% of customers a month',
+            definitions: [
+              {
+                text: 'The rate at which customers stop using the product',
+                selected: true,
+                source: 'ai_proposed',
+                sourceQuote: 'we lose about 5% of customers a month',
+                edited: true,
+              },
+            ],
+          },
+        ],
+      });
+      await persistDefinitionImport(input({ envelope, adminId: 'admin-7' }));
+
+      expect(tx.appGlossaryTerm.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            versionId: 'ver-1',
+            term: 'Churn',
+            aliases: ['Attrition'],
+            status: 'accepted',
+            source: 'ai_proposed',
+            ordinal: 0,
+            rationale: 'Frequently used undefined by respondents',
+            contextQuote: 'we lose about 5% of customers a month',
+            createdBy: 'admin-7',
+            definitions: {
+              create: [
+                expect.objectContaining({
+                  text: 'The rate at which customers stop using the product',
+                  selected: true,
+                  source: 'ai_proposed',
+                  edited: true,
+                  ordinal: 0,
+                  sourceQuote: 'we lose about 5% of customers a month',
+                }),
+              ],
+            },
+          }),
+        })
+      );
+    });
+
+    it('omits rationale/contextQuote/sourceQuote when null, and skips a blank-normalised term', async () => {
+      const envelope = makeEnvelope({
+        glossary: [
+          {
+            // Normalises to an empty string (punctuation-only) — skipped entirely, no create call.
+            term: '—',
+            aliases: [],
+            status: 'proposed',
+            source: 'admin',
+            rationale: null,
+            contextQuote: null,
+            definitions: [],
+          },
+          {
+            term: 'Retention',
+            aliases: [],
+            status: 'proposed',
+            source: 'admin',
+            rationale: null,
+            contextQuote: null,
+            definitions: [
+              {
+                text: 'Customers who keep using the product',
+                selected: false,
+                source: 'admin',
+                sourceQuote: null,
+                edited: false,
+              },
+            ],
+          },
+        ],
+      });
+      await persistDefinitionImport(input({ envelope }));
+
+      // One call, not two — the punctuation-only term was skipped.
+      expect(tx.appGlossaryTerm.create).toHaveBeenCalledTimes(1);
+      const call = (tx.appGlossaryTerm.create as Mock).mock.calls[0][0] as {
+        data: Row & { definitions: { create: Row[] } };
+      };
+      expect(call.data.term).toBe('Retention');
+      expect(call.data).not.toHaveProperty('rationale');
+      expect(call.data).not.toHaveProperty('contextQuote');
+      expect(call.data.definitions.create[0]).not.toHaveProperty('sourceQuote');
+    });
   });
 
   it('returns correct structural counts that reflect the written graph', async () => {

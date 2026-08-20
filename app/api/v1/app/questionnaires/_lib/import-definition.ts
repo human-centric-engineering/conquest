@@ -28,7 +28,10 @@ import { normalizeTagLabel } from '@/lib/app/questionnaire/tagging';
 import { AUDIENCE_FIELDS } from '@/lib/app/questionnaire/types';
 import type { DefinitionImport } from '@/lib/app/questionnaire/authoring';
 import { jsonInput } from '@/app/api/v1/app/_lib/prisma-json';
-import { patchAdaptiveScopeSettings } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import {
+  buildTopicCreateInput,
+  patchAdaptiveScopeSettings,
+} from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
 
 export interface ImportDefinitionInput {
   envelope: DefinitionImport;
@@ -241,15 +244,6 @@ export async function persistDefinitionImport(
         });
       }
 
-      // 6b. Adaptive Scope (P17) settings — a top-level envelope field, not part of `version.config`
-      //     (see definition-export.ts for why). Routed through the same read-narrow-merge-write
-      //     helper the Topics tab's settings PATCH uses, rather than a raw write, so rule ordinals get
-      //     re-stamped and every field is normalised exactly as a live read would produce — a fresh
-      //     version has no "current" settings to merge onto, so this effectively seeds from defaults.
-      if (version.adaptiveScope !== undefined) {
-        await patchAdaptiveScopeSettings(versionId, version.adaptiveScope, tx);
-      }
-
       // 7. Data slots + question links (by original question key; unknown keys skipped). Slots are
       //    written in one batch, then matched back by their unique deduped key to wire the question
       //    links — also one batch. The slot's deduped key carries the original questionKeys forward.
@@ -306,22 +300,39 @@ export async function persistDefinitionImport(
         const dataSlotKeys = topic.dataSlotKeys
           .map((k) => dedupedSlotKeyByOriginal.get(k))
           .filter((k): k is string => k !== undefined);
-        topicRows.push({
-          versionId,
-          key: topic.key,
-          label: topic.label,
-          phase: topic.phase,
-          criteria: topic.criteria,
-          depth: topic.depth,
-          members: jsonInput({ dataSlotKeys, questionKeys }),
-          ordinal: topic.ordinal,
-          source: topic.source,
-          ...(topic.description !== null ? { description: topic.description } : {}),
-        });
+        topicRows.push(
+          buildTopicCreateInput(
+            versionId,
+            { ...topic, questionKeys, dataSlotKeys },
+            topic.ordinal,
+            topic.source
+          )
+        );
       }
       const topicCount = topicRows.length;
       if (topicRows.length > 0) {
         await tx.appQuestionnaireTopic.createMany({ data: topicRows });
+      }
+
+      // 8b. Adaptive Scope (P17) settings — a top-level envelope field, not part of `version.config`
+      //     (see definition-export.ts for why). Routed through the same read-narrow-merge-write
+      //     helper the Topics tab's settings PATCH uses, rather than a raw write, so rule ordinals get
+      //     re-stamped and every field is normalised exactly as a live read would produce — a fresh
+      //     version has no "current" settings to merge onto, so this effectively seeds from defaults.
+      //     Runs AFTER the data-slot dedup map (step 7) exists: a hard rule's `dataSlotKey` is a key
+      //     reference exactly like a topic's membership, and needs the same remap onto whatever key a
+      //     collided data slot actually landed on — `topicKey` needs no such remap because topic keys
+      //     are never deduped (uniqueness is enforced by the import schema, not `nextAvailableKey`).
+      if (version.adaptiveScope !== undefined) {
+        const rules = version.adaptiveScope.rules?.map((rule) => ({
+          ...rule,
+          dataSlotKey: dedupedSlotKeyByOriginal.get(rule.dataSlotKey) ?? rule.dataSlotKey,
+        }));
+        await patchAdaptiveScopeSettings(
+          versionId,
+          { ...version.adaptiveScope, ...(rules !== undefined ? { rules } : {}) },
+          tx
+        );
       }
 
       // 9. Scoring schema (1:1) — authored, so source 'manual'. Its item/band refs use question +
