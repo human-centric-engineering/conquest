@@ -22,7 +22,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Eye, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, Lightbulb, Plus, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,8 +39,12 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { HouseRulesLibrary } from '@/components/admin/questionnaires/house-rules-library';
+import { HouseRulesSuggest } from '@/components/admin/questionnaires/house-rules-suggest';
 import { cn } from '@/lib/utils';
-import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
+import {
+  buildHouseRulesInstructions,
+  narrowHouseRules,
+} from '@/lib/app/questionnaire/chat/house-rules';
 import {
   HOUSE_RULE_PLACEHOLDER,
   HOUSE_RULE_PRESETS,
@@ -93,10 +97,18 @@ export function HouseRulesPanel({
   value,
   onChange,
   disabled,
+  questionnaireId,
+  versionId,
 }: {
   value: HouseRulesSettings;
   onChange: (next: HouseRulesSettings) => void;
   disabled?: boolean;
+  /**
+   * Ids for the suggest route. Optional so the panel still renders standalone (and in tests)
+   * without one — the AI affordance simply doesn't appear, and every other control still works.
+   */
+  questionnaireId?: string;
+  versionId?: string;
 }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -138,17 +150,33 @@ export function HouseRulesPanel({
   // Which library presets are already in the list. Matched on the preset's original text, so an
   // inserted-then-edited copy stops counting as "added" once the admin has genuinely rewritten it —
   // at which point offering it again is the right call, not a duplicate.
-  const addedKeys = useMemo<ReadonlySet<string>>(() => {
-    const texts = new Set(rules.map((rule) => rule.text));
-    return new Set(
-      HOUSE_RULE_PRESETS.filter((preset) => texts.has(preset.text)).map((preset) => preset.key)
-    );
-  }, [rules]);
+  const addedTexts = useMemo<ReadonlySet<string>>(
+    () => new Set(rules.map((rule) => rule.text)),
+    [rules]
+  );
+  const addedKeys = useMemo<ReadonlySet<string>>(
+    () =>
+      new Set(
+        HOUSE_RULE_PRESETS.filter((preset) => addedTexts.has(preset.text)).map(
+          (preset) => preset.key
+        )
+      ),
+    [addedTexts]
+  );
 
-  const preview = useMemo(() => buildHouseRulesInstructions(value), [value]);
+  // Narrow before rendering, exactly as the server does on the way out of the database. Without
+  // this the preview would show the admin's raw text while the live turn shows the narrowed form —
+  // and a preview that differs from what is actually sent is worse than no preview.
+  const preview = useMemo(() => buildHouseRulesInstructions(narrowHouseRules(value)), [value]);
   const atCap = rules.length >= MAX_HOUSE_RULES;
   const unfilled = rules.filter(
     (rule) => rule.enabled && rule.text.includes(HOUSE_RULE_PLACEHOLDER)
+  ).length;
+  // Rules the save will discard: no text, or an `if_asked` rule with nothing to react to. The save
+  // drops them rather than failing validation with a path error the admin cannot act on — but
+  // dropping them silently would lose real wording, so say so before they hit Save.
+  const incomplete = rules.filter(
+    (rule) => !rule.text.trim() || (rule.kind === 'if_asked' && !(rule.trigger ?? '').trim())
   ).length;
 
   return (
@@ -198,8 +226,24 @@ export function HouseRulesPanel({
               disabled={disabled || atCap}
               onClick={() => setLibraryOpen(true)}
             >
-              <Sparkles className="mr-1 h-3.5 w-3.5" /> Rule ideas
+              <Lightbulb className="mr-1 h-3.5 w-3.5" /> Rule ideas
             </Button>
+            {questionnaireId && versionId && (
+              <HouseRulesSuggest
+                questionnaireId={questionnaireId}
+                versionId={versionId}
+                addedTexts={addedTexts}
+                onAdd={(suggestion) =>
+                  addRule({
+                    kind: suggestion.kind,
+                    text: suggestion.text,
+                    ...(suggestion.trigger ? { trigger: suggestion.trigger } : {}),
+                  })
+                }
+                disabled={disabled}
+                atCap={atCap}
+              />
+            )}
             {rules.length > 0 && (
               <Button
                 type="button"
@@ -220,6 +264,14 @@ export function HouseRulesPanel({
             <p className="text-muted-foreground text-xs">
               No rules yet. <strong>Rule ideas</strong> has ready-written ones grouped by what they
               solve — staying on topic, questions respondents ask, getting useful detail, and so on.
+            </p>
+          )}
+
+          {incomplete > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              {incomplete === 1 ? 'One rule is' : `${incomplete} rules are`} unfinished and
+              won&rsquo;t be saved — an &ldquo;if asked&rdquo; rule needs both what they ask about
+              and what to say.
             </p>
           )}
 

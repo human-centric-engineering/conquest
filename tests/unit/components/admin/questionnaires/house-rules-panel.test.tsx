@@ -168,17 +168,20 @@ describe('HouseRulesPanel — editing rules', () => {
     expect(screen.getByRole('button', { name: /rule ideas/i })).toBeDisabled();
   });
 
-  it('gives every added rule a distinct id, including alongside stored positional ids', async () => {
+  it('skips past an id already in use rather than minting a duplicate', async () => {
     const user = userEvent.setup();
-    // `rule-1` is what the read-path narrower assigns a stored rule with no id — a naive counter
-    // would collide with it and the server would reject the save as a duplicate.
-    const { latest } = renderPanel(ON([rule({ id: 'hr-1', kind: 'always', text: 'Stored.' })]));
+    // One stored rule carrying `hr-2` — the id a naive `hr-${length + 1}` counter would produce for
+    // the next add. Perfectly ordinary: add two rules, delete the first. A duplicate id fails the
+    // save with a path-based Zod error the admin cannot act on, so the skip loop is load-bearing.
+    const { latest } = renderPanel(ON([rule({ id: 'hr-2', kind: 'always', text: 'Stored.' })]));
 
     await user.click(screen.getByRole('button', { name: /add a rule/i }));
-    await user.click(screen.getByRole('button', { name: /add a rule/i }));
 
+    expect(latest().rules[1]?.id).toBe('hr-3');
+
+    await user.click(screen.getByRole('button', { name: /add a rule/i }));
     const ids = latest().rules.map((r) => r.id);
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['hr-2', 'hr-3', 'hr-4']);
   });
 });
 
@@ -189,24 +192,44 @@ describe('HouseRulesPanel — authoring guidance', () => {
     expect(screen.getByText(/no rules yet/i)).toBeInTheDocument();
   });
 
-  it('adds a library preset as an editable copy, then marks it as added', async () => {
+  it('adds a library preset as an editable copy, then marks that preset as added', async () => {
     const user = userEvent.setup();
     const preset = HOUSE_RULE_PRESETS.find((p) => p.key === 'no-advice');
     if (!preset) throw new Error('expected the no-advice preset to exist');
     const { latest } = renderPanel(ON());
 
     await user.click(screen.getByRole('button', { name: /rule ideas/i }));
-    const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getAllByRole('button', { name: /^add$/i })[0]);
+
+    // Scoped to the row carrying this preset's text, not "the first Add button" — reordering the
+    // preset list is pure content editing and must not break this test.
+    const row = () => {
+      const node = within(screen.getByRole('dialog'))
+        .getByText(preset.text)
+        .closest('div')?.parentElement;
+      if (!node) throw new Error('expected the preset row');
+      return node;
+    };
+    await user.click(within(row()).getByRole('button', { name: /^add$/i }));
 
     expect(latest().rules[0]).toMatchObject({ kind: preset.kind, text: preset.text });
-    expect(
-      within(screen.getByRole('dialog')).getAllByRole('button', { name: /added/i }).length
-    ).toBeGreaterThan(0);
+    // The preset that was added is the one marked added — a mis-keyed `addedKeys` map would
+    // otherwise mark some unrelated row and go unnoticed.
+    expect(within(row()).getByRole('button', { name: /added/i })).toBeDisabled();
   });
 
-  it('warns when an enabled rule still carries a fill-in-the-blank placeholder', async () => {
-    const user = userEvent.setup();
+  it('offers the AI suggester only when the panel knows which version it is editing', () => {
+    // Optional ids: the panel must still be fully usable standalone, just without the AI call.
+    const { unmount } = render(<HouseRulesPanel value={ON()} onChange={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /suggest rules/i })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <HouseRulesPanel value={ON()} onChange={vi.fn()} questionnaireId="qn-1" versionId="v1" />
+    );
+    expect(screen.getByRole('button', { name: /suggest rules/i })).toBeInTheDocument();
+  });
+
+  it('warns when an enabled rule still carries a fill-in-the-blank placeholder', () => {
     const { rerender } = render(
       <HouseRulesPanel
         value={ON([rule({ id: 'a', kind: 'always', text: 'Call them "__".' })])}
@@ -223,7 +246,6 @@ describe('HouseRulesPanel — authoring guidance', () => {
       />
     );
     expect(screen.queryByText(/still has/i)).not.toBeInTheDocument();
-    void user;
   });
 
   it('previews the exact block the interviewer will be sent', async () => {

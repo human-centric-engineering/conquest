@@ -486,6 +486,76 @@ describe('streaming a question turn', () => {
     };
     expect(arg.input.tone?.empathy).toEqual({ enabled: true, level: 5 });
   });
+
+  it('does not forward house rules to the phraser when the block is off (the default)', async () => {
+    // Off is silent: the route omits `houseRules` entirely, the section collapses, and the prompt
+    // is byte-identical to a version that never heard of the feature.
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { houseRules?: unknown };
+    };
+    expect(arg.input.houseRules).toBeUndefined();
+  });
+
+  it('forwards the rendered house-rules block to the phraser when rules are enabled', async () => {
+    // The whole point of the feature reaching a live turn: config → renderer → phraser input.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...loadedContext().base,
+          config: {
+            ...DEFAULT_QUESTIONNAIRE_CONFIG,
+            houseRules: {
+              enabled: true,
+              rules: [
+                { id: 'a', kind: 'never', enabled: true, text: 'Give advice.' },
+                // Individually off — must not reach the prompt.
+                { id: 'b', kind: 'always', enabled: false, text: 'Ask for an example.' },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'I do marketing' }), ctx));
+
+    const arg = questionMock.streamQuestionMessage.mock.calls[0][0] as {
+      input: { houseRules?: string };
+    };
+    expect(arg.input.houseRules).toContain('Give advice.');
+    expect(arg.input.houseRules).not.toContain('Ask for an example.');
+    // The subordination clause travels with it — a rule must never outrank the safety rules.
+    expect(arg.input.houseRules).toMatch(/do NOT override the safety/i);
+  });
+
+  it('sends the same house-rules block to the wrap-up composer', async () => {
+    // A closing message that broke a client's own rule would rightly be called a bug.
+    // The only question is already answered → assessment offers → the route streams the wrap-up.
+    ctxMock.buildTurnContext.mockResolvedValue(
+      loadedContext({
+        base: {
+          ...loadedContext().base,
+          answered: [{ questionId: 'q1', confidence: null }],
+          config: {
+            ...DEFAULT_QUESTIONNAIRE_CONFIG,
+            houseRules: {
+              enabled: true,
+              rules: [{ id: 'a', kind: 'never', enabled: true, text: 'Promise an outcome.' }],
+            },
+          },
+        },
+      })
+    );
+
+    await drainSse(await POST(req({ message: 'that is everything' }), ctx));
+
+    const arg = offerMock.streamOfferMessage.mock.calls[0][0] as {
+      input: { houseRules?: string };
+    };
+    expect(arg.input.houseRules).toContain('Promise an outcome.');
+  });
 });
 
 describe('streaming an offer turn', () => {

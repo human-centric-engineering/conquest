@@ -1308,3 +1308,15 @@ export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = 
     required: ['dimension', 'structure'],
   },
 };
+
+/* ── Interviewer house rules — suggestion assistant ────────────────────────── */
+
+/**
+ * Slug of the seeded house-rules assistant `AiAgent` (empty provider/model → dynamic resolution).
+ *
+ * A one-shot analyst, not a chat: it reads a version's goal, audience, questions and settings and
+ * proposes behaviour rules for the admin to adjudicate. Persists nothing itself — the route returns
+ * the proposals, the admin accepts what they want into the editor, and the ordinary config PATCH
+ * saves them.
+ */
+export const QUESTIONNAIRE_HOUSE_RULES_AGENT_SLUG = 'app-questionnaire-house-rules-assistant';

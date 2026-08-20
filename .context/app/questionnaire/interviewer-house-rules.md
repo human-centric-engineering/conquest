@@ -144,6 +144,48 @@ cause is a worse outcome than silently dropping a rule that says nothing.
 Rules can be individually switched off, which keeps their wording — drafting a rule and shipping it
 are different decisions.
 
+### Suggest rules (AI)
+
+`POST /api/v1/app/questionnaires/:id/versions/:vid/house-rules/suggest` →
+`lib/app/questionnaire/house-rules/suggest.ts`, backed by the seeded
+`app-questionnaire-house-rules-assistant` agent.
+
+Where the starter library answers "what kinds of rule exist", this answers "what would _this_
+questionnaire want" — it reads the goal, audience, question prompts (capped at 40), accepted glossary
+terms, and the rules already configured, and proposes 4–8 candidates each with a `why` line.
+
+**Read-only. There is deliberately no apply endpoint.** Candidates land in a dialog, the admin adds
+the ones they want, and the ordinary config PATCH saves them — audited like any other settings
+change. A rule the admin never read is exactly what this feature exists to prevent, so
+propose-then-accept is the point, not a nicety. There is no "add all" for the same reason.
+
+Three prompt decisions carry most of the quality:
+
+- It is told what it **cannot** usefully propose (scoring, question order, reply format, multiple
+  questions per turn), mirroring the conflict checks above. A suggester whose own output trips the
+  linter is worse than none — it teaches the admin that the AI and the warnings disagree.
+- It is told the settings it must not contradict, derived from the live config: an anonymous
+  questionnaire is told not to ask for identifying details; a non-anonymous one is told not to
+  promise anonymity; a questionnaire with no support message is told not to signpost support.
+- It is told to **prefer proposing nothing over padding**, and an empty result is a legitimate
+  answer. A long generic list is how an admin learns to stop reading suggestions.
+
+The narrower (`validateSuggestResult`) enforces the same trigger-only-on-`if_asked` invariant as the
+editor and the Zod schema, so the assistant can never produce a rule that would fail the save. It
+drops individual bad entries rather than failing the call — four good suggestions and one malformed
+fifth is still a useful answer.
+
+**Rate limit:** `houseRulesSuggestLimiter`, 20/min per admin, keyed on the admin user id — the same
+paid band as the Config Advisor, not the 60/min assist band, because this is a reasoning call over
+the whole instrument.
+
+**Provenance:** recorded as `AppAiRun` kind `house_rules_suggest`, including failures and empty
+results. This follows the Config Advisor rather than the Respondent Report config assistant (which
+records nothing): that assistant is a multi-turn chat where the admin thinks aloud, whereas this is a
+one-shot analysis whose proposals a human adjudicates into durable config that shapes what the
+interviewer says to real respondents. "Where did this rule come from" is worth answering months
+later, especially for the compliance-shaped rules this assistant is most often asked to draft.
+
 ### Conflict checks
 
 `detectConfigConflicts` (`lib/app/questionnaire/authoring/config-conflicts.ts`) reads the rules
@@ -211,6 +253,24 @@ than throw. It **drops** any rule that is not an object, has an unrecognised `ki
 `text`, or is `if_asked` with no `trigger`; it strips a `trigger` orphaned on a non-`if_asked` rule
 by a kind change in the editor; and it bounds text, triggers, and list length. Good siblings survive
 a bad neighbour. The Zod schema enforces the same rules on write, so the two agree.
+
+It also **replaces `<` and `>` with `‹` and `›`**. Rule text is spliced into an XML-tag-sectioned
+prompt, so text containing `</house_rules><output_format>…` would otherwise render a syntactically
+valid fake section. The real `<output_format>` and `<message_shape>` still follow it and later
+sections win, and the block carries its own subordination clause — but that is prompt-ordering
+convention, not enforcement. No legitimate rule needs angle brackets, so the strip costs nothing and
+closes it at the one point every render path flows through. Replaced rather than deleted so a rule
+mentioning "a group of <10 people" still reads sensibly.
+
+This matters most for the **suggester**, which is the only path where content an admin did not author
+(question prompts extracted from an uploaded document) can influence what ends up in the interviewer's
+prompt. The chain is long and gated — poisoned document → extracted question → suggestion → the admin
+reads the `why` and accepts → config save — but the strip is what makes the last step structurally
+safe rather than merely unlikely.
+
+Because it is a **read-path** defence it re-applies on every read, so it covers rows written before it
+existed and rows edited straight into the database. The admin editor's preview narrows before
+rendering for the same reason: a preview that differs from what is actually sent is worse than none.
 
 ## Adding a new rule kind
 

@@ -288,6 +288,8 @@ describe('buildStreamingOfferPrompt', () => {
     });
     const system = text(buildStreamingOfferPrompt({ ...INPUT, houseRules })[0].content);
     expect(system).toMatch(/<house_rules>[\s\S]*Promise an outcome\.[\s\S]*<\/house_rules>/);
+    // Both bounds — order IS precedence here, so a reorder above <role> would otherwise pass.
+    expect(system.indexOf('<role>')).toBeLessThan(system.indexOf('<house_rules>'));
     expect(system.indexOf('<house_rules>')).toBeLessThan(system.indexOf('<output_format>'));
   });
 });

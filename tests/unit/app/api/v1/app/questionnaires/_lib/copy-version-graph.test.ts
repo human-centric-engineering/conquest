@@ -640,6 +640,57 @@ describe('copyVersionGraph — with config and scoring schema', () => {
     expect(createCall.data.milestoneBannerThresholds).toEqual([25, 50, 75]);
   });
 
+  it('carries houseRules onto the fork, so a duplicated questionnaire behaves the same', async () => {
+    // The fork runs on every edit to a LAUNCHED version, so a config field missing from this copy
+    // is silently reset the first time an admin touches a live questionnaire — and duplicating one
+    // for a new client would hand them a differently-behaved interviewer. Exactly the class of bug
+    // the Adaptive Scope import/export regression was.
+    const houseRules = {
+      enabled: true,
+      rules: [
+        { id: 'a', kind: 'never', enabled: true, text: 'Give advice.' },
+        {
+          id: 'b',
+          kind: 'if_asked',
+          enabled: true,
+          text: 'Only the research team.',
+          trigger: 'who sees this',
+        },
+      ],
+    };
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...MINIMAL_SOURCE,
+      config: {
+        selectionStrategy: 'weighted',
+        minQuestionsAnswered: 3,
+        coverageThreshold: 0.8,
+        costBudgetUsd: null,
+        maxQuestionsPerSession: 20,
+        voiceEnabled: false,
+        contradictionMode: null,
+        contradictionWindowN: null,
+        anonymousMode: false,
+        profileFields: null,
+        inviteeFields: null,
+        tone: null,
+        interviewerStrategy: null,
+        respondentReport: null,
+        cohortReport: null,
+        intro: null,
+        accessMode: null,
+        milestoneBannerThresholds: null,
+        houseRules,
+      },
+    });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const createCall = (tx.appQuestionnaireConfig.create as Mock).mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(createCall.data.houseRules).toEqual(houseRules);
+  });
+
   it('creates a scoring-schema row when the source has one', async () => {
     // Arrange: source with scoringSchema present
     tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({

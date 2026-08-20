@@ -26,6 +26,7 @@ const SECTION_LABELS: Record<string, string> = {
   experience: 'Respondent experience',
   reasoning: 'Reasoning stream',
   tone: 'Interviewer tone & persona',
+  'house-rules': 'Interviewer house rules',
   access: 'Access & invitations',
   safeguarding: 'Answer quality & safeguarding',
   budget: 'Budget & limits',

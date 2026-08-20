@@ -424,3 +424,19 @@ export const scopeEvaluationApplyLimiter = createRateLimiter({
   interval: SCOPE_EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS,
   maxRequests: SCOPE_EVALUATION_APPLY_RATE_LIMIT_MAX,
 });
+
+/**
+ * House-rules suggestion sub-cap. One reasoning call that reads a version's goal, audience,
+ * questions and glossary — the same paid class as the advisor, and a bigger prompt than the report
+ * config assistant's stateless chat turn. 20/min per admin, keyed on the admin user id who owns the
+ * spend, matching `advisorLimiter` rather than the 60/min assist band.
+ */
+export const HOUSE_RULES_SUGGEST_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link houseRulesSuggestLimiter}, in milliseconds. */
+export const HOUSE_RULES_SUGGEST_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const houseRulesSuggestLimiter = createRateLimiter({
+  interval: HOUSE_RULES_SUGGEST_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: HOUSE_RULES_SUGGEST_RATE_LIMIT_MAX,
+});

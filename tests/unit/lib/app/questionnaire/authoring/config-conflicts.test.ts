@@ -248,6 +248,27 @@ describe('detectConfigConflicts — house rules', () => {
       );
     });
 
+    it('reads only the rule text, never the trigger', () => {
+      // A trigger is what the RESPONDENT asks about, not an instruction the interviewer follows.
+      // Matching on it told admins their perfectly good "if asked how answers are scored" rule had
+      // no effect — the exact noise the module's own rule 3 exists to prevent.
+      const scoringTrigger = houseRule(
+        'if_asked',
+        'They are not scored — the team reads every answer in full.',
+        'how their answers are scored'
+      );
+      expect(withRules([scoringTrigger])).not.toContain('house-rules-engine-controlled');
+
+      const anonTrigger = houseRule(
+        'if_asked',
+        'Yes — nobody outside the team.',
+        'is this anonymous'
+      );
+      expect(withRules([anonTrigger], { anonymousMode: false })).not.toContain(
+        'house-rules-overpromise-anonymity'
+      );
+    });
+
     it('does not treat a "never" rule about confidentiality as an over-promise', () => {
       // "Never claim answers are confidential" is the OPPOSITE of over-promising.
       const rule = houseRule('never', 'Claim answers are confidential or untraceable.');
@@ -290,6 +311,26 @@ describe('detectConfigConflicts — house rules', () => {
     expect(
       withRules([rule], { sensitivityAwareness: true, supportMessage: 'Call 0800 000 0000.' })
     ).not.toContain('house-rules-support-not-configured');
+  });
+
+  it('does not tell an admin to configure support they deliberately forbade', () => {
+    // "Never point them at a support line" + no support message configured is coherent, not a
+    // conflict. Warning here would be the panel arguing with a correct decision.
+    const rule = houseRule('never', 'Offer them the support line or a helpline.');
+    expect(withRules([rule], { sensitivityAwareness: false })).not.toContain(
+      'house-rules-support-not-configured'
+    );
+  });
+
+  it('does not flag an "if asked" answer as an instruction the interviewer cannot follow', () => {
+    // An if_asked rule's text is what the interviewer SAYS, not what it does — so a keyword there
+    // describes the answer, not a request.
+    expect(
+      withRules([houseRule('if_asked', 'Answers are not scored.', 'whether answers are scored')])
+    ).not.toContain('house-rules-engine-controlled');
+    expect(
+      withRules([houseRule('if_asked', 'Yes, bullet points are fine.', 'how to lay out an answer')])
+    ).not.toContain('house-rules-format-override');
   });
 
   it.each([
@@ -351,6 +392,23 @@ describe('detectConfigConflicts — house rules', () => {
     const houseRuleConflicts = conflicts.filter((c) => c.id.startsWith('house-rules-'));
     expect(houseRuleConflicts.length).toBeGreaterThan(0);
     expect(houseRuleConflicts.every((c) => c.sectionId === 'house-rules')).toBe(true);
+  });
+
+  it('orders conflicts errors → warnings → info regardless of check order', () => {
+    // The house-rule checks append an `info` before the `warning` ones run, so this ordering comes
+    // from the sort rather than from append order — and the card renders in the returned order.
+    const conflicts = detectConfigConflicts(
+      input({
+        presentationMode: 'form',
+        houseRulesEnabled: true,
+        houseRules: [houseRule('always', 'Reply using bullet points.')],
+      })
+    );
+    const rank = { error: 0, warning: 1, info: 2 } as const;
+    const ranks = conflicts.map((c) => rank[c.severity]);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(conflicts.some((c) => c.severity === 'info')).toBe(true);
+    expect(conflicts.some((c) => c.severity === 'warning')).toBe(true);
   });
 
   it('never raises a house-rule conflict as a blocking error', () => {

@@ -2095,7 +2095,13 @@ export function ConfigEditor({
             description="Things the interviewer must always do, must never do, or should say if a respondent asks. Use these for a client's own boundaries — no advice, house terminology, consistent answers about who sees the results. Off by default."
             conflicts={conflictsFor('house-rules')}
           >
-            <HouseRulesPanel value={houseRules} onChange={setHouseRules} disabled={busy} />
+            <HouseRulesPanel
+              value={houseRules}
+              onChange={setHouseRules}
+              disabled={busy}
+              questionnaireId={questionnaireId}
+              versionId={versionId}
+            />
           </SettingsGroup>
 
           {/* ── 3. Access & invitations — who may start, and the invitee detail fields captured. ── */}
