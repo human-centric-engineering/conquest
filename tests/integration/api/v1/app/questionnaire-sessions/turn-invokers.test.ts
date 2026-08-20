@@ -76,6 +76,7 @@ import {
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
   DEFAULT_INTERVIEWER_STRATEGY,
+  DEFAULT_HOUSE_RULES_SETTINGS,
 } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
@@ -164,6 +165,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
+      houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     },
     questions: [

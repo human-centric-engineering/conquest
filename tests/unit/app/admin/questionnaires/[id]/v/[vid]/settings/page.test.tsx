@@ -28,6 +28,7 @@ import {
   DEFAULT_INTRO_SETTINGS,
   DEFAULT_TONE_SETTINGS,
   DEFAULT_INTERVIEWER_STRATEGY,
+  DEFAULT_HOUSE_RULES_SETTINGS,
 } from '@/lib/app/questionnaire/types';
 import type { AttributedDemoClient, DemoClientView } from '@/lib/app/questionnaire/demo-clients';
 
@@ -232,6 +233,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
+      houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
       adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     },
     ...over,

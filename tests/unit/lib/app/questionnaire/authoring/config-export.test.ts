@@ -103,6 +103,34 @@ describe('parseSettingsImport', () => {
     expect(parsed.personaSelection).toEqual(personaSelection);
   });
 
+  it('round-trips the whole houseRules block, triggers included', () => {
+    // House rules are a client's own policy — losing them on an import would quietly hand the next
+    // questionnaire a differently-behaved interviewer, which is exactly the class of bug the
+    // Adaptive Scope import/export regression was. Pinned end-to-end through the server validator.
+    const houseRules = {
+      enabled: true,
+      rules: [
+        { id: 'a', kind: 'always' as const, enabled: true, text: 'Ask for a concrete example.' },
+        { id: 'b', kind: 'never' as const, enabled: false, text: 'Give advice.' },
+        {
+          id: 'c',
+          kind: 'if_asked' as const,
+          enabled: true,
+          text: 'Only the research team.',
+          trigger: 'who will see my answers',
+        },
+      ],
+    };
+    const view: ConfigView = { ...SAVED_VIEW, houseRules };
+    const text = JSON.stringify(buildSettingsExport(view, '2026-08-20T00:00:00.000Z'));
+
+    const result = parseSettingsImport(text);
+    expect(result.config.houseRules).toEqual(houseRules);
+
+    const parsed = updateConfigSchema.parse(result.config);
+    expect(parsed.houseRules).toEqual(houseRules);
+  });
+
   it('strips the read-only `saved` flag and envelope metadata from a bare object', () => {
     const result = parseSettingsImport(
       JSON.stringify({ saved: true, schemaVersion: 9, voiceEnabled: true })

@@ -61,6 +61,9 @@ export function buildStreamingOfferPrompt(input: OfferComposeInput): LlmMessage[
             'submit now rather than continue, and keep the message especially brief.'
           : '')
     ),
+    // House rules: same block, same placement rationale as the phraser — after the role/voice
+    // framing so client policy governs it, before `output_format` so the reply contract still wins.
+    section('house_rules', input.houseRules ?? ''),
     section(
       'output_format',
       'Reply with plain conversational prose only: no JSON, no lists, no headings, no XML tags, ' +

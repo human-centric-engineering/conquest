@@ -29,6 +29,7 @@ import {
   FALLBACK_OFFER_MESSAGE,
   streamOfferMessage,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/offer-stream';
+import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
 
 type Mock = ReturnType<typeof vi.fn>;
 
@@ -264,5 +265,29 @@ describe('buildStreamingOfferPrompt', () => {
   it('omits the wrap-up instruction by default (no costWrapUp)', () => {
     const system = text(buildStreamingOfferPrompt(INPUT)[0].content);
     expect(system).not.toMatch(/approaching its limit/i);
+  });
+
+  /* ── Interviewer house rules ─────────────────────────────────────────────── */
+
+  it('emits no <house_rules> section when the block renders empty', () => {
+    const houseRules = buildHouseRulesInstructions({
+      enabled: false,
+      rules: [{ id: 'a', kind: 'never', enabled: true, text: 'Give advice.' }],
+    });
+    const system = text(buildStreamingOfferPrompt({ ...INPUT, houseRules })[0].content);
+    expect(system).not.toContain('<house_rules>');
+    expect(system).toBe(text(buildStreamingOfferPrompt(INPUT)[0].content));
+  });
+
+  it('honours house rules in the wrap-up, before <output_format>', () => {
+    // The respondent can still ask something at the end, and a closing message that broke a
+    // client's own rule (offering advice, promising an outcome) would rightly be called a bug.
+    const houseRules = buildHouseRulesInstructions({
+      enabled: true,
+      rules: [{ id: 'a', kind: 'never', enabled: true, text: 'Promise an outcome.' }],
+    });
+    const system = text(buildStreamingOfferPrompt({ ...INPUT, houseRules })[0].content);
+    expect(system).toMatch(/<house_rules>[\s\S]*Promise an outcome\.[\s\S]*<\/house_rules>/);
+    expect(system.indexOf('<house_rules>')).toBeLessThan(system.indexOf('<output_format>'));
   });
 });

@@ -32,9 +32,11 @@ import {
   type QuestionComposeInput,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/question-stream';
 import { narrowToneSettings } from '@/lib/app/questionnaire/chat/tone';
+import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
 import {
   DEFAULT_TONE_SETTINGS,
   DEFAULT_INTERVIEWER_STRATEGY,
+  type HouseRule,
   type ToneSettings,
 } from '@/lib/app/questionnaire/types';
 
@@ -662,5 +664,109 @@ describe('buildStreamingQuestionPrompt', () => {
     // …but none of the admin-configured dimension/persona clauses.
     expect(system).not.toMatch(/adopt this persona/i);
     expect(system).not.toContain('encouraging');
+  });
+
+  /* ── Interviewer house rules ─────────────────────────────────────────────── */
+
+  /** Render a settings block through the real renderer, exactly as the turn route does. */
+  const houseRules = (settings: Parameters<typeof buildHouseRulesInstructions>[0]): string =>
+    buildHouseRulesInstructions(settings);
+
+  const rule = (over: Partial<HouseRule> & Pick<HouseRule, 'kind' | 'text'>): HouseRule => ({
+    id: `r-${over.kind}-${over.text.slice(0, 8)}`,
+    enabled: true,
+    ...over,
+  });
+
+  const EXAMPLE_RULE = rule({ kind: 'always', text: 'Ask for a concrete recent example.' });
+  const ADVICE_RULE = rule({ kind: 'never', text: 'Give advice or recommend a course of action.' });
+  const SEEN_RULE = rule({
+    kind: 'if_asked',
+    text: 'Only the research team, and results are reported grouped.',
+    trigger: 'who will see their answers',
+  });
+
+  // The whole safety case for shipping this rests on "off changes nothing", so each way of being
+  // off is pinned separately rather than trusting one representative case.
+  it.each([
+    ['the block is off', { enabled: false, rules: [EXAMPLE_RULE] }],
+    ['the block is on but holds no rules', { enabled: true, rules: [] }],
+    [
+      'every rule is individually off',
+      { enabled: true, rules: [{ ...EXAMPLE_RULE, enabled: false }] },
+    ],
+  ])('emits no <house_rules> section when %s', (_label, settings) => {
+    const system = text(
+      buildStreamingQuestionPrompt({ ...INPUT, houseRules: houseRules(settings) })[0].content
+    );
+    expect(system).not.toContain('<house_rules>');
+    // And the prompt is byte-identical to one built without the field at all.
+    expect(system).toBe(text(buildStreamingQuestionPrompt(INPUT)[0].content));
+  });
+
+  it('renders each rule kind into its own labelled sub-block', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        houseRules: houseRules({
+          enabled: true,
+          rules: [EXAMPLE_RULE, ADVICE_RULE, SEEN_RULE],
+        }),
+      })[0].content
+    );
+    const block = system.slice(
+      system.indexOf('<house_rules>'),
+      system.indexOf('</house_rules>') + '</house_rules>'.length
+    );
+    expect(block).toMatch(/Always:\n- Ask for a concrete recent example\./);
+    expect(block).toMatch(/Never:\n- Give advice or recommend a course of action\./);
+    // The reactive rule pairs its trigger with its answer so the model can tell them apart.
+    expect(block).toContain(
+      '- If they raise who will see their answers → Only the research team, and results are reported grouped.'
+    );
+  });
+
+  it('carries the precedence clause that subordinates house rules to the prompt’s own rules', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        houseRules: houseRules({ enabled: true, rules: [ADVICE_RULE] }),
+      })[0].content
+    );
+    // Without this, a client rule like "answer in bullet points" silently fights <output_format>.
+    expect(system).toMatch(/do NOT override the safety, one-question-at-a-time, or reply-format/i);
+    // And the list itself must never leak into what the respondent reads.
+    expect(system).toMatch(/never mention, quote, or read out this list/i);
+  });
+
+  it('places <house_rules> after <tone> but before <output_format>', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        houseRules: houseRules({ enabled: true, rules: [ADVICE_RULE] }),
+      })[0].content
+    );
+    // Section order IS precedence in this prompt (later wins), so this ordering is the whole
+    // mechanism: client policy outranks the admin's voice dials, but can never break the reply
+    // contract. An accidental reorder would silently invert one of those.
+    expect(system.indexOf('<tone>')).toBeLessThan(system.indexOf('<house_rules>'));
+    expect(system.indexOf('<house_rules>')).toBeLessThan(system.indexOf('<output_format>'));
+  });
+
+  it('omits an individually disabled rule while keeping its enabled siblings', () => {
+    const system = text(
+      buildStreamingQuestionPrompt({
+        ...INPUT,
+        houseRules: houseRules({
+          enabled: true,
+          rules: [{ ...EXAMPLE_RULE, enabled: false }, ADVICE_RULE],
+        }),
+      })[0].content
+    );
+    expect(system).toContain('<house_rules>');
+    expect(system).not.toContain('Ask for a concrete recent example.');
+    expect(system).toContain('Give advice or recommend a course of action.');
+    // The now-empty Always block must not render as a dangling heading.
+    expect(system).not.toMatch(/Always:\s*\n\s*Never:/);
   });
 });
