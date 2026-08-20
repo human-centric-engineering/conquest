@@ -21,6 +21,45 @@
  * contain `redirect: '…'`. Client components are skipped — a browser fetch is
  * subject to the page's own origin rules, not to this module's guarantee.
  *
+ * ## What it CANNOT see, and why that matters here
+ *
+ * **Outbound HTTP issued by an SDK, not by a literal `fetch(`.** This scans
+ * source text for a call expression, so a vendor client that fetches internally
+ * is invisible to it however it is configured. That is not hypothetical: it hid
+ * the biggest site of the family until #635 went looking by hand.
+ *
+ * `lib/orchestration/llm/openai-compatible.ts` passes the admin-set
+ * `AiProvider.baseUrl` into `new OpenAI({ baseURL })`, and that client carries
+ * the prompt. The SDK sets no redirect policy and undici defaults to `follow`,
+ * so every hop after the validated one received it. Neither #534's grep for
+ * `checkSafeProviderUrl` callers nor this scan could see it.
+ *
+ * Both are guarded now, and guarded in a way this scan CAN see — the fix is a
+ * `fetch` wrapper passed to the SDK, so the literal call appears here with its
+ * policy on it. That is the shape to copy for any future SDK client: **give it
+ * a wrapper rather than trusting its defaults.**
+ *
+ * But be precise about what that buys. This scan sees the wrapper only while
+ * the wrapper exists: delete the `fetch:` option and the literal call goes with
+ * it, and the file drops out of the scan **in silence**, exactly as before.
+ * What actually pins the wiring is a per-client unit test —
+ * `openai-compatible.test.ts` and `anthropic.test.ts` each assert that the
+ * supplied `fetch` sets `redirect: 'error'`, and a passthrough fails them.
+ *
+ * `@anthropic-ai/sdk` needed the same fix and for a sharper reason. Its
+ * constructor is called with no `baseURL`, which reads as "it can only reach
+ * Anthropic" — and the SDK defaults `baseURL` to `readEnv('ANTHROPIC_BASE_URL')`,
+ * so an operator pointing it at a gateway is one env var away. Anthropic also
+ * authenticates with `x-api-key`, a custom header name the fetch spec does NOT
+ * strip cross-origin, so a followed redirect would carry the key as well as the
+ * prompt.
+ *
+ * The residual limit stands: a new SDK client configured with an operator-set
+ * host and no wrapper would pass this file in silence. So read the heading
+ * above as scoped to literal `fetch(` calls, not as "all outbound HTTP declares
+ * a policy" — the hand-written roster this replaced made exactly that kind of
+ * unbounded claim, which is how #628 happened.
+ *
  * ## Adding a call site
  *
  * Set `redirect` explicitly. `'error'` for a configured integration (an endpoint
@@ -61,22 +100,8 @@ const EXEMPT: Record<string, { count: number; reason: string }> = {
     reason: 'client JS emitted as a response body, not executed here',
   },
 
-  // ── KNOWN GAPS — same class as #628, tracked, not yet fixed ──────────────
-  // Found by this check while it was being written, which is the argument for
-  // having it. All three follow a redirect from an admin-configured target that
-  // was validated exactly once.
-  'lib/orchestration/knowledge/embedder.ts': {
-    count: 1,
-    reason: 'KNOWN GAP #635 — provider baseUrl validated once, then followed',
-  },
-  'lib/orchestration/llm/provider.ts': {
-    count: 1,
-    reason: 'KNOWN GAP #635 — provider baseUrl validated once, then followed',
-  },
-  'app/api/v1/admin/orchestration/webhooks/[id]/test/route.ts': {
-    count: 1,
-    reason: 'KNOWN GAP #635 — HMAC signature travels to the redirect target',
-  },
+  // The three KNOWN GAP rows that stood here were closed in #635. The table is
+  // back to genuine exemptions only — nothing in it is now a deferred fix.
 };
 
 /** Text between the parens of the call starting at `openIdx`. */
