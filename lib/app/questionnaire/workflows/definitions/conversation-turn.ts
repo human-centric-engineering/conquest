@@ -268,13 +268,59 @@ export const conversationTurnWorkflow = diagram({
           },
         ],
       },
+      next: ['policy'],
+    }),
+    node({
+      id: 'policy',
+      name: 'Apply the interviewer policy',
+      type: 'tool_call',
+      x: 1980,
+      y: -120,
+      description:
+        'Before the question is phrased, the admin-configured policy is assembled into the ' +
+        'interviewer\u2019s instructions: the client\u2019s house rules, the questioning approach and ' +
+        'its pace, and how faithfully THIS question must be put. Deterministic \u2014 no model runs ' +
+        'here; it decides what the next call is told.',
+      meta: {
+        // The ordering IS the mechanism, and it is the thing authors most reliably misread: the
+        // prompt is assembled in sections and LATER SECTIONS WIN. A house rule outranks the tone
+        // dials; the reply-format contract outranks the house rule; a must-ask question overrides
+        // the standing "ask openly, never read out the options" guidance.
+        note: 'House rules > tone dials; question fidelity > the open-question rules. Later sections win.',
+        settings: [
+          {
+            key: 'interviewerStrategy.approach',
+            label: 'Questioning approach',
+            effect:
+              'Funnel / open / targeted \u2014 the arc across the whole conversation, and whether the opening is broad at all.',
+          },
+          {
+            key: 'interviewerStrategy.pace',
+            label: 'Funnel pace',
+            effect:
+              'How quickly the funnel narrows from broad to specific. Read only under the funnel approach.',
+          },
+          {
+            key: 'houseRules.enabled',
+            label: 'House rules',
+            effect:
+              'The client\u2019s behaviour policy (always / never / if-asked), placed after tone so it outranks the voice dials.',
+          },
+          {
+            key: 'questionFidelity.enabled',
+            label: 'Ask questions as written',
+            effect:
+              'Activates the per-question dial. At Must ask the question is put verbatim and typed questions show their real answer control.',
+          },
+        ],
+      },
       next: ['ask'],
     }),
     node({
       id: 'ask',
       name: 'Ask the question',
       type: 'agent_call',
-      x: 1980,
+      x: 2200,
       y: -120,
       description:
         'The Interviewer phrases the chosen question as warm, natural prose. Persona, tone, and voice all apply here — this is the voice the respondent hears.',

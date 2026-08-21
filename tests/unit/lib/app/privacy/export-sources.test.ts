@@ -63,7 +63,7 @@ const MODEL_OPEN = /^model\s+(\w+)\s*\{/;
  * pattern is not simply reused from the platform test.
  */
 const USER_SCALAR_FIELD =
-  /^\s*(userId|createdBy|closedBy|uploadedBy|ownerId|actorUserId|subjectUserId|respondentUserId|invitedByUserId)\s+String/;
+  /^\s*(userId|createdBy|closedBy|uploadedBy|ownerId|actorUserId|subjectUserId|respondentUserId|invitedByUserId|triggeredByUserId|decidedByUserId|evaluatedByUserId)\s+String/;
 
 /** Only ConQuest's own schema files — the platform guard owns the rest. */
 const APP_SCHEMA_FILE = /^app.*\.prisma$/;
