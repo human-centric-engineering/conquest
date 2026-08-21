@@ -52,6 +52,8 @@ export interface TurnWriteInput {
    * on resume rather than losing them on the next input. Empty/omitted for a turn with none.
    */
   warnings?: SessionWarning[];
+  /** Question fidelity (P18): the question key whose answer control was rendered in this turn. */
+  questionCardKey?: string | null;
   /**
    * Live "watch it think" reasoning trace this turn produced (demo feature) — persisted so the
    * respondent surface replays it on resume / scroll-back. Only passed when the version opted into
@@ -146,6 +148,7 @@ async function writeTurn(input: TurnWriteInput): Promise<string> {
         ...(input.sideEffectDataSlotIds
           ? { sideEffectDataSlotIds: jsonInput(input.sideEffectDataSlotIds) }
           : {}),
+        ...(input.questionCardKey !== undefined ? { questionCardKey: input.questionCardKey } : {}),
         ...(input.warnings && input.warnings.length > 0
           ? { warnings: jsonInput(input.warnings) }
           : {}),

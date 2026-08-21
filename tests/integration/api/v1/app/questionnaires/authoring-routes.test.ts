@@ -503,6 +503,70 @@ describe('question create', () => {
     );
   });
 
+  it("starts a new question on the version's configured fidelity level", async () => {
+    // The Settings-tab "level for new questions" only means something if the create path reads it.
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      questionFidelity: { enabled: true, defaultFidelity: 0.75 },
+    });
+    prismaMock.appQuestionSlot.create.mockResolvedValue({
+      id: 'q-1',
+      key: 'k',
+      sectionId: 'sec-1',
+    });
+
+    await createQuestionPOST(req({ prompt: 'Rate it', type: 'free_text' }), ctx(QUESTION_PARAMS));
+
+    expect(prismaMock.appQuestionSlot.create.mock.calls[0][0].data.fidelity).toBe(0.75);
+  });
+
+  it('falls back to the neutral midpoint when the fidelity gate is off', async () => {
+    // While the gate is off the stored value is inert either way, so the midpoint is the honest
+    // default — it is exactly how the question will behave.
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      questionFidelity: { enabled: false, defaultFidelity: 1 },
+    });
+    prismaMock.appQuestionSlot.create.mockResolvedValue({
+      id: 'q-1',
+      key: 'k',
+      sectionId: 'sec-1',
+    });
+
+    await createQuestionPOST(req({ prompt: 'Rate it', type: 'free_text' }), ctx(QUESTION_PARAMS));
+
+    expect(prismaMock.appQuestionSlot.create.mock.calls[0][0].data.fidelity).toBe(0.5);
+  });
+
+  it('lets an explicit fidelity in the body win over the configured default', async () => {
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      questionFidelity: { enabled: true, defaultFidelity: 0.25 },
+    });
+    prismaMock.appQuestionSlot.create.mockResolvedValue({
+      id: 'q-1',
+      key: 'k',
+      sectionId: 'sec-1',
+    });
+
+    await createQuestionPOST(
+      req({ prompt: 'Rate it', type: 'free_text', fidelity: 1 }),
+      ctx(QUESTION_PARAMS)
+    );
+
+    expect(prismaMock.appQuestionSlot.create.mock.calls[0][0].data.fidelity).toBe(1);
+  });
+
+  it('falls back to the neutral midpoint when the version has no config row', async () => {
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue(null);
+    prismaMock.appQuestionSlot.create.mockResolvedValue({
+      id: 'q-1',
+      key: 'k',
+      sectionId: 'sec-1',
+    });
+
+    await createQuestionPOST(req({ prompt: 'Rate it', type: 'free_text' }), ctx(QUESTION_PARAMS));
+
+    expect(prismaMock.appQuestionSlot.create.mock.calls[0][0].data.fidelity).toBe(0.5);
+  });
+
   it('maps a duplicate explicit key (P2002) to a 400', async () => {
     prismaMock.appQuestionSlot.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Unique constraint', {
@@ -965,6 +1029,28 @@ describe('question edit/delete', () => {
     });
     expect(data).not.toHaveProperty('section'); // no move
     expect(data).not.toHaveProperty('typeConfig'); // type untouched
+  });
+
+  it('persists a fidelity change on its own', async () => {
+    // The single-question write path for the Structure editor's fidelity slider. Sending only
+    // `fidelity` must not disturb any sibling field.
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue(existingQuestion);
+    prismaMock.appQuestionSlot.update.mockResolvedValue({ ...existingQuestion, fidelity: 1 });
+
+    await questionPATCH(req({ fidelity: 1 }), ctx(QUESTION_PARAMS));
+
+    const data = prismaMock.appQuestionSlot.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({ fidelity: 1 });
+    expect(data).not.toHaveProperty('required');
+    expect(data).not.toHaveProperty('weight');
+    expect(data).not.toHaveProperty('prompt');
+  });
+
+  it('rejects a fidelity outside the slider range', async () => {
+    prismaMock.appQuestionSlot.findFirst.mockResolvedValue(existingQuestion);
+    const res = await questionPATCH(req({ fidelity: 1.5 }), ctx(QUESTION_PARAMS));
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionSlot.update).not.toHaveBeenCalled();
   });
 
   it('resets config on a type-only change to a config-less type', async () => {

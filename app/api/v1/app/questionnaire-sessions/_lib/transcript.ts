@@ -21,7 +21,18 @@ import {
   REASONING_TONES,
   type ReasoningStep,
 } from '@/lib/app/questionnaire/reasoning';
-import { ANSWER_PROVENANCES } from '@/lib/app/questionnaire/types';
+import {
+  ANSWER_PROVENANCES,
+  QUESTION_TYPES,
+  narrowQuestionFidelity,
+  resolveQuestionFidelity,
+  type QuestionType,
+} from '@/lib/app/questionnaire/types';
+import {
+  buildQuestionCard,
+  canRenderAnswerControl,
+  type QuestionCardPayload,
+} from '@/lib/app/questionnaire/chat/question-card';
 import { inspectorTurnSchema } from '@/lib/app/questionnaire/inspector/schema';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 
@@ -59,8 +70,16 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
   const rows = await prisma.appQuestionnaireTurn.findMany({
     where: { sessionId },
     orderBy: { ordinal: 'asc' },
-    select: { userMessage: true, agentResponse: true, warnings: true, reasoning: true },
+    select: {
+      userMessage: true,
+      agentResponse: true,
+      warnings: true,
+      reasoning: true,
+      questionCardKey: true,
+    },
   });
+
+  const cardByKey = await loadReplayableCards(sessionId, rows);
 
   const turns: QuestionnaireTurn[] = [];
   for (const row of rows) {
@@ -69,14 +88,89 @@ export async function loadTranscript(sessionId: string): Promise<QuestionnaireTu
     }
     const warnings = warningsSchema.parse(row.warnings);
     const reasoning = reasoningSchema.parse(row.reasoning);
+    const card =
+      typeof row.questionCardKey === 'string' ? cardByKey.get(row.questionCardKey) : undefined;
     turns.push({
       role: 'assistant',
       content: row.agentResponse,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(reasoning.length > 0 ? { reasoning } : {}),
+      ...(card ? { card } : {}),
     });
   }
   return turns;
+}
+
+/**
+ * Rebuild the answer controls to replay, keyed by question key.
+ *
+ * Two deliberate choices:
+ *
+ *  - **Rebuilt from the LIVE slot, not from a stored copy.** Only the key is persisted, so an admin
+ *    who reworded a question or changed its options between sessions doesn't leave a stale snapshot
+ *    pinned in a resumed transcript.
+ *  - **Suppressed once answered.** Replaying a live control over an answer the respondent already
+ *    gave would invite them to answer it twice, and the second submission would overwrite the first.
+ *    An answered question replays as the prose turn alone.
+ *
+ * Returns an empty map when no turn carried a card, which is the overwhelming majority of sessions —
+ * so the common path costs no extra query.
+ */
+async function loadReplayableCards(
+  sessionId: string,
+  rows: ReadonlyArray<{ questionCardKey: string | null }>
+): Promise<Map<string, QuestionCardPayload>> {
+  // `typeof === 'string'`, not `!== null`: a row selected without the column (or from an older
+  // shape) yields `undefined`, which a null-check would wave through as a lookup key.
+  const keys = [
+    ...new Set(rows.map((r) => r.questionCardKey).filter((k) => typeof k === 'string')),
+  ];
+  if (keys.length === 0) return new Map();
+
+  const slots = await prisma.appQuestionSlot.findMany({
+    where: { key: { in: keys }, section: { version: { sessions: { some: { id: sessionId } } } } },
+    select: {
+      id: true,
+      key: true,
+      prompt: true,
+      type: true,
+      typeConfig: true,
+      required: true,
+      fidelity: true,
+      answers: { where: { sessionId }, select: { id: true }, take: 1 },
+      // The version's gate, fetched through the same traversal (no extra round-trip). Replaying an
+      // INTERACTIVE control after an admin switched the feature off would break the inert-when-off
+      // guarantee — the respondent could still submit through it.
+      section: {
+        select: { version: { select: { config: { select: { questionFidelity: true } } } } },
+      },
+    },
+  });
+
+  const cards = new Map<string, QuestionCardPayload>();
+  for (const slot of slots) {
+    if (!narrowQuestionFidelity(slot.section.version.config?.questionFidelity).enabled) continue;
+    if (slot.answers.length > 0) continue; // already answered — don't offer it again
+    const type = asQuestionType(slot.type);
+    // The question may have been reworded into a type/config that can no longer render a control.
+    if (!canRenderAnswerControl(type, slot.typeConfig)) continue;
+    cards.set(
+      slot.key,
+      buildQuestionCard({
+        questionKey: slot.key,
+        prompt: slot.prompt,
+        type,
+        typeConfig: slot.typeConfig,
+        required: slot.required,
+        reason:
+          resolveQuestionFidelity(slot.fidelity, slot.section.version.config?.questionFidelity) ===
+          'must_ask'
+            ? 'must_ask'
+            : 'last_resort',
+      })
+    );
+  }
+  return cards;
 }
 
 /** The saved reply for one persisted turn, re-emitted by the retry dedup-and-replay path. */
@@ -147,4 +241,11 @@ export async function loadInspectorTurns(sessionId: string): Promise<TurnInspect
     if (parsed.success) inspectorTurns.push(parsed.data);
   }
   return inspectorTurns;
+}
+
+/** Narrow the stored `type` string; an unrecognised value degrades to free text (no card). */
+function asQuestionType(value: string): QuestionType {
+  return (QUESTION_TYPES as readonly string[]).includes(value)
+    ? (value as QuestionType)
+    : 'free_text';
 }

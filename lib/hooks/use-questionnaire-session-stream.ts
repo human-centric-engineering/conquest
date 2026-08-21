@@ -36,6 +36,7 @@ import {
   type SessionWarning,
 } from '@/lib/app/questionnaire/chat/types';
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { QuestionCardPayload } from '@/lib/app/questionnaire/chat/question-card';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 import type { ChatAttachment } from '@/lib/orchestration/chat/types';
 
@@ -96,6 +97,8 @@ export interface UseQuestionnaireSessionStreamReturn {
    * Fired once on a fresh session by {@link SessionWorkspace}'s `autoStart`. No-ops when blocked.
    */
   kickoff: () => Promise<void>;
+  /** Run a follow-up turn after an in-chat answer control was submitted (no respondent bubble). */
+  continueAfterCard: (questionKey: string) => Promise<void>;
   /** Clear a transient error banner. */
   dismissError: () => void;
   /**
@@ -341,6 +344,8 @@ export function useQuestionnaireSessionStream(
       // The turn's reasoning trace (a single frame, before the content deltas) — attached to the
       // committed turn so it shows as that turn's collapsed reasoning disclosure.
       let streamReasoning: ReasoningStep[] = [];
+      // Question fidelity (P18): the answer control to render inside this turn, if any.
+      let streamCard: QuestionCardPayload | null = null;
       let streamError: ChatErrorState | null = null;
 
       try {
@@ -400,6 +405,9 @@ export function useQuestionnaireSessionStream(
               } else if (ev.type === 'reasoning') {
                 // Single frame before the reply — kept to attach onto the committed turn below.
                 streamReasoning = ev.steps;
+              } else if (ev.type === 'question_card') {
+                // One frame, emitted after the lead-in prose — attached to the committed turn below.
+                streamCard = ev.card;
               } else if (ev.type === 'inspector') {
                 // Admin preview only — append this turn's agent-call trace to the session log.
                 const turn = { turnIndex: ev.turnIndex, calls: ev.calls };
@@ -427,6 +435,7 @@ export function useQuestionnaireSessionStream(
               content: fullText,
               ...(streamWarnings.length > 0 ? { warnings: streamWarnings } : {}),
               ...(streamReasoning.length > 0 ? { reasoning: streamReasoning } : {}),
+              ...(streamCard !== null ? { card: streamCard } : {}),
             },
           ]);
         }
@@ -489,6 +498,20 @@ export function useQuestionnaireSessionStream(
     await streamTurn({ body: { kickoff: true } });
   }, [streamTurn]);
 
+  /**
+   * Question fidelity (P18): run a turn after the respondent answered a question through its in-chat
+   * answer control. The answer is ALREADY persisted (the card writes through `PUT …/answers`), so
+   * this carries no respondent message and adds no respondent bubble — passing the value as a fake
+   * user message would leak a form value into the transcript and re-run extraction over text they
+   * never typed. `answeredQuestionKey` only tells the interviewer to acknowledge and move on.
+   */
+  const continueAfterCard = useCallback(
+    async (questionKey: string) => {
+      await streamTurn({ body: { answeredQuestionKey: questionKey } });
+    },
+    [streamTurn]
+  );
+
   // Retry the last failed attempt (the error banner's "Try again"). Re-sends the same body + key
   // via `isRetry`, which reuses the attempt's key and skips re-adding the respondent bubble. No-op
   // once the attempt has been cleared (a clean settle or a dismiss).
@@ -514,6 +537,7 @@ export function useQuestionnaireSessionStream(
     canSend,
     sendMessage,
     kickoff,
+    continueAfterCard,
     dismissError,
     retry,
     applyStatus,

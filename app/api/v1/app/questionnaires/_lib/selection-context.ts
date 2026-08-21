@@ -75,6 +75,9 @@ export async function buildSelectionContext(
               key: true,
               ordinal: true,
               weight: true,
+              // Question fidelity (P18): without this the admin preview resolves every question to
+              // `balanced` and diverges from the live turn loop, which does carry it.
+              fidelity: true,
               required: true,
               type: true,
               prompt: true,
@@ -100,6 +103,7 @@ export async function buildSelectionContext(
         sectionOrdinal: section.ordinal,
         ordinal: slot.ordinal,
         weight: slot.weight,
+        fidelity: slot.fidelity,
         required: slot.required,
         type: asQuestionType(slot.type),
         tagIds: slot.tags.map((t) => t.tagId),

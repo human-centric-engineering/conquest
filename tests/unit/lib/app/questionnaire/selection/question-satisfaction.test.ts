@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   questionSatisfactionFloor,
+  selectableQuestions,
   terminalDecision,
   unsatisfiedQuestions,
 } from '@/lib/app/questionnaire/selection/context';
@@ -204,5 +205,74 @@ describe('terminalDecision — the must-ask block', () => {
       config: base,
     });
     expect(terminalDecision(state)?.kind).toBe('complete');
+  });
+});
+
+describe('selectableQuestions — the pool/terminal invariant', () => {
+  const base = config({
+    answerConfidenceFloor: 0.5,
+    coverageThreshold: 0.5,
+    minQuestionsAnswered: 1,
+    questionFidelity: GATE_ON,
+  });
+
+  it('re-admits a must-ask question answered below its bar', () => {
+    // Without this the guarantee is empty: the question has an answer row, so the ordinary pool
+    // drops it and no strategy could ever re-target it, however long terminalDecision held on.
+    const state = ctx({
+      questions: [question({ fidelity: 1 })],
+      answered: [{ questionId: 'q1', confidence: 0.6 }],
+      config: base,
+    });
+    expect(selectableQuestions(state).map((q) => q.id)).toEqual(['q1']);
+  });
+
+  it('does NOT re-admit a close question below its bar', () => {
+    // `close` raises the completion floor but promises nothing about being asked; re-targeting it
+    // could loop on a question the respondent has already answered as well as they are going to.
+    const state = ctx({
+      questions: [question({ fidelity: 0.75 })],
+      answered: [{ questionId: 'q1', confidence: 0.5 }],
+      config: base,
+    });
+    expect(selectableQuestions(state)).toEqual([]);
+  });
+
+  it('does not duplicate a never-answered must-ask question', () => {
+    const state = ctx({ questions: [question({ fidelity: 1 })], answered: [], config: base });
+    expect(selectableQuestions(state).map((q) => q.id)).toEqual(['q1']);
+  });
+
+  it('keeps document order when a re-admitted question is mixed in', () => {
+    const state = ctx({
+      questions: [
+        question({ id: 'q1', key: 'q_1', ordinal: 0, fidelity: 1 }),
+        question({ id: 'q2', key: 'q_2', ordinal: 1 }),
+        question({ id: 'q3', key: 'q_3', ordinal: 2 }),
+      ],
+      answered: [{ questionId: 'q1', confidence: 0.6 }],
+      config: base,
+    });
+    expect(selectableQuestions(state).map((q) => q.id)).toEqual(['q1', 'q2', 'q3']);
+  });
+
+  it('THE INVARIANT: terminalDecision returns null only when the pool is non-empty', () => {
+    // Every strategy dereferences pool[0] on the strength of this. A disagreement between the two
+    // is a crash in a live respondent turn, not a wrong answer — so assert it across the matrix of
+    // states that can produce one.
+    const cases: Array<{ fidelity: number; confidence: number | null }> = [];
+    for (const fidelity of [0, 0.5, 0.75, 1]) {
+      for (const confidence of [null, 0.3, 0.6, 0.9]) cases.push({ fidelity, confidence });
+    }
+    for (const { fidelity, confidence } of cases) {
+      const state = ctx({
+        questions: [question({ fidelity })],
+        answered: [{ questionId: 'q1', confidence }],
+        config: base,
+      });
+      if (terminalDecision(state) === null) {
+        expect(selectableQuestions(state).length).toBeGreaterThan(0);
+      }
+    }
   });
 });

@@ -15,7 +15,7 @@ import { registerStrategy } from '@/lib/app/questionnaire/selection/registry';
 import {
   requiredFirstPool,
   terminalDecision,
-  unansweredQuestions,
+  selectableQuestions,
 } from '@/lib/app/questionnaire/selection/context';
 import type {
   SelectionContext,
@@ -44,7 +44,7 @@ async function select(ctx: SelectionContext): Promise<SelectionDecision> {
 
   // Required-first, over a deterministically-ordered remaining pool, so the seed
   // indexes a stable list.
-  const pool = requiredFirstPool(unansweredQuestions(ctx));
+  const pool = requiredFirstPool(selectableQuestions(ctx));
   const index = fnv1a(`${ctx.sessionId}:${ctx.round}`) % pool.length;
   const next = pool[index];
 

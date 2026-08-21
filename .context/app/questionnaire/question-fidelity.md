@@ -114,6 +114,122 @@ The renderer takes an `answerControlShown` flag: when the surface renders a real
 beside the message, the prose must not also recite the options. Phase 2 always passes `false`; the
 in-chat question card will pass `true`.
 
+## The question card
+
+For a **typed** `must_ask` question the respondent answers the real control, rendered inside the
+chat turn — not a prose rendering of its options. Reading a five-point scale out and mapping whatever
+they say back onto it is precisely the inference `must_ask` exists to switch off.
+
+```
+Interviewer (streamed prose)
+  "That's helpful. Before we leave workload, there's one
+   I need to put to you exactly as it's written:"
+
+ ┌──────────────────────────────────────────────┐
+ │ Asked as written                    Required │
+ │ How satisfied are you with your current      │  ← verbatim `prompt`
+ │ workload?                                    │
+ │   1 ──── 2 ──── 3 ──── 4 ──── 5              │  ← <QuestionField>
+ │   Not at all           Extremely             │
+ │                              [ Submit ]      │
+ │  I'd rather answer in my own words           │
+ └──────────────────────────────────────────────┘
+```
+
+**Nothing new was built to render or persist it.** The control is `QuestionField` (the raw form's
+per-type dispatcher); the write is `useInlineCorrection` → `PUT …/answers` (the path the correction
+strip already uses), which records provenance `direct`, confidence `1`, and `respondentEdited` — so
+no later chat turn can overwrite what the respondent picked themselves.
+
+### When it appears
+
+`shouldShowQuestionCard()` (`chat/question-card.ts`), in order:
+
+1. **Behind the version gate** — including the last-resort path below, so enabling nothing changes
+   nothing.
+2. **Never for free text.** There is no control to render; the protected thing is the wording, and
+   the respondent answers in the ordinary composer. A deliberate product decision.
+3. **Never when the control can't render** — a `single_choice` with no choices, a `likert` with
+   broken bounds. `canRenderAnswerControl()` reuses the _same_ readers `QuestionField` dispatches on,
+   so "can we render it?" and "what gets rendered" cannot drift. Falling back to prose still asks the
+   question; rendering an empty radio group would be a dead end.
+4. **`must_ask`** → reason `must_ask`.
+5. **Otherwise, on a re-ask** → reason `last_resort`. This is the generalised _"the only other time
+   it presents the raw format is when it can't fill the question any other way"_: rather than asking
+   a third time in prose, hand over the control. The two reasons carry different copy — one is a
+   deliberate design, the other a rescue, and labelling a rescue as intent misleads the respondent.
+
+### The wire, and resume
+
+A `question_card` SSE frame, emitted **after** the lead-in prose so the card reads as the thing the
+message hands over to. Narrowed defensively in `parse-session-event.ts`: a payload missing
+`questionKey` / `prompt` / `type` is **dropped**, because the prose already asked the question, but a
+card whose Submit has nowhere to write is worse than no card.
+
+Only `AppQuestionnaireTurn.questionCardKey` is persisted. On resume the card is **rebuilt from the
+live slot**, so an admin who rewords a question between sessions doesn't leave a stale snapshot
+pinned in a transcript. It is suppressed in three cases: the question has since been **answered**
+(replaying a live control over an existing answer invites a second submission that would overwrite
+the first), the question can **no longer render a control**, or the version **gate has since been
+switched off** — the control is interactive, so replaying it after an admin disabled the feature
+would let a respondent still submit through it. The gate rides the same query traversal, so a
+session with no cards still makes no extra round-trip.
+
+The chat keys **dismissal on the turn, not the question**. Keyed on the question it would suppress
+the control permanently: a dismissed must-ask stays unsatisfied, so the interviewer re-asks it — and
+a prose answer cannot clear the 0.85 floor on its own (opportunistic fill caps at 0.75), so the
+respondent would be stuck with no way back to the control that could answer it.
+
+The chat renders the card for the **latest turn only**. A card left attached to an older turn would
+invite answering something the conversation has moved past.
+
+### After a submit
+
+The client calls `continueAfterCard(questionKey)` → `POST …/messages` with `answeredQuestionKey` and
+**no message**. The answer is already persisted, so this turn exists only for the interviewer to
+acknowledge it and move on. Passing the value as a fake user message would leak a form value into the
+transcript and re-run extraction over text the respondent never typed. The route adds one briefing
+line telling the interviewer to acknowledge briefly and **not** repeat the answer back.
+
+The escape hatch ("I'd rather answer in my own words") dismisses the card without marking the
+question answered — the interviewer still comes back to it — so it cannot be used to dodge a required
+item.
+
+## Targeting: naturally, but guaranteed
+
+A must-ask question can't be left to the abstraction layer to infer, but firing it the moment it
+becomes eligible would interrupt a theme mid-flow. So in data-slot mode `runDataSlotTurn` hoists it
+when **its own ground has been worked through** — every data slot mapping it is covered — and asks it
+directly, _before_ bridging to a new theme. A question no data slot claims has no topic to wind up
+and is asked as soon as it's eligible. The end-of-run sweep stays the backstop.
+
+Two supporting changes:
+
+- **`allQuestionsAnswered`** (the data-slot submit gate) additionally requires no outstanding
+  must-ask. That gate is count-based on purpose — making it floor-aware wholesale would tighten
+  completion for every questionnaire, not just the ones using fidelity — so this adds one condition
+  rather than changing its meaning.
+- **`weightedScores`** multiplies a must-ask question by `MUST_ASK_MULT` (100), large enough that the
+  lightest must-ask outranks the heaviest ordinary question at full bonus. Multiplying rather than
+  tiering keeps the rest of the scoring intact: among several must-asks, weight and section coverage
+  still decide the order.
+
+### `selectableQuestions` — the invariant that keeps this safe
+
+Holding the session open for a below-bar must-ask is only coherent if a strategy can actually pick
+it. But the question _has_ an answer row, so `unansweredQuestions` drops it — and every strategy
+dereferences `pool[0]` on the strength of "`terminalDecision` returned null ⇒ the pool is non-empty".
+
+`selectableQuestions()` restores that invariant: unanswered questions **plus** any `must_ask`
+question below its floor. `terminalDecision` reads the _same_ function, so the two cannot disagree.
+
+> **Keep them in step.** A divergence here is a crash in a live respondent turn, not a wrong answer.
+> There is a test that walks the fidelity × confidence matrix asserting the invariant directly.
+
+Only `must_ask` re-enters the pool. `close` raises the completion floor but promises nothing about
+being asked, so re-targeting it could loop on a question the respondent has already answered as well
+as they are going to.
+
 ## What fidelity is not
 
 - **Not `weight`** — weight is how strongly the _weighted_ strategy favours a question and how much
@@ -126,19 +242,21 @@ in-chat question card will pass `true`.
 
 ## Where each piece lives
 
-| Concern                                | Code                                                                                                                                       |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Stops, labels, clamp, narrow, resolver | `lib/app/questionnaire/types.ts` (`QUESTION_FIDELITY_STOPS`, `clampQuestionFidelity`, `narrowQuestionFidelity`, `resolveQuestionFidelity`) |
-| Schema columns                         | `AppQuestionSlot.fidelity`, `AppQuestionnaireConfig.questionFidelity` (migration `…_app_question_fidelity`)                                |
-| Zod (question PATCH)                   | `lib/app/questionnaire/authoring/schemas.ts` (`createQuestionSchema` / `updateQuestionSchema`)                                             |
-| Zod (config PATCH)                     | `lib/app/questionnaire/authoring/config-schema.ts` (`questionFidelitySchema`)                                                              |
-| Read projection                        | `app/api/v1/app/questionnaires/_lib/detail.ts` (question select + `toConfigView`)                                                          |
-| Per-question control                   | `components/admin/questionnaires/question-editor.tsx` (`FidelityControl`)                                                                  |
-| Section bulk-set                       | `components/admin/questionnaires/section-editor.tsx` → `PATCH …/versions/:vid/questions`                                                   |
-| Settings gate                          | `components/admin/questionnaires/config-editor.tsx`, "Questions & completion" group                                                        |
-| Pack / audit summary                   | `lib/app/questionnaire/settings-registry.ts` (`questionFidelity` descriptor)                                                               |
-| Fork / duplicate / clone               | `app/api/v1/app/questionnaires/_lib/copy-version-graph.ts` (question select **and** create)                                                |
-| Definition export / import             | `lib/app/questionnaire/authoring/definition-export.ts`, `_lib/import-definition.ts`                                                        |
+| Concern                                | Code                                                                                                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stops, labels, clamp, narrow, resolver | `lib/app/questionnaire/types.ts` (`QUESTION_FIDELITY_STOPS`, `clampQuestionFidelity`, `narrowQuestionFidelity`, `resolveQuestionFidelity`)                                     |
+| Schema columns                         | `AppQuestionSlot.fidelity`, `AppQuestionnaireConfig.questionFidelity` (migration `…_app_question_fidelity`)                                                                    |
+| Zod (question PATCH)                   | `lib/app/questionnaire/authoring/schemas.ts` (`createQuestionSchema` / `updateQuestionSchema`)                                                                                 |
+| Zod (config PATCH)                     | `lib/app/questionnaire/authoring/config-schema.ts` (`questionFidelitySchema`)                                                                                                  |
+| Read projection                        | `app/api/v1/app/questionnaires/_lib/detail.ts` (question select + `toConfigView`)                                                                                              |
+| Per-question control                   | `components/admin/questionnaires/question-editor.tsx` (`FidelityControl`)                                                                                                      |
+| New-question default                   | `…/sections/[sectionId]/questions/route.ts` — applies `questionFidelity.defaultFidelity` on create (the midpoint while the gate is off, or whatever the body names explicitly) |
+| Admin preview context                  | `app/api/v1/app/questionnaires/_lib/selection-context.ts` — must carry `fidelity`, or the `/next-question` preview silently diverges from the live turn loop                   |
+| Section bulk-set                       | `components/admin/questionnaires/section-editor.tsx` → `PATCH …/versions/:vid/questions`                                                                                       |
+| Settings gate                          | `components/admin/questionnaires/config-editor.tsx`, "Questions & completion" group                                                                                            |
+| Pack / audit summary                   | `lib/app/questionnaire/settings-registry.ts` (`questionFidelity` descriptor)                                                                                                   |
+| Fork / duplicate / clone               | `app/api/v1/app/questionnaires/_lib/copy-version-graph.ts` (question select **and** create)                                                                                    |
+| Definition export / import             | `lib/app/questionnaire/authoring/definition-export.ts`, `_lib/import-definition.ts`                                                                                            |
 
 Settings **export/import is automatic** — `CONFIG_KEYS` derives from `DEFAULT_QUESTIONNAIRE_CONFIG`.
 The per-question field is **not**: it must be named in the definition envelope and the fork copier.
@@ -164,6 +282,17 @@ Audit actions are kept distinct rather than folded together, so existing history
   behaves like its neighbour is a lie told to the admin.
 - **Don't** emit an answer-control card for `free_text` at Must ask. There is nothing to render; the
   protected thing is the wording, and the respondent answers in the composer as usual.
+- **Don't** let `selectableQuestions` and `terminalDecision` drift apart — every strategy assumes
+  they agree, and a divergence crashes a live turn.
+- **Don't** send a card's answer as a chat message. It is already persisted; a fake user message
+  would leak a form value into the transcript and re-run extraction over text nobody typed.
+- **Don't** persist the card's rendered content. Store the key and rebuild from the live slot, or a
+  reworded question leaves a stale copy pinned in every resumed transcript.
+- **Don't** read `fidelity` in a new context builder without adding it to that builder's Prisma
+  select. There are two — `turn-context.ts` (live) and `selection-context.ts` (admin preview) — and a
+  preview that resolves everything to `balanced` tells an admin the feature is broken when it isn't.
+- **Don't** suppress the card on a per-question flag. Dismissal must be per-turn, or a dismissed
+  must-ask can never be answered.
 - **Don't** hand-wire the _settings_ block into import/export — it flows from
   `DEFAULT_QUESTIONNAIRE_CONFIG` automatically. Do hand-wire the _per-question_ field.
 
@@ -174,8 +303,5 @@ Audit actions are kept distinct rather than folded together, so existing history
 - **Phase 2** — the prompt clause + the satisfaction bar (this document's later sections). The
   interviewer now honours fidelity in how it words and presents a question, and a below-bar must-ask
   keeps the session open.
-- **Phase 3** (not yet built) — the in-chat **question card**: a real answer control (`QuestionField`)
-  rendered inside the turn for a typed must-ask question, a new `question_card` SSE frame, and the
-  "naturally but guaranteed" targeting that hoists a must-ask out of the data-slot abstraction as its
-  theme winds up. Until then a typed must-ask question is asked verbatim in prose with its options
-  read out.
+- **Phase 3** — the in-chat **question card**, the `question_card` frame and its resume replay, and
+  the "naturally but guaranteed" targeting. Feature-complete.

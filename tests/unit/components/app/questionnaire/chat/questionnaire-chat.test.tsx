@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import type { UseQuestionnaireSessionStreamReturn } from '@/lib/hooks/use-questionnaire-session-stream';
 import {
@@ -65,6 +66,11 @@ afterEach(() => {
 
 import { QuestionnaireChat } from '@/components/app/questionnaire/chat/questionnaire-chat';
 
+// The question card writes through the real `useInlineCorrection` hook (PUT …/answers). Stub the
+// transport so the wiring is exercised end-to-end without a network call.
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
+
 function makeReturn(
   overrides: Partial<UseQuestionnaireSessionStreamReturn> = {}
 ): UseQuestionnaireSessionStreamReturn {
@@ -78,6 +84,7 @@ function makeReturn(
     canSend: true,
     sendMessage,
     kickoff: vi.fn(),
+    continueAfterCard: vi.fn(),
     dismissError,
     retry: vi.fn(),
     applyStatus: vi.fn(),
@@ -691,5 +698,114 @@ describe('QuestionnaireChat', () => {
         timeout: 5000,
       });
     });
+  });
+});
+
+describe('QuestionnaireChat — the in-chat question card (P18)', () => {
+  const CARD = {
+    questionKey: 'workload',
+    prompt: 'How satisfied are you with your current workload?',
+    type: 'likert' as const,
+    typeConfig: { min: 1, max: 5 },
+    required: true,
+    reason: 'must_ask' as const,
+  };
+
+  it('renders the answer control for the latest turn', () => {
+    hookReturn = makeReturn({
+      turns: [{ role: 'assistant', content: 'One as written:', card: CARD }],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+    expect(screen.getByText(CARD.prompt)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /submit/i })).toBeInTheDocument();
+  });
+
+  it('retires a card once the conversation has moved on', () => {
+    // Only the latest turn's card is live. Leaving an older one on screen would invite answering
+    // something already passed, and the submit would overwrite a newer answer.
+    hookReturn = makeReturn({
+      turns: [
+        { role: 'assistant', content: 'One as written:', card: CARD },
+        { role: 'user', content: 'actually, let me explain' },
+        { role: 'assistant', content: 'Of course — tell me more?' },
+      ],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+    expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
+  });
+
+  it('runs a follow-up turn and refreshes the panel once the control is submitted', async () => {
+    // The answer is written by the card itself; this turn exists only so the interviewer
+    // acknowledges it. Losing this wiring would leave the conversation silently stalled on a
+    // question the respondent had already answered.
+    const onCorrected = vi.fn();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { sections: [], dataSlotGroups: [] } }),
+    });
+    hookReturn = makeReturn({
+      turns: [{ role: 'assistant', content: 'One as written:', card: CARD }],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} onCorrected={onCorrected} />);
+
+    await userEvent.click(screen.getByRole('radio', { name: '4' }));
+    await userEvent.click(screen.getByRole('button', { name: /submit/i }));
+
+    await waitFor(() => expect(hookReturn.continueAfterCard).toHaveBeenCalledWith('workload'));
+    expect(onCorrected).toHaveBeenCalled();
+  });
+
+  it('hands the respondent back to the composer when the control is dismissed', async () => {
+    // Dismissing must not run a turn or mark anything answered — it just gets out of the way.
+    hookReturn = makeReturn({
+      turns: [{ role: 'assistant', content: 'One as written:', card: CARD }],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /my own words/i }));
+
+    expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
+    expect(hookReturn.continueAfterCard).not.toHaveBeenCalled();
+  });
+
+  it('offers the control again when a later turn re-asks the same question', async () => {
+    // Dismissal is per-TURN. Keyed on the question it would suppress the control permanently — and
+    // a must-ask question can't be closed out in prose (opportunistic fill caps below its floor),
+    // so the respondent would be stuck with no way back to the control that could answer it.
+    hookReturn = makeReturn({
+      turns: [{ role: 'assistant', content: 'One as written:', card: CARD }],
+    });
+    const { rerender } = render(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /my own words/i }));
+    expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
+
+    // The interviewer comes back to it on a later turn.
+    hookReturn = makeReturn({
+      turns: [
+        { role: 'assistant', content: 'One as written:', card: CARD },
+        { role: 'user', content: 'I said it depends' },
+        { role: 'assistant', content: 'Understood — still, as written:', card: CARD },
+      ],
+    });
+    rerender(<QuestionnaireChat sessionId="s1" stream={hookReturn} />);
+
+    // The reveal queue types the new turns in before the composer (and the card) reopen.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /submit/i })).toBeInTheDocument()
+    );
+  });
+
+  it('never offers the control in read-only replay', () => {
+    // The admin session viewer replays a REAL respondent's transcript. Rendering a live control
+    // there would let an admin answer a question on the respondent's behalf.
+    hookReturn = makeReturn({
+      turns: [{ role: 'assistant', content: 'One as written:', card: CARD }],
+    });
+    render(<QuestionnaireChat sessionId="s1" stream={hookReturn} readOnly />);
+    // The interviewer's prose still replays — only the interactive control is withheld.
+    expect(screen.getByText('One as written:')).toBeInTheDocument();
+    expect(screen.queryByText(CARD.prompt)).toBeNull();
+    expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
   });
 });

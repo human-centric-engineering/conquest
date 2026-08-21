@@ -1751,6 +1751,12 @@ model AppQuestionnaireTurn {
   sideEffectDataSlotIds Json     @default("[]") // AppDataSlotFill.id[] this turn created/updated (data-slot mode)
   warnings              Json     @default("[]") // [{ code, message }] side-band notices shown beneath this turn (seriousness/support/contradiction) — replayed inline on resume
   reasoning             Json     @default("[]") // ReasoningStep[] — live "watch it think" trace, persisted (when config.reasoningStreamPersist) so it replays on resume/scroll-back. Respondent-safe (no abuse/sensitivity). (lib/.../reasoning)
+  // Question fidelity (P18): the AppQuestionSlot.key whose real answer control was rendered inside
+  // this turn (a typed `must_ask` question, or a last-resort re-ask), else null. Only the key is
+  // stored — the card is rebuilt from the live slot on replay, so an admin who edits the question's
+  // wording or options between sessions doesn't leave a stale copy pinned in a transcript. The
+  // replay also suppresses the card once the question has been answered. (lib/.../chat/question-card)
+  questionCardKey       String?
   // The saved Turn Inspector dump: AgentCallTrace[] (inspector/types.ts) — every LLM/embedding
   // call this turn made, with its prompt, response, model, latency, tokens, and cost. Captured for
   // EVERY session (not just preview), so a session looked up by its `publicRef` can be re-evaluated

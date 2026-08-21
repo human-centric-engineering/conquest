@@ -1405,6 +1405,67 @@ describe('ConfigEditor', () => {
   });
 });
 
+describe('ConfigEditor — question fidelity gate (P18)', () => {
+  const fidelitySwitch = () => screen.getByRole('switch', { name: /per-question fidelity/i });
+
+  it('saves the stored block untouched when the admin does not open the section', () => {
+    // A config field that quietly resets on an unrelated save is the failure mode worth pinning —
+    // here it would silently deactivate every must-ask question in the questionnaire.
+    const questionFidelity = { enabled: true, defaultFidelity: 0.75 } as const;
+    const { specs } = setup({ questionFidelity });
+    clickSave();
+    expect(bodyOf(specs).questionFidelity).toEqual(questionFidelity);
+  });
+
+  it('is off by default, with no level picker until it is switched on', () => {
+    setup();
+    expect(fidelitySwitch()).not.toBeChecked();
+    expect(screen.queryByRole('combobox', { name: /level for new questions/i })).toBeNull();
+  });
+
+  it('turns the feature on and persists it', () => {
+    const { specs } = setup();
+    fireEvent.click(fidelitySwitch());
+    clickSave();
+    expect(bodyOf(specs).questionFidelity).toEqual({ enabled: true, defaultFidelity: 0.5 });
+  });
+
+  it('turns it back off without losing the configured default', () => {
+    // Switching off must be reversible: the admin's prepared levels stay, they just stop applying.
+    const { specs } = setup({ questionFidelity: { enabled: true, defaultFidelity: 1 } });
+    fireEvent.click(fidelitySwitch());
+    clickSave();
+    expect(bodyOf(specs).questionFidelity).toEqual({ enabled: false, defaultFidelity: 1 });
+  });
+
+  /** The level picker — the only select whose options are the fidelity level slugs. */
+  const levelPicker = () =>
+    screen
+      .getAllByRole('combobox')
+      .find((el) =>
+        Array.from(el.querySelectorAll('option')).some(
+          (o) => o.getAttribute('value') === 'must_ask'
+        )
+      ) as HTMLSelectElement | undefined;
+
+  it('reflects the stored level and explains what it means', () => {
+    setup({ questionFidelity: { enabled: true, defaultFidelity: 1 } });
+    expect(levelPicker()?.value).toBe('must_ask');
+    expect(
+      screen.getAllByText(/Choice and scale questions show their real answer control/).length
+    ).toBeGreaterThan(0);
+  });
+
+  it('maps the chosen level back onto its numeric stop when saving', () => {
+    // The admin picks a NAME; the API takes the grid value. Sending 'close' would fail validation,
+    // and sending the wrong number would silently set a different level than the one displayed.
+    const { specs } = setup({ questionFidelity: { enabled: true, defaultFidelity: 0.5 } });
+    fireEvent.change(levelPicker()!, { target: { value: 'close' } });
+    clickSave();
+    expect(bodyOf(specs).questionFidelity).toEqual({ enabled: true, defaultFidelity: 0.75 });
+  });
+});
+
 describe('ConfigEditor — interviewer house rules', () => {
   const ruleFor = (
     over: Partial<HouseRule> & Pick<HouseRule, 'id' | 'kind' | 'text'>

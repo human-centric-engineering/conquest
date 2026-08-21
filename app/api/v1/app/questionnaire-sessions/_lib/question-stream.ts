@@ -183,6 +183,13 @@ export interface QuestionComposeInput {
    */
   fidelity?: QuestionFidelityLevel;
   /**
+   * The surface is rendering the question's REAL answer control beside this message (the in-chat
+   * question card). Suppresses the "present the options with the question" clause — reciting a
+   * choice list in prose under a rendered radio group is duplication the respondent must reconcile.
+   * The verbatim-wording demand is unaffected.
+   */
+  answerControlShown?: boolean;
+  /**
    * Conversational profile capture (F-capture): the directive telling the interviewer to gather the
    * admin-authored profile fields naturally in-chat. Set only for a NON-anonymous version in
    * `conversational` capture mode whose snapshot is still incomplete; `''`/absent otherwise (form-mode
@@ -488,7 +495,10 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     // Collapses to '' at `balanced` (the default, and whenever the version gate is off).
     section(
       'question_fidelity',
-      buildQuestionFidelityInstructions(input.fidelity ?? 'balanced', { type: input.type })
+      buildQuestionFidelityInstructions(input.fidelity ?? 'balanced', {
+        type: input.type,
+        ...(input.answerControlShown === true ? { answerControlShown: true } : {}),
+      })
     ),
     // Conversational profile capture (F-capture): when set, the interviewer also gathers the
     // admin-authored profile fields naturally in-chat. Collapses to '' once the snapshot is complete
@@ -630,7 +640,10 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   //    failure — waiting for a failed turn would defeat the point of marking it must-ask.
   //
   // At every other fidelity the standing rules keep it open and we infer, exactly as before.
+  // When the surface renders the real control, the prose must not also recite the options — but the
+  // question is still asked verbatim (`questionLine` below reads `mustAsk` for that).
   const mustAsk = (input.fidelity ?? 'balanced') === 'must_ask';
+  const readOutOptions = mustAsk && input.answerControlShown !== true;
   const scaleNote = (s: {
     min: number;
     max: number;
@@ -641,23 +654,26 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       ? `(where ${s.min} is "${s.minLabel}" and ${s.max} is "${s.maxLabel}")`
       : `(where ${s.max} is the most positive)`;
 
-  const offerLead = mustAsk
+  const offerLead = readOutOptions
     ? 'This question must be asked as written, so present its answer options with it:'
     : "The last reply wasn't clear enough to map, so this time you MAY gently offer";
 
   const clarifyGuidance =
-    !input.isReask && !mustAsk
+    // The rendered control IS the option list. Reciting it in prose as well — including via the
+    // ordinary struggling-re-ask concession, which a must-ask question can also hit — leaves the
+    // respondent reconciling two copies of the same choices.
+    input.answerControlShown === true || (!input.isReask && !readOutOptions)
       ? ''
       : options
-        ? mustAsk
+        ? readOutOptions
           ? `\n\n${offerLead} ${options.join(', ')}.`
           : `\n\n${offerLead} the choices to make it easy: ${options.join(', ')}.`
         : matrix
-          ? mustAsk
+          ? readOutOptions
             ? `\n\n${offerLead} list the items and ask them to rate each on the ${matrix.min}–${matrix.max} scale ${scaleNote(matrix)}. The items are: ${matrix.rows.join(', ')}.`
             : `\n\n${offerLead} the items and ask them to rate each on the simple ${matrix.min}–${matrix.max} scale ${scaleNote(matrix)}. The items are: ${matrix.rows.join(', ')}.`
           : likertScale
-            ? mustAsk
+            ? readOutOptions
               ? `\n\n${offerLead} the ${likertScale.min}–${likertScale.max} scale ${scaleNote(likertScale)}.`
               : `\n\n${offerLead} the simple ${likertScale.min}–${likertScale.max} scale ${scaleNote(likertScale)} to make it easy.`
             : '';

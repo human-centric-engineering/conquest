@@ -384,6 +384,19 @@ describe('value formatting', () => {
     expect(rowsOf(config).byLabel.get('Interviewer tone')).toBe('Empathy +2, Formality -2');
   });
 
+  it("reports question fidelity as off by default, in the admin's language", () => {
+    // The pack is read by someone deciding how the interview will behave, so "Off" alone would
+    // leave them guessing what the default actually is.
+    expect(rowsOf(configOf()).byLabel.get('Question fidelity')).toBe(
+      'Off — every question asked openly'
+    );
+  });
+
+  it('names the starting level once question fidelity is on', () => {
+    const config = configOf({ questionFidelity: { enabled: true, defaultFidelity: 0.75 } });
+    expect(rowsOf(config).byLabel.get('Question fidelity')).toBe('On · new questions start Close');
+  });
+
   it('summarises house rules by kind, counting only the ones actually in use', () => {
     // The pack summarises setup, so it counts rather than reprinting up to twenty rules verbatim.
     expect(rowsOf(FULLY_ENABLED).byLabel.get('House rules')).toBe(

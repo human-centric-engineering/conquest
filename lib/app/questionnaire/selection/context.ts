@@ -121,6 +121,35 @@ export function unsatisfiedQuestions(ctx: CoverageContext): QuestionView[] {
 }
 
 /**
+ * The pool every strategy picks from: questions that have never been answered, PLUS any `must_ask`
+ * question sitting below its satisfaction floor.
+ *
+ * The second half is what makes "must ask" a guarantee rather than a hint. A must-ask question the
+ * extractor filled tangentially at 0.6 has an answer row, so {@link unansweredQuestions} drops it —
+ * and it would never be re-targeted, however hard {@link terminalDecision} tried to keep the session
+ * open for it.
+ *
+ * **This function and `terminalDecision` must agree.** `terminalDecision` returns `null` (meaning
+ * "pick something") exactly when this pool is non-empty; every strategy relies on that invariant and
+ * would dereference `pool[0]` on an empty array otherwise. Keep the two in step.
+ *
+ * Only `must_ask` re-enters the pool. `close` raises the completion floor but is not a promise that
+ * the question will be put to the respondent, so re-targeting it could loop on a question the
+ * respondent has already answered as well as they are going to.
+ */
+export function selectableQuestions(ctx: CoverageContext): QuestionView[] {
+  const unanswered = unansweredQuestions(ctx);
+  const unansweredIds = new Set(unanswered.map((q) => q.id));
+  const outstandingMustAsk = unsatisfiedQuestions(ctx).filter(
+    (q) =>
+      !unansweredIds.has(q.id) &&
+      resolveQuestionFidelity(q.fidelity, ctx.config.questionFidelity) === 'must_ask'
+  );
+  if (outstandingMustAsk.length === 0) return unanswered;
+  return [...unanswered, ...outstandingMustAsk].sort(compareQuestions);
+}
+
+/**
  * Required-before-optional precedence: the required subset if any required
  * question is unanswered, otherwise the whole pool. Lets `random`/`weighted`
  * exhaust mandatory questions before touching optional ones, while `sequential`
@@ -310,10 +339,9 @@ export function terminalDecision(ctx: SelectionContext): SelectionDecision | nul
     };
   }
 
-  if (unansweredQuestions(ctx).length === 0) {
-    // Everything has an answer row, but a must-ask question is answered only below its bar. There is
-    // still something to do — re-ask it — so this is not the terminal "nothing remains" case.
-    if (outstandingMustAsk.length > 0) return null;
+  // Uses the SAME pool the strategies pick from, so "returned null" always means "there is something
+  // to ask" — a below-bar must-ask keeps the session going precisely because it is still selectable.
+  if (selectableQuestions(ctx).length === 0) {
     return {
       kind: 'none',
       rationale: `No questions remain, but completion is unmet (need ≥${minQuestionsAnswered} answered at ≥${pct(coverageThreshold)} coverage; have ${answered} at ${pct(coverage)}).`,

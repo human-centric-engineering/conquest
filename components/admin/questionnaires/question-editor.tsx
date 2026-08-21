@@ -430,7 +430,14 @@ function FidelityControl({
   const isFreeText = type === 'free_text';
 
   return (
-    <div className={cn('flex items-center gap-2', !enabled && 'opacity-50')}>
+    // `data-dimmed` carries the gate-off state semantically. The opacity class is styling; without
+    // a real marker a test can only assert the Tailwind class name, which breaks on any restyle
+    // even though nothing the admin sees has changed.
+    <div
+      data-slot="fidelity-control"
+      data-dimmed={!enabled}
+      className={cn('flex items-center gap-2', !enabled && 'opacity-50')}
+    >
       <span className="text-muted-foreground flex items-center gap-1 text-[11px] font-medium tracking-wide uppercase">
         <MessageSquareQuote className="h-3.5 w-3.5" />
         Fidelity

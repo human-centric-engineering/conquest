@@ -301,6 +301,42 @@ describe('assessCompletion — the per-question fidelity floor (P18)', () => {
     expect(assessment.kind).toBe('not_ready');
   });
 
+  it('grades an answer whose question is not in this version against the FLAT floor', () => {
+    // These are real: an Adaptive Scope session narrows `questions` but keeps answers captured
+    // before the plan narrowed. Such an answer has no per-question floor, and falling back to 0
+    // would let a tentative out-of-scope answer start counting toward `minQuestionsAnswered` —
+    // a behaviour change the per-question floor must not smuggle in.
+    const config = {
+      answerConfidenceFloor: 0.5,
+      coverageThreshold: 1,
+      minQuestionsAnswered: 1,
+      questionFidelity: ON,
+    };
+    const below = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [
+          { questionId: 'a', confidence: 0.9 },
+          { questionId: 'ghost', confidence: 0.1 },
+        ],
+        config,
+      })
+    );
+    expect(below.answeredCount).toBe(1); // the ghost is below the flat floor — not counted
+
+    const above = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [
+          { questionId: 'a', confidence: 0.9 },
+          { questionId: 'ghost', confidence: 0.7 },
+        ],
+        config,
+      })
+    );
+    expect(above.answeredCount).toBe(2); // above the flat floor — counted, as before fidelity
+  });
+
   it('is inert while the version gate is off', () => {
     // Same data, gate off: the pre-feature behaviour, exactly.
     const assessment = assessCompletion(

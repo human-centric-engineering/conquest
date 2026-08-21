@@ -15,12 +15,13 @@
  */
 
 import { registerStrategy } from '@/lib/app/questionnaire/selection/registry';
+import { resolveQuestionFidelity } from '@/lib/app/questionnaire/types';
 import {
   answeredCount,
   compareQuestions,
   requiredFirstPool,
   terminalDecision,
-  unansweredQuestions,
+  selectableQuestions,
 } from '@/lib/app/questionnaire/selection/context';
 import {
   LOW_CONFIDENCE_MULT,
@@ -74,8 +75,15 @@ function sectionStats(
  * broken by document order). Exported so the scoring math is directly
  * unit-testable without going through `select`.
  */
+/**
+ * How strongly a `must_ask` question outranks the rest. Large enough that even the lightest must-ask
+ * (weight 0.1) beats the heaviest ordinary question at full section bonus and low-confidence pull
+ * (1.0 × 1.5 × 1.5 = 2.25), because "must ask" is a guarantee, not a preference.
+ */
+const MUST_ASK_MULT = 100;
+
 export function weightedScores(ctx: SelectionContext): ScoredQuestion[] {
-  const pool = requiredFirstPool(unansweredQuestions(ctx));
+  const pool = requiredFirstPool(selectableQuestions(ctx));
   const stats = sectionStats(ctx);
 
   const scored = pool.map((question) => {
@@ -83,7 +91,16 @@ export function weightedScores(ctx: SelectionContext): ScoredQuestion[] {
     const inverseCompletion = s && s.total > 0 ? 1 - s.answered / s.total : 1;
     const lowConfidenceMult = s?.hasLowConfidence ? LOW_CONFIDENCE_MULT : 1;
     const base = Number.isFinite(question.weight) && question.weight > 0 ? question.weight : 0;
-    const score = base * (1 + UNDERCOVERED_SECTION_BONUS * inverseCompletion) * lowConfidenceMult;
+    // A `must_ask` question is a promise that the respondent WILL be asked it, so it outranks
+    // ordinary scoring rather than merely competing with it. Multiplying (instead of sorting into a
+    // separate tier) keeps the rest of the scoring intact: among several must-asks, weight and
+    // section coverage still decide the order.
+    const mustAskMult =
+      resolveQuestionFidelity(question.fidelity, ctx.config.questionFidelity) === 'must_ask'
+        ? MUST_ASK_MULT
+        : 1;
+    const score =
+      base * (1 + UNDERCOVERED_SECTION_BONUS * inverseCompletion) * lowConfidenceMult * mustAskMult;
     return { question, score };
   });
 

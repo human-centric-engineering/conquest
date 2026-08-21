@@ -260,6 +260,16 @@ slot that the next send cleared. Both are now persisted and replayed.
   fresh greeting if that read fails. The `warnings` JSON is validated at the loader boundary and
   degrades to no notices if a row is malformed — a replayed transcript never throws.
 
+### The `question_card` frame (P18)
+
+A typed `must_ask` question (or a last-resort re-ask) streams its lead-in prose and then one
+`{ type: 'question_card', card }` frame carrying the question's real answer control — see
+[`question-fidelity.md`](./question-fidelity.md). The respondent answers it directly through
+`PUT …/answers`, then the client runs a follow-up turn with `answeredQuestionKey` and no message so
+the interviewer acknowledges and moves on. `AppQuestionnaireTurn.questionCardKey` records which
+control a turn rendered, and `loadTranscript` rebuilds it from the live slot on resume (suppressed
+once answered).
+
 ## Gating
 
 - The respondent surface — the turn loop, live sessions, voice input, and attachment input —

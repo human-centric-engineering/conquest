@@ -49,7 +49,12 @@ import {
   effectiveSupportMessage,
 } from '@/lib/app/questionnaire/sensitivity';
 import type { SensitivityAssessment } from '@/lib/app/questionnaire/sensitivity/types';
-import { coverageRatio, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
+import {
+  coverageRatio,
+  unansweredQuestions,
+  unsatisfiedQuestions,
+} from '@/lib/app/questionnaire/selection/context';
+import { resolveQuestionFidelity } from '@/lib/app/questionnaire/types';
 import { governsSlot, probesRemaining } from '@/lib/app/questionnaire/scope/probe';
 import type { ChatEvent } from '@/types/orchestration';
 import type {
@@ -514,7 +519,23 @@ export async function runDataSlotTurn(
     questions: effective.questions,
     answered: effective.answered,
   });
-  const allQuestionsAnswered = remainingQuestions.length === 0 && effective.questions.length > 0;
+  // Question fidelity (P18): must-ask questions still below their satisfaction floor. Deliberately
+  // NOT folded into `remainingQuestions` — data-slot mode's submit gate is count-based ("every
+  // question has an answer"), and making that floor-aware wholesale would tighten completion for
+  // every questionnaire, not just the ones using fidelity. This adds one extra condition instead.
+  const outstandingMustAsk = unsatisfiedQuestions({
+    questions: effective.questions,
+    answered: effective.answered,
+    config: state.config,
+  }).filter(
+    (qn) => resolveQuestionFidelity(qn.fidelity, state.config.questionFidelity) === 'must_ask'
+  );
+
+  const allQuestionsAnswered =
+    remainingQuestions.length === 0 &&
+    effective.questions.length > 0 &&
+    // An instrument question filled only by inference must not let the session offer to submit.
+    outstandingMustAsk.length === 0;
 
   // The progress/assessment the route persists + the panel reads (question coverage).
   const dataSlotCoverage =
@@ -595,6 +616,24 @@ export async function runDataSlotTurn(
   // sweep, ask the next required question now whenever every data slot is filled OR the question
   // coverage lags the data-slot coverage by more than {@link BALANCED_QUESTION_LAG}.
   const requiredRemaining = remainingQuestions.filter((qn) => qn.required);
+
+  // Question fidelity (P18): a `must_ask` question must actually be PUT to the respondent, so it
+  // can't be left to the abstraction layer to infer. But firing it the moment it becomes eligible
+  // would interrupt a theme mid-flow, so it waits until its own ground has been worked through —
+  // every data slot that maps it is covered — and is then asked directly, before we bridge to a new
+  // theme. That is the "naturally, but guaranteed" behaviour: woven into the conversation at the
+  // moment its topic winds up, not batched into a form-like tail.
+  //
+  // `unsatisfiedQuestions` (not `remainingQuestions`) is deliberate: a must-ask question that was
+  // filled tangentially at LOW confidence still needs asking, and only the floor-aware view knows
+  // that. The end-of-run sweep remains the backstop for anything this never catches.
+  const unfilledKeys = new Set(unfilled.map((slot) => slot.key));
+  const mustAskReady = outstandingMustAsk.filter((qn) => {
+    const owningSlots = dataSlots.filter((slot) => slot.mappedQuestionKeys?.includes(qn.key));
+    // A question no data slot claims has no topic to wind up — ask it as soon as it's eligible.
+    if (owningSlots.length === 0) return true;
+    return owningSlots.every((slot) => !unfilledKeys.has(slot.key));
+  });
   const dataCoverage =
     dataSlots.length === 0 ? 1 : (dataSlots.length - unfilled.length) / dataSlots.length;
   const questionCoverage = coverageRatio(effective);
@@ -615,6 +654,14 @@ export async function runDataSlotTurn(
       kind: 'offer',
       input: buildOfferInput(effective, dataSlots, effectiveDataAnswered, answeredIds.size),
     };
+  } else if (mustAskReady.length > 0) {
+    // Ahead of the required-question interleave and the data-slot pick: this question's area is
+    // done, and moving to a new theme without asking it is the exact miss the feature prevents.
+    const next = mustAskReady[0];
+    toolCalls.push(toolCall(DATA_SLOT_SELECTION_TOOL_SLUG, true));
+    response = { kind: 'question', questionId: next.id, text: next.prompt ?? '' };
+    targetedQuestionId = next.id;
+    selectionRationale = 'Asking a question that needs to be put exactly as written.';
   } else if (requiredRemaining.length > 0 && (unfilled.length === 0 || questionsLagging)) {
     // Interleave a required question directly (kept conversational by the route's phraser).
     const next = requiredRemaining[0];

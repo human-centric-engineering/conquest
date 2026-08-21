@@ -1181,7 +1181,7 @@ export function ConfigEditor({
                     }
                     disabled={busy}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-label="Level for new questions">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

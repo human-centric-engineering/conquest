@@ -288,6 +288,59 @@ describe('buildStreamingQuestionPrompt', () => {
       expect(user).not.toMatch(/present its answer options/i);
     });
 
+    it('lists the rows and the shared scale for a must-ask matrix question', () => {
+      // A matrix is the type most damaged by paraphrase — its comparability depends on every
+      // respondent rating the same rows on the same scale.
+      const user = text(
+        buildStreamingQuestionPrompt({
+          ...INPUT,
+          fidelity: 'must_ask',
+          type: 'matrix',
+          typeConfig: {
+            rows: [
+              { key: 'pay', label: 'Pay' },
+              { key: 'progression', label: 'Progression' },
+            ],
+            scale: { min: 1, max: 5, minLabel: 'Very poor', maxLabel: 'Very good' },
+          },
+        })[1].content
+      );
+      expect(user).toContain('Pay');
+      expect(user).toContain('Progression');
+      expect(user).toContain('1–5');
+      expect(user).toContain('Very poor');
+    });
+
+    it('suppresses the option read-out when the surface renders the real control', () => {
+      // The card IS the option list. Reciting it in prose as well leaves the respondent
+      // reconciling two copies — while the verbatim-wording demand must still stand.
+      const messages = buildStreamingQuestionPrompt({
+        ...LIKERT,
+        fidelity: 'must_ask',
+        answerControlShown: true,
+      });
+      expect(text(messages[0].content)).toContain('<question_fidelity>');
+      const user = text(messages[1].content);
+      expect(user).toMatch(/EXACTLY as written/);
+      expect(user).not.toMatch(/present its answer options/i);
+      expect(user).not.toContain('1–5');
+    });
+
+    it('suppresses the read-out on a must-ask RE-ASK when the control is shown', () => {
+      // A must-ask question can also hit the ordinary struggling-re-ask path, which has its own
+      // "you MAY gently offer the choices" concession — that must be suppressed too.
+      const user = text(
+        buildStreamingQuestionPrompt({
+          ...LIKERT,
+          fidelity: 'must_ask',
+          answerControlShown: true,
+          isReask: true,
+        })[1].content
+      );
+      expect(user).not.toContain('1–5');
+      expect(user).not.toMatch(/wasn't clear enough to map/i);
+    });
+
     it('offers the choice labels for a must-ask single-choice question', () => {
       const user = text(
         buildStreamingQuestionPrompt({
