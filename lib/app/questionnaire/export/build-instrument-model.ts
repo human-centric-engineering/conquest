@@ -12,7 +12,12 @@
  * deterministic in its input.
  */
 
-import { QUESTION_TYPE_LABELS, type QuestionType } from '@/lib/app/questionnaire/types';
+import {
+  QUESTION_TYPE_LABELS,
+  resolveQuestionFidelity,
+  type QuestionFidelityLevel,
+  type QuestionType,
+} from '@/lib/app/questionnaire/types';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 import { summariseAudience } from '@/lib/app/questionnaire/export/build-session-export-model';
@@ -33,6 +38,21 @@ export interface InstrumentQuestion {
   options: string[];
   /** A short one-line constraint (numeric bounds/unit, boolean labels, likert range). Else null. */
   constraint: string | null;
+  /**
+   * How faithfully the interviewer must put this question — the resolved five-stop level.
+   *
+   * `null` when the version's `questionFidelity` gate is off, which is the overwhelming majority of
+   * questionnaires: with the gate off every question resolves to `balanced`, so printing a uniform
+   * column would be noise on every export that never opted in. Resolved through
+   * {@link resolveQuestionFidelity} rather than read off `q.fidelity`, so a stored value the admin
+   * pre-set but never switched on is correctly reported as absent rather than as in force.
+   *
+   * This matters on a *blank instrument* because the dial changes what the document describes: at
+   * `must_ask` the question is an instrument whose wording and options are put as written, and at
+   * `free` it may never be asked aloud at all. A reader given only the prompt cannot tell those
+   * apart.
+   */
+  fidelity: QuestionFidelityLevel | null;
 }
 
 /** One section (with its questions) in the instrument. */
@@ -172,6 +192,9 @@ export function buildInstrumentModel(
   glossary: GlossaryAppendixView | null = null
 ): InstrumentModel {
   let questionCount = 0;
+  // Read once: the gate is version-level, so asking per question would resolve the same answer
+  // several hundred times on a large instrument.
+  const fidelityGateOn = graph.config.questionFidelity.enabled;
 
   const sections: InstrumentSection[] = graph.sections.map((section, sIndex) => ({
     number: sIndex + 1,
@@ -191,6 +214,9 @@ export function buildInstrumentModel(
         tags: q.tags.map((t) => t.label),
         options: readOptions(q.type, q.typeConfig),
         constraint: readConstraint(q.type, q.typeConfig),
+        fidelity: fidelityGateOn
+          ? resolveQuestionFidelity(q.fidelity, graph.config.questionFidelity)
+          : null,
       };
     }),
   }));

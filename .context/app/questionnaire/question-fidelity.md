@@ -256,6 +256,8 @@ as they are going to.
 | Section bulk-set                       | `components/admin/questionnaires/section-editor.tsx` → `PATCH …/versions/:vid/questions`                                                                                       |
 | Settings gate                          | `components/admin/questionnaires/config-editor.tsx`, "Questions & completion" group                                                                                            |
 | Pack / audit summary                   | `lib/app/questionnaire/settings-registry.ts` (`questionFidelity` descriptor)                                                                                                   |
+| Instrument + pack export               | `lib/app/questionnaire/export/build-instrument-model.ts` (`InstrumentQuestion.fidelity`) — resolved once per question; `null` when the gate is off                             |
+| Export renderers (6)                   | `build-instrument-{text,csv}.ts`, `build-pack-{markdown,csv}.ts`, `components/app/questionnaire/export/{instrument,pack}-pdf-document.tsx`                                     |
 | Fork / duplicate / clone               | `app/api/v1/app/questionnaires/_lib/copy-version-graph.ts` (question select **and** create)                                                                                    |
 | Definition export / import             | `lib/app/questionnaire/authoring/definition-export.ts`, `_lib/import-definition.ts`                                                                                            |
 
@@ -273,6 +275,19 @@ the **copied** section by ordinal; without that it would match nothing and silen
 Audit actions are kept distinct rather than folded together, so existing history stays queryable:
 `questionnaire_question.bulk_required` (required only, unchanged), `…bulk_fidelity` (fidelity only),
 `…bulk_update` (both).
+
+## The export has to say it too
+
+A blank instrument that prints only the prompt cannot distinguish a question that will be put word
+for word, with its scale read out, from one that may never be asked aloud at all. Both are in the
+document; only one of them is a script. So `InstrumentQuestion` carries the resolved level and all
+six renderers print it beside the type and the required flag — the branded Questionnaire Pack and
+the brand-free instrument export share one model, so this is one field and six one-line changes.
+
+`null` when the gate is off, and the renderers print nothing at all in that case: with the gate off
+every question resolves to `balanced`, so a uniform column would be noise on the large majority of
+questionnaires that never opted in. The two CSV writers keep the **column** either way — a stable
+shape is what a spreadsheet consumer needs — and leave the cell empty.
 
 ## The judge has to be told
 

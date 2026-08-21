@@ -9,6 +9,7 @@
  * builders can follow. Pure: deterministic in its input, no external Markdown library.
  */
 
+import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 
@@ -98,7 +99,11 @@ export function buildPackMarkdown(model: PackModel): string {
           continue;
         }
         for (const q of section.questions) {
-          const flags = [q.typeLabel, q.required ? 'required' : 'optional'].join(', ');
+          const flags = [
+            q.typeLabel,
+            q.required ? 'required' : 'optional',
+            ...(q.fidelity ? [`fidelity: ${QUESTION_FIDELITY_LABELS[q.fidelity]}`] : []),
+          ].join(', ');
           lines.push(`**${q.number}. ${q.prompt}** _(${flags})_`);
           if (q.constraint) lines.push(`- ${q.constraint}`);
           for (const option of q.options) lines.push(`- ${option}`);

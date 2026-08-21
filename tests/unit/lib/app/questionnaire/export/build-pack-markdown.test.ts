@@ -44,6 +44,9 @@ function question(over: Partial<InstrumentQuestion> = {}): InstrumentQuestion {
     tags: ['Culture'],
     options: [],
     constraint: null,
+    // The gate-off default: with `questionFidelity.enabled` false every question resolves to
+    // `balanced`, and the model reports null so no renderer prints a uniform column.
+    fidelity: null,
     ...over,
   };
 }
@@ -789,5 +792,26 @@ describe('buildPackMarkdown', () => {
       expect(md).toContain('Make the criteria more specific');
       expect(md).toContain('Proposed edit: Rewrite the topic’s criteria');
     });
+  });
+});
+
+/**
+ * Question fidelity in the export.
+ *
+ * Two properties, and the first is the one that matters: a version that never turned the gate on
+ * must produce byte-for-byte the document it produced before the field existed.
+ */
+describe('buildPackMarkdown — question fidelity', () => {
+  it('renders nothing at all when the gate is off', () => {
+    const out = buildPackMarkdown(model({ sections: [section({ questions: [question()] })] }));
+    expect(out).not.toMatch(/fidelity/i);
+    expect(out).not.toMatch(/must ask/i);
+  });
+
+  it('names the level when the gate is on', () => {
+    const out = buildPackMarkdown(
+      model({ sections: [section({ questions: [question({ fidelity: 'must_ask' })] })] })
+    );
+    expect(out).toMatch(/Must ask/);
   });
 });

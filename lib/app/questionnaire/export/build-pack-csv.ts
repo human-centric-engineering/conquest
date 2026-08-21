@@ -10,6 +10,7 @@
  */
 
 import { csvEscape } from '@/lib/api/csv';
+import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
 import { PACK_BRAND } from '@/lib/app/questionnaire/export/pack-brand';
 import type { PackModel } from '@/lib/app/questionnaire/export/build-pack-model';
 
@@ -82,6 +83,7 @@ export function buildPackCsv(model: PackModel): string {
             q.typeLabel,
             q.required ? 'yes' : 'no',
             String(q.weight),
+            q.fidelity ? QUESTION_FIDELITY_LABELS[q.fidelity] : '',
             q.options.join(' | '),
             q.constraint ?? '',
             q.guidelines ?? '',
@@ -101,6 +103,9 @@ export function buildPackCsv(model: PackModel): string {
         'type',
         'required',
         'weight',
+        // Empty on every row when the version's fidelity gate is off; the column stays regardless
+        // so the CSV shape is stable across exports.
+        'fidelity',
         'options',
         'constraint',
         'guidelines',
