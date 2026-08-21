@@ -20,6 +20,7 @@ import type {
   InterviewerOpeningMode,
   PresentationMode,
 } from '@/lib/app/questionnaire/types';
+import type { ConfigView } from '@/lib/app/questionnaire/views';
 
 export type ConflictSeverity = 'error' | 'warning' | 'info';
 
@@ -69,6 +70,59 @@ export interface ConfigConflictInput {
     text: string;
     trigger?: string;
   }>;
+  /**
+   * Adaptive Scope master switch. Off ⇒ every topic runs and the opening decides nothing beyond
+   * itself, so none of checks 18–20 apply.
+   */
+  adaptiveScopeEnabled: boolean;
+  /** Whether the opening's follow-up allowance is capped (G03). */
+  limitOpeningProbes: boolean;
+  /** The allowance, when capped. `0` means the planner may never ask a clarifying follow-up. */
+  maxOpeningProbes: number;
+}
+
+/**
+ * Build a {@link ConfigConflictInput} from a **saved** {@link ConfigView}.
+ *
+ * The Settings editor deliberately does NOT use this: it assembles its own input from unsaved local
+ * state so the banner reacts as the admin types. This one reads the version as it stands, for
+ * surfaces that show a saved version's health — the launch checklist above all.
+ *
+ * Two builders is the right number, not a smell: "what would this be if I saved now" and "what is
+ * this today" are different questions, and the launch checklist must answer the second. They cannot
+ * drift silently either — {@link ConfigConflictInput} has no optional fields, so a new one breaks
+ * both call sites at compile time.
+ */
+export function configConflictInputFromConfig(
+  config: ConfigView,
+  questionCount: number
+): ConfigConflictInput {
+  return {
+    anonymousMode: config.anonymousMode,
+    presentationMode: config.presentationMode,
+    // There is no `captureEnabled` column — the editor derives it, and so must this, or the two
+    // builders would disagree about what "capture is on" means.
+    captureEnabled: config.profileFields.length > 0,
+    captureMode: config.captureMode,
+    profileFields: config.profileFields,
+    personaSelectionEnabled: config.personaSelection.enabled,
+    reasoningStreamEnabled: config.reasoningStreamEnabled,
+    voiceInputEnabled: config.voiceEnabled,
+    attachmentInputEnabled: config.attachmentsEnabled,
+    minQuestionsAnswered: config.minQuestionsAnswered,
+    questionCount,
+    sensitivityAwareness: config.sensitivityAwareness,
+    supportMessage: config.supportMessage,
+    interviewerStrategyEnabled: config.interviewerStrategy.enabled,
+    interviewerApproach: config.interviewerStrategy.approach,
+    openingMode: config.interviewerStrategy.openingMode,
+    openingExamples: config.interviewerStrategy.openingExamples,
+    houseRulesEnabled: config.houseRules.enabled,
+    houseRules: config.houseRules.rules,
+    adaptiveScopeEnabled: config.adaptiveScope.enabled,
+    limitOpeningProbes: config.adaptiveScope.limitOpeningProbes,
+    maxOpeningProbes: config.adaptiveScope.maxOpeningProbes,
+  };
 }
 
 /* ── House-rule text matching ─────────────────────────────────────────────────
@@ -493,6 +547,74 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
         'The interviewer asks one thing at a time, and a house rule can’t override that. To let it ' +
         'group closely-related gaps, use “Batch related questions” under Interviewer strategy.',
     });
+  }
+
+  /* ── Adaptive Scope × the interviewer ───────────────────────────────────────
+   *
+   * The only checks here that cross a tab boundary, and they exist because the two features meet at
+   * exactly one point that neither surface shows: **the opening**.
+   *
+   * The Scope Planner runs once, the moment the opening topics are covered, and decides the rest of
+   * the interview from what the respondent said there. The questioning approach decides how that
+   * opening is asked. So an approach that produces a thin opening quietly starves the planner — it
+   * still produces a plan, because `planScope` never throws, it just falls back. Nothing errors and
+   * nothing is empty; the instrument simply asks less than its author believes it asks.
+   *
+   * All three are anchored to `interviewer-strategy` rather than to Adaptive Scope: that is the
+   * setting the admin would change, and it is the one on this tab. Adaptive Scope lives on the
+   * Topics tab and has its own (server-side) checker for its own coherence.
+   */
+  if (input.adaptiveScopeEnabled) {
+    // 18 — The sharpest of the three. `targeted` asks one specific question from the very first
+    //      turn, so there is no broad opening for the planner to read at all.
+    if (input.interviewerStrategyEnabled && input.interviewerApproach === 'targeted') {
+      conflicts.push({
+        id: 'adaptive-scope-targeted-opening',
+        severity: 'warning',
+        sectionId: 'interviewer-strategy',
+        title: 'Adaptive scope may have little to go on',
+        message:
+          'Adaptive scope decides which topics to cover from the respondent’s opening answers, and ' +
+          'the targeted approach asks one specific question from the very first turn. There may be ' +
+          'too little there to route on, in which case everyone gets the same fallback topics. ' +
+          'Switch the approach to Funnel or Open throughout to give it something to read.',
+      });
+    }
+
+    // 19 — The opening allowance set to zero. A probe is how the planner rescues an answer too
+    //      abstract to route on ("a predictable revenue engine"); with none, it cannot.
+    if (input.limitOpeningProbes && input.maxOpeningProbes === 0) {
+      conflicts.push({
+        id: 'adaptive-scope-no-probes',
+        severity: 'warning',
+        sectionId: 'interviewer-strategy',
+        title: 'The opening can’t ask for clarification',
+        message:
+          'Opening follow-ups are limited to none, so if a respondent’s opening answer is too vague ' +
+          'to route on, the interviewer can’t ask them to say more — adaptive scope falls back ' +
+          'instead. Allow at least one follow-up unless the opening questions are very concrete.',
+      });
+    }
+
+    // 20 — Guided openings under adaptive scope. Not a mistake at all — but the examples are now
+    //      steering the very answer the planner reads, which an admin writing them for tone alone
+    //      would not realise. `info`, and only when there is something written to steer with.
+    if (
+      input.interviewerStrategyEnabled &&
+      input.openingMode === 'examples' &&
+      input.openingExamples.some((example) => example.trim() !== '')
+    ) {
+      conflicts.push({
+        id: 'adaptive-scope-guided-openings',
+        severity: 'info',
+        sectionId: 'interviewer-strategy',
+        title: 'Your example openings steer the routing too',
+        message:
+          'Adaptive scope reads the opening answers to decide which topics to cover, so your ' +
+          'example openings shape more than the tone — they shape what the interview becomes. ' +
+          'Check they invite the kind of answer the topic criteria are written against.',
+      });
+    }
   }
 
   // Stable within a severity (Array.prototype.sort is stable), so each band keeps check order.
