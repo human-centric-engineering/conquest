@@ -4,7 +4,8 @@
  * POST /api/v1/app/questionnaire-sessions/:id/evaluate-turn
  *   body: {
  *     turn: { turnIndex, calls: AgentCallTrace[] },   // the live inspector dump for the turn
- *     respondentMessage?, interviewerMessage?, recentMessages?   // conversation context (client-held)
+ *     respondentMessage?, interviewerMessage?, recentMessages?,  // conversation context (client-held)
+ *     questionKey?                                    // which question the turn asked about
  *   }
  *
  *   Admin-only, preview-session-only. Runs one structured reasoning-model call that judges the
@@ -17,7 +18,9 @@
  *
  *   The dump is supplied by the client because inspector data is never persisted elsewhere; it is
  *   validated here (external data → Zod, never `as`). The questionnaire objectives (goal, audience,
- *   strategy, tone) are loaded SERVER-SIDE from the session's version so they can't be spoofed.
+ *   strategy, tone) and the interviewer policy the turn ran under (house rules, questioning
+ *   approach, question fidelity, adaptive scope) are loaded SERVER-SIDE from the session's version
+ *   so they can't be spoofed — `questionKey` is a lookup handle, never a claimed value.
  *
  *   Requires the session to be a *preview* — the same gate the inspector that produces the dump
  *   enforces — so it can only run where the inspector runs. Takes a per-admin LLM sub-cap (the
@@ -45,15 +48,25 @@ import { turnEvaluationLimiter } from '@/app/api/v1/app/questionnaire-sessions/_
 import { persistTurnEvaluation } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 import {
   buildObjectivesContext,
+  describeTurnFidelity,
   loadTurnEvaluatorAgent,
   TURN_EVALUATOR_SLUG,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context';
+import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
 
 const bodySchema = z.object({
   turn: inspectorTurnSchema,
   respondentMessage: z.string().max(50_000).optional(),
   interviewerMessage: z.string().max(50_000).optional(),
   recentMessages: z.array(z.string().max(50_000)).max(100).optional(),
+  /**
+   * Question fidelity: the stable `AppQuestionSlot.key` this turn asked about, so the judge is told
+   * how faithfully the question had to be put. The inspector dump carries no question identity, and
+   * the drawer knows it — so it travels as its own field. A key is a lookup, never a value: the
+   * level is resolved server-side against the version's own gate, so a crafted body cannot claim a
+   * fidelity the questionnaire does not have. Optional; absent leaves the version-level context.
+   */
+  questionKey: z.string().max(200).optional(),
 });
 
 const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session, { params }) => {
@@ -82,7 +95,9 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
           id: true,
           goal: true,
           audience: true,
-          config: { select: { selectionStrategy: true, tone: true } },
+          // The whole config row: the interviewer policy the judge scores against spans four
+          // blocks, and `buildObjectivesContext` renders them through the settings registry.
+          config: { select: CONFIG_SELECT },
         },
       },
     },
@@ -101,8 +116,15 @@ const handleEvaluateTurn = withAdminAuth<{ id: string }>(async (request, session
   }
 
   const version = sessionRow.version;
+  // Resolved server-side from the question's own row, never from the request body.
+  const questionFidelityLevel = await describeTurnFidelity(
+    version.id,
+    toConfigView(version.config),
+    { questionKey: body.questionKey ?? null }
+  );
   const context: TurnEvaluationContext = {
     ...buildObjectivesContext(version),
+    ...(questionFidelityLevel ? { questionFidelityLevel } : {}),
     ...(body.respondentMessage ? { respondentMessage: body.respondentMessage } : {}),
     ...(body.interviewerMessage ? { interviewerMessage: body.interviewerMessage } : {}),
     ...(body.recentMessages && body.recentMessages.length > 0

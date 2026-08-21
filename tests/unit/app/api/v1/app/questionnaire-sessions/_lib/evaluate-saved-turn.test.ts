@@ -20,6 +20,9 @@ vi.mock('@/lib/app/questionnaire/turn-evaluation', () => ({ evaluateTurn: evalMo
 const ctxMock = vi.hoisted(() => ({
   loadTurnEvaluatorAgent: vi.fn(),
   buildObjectivesContext: vi.fn(() => ({ goal: 'Understand housing' })),
+  // Question fidelity: resolved from the turn's targeted question. Undefined here (the default
+  // `balanced`) so these outcome tests stay about the outcomes; the resolver has its own suite.
+  describeTurnFidelity: vi.fn(async () => undefined),
 }));
 vi.mock('@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context', () => ctxMock);
 

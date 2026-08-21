@@ -91,7 +91,13 @@ function previewSession() {
       id: 'ver-1',
       goal: 'Understand housing security',
       audience: { role: 'Renter' },
-      config: { selectionStrategy: 'adaptive', tone: { persona: 'warm' } },
+      // The real `tone` Json shape — `persona` is `{ enabled, text }`, not a bare string. The
+      // context builder narrows it through the settings registry, so a fixture that lied about the
+      // column would test a projection the live read path never produces.
+      config: {
+        selectionStrategy: 'adaptive',
+        tone: { persona: { enabled: true, text: 'Warm and plain-spoken' } },
+      },
     },
   };
 }
@@ -207,8 +213,13 @@ describe('POST evaluate-turn', () => {
       // audience is summarised server-side to a bounded JSON string, not passed through raw.
       audience: '{"role":"Renter"}',
       selectionStrategy: 'adaptive',
-      tone: 'warm',
     });
+    expect(input.context.tone).toContain('Warm and plain-spoken');
+    // The interviewer policy the turn ran under, so the judge scores against what was configured
+    // rather than a generic ideal — a verbatim `must_ask` question otherwise reads as leading.
+    expect(input.context.houseRules).toBeDefined();
+    expect(input.context.interviewerStrategy).toBeDefined();
+    expect(input.context.adaptiveScope).toBeDefined();
     expect(agent).toMatchObject({ provider: '', model: '' });
     expect(opts).toMatchObject({ agentId: 'agent-eval', sessionId: 'sess-1' });
   });
@@ -260,7 +271,7 @@ describe('POST evaluate-turn', () => {
     });
   });
 
-  it('omits absent objectives when the version has no goal/audience/config', async () => {
+  it('omits objectives it does not have, but still describes the config it runs on', async () => {
     prismaMock.appQuestionnaireSession.findUnique.mockResolvedValue({
       isPreview: true,
       version: { id: 'ver-1', goal: null, audience: null, config: null },
@@ -270,10 +281,16 @@ describe('POST evaluate-turn', () => {
     expect(res.status).toBe(200);
 
     const [input] = evalMock.evaluateTurn.mock.calls[0];
-    // Absent objectives are omitted, not passed as null/undefined.
+    // A goal and an audience genuinely may not exist, and are omitted rather than passed as null.
     expect(input.context).not.toHaveProperty('goal');
     expect(input.context).not.toHaveProperty('audience');
-    expect(input.context).not.toHaveProperty('selectionStrategy');
+    // Config is different: a version with no saved config row still runs sessions — it runs them
+    // on the documented defaults. Describing those is more honest than silence, and a judge told
+    // nothing about a policy cannot tell "none is in force" from "you weren't told".
+    expect(input.context.selectionStrategy).toBe('adaptive');
+    expect(input.context.houseRules).toMatch(/none/i);
+    // Tone is the one block whose descriptor genuinely emits nothing when no dial and no persona
+    // is set — so it stays absent, exactly as before.
     expect(input.context).not.toHaveProperty('tone');
   });
 });

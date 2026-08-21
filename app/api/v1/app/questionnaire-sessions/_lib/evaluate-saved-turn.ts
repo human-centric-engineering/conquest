@@ -22,8 +22,10 @@ import {
 } from '@/lib/app/questionnaire/turn-evaluation';
 import {
   buildObjectivesContext,
+  describeTurnFidelity,
   loadTurnEvaluatorAgent,
 } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context';
+import { CONFIG_SELECT, toConfigView } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { persistTurnEvaluation } from '@/app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-store';
 
 /** How many prior conversation lines to include as recent context. */
@@ -71,7 +73,9 @@ export async function runSavedTurnEvaluation(
           id: true,
           goal: true,
           audience: true,
-          config: { select: { selectionStrategy: true, tone: true } },
+          // The whole config row — the interviewer policy the judge scores against spans four
+          // blocks, rendered by `buildObjectivesContext` through the settings registry.
+          config: { select: CONFIG_SELECT },
         },
       },
     },
@@ -80,7 +84,14 @@ export async function runSavedTurnEvaluation(
 
   const turn = await prisma.appQuestionnaireTurn.findFirst({
     where: { sessionId: params.sessionId, ordinal: params.ordinal },
-    select: { userMessage: true, agentResponse: true, inspectorCalls: true },
+    select: {
+      userMessage: true,
+      agentResponse: true,
+      inspectorCalls: true,
+      // Question fidelity: which question this turn was about, so the judge is told how faithfully
+      // it had to be put. Null on completion / offer turns, which target no question.
+      targetedQuestionId: true,
+    },
   });
   if (!turn) return { ok: false, reason: 'turn_not_found' };
 
@@ -112,8 +123,14 @@ export async function runSavedTurnEvaluation(
     .slice(-RECENT_CONTEXT_LINES);
 
   const version = sessionRow.version;
+  const questionFidelityLevel = await describeTurnFidelity(
+    version.id,
+    toConfigView(version.config),
+    { questionId: turn.targetedQuestionId }
+  );
   const context: TurnEvaluationContext = {
     ...buildObjectivesContext(version),
+    ...(questionFidelityLevel ? { questionFidelityLevel } : {}),
     ...(turn.userMessage ? { respondentMessage: turn.userMessage } : {}),
     ...(turn.agentResponse ? { interviewerMessage: turn.agentResponse } : {}),
     ...(recentMessages.length > 0 ? { recentMessages } : {}),

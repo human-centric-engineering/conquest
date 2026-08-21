@@ -252,6 +252,7 @@ as they are going to.
 | Per-question control                   | `components/admin/questionnaires/question-editor.tsx` (`FidelityControl`)                                                                                                      |
 | New-question default                   | `…/sections/[sectionId]/questions/route.ts` — applies `questionFidelity.defaultFidelity` on create (the midpoint while the gate is off, or whatever the body names explicitly) |
 | Admin preview context                  | `app/api/v1/app/questionnaires/_lib/selection-context.ts` — must carry `fidelity`, or the `/next-question` preview silently diverges from the live turn loop                   |
+| Turn-evaluator context                 | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context.ts` (`describeTurnFidelity`) — tells the judge how faithfully THIS turn's question had to be put           |
 | Section bulk-set                       | `components/admin/questionnaires/section-editor.tsx` → `PATCH …/versions/:vid/questions`                                                                                       |
 | Settings gate                          | `components/admin/questionnaires/config-editor.tsx`, "Questions & completion" group                                                                                            |
 | Pack / audit summary                   | `lib/app/questionnaire/settings-registry.ts` (`questionFidelity` descriptor)                                                                                                   |
@@ -273,6 +274,24 @@ Audit actions are kept distinct rather than folded together, so existing history
 `questionnaire_question.bulk_required` (required only, unchanged), `…bulk_fidelity` (fidelity only),
 `…bulk_update` (both).
 
+## The judge has to be told
+
+`must_ask` is the one stop that makes a _correct_ turn look wrong to an automated reviewer. The
+turn-evaluator's rubric scores `openEndedness`, `nonLeading` and `specificity`; putting a question
+verbatim and reciting its scale is the opposite of open and reads as leading, so a compliant
+must-ask turn was being marked down for doing exactly what the author asked.
+
+So the evaluator is handed two things it did not have before: the version-level gate, and — via
+`describeTurnFidelity` — the resolved level for the question _this_ turn asked about. The level is
+resolved server-side through `resolveQuestionFidelity`, never taken from the request body: on the
+saved-turn path from the row's `targetedQuestionId`, and on the live drawer path from the rendered
+card's `questionKey` (so the live path covers `must_ask` and last-resort re-asks, and falls back to
+version-level context elsewhere). `balanced` is omitted — it is the behaviour the rubric already
+assumes.
+
+The rubric clause that reads it is pinned by `TURN_RUBRIC_VERSION`, which moved to `1.1.0` when this
+landed: a score is only comparable to another score under the same rubric.
+
 ## Anti-patterns
 
 - **Don't** read `slot.fidelity` directly in runtime code — use `resolveQuestionFidelity`, or you
@@ -289,8 +308,9 @@ Audit actions are kept distinct rather than folded together, so existing history
 - **Don't** persist the card's rendered content. Store the key and rebuild from the live slot, or a
   reworded question leaves a stale copy pinned in every resumed transcript.
 - **Don't** read `fidelity` in a new context builder without adding it to that builder's Prisma
-  select. There are two — `turn-context.ts` (live) and `selection-context.ts` (admin preview) — and a
-  preview that resolves everything to `balanced` tells an admin the feature is broken when it isn't.
+  select. There are now three — `turn-context.ts` (live), `selection-context.ts` (admin preview) and
+  `turn-evaluation-context.ts` (the judge) — and a preview that resolves everything to `balanced`
+  tells an admin the feature is broken when it isn't.
 - **Don't** suppress the card on a per-question flag. Dismissal must be per-turn, or a dismissed
   must-ask can never be answered.
 - **Don't** hand-wire the _settings_ block into import/export — it flows from
