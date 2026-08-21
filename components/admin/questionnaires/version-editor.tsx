@@ -39,7 +39,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
-import type { AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
+import { narrowQuestionFidelity, type AppQuestionnaireStatus } from '@/lib/app/questionnaire/types';
 import type { VersionGraphView } from '@/lib/app/questionnaire/views';
 
 import { GoalAudienceEditor } from '@/components/admin/questionnaires/goal-audience-editor';
@@ -388,6 +388,7 @@ export function VersionEditor({
                   section={section}
                   allSections={sections}
                   tags={version.tags}
+                  fidelityEnabled={narrowQuestionFidelity(version.config.questionFidelity).enabled}
                   run={run}
                   busy={busy}
                 />

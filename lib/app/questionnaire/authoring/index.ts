@@ -31,7 +31,7 @@ export {
   reorderSchema,
   createQuestionSchema,
   updateQuestionSchema,
-  bulkSetRequiredSchema,
+  bulkUpdateQuestionsSchema,
   type UpdateVersionMetaInput,
   type UpdateVersionStatusInput,
   type CreateSectionInput,
@@ -39,7 +39,7 @@ export {
   type ReorderInput,
   type CreateQuestionInput,
   type UpdateQuestionInput,
-  type BulkSetRequiredInput,
+  type BulkUpdateQuestionsInput,
 } from '@/lib/app/questionnaire/authoring/schemas';
 export {
   updateConfigSchema,

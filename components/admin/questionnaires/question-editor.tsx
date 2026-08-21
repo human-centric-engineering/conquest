@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Scale, Trash2 } from 'lucide-react';
+import { GripVertical, MessageSquareQuote, Scale, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,9 +35,14 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
+import { cn } from '@/lib/utils';
 import {
   QUESTION_TYPES,
   QUESTION_TYPE_LABELS,
+  QUESTION_FIDELITY_LABELS,
+  QUESTION_FIDELITY_DESCRIPTIONS,
+  clampQuestionFidelity,
+  questionFidelityLevel,
   type QuestionType,
 } from '@/lib/app/questionnaire/types';
 import {
@@ -115,6 +120,7 @@ export function QuestionEditor({
   sections,
   question,
   tags,
+  fidelityEnabled,
   run,
   busy,
 }: {
@@ -123,6 +129,8 @@ export function QuestionEditor({
   sections: SectionView[];
   question: QuestionSlotView;
   tags: TagView[];
+  /** Whether the version's question-fidelity gate is on. Off ⇒ the slider is shown but dimmed. */
+  fidelityEnabled: boolean;
   run: RunMutation;
   busy: boolean;
 }) {
@@ -228,6 +236,14 @@ export function QuestionEditor({
               onSave={(w) => patch({ weight: w })}
             />
 
+            <FidelityControl
+              fidelity={question.fidelity}
+              type={question.type}
+              enabled={fidelityEnabled}
+              busy={busy}
+              onSave={(f) => patch({ fidelity: f })}
+            />
+
             {sections.length > 1 && (
               <div className="flex items-center gap-1.5">
                 <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
@@ -305,6 +321,11 @@ export function QuestionEditor({
   );
 }
 
+/** The fidelity slider's bounds — the five-stop grid from `free` (0) to `must_ask` (1). */
+const FIDELITY_MIN = 0;
+const FIDELITY_MAX = 1;
+const FIDELITY_STEP = 0.25;
+
 /** The question-weight slider's bounds — the lightest/heaviest a question can be. */
 const WEIGHT_MIN = 0.1;
 const WEIGHT_MAX = 1;
@@ -366,6 +387,93 @@ function WeightControl({
         <code>1.0</code> (heaviest); new questions start at <code>0.5</code>. Only affects versions
         whose <em>Settings → question selection</em> is set to <strong>Weighted</strong> (other
         strategies ignore it). Not related to tags.
+      </FieldHelp>
+    </div>
+  );
+}
+
+/**
+ * Per-question fidelity — how faithfully the interviewer must put THIS question to the respondent,
+ * from `Free` (fill it from anything they say) to `Must ask` (put it to them as written, with typed
+ * questions showing their real answer control).
+ *
+ * Deliberately rendered even when the version's gate is OFF, just dimmed with an explanatory hint:
+ * an admin setting levels across a long questionnaire before switching the feature on would
+ * otherwise find the control missing and have no idea it existed. Commits on release
+ * (`onValueCommit`) — one PATCH per adjustment, not one per pixel — exactly like `WeightControl`.
+ */
+function FidelityControl({
+  fidelity,
+  type,
+  enabled,
+  busy,
+  onSave,
+}: {
+  fidelity: number;
+  type: QuestionType;
+  enabled: boolean;
+  busy: boolean;
+  onSave: (fidelity: number) => void;
+}) {
+  const [val, setVal] = useState(() => clampQuestionFidelity(fidelity));
+  useEffect(() => setVal(clampQuestionFidelity(fidelity)), [fidelity]);
+
+  const commit = (next: number) => {
+    const f = clampQuestionFidelity(next);
+    setVal(f);
+    if (f !== clampQuestionFidelity(fidelity)) onSave(f);
+  };
+
+  const level = questionFidelityLevel(val);
+  // Free text has no answer control to show, so "Must ask" means verbatim wording only. Saying so
+  // here stops an admin expecting a form field that will never appear.
+  const isFreeText = type === 'free_text';
+
+  return (
+    // `data-dimmed` carries the gate-off state semantically. The opacity class is styling; without
+    // a real marker a test can only assert the Tailwind class name, which breaks on any restyle
+    // even though nothing the admin sees has changed.
+    <div
+      data-slot="fidelity-control"
+      data-dimmed={!enabled}
+      className={cn('flex items-center gap-2', !enabled && 'opacity-50')}
+    >
+      <span className="text-muted-foreground flex items-center gap-1 text-[11px] font-medium tracking-wide uppercase">
+        <MessageSquareQuote className="h-3.5 w-3.5" />
+        Fidelity
+      </span>
+      <Slider
+        value={[val]}
+        min={FIDELITY_MIN}
+        max={FIDELITY_MAX}
+        step={FIDELITY_STEP}
+        disabled={busy}
+        onValueChange={(v) => setVal(clampQuestionFidelity(v[0] ?? val))}
+        onValueCommit={(v) => commit(v[0] ?? val)}
+        className="w-24"
+        aria-label="Question fidelity"
+      />
+      <span className="text-foreground w-16 text-xs">{QUESTION_FIDELITY_LABELS[level]}</span>
+      <FieldHelp title="Question fidelity">
+        <p>
+          How faithfully the interviewer must put this question to the respondent.{' '}
+          <strong>{QUESTION_FIDELITY_LABELS[level]}</strong> —{' '}
+          {QUESTION_FIDELITY_DESCRIPTIONS[level]}
+        </p>
+        {isFreeText && (
+          <p className="mt-2">
+            This is a free-text question, so <strong>Must ask</strong> means the interviewer speaks
+            the wording exactly as written — there is no answer control to show, and the respondent
+            replies in the chat as usual.
+          </p>
+        )}
+        {!enabled && (
+          <p className="mt-2">
+            Currently <strong>inactive</strong>: every question is asked openly until you switch on{' '}
+            <em>Settings → Per-question fidelity</em>. You can set levels now and they will take
+            effect when you do.
+          </p>
+        )}
       </FieldHelp>
     </div>
   );

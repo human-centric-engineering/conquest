@@ -87,6 +87,8 @@ export interface DefinitionQuestion {
   typeConfig: unknown;
   required: boolean;
   weight: number;
+  /** Five-stop `ask as written ↔ fill creatively` dial (0 … 1). */
+  fidelity: number;
   /** Tags by label — remapped to freshly-minted tag ids on import. */
   tagLabels: string[];
 }
@@ -231,6 +233,7 @@ export function buildDefinitionExport(
           typeConfig: q.typeConfig,
           required: q.required,
           weight: q.weight,
+          fidelity: q.fidelity,
           tagLabels: q.tags.map((t) => t.label),
         })),
       })),
@@ -281,6 +284,9 @@ const questionImportSchema = z.object({
   typeConfig: z.unknown().optional(),
   required: z.boolean(),
   weight: z.number(),
+  // Defaulted: envelopes exported before question fidelity shipped carry no value, and the
+  // neutral midpoint is exactly the behaviour they were exported with.
+  fidelity: z.number().min(0).max(1).default(0.5),
   tagLabels: z.array(z.string()).default([]),
 });
 

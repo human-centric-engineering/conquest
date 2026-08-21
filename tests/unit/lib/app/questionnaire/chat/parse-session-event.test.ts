@@ -218,3 +218,67 @@ describe('parseSessionEvent', () => {
     expect(parseSessionEvent(block('warning', { code: 42, message: 'M' }))).toBeNull();
   });
 });
+
+describe('question_card frames (P18)', () => {
+  const frame = (data: unknown) => `event: question_card\ndata: ${JSON.stringify(data)}`;
+
+  it('narrows a well-formed card', () => {
+    const parsed = parseSessionEvent(
+      frame({
+        card: {
+          questionKey: 'workload',
+          prompt: 'How satisfied are you with your current workload?',
+          type: 'likert',
+          typeConfig: { min: 1, max: 5 },
+          required: true,
+          reason: 'must_ask',
+        },
+      })
+    );
+    expect(parsed).toEqual({
+      type: 'question_card',
+      card: {
+        questionKey: 'workload',
+        prompt: 'How satisfied are you with your current workload?',
+        type: 'likert',
+        typeConfig: { min: 1, max: 5 },
+        required: true,
+        reason: 'must_ask',
+      },
+    });
+  });
+
+  it('drops a card missing the fields its Submit needs', () => {
+    // Rendering a half-formed card is worse than rendering none: the interviewer's prose still asked
+    // the question, so the respondent can answer in the composer — but a card with no questionKey
+    // would give them a control whose Submit has nowhere to write.
+    expect(parseSessionEvent(frame({ card: { prompt: 'x', type: 'likert' } }))).toBeNull();
+    expect(parseSessionEvent(frame({ card: { questionKey: 'w', type: 'likert' } }))).toBeNull();
+    expect(parseSessionEvent(frame({ card: { questionKey: 'w', prompt: 'x' } }))).toBeNull();
+    expect(parseSessionEvent(frame({}))).toBeNull();
+  });
+
+  it('preserves a last_resort reason', () => {
+    // The two reasons drive different respondent-facing copy — collapsing them would label a
+    // fallback as a deliberate design.
+    const parsed = parseSessionEvent(
+      frame({ card: { questionKey: 'w', prompt: 'x', type: 'likert', reason: 'last_resort' } })
+    );
+    expect(parsed).toMatchObject({ card: { reason: 'last_resort' } });
+  });
+
+  it('drops a card whose type is not a known question type', () => {
+    expect(
+      parseSessionEvent(frame({ card: { questionKey: 'w', prompt: 'x', type: 'slider' } }))
+    ).toBeNull();
+  });
+
+  it('defaults required to false and an unknown reason to must_ask', () => {
+    const parsed = parseSessionEvent(
+      frame({ card: { questionKey: 'w', prompt: 'x', type: 'boolean' } })
+    );
+    expect(parsed).toMatchObject({
+      card: { required: false, reason: 'must_ask', typeConfig: null },
+    });
+  });
+});

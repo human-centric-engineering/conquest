@@ -22,7 +22,7 @@ import { logger } from '@/lib/logging';
 import {
   requiredFirstPool,
   terminalDecision,
-  unansweredQuestions,
+  selectableQuestions,
 } from '@/lib/app/questionnaire/selection/context';
 import { weightedScores } from '@/lib/app/questionnaire/selection/strategies/weighted';
 import {
@@ -78,7 +78,7 @@ async function select(ctx: SelectionContext, deps?: StrategyDeps): Promise<Selec
   const terminal = terminalDecision(ctx);
   if (terminal) return terminal;
 
-  const pool = requiredFirstPool(unansweredQuestions(ctx));
+  const pool = requiredFirstPool(selectableQuestions(ctx));
 
   // No deps (adaptive disabled / not wired) or no conversation yet → weighted.
   const lastMessage = ctx.recentMessages?.[ctx.recentMessages.length - 1]?.trim();

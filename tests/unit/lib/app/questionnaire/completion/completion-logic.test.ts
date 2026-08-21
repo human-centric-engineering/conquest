@@ -231,6 +231,147 @@ describe('assessCompletion', () => {
   });
 });
 
+describe('assessCompletion — the per-question fidelity floor (P18)', () => {
+  const ON = { enabled: true, defaultFidelity: 0.5 } as const;
+  const OFF = { enabled: false, defaultFidelity: 0.5 } as const;
+
+  it('does not count a must-ask answer that sits below its raised bar', () => {
+    // 0.75 clears the ordinary 0.5 confirmation floor but not must-ask's 0.85 — and 0.75 is exactly
+    // the opportunistic typed cap, so this is precisely the "filled in the background, never
+    // actually asked" case the feature exists to catch.
+    const assessment = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [{ questionId: 'a', confidence: 0.75 }],
+        config: {
+          answerConfidenceFloor: 0.5,
+          coverageThreshold: 1,
+          minQuestionsAnswered: 1,
+          questionFidelity: ON,
+        },
+      })
+    );
+    expect(assessment.kind).toBe('not_ready');
+    expect(assessment.answeredCount).toBe(0);
+  });
+
+  it('counts the same answer once it clears the bar', () => {
+    const assessment = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [{ questionId: 'a', confidence: 0.9 }],
+        config: {
+          answerConfidenceFloor: 0.5,
+          coverageThreshold: 1,
+          minQuestionsAnswered: 1,
+          questionFidelity: ON,
+        },
+      })
+    );
+    expect(assessment.kind).toBe('offer');
+  });
+
+  it('keeps a below-bar must-ask REQUIRED question blocking the offer', () => {
+    const assessment = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1, required: true })],
+        answered: [{ questionId: 'a', confidence: 0.75 }],
+        config: { answerConfidenceFloor: 0.5, questionFidelity: ON },
+      })
+    );
+    expect(assessment.kind).toBe('blocked_on_required');
+    expect(assessment.requiredUnansweredKeys).toEqual(['a']);
+  });
+
+  it('raises the bar for a must-ask question even when the configured floor is 0', () => {
+    // A floor of 0 disables the flat gate entirely. Fidelity must still apply, or marking a question
+    // must-ask would do nothing on the many questionnaires that leave the floor off.
+    const assessment = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [{ questionId: 'a', confidence: 0.5 }],
+        config: {
+          answerConfidenceFloor: 0,
+          coverageThreshold: 1,
+          minQuestionsAnswered: 1,
+          questionFidelity: ON,
+        },
+      })
+    );
+    expect(assessment.kind).toBe('not_ready');
+  });
+
+  it('grades an answer whose question is not in this version against the FLAT floor', () => {
+    // These are real: an Adaptive Scope session narrows `questions` but keeps answers captured
+    // before the plan narrowed. Such an answer has no per-question floor, and falling back to 0
+    // would let a tentative out-of-scope answer start counting toward `minQuestionsAnswered` —
+    // a behaviour change the per-question floor must not smuggle in.
+    const config = {
+      answerConfidenceFloor: 0.5,
+      coverageThreshold: 1,
+      minQuestionsAnswered: 1,
+      questionFidelity: ON,
+    };
+    const below = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [
+          { questionId: 'a', confidence: 0.9 },
+          { questionId: 'ghost', confidence: 0.1 },
+        ],
+        config,
+      })
+    );
+    expect(below.answeredCount).toBe(1); // the ghost is below the flat floor — not counted
+
+    const above = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [
+          { questionId: 'a', confidence: 0.9 },
+          { questionId: 'ghost', confidence: 0.7 },
+        ],
+        config,
+      })
+    );
+    expect(above.answeredCount).toBe(2); // above the flat floor — counted, as before fidelity
+  });
+
+  it('is inert while the version gate is off', () => {
+    // Same data, gate off: the pre-feature behaviour, exactly.
+    const assessment = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 1 })],
+        answered: [{ questionId: 'a', confidence: 0.75 }],
+        config: {
+          answerConfidenceFloor: 0.5,
+          coverageThreshold: 1,
+          minQuestionsAnswered: 1,
+          questionFidelity: OFF,
+        },
+      })
+    );
+    expect(assessment.kind).toBe('offer');
+  });
+
+  it('never lowers the configured floor for a `free` question', () => {
+    // `free` means "you need not ask this directly", not "a tentative guess is enough to finish on".
+    const assessment = assessCompletion(
+      cctx({
+        questions: [q({ id: 'a', fidelity: 0 })],
+        answered: [{ questionId: 'a', confidence: 0.4 }],
+        config: {
+          answerConfidenceFloor: 0.5,
+          coverageThreshold: 1,
+          minQuestionsAnswered: 1,
+          questionFidelity: ON,
+        },
+      })
+    );
+    expect(assessment.kind).toBe('not_ready');
+  });
+});
+
 describe('assessCompletion — early finish (escape hatch)', () => {
   // Four equal-weight questions, two answered → 50% coverage, answeredCount 2.
   const fourQ = [q({ id: 'a' }), q({ id: 'b' }), q({ id: 'c' }), q({ id: 'd' })];

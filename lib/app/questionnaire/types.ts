@@ -677,6 +677,152 @@ export const DEFAULT_INTERVIEWER_STRATEGY: InterviewerStrategySettings = {
 };
 
 /**
+ * Question fidelity — how faithfully the interviewer must put ONE question to the respondent.
+ *
+ * The product's default posture is that a respondent should never fill in a form: the interviewer
+ * converses, targets data slots, and fills the underlying questions in the background (see
+ * `data-slots.md` / `opportunistic-fill.md`). That is right for most questions and wrong for some.
+ * A validated Likert battery, a regulatory question, or a matrix whose comparability depends on
+ * exact wording are *instruments* — paraphrasing them destroys the thing being measured.
+ *
+ * Fidelity is the per-question dial between those two poles, stored on `AppQuestionSlot.fidelity`
+ * and snapped to five stops so each maps to one distinct prompt clause (a continuous dial would
+ * imply a resolution the runtime cannot act on):
+ *
+ *   0.00 `free`      — never needs to surface at all; inference carries it.
+ *   0.25 `loose`     — may approach the underlying idea from any angle.
+ *   0.50 `balanced`  — TODAY'S BEHAVIOUR: open invitation, reply mapped for them.
+ *   0.75 `close`     — may paraphrase, but keeps the author's terms, qualifiers and timeframe.
+ *   1.00 `must_ask`  — asked as written; typed questions get their real control inline.
+ *
+ * `balanced` is the default and emits no prompt clause, so an untouched questionnaire is
+ * byte-identical to before this feature. The second no-op layer is {@link QuestionFidelitySettings}
+ * — until an admin enables it, {@link resolveQuestionFidelity} returns `balanced` for every
+ * question regardless of what is stored.
+ *
+ * Distinct from `weight` (how strongly the *weighted* strategy favours a question, and how much it
+ * counts toward coverage) and from `required` (whether it must be answered at all). Fidelity says
+ * nothing about whether to ask — only how.
+ */
+export const QUESTION_FIDELITY_STOPS = [0, 0.25, 0.5, 0.75, 1] as const;
+export type QuestionFidelityStop = (typeof QUESTION_FIDELITY_STOPS)[number];
+
+/** The stop a question sits on, as a stable slug for prompt/branch logic. */
+export const QUESTION_FIDELITY_LEVELS = ['free', 'loose', 'balanced', 'close', 'must_ask'] as const;
+export type QuestionFidelityLevel = (typeof QUESTION_FIDELITY_LEVELS)[number];
+
+/** The neutral midpoint — today's behaviour, and every creation path's default. */
+export const DEFAULT_QUESTION_FIDELITY_VALUE: QuestionFidelityStop = 0.5;
+
+/** Stop value → level slug. Index-aligned with {@link QUESTION_FIDELITY_STOPS}. */
+export const QUESTION_FIDELITY_LEVEL_BY_STOP: Record<QuestionFidelityStop, QuestionFidelityLevel> =
+  {
+    0: 'free',
+    0.25: 'loose',
+    0.5: 'balanced',
+    0.75: 'close',
+    1: 'must_ask',
+  };
+
+/** Level slug → stop value. The inverse of {@link QUESTION_FIDELITY_LEVEL_BY_STOP}. */
+export const QUESTION_FIDELITY_STOP_BY_LEVEL: Record<QuestionFidelityLevel, QuestionFidelityStop> =
+  {
+    free: 0,
+    loose: 0.25,
+    balanced: 0.5,
+    close: 0.75,
+    must_ask: 1,
+  };
+
+/** Human labels — single source for the Structure-editor slider and any display. */
+export const QUESTION_FIDELITY_LABELS: Record<QuestionFidelityLevel, string> = {
+  free: 'Free',
+  loose: 'Loose',
+  balanced: 'Balanced',
+  close: 'Close',
+  must_ask: 'Must ask',
+};
+
+/** One-line explanations, shown under the slider so the admin sees what they just chose. */
+export const QUESTION_FIDELITY_DESCRIPTIONS: Record<QuestionFidelityLevel, string> = {
+  free: 'Never needs to be asked — fill it from anything the respondent says.',
+  loose: 'Approach the underlying idea from whatever angle the conversation offers.',
+  balanced: 'Ask it openly and map their reply. The standard conversational behaviour.',
+  close: 'Paraphrase if it helps, but keep the wording, qualifiers and timeframe intact.',
+  must_ask: 'Put it to them as written. Choice and scale questions show their real answer control.',
+};
+
+/**
+ * Clamp an arbitrary stored number onto the five-stop grid. Out-of-range and non-finite values
+ * (hand-edited JSON, a legacy import, a bad API call) land on the neutral midpoint rather than
+ * throwing — a malformed fidelity must never break a live turn.
+ */
+export function clampQuestionFidelity(value: unknown): QuestionFidelityStop {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_QUESTION_FIDELITY_VALUE;
+  const bounded = Math.min(1, Math.max(0, value));
+  // Snap to the nearest 0.25 step; `toFixed` avoids 0.30000000000000004-style drift.
+  const snapped = Number((Math.round(bounded * 4) / 4).toFixed(2));
+  return snapped as QuestionFidelityStop;
+}
+
+/** The level slug for a stored fidelity value, clamping first. */
+export function questionFidelityLevel(value: unknown): QuestionFidelityLevel {
+  return QUESTION_FIDELITY_LEVEL_BY_STOP[clampQuestionFidelity(value)];
+}
+
+/**
+ * The version-level gate. Off ⇒ every question's stored `fidelity` is inert and
+ * {@link resolveQuestionFidelity} answers `balanced`, so an admin can pre-set values on the
+ * Structure editor before switching the behaviour on (and can switch it off again to get today's
+ * behaviour back without losing what they set).
+ *
+ * `defaultFidelity` is what NEW questions are created at once the feature is on — an instrument-led
+ * questionnaire may reasonably want `close` as its baseline rather than `balanced`.
+ */
+export type QuestionFidelitySettings = {
+  /** Off ⇒ stored per-question fidelity is ignored everywhere. */
+  enabled: boolean;
+  /** The stop new questions start on. Clamped to the five-stop grid on read. */
+  defaultFidelity: QuestionFidelityStop;
+};
+
+/** Off by default — an existing questionnaire's behaviour must not change on deploy. */
+export const DEFAULT_QUESTION_FIDELITY: QuestionFidelitySettings = {
+  enabled: false,
+  defaultFidelity: DEFAULT_QUESTION_FIDELITY_VALUE,
+};
+
+/**
+ * Narrow the Json config column defensively (same discipline as the other Json config blocks):
+ * a missing, malformed, or partially-written value degrades to the default rather than throwing.
+ */
+export function narrowQuestionFidelity(value: unknown): QuestionFidelitySettings {
+  if (typeof value !== 'object' || value === null) return DEFAULT_QUESTION_FIDELITY;
+  const v = value as Record<string, unknown>;
+  return {
+    enabled: typeof v.enabled === 'boolean' ? v.enabled : DEFAULT_QUESTION_FIDELITY.enabled,
+    defaultFidelity:
+      v.defaultFidelity === undefined
+        ? DEFAULT_QUESTION_FIDELITY.defaultFidelity
+        : clampQuestionFidelity(v.defaultFidelity),
+  };
+}
+
+/**
+ * THE read seam every runtime consumer must go through — the single place the gate is honoured.
+ * Reading `slot.fidelity` directly anywhere else would apply a stored value on a questionnaire
+ * whose admin never switched the feature on.
+ */
+export function resolveQuestionFidelity(
+  storedFidelity: unknown,
+  settings: unknown
+): QuestionFidelityLevel {
+  const gate = narrowQuestionFidelity(settings);
+  if (!gate.enabled) return 'balanced';
+  return questionFidelityLevel(storedFidelity);
+}
+
+/**
  * Interviewer house rules — the client-specific behaviour policy for ONE questionnaire.
  *
  * The third and last of the interviewer-shaping config blocks, and deliberately distinct from its two
@@ -1360,6 +1506,13 @@ export type QuestionnaireConfigShape = {
    */
   houseRules: HouseRulesSettings;
   /**
+   * Question fidelity — the per-question "ask it as written ↔ fill it creatively" dial, and the
+   * gate that activates it. Off by default; while off, every question resolves to `balanced`
+   * (today's behaviour) whatever `AppQuestionSlot.fidelity` holds. See
+   * {@link QuestionFidelitySettings} and {@link resolveQuestionFidelity}.
+   */
+  questionFidelity: QuestionFidelitySettings;
+  /**
    * Respondent Report — the per-respondent report delivered after completion. See
    * {@link RespondentReportSettings}. Off by default.
    */
@@ -1458,6 +1611,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   personaSelection: DEFAULT_PERSONA_SELECTION,
   interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
   houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
+  questionFidelity: DEFAULT_QUESTION_FIDELITY,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,

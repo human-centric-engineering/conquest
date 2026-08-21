@@ -222,6 +222,68 @@ describe('useQuestionnaireSessionStream', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  it('attaches a question_card frame onto the committed turn', async () => {
+    // The card rides on the turn (like warnings and reasoning) rather than living in its own slot,
+    // so it retires automatically when the next turn arrives.
+    const card = {
+      questionKey: 'workload',
+      prompt: 'How satisfied are you with your current workload?',
+      type: 'likert',
+      typeConfig: { min: 1, max: 5 },
+      required: true,
+      reason: 'must_ask',
+    };
+    fetchMock.mockResolvedValue(
+      streamResponse([
+        frame('start', { conversationId: SESSION_ID, messageId: SESSION_ID }),
+        frame('content', { delta: 'One as written:' }),
+        frame('question_card', { card }),
+        frame('done', { costUsd: 0 }),
+      ])
+    );
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.turns.at(-1)).toEqual({
+      role: 'assistant',
+      content: 'One as written:',
+      card,
+    });
+  });
+
+  it('omits the card key when no question_card frame arrives', async () => {
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.sendMessage('hi');
+    });
+
+    expect(result.current.turns.at(-1)).not.toHaveProperty('card');
+  });
+
+  it('continueAfterCard posts the answered key with NO message and no respondent bubble', async () => {
+    // The answer is already persisted by the card's own write. Sending it as a chat message would
+    // leak a form value into the transcript and re-run extraction over text nobody typed.
+    fetchMock.mockResolvedValue(streamResponse(HAPPY_FRAMES));
+
+    const { result } = renderHook(() => useQuestionnaireSessionStream({ sessionId: SESSION_ID }));
+    await act(async () => {
+      await result.current.continueAfterCard('workload');
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(body.answeredQuestionKey).toBe('workload');
+    expect(body.message).toBeUndefined();
+    expect(result.current.turns.filter((t) => t.role === 'user')).toHaveLength(0);
+  });
+
   it('omits the reasoning key entirely when no reasoning frame arrives', async () => {
     // The committed turn must not carry an empty `reasoning: []` — the attachment is conditional on
     // a frame actually arriving, so the false branch leaves the key off.

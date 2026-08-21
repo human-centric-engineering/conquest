@@ -8,6 +8,7 @@
  * stay exhaustively unit-testable.
  */
 
+import { resolveQuestionFidelity, type QuestionFidelityLevel } from '@/lib/app/questionnaire/types';
 import type {
   QuestionView,
   SelectionContext,
@@ -48,6 +49,104 @@ export function unansweredQuestions(
     .filter((q) => !answered.has(q.id))
     .slice()
     .sort(compareQuestions);
+}
+
+/**
+ * How confidently a question must be answered before it counts as *satisfied* — i.e. before it
+ * stops being worth re-targeting and may count toward completion.
+ *
+ * The base is the admin's `answerConfidenceFloor` (the opportunistic-fill confirmation floor).
+ * Question fidelity can RAISE it and can never lower it:
+ *
+ * | Level      | Floor                            |
+ * | ---------- | -------------------------------- |
+ * | free       | the configured floor             |
+ * | loose      | the configured floor             |
+ * | balanced   | the configured floor             |
+ * | close      | max(configured, 0.65)            |
+ * | must_ask   | max(configured, 0.85)            |
+ *
+ * **Only-ever-raises is the invariant that makes this safe.** Turning fidelity on can never let a
+ * session complete on weaker evidence than it would have before — the worst it can do is ask for
+ * more. That is also why `free` sits at the configured floor rather than 0: `free` means "you need
+ * not ask this directly", not "a 0.3 tangential guess is good enough to finish on".
+ *
+ * The two raised bars are the mechanism behind "must ask it — unless it was already filled
+ * tangentially with high confidence". They need no new tuning: an opportunistic fill is already
+ * capped at 0.75 (typed) / 0.45 (free text), so it can never on its own satisfy a `must_ask`
+ * question. Only a genuine `direct` extraction, or corroboration climbing via `accrueConfidence`
+ * toward the 0.95 ceiling, clears 0.85.
+ */
+const FIDELITY_FLOOR: Record<QuestionFidelityLevel, number> = {
+  free: 0,
+  loose: 0,
+  balanced: 0,
+  close: 0.65,
+  must_ask: 0.85,
+};
+
+export function questionSatisfactionFloor(
+  question: Pick<QuestionView, 'fidelity'>,
+  config: Pick<CoverageContext['config'], 'answerConfidenceFloor' | 'questionFidelity'>
+): number {
+  const level = resolveQuestionFidelity(question.fidelity, config.questionFidelity);
+  return Math.max(config.answerConfidenceFloor, FIDELITY_FLOOR[level]);
+}
+
+/**
+ * Questions that still need work: never answered, OR answered only below their own satisfaction
+ * floor ({@link questionSatisfactionFloor}).
+ *
+ * The floor-aware counterpart of {@link unansweredQuestions}, which asks the simpler "is there an
+ * answer row at all?" question that identity-based callers (dedup, candidacy) still want. An
+ * *unscored* answer (`confidence: null`) is authoritative — a respondent's own edit or a
+ * non-opportunistic capture — and always satisfies.
+ *
+ * Where a question has several answer rows its BEST confidence wins, mirroring the distinct-question
+ * dedup used by {@link answeredCount} and {@link gradedCoverage}: a later corroborating row must
+ * never make an already-satisfied question look unsatisfied again.
+ */
+export function unsatisfiedQuestions(ctx: CoverageContext): QuestionView[] {
+  const best = new Map<string, number>();
+  for (const a of ctx.answered) {
+    // `null` (unscored/authoritative) is treated as full confidence, matching `gradedCoverage`.
+    const c = a.confidence ?? 1;
+    const prev = best.get(a.questionId);
+    if (prev === undefined || c > prev) best.set(a.questionId, c);
+  }
+  return ctx.questions
+    .filter((q) => (best.get(q.id) ?? -1) < questionSatisfactionFloor(q, ctx.config))
+    .slice()
+    .sort(compareQuestions);
+}
+
+/**
+ * The pool every strategy picks from: questions that have never been answered, PLUS any `must_ask`
+ * question sitting below its satisfaction floor.
+ *
+ * The second half is what makes "must ask" a guarantee rather than a hint. A must-ask question the
+ * extractor filled tangentially at 0.6 has an answer row, so {@link unansweredQuestions} drops it —
+ * and it would never be re-targeted, however hard {@link terminalDecision} tried to keep the session
+ * open for it.
+ *
+ * **This function and `terminalDecision` must agree.** `terminalDecision` returns `null` (meaning
+ * "pick something") exactly when this pool is non-empty; every strategy relies on that invariant and
+ * would dereference `pool[0]` on an empty array otherwise. Keep the two in step.
+ *
+ * Only `must_ask` re-enters the pool. `close` raises the completion floor but is not a promise that
+ * the question will be put to the respondent, so re-targeting it could loop on a question the
+ * respondent has already answered as well as they are going to.
+ */
+export function selectableQuestions(ctx: CoverageContext): QuestionView[] {
+  const unanswered = unansweredQuestions(ctx);
+  const unansweredIds = new Set(unanswered.map((q) => q.id));
+  const outstandingMustAsk = unsatisfiedQuestions(ctx).filter(
+    (q) =>
+      !unansweredIds.has(q.id) &&
+      resolveQuestionFidelity(q.fidelity, ctx.config.questionFidelity) === 'must_ask'
+  );
+  if (outstandingMustAsk.length === 0) return unanswered;
+  return [...unanswered, ...outstandingMustAsk].sort(compareQuestions);
 }
 
 /**
@@ -214,15 +313,35 @@ export function terminalDecision(ctx: SelectionContext): SelectionDecision | nul
     };
   }
 
+  // A `must_ask` question that has not yet been answered to its bar keeps the session going, even
+  // once the coverage thresholds are met — an instrument question the respondent was never actually
+  // asked is the exact failure this feature exists to prevent, and letting weighted coverage close
+  // the session over it would silently reintroduce it.
+  //
+  // Deliberately placed AFTER the cap check, so `maxQuestionsPerSession` still wins: the cap is the
+  // explicit "stop here" and must stay the backstop against a question that can never be satisfied.
+  // (The same "can block until the cap" property already exists for required questions and for
+  // `answerConfidenceFloor`; this raises the bar on the same accepted mechanism rather than adding
+  // a new kind of dead end.) Inert unless the version's fidelity gate is on.
+  const outstandingMustAsk = unsatisfiedQuestions(ctx).filter(
+    (q) => resolveQuestionFidelity(q.fidelity, ctx.config.questionFidelity) === 'must_ask'
+  );
+
   const coverage = coverageRatio(ctx);
-  if (coverage + COVERAGE_EPSILON >= coverageThreshold && answered >= minQuestionsAnswered) {
+  if (
+    outstandingMustAsk.length === 0 &&
+    coverage + COVERAGE_EPSILON >= coverageThreshold &&
+    answered >= minQuestionsAnswered
+  ) {
     return {
       kind: 'complete',
       rationale: `Coverage ${pct(coverage)} meets the ${pct(coverageThreshold)} threshold with ${answered} answered (min ${minQuestionsAnswered}).`,
     };
   }
 
-  if (unansweredQuestions(ctx).length === 0) {
+  // Uses the SAME pool the strategies pick from, so "returned null" always means "there is something
+  // to ask" — a below-bar must-ask keeps the session going precisely because it is still selectable.
+  if (selectableQuestions(ctx).length === 0) {
     return {
       kind: 'none',
       rationale: `No questions remain, but completion is unmet (need ≥${minQuestionsAnswered} answered at ≥${pct(coverageThreshold)} coverage; have ${answered} at ${pct(coverage)}).`,

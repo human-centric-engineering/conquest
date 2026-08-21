@@ -218,6 +218,148 @@ describe('buildStreamingQuestionPrompt', () => {
     return content;
   };
 
+  // ── Question fidelity (P18) ────────────────────────────────────────────────
+
+  describe('question fidelity', () => {
+    const LIKERT: QuestionComposeInput = {
+      ...INPUT,
+      type: 'likert',
+      typeConfig: { min: 1, max: 5, minLabel: 'Not at all', maxLabel: 'Extremely' },
+    };
+
+    it('emits NO section and the identical prompt at balanced or when absent', () => {
+      // The no-op guarantee, asserted at the only place it can actually be observed: an untouched
+      // questionnaire must produce byte-identical prompt text to one that never heard of fidelity.
+      const absent = buildStreamingQuestionPrompt(LIKERT);
+      const balanced = buildStreamingQuestionPrompt({ ...LIKERT, fidelity: 'balanced' });
+
+      expect(text(absent[0].content)).not.toContain('<question_fidelity>');
+      expect(text(balanced[0].content)).toBe(text(absent[0].content));
+      expect(text(balanced[1].content)).toBe(text(absent[1].content));
+    });
+
+    it('places the section AFTER rules and interviewer_strategy so it can override them', () => {
+      // Prompt convention is later-section-wins. Placed earlier, "ask openly, never read out the
+      // options" would beat "ask it as written" and a must-ask Likert would still be asked openly.
+      const system = text(
+        buildStreamingQuestionPrompt({ ...LIKERT, fidelity: 'must_ask' })[0].content
+      );
+      expect(system.indexOf('<question_fidelity>')).toBeGreaterThan(system.indexOf('<rules>'));
+      expect(system.indexOf('<question_fidelity>')).toBeGreaterThan(
+        system.indexOf('<interviewer_strategy>')
+      );
+    });
+
+    it('tells the model to ask verbatim, and offers the scale on the FIRST ask', () => {
+      // Not gated on isReask: waiting for a failed turn before presenting the scale would defeat the
+      // point of marking the question must-ask.
+      const messages = buildStreamingQuestionPrompt({ ...LIKERT, fidelity: 'must_ask' });
+      expect(text(messages[0].content)).toContain('<question_fidelity>');
+      const user = text(messages[1].content);
+      expect(user).toMatch(/EXACTLY as written/);
+      expect(user).toMatch(/must be asked as written, so present its answer options/i);
+      expect(user).toContain('1–5');
+      expect(user).toContain('Not at all');
+    });
+
+    it('does not offer the scale at balanced on a first ask (unchanged behaviour)', () => {
+      const user = text(buildStreamingQuestionPrompt(LIKERT)[1].content);
+      expect(user).not.toMatch(/1–5/);
+    });
+
+    it('still offers the scale as a concession on a balanced RE-ask', () => {
+      // The original Phase 5 struggling-re-ask path must survive untouched.
+      const user = text(buildStreamingQuestionPrompt({ ...LIKERT, isReask: true })[1].content);
+      expect(user).toMatch(/wasn't clear enough to map/i);
+      expect(user).toContain('1–5');
+    });
+
+    it('marks the wording as load-bearing at close without demanding the scale', () => {
+      const user = text(buildStreamingQuestionPrompt({ ...LIKERT, fidelity: 'close' })[1].content);
+      expect(user).toMatch(/Keep its specific terms, qualifiers and timeframe intact/i);
+      expect(user).not.toMatch(/present its answer options/i);
+    });
+
+    it('asks a free-text must-ask verbatim with no options offered', () => {
+      const messages = buildStreamingQuestionPrompt({ ...INPUT, fidelity: 'must_ask' });
+      const user = text(messages[1].content);
+      expect(user).toMatch(/EXACTLY as written/);
+      expect(user).toContain(PROMPT);
+      expect(user).not.toMatch(/present its answer options/i);
+    });
+
+    it('lists the rows and the shared scale for a must-ask matrix question', () => {
+      // A matrix is the type most damaged by paraphrase — its comparability depends on every
+      // respondent rating the same rows on the same scale.
+      const user = text(
+        buildStreamingQuestionPrompt({
+          ...INPUT,
+          fidelity: 'must_ask',
+          type: 'matrix',
+          typeConfig: {
+            rows: [
+              { key: 'pay', label: 'Pay' },
+              { key: 'progression', label: 'Progression' },
+            ],
+            scale: { min: 1, max: 5, minLabel: 'Very poor', maxLabel: 'Very good' },
+          },
+        })[1].content
+      );
+      expect(user).toContain('Pay');
+      expect(user).toContain('Progression');
+      expect(user).toContain('1–5');
+      expect(user).toContain('Very poor');
+    });
+
+    it('suppresses the option read-out when the surface renders the real control', () => {
+      // The card IS the option list. Reciting it in prose as well leaves the respondent
+      // reconciling two copies — while the verbatim-wording demand must still stand.
+      const messages = buildStreamingQuestionPrompt({
+        ...LIKERT,
+        fidelity: 'must_ask',
+        answerControlShown: true,
+      });
+      expect(text(messages[0].content)).toContain('<question_fidelity>');
+      const user = text(messages[1].content);
+      expect(user).toMatch(/EXACTLY as written/);
+      expect(user).not.toMatch(/present its answer options/i);
+      expect(user).not.toContain('1–5');
+    });
+
+    it('suppresses the read-out on a must-ask RE-ASK when the control is shown', () => {
+      // A must-ask question can also hit the ordinary struggling-re-ask path, which has its own
+      // "you MAY gently offer the choices" concession — that must be suppressed too.
+      const user = text(
+        buildStreamingQuestionPrompt({
+          ...LIKERT,
+          fidelity: 'must_ask',
+          answerControlShown: true,
+          isReask: true,
+        })[1].content
+      );
+      expect(user).not.toContain('1–5');
+      expect(user).not.toMatch(/wasn't clear enough to map/i);
+    });
+
+    it('offers the choice labels for a must-ask single-choice question', () => {
+      const user = text(
+        buildStreamingQuestionPrompt({
+          ...INPUT,
+          fidelity: 'must_ask',
+          type: 'single_choice',
+          typeConfig: {
+            choices: [
+              { value: 'a', label: 'Very easy' },
+              { value: 'b', label: 'Very hard' },
+            ],
+          },
+        })[1].content
+      );
+      expect(user).toContain('Very easy');
+      expect(user).toContain('Very hard');
+    });
+  });
+
   it('instructs to acknowledge the prior answer on a normal turn and includes the prompt + last message', () => {
     const messages = buildStreamingQuestionPrompt(INPUT);
     expect(messages).toHaveLength(2);

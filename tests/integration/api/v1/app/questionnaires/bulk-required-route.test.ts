@@ -28,6 +28,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/fork', () => ({ forkVersionIfLaunc
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireVersion: { findFirst: vi.fn() },
+  appQuestionnaireSection: { findFirst: vi.fn() },
   appQuestionSlot: { updateMany: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -121,6 +122,41 @@ describe('bulk requiredness PATCH', () => {
     );
   });
 
+  it('sets fidelity across the version and audits it under its own action', async () => {
+    // Fidelity rides the same route (same fork + audit path) but is a distinct operation, so the
+    // original `bulk_required` action string stays reserved for the original one.
+    const res = await PATCH(req({ fidelity: 1 }), ctx);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'v1' },
+      data: { fidelity: 1 },
+    });
+    expect(json.data).toEqual({ updated: 5, fidelity: 1 });
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_question.bulk_fidelity' })
+    );
+  });
+
+  it('narrows a fidelity set to one section when sectionId is given', async () => {
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ id: 'sec-1' });
+
+    await PATCH(req({ fidelity: 0.75, sectionId: 'sec-1' }), ctx);
+
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'v1', sectionId: 'sec-1' },
+      data: { fidelity: 0.75 },
+    });
+  });
+
+  it('rejects a body that sets neither required nor fidelity', async () => {
+    // An empty body would otherwise updateMany every row with no data and report a misleading count.
+    const res = await PATCH(req({}), ctx);
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionSlot.updateMany).not.toHaveBeenCalled();
+  });
+
   it('sets every question optional when required is false', async () => {
     await PATCH(req({ required: false }), ctx);
     expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
@@ -156,5 +192,92 @@ describe('bulk requiredness PATCH', () => {
   it('400s when required is not a boolean', async () => {
     const res = await PATCH(req({ required: 'yes' }), ctx);
     expect(res.status).toBe(400);
+  });
+});
+
+describe('bulk fidelity PATCH — section scoping across a fork', () => {
+  it('re-resolves sectionId onto the COPIED section when the version forks', async () => {
+    // A fork mints new section rows, so the id the admin's browser holds names a section on the
+    // LAUNCHED version. Used as-is it would match nothing and silently update zero questions while
+    // still reporting success — the admin would think they had set a whole section's fidelity.
+    (forkVersionIfLaunched as unknown as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    prismaMock.appQuestionnaireSection.findFirst
+      .mockResolvedValueOnce({ ordinal: 3 }) // the source section, looked up by id on v1
+      .mockResolvedValueOnce({ id: 'sec-copy' }); // its copy on v2, matched by ordinal
+
+    await PATCH(req({ fidelity: 1, sectionId: 'sec-src' }), ctx);
+
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'v2', sectionId: 'sec-copy' },
+      data: { fidelity: 1 },
+    });
+  });
+
+  it('404s when the sectionId does not belong to the version being edited', async () => {
+    // Scoping the lookup to the version is what stops a section id from another questionnaire
+    // being used to bulk-edit rows the caller never named.
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue(null);
+
+    const res = await PATCH(req({ fidelity: 0.75, sectionId: 'sec-elsewhere' }), ctx);
+
+    expect(res.status).toBe(404);
+    expect(prismaMock.appQuestionSlot.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('404s when the sectionId is not on the launched version being forked from', async () => {
+    // The first lookup is scoped to the SOURCE version, so an id from another questionnaire fails
+    // here — before the fork's copy is ever consulted.
+    (forkVersionIfLaunched as unknown as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValueOnce(null);
+
+    const res = await PATCH(req({ fidelity: 1, sectionId: 'sec-elsewhere' }), ctx);
+
+    expect(res.status).toBe(404);
+    expect(prismaMock.appQuestionnaireSection.findFirst).toHaveBeenCalledTimes(1);
+    expect(prismaMock.appQuestionSlot.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('404s when the forked version has no section at the source ordinal', async () => {
+    (forkVersionIfLaunched as unknown as Mock).mockResolvedValue({
+      versionId: 'v2',
+      forked: true,
+      versionNumber: 2,
+    });
+    prismaMock.appQuestionnaireSection.findFirst
+      .mockResolvedValueOnce({ ordinal: 3 })
+      .mockResolvedValueOnce(null);
+
+    const res = await PATCH(req({ fidelity: 1, sectionId: 'sec-src' }), ctx);
+
+    expect(res.status).toBe(404);
+    expect(prismaMock.appQuestionSlot.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('sets both fields at once under the combined audit action', async () => {
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ id: 'sec-1' });
+
+    await PATCH(req({ required: true, fidelity: 0.25 }), ctx);
+
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'v1' },
+      data: { required: true, fidelity: 0.25 },
+    });
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_question.bulk_update' })
+    );
+  });
+
+  it('rejects a fidelity outside the slider range', async () => {
+    const res = await PATCH(req({ fidelity: 4 }), ctx);
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionSlot.updateMany).not.toHaveBeenCalled();
   });
 });

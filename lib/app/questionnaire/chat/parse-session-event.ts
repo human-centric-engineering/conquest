@@ -2,8 +2,8 @@
  * Typed adapter over the shared SSE frame parser for the respondent turn loop (F7.1).
  *
  * The `/messages` route streams the orchestration `ChatEvent` shape, but only ever
- * emits a small subset on this surface: `start`, `content`, `warning`, `done`, plus
- * a defensive `error`. This narrows a raw `{ type, data }` block into that subset so
+ * emits a small subset on this surface: `start`, `content`, `warning`, `question_card`,
+ * `done`, plus a defensive `error`. This narrows a raw `{ type, data }` block into that subset so
  * the stream consumer's switch stays small and exhaustively typed. Anything outside
  * the subset (or malformed) returns `null` and is ignored by the caller.
  *
@@ -17,6 +17,8 @@ import {
   type ReasoningStep,
 } from '@/lib/app/questionnaire/reasoning';
 import type { AgentCallTrace, InspectorMessage } from '@/lib/app/questionnaire/inspector';
+import type { QuestionCardPayload } from '@/lib/app/questionnaire/chat/question-card';
+import { QUESTION_TYPES, type QuestionType } from '@/lib/app/questionnaire/types';
 
 /** The `ChatEvent` variants the respondent `/messages` stream can produce. */
 export type SessionStreamEvent =
@@ -24,6 +26,10 @@ export type SessionStreamEvent =
   | { type: 'content'; delta: string }
   | { type: 'warning'; code: string; message: string; detail?: string }
   | { type: 'reasoning'; steps: ReasoningStep[] }
+  // Question fidelity (P18): render the question's REAL answer control beside this reply, instead
+  // of asking it in prose. Emitted for a typed `must_ask` question, or as a last resort when a
+  // re-ask still could not be mapped.
+  | { type: 'question_card'; card: QuestionCardPayload }
   // Preview Turn Inspector (admin-only): the agent-call trace for this turn. The server only emits
   // it for a preview session with the inspector toggle on — never to a real respondent.
   | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
@@ -94,6 +100,31 @@ function asAgentCallTrace(value: unknown): AgentCallTrace | null {
 }
 
 /**
+ * Narrow the `question_card` frame's payload, or drop it.
+ *
+ * Dropping (rather than rendering a half-formed card) is the right failure mode: the interviewer's
+ * prose still asked the question, so the respondent can always answer in the composer. A card with
+ * no `questionKey` would render a control whose Submit had nowhere to write.
+ */
+function asQuestionCard(value: unknown): QuestionCardPayload | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const questionKey = asString(v.questionKey);
+  const prompt = asString(v.prompt);
+  const type = asString(v.type);
+  if (questionKey === null || prompt === null || type === null) return null;
+  if (!(QUESTION_TYPES as readonly string[]).includes(type)) return null;
+  return {
+    questionKey,
+    prompt,
+    type: type as QuestionType,
+    typeConfig: v.typeConfig ?? null,
+    required: v.required === true,
+    reason: v.reason === 'last_resort' ? 'last_resort' : 'must_ask',
+  };
+}
+
+/**
  * Parse one SSE block into a narrowed session event, or `null` for keepalive
  * comments, unrecognised event types, and malformed payloads.
  */
@@ -126,6 +157,11 @@ export function parseSessionEvent(block: string): SessionStreamEvent | null {
       const steps = data.steps.map(asReasoningStep).filter((s): s is ReasoningStep => s !== null);
       if (steps.length === 0) return null;
       return { type: 'reasoning', steps };
+    }
+    case 'question_card': {
+      const card = asQuestionCard(data.card);
+      if (card === null) return null;
+      return { type: 'question_card', card };
     }
     case 'inspector': {
       if (!Array.isArray(data.calls)) return null;

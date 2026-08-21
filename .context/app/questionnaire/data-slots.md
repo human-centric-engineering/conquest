@@ -282,6 +282,12 @@ route then drives `runDataSlotTurn` (`orchestrator/data-slot-orchestrator.ts`) i
    slot counts as covered; a later confident answer **promotes** it (clears `provisional` via the
    upsert's shared write). The seriousness gate still runs first — a disregarded (abusive) turn
    never parks or records a provisional fill.
+   3a. **Must-ask hoist (P18)** — a question the author marked `must_ask`
+   ([`question-fidelity.md`](./question-fidelity.md)) is asked DIRECTLY as soon as every data slot
+   mapping it is covered — before bridging to a new theme, and ahead of the required-question
+   interleave. It cannot be left to the abstraction layer to infer, but firing it mid-theme would
+   interrupt the conversation, so it waits for its own ground to be worked through. It also blocks
+   the submit offer while it sits below its satisfaction floor.
 4. **Late-stage sweep** — once every data slot is covered, ask any still-unanswered **questions**
    directly.
 5. **Completion** — offer to submit only when **all questions** are answered (a data-slot-mode

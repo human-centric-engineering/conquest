@@ -8,7 +8,7 @@
  */
 
 import { registerStrategy } from '@/lib/app/questionnaire/selection/registry';
-import { terminalDecision, unansweredQuestions } from '@/lib/app/questionnaire/selection/context';
+import { selectableQuestions, terminalDecision } from '@/lib/app/questionnaire/selection/context';
 import type {
   SelectionContext,
   SelectionDecision,
@@ -21,7 +21,7 @@ async function select(ctx: SelectionContext): Promise<SelectionDecision> {
   if (terminal) return terminal;
 
   // terminalDecision returned null ⇒ at least one question remains.
-  const next = unansweredQuestions(ctx)[0];
+  const next = selectableQuestions(ctx)[0];
   return {
     kind: 'ask' as const,
     questionId: next.id,

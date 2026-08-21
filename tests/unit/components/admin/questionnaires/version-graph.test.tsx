@@ -50,6 +50,7 @@ function makeQuestion(over: Partial<QuestionSlotView> = {}): QuestionSlotView {
     typeConfig: null,
     required: false,
     weight: 1,
+    fidelity: 0.5,
     extractionConfidence: null,
     tags: [],
     ...over,

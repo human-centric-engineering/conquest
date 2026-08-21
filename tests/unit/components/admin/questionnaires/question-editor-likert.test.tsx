@@ -34,6 +34,7 @@ function likertQuestion(typeConfig: unknown): QuestionSlotView {
     typeConfig,
     required: true,
     weight: 0.5,
+    fidelity: 0.5,
     extractionConfidence: 0.8,
     tags: [],
   };
@@ -56,6 +57,7 @@ function renderEditor(question: QuestionSlotView, run: RunMutation = vi.fn()) {
           sections={[section]}
           question={question}
           tags={[]}
+          fidelityEnabled={false}
           run={run}
           busy={false}
         />

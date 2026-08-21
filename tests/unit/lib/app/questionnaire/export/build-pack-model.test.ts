@@ -45,6 +45,7 @@ function question(
     typeConfig: null,
     required: false,
     weight: 0.5,
+    fidelity: 0.5,
     extractionConfidence: null,
     tags: [],
     ...partial,

@@ -49,7 +49,17 @@ import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
-import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
+import {
+  ABUSE_ABANDON_REASON,
+  TONE_DIMENSION_KEYS,
+  narrowQuestionFidelity,
+  resolveQuestionFidelity,
+} from '@/lib/app/questionnaire/types';
+import {
+  buildQuestionCard,
+  shouldShowQuestionCard,
+  type QuestionCardPayload,
+} from '@/lib/app/questionnaire/chat/question-card';
 import {
   runTurn,
   runDataSlotTurn,
@@ -103,16 +113,30 @@ const bodySchema = z
     /** Optional files attached to this turn (images/documents) — read by the extractor. */
     attachments: chatAttachmentsArraySchema.optional(),
     /**
+     * Question fidelity (P18): the respondent just answered this question through its in-chat answer
+     * control, and the answer is ALREADY persisted (the card writes through `PUT …/answers`). This
+     * turn exists only so the interviewer acknowledges it and moves on, so it carries no respondent
+     * message — passing the answer as a fake user message would leak form values into the transcript
+     * and re-run extraction over text the respondent never typed.
+     */
+    answeredQuestionKey: z.string().max(200).optional(),
+    /**
      * Idempotency key for this send attempt (F7.x retry). The surface mints one per logical send and
      * reuses it across that send's retries, so a retry re-running a turn the server already persisted
      * is replayed from that row rather than duplicated. Optional: a send without one is never deduped.
      */
     idempotencyKey: z.string().uuid().optional(),
   })
-  .refine((b) => b.kickoff === true || (b.message?.trim().length ?? 0) > 0, {
-    message: 'message is required',
-    path: ['message'],
-  });
+  .refine(
+    (b) =>
+      b.kickoff === true ||
+      b.answeredQuestionKey !== undefined ||
+      (b.message?.trim().length ?? 0) > 0,
+    {
+      message: 'message is required',
+      path: ['message'],
+    }
+  );
 
 /** Chunk text into small pieces for a streamed feel (true token streaming is PR5). */
 function chunkText(text: string, size = 48): string[] {
@@ -313,6 +337,20 @@ async function handleMessage(
               'Name the areas in their language. Never mention that a decision was made about them.',
           ]
         : [];
+
+    // Question fidelity (P18): the respondent just answered a question through its in-chat answer
+    // control. Their answer is already persisted, and there is no respondent message this turn, so
+    // without this the interviewer would open the next question cold — as if nothing had happened.
+    // Deliberately does NOT restate the value: the respondent picked it themselves and can see it,
+    // and reading a form value back is exactly the register the product avoids.
+    const cardAnswerNotice: string[] = body.answeredQuestionKey
+      ? [
+          'The respondent has just answered the previous question directly, using the answer ' +
+            'options shown to them. Acknowledge that briefly and naturally — a few words, not a ' +
+            'summary — and do NOT repeat their answer back or ask it again. Then move on to the ' +
+            'next question.',
+        ]
+      : [];
 
     // Adaptive Scope (P17.6): the acknowledgement for a topic the respondent asked for on the
     // PREVIOUS turn. Same one-outing mechanic as the announcement above — `atTurn` was stamped with
@@ -680,6 +718,7 @@ async function handleMessage(
       | { type: 'reasoning'; steps: ReasoningStep[] }
       | { type: 'warning'; code: string; message: string; detail?: string }
       | { type: 'inspector'; turnIndex: number; calls: AgentCallTrace[] }
+      | { type: 'question_card'; card: QuestionCardPayload }
     > {
       yield { type: 'start', conversationId: sessionId, messageId: sessionId };
 
@@ -817,6 +856,9 @@ async function handleMessage(
       // The generic `targetedQuestionId` column holds a QUESTION id (question/sweep turns) or a
       // DATA-SLOT id (data-slot turns) — the loader resolves whichever matches next turn.
       let persistedTargetedId: string | null = result.targetedQuestionId;
+      // Question fidelity (P18): set on a typed must-ask / last-resort question turn; the frame is
+      // emitted after the lead-in prose and the key is persisted so the card replays on resume.
+      let questionCard: QuestionCardPayload | null = null;
       // Data Slots feature: the data-slot id this turn targeted (set in the data_slot branch),
       // persisted separately so the per-slot re-ask/park counter is unambiguous.
       let targetedDataSlotId: string | null = null;
@@ -895,8 +937,16 @@ async function handleMessage(
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(dsBriefing.length > 0 ||
             scopeAnnouncement.length > 0 ||
-            scopeAmendmentNotice.length > 0
-              ? { briefing: [...scopeAnnouncement, ...scopeAmendmentNotice, ...dsBriefing] }
+            scopeAmendmentNotice.length > 0 ||
+            cardAnswerNotice.length > 0
+              ? {
+                  briefing: [
+                    ...cardAnswerNotice,
+                    ...scopeAnnouncement,
+                    ...scopeAmendmentNotice,
+                    ...dsBriefing,
+                  ],
+                }
               : {}),
             ...(dsGlossary.length > 0 ? { glossary: dsGlossary } : {}),
             ...(dsPeer ? { peerContext: [dsPeer.insight] } : {}),
@@ -928,6 +978,39 @@ async function handleMessage(
         const slot = result.targetedQuestionId
           ? slotById.get(result.targetedQuestionId)
           : undefined;
+        // Question fidelity (P18): how faithfully this one must be put. Resolved through the read
+        // seam so the version-level gate is honoured — `balanced` (and so no prompt section at all)
+        // whenever the feature is off. Read off the QuestionView, which carries the stored dial.
+        const fidelityLevel = resolveQuestionFidelity(
+          result.targetedQuestionId
+            ? state.questions.find((q) => q.id === result.targetedQuestionId)?.fidelity
+            : undefined,
+          state.config.questionFidelity
+        );
+        // Question fidelity (P18): for a TYPED must-ask question (or a last-resort re-ask) the
+        // respondent answers the real control rather than having its options read out in prose.
+        // Decided here so the phraser can be told the control is shown and skip reciting them.
+        const cardReason = slot
+          ? shouldShowQuestionCard({
+              fidelityEnabled: narrowQuestionFidelity(state.config.questionFidelity).enabled,
+              level: fidelityLevel,
+              type: slot.type,
+              typeConfig: slot.typeConfig,
+              isReask: targetedKey !== null && targetedKey === activeQuestionKey,
+            })
+          : null;
+        questionCard =
+          slot && cardReason
+            ? buildQuestionCard({
+                questionKey: slot.key,
+                // Verbatim: the stored prompt, never the phrased rendering.
+                prompt: slot.prompt,
+                type: slot.type,
+                typeConfig: slot.typeConfig,
+                required: slot.required,
+                reason: cardReason,
+              })
+            : null;
         // Continuity: what they've already shared, minus the question we're asking now.
         const priorAnswers = buildPriorAnswersDigest({
           dataSlots,
@@ -967,13 +1050,23 @@ async function handleMessage(
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
+            fidelity: fidelityLevel,
+            ...(questionCard ? { answerControlShown: true } : {}),
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),
             ...(qBriefing.length > 0 ||
             scopeAnnouncement.length > 0 ||
-            scopeAmendmentNotice.length > 0
-              ? { briefing: [...scopeAnnouncement, ...scopeAmendmentNotice, ...qBriefing] }
+            scopeAmendmentNotice.length > 0 ||
+            cardAnswerNotice.length > 0
+              ? {
+                  briefing: [
+                    ...cardAnswerNotice,
+                    ...scopeAnnouncement,
+                    ...scopeAmendmentNotice,
+                    ...qBriefing,
+                  ],
+                }
               : {}),
             ...(qGlossary.length > 0 ? { glossary: qGlossary } : {}),
             ...(qPeer ? { peerContext: [qPeer.insight] } : {}),
@@ -989,6 +1082,8 @@ async function handleMessage(
         });
         agentResponse = phrased.message;
         extraCostUsd = phrased.costUsd;
+        // After the prose, so the card reads as the thing the message just handed over to.
+        if (questionCard) yield { type: 'question_card', card: questionCard };
       } else {
         agentResponse = result.response.text;
         for (const delta of chunkText(agentResponse)) yield { type: 'content', delta };
@@ -1015,6 +1110,8 @@ async function handleMessage(
           completionTokens,
           toolCalls: result.toolCalls,
           ...(turnWarnings.length > 0 ? { warnings: turnWarnings } : {}),
+          // Question fidelity (P18): remember which control this turn rendered, so it replays.
+          ...(questionCard ? { questionCardKey: questionCard.questionKey } : {}),
           // Persist the reasoning trace only when the version opted into persistence — otherwise it
           // was live-only this turn (streamed above, not saved), so resumed turns show none.
           ...(reasoningPersist && reasoning.length > 0 ? { reasoning } : {}),

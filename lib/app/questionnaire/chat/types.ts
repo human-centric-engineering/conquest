@@ -8,6 +8,7 @@
  */
 
 import type { ReasoningStep } from '@/lib/app/questionnaire/reasoning';
+import type { QuestionCardPayload } from '@/lib/app/questionnaire/chat/question-card';
 
 /** One committed turn in the rendered transcript. */
 export interface QuestionnaireTurn {
@@ -28,6 +29,14 @@ export interface QuestionnaireTurn {
    * `lib/app/questionnaire/reasoning`.
    */
   reasoning?: ReasoningStep[];
+  /**
+   * Question fidelity (P18): the question's REAL answer control, rendered inside this turn instead
+   * of the interviewer reading its options out in prose. Present only for a typed `must_ask`
+   * question (or a last-resort re-ask); absent everywhere else, which is the overwhelming majority
+   * of turns. Replayed on resume from `AppQuestionnaireTurn.questionCardKey`, and suppressed once
+   * the question has been answered. See `lib/app/questionnaire/chat/question-card.ts`.
+   */
+  card?: QuestionCardPayload;
 }
 
 /**

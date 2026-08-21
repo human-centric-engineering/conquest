@@ -52,6 +52,7 @@ import type { ReasoningPlacement } from '@/lib/app/questionnaire/types';
 import { ChatErrorPanel } from '@/components/app/questionnaire/chat/chat-error-panel';
 import { ReleaseStageNotice } from '@/components/app/questionnaire/chat/release-stage-notice';
 import { CorrectionStrip } from '@/components/app/questionnaire/chat/correction-strip';
+import { QuestionCard } from '@/components/app/questionnaire/chat/question-card';
 import { ContradictionNotice } from '@/components/app/questionnaire/chat/contradiction-notice';
 import { MilestoneNotice } from '@/components/app/questionnaire/chat/milestone-notice';
 import { SeriousnessNotice } from '@/components/app/questionnaire/chat/seriousness-notice';
@@ -459,6 +460,7 @@ export function QuestionnaireChat({
     error,
     canSend,
     sendMessage,
+    continueAfterCard,
     dismissError,
     retry,
   } = stream;
@@ -505,6 +507,17 @@ export function QuestionnaireChat({
   // clocks have settled — the stream is done AND the queue has caught up to the last turn.
   const revealPending = revealCursor < turns.length;
   const composerReady = canSend && !revealPending;
+
+  // The answer control belonging to the CURRENT turn, if any. Reading only the last turn is what
+  // keeps exactly one card on screen: a new turn retires the previous card automatically.
+  const activeCard = turns[turns.length - 1]?.card;
+  // Dismissal is keyed on the TURN, not the question. Keying it on the question key would suppress
+  // the control permanently: a must-ask question the respondent dismissed stays unsatisfied, so the
+  // interviewer re-asks it on a later turn — and a prose answer can't clear the 0.85 must-ask floor
+  // on its own (opportunistic fill caps at 0.75), so the question would stall until the session cap
+  // with no way back to the control that could actually answer it.
+  const [dismissedTurnIndex, setDismissedTurnIndex] = useState<number | null>(null);
+  const cardDismissed = activeCard !== undefined && dismissedTurnIndex === turns.length - 1;
   // The cue shown at the composer while it's held closed for a non-terminal reason: the agent is
   // still composing (`streaming`), or the reply is still typing itself in (`revealPending`).
   const composerHint = streaming ? 'Waiting for a reply…' : 'Revealing the reply…';
@@ -700,6 +713,24 @@ export function QuestionnaireChat({
               onDismiss={status === 'error' ? dismissError : undefined}
               // `retry` is async; the panel's onRetry is fire-and-forget (void).
               onRetry={status === 'error' ? () => void retry() : undefined}
+            />
+          )}
+
+          {/* Question fidelity (P18): the current question's REAL answer control. Rendered only for
+              the LATEST turn — a card left attached to an older turn would invite the respondent to
+              answer something the conversation has already moved past, and the submit would
+              overwrite a newer answer. Dismissing it hands them back to the composer without
+              marking the question answered, so the interviewer still comes back to it. */}
+          {!readOnly && !isTerminal && composerReady && activeCard && !cardDismissed && (
+            <QuestionCard
+              card={activeCard}
+              sessionId={sessionId}
+              accessToken={accessToken}
+              onAnswered={(view) => {
+                onCorrected?.(view);
+                void continueAfterCard(activeCard.questionKey);
+              }}
+              onDismiss={() => setDismissedTurnIndex(turns.length - 1)}
             />
           )}
 

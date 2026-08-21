@@ -57,6 +57,8 @@ export async function persistTurn(opts: {
   toolCalls: ToolCallRecord[];
   /** Side-band notices this turn surfaced — persisted on the turn for inline replay on resume. */
   warnings?: SessionWarning[];
+  /** Question fidelity (P18): the question key whose answer control this turn rendered, for replay. */
+  questionCardKey?: string | null;
   /** Live "watch it think" reasoning trace — persisted (when the version opted in) for replay on resume. */
   reasoning?: ReasoningStep[];
   /** The saved Turn Inspector dump — every LLM/embedding call this turn made. Persisted for every
@@ -236,6 +238,7 @@ export async function persistTurn(opts: {
     agentResponse: opts.agentResponse,
     targetedQuestionId: opts.targetedQuestionId,
     ...(opts.warnings && opts.warnings.length > 0 ? { warnings: opts.warnings } : {}),
+    ...(opts.questionCardKey !== undefined ? { questionCardKey: opts.questionCardKey } : {}),
     ...(opts.reasoning && opts.reasoning.length > 0 ? { reasoning: opts.reasoning } : {}),
     ...(opts.inspectorCalls && opts.inspectorCalls.length > 0
       ? { inspectorCalls: opts.inspectorCalls }

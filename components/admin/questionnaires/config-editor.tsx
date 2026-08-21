@@ -125,6 +125,13 @@ import {
   type InterviewerApproach,
   type InterviewerStrategySettings,
   type HouseRulesSettings,
+  QUESTION_FIDELITY_LEVELS,
+  QUESTION_FIDELITY_LABELS,
+  QUESTION_FIDELITY_DESCRIPTIONS,
+  QUESTION_FIDELITY_STOP_BY_LEVEL,
+  questionFidelityLevel,
+  type QuestionFidelityLevel,
+  type QuestionFidelitySettings,
 } from '@/lib/app/questionnaire/types';
 import type { ConfigView } from '@/lib/app/questionnaire/views';
 import type { RunMutation } from '@/components/admin/questionnaires/version-editor-types';
@@ -673,6 +680,10 @@ export function ConfigEditor({
   );
   // Interviewer house rules (always / never / if-asked) — the whole block edited as one object.
   const [houseRules, setHouseRules] = useState<HouseRulesSettings>(config.houseRules);
+  // Question fidelity gate — the switch that activates the Structure editor's per-question dial.
+  const [questionFidelity, setQuestionFidelity] = useState<QuestionFidelitySettings>(
+    config.questionFidelity
+  );
   // Respondent intro / splash (admin opt-in): the whole block edited as one object.
   const [intro, setIntro] = useState<IntroSettings>(config.intro);
 
@@ -726,6 +737,7 @@ export function ConfigEditor({
     setTone(config.tone);
     setPersonaSelection(config.personaSelection);
     setInterviewerStrategy(config.interviewerStrategy);
+    setQuestionFidelity(config.questionFidelity);
     setHouseRules(config.houseRules);
     setIntro(config.intro);
   }, [config]);
@@ -1001,6 +1013,9 @@ export function ConfigEditor({
         personaSelection,
         // Interviewer strategy (questioning approach). Sent whole; off ⇒ default prompts unchanged.
         interviewerStrategy,
+        // Question fidelity gate. Sent whole; off ⇒ every question resolves to `balanced`, so the
+        // per-question dial stored on each question stays inert.
+        questionFidelity,
         // Interviewer house rules. Sent whole; trim each rule's text/trigger, and drop rules the
         // admin left blank — an empty rule fails server validation and is never what they meant.
         houseRules: {
@@ -1117,6 +1132,74 @@ export function ConfigEditor({
                   versionId={versionId}
                   busy={busy}
                 />
+              )}
+            </div>
+            {/* Question fidelity — the gate for the Structure editor's per-question dial. Kept here
+             rather than on Structure because it changes how EVERY question is asked; the per-question
+             slider is the detail, this is the decision. */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="question-fidelity-enabled"
+                  checked={questionFidelity.enabled}
+                  onCheckedChange={(checked) =>
+                    setQuestionFidelity((prev) => ({ ...prev, enabled: checked }))
+                  }
+                  disabled={busy}
+                />
+                <Label htmlFor="question-fidelity-enabled" className="text-sm font-medium">
+                  Per-question fidelity{' '}
+                  <FieldHelp title="Question fidelity">
+                    Lets you decide, question by question, how faithfully the interviewer must put
+                    it to the respondent — from <strong>Free</strong> (fill it from anything they
+                    say) to <strong>Must ask</strong> (put it to them as written, with choice and
+                    scale questions showing their real answer control). Set each question&apos;s
+                    level on the <em>Structure</em> tab. While this is off, every question is asked
+                    openly and the levels you set are ignored, so you can prepare them before
+                    switching over.
+                  </FieldHelp>
+                </Label>
+              </div>
+              {questionFidelity.enabled && (
+                <div className="space-y-1.5 pt-1 sm:max-w-sm">
+                  <Label className="text-sm font-medium">
+                    Level for new questions{' '}
+                    <FieldHelp title="Level for new questions">
+                      The level a newly-added question starts on. Existing questions keep whatever
+                      they are already set to. An instrument-led questionnaire may want
+                      <strong> Close</strong> as its baseline rather than <strong>Balanced</strong>.
+                    </FieldHelp>
+                  </Label>
+                  <Select
+                    value={questionFidelityLevel(questionFidelity.defaultFidelity)}
+                    onValueChange={(v) =>
+                      setQuestionFidelity((prev) => ({
+                        ...prev,
+                        defaultFidelity:
+                          QUESTION_FIDELITY_STOP_BY_LEVEL[v as QuestionFidelityLevel],
+                      }))
+                    }
+                    disabled={busy}
+                  >
+                    <SelectTrigger aria-label="Level for new questions">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {QUESTION_FIDELITY_LEVELS.map((level) => (
+                        <SelectItem key={level} value={level}>
+                          {QUESTION_FIDELITY_LABELS[level]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    {
+                      QUESTION_FIDELITY_DESCRIPTIONS[
+                        questionFidelityLevel(questionFidelity.defaultFidelity)
+                      ]
+                    }
+                  </p>
+                </div>
               )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">

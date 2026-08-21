@@ -28,10 +28,17 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Plus, Trash2 } from 'lucide-react';
+import { GripVertical, MessageSquareQuote, Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
+import {
+  QUESTION_FIDELITY_LABELS,
+  QUESTION_FIDELITY_LEVELS,
+  QUESTION_FIDELITY_STOP_BY_LEVEL,
+  type QuestionFidelityLevel,
+} from '@/lib/app/questionnaire/types';
 import { API } from '@/lib/api/endpoints';
 import type { SectionView, TagView } from '@/lib/app/questionnaire/views';
 
@@ -45,6 +52,7 @@ export function SectionEditor({
   section,
   allSections,
   tags,
+  fidelityEnabled,
   run,
   busy,
 }: {
@@ -55,6 +63,8 @@ export function SectionEditor({
   section: SectionView;
   allSections: SectionView[];
   tags: TagView[];
+  /** Whether the version's question-fidelity gate is on — dims the per-question slider when off. */
+  fidelityEnabled: boolean;
   run: RunMutation;
   busy: boolean;
 }) {
@@ -143,6 +153,40 @@ export function SectionEditor({
         <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
           {questions.length} q{questions.length === 1 ? '' : 's'}
         </span>
+        {/* Set every question in this section to one fidelity level. Fidelity is usually uniform
+           within a section (a scored battery is all-or-nothing), and dragging seventy sliders one
+           at a time is not a real workflow. Only offered while the gate is on. */}
+        {fidelityEnabled && questions.length > 0 && (
+          <Select
+            value=""
+            onValueChange={(v) => {
+              void run(() => [
+                'PATCH',
+                API.APP.QUESTIONNAIRES.versionQuestions(questionnaireId, versionId),
+                {
+                  fidelity: QUESTION_FIDELITY_STOP_BY_LEVEL[v as QuestionFidelityLevel],
+                  sectionId: section.id,
+                },
+              ]);
+            }}
+            disabled={busy}
+          >
+            <SelectTrigger
+              className="h-8 w-auto shrink-0 gap-1 border-transparent text-xs shadow-none"
+              aria-label="Set fidelity for every question in this section"
+            >
+              <MessageSquareQuote className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Set fidelity</span>
+            </SelectTrigger>
+            <SelectContent>
+              {QUESTION_FIDELITY_LEVELS.map((level) => (
+                <SelectItem key={level} value={level}>
+                  {QUESTION_FIDELITY_LABELS[level]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -176,6 +220,7 @@ export function SectionEditor({
                     sections={allSections}
                     question={q}
                     tags={tags}
+                    fidelityEnabled={fidelityEnabled}
                     run={run}
                     busy={busy}
                   />

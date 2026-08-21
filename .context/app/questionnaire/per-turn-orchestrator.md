@@ -88,6 +88,12 @@ slot/question being asked this turn and capped to keep the prompt lean. It's pas
 next question land, but the prompt forbids recapping the list or re-asking anything in it. Absent
 when nothing is captured yet → the block is omitted (no behaviour change).
 
+**Per-question fidelity overrides the two rules below.** A question marked `close` or `must_ask`
+(see [`question-fidelity.md`](./question-fidelity.md)) gets a `<question_fidelity>` section placed
+after `rules`/`interviewer_strategy`, and at `must_ask` the choice/scale IS offered on the first ask
+rather than only on a struggling re-ask. At the default `balanced` stop nothing is emitted and the
+behaviour below is exactly as described.
+
 **Infer scales/choices; only spell them out as a last resort.** A choice or Likert question is
 asked **openly** on the first ask — the interviewer asks about the underlying feeling/choice in
 plain language and the extractor (+ the answer-fit resolver, see
@@ -253,6 +259,16 @@ slot that the next send cleared. Both are now persisted and replayed.
   `GET …/transcript` on boot (its token is client-only, so it can't SSR-seed) and falls soft to a
   fresh greeting if that read fails. The `warnings` JSON is validated at the loader boundary and
   degrades to no notices if a row is malformed — a replayed transcript never throws.
+
+### The `question_card` frame (P18)
+
+A typed `must_ask` question (or a last-resort re-ask) streams its lead-in prose and then one
+`{ type: 'question_card', card }` frame carrying the question's real answer control — see
+[`question-fidelity.md`](./question-fidelity.md). The respondent answers it directly through
+`PUT …/answers`, then the client runs a follow-up turn with `answeredQuestionKey` and no message so
+the interviewer acknowledges and moves on. `AppQuestionnaireTurn.questionCardKey` records which
+control a turn rendered, and `loadTranscript` rebuilds it from the live slot on resume (suppressed
+once answered).
 
 ## Gating
 

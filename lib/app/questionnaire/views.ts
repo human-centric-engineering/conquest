@@ -123,6 +123,8 @@ export interface QuestionSlotView {
   typeConfig: unknown;
   required: boolean;
   weight: number;
+  /** Five-stop `ask as written ↔ fill creatively` dial. Inert unless `config.questionFidelity.enabled`. */
+  fidelity: number;
   extractionConfidence: number | null;
   /** Tags assigned to this question, ordered by normalised label. */
   tags: TagView[];

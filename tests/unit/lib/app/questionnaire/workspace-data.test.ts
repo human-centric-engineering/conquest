@@ -52,6 +52,7 @@ import {
   DEFAULT_TONE_SETTINGS,
   DEFAULT_INTERVIEWER_STRATEGY,
   DEFAULT_HOUSE_RULES_SETTINGS,
+  DEFAULT_QUESTION_FIDELITY,
 } from '@/lib/app/questionnaire/types';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots';
 import {
@@ -152,6 +153,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
       cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
       intro: DEFAULT_INTRO_SETTINGS,
       houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
+      questionFidelity: DEFAULT_QUESTION_FIDELITY,
       adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     },
     ...over,

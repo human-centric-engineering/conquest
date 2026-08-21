@@ -19,6 +19,11 @@ import { Prisma } from '@prisma/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 import { createQuestionSchema, validateTypeConfig } from '@/lib/app/questionnaire/authoring';
+import {
+  DEFAULT_QUESTION_FIDELITY_VALUE,
+  clampQuestionFidelity,
+  narrowQuestionFidelity,
+} from '@/lib/app/questionnaire/types';
 import { forkVersionIfLaunched } from '@/app/api/v1/app/questionnaires/_lib/fork';
 import {
   asKeyConflict,
@@ -81,6 +86,23 @@ const handleCreateQuestion = withAdminAuth<Params>(async (request, session, { pa
   if (!parentSectionId)
     return errorResponse('Section not found', { code: 'NOT_FOUND', status: 404 });
 
+  // Question fidelity (P18): a new question starts on the version's configured stop, so the
+  // Settings-tab "level for new questions" actually does something. Read from the EDIT version
+  // (a fork copies the config), and fall back to the neutral midpoint when no config row exists.
+  const editConfig = await prisma.appQuestionnaireConfig.findUnique({
+    where: { versionId: editId },
+    select: { questionFidelity: true },
+  });
+  const fidelityGate = narrowQuestionFidelity(editConfig?.questionFidelity);
+  const fidelity =
+    body.fidelity !== undefined
+      ? clampQuestionFidelity(body.fidelity)
+      : // While the gate is off the stored value is inert anyway, so the neutral midpoint is the
+        // honest default — it is what the question will behave as either way.
+        fidelityGate.enabled
+        ? fidelityGate.defaultFidelity
+        : DEFAULT_QUESTION_FIDELITY_VALUE;
+
   const key = await resolveQuestionKey(editId, body.key, body.prompt);
   const ordinal =
     body.ordinal ?? (await prisma.appQuestionSlot.count({ where: { sectionId: parentSectionId } }));
@@ -96,6 +118,7 @@ const handleCreateQuestion = withAdminAuth<Params>(async (request, session, { pa
         type: body.type,
         required: body.required ?? false,
         weight: body.weight ?? 0.5,
+        fidelity,
         typeConfig: tc.value == null ? Prisma.JsonNull : jsonInput(tc.value),
         ...(body.guidelines != null ? { guidelines: body.guidelines } : {}),
         ...(body.rationale != null ? { rationale: body.rationale } : {}),

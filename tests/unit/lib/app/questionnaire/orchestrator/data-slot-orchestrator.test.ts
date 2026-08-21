@@ -38,6 +38,7 @@ function ds(over: Partial<DataSlotTarget> & { id: string; theme: string }): Data
     theme: over.theme,
     ordinal: over.ordinal ?? 0,
     weight: over.weight ?? 1,
+    ...(over.mappedQuestionKeys ? { mappedQuestionKeys: over.mappedQuestionKeys } : {}),
   };
 }
 
@@ -1375,5 +1376,115 @@ describe('runDataSlotTurn — the opening probe allowance (G03)', () => {
     );
     expect(calls.routability).toHaveLength(0);
     if (result.response.kind === 'data_slot') expect(result.response.dataSlotId).toBe('d2');
+  });
+});
+
+describe('runDataSlotTurn — must-ask hoist (P18)', () => {
+  const ON = { enabled: true, defaultFidelity: 0.5 } as const;
+  const OFF = { enabled: false, defaultFidelity: 0.5 } as const;
+
+  /** A must-ask question owned by data slot `d1`, plus a second slot on another theme. */
+  const scene = (over: { questionFidelity: typeof ON | typeof OFF }) =>
+    dsState({
+      questions: [q({ id: 'qa', key: 'q_a', fidelity: 1 }), q({ id: 'qb', key: 'q_b' })],
+      dataSlots: [
+        ds({ id: 'd1', key: 'd1', theme: 'A', mappedQuestionKeys: ['q_a'] }),
+        ds({ id: 'd2', key: 'd2', theme: 'B', mappedQuestionKeys: ['q_b'] }),
+      ],
+      activeDataSlotKey: 'd1',
+      config: { questionFidelity: over.questionFidelity },
+    });
+
+  it("waits while the question's own theme is still being worked through", async () => {
+    // "Naturally": interrupting a live theme to fire the instrument question would be exactly the
+    // form-like intrusion the design avoids. d1 is unfilled, so we keep talking.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(scene({ questionFidelity: ON }), invokers);
+    expect(result.response.kind).toBe('data_slot');
+  });
+
+  it('asks the must-ask question directly once its owning slot is covered', async () => {
+    // "But guaranteed": the moment its ground is done, it is put to the respondent — before we
+    // bridge to theme B.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      {
+        ...scene({ questionFidelity: ON }),
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+      },
+      invokers
+    );
+    expect(result.response.kind).toBe('question');
+    if (result.response.kind !== 'question') return;
+    expect(result.response.questionId).toBe('qa');
+  });
+
+  it('still asks it when an inference filled it below the must-ask bar', async () => {
+    // The tangential-fill case: there IS an answer row, so the ordinary "unanswered" view would
+    // consider it done and bridge straight on to theme B.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      {
+        ...scene({ questionFidelity: ON }),
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+        answered: [{ questionId: 'qa', confidence: 0.75 }],
+      },
+      invokers
+    );
+    expect(result.response.kind).toBe('question');
+    if (result.response.kind !== 'question') return;
+    expect(result.response.questionId).toBe('qa');
+  });
+
+  it('asks a must-ask question that no data slot claims without waiting for any theme', async () => {
+    // An orphan question has no ground to wind up, so waiting for its "owning" slots would wait
+    // forever and leave it to the end-of-run sweep — losing the "asked in context" property.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      dsState({
+        questions: [q({ id: 'qa', key: 'q_a', fidelity: 1 }), q({ id: 'qb', key: 'q_b' })],
+        dataSlots: [ds({ id: 'd1', key: 'd1', theme: 'A', mappedQuestionKeys: ['q_b'] })],
+        activeDataSlotKey: 'd1',
+        config: { questionFidelity: ON },
+      }),
+      invokers
+    );
+    expect(result.response.kind).toBe('question');
+    if (result.response.kind !== 'question') return;
+    expect(result.response.questionId).toBe('qa');
+  });
+
+  it('does not hoist when the gate is off', async () => {
+    // The no-op guarantee at the targeting layer: identical state, previous behaviour.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      {
+        ...scene({ questionFidelity: OFF }),
+        dataSlotAnswered: [{ dataSlotId: 'd1', confidence: 0.9 }],
+      },
+      invokers
+    );
+    expect(result.response.kind).toBe('data_slot');
+  });
+
+  it('does not offer to submit while a must-ask sits below its bar', async () => {
+    // Every question has an answer row — the count-based data-slot submit gate would otherwise be
+    // satisfied and offer to finish over an instrument question that was never actually asked.
+    const { invokers } = stubInvokers();
+    const result = await runDataSlotTurn(
+      {
+        ...scene({ questionFidelity: ON }),
+        dataSlotAnswered: [
+          { dataSlotId: 'd1', confidence: 0.9 },
+          { dataSlotId: 'd2', confidence: 0.9 },
+        ],
+        answered: [
+          { questionId: 'qa', confidence: 0.75 },
+          { questionId: 'qb', confidence: 0.9 },
+        ],
+      },
+      invokers
+    );
+    expect(result.response.kind).toBe('question');
   });
 });

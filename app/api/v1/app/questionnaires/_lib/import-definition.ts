@@ -169,6 +169,7 @@ export async function persistDefinitionImport(
             type: q.type,
             required: q.required,
             weight: q.weight,
+            fidelity: q.fidelity,
             ...(q.guidelines != null ? { guidelines: q.guidelines } : {}),
             ...(q.rationale != null ? { rationale: q.rationale } : {}),
             ...(q.typeConfig !== undefined && q.typeConfig !== null

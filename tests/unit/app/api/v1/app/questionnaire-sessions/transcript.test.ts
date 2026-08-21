@@ -12,11 +12,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const findMany = vi.fn();
 const findUnique = vi.fn();
+const slotFindMany = vi.fn();
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     appQuestionnaireTurn: {
       findMany: (...args: unknown[]) => findMany(...args),
       findUnique: (...args: unknown[]) => findUnique(...args),
+    },
+    appQuestionSlot: {
+      findMany: (...args: unknown[]) => slotFindMany(...args),
     },
   },
 }));
@@ -235,5 +239,142 @@ describe('findTurnByIdempotencyKey', () => {
       warnings: [],
       reasoning: [],
     });
+  });
+});
+
+describe('loadTranscript — question-card replay (P18)', () => {
+  const turnRow = (over: Record<string, unknown> = {}) => ({
+    userMessage: 'sure',
+    agentResponse: 'Before we move on, one as written:',
+    warnings: [],
+    reasoning: [],
+    questionCardKey: 'workload',
+    ...over,
+  });
+
+  const slotRow = (over: Record<string, unknown> = {}) => ({
+    id: 'q1',
+    key: 'workload',
+    prompt: 'How satisfied are you with your current workload?',
+    type: 'likert',
+    typeConfig: { min: 1, max: 5 },
+    required: true,
+    fidelity: 1,
+    answers: [],
+    section: { version: { config: { questionFidelity: { enabled: true, defaultFidelity: 0.5 } } } },
+    ...over,
+  });
+
+  it('scopes the slot lookup to THIS session, and reads its answers per-session', async () => {
+    // The `where` is the isolation guarantee: without the session scope a card could be rebuilt
+    // from a slot on somebody else's questionnaire, and without the per-session `answers` filter a
+    // question another respondent had answered would suppress this respondent's card.
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow()]);
+
+    await loadTranscript('sess-1');
+
+    expect(slotFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          key: { in: ['workload'] },
+          section: { version: { sessions: { some: { id: 'sess-1' } } } },
+        },
+        select: expect.objectContaining({
+          answers: { where: { sessionId: 'sess-1' }, select: { id: true }, take: 1 },
+          // The gate rides the same traversal — no second round-trip for it.
+          section: {
+            select: { version: { select: { config: { select: { questionFidelity: true } } } } },
+          },
+        }),
+      })
+    );
+  });
+
+  it('rebuilds the card from the LIVE slot, not a stored snapshot', async () => {
+    // Only the key is persisted, so an admin who rewords a question between sessions must not leave
+    // a stale copy pinned in a resumed transcript.
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow({ prompt: 'Reworded since that turn?' })]);
+
+    const turns = await loadTranscript('sess-1');
+
+    const assistant = turns.find((t) => t.role === 'assistant');
+    expect(assistant?.card).toMatchObject({
+      questionKey: 'workload',
+      prompt: 'Reworded since that turn?',
+      reason: 'must_ask',
+    });
+  });
+
+  it('suppresses the card once the question has been answered', async () => {
+    // Replaying a live control over an answer they already gave invites a second submission, which
+    // would overwrite the first.
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow({ answers: [{ id: 'a1' }] })]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(turns.find((t) => t.role === 'assistant')?.card).toBeUndefined();
+  });
+
+  it('suppresses the card when the question can no longer render a control', async () => {
+    // Retyped to free text, or its choices removed, since the turn was recorded.
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow({ type: 'single_choice', typeConfig: null })]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(turns.find((t) => t.role === 'assistant')?.card).toBeUndefined();
+  });
+
+  it('suppresses the card when the stored type is not a known question type', async () => {
+    // A legacy or hand-edited row degrades to free_text, which has no answer control — so the turn
+    // replays as prose rather than rendering a control the respondent cannot use.
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow({ type: 'slider' })]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(turns.find((t) => t.role === 'assistant')?.card).toBeUndefined();
+  });
+
+  it('labels a non-must-ask replay as a last resort', async () => {
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow({ fidelity: 0.5 })]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(turns.find((t) => t.role === 'assistant')?.card?.reason).toBe('last_resort');
+  });
+
+  it('suppresses the card when the version gate has since been switched off', async () => {
+    // The turn genuinely rendered a card, but the control is INTERACTIVE — replaying it after the
+    // admin disabled the feature would let a respondent still submit through it, breaking the
+    // inert-when-off guarantee.
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([
+      slotRow({
+        section: {
+          version: { config: { questionFidelity: { enabled: false, defaultFidelity: 0.5 } } },
+        },
+      }),
+    ]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(turns.find((t) => t.role === 'assistant')?.card).toBeUndefined();
+  });
+
+  it('suppresses the card when the version has no config row at all', async () => {
+    findMany.mockResolvedValue([turnRow()]);
+    slotFindMany.mockResolvedValue([slotRow({ section: { version: { config: null } } })]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(turns.find((t) => t.role === 'assistant')?.card).toBeUndefined();
+  });
+
+  it('makes NO slot query when no turn carried a card', async () => {
+    // The overwhelming majority of sessions. The common path must not pay for this feature.
+    findMany.mockResolvedValue([turnRow({ questionCardKey: null })]);
+
+    const turns = await loadTranscript('sess-1');
+    expect(slotFindMany).not.toHaveBeenCalled();
+    expect(turns.find((t) => t.role === 'assistant')?.card).toBeUndefined();
   });
 });
