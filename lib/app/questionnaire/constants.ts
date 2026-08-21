@@ -1320,3 +1320,15 @@ export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = 
  * saves them.
  */
 export const QUESTIONNAIRE_HOUSE_RULES_AGENT_SLUG = 'app-questionnaire-house-rules-assistant';
+
+/**
+ * Slug of the seeded opening-questions assistant `AiAgent` (empty provider/model → dynamic
+ * resolution).
+ *
+ * The sibling of the house-rules assistant, and the same shape: a one-shot analyst that reads a
+ * version's subject, audience and questions and proposes example OPENING questions the interviewer
+ * can be guided by. Persists nothing — the admin accepts what they want into the editor and the
+ * ordinary config PATCH saves them.
+ */
+export const QUESTIONNAIRE_OPENING_EXAMPLES_AGENT_SLUG =
+  'app-questionnaire-opening-examples-assistant';

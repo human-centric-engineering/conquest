@@ -167,6 +167,9 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     interviewerStrategy: {
       enabled: false,
       approach: 'funnel',
+      pace: 'balanced',
+      openingMode: 'auto',
+      openingExamples: [],
       probeDepth: false,
       reflect: false,
       batchRelated: false,

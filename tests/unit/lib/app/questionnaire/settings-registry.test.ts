@@ -397,6 +397,76 @@ describe('value formatting', () => {
     expect(rowsOf(config).byLabel.get('Question fidelity')).toBe('On · new questions start Close');
   });
 
+  describe('interviewer strategy', () => {
+    const strategy = (over: Partial<QuestionnaireConfigShape['interviewerStrategy']>) =>
+      rowsOf(
+        configOf({
+          interviewerStrategy: {
+            ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+            enabled: true,
+            ...over,
+          },
+        })
+      ).byLabel;
+
+    it('names the funnel pace alongside the approach', () => {
+      const rows = strategy({ approach: 'funnel', pace: 'brisk' });
+      expect(rows.get('Questioning approach')).toBe('Funnel (open → targeted)');
+      expect(rows.get('Funnel pace')).toBe('Narrow quickly');
+    });
+
+    /**
+     * `paceProfile()` ignores a stored pace outside the funnel, so printing one here would describe
+     * an arc that isn't running — the pack would be documenting a setting with no effect.
+     */
+    it('omits the pace row for approaches that have no arc', () => {
+      expect(strategy({ approach: 'open', pace: 'brisk' }).has('Funnel pace')).toBe(false);
+      expect(strategy({ approach: 'targeted', pace: 'brisk' }).has('Funnel pace')).toBe(false);
+    });
+
+    it('counts the opening examples rather than reprinting them', () => {
+      const rows = strategy({
+        openingMode: 'examples',
+        openingExamples: ['Tell me about your week.', 'What stands out?'],
+      });
+      expect(rows.get('Opening questions')).toBe('Guided by 2 examples');
+      expect(
+        strategy({ openingMode: 'examples', openingExamples: ['One.'] }).get('Opening questions')
+      ).toBe('Guided by 1 example');
+    });
+
+    /** Mirrors `usesGuidedOpening()`: an unusable list is not guiding anything. */
+    it("reports the interviewer's own framings when no example is usable", () => {
+      expect(strategy({ openingMode: 'auto' }).get('Opening questions')).toBe(
+        "Interviewer's own framings"
+      );
+      expect(
+        strategy({ openingMode: 'examples', openingExamples: ['  '] }).get('Opening questions')
+      ).toBe("Interviewer's own framings");
+    });
+
+    it('omits the opening row for the targeted approach, which has no open opening', () => {
+      expect(strategy({ approach: 'targeted' }).has('Opening questions')).toBe(false);
+    });
+
+    it('collapses to a single Default row when the whole block is off', () => {
+      const rows = rowsOf(
+        configOf({
+          interviewerStrategy: {
+            ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+            enabled: false,
+            pace: 'brisk',
+            openingMode: 'examples',
+            openingExamples: ['Tell me about your week.'],
+          },
+        })
+      ).byLabel;
+      expect(rows.get('Questioning approach')).toBe('Default');
+      expect(rows.has('Funnel pace')).toBe(false);
+      expect(rows.has('Opening questions')).toBe(false);
+    });
+  });
+
   it('summarises house rules by kind, counting only the ones actually in use', () => {
     // The pack summarises setup, so it counts rather than reprinting up to twenty rules verbatim.
     expect(rowsOf(FULLY_ENABLED).byLabel.get('House rules')).toBe(

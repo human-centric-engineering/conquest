@@ -343,12 +343,17 @@ model AppQuestionnaireConfig {
   personas         Json @default("[]")
   personaSelection Json @default("{\"enabled\":true,\"defaultPersonaKey\":\"neutral-coach\",\"allowRespondentSwitch\":false,\"switcher\":\"page\"}")
 
-  // Interviewer strategy (questioning approach): { enabled, approach: funnel|open|targeted, probeDepth,
-  // reflect, batchRelated }. When enabled, OVERRIDES the default open-invitation questioning prompt with
-  // the chosen openness arc + additive tactics. Defaults to ON: a funnel arc with probeDepth and
-  // batchRelated; reflect stays off. Rendered into the phraser system prompt by
+  // Interviewer strategy (questioning approach): { enabled, approach: funnel|open|targeted, pace:
+  // gradual|balanced|brisk, openingMode: auto|examples, openingExamples: string[], probeDepth, reflect,
+  // batchRelated }. When enabled, OVERRIDES the default open-invitation questioning prompt with the chosen
+  // openness arc + additive tactics. `pace` sets how fast the funnel arc narrows (funnel only);
+  // `openingMode`/`openingExamples` decide whether the opener's framing comes from the interviewer's own
+  // menu or is guided by the admin's examples. Defaults to ON: a balanced funnel arc with an
+  // interviewer-chosen opening, probeDepth and batchRelated; reflect stays off. Rows written before the
+  // pace/opening fields existed simply lack those keys — narrowInterviewerStrategy fills the defaults on
+  // read, so no backfill is needed. Rendered into the phraser system prompt by
   // buildInterviewerStrategyInstructions (lib/.../chat/interviewer-strategy.ts). (types.ts)
-  interviewerStrategy Json @default("{\"enabled\":true,\"approach\":\"funnel\",\"probeDepth\":true,\"reflect\":false,\"batchRelated\":true}")
+  interviewerStrategy Json @default("{\"enabled\":true,\"approach\":\"funnel\",\"pace\":\"balanced\",\"openingMode\":\"auto\",\"openingExamples\":[],\"probeDepth\":true,\"reflect\":false,\"batchRelated\":true}")
 
   // Interviewer house rules: HouseRulesSettings — { enabled, rules: [{ id, kind, enabled, text,
   // trigger? }] } where kind is always | never | if_asked. The client-specific BEHAVIOUR policy for

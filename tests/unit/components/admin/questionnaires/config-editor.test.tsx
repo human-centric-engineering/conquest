@@ -1555,3 +1555,46 @@ describe('ConfigEditor — interviewer house rules', () => {
     expect(saved.rules.map((r) => r.id)).toEqual(['a']);
   });
 });
+
+// ─── Interviewer strategy — save payload ─────────────────────────────────────
+//
+// The panel itself is covered by interviewer-strategy-panel.test.tsx. What only the editor can
+// pin is the transform it applies on the way out: the opening examples are trimmed and the blank
+// ones dropped, so a row the admin added but never wrote in never reaches the server (and the
+// "n of 5" counter doesn't lie after a reload).
+
+describe('ConfigEditor — interviewer strategy', () => {
+  it('saves the stored block untouched when the admin does not open the section', () => {
+    const interviewerStrategy = {
+      ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+      approach: 'funnel' as const,
+      pace: 'brisk' as const,
+      openingMode: 'examples' as const,
+      openingExamples: ['What brought you here today?'],
+    };
+    const { specs } = setup({ interviewerStrategy });
+    clickSave();
+    // A config field that quietly resets on an unrelated save is the failure mode worth pinning.
+    expect(bodyOf(specs).interviewerStrategy).toEqual(interviewerStrategy);
+  });
+
+  it('trims the opening examples and drops the blank ones on save', () => {
+    const { specs } = setup({
+      interviewerStrategy: {
+        ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+        openingMode: 'examples',
+        openingExamples: [
+          '  Tell me about your week.  ',
+          // An added-but-never-typed row. It is not an example, and the runtime would ignore it —
+          // storing it would only make the counter overstate what the interviewer has to work with.
+          '   ',
+          '',
+          'What made you say yes?',
+        ],
+      },
+    });
+    clickSave();
+    const saved = bodyOf(specs).interviewerStrategy as { openingExamples: string[] };
+    expect(saved.openingExamples).toEqual(['Tell me about your week.', 'What made you say yes?']);
+  });
+});

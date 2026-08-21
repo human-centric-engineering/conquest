@@ -30,6 +30,7 @@
 
 import {
   ACCESS_MODE_LABELS,
+  FUNNEL_PACE_LABELS,
   INTERVIEWER_APPROACH_LABELS,
   QUESTION_FIDELITY_LABELS,
   questionFidelityLevel,
@@ -490,23 +491,39 @@ export const SETTING_DESCRIPTORS = {
       if (!c.interviewerStrategy.enabled) {
         return [{ label: 'Questioning approach', value: 'Default' }];
       }
-      return [
-        {
-          label: 'Questioning approach',
-          value: INTERVIEWER_APPROACH_LABELS[c.interviewerStrategy.approach],
-        },
-        {
-          label: 'Questioning tactics',
-          value: listOf(
-            [
-              [c.interviewerStrategy.probeDepth, 'Probe shallow answers'],
-              [c.interviewerStrategy.reflect, 'Reflect answers back'],
-              [c.interviewerStrategy.batchRelated, 'Invite related gaps together'],
-            ],
-            'None'
-          ),
-        },
+      const { approach, pace, openingMode, openingExamples } = c.interviewerStrategy;
+      const usableExamples = openingExamples.filter((example) => example.trim() !== '');
+      const rows: SettingRow[] = [
+        { label: 'Questioning approach', value: INTERVIEWER_APPROACH_LABELS[approach] },
       ];
+      // Pace only means something for the funnel — the runtime ignores it otherwise (`paceProfile`),
+      // so listing it under Open/Targeted would describe an arc that isn't running.
+      if (approach === 'funnel') {
+        rows.push({ label: 'Funnel pace', value: FUNNEL_PACE_LABELS[pace] });
+      }
+      // Summarised, not listed: the pack describes setup, and the openers themselves are an editor
+      // concern (same call as house rules, which counts rather than dumping the client's text).
+      if (approach !== 'targeted') {
+        rows.push({
+          label: 'Opening questions',
+          value:
+            openingMode === 'examples' && usableExamples.length > 0
+              ? `Guided by ${usableExamples.length} example${usableExamples.length === 1 ? '' : 's'}`
+              : "Interviewer's own framings",
+        });
+      }
+      rows.push({
+        label: 'Questioning tactics',
+        value: listOf(
+          [
+            [c.interviewerStrategy.probeDepth, 'Probe shallow answers'],
+            [c.interviewerStrategy.reflect, 'Reflect answers back'],
+            [c.interviewerStrategy.batchRelated, 'Invite related gaps together'],
+          ],
+          'None'
+        ),
+      });
+      return rows;
     },
   },
   houseRules: {

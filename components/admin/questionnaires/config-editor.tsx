@@ -84,6 +84,7 @@ import {
   PersonaLibraryIcon,
 } from '@/components/admin/questionnaires/persona-library-panel';
 import { HouseRulesPanel } from '@/components/admin/questionnaires/house-rules-panel';
+import { InterviewerStrategyPanel } from '@/components/admin/questionnaires/interviewer-strategy-panel';
 import { BUILT_IN_PERSONAS } from '@/lib/app/questionnaire/persona/presets';
 import { personaToneClause } from '@/lib/app/questionnaire/chat/tone';
 import { API } from '@/lib/api/endpoints';
@@ -120,9 +121,6 @@ import {
   type ToneDimensionKey,
   type ToneSettings,
   type PersonaSelectionSettings,
-  INTERVIEWER_APPROACHES,
-  INTERVIEWER_APPROACH_LABELS,
-  type InterviewerApproach,
   type InterviewerStrategySettings,
   type HouseRulesSettings,
   QUESTION_FIDELITY_LEVELS,
@@ -674,7 +672,7 @@ export function ConfigEditor({
   const [personaSelection, setPersonaSelection] = useState<PersonaSelectionSettings>(
     config.personaSelection
   );
-  // Interviewer strategy (questioning approach) — edited as one object, patched by `setStrategy`.
+  // Interviewer strategy (questioning approach) — the whole block edited as one object by its panel.
   const [interviewerStrategy, setInterviewerStrategy] = useState<InterviewerStrategySettings>(
     config.interviewerStrategy
   );
@@ -749,9 +747,6 @@ export function ConfigEditor({
     setTone((t) => ({ ...t, [key]: { ...t[key], ...patch } }));
   const setTonePersona = (patch: Partial<ToneSettings['persona']>) =>
     setTone((t) => ({ ...t, persona: { ...t.persona, ...patch } }));
-  const setStrategy = (patch: Partial<InterviewerStrategySettings>) =>
-    setInterviewerStrategy((s) => ({ ...s, ...patch }));
-
   const setPersonaSelectionPatch = (patch: Partial<PersonaSelectionSettings>) =>
     setPersonaSelection((s) => ({ ...s, ...patch }));
 
@@ -869,6 +864,10 @@ export function ConfigEditor({
         questionCount,
         sensitivityAwareness,
         supportMessage,
+        interviewerStrategyEnabled: interviewerStrategy.enabled,
+        interviewerApproach: interviewerStrategy.approach,
+        openingMode: interviewerStrategy.openingMode,
+        openingExamples: interviewerStrategy.openingExamples,
         houseRulesEnabled: houseRules.enabled,
         houseRules: houseRules.rules,
       }),
@@ -886,6 +885,7 @@ export function ConfigEditor({
       questionCount,
       sensitivityAwareness,
       supportMessage,
+      interviewerStrategy,
       houseRules,
     ]
   );
@@ -1012,7 +1012,14 @@ export function ConfigEditor({
         // persona-selection flag AND `personaSelection.enabled` to surface to a respondent.
         personaSelection,
         // Interviewer strategy (questioning approach). Sent whole; off ⇒ default prompts unchanged.
-        interviewerStrategy,
+        // Trim the opening examples and drop the blank ones — a row the admin added but never wrote
+        // in is not an example, and keeping it would make the "n of 5" counter lie after a reload.
+        interviewerStrategy: {
+          ...interviewerStrategy,
+          openingExamples: interviewerStrategy.openingExamples
+            .map((example) => example.trim())
+            .filter((example) => example.length > 0),
+        },
         // Question fidelity gate. Sent whole; off ⇒ every question resolves to `balanced`, so the
         // per-question dial stored on each question stays inert.
         questionFidelity,
@@ -2034,139 +2041,15 @@ export function ConfigEditor({
             id="interviewer-strategy"
             title="Interviewer strategy"
             description="How the interviewer decides what to ask each turn. Off keeps the built-in default — ask the one provided question, one thing at a time, phrased as an open invitation. On adds an approach + tactics that override that default in the interviewer's prompt."
+            conflicts={conflictsFor('interviewer-strategy')}
           >
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={interviewerStrategy.enabled}
-                onCheckedChange={(enabled) => setStrategy({ enabled })}
-                disabled={busy}
-              />
-              <Label className="text-sm font-medium">
-                Override the default questioning approach{' '}
-                <FieldHelp title="Interviewer strategy">
-                  <p>
-                    By default the interviewer prompt tells it to{' '}
-                    <strong>ask the one provided question, one thing at a time</strong>, phrased as
-                    an open invitation (“Tell me about…”), in a neutral register.
-                  </p>
-                  <p className="mt-2">
-                    When on, an <code className="text-xs">&lt;interviewer_strategy&gt;</code> block
-                    is appended to the prompt <em>after</em> those default rules — so it takes
-                    precedence — carrying the approach and tactics below. When off, that block is
-                    omitted entirely and nothing about the default changes.
-                  </p>
-                </FieldHelp>
-              </Label>
-            </div>
-
-            {interviewerStrategy.enabled && (
-              <div className="border-border/60 ml-1 space-y-4 border-l pl-4">
-                <div className="space-y-1.5 sm:max-w-xs">
-                  <Label className="text-sm font-medium">
-                    Approach{' '}
-                    <FieldHelp title="Approach">
-                      <p>
-                        The questioning-approach clause added to the prompt. It sets how open vs.
-                        targeted each ask is:
-                      </p>
-                      <ul className="mt-2 list-disc space-y-2 pl-4">
-                        <li>
-                          <strong>Funnel (open → targeted)</strong> — a coverage-driven arc. While
-                          little is covered it <em>overrides</em> the “ask the one question / one
-                          thing at a time” rules and asks a broad opener about the topic{' '}
-                          <em>area</em> (“Tell me about…”), so one wide answer can fill several
-                          gaps; the first couple of asks get an extra permission-giving opening. As
-                          coverage builds it steers toward the specific points still missing, then
-                          near the end asks one concrete question at a time. Terse answers move it
-                          toward targeted a step sooner.
-                        </li>
-                        <li>
-                          <strong>Open throughout</strong> — the broad opener above, the whole way;
-                          keeps overriding “one question / one thing at a time” so it stays
-                          exploratory. Best for rich, qualitative discovery.
-                        </li>
-                        <li>
-                          <strong>Targeted / efficient</strong> — one specific, concrete question at
-                          a time with minimal preamble, favouring a direct answerable ask over a
-                          broad invitation. Best for factual questionnaires and fastest completion.
-                        </li>
-                      </ul>
-                    </FieldHelp>
-                  </Label>
-                  <Select
-                    value={interviewerStrategy.approach}
-                    onValueChange={(v) => setStrategy({ approach: v as InterviewerApproach })}
-                    disabled={busy}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {INTERVIEWER_APPROACHES.map((a) => (
-                        <SelectItem key={a} value={a}>
-                          {INTERVIEWER_APPROACH_LABELS[a]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={interviewerStrategy.probeDepth}
-                      onCheckedChange={(probeDepth) => setStrategy({ probeDepth })}
-                      disabled={busy}
-                    />
-                    <Label className="text-sm font-medium">
-                      Probe for depth{' '}
-                      <FieldHelp title="Probe for depth">
-                        Adds a <strong>PROBE FOR DEPTH</strong> clause on top of the approach: if
-                        the last answer was shallow or vague, ask ONE brief follow-up (“What makes
-                        you say that?”, “Can you give an example?”) before moving on to anything
-                        new. Deepens qualitative answers at the cost of a few more turns. Combines
-                        with any approach.
-                      </FieldHelp>
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={interviewerStrategy.reflect}
-                      onCheckedChange={(reflect) => setStrategy({ reflect })}
-                      disabled={busy}
-                    />
-                    <Label className="text-sm font-medium">
-                      Reflect &amp; confirm{' '}
-                      <FieldHelp title="Reflect & confirm">
-                        Adds a <strong>REFLECT AND CONFIRM</strong> clause: before the next
-                        question, briefly play back the gist of the last answer in one short{' '}
-                        <em>statement</em> (“So the backdrop most of the time is sadness.”) — not a
-                        verbatim repeat, and never a confirming question like “is that right?”, so
-                        the turn still asks only one thing. Builds trust and strengthens answer
-                        confidence through corroboration.
-                      </FieldHelp>
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={interviewerStrategy.batchRelated}
-                      onCheckedChange={(batchRelated) => setStrategy({ batchRelated })}
-                      disabled={busy}
-                    />
-                    <Label className="text-sm font-medium">
-                      Batch related questions{' '}
-                      <FieldHelp title="Batch related questions">
-                        Adds a <strong>BATCH RELATED</strong> clause: when several remaining gaps
-                        are closely related, the interviewer MAY invite two or three together in one
-                        natural question — the one allowed exception to the default “one thing at a
-                        time” rule. Faster and more conversational; slightly harder to extract
-                        cleanly.
-                      </FieldHelp>
-                    </Label>
-                  </div>
-                </div>
-              </div>
-            )}
+            <InterviewerStrategyPanel
+              value={interviewerStrategy}
+              onChange={setInterviewerStrategy}
+              disabled={busy}
+              questionnaireId={questionnaireId}
+              versionId={versionId}
+            />
           </SettingsGroup>
 
           {/* ── Interviewer house rules — what the interviewer may and may not do, per client. ── */}

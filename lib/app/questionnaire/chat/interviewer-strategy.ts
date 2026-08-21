@@ -12,48 +12,120 @@
  */
 
 import { isRecord } from '@/lib/utils';
+import { narrowPromptText } from '@/lib/app/questionnaire/chat/prompt-text';
 import {
   DEFAULT_INTERVIEWER_STRATEGY,
+  FUNNEL_PACES,
   INTERVIEWER_APPROACHES,
+  INTERVIEWER_OPENING_MODES,
+  MAX_OPENING_EXAMPLES,
+  OPENING_EXAMPLE_MAX,
+  type FunnelPace,
   type InterviewerApproach,
+  type InterviewerOpeningMode,
   type InterviewerStrategySettings,
 } from '@/lib/app/questionnaire/types';
 
 /**
  * Project the stored `interviewerStrategy` Json (we wrote it, but it may be `{}`, partial,
  * legacy-null, or malformed) onto a complete {@link InterviewerStrategySettings}: `enabled` strictly
- * boolean, `approach` a known member (else the default), tactics strictly boolean.
+ * boolean, `approach`/`pace`/`openingMode` known members (else the default), tactics strictly
+ * boolean, `openingExamples` a bounded array of sanitised non-empty strings.
+ *
+ * Rows written before the pace/opening fields existed simply lack those keys and fall back to the
+ * defaults, which reproduce the original hard-coded behaviour — no backfill required.
  */
 export function narrowInterviewerStrategy(value: unknown): InterviewerStrategySettings {
   const obj = isRecord(value) ? value : {};
   const approach = INTERVIEWER_APPROACHES.includes(obj.approach as InterviewerApproach)
     ? (obj.approach as InterviewerApproach)
     : DEFAULT_INTERVIEWER_STRATEGY.approach;
+  const pace = FUNNEL_PACES.includes(obj.pace as FunnelPace)
+    ? (obj.pace as FunnelPace)
+    : DEFAULT_INTERVIEWER_STRATEGY.pace;
+  const openingMode = INTERVIEWER_OPENING_MODES.includes(obj.openingMode as InterviewerOpeningMode)
+    ? (obj.openingMode as InterviewerOpeningMode)
+    : DEFAULT_INTERVIEWER_STRATEGY.openingMode;
+  const openingExamples = (Array.isArray(obj.openingExamples) ? obj.openingExamples : [])
+    .map((entry) => narrowPromptText(entry, OPENING_EXAMPLE_MAX))
+    .filter((entry) => entry.length > 0)
+    .slice(0, MAX_OPENING_EXAMPLES);
   return {
     enabled: obj.enabled === true,
     approach,
+    pace,
+    openingMode,
+    openingExamples,
     probeDepth: obj.probeDepth === true,
     reflect: obj.reflect === true,
     batchRelated: obj.batchRelated === true,
   };
 }
 
-/**
- * The "particularly open" window at the very start of a session: the first couple of asks get a
- * richer, permission-giving, breadth-first invitation (and a relaxed brevity floor) instead of the
- * ongoing broad clause. Beyond this, the open phase reverts to its standard broad invitation.
- */
-const OPENING_WINDOW = 2;
-
 /** Where the conversation is in the funnel arc, derived from coverage (with progress as a fallback). */
 export type FunnelPhase = 'open' | 'mixed' | 'targeted';
 
-/** Coverage below this is still the broad/open phase; above the upper bound it's the targeted phase. */
-const FUNNEL_OPEN_BELOW = 0.4;
-const FUNNEL_TARGETED_ABOVE = 0.75;
-/** Without a coverage signal, fall back to the selection round: open for the first few asks, … */
-const FUNNEL_OPEN_ROUNDS = 3;
-const FUNNEL_TARGETED_ROUNDS = 8;
+/**
+ * The four numbers that define one arc. They move together as a {@link FunnelPace} because they are
+ * not independently meaningful: an admin who widened the open band but left the opening window at
+ * one ask would get an arc that contradicts itself.
+ *
+ * - `openingWindow` — asks at the very start of a session that get the richer, permission-giving,
+ *   breadth-first invitation (and a relaxed brevity floor) instead of the ongoing broad clause.
+ *   Beyond it, the open phase reverts to its standard broad invitation.
+ * - `openBelow` / `targetedAbove` — coverage below the first is the broad/open phase; above the
+ *   second it's the targeted phase; between them, mixed.
+ * - `openRounds` / `targetedRounds` — the same three bands expressed in asks, used when there is no
+ *   coverage signal yet.
+ */
+export interface FunnelPaceProfile {
+  openingWindow: number;
+  openBelow: number;
+  targetedAbove: number;
+  openRounds: number;
+  targetedRounds: number;
+}
+
+/**
+ * `balanced` is the arc's original hard-coded constants, unchanged — it is what makes this dial a
+ * provable no-op for every questionnaire that has never touched it. The other two stops widen and
+ * narrow every band in step.
+ */
+export const FUNNEL_PACE_PROFILES: Record<FunnelPace, FunnelPaceProfile> = {
+  gradual: {
+    openingWindow: 3,
+    openBelow: 0.55,
+    targetedAbove: 0.85,
+    openRounds: 5,
+    targetedRounds: 12,
+  },
+  balanced: {
+    openingWindow: 2,
+    openBelow: 0.4,
+    targetedAbove: 0.75,
+    openRounds: 3,
+    targetedRounds: 8,
+  },
+  brisk: {
+    openingWindow: 1,
+    openBelow: 0.25,
+    targetedAbove: 0.55,
+    openRounds: 2,
+    targetedRounds: 5,
+  },
+};
+
+/**
+ * The profile governing THIS session.
+ *
+ * Pace is honoured for `funnel` only, and deliberately so: the admin editor shows the dial only for
+ * that approach, so letting a stored pace quietly reshape an `open` session's opening window would
+ * be an effect with no visible cause. `open` and `targeted` always read `balanced`.
+ */
+export function paceProfile(settings: InterviewerStrategySettings | undefined): FunnelPaceProfile {
+  if (settings?.approach !== 'funnel') return FUNNEL_PACE_PROFILES.balanced;
+  return FUNNEL_PACE_PROFILES[settings.pace] ?? FUNNEL_PACE_PROFILES.balanced;
+}
 
 /** Context the funnel arc reads to decide its phase. */
 export interface InterviewerStrategyContext {
@@ -71,21 +143,27 @@ export interface InterviewerStrategyContext {
   topicArea?: string | null;
 }
 
-/** Resolve the funnel phase from coverage (preferred) or the selection round, then apply the terse bias. */
-export function funnelPhase(ctx: InterviewerStrategyContext): FunnelPhase {
+/**
+ * Resolve the funnel phase from coverage (preferred) or the selection round, then apply the terse
+ * bias. The profile defaults to `balanced`, which is the arc's original behaviour.
+ */
+export function funnelPhase(
+  ctx: InterviewerStrategyContext,
+  profile: FunnelPaceProfile = FUNNEL_PACE_PROFILES.balanced
+): FunnelPhase {
   let phase: FunnelPhase;
   if (typeof ctx.coverage === 'number') {
     phase =
-      ctx.coverage < FUNNEL_OPEN_BELOW
+      ctx.coverage < profile.openBelow
         ? 'open'
-        : ctx.coverage < FUNNEL_TARGETED_ABOVE
+        : ctx.coverage < profile.targetedAbove
           ? 'mixed'
           : 'targeted';
   } else {
     phase =
-      ctx.questionsAsked < FUNNEL_OPEN_ROUNDS
+      ctx.questionsAsked < profile.openRounds
         ? 'open'
-        : ctx.questionsAsked < FUNNEL_TARGETED_ROUNDS
+        : ctx.questionsAsked < profile.targetedRounds
           ? 'mixed'
           : 'targeted';
   }
@@ -107,12 +185,16 @@ function areaPhrase(ctx: InterviewerStrategyContext): string {
 /**
  * The OPEN clause deliberately BROADENS the scope past the single selected question — the phraser is
  * otherwise told to "ask the ONE question provided", so without this explicit override it just
- * rewords that specific question openly instead of asking a genuinely general opener. The first
- * couple of asks ({@link OPENING_WINDOW}) get the richer, permission-giving {@link openingClause};
+ * rewords that specific question openly instead of asking a genuinely general opener. The first few
+ * asks (the pace profile's `openingWindow`) get the richer, permission-giving {@link openingClause};
  * after that the ongoing broad invitation below carries the open phase.
  */
-function openClause(ctx: InterviewerStrategyContext): string {
-  if (ctx.questionsAsked < OPENING_WINDOW) return openingClause(ctx);
+function openClause(
+  ctx: InterviewerStrategyContext,
+  profile: FunnelPaceProfile,
+  settings: InterviewerStrategySettings
+): string {
+  if (ctx.questionsAsked < profile.openingWindow) return openingClause(ctx, settings);
   return (
     'QUESTIONING APPROACH — be highly OPEN and general right now. Treat the specific question below ' +
     `as ONLY a hint to the AREA to explore — do NOT ask it narrowly. Instead, ask ONE broad, ` +
@@ -125,15 +207,54 @@ function openClause(ctx: InterviewerStrategyContext): string {
 }
 
 /**
- * The OPENING clause — used for the first couple of asks ({@link OPENING_WINDOW}) in an open phase.
- * Richer and more subtle than the ongoing broad clause: it invites the respondent to talk freely and
- * broadly before any specific question, gives explicit permission to speak at length, welcomes
- * experiences as much as opinions, and offers a MENU of framings the model varies between (no script,
- * so different respondents get different openings). On the second ask it follows the respondent's
- * lead — widening again if their first answer was thin, or probing deeper if it surfaced something
- * that matters. The brevity floor is relaxed for these turns (see {@link usesOpenOpening}).
+ * The framing half of the opening clause: where the wording of the opener comes from.
+ *
+ * `auto` hands the model a MENU of framings and tells it to vary between them, so different
+ * respondents get different openings. `examples` swaps that menu for the admin's own openers as
+ * GUIDANCE — the register and breadth to aim at, never a script to read. Reproducing one verbatim
+ * would give every respondent the same opener, which is the failure mode the menu exists to avoid,
+ * so the clause bans it explicitly rather than trusting the word "example" to carry that.
+ *
+ * An `examples` mode with nothing usable in it falls back to the menu: an empty list must never
+ * produce a degraded opener (see {@link usesGuidedOpening}).
  */
-function openingClause(ctx: InterviewerStrategyContext): string {
+function framingClause(settings: InterviewerStrategySettings): string {
+  if (usesGuidedOpening(settings)) {
+    const examples = settings.openingExamples
+      .map((example, index) => `(${index + 1}) "${example}"`)
+      .join(' ');
+    return (
+      'The client has supplied example opening questions that show the KIND of opener they want. Be ' +
+      'GUIDED by them — match their breadth, register and spirit, and the sort of thinking they ask ' +
+      'for — but do NOT reproduce one verbatim, quote it, or treat the list as a script. Write your ' +
+      'OWN opener in the same vein, adapted to this questionnaire and this respondent, and vary it ' +
+      `between respondents. Examples: ${examples}`
+    );
+  }
+  return (
+    'Choose ONE natural framing and make it your own — VARY it, do not recite a script. Framings to ' +
+    'draw on: broad & conversational ("I\'d like to invite you to talk about your experiences of…"); ' +
+    'story-first ("could you tell me about your overall experience of…?"); reflection-first ("what ' +
+    'comes to mind when you think about…?"); very open ("what\'s it really like to experience…?"); ' +
+    'blank page ("if you had a blank page to describe…, what would you write?"); appreciative & ' +
+    'critical ("what stands out most, both positively and negatively?").'
+  );
+}
+
+/**
+ * The OPENING clause — used for the first few asks (the pace profile's `openingWindow`) in an open
+ * phase. Richer and more subtle than the ongoing broad clause: it invites the respondent to talk
+ * freely and broadly before any specific question, gives explicit permission to speak at length,
+ * welcomes experiences as much as opinions, and closes with a {@link framingClause} — the
+ * interviewer's own menu of framings, or the admin's examples. On the second ask it follows the
+ * respondent's lead — widening again if their first answer was thin, or probing deeper if it
+ * surfaced something that matters. The brevity floor is relaxed for these turns (see
+ * {@link usesOpenOpening}).
+ */
+function openingClause(
+  ctx: InterviewerStrategyContext,
+  settings: InterviewerStrategySettings
+): string {
   const second =
     ctx.questionsAsked >= 1
       ? ctx.respondentTerse
@@ -156,12 +277,8 @@ function openingClause(ctx: InterviewerStrategyContext): string {
     "their overall experience of the questionnaire's subject (see the goal); take the BROADEST " +
     'sensible framing, never the one narrow topic. ' +
     second +
-    'Choose ONE natural framing and make it your own — VARY it, do not recite a script. Framings to ' +
-    'draw on: broad & conversational ("I\'d like to invite you to talk about your experiences of…"); ' +
-    'story-first ("could you tell me about your overall experience of…?"); reflection-first ("what ' +
-    'comes to mind when you think about…?"); very open ("what\'s it really like to experience…?"); ' +
-    'blank page ("if you had a blank page to describe…, what would you write?"); appreciative & ' +
-    'critical ("what stands out most, both positively and negatively?"). This OVERRIDES the "ask the ' +
+    framingClause(settings) +
+    ' This OVERRIDES the "ask the ' +
     'one question provided" and "one thing at a time" guidance above — a wide, permission-giving ' +
     'invitation matters more than the underlying question right now.'
   );
@@ -183,9 +300,13 @@ function mixedClause(ctx: InterviewerStrategyContext): string {
   );
 }
 
-function funnelClause(ctx: InterviewerStrategyContext): string {
-  const phase = funnelPhase(ctx);
-  if (phase === 'open') return openClause(ctx);
+function funnelClause(
+  ctx: InterviewerStrategyContext,
+  profile: FunnelPaceProfile,
+  settings: InterviewerStrategySettings
+): string {
+  const phase = funnelPhase(ctx, profile);
+  if (phase === 'open') return openClause(ctx, profile, settings);
   if (phase === 'mixed') return mixedClause(ctx);
   return targetedClause();
 }
@@ -200,9 +321,10 @@ export function buildInterviewerStrategyInstructions(
 ): string {
   if (!settings?.enabled) return '';
 
+  const profile = paceProfile(settings);
   const clauses: string[] = [];
-  if (settings.approach === 'funnel') clauses.push(funnelClause(ctx));
-  else if (settings.approach === 'open') clauses.push(openClause(ctx));
+  if (settings.approach === 'funnel') clauses.push(funnelClause(ctx, profile, settings));
+  else if (settings.approach === 'open') clauses.push(openClause(ctx, profile, settings));
   else clauses.push(targetedClause());
 
   // Additive tactics — combine with any approach.
@@ -237,8 +359,8 @@ export function buildInterviewerStrategyInstructions(
 }
 
 /**
- * Whether THIS turn is an "open opening" — the first couple of asks ({@link OPENING_WINDOW}) of a
- * session whose resolved phase is open: the `open` approach (always open) or `funnel` while
+ * Whether THIS turn is an "open opening" — the first few asks (the pace profile's `openingWindow`)
+ * of a session whose resolved phase is open: the `open` approach (always open) or `funnel` while
  * {@link funnelPhase} reads `open`. The single source of truth for "give this opening room": the
  * phraser uses it to relax the brevity floor so the richer {@link openingClause} invitation fits.
  * False when the strategy is disabled, the approach/phase isn't open, or we're past the window.
@@ -248,8 +370,23 @@ export function usesOpenOpening(
   ctx: InterviewerStrategyContext
 ): boolean {
   if (!settings?.enabled) return false;
-  if (ctx.questionsAsked >= OPENING_WINDOW) return false;
+  const profile = paceProfile(settings);
+  if (ctx.questionsAsked >= profile.openingWindow) return false;
   if (settings.approach === 'open') return true;
-  if (settings.approach === 'funnel') return funnelPhase(ctx) === 'open';
+  if (settings.approach === 'funnel') return funnelPhase(ctx, profile) === 'open';
   return false;
+}
+
+/**
+ * Whether the admin's example openers actually govern the opening framing: `examples` mode with at
+ * least one usable example left after narrowing.
+ *
+ * The emptiness check is the point. `examples` with nothing in it — a mode switched on before the
+ * list was written, or a list whose entries were all whitespace — must fall back to the
+ * interviewer's own framings menu rather than render an examples block with no examples in it. The
+ * editor uses this to warn the admin that the mode is currently doing nothing.
+ */
+export function usesGuidedOpening(settings: InterviewerStrategySettings | undefined): boolean {
+  if (settings?.openingMode !== 'examples') return false;
+  return settings.openingExamples.some((example) => example.trim().length > 0);
 }

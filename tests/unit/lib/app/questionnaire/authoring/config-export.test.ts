@@ -131,6 +131,70 @@ describe('parseSettingsImport', () => {
     expect(parsed.houseRules).toEqual(houseRules);
   });
 
+  it('round-trips the whole interviewerStrategy block, pace and opening examples included', () => {
+    // Same class of bug as the houseRules case above: losing the pace or the client's own opening
+    // questions on an import would hand the next questionnaire a differently-behaved interviewer
+    // without saying so. Pinned end-to-end through the real server validator.
+    const interviewerStrategy = {
+      enabled: true,
+      approach: 'funnel' as const,
+      pace: 'brisk' as const,
+      openingMode: 'examples' as const,
+      openingExamples: ['Tell me about your week.', 'What stands out, good and bad?'],
+      probeDepth: true,
+      reflect: false,
+      batchRelated: true,
+    };
+    const view: ConfigView = { ...SAVED_VIEW, interviewerStrategy };
+    const text = JSON.stringify(buildSettingsExport(view, '2026-08-21T00:00:00.000Z'));
+
+    const result = parseSettingsImport(text);
+    expect(result.config.interviewerStrategy).toEqual(interviewerStrategy);
+
+    const parsed = updateConfigSchema.parse(result.config);
+    expect(parsed.interviewerStrategy).toEqual(interviewerStrategy);
+  });
+
+  /**
+   * The end-to-end case for the `.default()` decision in `interviewerStrategySchema`. An export file
+   * written before pace/opening existed omits those three keys entirely; against a `strict()` block
+   * with required keys it would fail to import, and the admin would be told their own export file is
+   * invalid. The defaults must also reproduce the PRE-FEATURE behaviour, or importing an old file
+   * would silently change how the interviewer questions.
+   */
+  it('imports a pre-feature export file, filling the pre-feature defaults', () => {
+    const legacyFile = JSON.stringify({
+      kind: CONFIG_EXPORT_KIND,
+      schemaVersion: 1,
+      exportedAt: '2026-07-01T00:00:00.000Z',
+      config: {
+        interviewerStrategy: {
+          enabled: true,
+          approach: 'funnel',
+          probeDepth: true,
+          reflect: false,
+          batchRelated: true,
+        },
+      },
+    });
+
+    const result = parseSettingsImport(legacyFile);
+    // Nothing is reported as unrecognised — the omission is absence, not junk.
+    expect(result.unknownKeys).toEqual([]);
+
+    const parsed = updateConfigSchema.parse(result.config);
+    expect(parsed.interviewerStrategy).toEqual({
+      enabled: true,
+      approach: 'funnel',
+      pace: 'balanced',
+      openingMode: 'auto',
+      openingExamples: [],
+      probeDepth: true,
+      reflect: false,
+      batchRelated: true,
+    });
+  });
+
   it('strips the read-only `saved` flag and envelope metadata from a bare object', () => {
     const result = parseSettingsImport(
       JSON.stringify({ saved: true, schemaVersion: 9, voiceEnabled: true })

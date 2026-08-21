@@ -695,6 +695,54 @@ describe('copyVersionGraph — with config and scoring schema', () => {
     expect(createCall.data.houseRules).toEqual(houseRules);
   });
 
+  it('carries the whole interviewerStrategy block, pace and opening examples included', async () => {
+    // Same reasoning as houseRules above: the fork runs on every edit to a LAUNCHED version, so a
+    // field that does not survive it is silently reset the first time an admin touches a live
+    // questionnaire. Losing the pace would re-time the whole arc; losing the openers would change
+    // the first thing every respondent is asked. The block is copied wholesale by
+    // `jsonInput(source.config.interviewerStrategy)`, and this pins that it stays that way.
+    const interviewerStrategy = {
+      enabled: true,
+      approach: 'funnel',
+      pace: 'brisk',
+      openingMode: 'examples',
+      openingExamples: ['Tell me about your week.'],
+      probeDepth: true,
+      reflect: false,
+      batchRelated: true,
+    };
+    tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
+      ...MINIMAL_SOURCE,
+      config: {
+        selectionStrategy: 'weighted',
+        minQuestionsAnswered: 3,
+        coverageThreshold: 0.8,
+        costBudgetUsd: null,
+        maxQuestionsPerSession: 20,
+        voiceEnabled: false,
+        contradictionMode: null,
+        contradictionWindowN: null,
+        anonymousMode: false,
+        profileFields: null,
+        inviteeFields: null,
+        tone: null,
+        interviewerStrategy,
+        respondentReport: null,
+        cohortReport: null,
+        intro: null,
+        accessMode: null,
+        milestoneBannerThresholds: null,
+      },
+    });
+
+    await copyVersionGraph(tx as never, 'src-v', 'tgt-v');
+
+    const createCall = (tx.appQuestionnaireConfig.create as Mock).mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(createCall.data.interviewerStrategy).toEqual(interviewerStrategy);
+  });
+
   it('creates a scoring-schema row when the source has one', async () => {
     // Arrange: source with scoringSchema present
     tx.appQuestionnaireVersion.findUniqueOrThrow.mockResolvedValue({
