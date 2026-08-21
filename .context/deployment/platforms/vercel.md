@@ -41,6 +41,28 @@ connection limit. Set it to 1 **and** point `DATABASE_URL` at a pooled endpoint
 instance is plenty. See
 [database-env.md](../../environment/database-env.md#database_pool_max).
 
+**`MCP_SESSION_MODE` is the same shape of problem, and needs no setting** — its
+default (`stateless`) is already the correct value here. It is worth knowing why,
+because the failure it prevents looks like something else entirely.
+
+MCP sessions were held in a per-process `Map`. On Vercel, `initialize` mints a
+session on one instance and the client's next call is load-balanced to another,
+which looks that id up in its own empty map and returns `404 Session not found or
+expired` — so the handshake fails intermittently and reads as session expiry. No
+client retry recovers it, because the session is not lost, it is invisible to
+live siblings. In stateless mode no session id is issued and there is nothing to
+look up.
+
+If you deliberately set `MCP_SESSION_MODE=stateful` here **the build fails** —
+during _Collecting page data_, with that explanation. Two things worth knowing
+about that guard. It fails the **whole app**, not just MCP: the check sits at
+module scope in a file the MCP barrel re-exports, and seven non-MCP admin routes
+reach that barrel transitively, so the deploy fails even with the MCP server
+switched off in the database. And it only catches platforms that announce
+themselves via `VERCEL` or `AWS_LAMBDA_FUNCTION_NAME` — a multi-replica container
+deploy elsewhere hits the identical bug undetected. See
+[mcp.md](../../orchestration/mcp.md#session-model--mcp_session_mode).
+
 **Optional (for email):**
 
 ```

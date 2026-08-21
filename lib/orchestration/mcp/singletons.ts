@@ -10,6 +10,50 @@
 
 import { McpSessionManager } from '@/lib/orchestration/mcp/session-manager';
 import { McpRateLimiter } from '@/lib/orchestration/mcp/rate-limiter';
+import { env } from '@/lib/env';
+
+/**
+ * Platforms that announce themselves as function-per-request.
+ *
+ * `||` rather than `??` on purpose: `VERCEL=""` is falsy but not nullish, so
+ * `??` would stop at the empty string and never reach the Lambda check.
+ */
+const SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+/**
+ * Refuse `stateful` where more than one process is known to serve traffic.
+ *
+ * At module scope, so it throws on the first import of the MCP singletons
+ * rather than on the first request — the same shape as the `TENANCY_MODE` guard
+ * in `lib/db/client.ts`. The failure it prevents is the worst kind to debug:
+ * `initialize` succeeds on instance A, the next call lands on B, B looks the id
+ * up in its own empty map and returns 404, and the client reports a connection
+ * failure that "works on retry" purely by routing luck.
+ *
+ * **This fails the whole app, not just MCP.** The throw is at module scope in a
+ * file the MCP barrel re-exports, and `resource-update-hooks.ts` pulls that
+ * barrel into seven non-MCP admin routes (agents, workflows, knowledge
+ * documents). So a misconfigured deploy fails at build — during Next's
+ * page-data collection — even if the MCP server is switched off in the database
+ * and no MCP traffic exists. That is the intent (a config that cannot work
+ * should not deploy), but it is a bigger blast radius than "the MCP endpoint
+ * degrades", so it is worth knowing before you reach for the flag.
+ *
+ * **A safety net, not a boundary.** It only catches platforms that set a
+ * well-known variable. A container deploy with `replicas: 2`, or a clustered
+ * Node process, hits the identical bug and this will not fire — which is the
+ * other half of why `stateless` is the default rather than a documented opt-in.
+ */
+if (env.MCP_SESSION_MODE === 'stateful' && SERVERLESS) {
+  throw new Error(
+    'MCP_SESSION_MODE=stateful holds sessions in per-process memory and cannot work where ' +
+      'more than one process serves traffic: consecutive requests land on different ' +
+      'instances, so the session created by `initialize` is not found and the client cannot ' +
+      'connect. Use MCP_SESSION_MODE=stateless (the default), which needs no shared state — ' +
+      'at the cost of the SSE stream, resources/subscribe and logging/setLevel. See ' +
+      '.context/orchestration/mcp.md.'
+  );
+}
 
 let sessionManager: McpSessionManager | null = null;
 let rateLimiter: McpRateLimiter | null = null;

@@ -4,6 +4,19 @@
  * POST   /api/v1/mcp — JSON-RPC 2.0 requests
  * GET    /api/v1/mcp — SSE notification stream
  * DELETE /api/v1/mcp — Session termination
+ *
+ * **`@/lib/env` is mocked, and that is load-bearing.** `vitest.config.ts` runs
+ * on `happy-dom`, so `typeof window !== 'undefined'` is true and `lib/env.ts`
+ * validates only the *client* schema — every server variable reads as
+ * `undefined` here. Without this mock `MCP_SESSION_MODE` is undefined,
+ * `isStateless()` is silently false, and the whole stateless path tests as if it
+ * were the stateful one. That is not a hypothetical: a downstream
+ * implementation of this feature had 40 tests pass over a branch none of them
+ * entered, for exactly this reason. Set `mockEnv.MCP_SESSION_MODE` per block.
+ *
+ * A mock cannot tell you what the SHIPPED default is, though — for that see
+ * `tests/unit/lib/env-server-vars.test.ts`, which reads the real schema under
+ * the node environment.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -57,6 +70,21 @@ const mockRateLimiter = {
 vi.mock('@/lib/security/ip', () => ({
   getClientIP: vi.fn(() => '127.0.0.1'),
 }));
+
+/**
+ * Mutable so a block can choose its session mode; the route reads it per request.
+ * `vi.hoisted` because a `vi.mock` factory is lifted above normal declarations.
+ *
+ * `NODE_ENV` rides along because this mock replaces `@/lib/env` for EVERY
+ * importer in the graph, and `lib/api/errors.ts` branches on it to decide how
+ * much detail to leak — leaving it undefined would quietly put the error path in
+ * non-production mode for these tests.
+ */
+const mockEnv = vi.hoisted(() => ({
+  MCP_SESSION_MODE: 'stateful',
+  NODE_ENV: 'test',
+}));
+vi.mock('@/lib/env', () => ({ env: mockEnv }));
 
 // Capture the iterable passed to sseResponse so tests can consume the generator
 let capturedIterable: AsyncIterable<{ type: string; data?: string }> | null = null;
@@ -154,6 +182,12 @@ async function parseJson<T>(response: Response): Promise<T> {
 beforeEach(() => {
   vi.clearAllMocks();
   capturedIterable = null;
+
+  // Reset the mode globally, not per-block: `clearAllMocks` does not touch a
+  // plain object, so one block switching to stateless would silently govern
+  // every block after it — and they would still pass, because most assertions
+  // do not distinguish the modes.
+  mockEnv.MCP_SESSION_MODE = 'stateful';
 
   // Restore default mock behaviours
   vi.mocked(authenticateMcpRequest).mockResolvedValue(mockAuthContext);
@@ -764,5 +798,166 @@ describe('DELETE /mcp', () => {
     // handleAPIError handles the thrown error — not a success response
     expect(response.status).not.toBe(200);
     expect(response.status).not.toBe(204);
+  });
+});
+
+// ─── MCP_SESSION_MODE=stateless (#609) ──────────────────────────────────
+
+describe('stateless mode', () => {
+  beforeEach(() => {
+    mockEnv.MCP_SESSION_MODE = 'stateless';
+  });
+
+  it('serves a request with no session header, where stateful rejects it', () => {
+    // The pair is the point. The identical request 400s in stateful mode (see
+    // "Missing Mcp-Session-Id header" above) — that is the bug on serverless,
+    // where `initialize` lands on one instance and this lands on another.
+    return POST(makePostRequest(makeRpcRequest('tools/list'))).then(async (res) => {
+      expect(res.status).toBe(200);
+      expect(handleMcpRequest).toHaveBeenCalled();
+    });
+  });
+
+  it('issues no Mcp-Session-Id, so the client never sends one back', async () => {
+    const res = await POST(makePostRequest(makeRpcRequest('tools/list')));
+
+    // The status assertion is load-bearing: in stateful mode this same request
+    // 400s, and an error response carries no session header either — so without
+    // it the test would pass in both modes for different reasons.
+    expect(res.status).toBe(200);
+    // Per the Streamable HTTP transport a client sends the header only if the
+    // server issued one. Withholding it is what makes the round trip work.
+    expect(res.headers.get(MCP_SESSION_HEADER)).toBeNull();
+  });
+
+  it('ignores a stale session id instead of 404ing it', async () => {
+    // A leftover id from a previous stateful deploy, or from a sibling instance.
+    const res = await POST(
+      makePostRequest(makeRpcRequest('tools/list'), {
+        [MCP_SESSION_HEADER]: 'session-from-elsewhere',
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockSessionManager.getSession).not.toHaveBeenCalled();
+  });
+
+  it('never touches the session manager — nothing to create, persist or evict', async () => {
+    await POST(makePostRequest(makeRpcRequest('initialize')));
+
+    expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+    expect(mockSessionManager.markInitialized).not.toHaveBeenCalled();
+  });
+
+  it('hands the handler a session flagged ephemeral', async () => {
+    await POST(makePostRequest(makeRpcRequest('tools/list')));
+
+    const [, context] = vi.mocked(handleMcpRequest).mock.calls[0];
+    expect(context.session.ephemeral).toBe(true);
+    expect(context.session.initialized).toBe(true);
+  });
+
+  it('rejects a batched initialize here too, not just in stateful mode', async () => {
+    // Stateless has no session state to make ambiguous, but it has the subtler
+    // version: every request in the batch takes its version from the
+    // `MCP-Protocol-Version` header, absent on a handshake request — so the
+    // `tools/list` would be served at 2024-11-05 while the `initialize` beside
+    // it negotiated 2025-06-18, silently dropping the annotations gated on
+    // `>= 2025-06-18`. Same guard, both modes, rather than a documented
+    // difference.
+    const res = await POST(
+      makePostRequest([makeRpcRequest('initialize'), makeRpcRequest('tools/list', undefined, 2)])
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('initialize must be the only request in the batch');
+    expect(handleMcpRequest).not.toHaveBeenCalled();
+  });
+
+  it('answers GET with 405 and Allow: POST, not a broken SSE stream', async () => {
+    const res = await GET(makeGetRequest());
+
+    // 405 is the status the transport designates for "no GET stream here", and
+    // the one clients treat as informational rather than as a failed connect.
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('POST');
+    const body = (await res.json()) as { error: { code: number } };
+    expect(body.error.code).toBe(JsonRpcErrorCode.STATELESS_UNSUPPORTED);
+  });
+
+  it('still answers an UNAUTHENTICATED GET with 401, not 405', async () => {
+    // Pins the position of the stateless block inside GET. It sits after auth
+    // and after the server-enabled check deliberately, so the method is only
+    // unavailable to callers who would otherwise have been allowed it — but
+    // nothing tested that, and hoisting the block to the top of the handler
+    // passed the whole suite.
+    vi.mocked(authenticateMcpRequest).mockResolvedValue(null);
+
+    const res = await GET(makeGetRequest());
+
+    expect(res.status).toBe(401);
+  });
+
+  it('still answers GET with 503 when the MCP server is disabled', async () => {
+    vi.mocked(getMcpServerConfig).mockResolvedValue({
+      ...mockServerState,
+      isEnabled: false,
+    } as never);
+
+    const res = await GET(makeGetRequest());
+
+    expect(res.status).toBe(503);
+  });
+
+  it('answers DELETE with 405 but still audits what the key asked for', async () => {
+    const res = await DELETE(makeDeleteRequest({ [MCP_SESSION_HEADER]: 'whatever' }));
+
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('POST');
+    expect(logMcpAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'session/destroy', responseCode: 'error' })
+    );
+  });
+});
+
+describe('stateless mode: the protocol version comes from the header', () => {
+  beforeEach(() => {
+    mockEnv.MCP_SESSION_MODE = 'stateless';
+  });
+
+  async function versionSeenByHandler(headers: Record<string, string> = {}): Promise<string> {
+    await POST(makePostRequest(makeRpcRequest('tools/list'), headers));
+    const [, context] = vi.mocked(handleMcpRequest).mock.calls[0];
+    return context.session.protocolVersion;
+  }
+
+  it('honours a version the server supports', async () => {
+    expect(await versionSeenByHandler({ 'mcp-protocol-version': '2025-06-18' })).toBe('2025-06-18');
+  });
+
+  it('falls back to the OLDEST when the header is missing', async () => {
+    // No session remembers a negotiation, so the conservative read is that the
+    // client predates version negotiation entirely.
+    expect(await versionSeenByHandler()).toBe('2024-11-05');
+  });
+
+  it('DOWNGRADES a forward-dated client to our latest, rather than flooring it', async () => {
+    // The correction that must not be inherited. A `2026-07-28` client
+    // understands strictly MORE than we do; flooring it to `2024-11-05` means
+    // the newer the client the worse it is treated, and `protocol-handler` gates
+    // tool annotations on `>= 2025-06-18` — so the newest clients would silently
+    // lose annotations on the default path. `negotiateMcpProtocolVersion`
+    // already draws this distinction; the route delegates rather than
+    // re-deciding.
+    expect(await versionSeenByHandler({ 'mcp-protocol-version': '2026-07-28' })).toBe('2025-06-18');
+    expect(await versionSeenByHandler({ 'mcp-protocol-version': '2025-11-25' })).toBe('2025-06-18');
+  });
+
+  it('falls back to the oldest for a BACK-dated or junk value', async () => {
+    // The other side of the same rule: older-unknown and malformed are not
+    // evidence of a newer client, so they get the conservative floor.
+    expect(await versionSeenByHandler({ 'mcp-protocol-version': '1999-01-01' })).toBe('2024-11-05');
+    expect(await versionSeenByHandler({ 'mcp-protocol-version': 'banana' })).toBe('2024-11-05');
   });
 });

@@ -395,6 +395,44 @@ release process.
 
 ### Changed
 
+- **`MCP_SESSION_MODE` — MCP sessions are now stateless by default, so the
+  handshake survives a function-per-request platform.** Sessions were held in a
+  per-process `Map`: `initialize` minted an id on one instance, the client's next
+  call was load-balanced to another, and that instance looked the id up in its
+  own empty map and returned `404 Session not found or expired`. Observed on a
+  production Vercel deploy — one session id, one instant, three instances, two
+  404s and a 200. **No client retry recovers it**, because the session is not
+  lost, it is invisible to live siblings, so re-initialising just repeats the
+  race. The default issues no `Mcp-Session-Id`, which per the Streamable HTTP
+  transport means the client never sends one, so there is nothing that can fail
+  to be found.
+  **What this costs you if you are on a single long-running process:** the SSE
+  stream (`GET` answers `405 Allow: POST`), `resources/subscribe`,
+  `resources/unsubscribe` and `logging/setLevel`, which refuse with a new
+  `STATELESS_UNSUPPORTED` (`-32005`) rather than accepting work they would drop —
+  and `initialize` no longer advertises them, so a conforming client does not
+  ask. **Set `MCP_SESSION_MODE=stateful` to keep them.** That mode is a
+  legacy-compatibility mode rather than a richer one: MCP revision `2026-07-28`
+  removes protocol-level sessions and the `initialize` handshake outright and
+  prescribes exactly what `stateless` does. **`stateful` is not needed to serve
+  older clients** — that is backwards: `stateless` dispatches `initialize`
+  normally and **connects** for every client `stateful` does, plus `2026-07-28`
+  clients that `stateful` refuses with `400 Missing Mcp-Session-Id header`. Choose it
+  for the SSE stream or the three continuity methods, on one process — plus one
+  smaller difference: it remembers the negotiated protocol version, so a client
+  that omits `MCP-Protocol-Version` on later requests keeps its `2025-06-18`
+  tool annotations instead of falling back to `2024-11-05`.
+  **Two operator-facing consequences of the default.** `Max sessions per key` in
+  the admin MCP settings has no effect — nothing creates a session, so there is
+  nothing to cap — and the admin Sessions page is always empty even while clients
+  are connected. Both surfaces now say so rather than reading as a broken setting
+  and an idle server. And note the startup guard fails the **whole app** build,
+  not just MCP: it sits at module scope in a file the MCP barrel re-exports, and
+  seven non-MCP admin routes reach that barrel transitively. Choosing `stateful` on a platform that announces itself (`VERCEL`,
+  `AWS_LAMBDA_FUNCTION_NAME`) throws at startup with the fix in the message; that
+  guard is a safety net, not a boundary — a multi-replica container deploy hits
+  the same bug undetected (#609).
+
 - **A fork-owned schema file must now account for every model it declares.**
   Any file in `prisma/schema/` that is not one of Sunrise's own eleven — not
   just `app.prisma` and `framework-*.prisma` — is treated as a fork tier's and
