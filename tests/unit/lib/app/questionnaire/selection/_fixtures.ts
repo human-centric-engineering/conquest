@@ -25,6 +25,7 @@ export function q(partial: Partial<QuestionView> & { id: string }): QuestionView
     required: partial.required ?? false,
     type: partial.type ?? 'free_text',
     tagIds: partial.tagIds ?? [],
+    ...(partial.fidelity !== undefined ? { fidelity: partial.fidelity } : {}),
     ...(partial.prompt !== undefined ? { prompt: partial.prompt } : {}),
     ...(partial.guidelines !== undefined ? { guidelines: partial.guidelines } : {}),
     ...(partial.rationale !== undefined ? { rationale: partial.rationale } : {}),

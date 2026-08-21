@@ -31,12 +31,14 @@ import {
   type SensitivitySeverity,
   type ToneSettings,
   type InterviewerStrategySettings,
+  type QuestionFidelityLevel,
 } from '@/lib/app/questionnaire/types';
 import { buildToneInstructions } from '@/lib/app/questionnaire/chat/tone';
 import {
   buildInterviewerStrategyInstructions,
   usesOpenOpening,
 } from '@/lib/app/questionnaire/chat/interviewer-strategy';
+import { buildQuestionFidelityInstructions } from '@/lib/app/questionnaire/chat/question-fidelity';
 import { joinSections, section } from '@/lib/app/questionnaire/prompt/format';
 import { formatGlossarySection } from '@/lib/app/questionnaire/glossary/injection';
 import { QUESTIONNAIRE_INTERVIEWER_AGENT_SLUG } from '@/lib/app/questionnaire/constants';
@@ -173,6 +175,13 @@ export interface QuestionComposeInput {
    * when the block is off or holds no enabled rule, and then no section is emitted at all.
    */
   houseRules?: string;
+  /**
+   * Question fidelity (P18): the resolved level for THIS question — how faithfully it must be put to
+   * the respondent. The route resolves it through `resolveQuestionFidelity`, so it already accounts
+   * for the version-level gate and arrives as `balanced` whenever the feature is off. Absent is
+   * treated as `balanced` (today's behaviour) and emits no section.
+   */
+  fidelity?: QuestionFidelityLevel;
   /**
    * Conversational profile capture (F-capture): the directive telling the interviewer to gather the
    * admin-authored profile fields naturally in-chat. Set only for a NON-anonymous version in
@@ -473,6 +482,14 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
     // approach in `rules`/`this_turn` above — placed after them so it governs (later sections win,
     // same as tone). Collapses to '' when disabled, leaving the default voice untouched.
     section('interviewer_strategy', strategyInstructions),
+    // Question fidelity (P18): how faithfully THIS question must be put. Placed after `rules` and
+    // `interviewer_strategy` because at `close`/`must_ask` it directly contradicts their standing
+    // "ask openly, never read out the options" guidance, and the prompt convention is later-wins.
+    // Collapses to '' at `balanced` (the default, and whenever the version gate is off).
+    section(
+      'question_fidelity',
+      buildQuestionFidelityInstructions(input.fidelity ?? 'balanced', { type: input.type })
+    ),
     // Conversational profile capture (F-capture): when set, the interviewer also gathers the
     // admin-authored profile fields naturally in-chat. Collapses to '' once the snapshot is complete
     // (or for form-mode / anonymous versions), leaving the questionnaire flow untouched.
@@ -604,25 +621,46 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
   const matrix = extractMatrix(input.typeConfig);
   const transcript = input.recentMessages.slice(-6).join('\n');
 
-  // Phase 5 — only spell out the choices/scale when we're STRUGGLING (a re-ask after the prior
-  // answer wasn't captured). On the first ask, the standing rules keep it open and we infer.
-  const clarifyGuidance = !input.isReask
-    ? ''
-    : options
-      ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY gently offer the choices to make it easy: ${options.join(', ')}.`
-      : matrix
-        ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY gently list the items and ask them to rate each on the simple ${matrix.min}–${matrix.max} scale ${
-            matrix.minLabel && matrix.maxLabel
-              ? `(where ${matrix.min} is "${matrix.minLabel}" and ${matrix.max} is "${matrix.maxLabel}")`
-              : `(where ${matrix.max} is the most positive)`
-          }. The items are: ${matrix.rows.join(', ')}.`
-        : likertScale
-          ? `\n\nThe last reply wasn't clear enough to map, so this time you MAY offer the simple ${likertScale.min}–${likertScale.max} scale ${
-              likertScale.minLabel && likertScale.maxLabel
-                ? `(where ${likertScale.min} is "${likertScale.minLabel}" and ${likertScale.max} is "${likertScale.maxLabel}")`
-                : `(where ${likertScale.max} is the most positive)`
-            } to make it easy.`
-          : '';
+  // Two reasons to spell out the choices/scale rather than infer from natural language:
+  //
+  //  - STRUGGLING (the original Phase 5 rule): a re-ask after the prior answer couldn't be mapped.
+  //    Framed as a concession — "this time you MAY gently offer…".
+  //  - MUST ASK (P18): the question is an instrument, so its options ARE part of asking it as
+  //    written. Framed as an instruction, and fires on the FIRST ask rather than only after a
+  //    failure — waiting for a failed turn would defeat the point of marking it must-ask.
+  //
+  // At every other fidelity the standing rules keep it open and we infer, exactly as before.
+  const mustAsk = (input.fidelity ?? 'balanced') === 'must_ask';
+  const scaleNote = (s: {
+    min: number;
+    max: number;
+    minLabel?: string;
+    maxLabel?: string;
+  }): string =>
+    s.minLabel && s.maxLabel
+      ? `(where ${s.min} is "${s.minLabel}" and ${s.max} is "${s.maxLabel}")`
+      : `(where ${s.max} is the most positive)`;
+
+  const offerLead = mustAsk
+    ? 'This question must be asked as written, so present its answer options with it:'
+    : "The last reply wasn't clear enough to map, so this time you MAY gently offer";
+
+  const clarifyGuidance =
+    !input.isReask && !mustAsk
+      ? ''
+      : options
+        ? mustAsk
+          ? `\n\n${offerLead} ${options.join(', ')}.`
+          : `\n\n${offerLead} the choices to make it easy: ${options.join(', ')}.`
+        : matrix
+          ? mustAsk
+            ? `\n\n${offerLead} list the items and ask them to rate each on the ${matrix.min}–${matrix.max} scale ${scaleNote(matrix)}. The items are: ${matrix.rows.join(', ')}.`
+            : `\n\n${offerLead} the items and ask them to rate each on the simple ${matrix.min}–${matrix.max} scale ${scaleNote(matrix)}. The items are: ${matrix.rows.join(', ')}.`
+          : likertScale
+            ? mustAsk
+              ? `\n\n${offerLead} the ${likertScale.min}–${likertScale.max} scale ${scaleNote(likertScale)}.`
+              : `\n\n${offerLead} the simple ${likertScale.min}–${likertScale.max} scale ${scaleNote(likertScale)} to make it easy.`
+            : '';
 
   // What they've already shared this session (continuity). Explicitly background-only: the
   // interviewer may glance back at one point when it helps, but must not recap or re-ask it.
@@ -643,7 +681,11 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
       `area (or wider — the questionnaire's subject as a whole), following the interviewer_strategy ` +
       `guidance. The detailed wording is for YOUR awareness only — never read it out, name it, or ` +
       `bold it:\n"${input.prompt}"`
-    : `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}):\n"${input.prompt}"`;
+    : mustAsk
+      ? `Ask this question EXACTLY as written (type: ${QUESTION_TYPE_LABELS[input.type]}). These are the author's words and must not be reworded:\n"${input.prompt}"`
+      : (input.fidelity ?? 'balanced') === 'close'
+        ? `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}). Keep its specific terms, qualifiers and timeframe intact:\n"${input.prompt}"`
+        : `The question to ask (type: ${QUESTION_TYPE_LABELS[input.type]}):\n"${input.prompt}"`;
 
   const user =
     questionLine +

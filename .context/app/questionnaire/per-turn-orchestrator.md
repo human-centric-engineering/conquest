@@ -88,6 +88,12 @@ slot/question being asked this turn and capped to keep the prompt lean. It's pas
 next question land, but the prompt forbids recapping the list or re-asking anything in it. Absent
 when nothing is captured yet → the block is omitted (no behaviour change).
 
+**Per-question fidelity overrides the two rules below.** A question marked `close` or `must_ask`
+(see [`question-fidelity.md`](./question-fidelity.md)) gets a `<question_fidelity>` section placed
+after `rules`/`interviewer_strategy`, and at `must_ask` the choice/scale IS offered on the first ask
+rather than only on a struggling re-ask. At the default `balanced` stop nothing is emitted and the
+behaviour below is exactly as described.
+
 **Infer scales/choices; only spell them out as a last resort.** A choice or Likert question is
 asked **openly** on the first ask — the interviewer asks about the underlying feeling/choice in
 plain language and the extractor (+ the answer-fit resolver, see

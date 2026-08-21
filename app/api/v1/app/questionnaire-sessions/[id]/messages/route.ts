@@ -49,7 +49,11 @@ import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
-import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
+import {
+  ABUSE_ABANDON_REASON,
+  TONE_DIMENSION_KEYS,
+  resolveQuestionFidelity,
+} from '@/lib/app/questionnaire/types';
 import {
   runTurn,
   runDataSlotTurn,
@@ -928,6 +932,15 @@ async function handleMessage(
         const slot = result.targetedQuestionId
           ? slotById.get(result.targetedQuestionId)
           : undefined;
+        // Question fidelity (P18): how faithfully this one must be put. Resolved through the read
+        // seam so the version-level gate is honoured — `balanced` (and so no prompt section at all)
+        // whenever the feature is off. Read off the QuestionView, which carries the stored dial.
+        const fidelityLevel = resolveQuestionFidelity(
+          result.targetedQuestionId
+            ? state.questions.find((q) => q.id === result.targetedQuestionId)?.fidelity
+            : undefined,
+          state.config.questionFidelity
+        );
         // Continuity: what they've already shared, minus the question we're asking now.
         const priorAnswers = buildPriorAnswersDigest({
           dataSlots,
@@ -967,6 +980,7 @@ async function handleMessage(
             isReask: targetedKey !== null && targetedKey === activeQuestionKey,
             isOpening: state.selectionRound === 0,
             questionsAsked: state.selectionRound,
+            fidelity: fidelityLevel,
             // Seriousness gate: last message was a non-serious heckle (set aside) → phraser parries it.
             ...(result.abuse?.flagged ? { heckled: true } : {}),
             ...(priorAnswers.length > 0 ? { priorAnswers } : {}),

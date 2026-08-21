@@ -306,6 +306,9 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
                   key: true,
                   ordinal: true,
                   weight: true,
+                  // Question fidelity (raw stored value) — read through `resolveQuestionFidelity`
+                  // downstream so the version-level gate is honoured.
+                  fidelity: true,
                   required: true,
                   type: true,
                   prompt: true,
@@ -382,6 +385,7 @@ export async function buildTurnContext(sessionId: string): Promise<LoadedTurnCon
         sectionOrdinal: section.ordinal,
         ordinal: slot.ordinal,
         weight: slot.weight,
+        fidelity: slot.fidelity,
         required: slot.required,
         type: asQuestionType(slot.type),
         tagIds: slot.tags.map((t) => t.tagId),

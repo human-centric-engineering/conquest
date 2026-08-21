@@ -44,6 +44,15 @@ export interface QuestionView {
   ordinal: number;
   /** Admin-set importance (schema default 1.0); the `weighted` scorer's base. */
   weight: number;
+  /**
+   * How faithfully this question must be put to the respondent — the raw stored
+   * `AppQuestionSlot.fidelity` on its five-stop grid, NOT a resolved level. Optional so the many
+   * hand-built contexts (tests, the preview route) need not supply it; absent behaves as the
+   * neutral midpoint. Always read it through `questionSatisfactionFloor` /
+   * `resolveQuestionFidelity`, which honour the version-level gate — a raw read would apply a dial
+   * the admin never switched on. See `question-fidelity.md`.
+   */
+  fidelity?: number;
   /** Whether an answer is mandatory — required slots are asked before optional. */
   required: boolean;
   /** Question type; carried for future heuristics (e.g. variety), not yet scored. */

@@ -23,6 +23,7 @@ import {
   answeredCount,
   coverageRatio,
   gradedCoverage,
+  questionSatisfactionFloor,
   unansweredQuestions,
 } from '@/lib/app/questionnaire/selection/context';
 import type {
@@ -92,11 +93,25 @@ export function assessCompletion(ctx: CompletionContext): CompletionAssessment {
   // a required question, until a confirmation raises it. Unscored answers (`null`) are authoritative
   // (respondent edits / non-opportunistic captures), so they always count. With the floor at 0 this
   // is a no-op, preserving the prior "filled is enough" behaviour.
+  //
+  // The floor is PER QUESTION, not flat: question fidelity raises it for `close` / `must_ask` items
+  // so an instrument question can't be closed out by a tangential inference. It can only ever raise
+  // it, so this stays a superset of the previous behaviour — see `questionSatisfactionFloor`.
   const floor = ctx.config.answerConfidenceFloor;
-  const gated: CompletionContext =
-    floor > 0
-      ? { ...ctx, answered: ctx.answered.filter((a) => (a.confidence ?? 1) >= floor) }
-      : ctx;
+  const floorByQuestionId = new Map(
+    ctx.questions.map((q) => [q.id, questionSatisfactionFloor(q, ctx.config)])
+  );
+  const anyFloor = floor > 0 || [...floorByQuestionId.values()].some((f) => f > 0);
+  const gated: CompletionContext = anyFloor
+    ? {
+        ...ctx,
+        answered: ctx.answered.filter(
+          // An answer to a question that is not in this version's set can't be graded against a
+          // floor; keep it rather than silently dropping it (the coverage helpers ignore it anyway).
+          (a) => (a.confidence ?? 1) >= (floorByQuestionId.get(a.questionId) ?? 0)
+        ),
+      }
+    : ctx;
 
   const answered = answeredCount(gated);
   const coverage = coverageRatio(gated);
