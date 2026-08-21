@@ -58,6 +58,9 @@ approach. Stored as `AppQuestionnaireConfig.interviewerStrategy` (Json), shape
 | Prompt injection               | `app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts` — an `interviewer_strategy` section placed AFTER `rules`/`this_turn` so it governs (later sections win, like tone)            |
 | Progress signals               | the messages route computes `coverage` (answered/total) + `respondentTerse` (short latest reply) once per turn and threads them into both phrasing call sites                                 |
 | Config plumbing                | Prisma `interviewerStrategy Json` (column default carries the full shape); Zod `interviewerStrategySchema` in `config-schema.ts`; `detail.ts` select/view (narrowed); `config-editor.tsx`     |
+| Admin editor                   | `components/admin/questionnaires/interviewer-strategy-panel.tsx` — the whole group, including `FunnelArcExplainer`; `config-editor.tsx` keeps only the `SettingsGroup` shell, state and save  |
+| Conflict lints                 | `config-conflicts.ts` checks 8–9, anchored `sectionId: 'interviewer-strategy'`; label in `components/admin/questionnaires/config-conflicts.tsx`                                               |
+| Pack / audit summary           | `settings-registry.ts` — approach, Funnel pace (funnel only), Opening questions (counted, never reprinted), tactics                                                                           |
 | Import / export                | **automatic** — `config-export.ts` derives keys from `DEFAULT_QUESTIONNAIRE_CONFIG`, value-validates via `updateConfigSchema`; both now include the field, so no per-setting wiring is needed |
 
 ## The funnel phase
@@ -87,6 +90,22 @@ intentions.
 `paceProfile(settings)` honours the stored pace for **`funnel` only** — `open` and `targeted` always
 read `balanced`. The editor shows the dial only for `funnel`, so letting a stored pace quietly
 reshape an `open` session's opening window would be an effect with no visible cause.
+
+## Showing the arc, not describing it
+
+`FunnelArcExplainer` renders the bands as a small table under the approach select, derived from the
+**same `FUNNEL_PACE_PROFILES` the runtime reads**. This is the house-rules preview trick applied to a
+table instead of prompt text: a hard-coded explainer that drifted from the profile would be worse
+than the vague prose it replaced, because the admin would have no reason to doubt it.
+
+It exists because the previous help text ("as coverage builds it steers toward the specific points
+still missing") could not answer the question admins actually ask — _is the openness a two-question
+preamble, or a gradual descent?_ It is both, and the only honest way to say so is to show the bands.
+Three variants: the four-band table for `funnel` (plus footnotes for the terse bias and the
+round fallback), a two-band one for `open`, and nothing at all for `targeted`, which has no arc.
+
+Percentages go through `Math.round` — `0.55 * 100` is `55.00000000000001` in IEEE floats, and
+`brisk` is the pace that exposes it. A test pins that no percentage ever renders a decimal point.
 
 ## Opening framings (open phase)
 
@@ -155,3 +174,8 @@ to ask". Without that, the precise prompt in the user turn out-anchors the syste
   retune `gradual`/`brisk` instead.
 - **Don't** splice admin free text into a prompt without `narrowPromptText` — it neutralises the
   angle brackets that would otherwise let stored text forge a prompt section.
+- **Don't** hard-code the arc's numbers into admin copy. `FunnelArcExplainer` reads
+  `FUNNEL_PACE_PROFILES`; a duplicated table is a lie waiting to happen.
+- **Don't** let the editor and `usesGuidedOpening()` disagree about what counts as a usable example.
+  The panel's amber warning, the `opening-examples-empty` lint and the runtime fallback all mean
+  "at least one non-whitespace entry", and all three are tested against that same definition.

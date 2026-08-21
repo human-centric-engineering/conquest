@@ -13,7 +13,13 @@
  * never prevent saving (some combinations are deliberate mid-edit states).
  */
 
-import type { CaptureMode, HouseRuleKind, PresentationMode } from '@/lib/app/questionnaire/types';
+import type {
+  CaptureMode,
+  HouseRuleKind,
+  InterviewerApproach,
+  InterviewerOpeningMode,
+  PresentationMode,
+} from '@/lib/app/questionnaire/types';
 
 export type ConflictSeverity = 'error' | 'warning' | 'info';
 
@@ -46,6 +52,14 @@ export interface ConfigConflictInput {
   questionCount: number;
   sensitivityAwareness: boolean;
   supportMessage: string;
+  /** Interviewer-strategy master switch — off ⇒ the block is never sent, so nothing is checked. */
+  interviewerStrategyEnabled: boolean;
+  /** The questioning approach; decides whether an open opening exists for examples to shape. */
+  interviewerApproach: InterviewerApproach;
+  /** Where the opening question's framing comes from. */
+  openingMode: InterviewerOpeningMode;
+  /** The admin's example openers (all of them; the detector filters the blanks itself). */
+  openingExamples: ReadonlyArray<string>;
   /** House-rules master switch — off ⇒ no rule can have any effect, so none are checked. */
   houseRulesEnabled: boolean;
   /** The version's house rules (all of them; the detector filters to the enabled ones itself). */
@@ -277,6 +291,47 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
+  /* ── Interviewer strategy: opening examples ──────────────────────────────────
+   *
+   * Both checks are `info`: neither is a mistake, and both describe a setting that is simply inert
+   * rather than wrong. They exist because an admin who has written openers reasonably believes they
+   * are steering the conversation, and silence would let that belief stand when it isn't true.
+   */
+  if (input.interviewerStrategyEnabled && input.openingMode === 'examples') {
+    const usableExamples = input.openingExamples.filter((example) => example.trim() !== '');
+
+    // 8 — Guided openings switched on with nothing written. Mirrors `usesGuidedOpening()`, which is
+    //     what the runtime actually checks before swapping out the interviewer's own framings menu.
+    if (usableExamples.length === 0) {
+      conflicts.push({
+        id: 'opening-examples-empty',
+        severity: 'info',
+        sectionId: 'interviewer-strategy',
+        title: 'No example opening questions yet',
+        message:
+          'Opening questions are set to be guided by examples, but none are written, so the ' +
+          'interviewer will still choose its own opening. Add an example, or switch back to ' +
+          'letting it choose.',
+      });
+    }
+
+    // 9 — Examples written under an approach that has no open opening for them to shape. The
+    //     targeted approach asks one specific question from the first turn, so there is no broad
+    //     invitation for an example to be a model of.
+    if (usableExamples.length > 0 && input.interviewerApproach === 'targeted') {
+      conflicts.push({
+        id: 'opening-examples-targeted',
+        severity: 'info',
+        sectionId: 'interviewer-strategy',
+        title: 'Example openings won’t be used',
+        message:
+          'The targeted approach asks one specific question from the very first turn, so there is ' +
+          'no broad opening for your examples to shape. Switch the approach to Funnel or Open ' +
+          'throughout to use them.',
+      });
+    }
+  }
+
   /* ── House rules ────────────────────────────────────────────────────────────
    *
    * Only ENABLED rules are checked, and only while the block itself is on — a parked rule is a
@@ -287,7 +342,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     : [];
 
   if (input.houseRulesEnabled) {
-    // 8 — House rules on with nothing to say. Not a mistake, but the admin probably meant to finish.
+    // 10 — House rules on with nothing to say. Not a mistake, but the admin probably meant to finish.
     if (activeRules.length === 0) {
       conflicts.push({
         id: 'house-rules-empty',
@@ -300,7 +355,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
       });
     }
 
-    // 9 — A form-only questionnaire never runs the interviewer, so no rule can take effect. Same
+    // 11 — A form-only questionnaire never runs the interviewer, so no rule can take effect. Same
     //     family as checks 2–5 above.
     if (formOnly && activeRules.length > 0) {
       conflicts.push({
@@ -315,7 +370,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     }
   }
 
-  // 10 — A rule promising anonymity on a questionnaire that isn't anonymous. The one that matters
+  // 12 — A rule promising anonymity on a questionnaire that isn't anonymous. The one that matters
   //      most: over-promising anonymity is a claim the client has to stand behind afterwards.
   const anonymityClaims = activeRules.filter(
     (rule) => rule.kind !== 'never' && mentions(rule, ANONYMITY_CLAIM)
@@ -333,7 +388,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
-  // 11 — The mirror image: asking for identifying details on an anonymous questionnaire. `never`
+  // 13 — The mirror image: asking for identifying details on an anonymous questionnaire. `never`
   //      rules are excluded — "never ask for names" is exactly right under anonymous mode, not a
   //      conflict, and flagging it would be the panel arguing with a correct decision.
   // Only `always` can instruct the interviewer to ASK for identity. `never` is the correct rule
@@ -355,7 +410,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
-  // 12 — Pointing at a support service that safeguarding isn't configured to provide.
+  // 14 — Pointing at a support service that safeguarding isn't configured to provide.
   // `never` excluded for the same reason as 10 and 11: "never point them at a support line" is a
   // deliberate instruction, and telling that admin to go configure a support message is nonsense.
   const supportMentions = activeRules.filter(
@@ -377,7 +432,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
-  // 13 — Instructions the phraser structurally cannot honour. The highest-value check: without it
+  // 15 — Instructions the phraser structurally cannot honour. The highest-value check: without it
   //      the admin has no way to learn their rule is being ignored.
   // `if_asked` excluded: its text is what the interviewer SAYS to a respondent, not an
   // instruction it follows, so a keyword hit there describes the answer rather than a request.
@@ -397,7 +452,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
-  // 14 — Reply-shape instructions that `<output_format>` overrides (it sits after house rules).
+  // 16 — Reply-shape instructions that `<output_format>` overrides (it sits after house rules).
   // `if_asked` excluded: its text is what the interviewer SAYS to a respondent, not an
   // instruction it follows, so a keyword hit there describes the answer rather than a request.
   const formatOverrides = activeRules.filter(
@@ -415,7 +470,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
     });
   }
 
-  // 15 — Asking for more than one question a turn. The prompt's hardest rule; the only sanctioned
+  // 17 — Asking for more than one question a turn. The prompt's hardest rule; the only sanctioned
   //      exception is the "batch related questions" tactic under Interviewer strategy.
   // `if_asked` excluded: its text is what the interviewer SAYS to a respondent, not an
   // instruction it follows, so a keyword hit there describes the answer rather than a request.

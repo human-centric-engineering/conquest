@@ -30,6 +30,10 @@ function input(over: Partial<ConfigConflictInput> = {}): ConfigConflictInput {
     questionCount: 10,
     sensitivityAwareness: false,
     supportMessage: '',
+    interviewerStrategyEnabled: false,
+    interviewerApproach: 'funnel',
+    openingMode: 'auto',
+    openingExamples: [],
     houseRulesEnabled: false,
     houseRules: [],
     ...over,
@@ -196,6 +200,71 @@ describe('detectConfigConflicts', () => {
         'form-only-reasoning',
       ])
     );
+  });
+});
+
+describe('detectConfigConflicts — opening examples', () => {
+  /** Guided openings, switched on, with whatever examples the case supplies. */
+  const guided = (openingExamples: string[], over: Partial<ConfigConflictInput> = {}) =>
+    ids({
+      interviewerStrategyEnabled: true,
+      openingMode: 'examples',
+      openingExamples,
+      ...over,
+    });
+
+  it('notes guided openings switched on with nothing written', () => {
+    expect(guided([])).toContain('opening-examples-empty');
+    expect(guided(['Tell me about your week.'])).not.toContain('opening-examples-empty');
+  });
+
+  /**
+   * Must agree with `usesGuidedOpening()`, which is what the runtime checks before swapping out the
+   * interviewer's own framings menu. A whitespace-only row is not an example there either.
+   */
+  it('treats whitespace-only examples as nothing written', () => {
+    expect(guided(['   ', ''])).toContain('opening-examples-empty');
+  });
+
+  it('says nothing while the mode is auto, however many examples are stored', () => {
+    const stored = ['Tell me about your week.'];
+    expect(guided(stored, { openingMode: 'auto' })).not.toContain('opening-examples-empty');
+    expect(guided([], { openingMode: 'auto' })).not.toContain('opening-examples-empty');
+  });
+
+  it('says nothing while the whole strategy block is off', () => {
+    expect(guided([], { interviewerStrategyEnabled: false })).not.toContain(
+      'opening-examples-empty'
+    );
+  });
+
+  it('notes that examples cannot apply under the targeted approach', () => {
+    const written = ['Tell me about your week.'];
+    expect(guided(written, { interviewerApproach: 'targeted' })).toContain(
+      'opening-examples-targeted'
+    );
+    expect(guided(written, { interviewerApproach: 'funnel' })).not.toContain(
+      'opening-examples-targeted'
+    );
+    expect(guided(written, { interviewerApproach: 'open' })).not.toContain(
+      'opening-examples-targeted'
+    );
+  });
+
+  it('does not stack both notes — with nothing written there is nothing to be unused', () => {
+    const both = guided([], { interviewerApproach: 'targeted' });
+    expect(both).toContain('opening-examples-empty');
+    expect(both).not.toContain('opening-examples-targeted');
+  });
+
+  it('anchors both notes on the interviewer-strategy section', () => {
+    const conflicts = detectConfigConflicts(
+      input({ interviewerStrategyEnabled: true, openingMode: 'examples', openingExamples: [] })
+    );
+    const note = conflicts.find((c) => c.id === 'opening-examples-empty');
+    expect(note?.sectionId).toBe('interviewer-strategy');
+    // Informational: an inert setting is not a mistake, and an `error` here would read as blocking.
+    expect(note?.severity).toBe('info');
   });
 });
 
