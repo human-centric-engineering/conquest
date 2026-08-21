@@ -28,16 +28,20 @@ import {
   COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   COHORT_REPORT_LENGTHS,
   CONTRADICTION_MODES,
+  FUNNEL_PACES,
   HOUSE_RULE_KINDS,
   HOUSE_RULE_TEXT_MAX,
   HOUSE_RULE_TRIGGER_MAX,
   INTERVIEWER_APPROACHES,
+  INTERVIEWER_OPENING_MODES,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
   MAX_HOUSE_RULES,
   MAX_MILESTONE_THRESHOLDS,
+  MAX_OPENING_EXAMPLES,
+  OPENING_EXAMPLE_MAX,
   PERSONA_KEY_MAX_LENGTH,
   PERSONA_SWITCHERS,
   PRESENTATION_MODES,
@@ -138,11 +142,22 @@ const tonePersonaSchema = z.object({
 /**
  * Interviewer strategy (questioning approach). Sent whole by the editor; `strict()` rejects unknown
  * keys. `approach` is one of {@link INTERVIEWER_APPROACHES}; the tactics are plain booleans.
+ *
+ * `pace`, `openingMode` and `openingExamples` carry `.default()` rather than being required — a
+ * settings export or questionnaire definition written before those fields existed would otherwise
+ * fail to import against a `strict()` block, and the defaults reproduce the pre-feature behaviour
+ * exactly. Required-ness buys nothing here: the editor always sends all three.
  */
 const interviewerStrategySchema = z
   .object({
     enabled: z.boolean(),
     approach: z.enum(INTERVIEWER_APPROACHES),
+    pace: z.enum(FUNNEL_PACES).default('balanced'),
+    openingMode: z.enum(INTERVIEWER_OPENING_MODES).default('auto'),
+    openingExamples: z
+      .array(z.string().trim().max(OPENING_EXAMPLE_MAX))
+      .max(MAX_OPENING_EXAMPLES)
+      .default([]),
     probeDepth: z.boolean(),
     reflect: z.boolean(),
     batchRelated: z.boolean(),

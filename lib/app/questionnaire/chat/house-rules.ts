@@ -20,6 +20,7 @@
  */
 
 import { bulletList, joinSections, titledBlock } from '@/lib/app/questionnaire/prompt/format';
+import { narrowPromptText } from '@/lib/app/questionnaire/chat/prompt-text';
 import {
   DEFAULT_HOUSE_RULES_SETTINGS,
   HOUSE_RULE_KINDS,
@@ -40,24 +41,11 @@ function isHouseRuleKind(value: unknown): value is HouseRuleKind {
 }
 
 /**
- * Trim a possibly-garbage value to a bounded string (`''` when it isn't one), with the prompt's
- * section delimiters neutralised.
- *
- * The angle-bracket strip is the one piece of hardening here. Rule text is spliced into an
- * XML-tag-sectioned system prompt, so text containing `</house_rules><output_format>…` would render
- * a syntactically valid fake section. In practice the real `<output_format>` and `<message_shape>`
- * still follow it and later sections win, and the block carries its own subordination clause — but
- * that is prompt-ordering convention, not enforcement, and no legitimate rule needs angle brackets.
- * Stripping them here costs nothing and closes it at the single point every render path flows
- * through. Replaced rather than deleted so a rule that mentions "<10 people" still reads sensibly.
- *
- * Note this is a **read-path** defence: it re-applies on every read, so it also covers rows written
- * before it existed and rows edited by hand straight into the database.
+ * Rule text is admin-authored prose spliced into an XML-tag-sectioned system prompt, so it goes
+ * through the shared read-path sanitiser rather than a local copy — see {@link narrowPromptText}
+ * for why the angle brackets are neutralised and why doing it on read (not on write) is the point.
  */
-function narrowText(value: unknown, max: number): string {
-  if (typeof value !== 'string') return '';
-  return value.replaceAll('<', '‹').replaceAll('>', '›').trim().slice(0, max);
-}
+const narrowText = narrowPromptText;
 
 /**
  * Coerce one (possibly missing/garbage) entry to a complete {@link HouseRule}, or `null` when it

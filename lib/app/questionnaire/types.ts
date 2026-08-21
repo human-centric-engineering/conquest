@@ -646,11 +646,57 @@ export const INTERVIEWER_APPROACH_LABELS: Record<InterviewerApproach, string> = 
   targeted: 'Targeted / efficient',
 };
 
+/**
+ * How fast the `funnel` arc narrows from open to targeted. One dial rather than four numbers: the
+ * opening window, both coverage thresholds and the no-coverage round fallback have to move together
+ * or the arc stops being coherent, and an admin cannot reason about them individually anyway.
+ *
+ * `balanced` reproduces the arc's original hard-coded constants exactly, so an existing
+ * questionnaire that has never seen this setting behaves identically. Applies to `funnel` only —
+ * `open` and `targeted` have no arc to pace.
+ */
+export const FUNNEL_PACES = ['gradual', 'balanced', 'brisk'] as const;
+export type FunnelPace = (typeof FUNNEL_PACES)[number];
+
+/** Human labels — single source for the admin select + any display. */
+export const FUNNEL_PACE_LABELS: Record<FunnelPace, string> = {
+  gradual: 'Stay open longer',
+  balanced: 'Balanced',
+  brisk: 'Narrow quickly',
+};
+
+/**
+ * Where the wording of the opening question comes from.
+ *
+ * - `auto` — the interviewer picks from its own menu of framings and varies between respondents.
+ * - `examples` — the admin supplies example openers and the interviewer is told to be GUIDED by
+ *   them (breadth, register, spirit) while still writing its own. Never a script: reproducing an
+ *   example verbatim would hand every respondent the same opener and defeat the variety that makes
+ *   the opening feel like a conversation.
+ */
+export const INTERVIEWER_OPENING_MODES = ['auto', 'examples'] as const;
+export type InterviewerOpeningMode = (typeof INTERVIEWER_OPENING_MODES)[number];
+
+/** Enough examples to establish a register; few enough that the prompt stays a hint, not a corpus. */
+export const MAX_OPENING_EXAMPLES = 5;
+/** One opening question, generously — long enough for a two-clause invitation, short of an essay. */
+export const OPENING_EXAMPLE_MAX = 300;
+
 export type InterviewerStrategySettings = {
   /** Off ⇒ the default questioning-approach prompt is used unchanged. */
   enabled: boolean;
   /** The session-level openness arc. */
   approach: InterviewerApproach;
+  /** How fast the `funnel` arc narrows. Ignored by the `open` and `targeted` approaches. */
+  pace: FunnelPace;
+  /** Where the opening question's framing comes from — the interviewer's own menu, or examples. */
+  openingMode: InterviewerOpeningMode;
+  /**
+   * Admin-written example opening questions, used as guidance when `openingMode` is `examples`.
+   * Capped at {@link MAX_OPENING_EXAMPLES}. An empty list falls back to `auto` rather than
+   * producing a degraded opener — see `buildInterviewerStrategyInstructions`.
+   */
+  openingExamples: string[];
   /** Tactic: dig into a shallow / low-confidence answer with one follow-up before moving on. */
   probeDepth: boolean;
   /**
@@ -671,6 +717,9 @@ export type InterviewerStrategySettings = {
 export const DEFAULT_INTERVIEWER_STRATEGY: InterviewerStrategySettings = {
   enabled: true,
   approach: 'funnel',
+  pace: 'balanced',
+  openingMode: 'auto',
+  openingExamples: [],
   probeDepth: true,
   reflect: false,
   batchRelated: true,

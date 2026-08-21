@@ -7,6 +7,8 @@ import {
 import {
   HOUSE_RULE_TEXT_MAX,
   MAX_HOUSE_RULES,
+  MAX_OPENING_EXAMPLES,
+  OPENING_EXAMPLE_MAX,
   TONE_PERSONA_MAX_LENGTH,
 } from '@/lib/app/questionnaire/types';
 
@@ -755,6 +757,94 @@ describe('updateConfigSchema — intro video link', () => {
       updateConfigSchema.safeParse({
         intro: { ...baseIntro, videoUrl: `https://youtu.be/${'x'.repeat(600)}` },
       }).success
+    ).toBe(false);
+  });
+});
+
+describe('updateConfigSchema — interviewerStrategy (pace + opening examples)', () => {
+  /** What the editor sends today: every key present. */
+  const full = {
+    enabled: true,
+    approach: 'funnel',
+    pace: 'brisk',
+    openingMode: 'examples',
+    openingExamples: ['Tell me about your week.'],
+    probeDepth: true,
+    reflect: false,
+    batchRelated: true,
+  };
+
+  it('accepts a well-formed block', () => {
+    expect(updateConfigSchema.safeParse({ interviewerStrategy: full }).success).toBe(true);
+  });
+
+  /**
+   * The reason `pace`/`openingMode`/`openingExamples` carry `.default()` instead of being required:
+   * a settings export or questionnaire definition written before those fields existed omits them,
+   * and a `strict()` object with required keys would refuse to import it. The defaults must also be
+   * the PRE-FEATURE behaviour, or importing an old file would silently change the interviewer.
+   */
+  it('accepts a pre-feature payload and fills the pre-feature defaults', () => {
+    const { pace: _p, openingMode: _m, openingExamples: _e, ...legacy } = full;
+    void [_p, _m, _e];
+    const result = updateConfigSchema.safeParse({ interviewerStrategy: legacy });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interviewerStrategy).toMatchObject({
+        pace: 'balanced',
+        openingMode: 'auto',
+        openingExamples: [],
+      });
+    }
+  });
+
+  it('rejects an unknown pace or opening mode', () => {
+    expect(
+      updateConfigSchema.safeParse({ interviewerStrategy: { ...full, pace: 'glacial' } }).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({ interviewerStrategy: { ...full, openingMode: 'psychic' } })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects more examples than the cap, flagged on the list', () => {
+    const result = updateConfigSchema.safeParse({
+      interviewerStrategy: {
+        ...full,
+        openingExamples: Array.from({ length: MAX_OPENING_EXAMPLES + 1 }, (_, i) => `q${i}`),
+      },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['interviewerStrategy', 'openingExamples']);
+    }
+  });
+
+  it('rejects an over-long example', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        interviewerStrategy: { ...full, openingExamples: ['x'.repeat(OPENING_EXAMPLE_MAX + 1)] },
+      }).success
+    ).toBe(false);
+  });
+
+  it('trims examples on the way in, so a padded entry still fits the cap', () => {
+    const padded = `  ${'x'.repeat(OPENING_EXAMPLE_MAX)}  `;
+    const result = updateConfigSchema.safeParse({
+      interviewerStrategy: { ...full, openingExamples: [padded] },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interviewerStrategy?.openingExamples).toEqual([
+        'x'.repeat(OPENING_EXAMPLE_MAX),
+      ]);
+    }
+  });
+
+  it('rejects unknown keys', () => {
+    expect(
+      updateConfigSchema.safeParse({ interviewerStrategy: { ...full, funnelSpeed: 3 } }).success
     ).toBe(false);
   });
 });
