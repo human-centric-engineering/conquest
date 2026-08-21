@@ -90,6 +90,24 @@ const FULLY_ENABLED: ConfigView = configOf({
     allowRespondentSwitch: true,
   },
   interviewerStrategy: { ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy, enabled: true },
+  // One of each kind, so the descriptor's counting branch runs rather than its "None" branch.
+  houseRules: {
+    enabled: true,
+    rules: [
+      { id: 'a', kind: 'always', enabled: true, text: 'Ask for a concrete example.' },
+      { id: 'b', kind: 'always', enabled: true, text: 'Acknowledge what they shared.' },
+      { id: 'c', kind: 'never', enabled: true, text: 'Give advice.' },
+      {
+        id: 'd',
+        kind: 'if_asked',
+        enabled: true,
+        text: 'Only the research team.',
+        trigger: 'who sees this',
+      },
+      // Individually off — must not be counted.
+      { id: 'e', kind: 'never', enabled: false, text: 'Promise an outcome.' },
+    ],
+  },
   respondentReport: {
     ...DEFAULT_QUESTIONNAIRE_CONFIG.respondentReport,
     enabled: true,
@@ -364,5 +382,22 @@ describe('value formatting', () => {
       },
     });
     expect(rowsOf(config).byLabel.get('Interviewer tone')).toBe('Empathy +2, Formality -2');
+  });
+
+  it('summarises house rules by kind, counting only the ones actually in use', () => {
+    // The pack summarises setup, so it counts rather than reprinting up to twenty rules verbatim.
+    expect(rowsOf(FULLY_ENABLED).byLabel.get('House rules')).toBe(
+      '2 × always, 1 × never, 1 × if asked'
+    );
+  });
+
+  it('says "None" when house rules are configured but switched off', () => {
+    const config = configOf({
+      houseRules: {
+        enabled: false,
+        rules: [{ id: 'a', kind: 'never', enabled: true, text: 'Give advice.' }],
+      },
+    });
+    expect(rowsOf(config).byLabel.get('House rules')).toBe('None');
   });
 });

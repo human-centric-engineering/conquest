@@ -4,7 +4,11 @@ import {
   profileFieldSchema,
   updateConfigSchema,
 } from '@/lib/app/questionnaire/authoring/config-schema';
-import { TONE_PERSONA_MAX_LENGTH } from '@/lib/app/questionnaire/types';
+import {
+  HOUSE_RULE_TEXT_MAX,
+  MAX_HOUSE_RULES,
+  TONE_PERSONA_MAX_LENGTH,
+} from '@/lib/app/questionnaire/types';
 
 /**
  * Request-body contract for the version configuration endpoint (F3.1).
@@ -751,6 +755,102 @@ describe('updateConfigSchema — intro video link', () => {
       updateConfigSchema.safeParse({
         intro: { ...baseIntro, videoUrl: `https://youtu.be/${'x'.repeat(600)}` },
       }).success
+    ).toBe(false);
+  });
+});
+
+describe('updateConfigSchema — houseRules (interviewer house rules)', () => {
+  const always = { id: 'a', kind: 'always', enabled: true, text: 'Ask for a concrete example.' };
+  const never = { id: 'b', kind: 'never', enabled: true, text: 'Give advice.' };
+  const ifAsked = {
+    id: 'c',
+    kind: 'if_asked',
+    enabled: true,
+    text: 'Only the research team.',
+    trigger: 'who will see my answers',
+  };
+
+  it('accepts a well-formed block covering all three rule kinds', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        houseRules: { enabled: true, rules: [always, never, ifAsked] },
+      }).success
+    ).toBe(true);
+  });
+
+  it('accepts the empty off block the editor sends when the section is cleared', () => {
+    expect(
+      updateConfigSchema.safeParse({ houseRules: { enabled: false, rules: [] } }).success
+    ).toBe(true);
+  });
+
+  it('rejects an if_asked rule with no trigger, flagged on the trigger', () => {
+    // A reactive rule with nothing to react to can never fire.
+    const { trigger: _omit, ...noTrigger } = ifAsked;
+    void _omit;
+    const result = updateConfigSchema.safeParse({
+      houseRules: { enabled: true, rules: [noTrigger] },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['houseRules', 'rules', 0, 'trigger']);
+    }
+  });
+
+  it('rejects a trigger on a rule that is not if_asked', () => {
+    // Guards against a kind changed in the editor leaving an orphaned trigger in stored JSON —
+    // the read-path narrower strips those, and the two must agree.
+    expect(
+      updateConfigSchema.safeParse({
+        houseRules: { enabled: true, rules: [{ ...always, trigger: 'orphaned' }] },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects duplicate rule ids, flagged on the second occurrence', () => {
+    const result = updateConfigSchema.safeParse({
+      houseRules: { enabled: true, rules: [always, { ...never, id: always.id }] },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['houseRules', 'rules', 1, 'id']);
+    }
+  });
+
+  it('rejects an unknown rule kind, empty text, and unknown keys', () => {
+    expect(
+      updateConfigSchema.safeParse({
+        houseRules: { enabled: true, rules: [{ ...always, kind: 'maybe' }] },
+      }).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({
+        houseRules: { enabled: true, rules: [{ ...always, text: '  ' }] },
+      }).success
+    ).toBe(false);
+    expect(
+      updateConfigSchema.safeParse({
+        houseRules: { enabled: true, rules: [{ ...always, bogus: true }] },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects over-long text and more rules than the cap allows', () => {
+    // Both bounds are real per-turn prompt-cost limits, not cosmetic.
+    expect(
+      updateConfigSchema.safeParse({
+        houseRules: {
+          enabled: true,
+          rules: [{ ...always, text: 'x'.repeat(HOUSE_RULE_TEXT_MAX + 1) }],
+        },
+      }).success
+    ).toBe(false);
+    const tooMany = Array.from({ length: MAX_HOUSE_RULES + 1 }, (_, i) => ({
+      ...always,
+      id: `r${i}`,
+    }));
+    expect(
+      updateConfigSchema.safeParse({ houseRules: { enabled: true, rules: tooMany } }).success
     ).toBe(false);
   });
 });

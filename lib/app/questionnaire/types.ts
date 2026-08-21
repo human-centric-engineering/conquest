@@ -677,6 +677,72 @@ export const DEFAULT_INTERVIEWER_STRATEGY: InterviewerStrategySettings = {
 };
 
 /**
+ * Interviewer house rules — the client-specific behaviour policy for ONE questionnaire.
+ *
+ * The third and last of the interviewer-shaping config blocks, and deliberately distinct from its two
+ * neighbours: {@link ToneSettings} controls how the interviewer *sounds* (register, warmth, humour)
+ * and {@link InterviewerStrategySettings} controls how it *questions* (openness arc, tactics). Neither
+ * can express "never give advice", "always ask for a concrete example", or "if they ask who sees their
+ * answers, tell them X" — policy about what the interviewer may and may not do, which varies per client
+ * rather than per platform.
+ *
+ * Three rule kinds, because each needs different prompt framing and each fails differently:
+ *   - `always`   — a standing instruction to follow every turn.
+ *   - `never`    — a prohibition.
+ *   - `if_asked` — a reactive answer: `trigger` is what the respondent raises, `text` is the substance
+ *     of the reply. Answered in the interviewer's own words, NOT recited verbatim (a recited script
+ *     breaks the conversational illusion the whole product rests on).
+ *
+ * A typed list rather than one free-text blob: each kind renders into its own labelled sub-block, rules
+ * toggle individually, and the authoring lints can reason about them. A blob would also invite admins
+ * to quietly override the safeguarding / anonymity / reply-format rules the prompt depends on.
+ */
+export const HOUSE_RULE_KINDS = ['always', 'never', 'if_asked'] as const;
+export type HouseRuleKind = (typeof HOUSE_RULE_KINDS)[number];
+
+/** Human labels — single source for the admin selector and any display. */
+export const HOUSE_RULE_KIND_LABELS: Record<HouseRuleKind, string> = {
+  always: 'Always',
+  never: 'Never',
+  if_asked: 'If asked, say',
+};
+
+export type HouseRule = {
+  /** Stable id, unique within the list — React keys, reordering, and lint anchoring. */
+  id: string;
+  kind: HouseRuleKind;
+  /** Off ⇒ kept in the editor but omitted from the prompt (draft a rule without shipping it). */
+  enabled: boolean;
+  /** `always`/`never`: the instruction. `if_asked`: the substance of the reply. */
+  text: string;
+  /** `if_asked` only: what the respondent raises that triggers {@link text}. Absent on other kinds. */
+  trigger?: string;
+};
+
+export type HouseRulesSettings = {
+  /** Master switch. Off ⇒ no `<house_rules>` section at all, i.e. today's prompt byte-for-byte. */
+  enabled: boolean;
+  /** Rules in prompt order (the admin reorders; order carries no precedence, only listing). */
+  rules: HouseRule[];
+};
+
+/**
+ * Caps. Every enabled rule ships in EVERY turn's system prompt, so these are a real per-turn cost
+ * ceiling rather than tidiness: 20 × 400 chars ≈ 2k tokens is the worst case an admin can build.
+ * The text bound also does useful authoring work — it is long enough for an instruction plus a
+ * caveat, and short enough that "one rule per rule" is the path of least resistance.
+ */
+export const MAX_HOUSE_RULES = 20;
+export const HOUSE_RULE_TEXT_MAX = 400;
+export const HOUSE_RULE_TRIGGER_MAX = 160;
+
+/** Off with no rules — today's behaviour, and what the read-path narrower falls back to. */
+export const DEFAULT_HOUSE_RULES_SETTINGS: HouseRulesSettings = {
+  enabled: false,
+  rules: [],
+};
+
+/**
  * Respondent Report (report kind `respondent`) — the per-respondent report delivered after a
  * respondent completes the questionnaire. The first of two report kinds; the later cross-respondent
  * Cohort Report (`cohort`) gets its own config when built.
@@ -1288,6 +1354,12 @@ export type QuestionnaireConfigShape = {
   /** Interviewer questioning approach (off ⇒ default prompts). See {@link InterviewerStrategySettings}. */
   interviewerStrategy: InterviewerStrategySettings;
   /**
+   * Interviewer house rules — the client-specific behaviour policy (always / never / if-asked) for
+   * this questionnaire. See {@link HouseRulesSettings}. Off by default. Rendered into the phraser and
+   * wrap-up prompts by `buildHouseRulesInstructions`.
+   */
+  houseRules: HouseRulesSettings;
+  /**
    * Respondent Report — the per-respondent report delivered after completion. See
    * {@link RespondentReportSettings}. Off by default.
    */
@@ -1385,6 +1457,7 @@ export const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfigShape = {
   personas: [],
   personaSelection: DEFAULT_PERSONA_SELECTION,
   interviewerStrategy: DEFAULT_INTERVIEWER_STRATEGY,
+  houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
   respondentReport: DEFAULT_RESPONDENT_REPORT_SETTINGS,
   cohortReport: DEFAULT_COHORT_REPORT_SETTINGS,
   intro: DEFAULT_INTRO_SETTINGS,

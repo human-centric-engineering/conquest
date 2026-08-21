@@ -47,6 +47,7 @@ import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector';
 import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/questionnaire/inspector';
 import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
+import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
 import { ABUSE_ABANDON_REASON, TONE_DIMENSION_KEYS } from '@/lib/app/questionnaire/types';
 import {
@@ -465,6 +466,15 @@ async function handleMessage(
     const strategyConfig = loaded.base.config.interviewerStrategy;
     const strategyActive = strategyConfig.enabled;
 
+    // Interviewer house rules: the client's behaviour policy for this questionnaire, rendered once
+    // per turn and shared by the phraser and the wrap-up composer so the two can never disagree.
+    // The renderer applies its own gate (block off, no rules, or every rule individually off all
+    // yield ''), so an untouched version contributes nothing and its prompt is unchanged.
+    const houseRulesInstructions = buildHouseRulesInstructions(loaded.base.config.houseRules);
+    const houseRulesPhraserInput = houseRulesInstructions
+      ? { houseRules: houseRulesInstructions }
+      : {};
+
     // Attachments only flow when this questionnaire opted in via config: with it off, a client that
     // sends attachments anyway gets a text-only turn — the paid multimodal path stays shut. This
     // server gate mirrors the composer hiding the paperclip, so a crafted request can't bypass an
@@ -812,7 +822,9 @@ async function handleMessage(
       let targetedDataSlotId: string | null = null;
       if (result.response.kind === 'offer') {
         const offer = yield* streamOfferMessage({
-          input: result.response.input,
+          // House rules govern the wrap-up too — the orchestrator core builds the offer input from
+          // turn state and knows nothing about config, so the policy is layered on here.
+          input: { ...result.response.input, ...houseRulesPhraserInput },
           userId,
           sessionId,
           recordInspectorCall,
@@ -893,6 +905,7 @@ async function handleMessage(
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
             ...strategyPhraserInput,
+            ...houseRulesPhraserInput,
             ...profileCapturePhraserInput,
             // Open approach/phase broadens to the slot's THEME instead of this one specific slot.
             ...(strategyActive && r.theme ? { topicArea: r.theme } : {}),
@@ -967,6 +980,7 @@ async function handleMessage(
             ...sensitivityPhraserInput,
             ...tonePhraserInput,
             ...strategyPhraserInput,
+            ...houseRulesPhraserInput,
             ...profileCapturePhraserInput,
           },
           userId,

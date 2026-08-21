@@ -350,6 +350,19 @@ model AppQuestionnaireConfig {
   // buildInterviewerStrategyInstructions (lib/.../chat/interviewer-strategy.ts). (types.ts)
   interviewerStrategy Json @default("{\"enabled\":true,\"approach\":\"funnel\",\"probeDepth\":true,\"reflect\":false,\"batchRelated\":true}")
 
+  // Interviewer house rules: HouseRulesSettings — { enabled, rules: [{ id, kind, enabled, text,
+  // trigger? }] } where kind is always | never | if_asked. The client-specific BEHAVIOUR policy for
+  // this questionnaire, as distinct from `tone` (how it sounds) and `interviewerStrategy` (how it
+  // questions): "never give advice", "always ask for a concrete example", "if they ask who sees their
+  // answers, say X". Rendered into the phraser + wrap-up system prompts by buildHouseRulesInstructions
+  // (lib/.../chat/house-rules.ts), in a section that sits AFTER tone (so client policy beats the tone
+  // dials) but BEFORE output_format (so a rule can never break the reply contract).
+  //
+  // OFF BY DEFAULT and inert by construction: `enabled: false` — or no enabled rule with text — makes
+  // the renderer return '', the section collapses to nothing, and the prompt is byte-identical to a
+  // version that never heard of the feature. Narrowed by narrowHouseRules. (types.ts)
+  houseRules Json @default("{}")
+
   // Respondent Report (report kind `respondent`): RespondentReportSettings — the per-respondent
   // report delivered after completion (mode, raw-content includes, AI generation knobs, delivery).
   // Off by default; only takes effect when the platform flag

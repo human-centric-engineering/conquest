@@ -426,6 +426,9 @@ export const API = {
       /** Respondent Report: one config-crafting assistant turn (POST — Generation-tab chat). */
       reportCraft: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/craft`,
+      /** Interviewer house rules: propose rules for this version (POST, read-only — Settings tab). */
+      houseRulesSuggest: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/house-rules/suggest`,
       /** Respondent Report: generate a preview from AI-sample answers (POST — Generation tab). */
       reportPreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/report/preview`,

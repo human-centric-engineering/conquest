@@ -114,6 +114,20 @@ default block changes nothing. The live phraser renders the **enabled** dimensio
 prompt; governed by this per-version `tone` config alone. See
 [`interviewer-tone.md`](./interviewer-tone.md).
 
+`houseRules` is the interviewer's **behaviour policy** for this questionnaire — a single JSON object
+(`HouseRulesSettings`): an `enabled` master switch plus an ordered list of typed rules, each
+`always` (a standing instruction), `never` (a prohibition), or `if_asked` (a `trigger` the respondent
+raises paired with the answer to give). Distinct from `tone` (how the interviewer sounds) and
+`interviewerStrategy` (how it questions): house rules govern what it may and may not **do** — "never
+give advice", "always ask for a concrete example", "if they ask who sees their answers, say X". Off
+by default with no rules, so the default block changes nothing. Capped at 20 rules × 400 characters
+because every enabled rule ships in **every turn's** system prompt. Narrowed on read by
+`narrowHouseRules` and rendered by `buildHouseRulesInstructions`
+(`lib/app/questionnaire/chat/house-rules.ts`) into a `<house_rules>` section that sits after
+`<tone>` (so client policy beats the voice dials) and before `<output_format>` (so a rule can never
+break the reply contract). Applies to both the question phraser and the wrap-up message. See
+[`interviewer-house-rules.md`](./interviewer-house-rules.md).
+
 `respondentReport` (report kind `respondent`) is the per-respondent report delivered after a
 respondent completes the questionnaire — a single JSON object (`RespondentReportSettings`):
 `enabled`, `mode` (`raw | raw_plus_insights`), `rawIncludes` (data-slot values / questions as

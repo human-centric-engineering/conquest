@@ -102,6 +102,22 @@ export const APP_AI_RUN_KINDS = [
    * a skip, not a run.
    */
   'scope_candidacy',
+  /**
+   * House-rule suggestions — the behaviour rules the assistant proposed for a version, with the
+   * reasoning behind each one.
+   *
+   * Recorded on the same grounds as `glossary_analysis`: a human adjudicates every proposal, and an
+   * accepted rule changes durable config that shapes what the interviewer says to real respondents.
+   * "Where did this rule come from, and what was it for" is a question worth answering months later
+   * — especially for the compliance-shaped rules (anonymity claims, what the client will not
+   * promise) this assistant is most often asked to draft. Kept when the admin discards everything
+   * too: "we ran it and it had nothing useful to add" is a real answer.
+   *
+   * Distinct from the Respondent Report config assistant (`report/craft`), which records nothing —
+   * that is a multi-turn chat where the admin is thinking aloud. This is a one-shot analysis of the
+   * questionnaire, structurally the Config Advisor, so it follows the Advisor's precedent.
+   */
+  'house_rules_suggest',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

@@ -404,6 +404,13 @@ export interface OfferComposeInput {
    * from {@link capReached} (the F4.5 question-count cap) — this is the USD budget.
    */
   costWrapUp?: boolean;
+  /**
+   * Interviewer house rules, already rendered to their prompt block by `buildHouseRulesInstructions`
+   * (see the same field on `QuestionComposeInput`). The wrap-up honours them too: a respondent can
+   * still ask something at the end, and a closing message that broke a client's own rule — offering
+   * advice, promising an outcome — would rightly be called a bug. `''`/absent ⇒ no section emitted.
+   */
+  houseRules?: string;
 }
 
 /**

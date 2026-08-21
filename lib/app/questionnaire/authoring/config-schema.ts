@@ -28,11 +28,15 @@ import {
   COHORT_REPORT_INSTRUCTIONS_MAX_LENGTH,
   COHORT_REPORT_LENGTHS,
   CONTRADICTION_MODES,
+  HOUSE_RULE_KINDS,
+  HOUSE_RULE_TEXT_MAX,
+  HOUSE_RULE_TRIGGER_MAX,
   INTERVIEWER_APPROACHES,
   INTRO_BACKGROUND_MAX_LENGTH,
   INTRO_BUTTON_LABEL_MAX_LENGTH,
   INTRO_VIDEO_URL_MAX_LENGTH,
   INVITEE_FIELD_KEYS,
+  MAX_HOUSE_RULES,
   MAX_MILESTONE_THRESHOLDS,
   PERSONA_KEY_MAX_LENGTH,
   PERSONA_SWITCHERS,
@@ -144,6 +148,66 @@ const interviewerStrategySchema = z
     batchRelated: z.boolean(),
   })
   .strict();
+
+/**
+ * Interviewer house rules — the client-specific behaviour policy. Sent whole by the editor;
+ * `strict()` rejects unknown keys.
+ *
+ * The per-rule `superRefine` enforces the one invariant the shape alone cannot: `trigger` belongs to
+ * `if_asked` and to nothing else. Required there because a reactive rule with nothing to react to can
+ * never fire; forbidden elsewhere because a kind changed in the editor must not leave an orphaned
+ * trigger behind in stored JSON (the read-path narrower drops such strays, and the two must agree).
+ */
+const houseRuleSchema = z
+  .object({
+    id: z.string().trim().min(1).max(64),
+    kind: z.enum(HOUSE_RULE_KINDS),
+    enabled: z.boolean(),
+    text: z.string().trim().min(1).max(HOUSE_RULE_TEXT_MAX),
+    trigger: z.string().trim().max(HOUSE_RULE_TRIGGER_MAX).optional(),
+  })
+  .strict()
+  .superRefine((rule, ctx) => {
+    if (rule.kind === 'if_asked') {
+      if (!rule.trigger) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'An "if asked" rule needs to say what the respondent asks about',
+          path: ['trigger'],
+        });
+      }
+      return;
+    }
+    if (rule.trigger !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Only an "if asked" rule can have a trigger',
+        path: ['trigger'],
+      });
+    }
+  });
+
+const houseRulesSchema = z
+  .object({
+    enabled: z.boolean(),
+    rules: z.array(houseRuleSchema).max(MAX_HOUSE_RULES),
+  })
+  .strict()
+  .superRefine((settings, ctx) => {
+    // Ids key the editor list and anchor the authoring lints — duplicates would collapse rules onto
+    // one another in the UI and make a warning point at the wrong rule.
+    const seen = new Set<string>();
+    settings.rules.forEach((rule, index) => {
+      if (seen.has(rule.id)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Rule ids must be unique',
+          path: ['rules', index, 'id'],
+        });
+      }
+      seen.add(rule.id);
+    });
+  });
 
 const toneSettingsSchema = z
   .object({
@@ -393,6 +457,8 @@ export const updateConfigSchema = z
     // are stored.
     personaSelection: personaSelectionSchema.optional(),
     interviewerStrategy: interviewerStrategySchema.optional(),
+    // Interviewer house rules (always / never / if-asked). Sent whole when present.
+    houseRules: houseRulesSchema.optional(),
     // Respondent Report. Sent whole when present.
     respondentReport: respondentReportSettingsSchema.optional(),
     // Cohort Report. Sent whole when present.

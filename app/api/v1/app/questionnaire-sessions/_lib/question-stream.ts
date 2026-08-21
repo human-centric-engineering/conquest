@@ -166,6 +166,14 @@ export interface QuestionComposeInput {
    */
   interviewerStrategy?: InterviewerStrategySettings;
   /**
+   * Interviewer house rules: the admin's client-specific behaviour policy, already rendered to its
+   * prompt block by `buildHouseRulesInstructions`. Pre-rendered (rather than passed as settings, the
+   * way {@link tone} is) because the same string also goes to the wrap-up prompt and to the admin
+   * editor's preview — rendering once at the call site keeps those three byte-identical. `''`/absent
+   * when the block is off or holds no enabled rule, and then no section is emitted at all.
+   */
+  houseRules?: string;
+  /**
    * Conversational profile capture (F-capture): the directive telling the interviewer to gather the
    * admin-authored profile fields naturally in-chat. Set only for a NON-anonymous version in
    * `conversational` capture mode whose snapshot is still incomplete; `''`/absent otherwise (form-mode
@@ -528,6 +536,13 @@ export function buildStreamingQuestionPrompt(input: QuestionComposeInput): LlmMe
         brevity
       )
     ),
+    // Interviewer house rules: the client's own behaviour policy for this questionnaire (always /
+    // never / if-asked). Deliberately placed AFTER `tone` — a client's policy outranks the admin's
+    // voice dials, so "never use humour" must win over a humour dial set high — but BEFORE
+    // `output_format`/`message_shape`, which must keep governing the reply contract no matter what a
+    // rule asks for. The block carries its own subordination clause saying exactly that
+    // (`buildHouseRulesInstructions`). Collapses to '' when off or empty.
+    section('house_rules', input.houseRules ?? ''),
     section(
       'output_format',
       'Reply with conversational prose only: no JSON, no lists, no headings, no XML tags, no ' +

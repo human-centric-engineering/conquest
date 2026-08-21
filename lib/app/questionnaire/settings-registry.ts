@@ -507,6 +507,38 @@ export const SETTING_DESCRIPTORS = {
       ];
     },
   },
+  houseRules: {
+    group: 'Interviewer',
+    tier: 'standard',
+    rows: (c) => {
+      const active = c.houseRules.enabled ? c.houseRules.rules.filter((r) => r.enabled) : [];
+      if (active.length === 0) return [{ label: 'House rules', value: 'None' }];
+      // Counted by kind rather than listed verbatim: the pack summarises setup, and a client's
+      // full rule text can run to twenty entries. The rules themselves are an editor concern.
+      return [
+        {
+          label: 'House rules',
+          value: listOf(
+            [
+              [
+                active.some((r) => r.kind === 'always'),
+                `${active.filter((r) => r.kind === 'always').length} × always`,
+              ],
+              [
+                active.some((r) => r.kind === 'never'),
+                `${active.filter((r) => r.kind === 'never').length} × never`,
+              ],
+              [
+                active.some((r) => r.kind === 'if_asked'),
+                `${active.filter((r) => r.kind === 'if_asked').length} × if asked`,
+              ],
+            ],
+            'None'
+          ),
+        },
+      ];
+    },
+  },
 
   /* ── Questioning & completion ── */
 
