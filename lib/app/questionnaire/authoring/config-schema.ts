@@ -187,6 +187,18 @@ const houseRuleSchema = z
     }
   });
 
+/**
+ * The question-fidelity gate. `.strict()` like its neighbours so a typo'd key is a 400 rather than a
+ * silently-ignored setting. `defaultFidelity` is bounded, not enumerated — `clampQuestionFidelity`
+ * snaps it onto the five-stop grid on read, so a value from an older client still saves.
+ */
+const questionFidelitySchema = z
+  .object({
+    enabled: z.boolean(),
+    defaultFidelity: z.number().min(0).max(1),
+  })
+  .strict();
+
 const houseRulesSchema = z
   .object({
     enabled: z.boolean(),
@@ -459,6 +471,7 @@ export const updateConfigSchema = z
     interviewerStrategy: interviewerStrategySchema.optional(),
     // Interviewer house rules (always / never / if-asked). Sent whole when present.
     houseRules: houseRulesSchema.optional(),
+    questionFidelity: questionFidelitySchema.optional(),
     // Respondent Report. Sent whole when present.
     respondentReport: respondentReportSettingsSchema.optional(),
     // Cohort Report. Sent whole when present.

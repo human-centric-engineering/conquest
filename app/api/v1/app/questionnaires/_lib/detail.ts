@@ -28,6 +28,7 @@ import {
   PRESENTATION_MODES,
   REASONING_PLACEMENTS,
   SELECTION_STRATEGIES,
+  narrowQuestionFidelity,
   type AccessMode,
   type AnswerFitMode,
   type AnswerSlotPanelScope,
@@ -143,6 +144,7 @@ export const CONFIG_SELECT = {
   personaSelection: true,
   interviewerStrategy: true,
   houseRules: true,
+  questionFidelity: true,
   respondentReport: true,
   cohortReport: true,
   intro: true,
@@ -197,6 +199,7 @@ type ConfigRow = {
   personaSelection: Prisma.JsonValue;
   interviewerStrategy: Prisma.JsonValue;
   houseRules: Prisma.JsonValue;
+  questionFidelity: Prisma.JsonValue;
   respondentReport: Prisma.JsonValue;
   cohortReport: Prisma.JsonValue;
   intro: Prisma.JsonValue;
@@ -341,6 +344,7 @@ export function toConfigView(row: ConfigRow | null): ConfigView {
     personaSelection: narrowPersonaSelection(row.personaSelection),
     interviewerStrategy: narrowInterviewerStrategy(row.interviewerStrategy),
     houseRules: narrowHouseRules(row.houseRules),
+    questionFidelity: narrowQuestionFidelity(row.questionFidelity),
     respondentReport: narrowRespondentReportSettings(row.respondentReport),
     cohortReport: narrowCohortReportSettings(row.cohortReport),
     intro: narrowIntroSettings(row.intro),
@@ -498,6 +502,7 @@ export async function getVersionGraph(
               typeConfig: true,
               required: true,
               weight: true,
+              fidelity: true,
               extractionConfidence: true,
               tags: {
                 orderBy: { tag: { normalizedLabel: 'asc' } },
@@ -527,6 +532,7 @@ export async function getVersionGraph(
       typeConfig: qn.typeConfig ?? null,
       required: qn.required,
       weight: qn.weight,
+      fidelity: qn.fidelity,
       extractionConfidence: qn.extractionConfidence,
       tags: qn.tags.map((t) => toTagView(t.tag)),
     })),

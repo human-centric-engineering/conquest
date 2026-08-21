@@ -25,6 +25,7 @@ import {
   DEFAULT_TONE_SETTINGS,
   DEFAULT_INTERVIEWER_STRATEGY,
   DEFAULT_HOUSE_RULES_SETTINGS,
+  DEFAULT_QUESTION_FIDELITY,
 } from '@/lib/app/questionnaire/types';
 import type {
   QuestionDistributionsResult,
@@ -146,6 +147,7 @@ function makeGraph(over: Partial<VersionGraphView> = {}): VersionGraphView {
     tags: [makeTag()],
     config: {
       saved: true,
+      questionFidelity: DEFAULT_QUESTION_FIDELITY,
       // Definitions / glossary (P16) — inert here; present so the fixture matches the shape.
       glossaryPromptInjection: true,
       glossaryRespondentHints: true,

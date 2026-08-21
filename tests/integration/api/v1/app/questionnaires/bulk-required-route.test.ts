@@ -28,6 +28,7 @@ vi.mock('@/app/api/v1/app/questionnaires/_lib/fork', () => ({ forkVersionIfLaunc
 
 const prismaMock = vi.hoisted(() => ({
   appQuestionnaireVersion: { findFirst: vi.fn() },
+  appQuestionnaireSection: { findFirst: vi.fn() },
   appQuestionSlot: { updateMany: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
@@ -119,6 +120,41 @@ describe('bulk requiredness PATCH', () => {
         metadata: expect.objectContaining({ required: true, updated: 5 }),
       })
     );
+  });
+
+  it('sets fidelity across the version and audits it under its own action', async () => {
+    // Fidelity rides the same route (same fork + audit path) but is a distinct operation, so the
+    // original `bulk_required` action string stays reserved for the original one.
+    const res = await PATCH(req({ fidelity: 1 }), ctx);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'v1' },
+      data: { fidelity: 1 },
+    });
+    expect(json.data).toEqual({ updated: 5, fidelity: 1 });
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'questionnaire_question.bulk_fidelity' })
+    );
+  });
+
+  it('narrows a fidelity set to one section when sectionId is given', async () => {
+    prismaMock.appQuestionnaireSection.findFirst.mockResolvedValue({ id: 'sec-1' });
+
+    await PATCH(req({ fidelity: 0.75, sectionId: 'sec-1' }), ctx);
+
+    expect(prismaMock.appQuestionSlot.updateMany).toHaveBeenCalledWith({
+      where: { versionId: 'v1', sectionId: 'sec-1' },
+      data: { fidelity: 0.75 },
+    });
+  });
+
+  it('rejects a body that sets neither required nor fidelity', async () => {
+    // An empty body would otherwise updateMany every row with no data and report a misleading count.
+    const res = await PATCH(req({}), ctx);
+    expect(res.status).toBe(400);
+    expect(prismaMock.appQuestionSlot.updateMany).not.toHaveBeenCalled();
   });
 
   it('sets every question optional when required is false', async () => {

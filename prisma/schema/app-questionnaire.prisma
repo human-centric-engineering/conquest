@@ -363,6 +363,14 @@ model AppQuestionnaireConfig {
   // version that never heard of the feature. Narrowed by narrowHouseRules. (types.ts)
   houseRules Json @default("{}")
 
+  // Question fidelity gate: QuestionFidelitySettings — { enabled, defaultFidelity }. The version-level
+  // switch that activates the per-question AppQuestionSlot.fidelity dial, plus the stop NEW questions
+  // are created on. OFF BY DEFAULT and inert by construction: while `enabled` is false,
+  // resolveQuestionFidelity returns `balanced` for every question whatever is stored, so an admin can
+  // pre-set values (and switch back) without changing respondent behaviour. Narrowed by
+  // narrowQuestionFidelity. (types.ts)
+  questionFidelity Json @default("{}")
+
   // Respondent Report (report kind `respondent`): RespondentReportSettings — the per-respondent
   // report delivered after completion (mode, raw-content includes, AI generation knobs, delivery).
   // Off by default; only takes effect when the platform flag
@@ -452,6 +460,13 @@ model AppQuestionSlot {
   typeConfig           Json? // choices, likert bounds, etc.
   required             Boolean                      @default(false)
   weight               Float                        @default(0.5) // 0.1–1.0 slider scale; 0.5 neutral midpoint
+  // Question fidelity: how faithfully the interviewer must put THIS question to the respondent.
+  // Five-stop grid — 0 free | 0.25 loose | 0.5 balanced | 0.75 close | 1 must_ask — clamped on read
+  // by clampQuestionFidelity. `balanced` (0.5) is today's behaviour, so an untouched question is
+  // unchanged. INERT unless AppQuestionnaireConfig.questionFidelity.enabled is on: every runtime
+  // consumer reads it through resolveQuestionFidelity, which answers `balanced` while the gate is
+  // off. Distinct from `weight` (pick score + coverage) and `required` (must be answered). (types.ts)
+  fidelity             Float                        @default(0.5)
   extractionConfidence Float? // 0–1, set by the extractor
   // F4.1 adaptive selection: cosine-similarity vector over `prompt` (+`guidelines`).
   // Width matches the platform embedding model (AiKnowledgeChunk.embedding). Raw-SQL

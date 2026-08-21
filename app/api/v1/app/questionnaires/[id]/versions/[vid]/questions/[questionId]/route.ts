@@ -47,6 +47,7 @@ const QUESTION_SELECT = {
   typeConfig: true,
   required: true,
   weight: true,
+  fidelity: true,
 } as const;
 
 /** Load a question scoped to the version, or `null` (→ 404). */
@@ -141,6 +142,7 @@ const handlePatch = withAdminAuth<Params>(async (request, session, { params }) =
   if (body.rationale !== undefined) data.rationale = body.rationale;
   if (body.required !== undefined) data.required = body.required;
   if (body.weight !== undefined) data.weight = body.weight;
+  if (body.fidelity !== undefined) data.fidelity = body.fidelity;
   if (typeConfigData !== undefined) data.typeConfig = typeConfigData;
   if (moveSectionId !== undefined) data.section = { connect: { id: moveSectionId } };
   if (moveOrdinal !== undefined) data.ordinal = moveOrdinal;

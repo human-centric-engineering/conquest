@@ -98,6 +98,7 @@ function makeGraph(questionCount = 3, over: Partial<VersionGraphView> = {}): Ver
     typeConfig: {},
     required: true,
     weight: 1,
+    fidelity: 0.5,
     extractionConfidence: null,
     tags: [],
   }));

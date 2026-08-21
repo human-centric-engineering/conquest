@@ -77,6 +77,7 @@ import {
   DEFAULT_TONE_SETTINGS,
   DEFAULT_INTERVIEWER_STRATEGY,
   DEFAULT_HOUSE_RULES_SETTINGS,
+  DEFAULT_QUESTION_FIDELITY,
 } from '@/lib/app/questionnaire/types';
 import type { TurnState } from '@/lib/app/questionnaire/orchestrator';
 import type { CapabilitySlotView } from '@/app/api/v1/app/questionnaires/_lib/turn-context';
@@ -110,6 +111,7 @@ function state(over: Partial<TurnState> = {}): TurnState {
     sessionId: 'sess-1',
     userMessage: 'I do marketing',
     config: {
+      questionFidelity: DEFAULT_QUESTION_FIDELITY,
       // Definitions / glossary (P16) — inert here; present so the fixture matches the shape.
       glossaryPromptInjection: true,
       glossaryRespondentHints: true,

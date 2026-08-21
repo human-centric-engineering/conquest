@@ -37,7 +37,10 @@ import type {
   RefLookupResult,
 } from '@/lib/app/questionnaire/views';
 import { DEFAULT_ADAPTIVE_SCOPE_SETTINGS } from '@/lib/app/questionnaire/scope/types';
-import { DEFAULT_HOUSE_RULES_SETTINGS } from '@/lib/app/questionnaire/types';
+import {
+  DEFAULT_HOUSE_RULES_SETTINGS,
+  DEFAULT_QUESTION_FIDELITY,
+} from '@/lib/app/questionnaire/types';
 
 // ---------------------------------------------------------------------------
 // Helpers — build representative instances of each interface shape.
@@ -129,6 +132,7 @@ function makeQuestionSlotView(overrides: Partial<QuestionSlotView> = {}): Questi
     typeConfig: { options: ['Own', 'Rent'] },
     required: true,
     weight: 1,
+    fidelity: 0.5,
     extractionConfidence: null,
     tags: [],
     ...overrides,
@@ -263,6 +267,7 @@ function makeConfigView(overrides: Partial<ConfigView> = {}): ConfigView {
     intro: { enabled: false, background: '', buttonLabel: '', videoUrl: '' },
     adaptiveScope: DEFAULT_ADAPTIVE_SCOPE_SETTINGS,
     houseRules: DEFAULT_HOUSE_RULES_SETTINGS,
+    questionFidelity: DEFAULT_QUESTION_FIDELITY,
     ...overrides,
   };
 }

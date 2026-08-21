@@ -31,6 +31,16 @@ fill aggressively (a guess)  →  guess lands at a discounted confidence
 | **Configurable floor + completion gating**              | schema `answerConfidenceFloor` (default 0.5); `completion-logic.ts` `assessCompletion`                                                                                      | A below-floor answer doesn't count toward coverage, the min-answered gate, or a required question until corroborated. Unscored (authoritative) answers always count; a floor of 0 disables gating. 0.5 gates the 0.45 guesses without blocking genuine answers. Threaded to the extractor so the refresh uses the configured floor.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **Form-field surfacing**                                | `components/app/questionnaire/form/questionnaire-form.tsx` (`ConfidenceScore`)                                                                                              | Each agent-filled field shows its confidence band (Tentative → Confident) next to the "Inferred" marker, so the respondent knows which answers to glance at. Drops once they edit the field themselves.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
+## The exception: instrument questions
+
+Filling a question from a good hunch is right for most questions and wrong for an instrument — a
+validated scale, a regulatory item, a matrix whose comparability depends on exact wording.
+[Question fidelity](./question-fidelity.md) is the per-question dial that says so, and its
+`must_ask` stop raises the bar a background fill must clear before the question counts as answered.
+Note the two caps above already make this work without new tuning: an opportunistic fill is capped at
+`0.75` (typed) / `0.45` (free text), so it can never on its own satisfy a must-ask question — only a
+genuine `direct` extraction, or corroboration climbing via `accrueConfidence`, can.
+
 ## Provenance / confidence as the signal
 
 There is **no separate "opportunistic" flag** — `provenance: 'inferred'` + a confidence below the

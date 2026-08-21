@@ -31,6 +31,8 @@
 import {
   ACCESS_MODE_LABELS,
   INTERVIEWER_APPROACH_LABELS,
+  QUESTION_FIDELITY_LABELS,
+  questionFidelityLevel,
   INVITEE_FIELD_LABELS,
   TONE_DIMENSION_KEYS,
   toDisplayLevel,
@@ -548,6 +550,23 @@ export const SETTING_DESCRIPTORS = {
     rows: (c) => [
       { label: 'Question selection', value: SELECTION_STRATEGY_LABELS[c.selectionStrategy] },
     ],
+  },
+  questionFidelity: {
+    group: 'Questioning & completion',
+    tier: 'standard',
+    rows: (c) => {
+      // Off is the default and the pre-feature behaviour: every question is asked openly and the
+      // stored per-question dial is inert, so the only honest row is the switch itself.
+      if (!c.questionFidelity.enabled) {
+        return [{ label: 'Question fidelity', value: 'Off — every question asked openly' }];
+      }
+      return [
+        {
+          label: 'Question fidelity',
+          value: `On · new questions start ${QUESTION_FIDELITY_LABELS[questionFidelityLevel(c.questionFidelity.defaultFidelity)]}`,
+        },
+      ];
+    },
   },
   adaptiveScope: {
     group: 'Questioning & completion',

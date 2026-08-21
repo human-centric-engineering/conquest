@@ -6,7 +6,9 @@ Off by default: existing questionnaires keep today's open, conversational voice 
 
 It is the questioning-approach sibling of **interviewer tone & persona** (`tone.ts`) — same JSON-config
 shape, same narrow-on-read + render-into-prompt pattern. Tone controls _voice_; strategy controls
-_approach_.
+_approach_. Both are **session-level**; the per-question counterpart is
+[question fidelity](./question-fidelity.md), which decides how faithfully ONE question must be put to
+the respondent.
 
 ## The model
 

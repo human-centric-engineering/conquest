@@ -61,6 +61,7 @@ function makeQuestion(overrides: Partial<QuestionSlotView> = {}): QuestionSlotVi
     typeConfig: null,
     required: false,
     weight: 1,
+    fidelity: 0.5,
     extractionConfidence: null,
     tags: [],
     ...overrides,

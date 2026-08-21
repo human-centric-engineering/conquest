@@ -57,6 +57,7 @@ const GRAPH: VersionGraphView = {
           typeConfig: { min: 1, max: 5, labels: ['VL', 'L', 'M', 'H', 'VH'] },
           required: true,
           weight: 0.7,
+          fidelity: 1,
           extractionConfidence: null,
           tags: [{ id: 't1', label: 'Wellbeing', color: 'green' }],
         },
@@ -164,6 +165,45 @@ describe('buildDefinitionExport', () => {
     expect(json).not.toContain('paraphrase');
     expect(json).not.toContain('respondentName');
     expect(json).not.toContain('provenanceLabel');
+  });
+});
+
+describe('question fidelity round-trip', () => {
+  const exportGraph = () =>
+    buildDefinitionExport(
+      'Staff Morale',
+      GRAPH,
+      DATA_SLOTS,
+      TOPICS,
+      SCORING,
+      '2026-06-28T00:00:00.000Z'
+    );
+
+  it("carries each question's fidelity through export and back", () => {
+    // Fidelity is per-question admin work, and a missed line in any one of the export projection,
+    // the Zod schema, or the persister loses it SILENTLY on every fork / export / re-import.
+    // `must_ask` — deliberately NOT the 0.5 default, so a hardcoded midpoint fails this.
+    const expected = 1;
+    expect(GRAPH.sections[0].questions[0].fidelity).toBe(expected);
+    const env = exportGraph();
+    expect(env.version.sections[0].questions[0].fidelity).toBe(expected);
+
+    const parsed = parseDefinitionImport(JSON.stringify(env));
+    expect(parsed.version.sections[0].questions[0].fidelity).toBe(expected);
+  });
+
+  it('defaults fidelity to the neutral midpoint for an envelope exported before the feature', () => {
+    // Real files predate this field. They must import as `balanced` — behaving exactly as they did
+    // when they were exported — rather than failing validation.
+    const raw = JSON.parse(JSON.stringify(exportGraph()));
+    for (const section of raw.version.sections) {
+      for (const question of section.questions) delete question.fidelity;
+    }
+
+    const parsed = parseDefinitionImport(JSON.stringify(raw));
+    for (const section of parsed.version.sections) {
+      for (const question of section.questions) expect(question.fidelity).toBe(0.5);
+    }
   });
 });
 

@@ -75,6 +75,13 @@ export const reorderSchema = z.object({
  */
 const questionWeightSchema = z.number().min(0.1).max(1);
 
+/**
+ * Per-question fidelity — the Structure editor's five-stop slider (`0` free … `1` must-ask, in
+ * `0.25` steps). Bounded rather than enumerated so a value from an older export still validates;
+ * `clampQuestionFidelity` snaps it onto the grid on read.
+ */
+const questionFidelitySchema = z.number().min(0).max(1);
+
 export const createQuestionSchema = z.object({
   prompt: z.string().min(1),
   type: z.enum(QUESTION_TYPES),
@@ -83,6 +90,7 @@ export const createQuestionSchema = z.object({
   rationale: z.string().min(1).nullable().optional(),
   required: z.boolean().optional(),
   weight: questionWeightSchema.optional(),
+  fidelity: questionFidelitySchema.optional(),
   /** Validated against `type` by `validateTypeConfig` in the route. */
   typeConfig: z.unknown().optional(),
   ordinal: z.number().int().nonnegative().optional(),
@@ -102,6 +110,7 @@ export const updateQuestionSchema = z
     rationale: z.string().min(1).nullable().optional(),
     required: z.boolean().optional(),
     weight: questionWeightSchema.optional(),
+    fidelity: questionFidelitySchema.optional(),
     typeConfig: z.unknown().optional(),
     sectionId: idSchema.optional(),
     ordinal: z.number().int().nonnegative().optional(),
@@ -111,16 +120,29 @@ export const updateQuestionSchema = z
   });
 
 /**
- * PATCH the whole version's question collection — bulk-set every question's
- * `required` flag in one call (the Structure editor's "All questions required"
- * tri-state checkbox). No per-question targeting: it's all-or-nothing.
+ * PATCH many of a version's questions at once — the Structure editor's collection-level controls.
+ *
+ * `required` is the original all-or-nothing "All questions required" tri-state checkbox.
+ * `fidelity` was added alongside it because setting a seventy-question instrument one slider at a
+ * time is not a real workflow; `sectionId` narrows either to a single section, since fidelity is
+ * usually uniform within a section (a scored battery) rather than across a whole questionnaire.
+ *
+ * At least one of `required` / `fidelity` must be present — an empty body would silently touch every
+ * row and report a misleading `updated` count.
  */
-export const bulkSetRequiredSchema = z.object({
-  required: z.boolean(),
-});
+export const bulkUpdateQuestionsSchema = z
+  .object({
+    required: z.boolean().optional(),
+    fidelity: questionFidelitySchema.optional(),
+    /** Limit the update to one section. Omitted ⇒ every question in the version. */
+    sectionId: idSchema.optional(),
+  })
+  .refine((b) => b.required !== undefined || b.fidelity !== undefined, {
+    message: 'Provide `required` or `fidelity` to set',
+  });
 
 export type UpdateVersionMetaInput = z.infer<typeof updateVersionMetaSchema>;
-export type BulkSetRequiredInput = z.infer<typeof bulkSetRequiredSchema>;
+export type BulkUpdateQuestionsInput = z.infer<typeof bulkUpdateQuestionsSchema>;
 export type UpdateVersionStatusInput = z.infer<typeof updateVersionStatusSchema>;
 export type CreateSectionInput = z.infer<typeof createSectionSchema>;
 export type UpdateSectionInput = z.infer<typeof updateSectionSchema>;

@@ -198,6 +198,7 @@ const MINIMAL_SOURCE = {
           typeConfig: null, // ← null-typeConfig else-branch
           required: true,
           weight: 1,
+          fidelity: 1, // must_ask — deliberately off-default, so a dropped copy is visible
           extractionConfidence: null, // ← null-extractionConfidence else-branch
         },
       ],
@@ -291,6 +292,9 @@ describe('copyVersionGraph — null-guard else-branches', () => {
         type: 'free_text',
         required: true,
         weight: 1,
+        // Per-question fidelity must ride the fork. Dropping it here would silently reset every
+        // must-ask question to `balanced` the first time an admin edits a launched version.
+        fidelity: 1,
       });
 
       // All-null optional fields must be absent (not written as null columns)
