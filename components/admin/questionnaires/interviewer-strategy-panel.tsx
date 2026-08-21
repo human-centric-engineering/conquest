@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { OpeningExamplesSuggest } from '@/components/admin/questionnaires/opening-examples-suggest';
 import { cn } from '@/lib/utils';
 import {
   FUNNEL_PACE_PROFILES,
@@ -217,10 +218,18 @@ export function InterviewerStrategyPanel({
   value,
   onChange,
   disabled,
+  questionnaireId,
+  versionId,
 }: {
   value: InterviewerStrategySettings;
   onChange: (next: InterviewerStrategySettings) => void;
   disabled?: boolean;
+  /**
+   * Ids for the suggest route. Optional so the panel still renders standalone (and in tests)
+   * without one — the AI affordance simply doesn't appear, and every other control still works.
+   */
+  questionnaireId?: string;
+  versionId?: string;
 }) {
   const patch = (next: Partial<InterviewerStrategySettings>) => onChange({ ...value, ...next });
 
@@ -236,6 +245,23 @@ export function InterviewerStrategyPanel({
   const setExamples = (next: string[]) => patch({ openingExamples: next });
   const setExample = (index: number, text: string) =>
     setExamples(openingExamples.map((example, i) => (i === index ? text : example)));
+
+  /**
+   * Accepting a suggestion fills the first blank row if there is one, rather than always appending.
+   * An admin who clicked "Add an example" and then opened the assistant would otherwise be left
+   * with an empty row above the accepted opener — and that empty row makes the list read as
+   * unfinished (and trips the panel's own "nothing written yet" warning).
+   */
+  const addExample = (text: string) => {
+    const blank = openingExamples.findIndex((example) => example.trim() === '');
+    if (blank >= 0) return setExample(blank, text);
+    if (atCap) return;
+    setExamples([...openingExamples, text]);
+  };
+
+  // Matched on exact text so an accepted-then-edited opener stops counting as "added" — at which
+  // point offering it again is right, not a duplicate. Same call as the house-rules library.
+  const addedTexts = new Set(openingExamples);
 
   return (
     <div className="space-y-4">
@@ -447,6 +473,16 @@ export function InterviewerStrategyPanel({
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" /> Add an example
                     </Button>
+                    {questionnaireId && versionId && (
+                      <OpeningExamplesSuggest
+                        questionnaireId={questionnaireId}
+                        versionId={versionId}
+                        addedTexts={addedTexts}
+                        onAdd={addExample}
+                        disabled={disabled}
+                        atCap={atCap}
+                      />
+                    )}
                     <span className="text-muted-foreground ml-auto text-xs">
                       {openingExamples.length} of {MAX_OPENING_EXAMPLES}
                     </span>

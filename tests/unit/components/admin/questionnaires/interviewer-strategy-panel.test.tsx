@@ -17,7 +17,7 @@
  */
 
 import { useState } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -260,6 +260,133 @@ describe('InterviewerStrategyPanel — opening questions', () => {
       .click(screen.getByRole('radio', { name: /Let the interviewer choose/ }));
     // Parking the mode must not discard the wording — drafting and shipping are different decisions.
     expect(latest().openingExamples).toEqual(['Tell me about your week.']);
+  });
+});
+
+describe('InterviewerStrategyPanel — the suggester', () => {
+  /** Suggestions the mocked route returns, so the accept path can be driven end to end. */
+  const PROPOSED = 'Tell me about your experience of working here.';
+
+  function mockSuggestFetch() {
+    const fn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        success: true,
+        data: { suggestions: [{ text: PROPOSED, why: 'Wide and easy.' }] },
+      }),
+    });
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  /**
+   * The ids are optional so the panel still renders standalone and in tests. Without them the AI
+   * affordance is simply absent — every other control must still work.
+   */
+  it('is absent without the route ids, and present with them', () => {
+    const value = { ...ON, openingMode: 'examples' as const, openingExamples: ['Tell me.'] };
+    const { unmount } = render(<InterviewerStrategyPanel value={value} onChange={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /Suggest openers/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Add an example/ })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <InterviewerStrategyPanel
+        value={value}
+        onChange={vi.fn()}
+        questionnaireId="qn-1"
+        versionId="v1"
+      />
+    );
+    expect(screen.getByRole('button', { name: /Suggest openers/ })).toBeInTheDocument();
+  });
+
+  it('appends an accepted suggestion to the list', async () => {
+    mockSuggestFetch();
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    let current: InterviewerStrategySettings = {
+      ...ON,
+      openingMode: 'examples',
+      openingExamples: ['Tell me about your week.'],
+    };
+
+    function Harness() {
+      const [value, setValue] = useState(current);
+      return (
+        <InterviewerStrategyPanel
+          value={value}
+          onChange={(next) => {
+            onChange(next);
+            current = next;
+            setValue(next);
+          }}
+          questionnaireId="qn-1"
+          versionId="v1"
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole('button', { name: /Suggest openers/ }));
+    await user.click(await screen.findByRole('button', { name: /^Add$/ }));
+    expect(current.openingExamples).toEqual(['Tell me about your week.', PROPOSED]);
+  });
+
+  /**
+   * An admin who clicked "Add an example" and then opened the assistant would otherwise be left
+   * with an empty row above the accepted opener — which makes the list read as unfinished and
+   * trips the panel's own "nothing written yet" warning.
+   */
+  it('fills a blank row rather than appending below it', async () => {
+    mockSuggestFetch();
+    const user = userEvent.setup();
+    let current: InterviewerStrategySettings = {
+      ...ON,
+      openingMode: 'examples',
+      openingExamples: [''],
+    };
+
+    function Harness() {
+      const [value, setValue] = useState(current);
+      return (
+        <InterviewerStrategyPanel
+          value={value}
+          onChange={(next) => {
+            current = next;
+            setValue(next);
+          }}
+          questionnaireId="qn-1"
+          versionId="v1"
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole('button', { name: /Suggest openers/ }));
+    await user.click(await screen.findByRole('button', { name: /^Add$/ }));
+    expect(current.openingExamples).toEqual([PROPOSED]);
+  });
+
+  it('tells the dialog which openers are already in the list', async () => {
+    mockSuggestFetch();
+    const user = userEvent.setup();
+    render(
+      <InterviewerStrategyPanel
+        value={{ ...ON, openingMode: 'examples', openingExamples: [PROPOSED] }}
+        onChange={vi.fn()}
+        questionnaireId="qn-1"
+        versionId="v1"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /Suggest openers/ }));
+    // Shown as already added rather than offered a second time.
+    expect(await screen.findByRole('button', { name: /Added/ })).toBeDisabled();
   });
 });
 

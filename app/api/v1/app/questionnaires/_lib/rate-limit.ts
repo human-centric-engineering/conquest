@@ -440,3 +440,20 @@ export const houseRulesSuggestLimiter = createRateLimiter({
   interval: HOUSE_RULES_SUGGEST_RATE_LIMIT_INTERVAL_MS,
   maxRequests: HOUSE_RULES_SUGGEST_RATE_LIMIT_MAX,
 });
+
+/**
+ * Opening-questions suggestion sub-cap. Structurally identical to {@link houseRulesSuggestLimiter}
+ * — one reasoning call over the same version context — so it sits in the same 20/min paid band,
+ * keyed on the admin who owns the spend. Kept as its OWN limiter rather than shared: two assistants
+ * on the same Settings tab sharing a bucket would let a burst of one lock out the other, which the
+ * admin would experience as an unrelated feature breaking.
+ */
+export const OPENING_EXAMPLES_SUGGEST_RATE_LIMIT_MAX = 20;
+
+/** Sliding-window length for {@link openingExamplesSuggestLimiter}, in milliseconds. */
+export const OPENING_EXAMPLES_SUGGEST_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const openingExamplesSuggestLimiter = createRateLimiter({
+  interval: OPENING_EXAMPLES_SUGGEST_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: OPENING_EXAMPLES_SUGGEST_RATE_LIMIT_MAX,
+});

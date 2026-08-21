@@ -118,6 +118,16 @@ export const APP_AI_RUN_KINDS = [
    * questionnaire, structurally the Config Advisor, so it follows the Advisor's precedent.
    */
   'house_rules_suggest',
+  /**
+   * Opening-question suggestions — the example openers the assistant proposed for a version.
+   *
+   * Same grounds as `house_rules_suggest`: a human adjudicates each one, and an accepted example
+   * becomes durable config that shapes the first thing a real respondent is ever asked. The opening
+   * carries disproportionate weight — it is what decides whether someone writes three words or
+   * three paragraphs — so "where did this opener come from" is worth answering later. Kept when it
+   * proposes nothing, too: that is a real answer about the questionnaire, not an absence of one.
+   */
+  'opening_examples_suggest',
 ] as const;
 export type AppAiRunKind = (typeof APP_AI_RUN_KINDS)[number];
 

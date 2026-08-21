@@ -2047,6 +2047,8 @@ export function ConfigEditor({
               value={interviewerStrategy}
               onChange={setInterviewerStrategy}
               disabled={busy}
+              questionnaireId={questionnaireId}
+              versionId={versionId}
             />
           </SettingsGroup>
 

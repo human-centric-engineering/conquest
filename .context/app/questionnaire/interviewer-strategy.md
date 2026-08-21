@@ -50,18 +50,19 @@ approach. Stored as `AppQuestionnaireConfig.interviewerStrategy` (Json), shape
 
 ## Where each piece lives
 
-| Concern                        | Code                                                                                                                                                                                          |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Types + default                | `lib/app/questionnaire/types.ts` (`INTERVIEWER_APPROACHES`, `FUNNEL_PACES`, `INTERVIEWER_OPENING_MODES`, `InterviewerStrategySettings`, `DEFAULT_INTERVIEWER_STRATEGY`)                       |
-| Narrow (read) + prompt builder | `lib/app/questionnaire/chat/interviewer-strategy.ts` (`narrowInterviewerStrategy`, `FUNNEL_PACE_PROFILES`, `paceProfile`, `funnelPhase`, `buildInterviewerStrategyInstructions`)              |
-| Free-text sanitisation         | `lib/app/questionnaire/chat/prompt-text.ts` (`narrowPromptText`) — the single choke point every admin-authored prompt string flows through, shared with house rules                           |
-| Prompt injection               | `app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts` — an `interviewer_strategy` section placed AFTER `rules`/`this_turn` so it governs (later sections win, like tone)            |
-| Progress signals               | the messages route computes `coverage` (answered/total) + `respondentTerse` (short latest reply) once per turn and threads them into both phrasing call sites                                 |
-| Config plumbing                | Prisma `interviewerStrategy Json` (column default carries the full shape); Zod `interviewerStrategySchema` in `config-schema.ts`; `detail.ts` select/view (narrowed); `config-editor.tsx`     |
-| Admin editor                   | `components/admin/questionnaires/interviewer-strategy-panel.tsx` — the whole group, including `FunnelArcExplainer`; `config-editor.tsx` keeps only the `SettingsGroup` shell, state and save  |
-| Conflict lints                 | `config-conflicts.ts` checks 8–9, anchored `sectionId: 'interviewer-strategy'`; label in `components/admin/questionnaires/config-conflicts.tsx`                                               |
-| Pack / audit summary           | `settings-registry.ts` — approach, Funnel pace (funnel only), Opening questions (counted, never reprinted), tactics                                                                           |
-| Import / export                | **automatic** — `config-export.ts` derives keys from `DEFAULT_QUESTIONNAIRE_CONFIG`, value-validates via `updateConfigSchema`; both now include the field, so no per-setting wiring is needed |
+| Concern                        | Code                                                                                                                                                                                           |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Types + default                | `lib/app/questionnaire/types.ts` (`INTERVIEWER_APPROACHES`, `FUNNEL_PACES`, `INTERVIEWER_OPENING_MODES`, `InterviewerStrategySettings`, `DEFAULT_INTERVIEWER_STRATEGY`)                        |
+| Narrow (read) + prompt builder | `lib/app/questionnaire/chat/interviewer-strategy.ts` (`narrowInterviewerStrategy`, `FUNNEL_PACE_PROFILES`, `paceProfile`, `funnelPhase`, `buildInterviewerStrategyInstructions`)               |
+| Free-text sanitisation         | `lib/app/questionnaire/chat/prompt-text.ts` (`narrowPromptText`) — the single choke point every admin-authored prompt string flows through, shared with house rules                            |
+| Prompt injection               | `app/api/v1/app/questionnaire-sessions/_lib/question-stream.ts` — an `interviewer_strategy` section placed AFTER `rules`/`this_turn` so it governs (later sections win, like tone)             |
+| Progress signals               | the messages route computes `coverage` (answered/total) + `respondentTerse` (short latest reply) once per turn and threads them into both phrasing call sites                                  |
+| Config plumbing                | Prisma `interviewerStrategy Json` (column default carries the full shape); Zod `interviewerStrategySchema` in `config-schema.ts`; `detail.ts` select/view (narrowed); `config-editor.tsx`      |
+| Admin editor                   | `components/admin/questionnaires/interviewer-strategy-panel.tsx` — the whole group, including `FunnelArcExplainer`; `config-editor.tsx` keeps only the `SettingsGroup` shell, state and save   |
+| Conflict lints                 | `config-conflicts.ts` checks 8–9, anchored `sectionId: 'interviewer-strategy'`; label in `components/admin/questionnaires/config-conflicts.tsx`                                                |
+| Pack / audit summary           | `settings-registry.ts` — approach, Funnel pace (funnel only), Opening questions (counted, never reprinted), tactics                                                                            |
+| Opening-examples suggester     | `lib/app/questionnaire/opening-examples/suggest.ts` + `…/[vid]/opening-examples/suggest/route.ts` + `opening-examples-suggest.tsx`; agent seed `094`, `openingExamplesSuggestLimiter` (20/min) |
+| Import / export                | **automatic** — `config-export.ts` derives keys from `DEFAULT_QUESTIONNAIRE_CONFIG`, value-validates via `updateConfigSchema`; both now include the field, so no per-setting wiring is needed  |
 
 ## The funnel phase
 
@@ -157,6 +158,41 @@ tells the model to take the broadest sensible framing (the whole area, or wider 
 subject); and the phraser **reframes the user message** on an open opening so the detailed slot prompt
 is demoted to "for your awareness only — the AREA to explore" rather than presented as "the question
 to ask". Without that, the precise prompt in the user turn out-anchors the system guidance.
+
+## The opening-questions assistant
+
+A **one-shot analyst**, structurally identical to the house-rules suggester and sharing its whole
+skeleton: `withAdminAuth` → per-admin 20/min sub-cap → scoped `findFirst` with a capped context
+select → `buildSuggestMessages` (pure, separately tested) → `validateSuggestResult` (a **narrower**,
+not a Zod parse — it drops bad entries and returns `null` only on a broken envelope, which is what
+earns `runStructuredCompletion`'s retry) → `recordAiRun` on success **and** failure.
+
+**Read-only.** There is no apply endpoint. Proposals land in a dialog, the admin accepts the ones
+they want into editor state, and the ordinary config PATCH saves them — audited like any other
+settings change. The opening is the first thing a real respondent is ever asked, so an opener
+nobody read is precisely what the propose-then-accept shape exists to prevent.
+
+Four prompt decisions carry the quality, and each is asserted in the unit tests rather than trusted:
+
+- It is told the examples are **guidance the interviewer riffs on, not a script it reads**. Without
+  that it writes safe, ready-to-recite lines instead of strong models of a register.
+- It anchors on the questionnaire's **subject**, and is explicitly forbidden from naming, quoting or
+  paraphrasing an individual question — the opening deliberately comes before all of them. The same
+  warning rides the question list in the user message, where it is hardest to ignore.
+- It is given the **failure modes** (leading, yes/no-able, double-barrelled, jargon) that otherwise
+  survive a plausible-looking first draft.
+- It is told to **vary** the openers, so the admin gets a real choice of registers rather than one
+  question rephrased five ways. The seed sets `temperature: 0.7` for the same reason — the
+  house-rules assistant's 0.4 returns near-duplicates here.
+
+Two smaller choices: the narrower **de-duplicates** case-insensitively (two identical openers in the
+panel read as a UI bug, not a model quirk), and accepting a suggestion **fills a blank row** if one
+exists rather than appending below it, so an admin who clicked "Add an example" first is not left
+with an empty row that trips the panel's own "nothing written yet" warning.
+
+The limiter is its **own** bucket, not shared with the house-rules assistant: two assistants on one
+Settings tab sharing a cap would let a burst of one lock out the other, which the admin would
+experience as an unrelated feature breaking.
 
 ## Anti-patterns
 
