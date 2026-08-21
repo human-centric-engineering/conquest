@@ -140,7 +140,7 @@ export function FunnelArcExplainer({
           <li>
             Before anything is captured there is no coverage to read, so it counts questions
             instead: open for the first {profile.openRounds}, specific from question{' '}
-            {profile.targetedRounds}.
+            {profile.targetedRounds + 1}.
           </li>
         </ul>
       )}
@@ -241,6 +241,15 @@ export function InterviewerStrategyPanel({
   // Examples only ever govern an OPEN opening, which `targeted` never has.
   const opensBroadly = approach === 'funnel' || approach === 'open';
   const atCap = openingExamples.length >= MAX_OPENING_EXAMPLES;
+  const blankIndex = openingExamples.findIndex((example) => example.trim() === '');
+  /**
+   * The cap as the SUGGESTER sees it. A blank row is capacity `addExample` can use without growing
+   * the list, so five rows one of which is empty is not full to the assistant — only to the "Add an
+   * example" button, which would have to add a sixth. Without this distinction the exact case
+   * `addExample`'s blank-row branch exists for (click "Add an example", then open the assistant, at
+   * five rows) disables every proposal's Add button and the blank row can never be filled.
+   */
+  const suggestAtCap = atCap && blankIndex < 0;
 
   const setExamples = (next: string[]) => patch({ openingExamples: next });
   const setExample = (index: number, text: string) =>
@@ -253,8 +262,7 @@ export function InterviewerStrategyPanel({
    * unfinished (and trips the panel's own "nothing written yet" warning).
    */
   const addExample = (text: string) => {
-    const blank = openingExamples.findIndex((example) => example.trim() === '');
-    if (blank >= 0) return setExample(blank, text);
+    if (blankIndex >= 0) return setExample(blankIndex, text);
     if (atCap) return;
     setExamples([...openingExamples, text]);
   };
@@ -480,7 +488,7 @@ export function InterviewerStrategyPanel({
                         addedTexts={addedTexts}
                         onAdd={addExample}
                         disabled={disabled}
-                        atCap={atCap}
+                        atCap={suggestAtCap}
                       />
                     )}
                     <span className="text-muted-foreground ml-auto text-xs">

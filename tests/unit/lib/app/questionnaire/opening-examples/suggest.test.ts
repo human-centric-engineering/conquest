@@ -325,6 +325,25 @@ describe('suggestOpeningExamples', () => {
     );
   });
 
+  it('retries once, then throws a named error when the reply never parses', async () => {
+    // A model that answers in prose is the realistic failure here, and the narrower cannot salvage
+    // it — there is no envelope to narrow. One retry with the JSON-only nudge, then a named error
+    // the route turns into its 502; without this the caller would surface a raw parse error.
+    const chat = vi.fn().mockResolvedValue({
+      content: 'Here are some great opening questions you could use!',
+      usage: { inputTokens: 30, outputTokens: 15 },
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    (getProvider as Mock).mockResolvedValue({ chat });
+
+    await expect(suggestOpeningExamples({ context: ctx(), versionId: 'v1' })).rejects.toThrow(
+      /not valid JSON after retry/
+    );
+    // Retried rather than failing on the first bad reply — a one-shot give-up wastes the call.
+    expect(chat).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the seeded agent’s temperature so the variety knob is operator-tunable', async () => {
     const { provider } = fakeProvider({ suggestions: [] });
     (getProvider as Mock).mockResolvedValue(provider);

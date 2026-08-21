@@ -143,6 +143,24 @@ describe('InterviewerStrategyPanel — pace', () => {
     expect(screen.getByText(/no coverage to read, so it counts questions/)).toBeInTheDocument();
   });
 
+  /**
+   * `funnelPhase` compares `questionsAsked` — the count ALREADY asked — so `>= targetedRounds`
+   * first holds when the next ask is question `targetedRounds + 1`. Reading the profile number
+   * straight out is off by one, and this footnote is the one line in the explainer that is not a
+   * verbatim read of `FUNNEL_PACE_PROFILES` — exactly the drift the explainer exists to prevent.
+   */
+  it('states the round fallback boundaries as the reader counts questions', () => {
+    renderPanel(ON);
+    const balanced = FUNNEL_PACE_PROFILES.balanced;
+    expect(
+      screen.getByText(
+        new RegExp(
+          `open for the first ${balanced.openRounds}, specific from question ${balanced.targetedRounds + 1}`
+        )
+      )
+    ).toBeInTheDocument();
+  });
+
   it('shows a two-band explainer for Open throughout and none at all for Targeted', async () => {
     renderPanel(ON);
     await choose('Approach', 'Open throughout');
@@ -372,6 +390,64 @@ describe('InterviewerStrategyPanel — the suggester', () => {
     expect(current.openingExamples).toEqual([PROPOSED]);
   });
 
+  /**
+   * The cap counts ROWS, but a blank row is capacity an accepted suggestion can use without growing
+   * the list. Clicking "Add an example" at four written openers reaches five rows, one blank — and
+   * a cap the dialog reads off the row count alone would disable every Add button while the blank
+   * row it was meant to fill sits there, which is precisely the case the blank-fill exists for.
+   */
+  it('still accepts a proposal into a blank row when the list is at its row cap', async () => {
+    mockSuggestFetch();
+    const user = userEvent.setup();
+    const written = Array.from({ length: MAX_OPENING_EXAMPLES - 1 }, (_, i) => `Question ${i}`);
+    let current: InterviewerStrategySettings = {
+      ...ON,
+      openingMode: 'examples',
+      openingExamples: [...written, ''],
+    };
+
+    function Harness() {
+      const [value, setValue] = useState(current);
+      return (
+        <InterviewerStrategyPanel
+          value={value}
+          onChange={(next) => {
+            current = next;
+            setValue(next);
+          }}
+          questionnaireId="qn-1"
+          versionId="v1"
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole('button', { name: /Suggest openers/ }));
+    const add = await screen.findByRole('button', { name: /^Add$/ });
+    expect(add).toBeEnabled();
+    await user.click(add);
+    // Filled in place — still at the cap, no sixth row.
+    expect(current.openingExamples).toEqual([...written, PROPOSED]);
+  });
+
+  it('offers nothing to add once every row is full', async () => {
+    mockSuggestFetch();
+    const user = userEvent.setup();
+    const full = Array.from({ length: MAX_OPENING_EXAMPLES }, (_, i) => `Question ${i}`);
+    render(
+      <InterviewerStrategyPanel
+        value={{ ...ON, openingMode: 'examples', openingExamples: full }}
+        onChange={vi.fn()}
+        questionnaireId="qn-1"
+        versionId="v1"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /Suggest openers/ }));
+    // Readable, but genuinely full — there is no blank row for the proposal to land in.
+    expect(await screen.findByRole('button', { name: /^Add$/ })).toBeDisabled();
+  });
+
   it('tells the dialog which openers are already in the list', async () => {
     mockSuggestFetch();
     const user = userEvent.setup();
@@ -400,12 +476,18 @@ describe('InterviewerStrategyPanel — tactics', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Probe for depth' }));
     expect(latest()).toMatchObject({ reflect: true, probeDepth: false, batchRelated: true });
+
+    // The third tactic is the one the title promises and nothing else reaches — the panel is the
+    // only surface that writes it, so an unwired switch here would ship silently.
+    await user.click(screen.getByRole('switch', { name: 'Batch related questions' }));
+    expect(latest()).toMatchObject({ reflect: true, probeDepth: false, batchRelated: false });
   });
 });
 
 describe('InterviewerStrategyPanel — disabled', () => {
   it('locks every control while a save is in flight', () => {
-    renderPanel({ ...ON, openingMode: 'examples', openingExamples: ['Tell me.'] });
+    // Only the disabled panel is mounted, so every query below is singular and cannot be satisfied
+    // by the wrong tree — an enabled sibling would make `getAllByRole(...).at(-1)` the real assertion.
     render(
       <InterviewerStrategyPanel
         value={{ ...ON, openingMode: 'examples', openingExamples: ['Tell me.'] }}
@@ -413,7 +495,11 @@ describe('InterviewerStrategyPanel — disabled', () => {
         disabled
       />
     );
-    const busyPanels = screen.getAllByRole('button', { name: /Add an example/ });
-    expect(busyPanels[busyPanels.length - 1]).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Add an example/ })).toBeDisabled();
+    expect(
+      screen.getByRole('switch', { name: 'Override the default questioning approach' })
+    ).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Batch related questions' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Approach' })).toBeDisabled();
   });
 });

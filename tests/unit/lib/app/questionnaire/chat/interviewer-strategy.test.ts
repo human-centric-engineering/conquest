@@ -314,7 +314,8 @@ describe('buildInterviewerStrategyInstructions', () => {
   });
 
   it('funnel mid-coverage → mixed-phase clause; open and targeted clauses absent', () => {
-    // Coverage 0.5 is between FUNNEL_OPEN_BELOW (0.4) and FUNNEL_TARGETED_ABOVE (0.75) → 'mixed'.
+    // Coverage 0.5 sits between the default (balanced) pace profile's `openBelow` (0.4) and
+    // `targetedAbove` (0.75) — see FUNNEL_PACE_PROFILES — so the phase resolves to 'mixed'.
     const out = buildInterviewerStrategyInstructions(
       { ...DEFAULT_INTERVIEWER_STRATEGY, enabled: true, approach: 'funnel' },
       { coverage: 0.5, questionsAsked: 0 }

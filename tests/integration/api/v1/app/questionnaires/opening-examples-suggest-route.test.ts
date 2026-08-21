@@ -237,6 +237,7 @@ describe('POST …/opening-examples/suggest', () => {
     expect(res.status).toBe(502);
     // The provider's own words stay in the log and the AppAiRun row, never in the response.
     const body = await res.json();
+    expect(body.success).toBe(false);
     expect(body.error.message).not.toContain('provider exploded');
     expect(body.error.code).toBe('OPENING_EXAMPLES_SUGGEST_FAILED');
     // "We ran it and it errored" is a real answer worth keeping — a failed run is still a run.

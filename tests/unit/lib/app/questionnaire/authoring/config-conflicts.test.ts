@@ -257,6 +257,27 @@ describe('detectConfigConflicts — opening examples', () => {
     expect(both).not.toContain('opening-examples-targeted');
   });
 
+  /**
+   * The panel's amber twin can say "the interviewer will still choose its own opening" because it
+   * renders only while the opening block is on screen. This note is read from the settings review
+   * under every approach, and `targeted` has no broad opening to choose — so a claim the panel can
+   * make safely would be false here, and would name controls `targeted` is hiding.
+   */
+  it('words the empty note so it stays true under the targeted approach', () => {
+    for (const interviewerApproach of ['funnel', 'open', 'targeted'] as const) {
+      const note = detectConfigConflicts(
+        input({
+          interviewerStrategyEnabled: true,
+          openingMode: 'examples',
+          openingExamples: [],
+          interviewerApproach,
+        })
+      ).find((c) => c.id === 'opening-examples-empty');
+      expect(note?.message).not.toMatch(/will still choose its own opening/);
+      expect(note?.message).toMatch(/having no effect/);
+    }
+  });
+
   it('anchors both notes on the interviewer-strategy section', () => {
     const conflicts = detectConfigConflicts(
       input({ interviewerStrategyEnabled: true, openingMode: 'examples', openingExamples: [] })

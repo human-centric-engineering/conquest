@@ -196,12 +196,12 @@ experience as an unrelated feature breaking.
 
 ## Anti-patterns
 
-- **Don't** gate this on a platform flag — it's a per-questionnaire setting, off by default; `enabled`
-  is the only gate.
+- **Don't** gate this on a platform flag — it's a per-questionnaire setting and `enabled` is the only
+  gate (see the header for what that defaults to, which differs for pre- and post-migration rows).
 - **Don't** place the strategy section before `rules` in the prompt — it must come AFTER so it
   overrides the default open-invitation guidance (the prompt convention is later-section-wins).
-- **Don't** hand-wire import/export for a new config field — add it to `DEFAULT_QUESTIONNAIRE_CONFIG`
-  - `updateConfigSchema` and it flows automatically.
+- **Don't** hand-wire import/export for a new config field — add it to both
+  `DEFAULT_QUESTIONNAIRE_CONFIG` and `updateConfigSchema`, and it flows automatically.
 - **Don't** make a newly-added key inside `interviewerStrategySchema` required. The block is
   `strict()`, so a settings export or questionnaire definition written before the key existed would
   fail to import. Give it a `.default()` whose value reproduces the pre-feature behaviour — that is

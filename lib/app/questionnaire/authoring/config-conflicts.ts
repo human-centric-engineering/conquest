@@ -308,10 +308,16 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
         severity: 'info',
         sectionId: 'interviewer-strategy',
         title: 'No example opening questions yet',
+        // Worded to stay true under EVERY approach. The panel's amber twin says "the interviewer
+        // will still choose its own opening", which it can, because it renders only when the
+        // opening block is on screen (`opensBroadly`). This note has no such guard — it is read
+        // from the settings review — and under `targeted` there is no broad opening to choose, so
+        // claiming one here would describe behaviour the questionnaire does not have, and point at
+        // two controls the panel is currently hiding.
         message:
           'Opening questions are set to be guided by examples, but none are written, so the ' +
-          'interviewer will still choose its own opening. Add an example, or switch back to ' +
-          'letting it choose.',
+          'setting is having no effect. Write an example, or set opening questions back to ' +
+          'letting the interviewer choose its own.',
       });
     }
 
@@ -411,7 +417,7 @@ export function detectConfigConflicts(input: ConfigConflictInput): ConfigConflic
   }
 
   // 14 — Pointing at a support service that safeguarding isn't configured to provide.
-  // `never` excluded for the same reason as 10 and 11: "never point them at a support line" is a
+  // `never` excluded for the same reason as 12 and 13: "never point them at a support line" is a
   // deliberate instruction, and telling that admin to go configure a support message is nonsense.
   const supportMentions = activeRules.filter(
     (rule) => rule.kind !== 'never' && mentions(rule, SUPPORT_RESOURCE)
