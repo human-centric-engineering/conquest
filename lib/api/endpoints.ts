@@ -605,6 +605,9 @@ export const API = {
       /** Routing quality — per-topic selection / exclusion / amendment counts (GET — F17.16). */
       versionAnalyticsRouting: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/routing`,
+      /** Interviewer policy — arc phases reached, must-ask reach, house-rule configuration. */
+      versionAnalyticsInterviewerPolicy: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/interviewer-policy`,
       /** Safeguarding summary — flagged/serious sensitive-disclosure session counts (GET). */
       versionAnalyticsSafeguarding: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/safeguarding`,

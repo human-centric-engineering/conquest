@@ -29,6 +29,7 @@ const baseProps = {
   distributions: null,
   funnel: null,
   cost: null,
+  interviewerPolicy: null,
   filters: { from: '2026-01-01', to: '2026-02-01', tagIds: [] },
   roundOptions: [],
   hasOpenEnded: false,

@@ -16,6 +16,7 @@ import {
 import { QuestionDistributionPanel } from '@/components/admin/questionnaires/analytics/question-distribution-panel';
 import { CompletionFunnelPanel } from '@/components/admin/questionnaires/analytics/completion-funnel-panel';
 import { CostPanel } from '@/components/admin/questionnaires/analytics/cost-panel';
+import { InterviewerPolicyPanel } from '@/components/admin/questionnaires/analytics/interviewer-policy-panel';
 import {
   ALPHA_ANALYTICS_ANONYMITY_DISABLED,
   K_ANONYMITY_THRESHOLD,
@@ -23,6 +24,7 @@ import {
 import type { TagView } from '@/lib/app/questionnaire/views';
 import type {
   CompletionFunnelResult,
+  InterviewerPolicyResult,
   QuestionDistributionsResult,
   QuestionnaireCostResult,
 } from '@/lib/app/questionnaire/analytics';
@@ -32,6 +34,8 @@ export interface AnalyticsViewProps {
   distributions: QuestionDistributionsResult | null;
   funnel: CompletionFunnelResult | null;
   cost: QuestionnaireCostResult | null;
+  /** Interviewer policy — the arc, must-ask reach, house-rule configuration (F18.7). */
+  interviewerPolicy: InterviewerPolicyResult | null;
   filters: { from: string; to: string; tagIds: string[]; roundId?: string };
   /** Round-scope options for the filter; empty hides the selector. */
   roundOptions: AnalyticsRoundChoice[];
@@ -43,6 +47,7 @@ export function AnalyticsView({
   distributions,
   funnel,
   cost,
+  interviewerPolicy,
   filters,
   roundOptions,
   hasOpenEnded,
@@ -73,6 +78,9 @@ export function AnalyticsView({
           <TabsTrigger value="distributions">Distributions</TabsTrigger>
           <TabsTrigger value="funnel">Completion funnel</TabsTrigger>
           <TabsTrigger value="cost">Cost</TabsTrigger>
+          {/* Named for its subject, not "funnel" — `analytics/funnel.ts` is the completion funnel
+              (invited → completed) and has nothing to do with the interviewer's questioning arc. */}
+          <TabsTrigger value="interviewer">Interviewer</TabsTrigger>
         </TabsList>
         <TabsContent value="distributions" className="mt-4">
           <QuestionDistributionPanel data={distributions} />
@@ -82,6 +90,9 @@ export function AnalyticsView({
         </TabsContent>
         <TabsContent value="cost" className="mt-4">
           <CostPanel data={cost} />
+        </TabsContent>
+        <TabsContent value="interviewer" className="mt-4">
+          <InterviewerPolicyPanel data={interviewerPolicy} />
         </TabsContent>
       </Tabs>
     </div>

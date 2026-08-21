@@ -62,7 +62,12 @@ export function narrowInterviewerStrategy(value: unknown): InterviewerStrategySe
   };
 }
 
-/** Where the conversation is in the funnel arc, derived from coverage (with progress as a fallback). */
+/**
+ * Where the conversation is in the funnel arc, derived from coverage (with progress as a fallback).
+ *
+ * NOT the completion funnel (`analytics/funnel.ts`), which is invited → completed drop-off across a
+ * cohort. Two unrelated things share the word: this one narrows ONE interview.
+ */
 export type FunnelPhase = 'open' | 'mixed' | 'targeted';
 
 /**

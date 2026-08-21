@@ -454,3 +454,82 @@ export interface RoutingAnalyticsResult {
    */
   truncated: boolean;
 }
+
+/* ── Interviewer policy (F18.7) ─────────────────────────────────────────── */
+
+/** How far through the funnel arc a session got. */
+export type FunnelPhaseKey = 'open' | 'mixed' | 'targeted';
+
+/** One `must_ask` question's record over the window. */
+export interface MustAskQuestionRow {
+  key: string;
+  /** The question's prompt today, or the bare key if it has since been deleted. */
+  prompt: string;
+  /** Sessions in which this question was the turn's target — i.e. it was actually reached. */
+  reached: number;
+  /**
+   * Of {@link reached}, how many rendered the real answer control (`questionCardKey`).
+   *
+   * This is the closest thing to a compliance signal the schema holds, and it is deliberately NOT
+   * called compliance: the card is emitted for a **typed** must-ask question, so a `free_text`
+   * must-ask correctly reaches without one. A gap between the two is a prompt to look, not a fault.
+   */
+  cardShown: number;
+}
+
+/** What an interviewer-policy observation is about. */
+export type InterviewerPolicyFindingCode =
+  'arc_never_narrowed' | 'must_ask_never_reached' | 'opening_allowance_unspent';
+
+/**
+ * One observation about how the configured policy actually played out, stated with its sample size.
+ *
+ * Observations, not verdicts — the same posture as {@link RoutingFinding}, and for the same reason:
+ * an arc that never narrowed may be a short instrument behaving exactly as designed. The count is
+ * carried in the message so the reader can weigh it.
+ */
+export interface InterviewerPolicyFinding {
+  code: InterviewerPolicyFindingCode;
+  /** The subject, when the finding is about one — a question key. Else null. */
+  questionKey: string | null;
+  message: string;
+}
+
+/** Interviewer policy for one version over the window (F18.7). */
+export interface InterviewerPolicyResult {
+  versionId: string;
+  range: AnalyticsRange;
+  /** Non-preview sessions in the window with at least one turn carrying a recorded phase. */
+  sessions: number;
+  /**
+   * Sessions by the furthest arc phase they reached. Counts sessions, not turns: an arc is a
+   * property of a conversation, and counting turns would weight a long interview more heavily than
+   * a short one that got just as far.
+   */
+  furthestPhase: Record<FunnelPhaseKey, number>;
+  /** Median turns before the arc first reached `targeted`; null when it never did in any session. */
+  medianTurnsToTargeted: number | null;
+  /**
+   * Turns whose phase predates the column, so nothing can be said about them. Reported rather than
+   * folded into `open`, which would invent a narrative out of missing data.
+   */
+  turnsWithoutPhase: number;
+  /** Whether the version has the funnel arc configured at all, which decides if the arc reads. */
+  arcConfigured: boolean;
+  /** Per `must_ask` question — empty when the fidelity gate is off or nothing is marked must-ask. */
+  mustAsk: MustAskQuestionRow[];
+  /** Whether the version's fidelity gate is on, so the must-ask section means anything. */
+  fidelityGateOn: boolean;
+  /**
+   * House rules in force on the version — a **configuration** count, not a behavioural one.
+   *
+   * There is no per-turn record of a rule firing, and the surface must say so rather than imply
+   * one. Deriving it by parsing prompt blobs would be a guess dressed as a count.
+   */
+  houseRulesActive: number;
+  findings: InterviewerPolicyFinding[];
+  /** True when the cohort is non-empty but below the k-anonymity threshold. */
+  suppressed: boolean;
+  /** True when the read hit its cap, so the numbers describe a sample. */
+  truncated: boolean;
+}

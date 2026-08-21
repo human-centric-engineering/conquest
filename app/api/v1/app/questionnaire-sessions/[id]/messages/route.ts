@@ -48,6 +48,7 @@ import { totalInspectorTokensIn, totalInspectorTokensOut } from '@/lib/app/quest
 import { recordQuestionnaireError } from '@/lib/app/questionnaire/diagnostics';
 import type { SessionWarning } from '@/lib/app/questionnaire/chat/types';
 import { buildHouseRulesInstructions } from '@/lib/app/questionnaire/chat/house-rules';
+import { funnelPhase, paceProfile } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { classifyCostCap } from '@/lib/app/questionnaire/session';
 import {
   ABUSE_ABANDON_REASON,
@@ -536,15 +537,32 @@ async function handleMessage(
     // constants) and spread into whichever phrasing call site fires. Coverage is a simple
     // answered/total ratio (enough to phase the funnel); `respondentTerse` flags a short latest
     // reply, which biases the funnel toward targeted sooner. Empty object when the strategy is off.
+    //
+    // Coverage and terseness are computed UNCONDITIONALLY, not only when the strategy is on: they
+    // are cheap, and both are persisted on the turn so the arc can be reported on across sessions.
+    // Gating the write on `strategyActive` would make a null ambiguous between "the arc was off"
+    // and "this turn predates the column".
+    const turnCoverage =
+      state.questions.length > 0 ? state.answered.length / state.questions.length : null;
+    const respondentTerse =
+      userMessage.trim().length > 0 && userMessage.trim().split(/\s+/).length < 12;
     const strategyPhraserInput = strategyActive
       ? {
           interviewerStrategy: strategyConfig,
-          coverage:
-            state.questions.length > 0 ? state.answered.length / state.questions.length : null,
-          respondentTerse:
-            userMessage.trim().length > 0 && userMessage.trim().split(/\s+/).length < 12,
+          coverage: turnCoverage,
+          respondentTerse,
         }
       : {};
+    // The arc phase this turn fell in, from the same pure helper the phraser uses — so the recorded
+    // phase is the one the interviewer actually behaved as, never a re-derivation that could drift.
+    const turnFunnelPhase = funnelPhase(
+      {
+        coverage: turnCoverage,
+        questionsAsked: state.answered.length,
+        respondentTerse,
+      },
+      paceProfile(strategyConfig)
+    );
 
     // Data Slots feature: the current fill per data slot id, so the extractor sees what's already
     // recorded (to update/correct it across turns), keyed for the candidate build below.
@@ -1108,6 +1126,8 @@ async function handleMessage(
           durationMs,
           promptTokens,
           completionTokens,
+          funnelPhase: turnFunnelPhase,
+          coverage: turnCoverage,
           toolCalls: result.toolCalls,
           ...(turnWarnings.length > 0 ? { warnings: turnWarnings } : {}),
           // Question fidelity (P18): remember which control this turn rendered, so it replays.

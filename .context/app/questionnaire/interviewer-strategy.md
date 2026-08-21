@@ -194,6 +194,32 @@ The limiter is its **own** bucket, not shared with the house-rules assistant: tw
 Settings tab sharing a cap would let a burst of one lock out the other, which the admin would
 experience as an unrelated feature breaking.
 
+## What the arc actually did (F18.7)
+
+Everything above is intent. `analytics/interviewer-policy.ts` is the only account of what happened
+when real respondents met it, and it exists because the failure that matters most is invisible: an
+arc that never narrows produces no error and no empty state.
+
+The phase is **persisted per turn** (`AppQuestionnaireTurn.funnelPhase`, alongside `coverage`),
+written from the same `funnelPhase(ctx, paceProfile(settings))` call the phraser reads — so the
+recorded phase is the one the interviewer actually behaved as, never a re-derivation that could
+drift. Coverage is computed whether or not the strategy is enabled: gating the write would make a
+null ambiguous between "the arc was off" and "this turn predates the column".
+
+Sessions are the unit, by the **furthest** phase reached. Two rules fall out of that and both are
+pinned by tests:
+
+- A twenty-turn interview that reached `targeted` must not outweigh a five-turn one that got just as
+  far — so it is one count per session, not per turn.
+- "Furthest" means furthest, not last. A terse answer steps the phase toward targeted and a rich one
+  steps it back, so the sequence is not monotonic.
+
+A turn with no recorded phase is **reported** (`turnsWithoutPhase`), never folded into `open` —
+unknown is not broad, and treating it as broad would invent a narrative out of missing data.
+
+`arc_never_narrowed` fires only when a funnel is actually configured. An `open` approach is supposed
+to stay open, and reporting that as a failure would be the surface arguing with a correct decision.
+
 ## Anti-patterns
 
 - **Don't** gate this on a platform flag — it's a per-questionnaire setting and `enabled` is the only

@@ -1776,6 +1776,15 @@ model AppQuestionnaireTurn {
   // without parsing the JSON blob in SQL. `durationMs` is the end-to-end wall-clock of the turn
   // (route entry → persist), which is NOT derivable from the per-call latencies; the token counts
   // are the summed `inspectorCalls` tokensIn/tokensOut. All null for pre-column turns.
+  // Interviewer funnel arc: how far through its open -> mixed -> targeted arc this turn fell, and
+  // the coverage ratio that decided it. Denormalized for the same reason as the three telemetry
+  // columns below: the arc is a pure function of coverage, but coverage is computed live per turn
+  // and was never persisted, so "did the arc ever actually narrow?" had no answer at any scale.
+  // Written for EVERY turn, not just when the strategy is enabled — an arc that is off is a real
+  // fact about a session, and gating the write would make absence ambiguous. Null on pre-column
+  // turns, which every reader must treat as unknown rather than zero.
+  funnelPhase           String? // 'open' | 'mixed' | 'targeted'
+  coverage              Float? // answered / total questions at the moment this turn was phrased
   durationMs            Int? // end-to-end turn wall-clock (ms)
   promptTokens          Int? // summed input/prompt tokens across this turn's calls
   completionTokens      Int? // summed output/completion tokens across this turn's calls
