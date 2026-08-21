@@ -24,6 +24,7 @@ import {
   AppDetectContradictionsCapability,
   AppDetectScopeCandidacyCapability,
   AppEvaluateScopeCapability,
+  AppEvaluatePolicyCapability,
   AppEvaluateStructureCapability,
   AppReconcileSuggestionsCapability,
   AppExtractAnswerSlotsCapability,
@@ -92,6 +93,7 @@ export function initAppCapabilities(): void {
   // (criteria_quality, rule_integrity, budget_realism, coverage_and_burden) scoring the authored
   // topics/rules/budget. Dispatched once per dimension by the scope evaluate-preview route.
   registerAppCapability(new AppEvaluateScopeCapability());
+  registerAppCapability(new AppEvaluatePolicyCapability());
 
   // Data Slots — the data-slot generator. Dispatched by the generate-data-slots route.
   registerAppCapability(new AppGenerateDataSlotsCapability());

@@ -605,6 +605,9 @@ export const API = {
       /** Routing quality — per-topic selection / exclusion / amendment counts (GET — F17.16). */
       versionAnalyticsRouting: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/routing`,
+      /** Interviewer-policy judge panel — ephemeral preview, persists nothing (POST — F18.8). */
+      versionPolicyEvaluatePreview: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluate-preview`,
       /** Interviewer policy — arc phases reached, must-ask reach, house-rule configuration. */
       versionAnalyticsInterviewerPolicy: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/interviewer-policy`,

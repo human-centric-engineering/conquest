@@ -457,3 +457,19 @@ export const openingExamplesSuggestLimiter = createRateLimiter({
   interval: OPENING_EXAMPLES_SUGGEST_RATE_LIMIT_INTERVAL_MS,
   maxRequests: OPENING_EXAMPLES_SUGGEST_RATE_LIMIT_MAX,
 });
+
+/**
+ * Interviewer-policy-evaluation sub-cap (F18.8). One run fans four judges out at the reasoning tier
+ * — the same paid class as the other two panels, and a larger prompt than either (it can carry up
+ * to 150 question prompts), so the ceiling is tighter than the scope panel's 20/min rather than
+ * equal to it. Keyed on the admin user id, who owns the spend.
+ */
+export const POLICY_EVALUATION_RATE_LIMIT_MAX = 10;
+
+/** Sliding-window length for {@link policyEvaluationLimiter}, in milliseconds. */
+export const POLICY_EVALUATION_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const policyEvaluationLimiter = createRateLimiter({
+  interval: POLICY_EVALUATION_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: POLICY_EVALUATION_RATE_LIMIT_MAX,
+});
