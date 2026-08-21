@@ -68,6 +68,54 @@ release process.
   nothing and exited 0. See
   [`.context/testing/scoped-runs.md`](./.context/testing/scoped-runs.md).
 
+- **A capability can declare that a persisted `scope` binds its arguments
+  (#586).** `CapabilityContext.scope` has shipped since 0.5.0 as a carrier —
+  threaded from an MCP key, a workflow execution or a nested `run_workflow`, and
+  handed to `execute()`. It could not *do* anything: every scoped capability
+  consumed it by hand, or a fork patched the dispatch path. Now a capability
+  opts in at registration — `register(cap, { scopedBy: 'projectId' })` — and the
+  dispatcher fills that argument when the caller omits it (step 4b) and refuses
+  with `{ code: 'scope_conflict' }` when the caller names a different value. A
+  key minted with `scope: { projectId: 'x' }` makes `projectId` ambient **and**
+  makes it a boundary.
+
+  **Two conditions, both defaulting to off.** The capability must declare the
+  binding, and the caller's scope must be one the platform wrote
+  (`scopeIsAuthoritative`). The four sites that build a dispatch context each
+  spread `platformScope()` or `hintScope()` — the MCP key carrier and the two
+  workflow executors take the first, `POST /api/v1/chat/stream` takes the
+  second, because its `scope` comes from an untrusted request body. A mistake in
+  either direction loses the binding rather than gaining one, and
+  `run_workflow` drops a hint scope rather than passing it to
+  `engine.execute()`, so the persisted `AiWorkflowExecution.scope` column never
+  holds a consumer's hint. Note for fork adapter authors: the inbound-trigger
+  route merges an adapter's `normalise()` scope under the operator's static
+  one, so a bound value there can originate from a verified request payload
+  rather than from config — more restrictive than no key at all, but worth
+  knowing.
+
+  **The binding is declared rather than inferred**, which is the whole design.
+  An earlier cut read it out of the capability's published
+  `functionDefinition.parameters` and armed whenever a scope map was present;
+  that is admin-editable JSON which need not agree with the Zod schema the
+  author wrote, and "a scope map exists" is a different question from "this tool
+  is scoped". Declaring it also makes the gaps visible: measured against the
+  fork that asked for this, inference covered 19 of its 29 capabilities and none
+  of its nine `featureId`-keyed writes, with nothing to say which were which.
+
+  **The invariant is re-asserted after validation** (step 7a), on the args
+  `execute` actually receives, because `handler.validate()` is a Zod *pipeline*
+  and may transform — three built-ins wrap their schema in
+  `z.preprocess(unwrapApprovalPayload, …)`, which merges an `approvalPayload`
+  object over the top level. Each pinned key must be **present and equal**;
+  a stripped key or unreadable args (a `Map`, a class instance, anything behind
+  an accessor — all of which answer `hasOwnProperty` with `false`) are refused
+  with the second new code, `scope_unenforceable`. **The limit, stated because
+  it cannot be fixed:** only top-level own properties are inspected, so a
+  capability resolving its scope from a child id must not declare `scopedBy` for
+  it — that check belongs in `execute()` or a `guard`.
+
+
 - **`npm run check:missing-tests` — `/pre-pr` step 4f stops being prose.** Twelve
   of step 4's thirteen anti-pattern checks were prose, so every agent hand-rolled
   a scanner on every run — and a hand-rolled scanner's failure mode is *silence*,

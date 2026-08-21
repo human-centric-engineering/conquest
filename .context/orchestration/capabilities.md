@@ -116,13 +116,64 @@ export function initAppCapabilities(): void {
 - **`slug`** overrides the in-memory handler key (defaults to `capability.slug`).
   **⚠️ Second hard contract (#509): a namespaced slug is not advertisable to an LLM.** The slug _is_ the tool name a model sees — `getCapabilityDefinitions` sets `name` from it, because dispatch resolves the emitted name back as a slug. Provider tool names must match `^[a-zA-Z0-9_-]{1,64}$`, so `billing:lookup_order` cannot be one, and a capability whose slug fails that charset is **dropped from the agent's toolset with a warning** rather than sent to the provider — a malformed tool name fails the entire request, not just the call. Such a capability was never reachable from chat regardless (no valid tool name can resolve to a namespaced slug); **MCP is its supported surface**, since `mcp/tool-registry.ts` advertises `customName` and resolves it back to the slug before dispatch. Use an underscore-or-hyphen slug for anything an agent should call directly.
   **⚠️ Hard contract:** the override slug must correspond to an **active `AiCapability` row**. Every downstream gate — registry lookup (step 3), quarantine, per-agent binding, rate limit — looks the DB up by this same slug. An override with no active row dies at `capability_inactive` **before the handler or guard ever runs**. Forks whose module system creates the namespaced rows satisfy this automatically; a bare override with no matching row will silently never dispatch.
+- **`scopedBy`** declares which scope keys bind this capability's parameters; see [The scope binding](#the-scope-binding-scopedby-dispatch-steps-4b--7a).
 - **`guard`** is an async-capable predicate run as dispatch step 4a (after the per-agent binding, before the rate limiter). It reads the generic [`CapabilityContext.scope`](#dispatch-scope-carrier-capabilitycontextscope) carrier — core names no keys. `{ allow: false }` → `capability_guard_denied`; a guard that throws **fails closed** (denied + logged). Keyed by the same registration key as the handler, so a `slug` override guards the override key.
 
-Re-registering the same key **replaces the handler and its guard together** — a guard-less re-registration drops any prior guard on that key.
+Re-registering the same key **replaces the handler, its guard and its `scopedBy` binding together** — a re-registration without one drops any the prior registration left on that key. That matters for the binding in particular: a capability must not stay silently scoped after its author removed the declaration, and `dispatcher.test.ts` pins it.
 
 ### Dispatch scope carrier (`CapabilityContext.scope`)
 
 `CapabilityContext.scope?: Record<string, string>` is a free-form, optional string map the dispatcher's caller can populate. It is **generic by design** — core names no keys and no built-in capability reads it; the dispatcher passes it verbatim into `execute()`. A fork uses it to let a capability refuse to run outside its intended scope (e.g. a `module` slug). In vanilla Sunrise the chat handler threads it from `ChatRequest.scope` into the dispatch context, so it stays `undefined` and inert unless a caller sets it.
+
+**Four callers build a dispatch context that carries it**, and each answers the authority question by spreading one of two helpers from `lib/orchestration/scope.ts`: `platformScope()` for a carrier the platform wrote — `mcp/tool-registry.ts` (an `McpApiKey.scope`) and the two workflow executors, `engine/executors/tool-call.ts` and `agent-call.ts` (a persisted `AiWorkflow*.scope`) — and `hintScope()` for `chat/streaming-handler.ts`, whose `scope` arrives from an untrusted consumer request body.
+
+**The pair must travel together, and once did not.** The flag was set on the workflow engine's own `ExecutionContext` while the `CapabilityContext` was built two files away in the executors, which forwarded the values and nothing else — so the binding armed for MCP and for nothing else, while this page, the CHANGELOG and a roster test all said three carriers were wired. The helpers exist so a caller cannot supply the carrier without answering the question; `tests/unit/lib/orchestration/scope-authority.test.ts` derives the roster from `lib/` and fails on a site it cannot classify.
+
+#### The scope binding (`scopedBy`, dispatch steps 4b + 7a)
+
+Delivering the carrier to `execute()` is only half of what a persisted scope is for. The other half is making it **bind** the arguments, so a scoped caller can omit the scoped parameter and cannot act outside its scope by naming a different one. Before this, every scoped capability consumed the carrier by hand — or a fork patched the dispatch path (#586).
+
+A capability **declares** the binding at registration:
+
+```ts
+registerAppCapability(new GetProjectCapability(), { scopedBy: 'projectId' });
+```
+
+That says: the scope key `projectId` binds to the parameter `projectId`. Then, on every dispatch where **both** conditions hold — the capability declared a binding, **and** the caller's scope is one the platform wrote (`CapabilityContext.scopeIsAuthoritative`) — the dispatcher:
+
+- **fills** the argument at step 4b when the caller omitted it (missing, `null` or `''`);
+- **refuses** with `{ code: 'scope_conflict' }` when the caller named a different value;
+- **re-asserts** at step 7a on the **validated** args, requiring each pinned key to be _present and equal_, and refusing with `{ code: 'scope_unenforceable' }` when it is gone or the args cannot be read.
+
+Both conditions default to off, so a mistake in either direction loses the binding rather than gaining one.
+
+##### Why it is declared and not inferred
+
+The first design read the binding out of the capability's published `functionDefinition.parameters` and armed itself whenever a scope map was present. Three review rounds found four separate ways that was wrong, and they are worth keeping because each is a general trap:
+
+|                                   | what went wrong                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Wrong point in the pipeline**   | The fold ran before `handler.validate()`, and validation is a Zod _pipeline_, not a filter. Three built-ins wrap their schema in `z.preprocess(unwrapApprovalPayload, …)`, which merges an `approvalPayload` object **over** the top level — so a caller hiding `{projectId:'B'}` there took the fill-if-absent path (no conflict; the top-level key was absent) and the preprocess then replaced the pin. |
+| **Verified an unreadable object** | The fail-closed gate was `typeof === 'object'`, which is true of a `Map`, a `URLSearchParams` and every class instance — all of which answer `hasOwnProperty` with `false`. It looked, saw nothing, and reported the invariant held while `execute` read the caller's value out of a getter.                                                                                                               |
+| **A pin could be silently eaten** | `z.object()` strips unknown keys, and `functionDefinition` is admin-editable JSON that need not agree with the Zod schema. A row declaring `projectId` against a schema that does not accept it dispatched with the discriminator **absent**, under a boundary reporting success.                                                                                                                          |
+| **Armed on an untrusted carrier** | `POST /api/v1/chat/stream` accepts `scope` from the request body. Arming on presence alone meant an end user posting `scope: {"priority":"high"}` set the urgency of every `escalate_to_human` call, and `{"reason":"x"}` disabled the capability outright.                                                                                                                                                |
+
+Declaring the binding removes the guess. `parameters` is not consulted at all, so the admin-editable JSON can no longer disagree with the code; and "this tool is scoped" stops being answered by "a scope map exists".
+
+It also makes the gaps visible. Measured against the fork that asked for this: the inferred design covered 19 of its 29 capabilities and **none** of its nine `featureId`-keyed writes, with nothing to say which were which. Under `scopedBy` those nine are a decision someone has to make out loud.
+
+##### What the binding does not cover
+
+Only **top-level own properties** are inspected. A capability that resolves its scope from a child id (`{ featureId }` → the feature's project) is not enforced here and **must not** declare `scopedBy` for it — that check belongs in `execute()`, or in a [`guard`](#app-contributed-capabilities-forks), which sees the context but not the args.
+
+Two more properties, each a bug the tests now pin:
+
+- **Comparison is strict and never coerces.** A `projectId` of `5` is not the scope's `"5"`, and `{ toString: () => 'p1' }` is not `'p1'` — coercing would let any caller satisfy a tenant check.
+- **A conflict on any key refuses the whole call.** Filling some keys while refusing others would dispatch a partially-scoped call.
+
+A declared key the caller's scope does **not** pin is left alone and logged: an unscoped service key is a deliberate configuration (`McpApiKey.scope = NULL` means system-wide), so it is not refused — but the difference between "enforced" and "not" is never silent.
+
+The rules live in [`lib/orchestration/scope.ts`](../../lib/orchestration/scope.ts) (`foldScopeIntoArgs` and `assertScopeHeld`, both pure) — the same module that owns the validate-on-read guard for the persisted columns.
 
 ### Workflow attribution (`CapabilityContext.workflowExecutionId`)
 
@@ -246,9 +297,11 @@ The registry refuses to register a capability that declares `processesPii = true
    3a. **Quarantine gate** — `resolveQuarantineState(entry)` resolves the effective state (a past `quarantineUntil` is treated as `active`). Soft → `{ code: 'capability_quarantined', skipFollowup: false, metadata: { mode, reason } }` with a "temporarily unavailable" message the agent can route around. Hard → same code with `skipFollowup: true` and a firm message that stops the model's tool loop. See the [Quarantine](#quarantine-incident-disable) section below.
 4. **Per-agent binding** — `prisma.aiAgentCapability.findMany({ agentId })`, cached per agent for 5 minutes. An explicit row with `isEnabled: false` → `{ code: 'capability_disabled_for_agent' }`. Missing row = default-allow with base-capability defaults.
    4a. **Capability guard** — if a `guard` was attached at registration (a fork seam; core attaches none), it's `await`ed here with the full `context`. `{ allow: false }` → `{ code: 'capability_guard_denied' }` (the guard's optional `reason` is folded into the client-surfaced message; no internal ids). A guard that **throws** fails **closed** — same denial, logged via `logger.error`. Placed after enablement and before the rate limiter, so a denied call consumes no rate token. See [App-contributed capabilities](#app-contributed-capabilities-forks).
+   4b. **Scope binding** — when the capability declared `scopedBy` **and** the caller's scope is authoritative, each bound key is filled if the caller omitted it and refused with `{ code: 'scope_conflict' }` if the caller named a different value. Placed beside the guard, and for the guard's reason: a cross-scope call is an authorization failure, not a malformed request, so it must not spend the legitimate tenant's rate token. Inert for a capability that declared nothing. See [The scope binding](#the-scope-binding-scopedby-dispatch-steps-4b--7a).
 5. **Rate limit** — effective limit = `binding.effectiveRateLimit ?? entry.rateLimit`. If non-null, a sliding-window `RateLimiter` keyed by slug (token = `agentId`) checks the request. Exceeded → `{ code: 'rate_limited' }`.
 6. **Approval gate** — `entry.requiresApproval: true` → `{ code: 'requires_approval', skipFollowup: true }`. The handler never runs. (The admin queue that resolves approvals is a later slice.)
-7. **Validate args** — `handler.validate(rawArgs)`. `CapabilityValidationError` → `{ code: 'invalid_args', message }`.
+7. **Validate args** — `handler.validate(dispatchArgs)`. `CapabilityValidationError` → `{ code: 'invalid_args', message }`.
+   7a. **Re-assert the binding** — the invariant is checked again on the **validated** args, the ones `execute` is about to receive. Each pinned key must be present and equal: a different value → `{ code: 'scope_conflict' }`; a stripped key, or args that cannot be read → `{ code: 'scope_unenforceable' }`. See [Why it is declared and not inferred](#why-it-is-declared-and-not-inferred) for why step 4b alone is not sufficient.
 8. **Execute** — `await handler.execute(validated, context)`. Any thrown error → `{ code: 'execution_error' }` and `logger.error`.
 9. **Log cost** — fire-and-forget `logCost({ operation: 'tool_call', model: 'n/a', provider: 'capability', inputTokens: 0, outputTokens: 0, metadata: { slug, success } })`. Not awaited: the LLM call that triggered the tool already logged its own tokens, and `logCost` returns `null` on DB failure. Capabilities that invoke their OWN LLMs internally (the `search_knowledge_base` embedding call, the rolling summariser, `run_workflow`'s child execution) issue their own `logCost` calls for that LLM spend. The chat handler's per-turn cap (improvement #39) only counts the chat-LLM rounds it sees — tool-internal LLM cost is logged to `AiCostLog` for audit but NOT counted against the per-turn cap. Documented in `.context/orchestration/chat.md`.
 10. **Return** the handler's result verbatim. One `logger.info('Capability dispatched', ...)` line with `latencyMs` rounds out each call.

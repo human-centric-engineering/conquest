@@ -49,6 +49,8 @@ const { logger } = await import('@/lib/logging');
 const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
 const { capabilityDispatcher } = await import('@/lib/orchestration/capabilities/dispatcher');
 const { BaseCapability } = await import('@/lib/orchestration/capabilities/base-capability');
+const { unwrapApprovalPayload } =
+  await import('@/lib/orchestration/capabilities/approval-payload-unwrap');
 const { CostOperation } = await import('@/types/orchestration');
 const { searchKnowledgeWithEmbedding } = await import('@/lib/orchestration/knowledge/search');
 const { SearchKnowledgeCapability } =
@@ -69,6 +71,86 @@ class OkCapability extends BaseCapability<{ n: number }, { doubled: number }> {
 
   async execute(args: { n: number }) {
     return this.success({ doubled: args.n * 2 });
+  }
+}
+
+/**
+ * Declares a `projectId` parameter, so the scope fold (dispatch step 4b) has
+ * something to fold into. Echoes the args it was validated with.
+ */
+class ScopedCapability extends BaseCapability<{ projectId: string }, { projectId: string }> {
+  readonly slug = 'scoped';
+  readonly functionDefinition = {
+    name: 'scoped',
+    description: '',
+    parameters: { type: 'object', properties: { projectId: { type: 'string' } } },
+  };
+  protected readonly schema = z.object({ projectId: z.string() });
+
+  async execute(args: { projectId: string }) {
+    return this.success({ projectId: args.projectId });
+  }
+}
+
+/**
+ * Declares `tenantId` AND wraps its schema in the same
+ * `z.preprocess(unwrapApprovalPayload, …)` three shipped built-ins use — which
+ * merges an `approvalPayload` object **over** the top level. This is the shape
+ * that made the fold alone insufficient: the caller hides the value there, the
+ * fold sees the top-level key absent and fills it, and the preprocess then
+ * replaces it. Reproduces the real bypass rather than modelling it.
+ */
+class TransformingScopedCapability extends BaseCapability<
+  { tenantId: string },
+  { tenantId: string }
+> {
+  readonly slug = 'transforming';
+  readonly functionDefinition = {
+    name: 'transforming',
+    description: '',
+    parameters: { type: 'object', properties: { tenantId: { type: 'string' } } },
+  };
+  protected readonly schema = z.preprocess(
+    unwrapApprovalPayload,
+    z.looseObject({ tenantId: z.string() })
+  ) as unknown as z.ZodType<{ tenantId: string }>;
+
+  async execute(args: { tenantId: string }) {
+    return this.success({ tenantId: args.tenantId });
+  }
+}
+
+/**
+ * Declares `tenantId` in its `functionDefinition` but does NOT accept it in its
+ * Zod schema — so `z.object()` strips the pin the fold just wrote. The admin
+ * Capability form edits that JSON independently of the code, which is exactly
+ * how a fork lands here.
+ */
+class StrippingScopedCapability extends BaseCapability<{ resourceId: string }, { seen: string[] }> {
+  readonly slug = 'stripping';
+  readonly functionDefinition = {
+    name: 'stripping',
+    description: '',
+    parameters: {
+      type: 'object',
+      properties: { tenantId: { type: 'string' }, resourceId: { type: 'string' } },
+    },
+  };
+  protected readonly schema = z.object({ resourceId: z.string() });
+
+  async execute(args: { resourceId: string }) {
+    return this.success({ seen: Object.keys(args) });
+  }
+}
+
+/** Validates to a non-object, so a scoped call has no readable invariant. */
+class NonObjectCapability extends BaseCapability<string, { echoed: string }> {
+  readonly slug = 'non-object';
+  readonly functionDefinition = { name: 'non-object', description: '', parameters: {} };
+  protected readonly schema = z.string();
+
+  async execute(args: string) {
+    return this.success({ echoed: args });
   }
 }
 
@@ -1306,5 +1388,223 @@ describe('CapabilityDispatcher', () => {
       // No override required; register succeeds.
       expect(() => capabilityDispatcher.register(new OkCapability())).not.toThrow();
     });
+  });
+});
+
+describe('CapabilityDispatcher — declared scope binding', () => {
+  /** An authoritative caller, as the MCP / workflow carriers construct one. */
+  const scoped = (scope: Record<string, string>) => ({
+    ...ctx,
+    scope,
+    scopeIsAuthoritative: true,
+  });
+
+  describe('step 4b — fold', () => {
+    beforeEach(() => {
+      capabilityDispatcher.register(new ScopedCapability(), { scopedBy: 'projectId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'scoped' })]);
+    });
+
+    it('fills the bound parameter the caller omitted', async () => {
+      // The capability's schema REQUIRES `projectId`; without the fold this is
+      // `invalid_args`. It reaching `execute` is the feature.
+      const result = await capabilityDispatcher.dispatch('scoped', {}, scoped({ projectId: 'p1' }));
+      expect(result).toEqual({ success: true, data: { projectId: 'p1' } });
+    });
+
+    it('leaves a matching value alone', async () => {
+      const result = await capabilityDispatcher.dispatch(
+        'scoped',
+        { projectId: 'p1' },
+        scoped({ projectId: 'p1' })
+      );
+      expect(result).toEqual({ success: true, data: { projectId: 'p1' } });
+    });
+
+    it('refuses a call naming a different value, and never executes', async () => {
+      const executeSpy = vi.spyOn(ScopedCapability.prototype, 'execute');
+      const result = await capabilityDispatcher.dispatch(
+        'scoped',
+        { projectId: 'other' },
+        scoped({ projectId: 'p1' })
+      );
+      expect(result.error?.code).toBe('scope_conflict');
+      expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it('withholds the scope value from the client-facing message', async () => {
+      // The message is surfaced verbatim. Naming the tenant a key is pinned to
+      // is not something a refusal needs to do.
+      const result = await capabilityDispatcher.dispatch(
+        'scoped',
+        { projectId: 'other' },
+        scoped({ projectId: 'secret-tenant' })
+      );
+      expect(result.error?.message).toContain('projectId');
+      expect(result.error?.message).not.toContain('secret-tenant');
+    });
+
+    it('warns when the caller’s scope does not pin a declared key', async () => {
+      // A deliberately unscoped service key is legitimate, but the difference
+      // between "enforced" and "not" should never be silent.
+      await capabilityDispatcher.dispatch('scoped', { projectId: 'x' }, scoped({ other: 'y' }));
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Capability dispatch: declared scope key not pinned by the caller',
+        expect.objectContaining({ slug: 'scoped', keys: ['projectId'] })
+      );
+    });
+  });
+
+  describe('it arms only when BOTH conditions hold', () => {
+    it('does nothing for a capability that declared no binding', async () => {
+      // The defect that made this a rewrite: armed on the presence of a scope
+      // map alone, an untrusted consumer scope wrote core tools' arguments.
+      const executeSpy = vi.spyOn(OkCapability.prototype, 'execute');
+      capabilityDispatcher.register(new OkCapability());
+      mockFindMany.mockResolvedValue([makeCapabilityRow()]);
+
+      const result = await capabilityDispatcher.dispatch('ok', { n: 2 }, scoped({ n: '99' }));
+
+      expect(result).toEqual({ success: true, data: { doubled: 4 } });
+      expect(executeSpy).toHaveBeenCalledWith({ n: 2 }, expect.anything());
+    });
+
+    it('does nothing for a scope the platform did not write', async () => {
+      // `POST /api/v1/chat/stream` takes `scope` from the request body. Its own
+      // schema calls it "a routing/context hint, never proof of authorization".
+      const executeSpy = vi.spyOn(ScopedCapability.prototype, 'execute');
+      capabilityDispatcher.register(new ScopedCapability(), { scopedBy: 'projectId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'scoped' })]);
+
+      const result = await capabilityDispatcher.dispatch(
+        'scoped',
+        {},
+        { ...ctx, scope: { projectId: 'attacker-chosen' } }
+      );
+
+      // Unfolded, so the capability's own schema rejects the missing arg.
+      expect(result.error?.code).toBe('invalid_args');
+      expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it('drops a binding when the capability is re-registered without one', async () => {
+      capabilityDispatcher.register(new ScopedCapability(), { scopedBy: 'projectId' });
+      capabilityDispatcher.register(new ScopedCapability());
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'scoped' })]);
+
+      const result = await capabilityDispatcher.dispatch('scoped', {}, scoped({ projectId: 'p1' }));
+
+      // No fill — a capability must not stay silently scoped after its author
+      // removed the declaration.
+      expect(result.error?.code).toBe('invalid_args');
+    });
+  });
+
+  describe('step 7a — re-asserted on the args execute receives', () => {
+    it('refuses a value a schema transform put back after the fold', async () => {
+      // `approvalPayload` merges over the top level, so the caller's 'B'
+      // replaces the 'A' the fold wrote. No conflict fires at fold time
+      // because the top-level key was absent — that is the fill path.
+      const executeSpy = vi.spyOn(TransformingScopedCapability.prototype, 'execute');
+      capabilityDispatcher.register(new TransformingScopedCapability(), { scopedBy: 'tenantId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'transforming' })]);
+
+      const result = await capabilityDispatcher.dispatch(
+        'transforming',
+        { approvalPayload: { tenantId: 'B' } },
+        scoped({ tenantId: 'A' })
+      );
+
+      expect(result.error?.code).toBe('scope_conflict');
+      expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it('lets the same capability through when the payload agrees with the scope', async () => {
+      // Same path, one value changed — so the case above turns on the conflict
+      // and not on the transform merely being present.
+      capabilityDispatcher.register(new TransformingScopedCapability(), { scopedBy: 'tenantId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'transforming' })]);
+
+      const result = await capabilityDispatcher.dispatch(
+        'transforming',
+        { approvalPayload: { tenantId: 'A' } },
+        scoped({ tenantId: 'A' })
+      );
+
+      expect(result).toEqual({ success: true, data: { tenantId: 'A' } });
+    });
+
+    it('refuses when the schema strips the key the binding names', async () => {
+      // Declaring a binding the Zod schema does not accept would otherwise
+      // dispatch with the discriminator gone, under a boundary reporting
+      // success. Demanding PRESENCE is only possible because it was declared.
+      const executeSpy = vi.spyOn(StrippingScopedCapability.prototype, 'execute');
+      capabilityDispatcher.register(new StrippingScopedCapability(), { scopedBy: 'tenantId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'stripping' })]);
+
+      const result = await capabilityDispatcher.dispatch(
+        'stripping',
+        { resourceId: 'r1' },
+        scoped({ tenantId: 'A' })
+      );
+
+      expect(result.error?.code).toBe('scope_unenforceable');
+      expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses the same capability when the caller supplies the pin themselves', async () => {
+      // The half a "filled keys only" check missed: the caller names their OWN
+      // correct tenant, so nothing is filled — and the strip is just as fatal.
+      capabilityDispatcher.register(new StrippingScopedCapability(), { scopedBy: 'tenantId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'stripping' })]);
+
+      const result = await capabilityDispatcher.dispatch(
+        'stripping',
+        { tenantId: 'A', resourceId: 'r1' },
+        scoped({ tenantId: 'A' })
+      );
+
+      expect(result.error?.code).toBe('scope_unenforceable');
+    });
+
+    it('fails closed when validated args carry no readable invariant', async () => {
+      const executeSpy = vi.spyOn(NonObjectCapability.prototype, 'execute');
+      capabilityDispatcher.register(new NonObjectCapability(), { scopedBy: 'tenantId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'non-object' })]);
+
+      const result = await capabilityDispatcher.dispatch(
+        'non-object',
+        'hello',
+        scoped({ tenantId: 'A' })
+      );
+
+      expect(result.error?.code).toBe('scope_unenforceable');
+      expect(executeSpy).not.toHaveBeenCalled();
+    });
+
+    it('leaves the same capability alone for an unscoped caller', async () => {
+      // Fail-closed must not mean fail-always.
+      capabilityDispatcher.register(new NonObjectCapability(), { scopedBy: 'tenantId' });
+      mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'non-object' })]);
+
+      const result = await capabilityDispatcher.dispatch('non-object', 'hello', ctx);
+
+      expect(result).toEqual({ success: true, data: { echoed: 'hello' } });
+    });
+  });
+
+  it('runs before the rate limiter — a refused call consumes no rate token', async () => {
+    // Mirrors the guard's placement test. rateLimit=1 lets exactly one call
+    // through; if the fold ran AFTER the limiter, the refused call would spend
+    // the only token and the legitimate call behind it would be rate_limited.
+    capabilityDispatcher.register(new ScopedCapability(), { scopedBy: 'projectId' });
+    mockFindMany.mockResolvedValue([makeCapabilityRow({ slug: 'scoped', rateLimit: 1 })]);
+    const caller = scoped({ projectId: 'p1' });
+
+    const refused = await capabilityDispatcher.dispatch('scoped', { projectId: 'other' }, caller);
+    const allowed = await capabilityDispatcher.dispatch('scoped', {}, caller);
+
+    expect(refused.error?.code).toBe('scope_conflict');
+    expect(allowed).toEqual({ success: true, data: { projectId: 'p1' } });
   });
 });
