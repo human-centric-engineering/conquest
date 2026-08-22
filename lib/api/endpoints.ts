@@ -605,6 +605,31 @@ export const API = {
       /** Routing quality — per-topic selection / exclusion / amendment counts (GET — F17.16). */
       versionAnalyticsRouting: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/analytics/routing`,
+      /** Interviewer-policy evaluation runs: POST to run + persist, GET to list (F18.8). */
+      versionPolicyEvaluations: (id: string, versionId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluations`,
+      /** One persisted policy-evaluation run with its findings (GET). */
+      versionPolicyEvaluationById: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluations/${runId}`,
+      /** Re-run one failed policy judge into an existing run (POST). */
+      versionPolicyEvaluationRetryJudge: (id: string, versionId: string, runId: string): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluations/${runId}/retry`,
+      /** Review one policy finding — accept / decline / edit / mark_applied (PATCH). */
+      versionPolicyEvaluationFinding: (
+        id: string,
+        versionId: string,
+        runId: string,
+        findingId: string
+      ): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluations/${runId}/findings/${findingId}`,
+      /** Apply one policy finding's structured edit (POST). */
+      versionPolicyEvaluationFindingApply: (
+        id: string,
+        versionId: string,
+        runId: string,
+        findingId: string
+      ): string =>
+        `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluations/${runId}/findings/${findingId}/apply`,
       /** Interviewer-policy judge panel — ephemeral preview, persists nothing (POST — F18.8). */
       versionPolicyEvaluatePreview: (id: string, versionId: string): string =>
         `/api/v1/app/questionnaires/${id}/versions/${versionId}/policy/evaluate-preview`,

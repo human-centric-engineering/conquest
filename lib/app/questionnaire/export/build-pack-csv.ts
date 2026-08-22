@@ -312,5 +312,74 @@ export function buildPackCsv(model: PackModel): string {
     ]);
   }
 
+  // ── Interviewer policy (F18.8) ───────────────────────────────────────────
+  if (model.interviewerPolicy) {
+    const p = model.interviewerPolicy;
+    blocks.push([
+      '# Interviewer',
+      row(['setting', 'value']),
+      row(['conversational', p.conversational ? 'yes' : 'no']),
+      row(['questioning_approach', p.approachLabel]),
+      row(['pace', p.paceLabel ?? '']),
+      row(['opening_questions', p.openingSource]),
+      row(['tactics', p.tacticLabels.join(' | ')]),
+      row(['house_rules_in_force', String(p.houseRules.length)]),
+      row(['asked_as_written', p.fidelityEnabled ? 'on' : 'off']),
+      row(['questions_word_for_word', String(p.mustAskQuestions.length)]),
+    ]);
+
+    if (p.houseRules.length > 0) {
+      blocks.push([
+        '# Interviewer house rules',
+        row(['kind', 'trigger', 'rule']),
+        ...p.houseRules.map((r) => row([r.kind, r.trigger ?? '', r.text])),
+      ]);
+    }
+
+    const policyReview = p.evaluation;
+    blocks.push([
+      '# Interviewer review scores',
+      row(['reviewer', 'score', 'diagnostic', 'findings']),
+      ...(policyReview.hasRun
+        ? policyReview.scores.map((sc) =>
+            row([
+              sc.label,
+              sc.score === null ? '' : sc.score.toFixed(2),
+              sc.diagnostic ?? '',
+              String(sc.findingCount),
+            ])
+          )
+        : [row(['(not reviewed)', '', '', '0'])]),
+    ]);
+
+    if (policyReview.targets.length > 0) {
+      blocks.push([
+        '# Interviewer review findings',
+        row([
+          'subject',
+          'reviewer',
+          'severity',
+          'status',
+          'proposed_change',
+          'rationale',
+          'proposed_edit',
+        ]),
+        ...policyReview.targets.flatMap((target) =>
+          target.judges.map((j) =>
+            row([
+              target.label,
+              j.label,
+              j.severity,
+              j.status,
+              j.proposedChange,
+              j.rationale,
+              j.proposedEditSummary ?? '',
+            ])
+          )
+        ),
+      ]);
+    }
+  }
+
   return `${blocks.map((block) => block.join('\r\n')).join('\r\n\r\n')}\r\n`;
 }

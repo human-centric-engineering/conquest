@@ -75,6 +75,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setupTechnical: false,
       evaluations: false,
       adaptiveScope: false,
+      interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
     sections: [section()],
@@ -97,6 +98,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
     setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
     adaptiveScope: null,
+    interviewerPolicy: null,
     ...over,
   };
 }

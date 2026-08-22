@@ -80,28 +80,29 @@ model AppQuestionnaireVersion {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  questionnaire       AppQuestionnaire                     @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
-  sections            AppQuestionnaireSection[]
-  changeRecords       AppQuestionnaireExtractionChange[]
-  sourceDocuments     AppQuestionnaireSourceDocument[]
-  tags                AppQuestionTag[]
-  config              AppQuestionnaireConfig?
-  invitations         AppQuestionnaireInvitation[]
-  sessions            AppQuestionnaireSession[]
-  evaluationRuns      AppQuestionnaireEvaluationRun[]
-  scopeEvaluationRuns AppQuestionnaireScopeEvaluationRun[]
-  dataSlots           AppDataSlot[]
-  dataSlotDraft       AppDataSlotDraft?
-  scoringSchema       AppScoringSchema?
-  errors              AppQuestionnaireError[]
+  questionnaire        AppQuestionnaire                      @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  sections             AppQuestionnaireSection[]
+  changeRecords        AppQuestionnaireExtractionChange[]
+  sourceDocuments      AppQuestionnaireSourceDocument[]
+  tags                 AppQuestionTag[]
+  config               AppQuestionnaireConfig?
+  invitations          AppQuestionnaireInvitation[]
+  sessions             AppQuestionnaireSession[]
+  evaluationRuns       AppQuestionnaireEvaluationRun[]
+  scopeEvaluationRuns  AppQuestionnaireScopeEvaluationRun[]
+  policyEvaluationRuns AppQuestionnairePolicyEvaluationRun[]
+  dataSlots            AppDataSlot[]
+  dataSlotDraft        AppDataSlotDraft?
+  scoringSchema        AppScoringSchema?
+  errors               AppQuestionnaireError[]
   // Adaptive Scope (P17): the conditional units and the Routing Analyst's pending proposal.
   // Both fork with the version, like tags / data slots / glossary terms.
-  topics              AppQuestionnaireTopic[]
-  topicDraft          AppQuestionnaireTopicDraft?
+  topics               AppQuestionnaireTopic[]
+  topicDraft           AppQuestionnaireTopicDraft?
   // Definitions / glossary: the curated terms (with their candidate definitions) and the
   // optional authoritative definitions document. Both fork with the version.
-  glossaryTerms       AppGlossaryTerm[]
-  glossaryDocument    AppGlossaryDocument?
+  glossaryTerms        AppGlossaryTerm[]
+  glossaryDocument     AppGlossaryDocument?
 
   @@unique([questionnaireId, versionNumber])
   @@index([questionnaireId])
@@ -2021,6 +2022,85 @@ model AppQuestionnaireScopeEvaluationFinding {
   @@index([runId, dimension])
   @@index([status])
   @@map("app_questionnaire_scope_evaluation_finding")
+}
+
+/// One run of the interviewer-policy judge panel over a version (F18.8).
+///
+/// The third of its kind, after the design-evaluation run (F5.2) and the scope-evaluation run
+/// (F17.21): same synchronous fail-soft dispatch, same terminal `status` semantics, same
+/// `dimensionSummary` + snapshot shape. A SEPARATE model rather than a reuse because the three
+/// panels judge structurally different subjects with their own dimension vocabulary and edit-op
+/// union — see `lib/app/questionnaire/policy-evaluation/types.ts`.
+///
+/// `policySnapshot` captures the `PolicyStructureInput` the judges read, for read-time staleness
+/// diffing — `stale` is never stored, always derived fresh, same posture as its two siblings.
+model AppQuestionnairePolicyEvaluationRun {
+  id                  String    @id @default(cuid())
+  versionId           String
+  questionnaireId     String // denormalised parent for cheap questionnaire-scoped listing
+  status              String    @default("completed") // completed | partial | failed
+  triggeredByUserId   String? // admin User.id; plain String, no FK (UG-1)
+  dimensionsRequested Int
+  dimensionsRun       Int // judges that returned a verdict
+  dimensionsFailed    Int // judges that returned a diagnostic
+  totalFindings       Int       @default(0)
+  dimensionSummary    Json // [{ dimension, score?, findingCount, diagnostic? }]
+  // The `PolicyStructureInput` the judges read, captured at run time — diffed against the live
+  // config at READ time to derive a finding `stale`. Nullable: a future schema change could add
+  // fields the writer predates.
+  policySnapshot      Json?
+  costUsd             Float? // reserved; populated if/when the dispatcher surfaces per-run cost
+  error               String? // run-level note when status = 'failed'
+  startedAt           DateTime
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  version  AppQuestionnaireVersion                   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  findings AppQuestionnairePolicyEvaluationFinding[]
+
+  @@index([versionId, createdAt]) // newest-first list per version (the primary query)
+  @@index([questionnaireId])
+  @@index([status])
+  @@map("app_questionnaire_policy_evaluation_run")
+}
+
+/// One actionable finding from one policy judge in one run (F18.8).
+///
+/// Row-per-finding, same rationale as both siblings: the review queue mutates findings
+/// individually. `targetKey` addresses `house_rule:<id>` | `house_rules` | `strategy` | `fidelity`
+/// | `tone` | `question:<key>` — deliberately `house_rule:` rather than `rule:`, which the scope
+/// panel already owns for a hard routing rule, so a pack printing both appendices can never
+/// mis-resolve one as the other.
+///
+/// `proposedEdit`/`editedOverride` hold a `PolicyProposedEdit` (validated and soft-degraded by
+/// `coercePolicyProposedEdit` on persist). `appliedToVersionId` may point at a forked draft.
+model AppQuestionnairePolicyEvaluationFinding {
+  id                 String    @id @default(cuid())
+  runId              String
+  dimension          String // PolicyEvaluationDimension, stamped by the caller
+  ordinal            Int // presentation order within (run, dimension)
+  targetKey          String // house_rule:<id> | house_rules | strategy | fidelity | tone | question:<key>
+  severity           String // FINDING_SEVERITIES: info | minor | major
+  proposedChange     String
+  rationale          String
+  sourceQuote        String? // offending text when the finding points at one
+  proposedEdit       Json? // optional structured op; null when prose-only or degraded
+  editedOverride     Json? // admin-edited op; takes precedence over proposedEdit at apply
+  status             String    @default("pending") // pending | accepted | declined | applied
+  decidedByUserId    String? // admin who accepted/declined/edited; plain String, no FK (UG-1)
+  decidedAt          DateTime?
+  appliedAt          DateTime?
+  appliedToVersionId String? // version actually written (may be a forked draft); plain String (UG-1)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  run AppQuestionnairePolicyEvaluationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([runId, dimension])
+  @@index([status])
+  @@map("app_questionnaire_policy_evaluation_finding")
 }
 
 /// One persisted interview-quality evaluation of ONE live Preview Turn Inspector turn.

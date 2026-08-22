@@ -191,8 +191,78 @@ Two further purity constraints, neither obvious:
 - **Don't** let this panel propose question wording. That is the design panel's job, and two panels
   rewriting one prompt is a queue nobody can reconcile.
 
+## Persistence, review and apply
+
+Runs persist as `AppQuestionnairePolicyEvaluationRun` + one row per finding, with a
+`policySnapshot` of exactly what the judges read. `stale` is **never stored** — it is derived fresh
+on every read by diffing the targeted slice of that snapshot against the live config.
+
+### Staleness compares only the op's own field
+
+This is load-bearing here in a way it is not on either sibling. Because the panel has no reconciler
+_and_ a real collision case, per-op comparison is the only thing stopping the second of two
+colliding findings from silently overwriting the first.
+
+The trap: a `default:` branch that stringifies a whole block would mark **every** finding on that
+block stale the moment any one of them applied. A reviewer would apply one strategy finding, watch
+the other three grey out for no visible reason, and conclude the panel was broken. So
+`set_pace` does not stale a `set_tactics` finding, `set_tactics` compares only the tactics it names,
+and a tone finding compares only its own dial. Tests pin each of those.
+
+One more subtlety: a `question:` finding whose question has dropped out of the **sample** is not
+stale. The loader caps at 150 and prefers non-Balanced questions, so a question whose slider moved
+to Balanced legitimately leaves the list while still existing. Claiming `removed` there would block
+a perfectly good apply; the apply engine re-checks against the real row anyway.
+
+### Apply
+
+Three rules, all inherited from what F17.21's gate pass found the hard way:
+
+1. **`current` is built against the version the apply will actually write to** — the run's existing
+   review draft (`findRunReviewDraft`) when one exists, the route's `vid` only when it does not.
+   More load-bearing here than on the siblings: one run routinely yields many
+   `set_question_fidelity` findings, so multi-apply-per-run is the normal path.
+2. **The op write and the `applied` stamp share one transaction.** `writePolicyOp` takes the
+   transaction client as its **first** parameter so the mistake is hard to write. The named
+   non-idempotent op is `add_house_rule`, which appends unconditionally.
+3. **There is no provenance column to stamp — and that is the trap.** The scope panel could set
+   `source: 'manual'` on an applied topic; neither `AppQuestionSlot` nor a house rule has an
+   equivalent. So the audit log is the _only_ record that an AI suggestion, not a human, chose a
+   value. That makes `logAdminAction` load-bearing rather than decorative, and its metadata carries
+   **`previousValue`** — without it, an enum or number change is unreconstructible from history (you
+   could see that a fidelity was set, never what it was set _from_).
+
+`set_question_fidelity` is the only op writing outside the config JSON. It validates the slot
+**pre-fork** so a doomed op never strands an orphan draft, then writes by the `(versionId, key)`
+unique — never by row id, since a fork mints new ids while `copyVersionGraph` preserves the key.
+
+Two ops are refused at apply time because they would deterministically **create** a conflict the
+mechanical checker already warns about: `set_opening_mode: 'examples'` with no usable examples, and
+`set_tone_dimension` while a selectable persona has replaced the version's dials. Text edits are
+deliberately **not** blocked — the conflict checker's own rules are "never emit error" and "prefer a
+missed warning to a noisy one", and a blocking gate driven by keyword matching would violate both.
+
+### One genuinely new helper
+
+`patchVersionConfigBlocks(versionId, patch, tx?)` in `_lib/config-routes.ts`. There was no
+transaction-aware read-modify-write seam for the plain config blocks — `patchAdaptiveScopeSettings`
+covers only adaptive scope, and the config PATCH route does an inline upsert over a whole validated
+body. Modelled on the former, down to the optional `tx`.
+
+## In the Questionnaire Pack
+
+A **new top-level `PackInclude.interviewerPolicy` flag**, defaulting `false`. Not nested under
+`setup`, for two reasons: `setup` is a flat list across ~15 groups, so nesting a verdict about three
+of them would attach a judgement to twelve things it never read — and `setup` defaults **true**,
+which would ship unreviewed AI critique into every default download.
+
+The section renders the policy in plain language (rules by kind, the arc's bands, the fidelity
+distribution) with the panel's verdict nested inside it. The arc bands derive from the same
+`FUNNEL_PACE_PROFILES` the runtime reads — the `FunnelArcExplainer` trick applied to the pack, since
+a hard-coded table that drifted would be worse than none. `hasRun: false` still renders.
+
 ## Status
 
-Phase A shipped: the panel, the capability, the seeds, the structure loader, the ephemeral preview
-and the card. Persisted runs, the review queue and one-click apply are phase B — see
+Shipped. Both phases: the panel and preview (PR A), then persisted runs, the review queue,
+one-click apply and the pack section (PR B). See
 [`f18.8.md`](../planning/features/f18.8.md).

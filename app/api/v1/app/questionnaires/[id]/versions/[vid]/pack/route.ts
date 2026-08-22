@@ -40,6 +40,7 @@ import { loadAcceptedGlossaryEntries } from '@/lib/app/questionnaire/glossary/re
 import { getVersionGraph } from '@/app/api/v1/app/questionnaires/_lib/detail';
 import { loadDataSlots } from '@/app/api/v1/app/questionnaires/_lib/data-slot-routes';
 import { loadLatestEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/evaluation-run-routes';
+import { loadLatestPolicyEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/policy-evaluation-run-routes';
 import { loadLatestScopeEvaluationRun } from '@/app/api/v1/app/questionnaires/_lib/scope-evaluation-run-routes';
 import {
   loadAdaptiveScopeSettings,
@@ -71,6 +72,7 @@ const querySchema = z.object({
   evaluations: includeParam('false'),
   // Routing design, not questionnaire content — opt-in, same reasoning as `evaluations`.
   adaptiveScope: includeParam('false'),
+  interviewerPolicy: includeParam('false'),
 });
 
 const handleGet = withAdminAuth<{ id: string; vid: string }>(
@@ -92,6 +94,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setupTechnical,
       evaluations,
       adaptiveScope,
+      interviewerPolicy,
     } = validateQueryParams(searchParams, querySchema);
     const include = {
       meta,
@@ -102,6 +105,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       setupTechnical,
       evaluations,
       adaptiveScope,
+      interviewerPolicy,
     };
 
     // Definitions / glossary (P16): accepted-only, same as the instrument's reviewer copy — this is
@@ -125,7 +129,9 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
     // been evaluated. Independent of each other, so they load in parallel rather than serially
     // when an admin opts into both; the scope-evaluation run rides along with the topics/settings
     // load since it only matters when `adaptiveScope` is included.
-    const [evaluationRun, adaptiveScopeSource] = await Promise.all([
+    // The interviewer-policy run (F18.8) rides the same parallel load, and is skipped entirely
+    // when its section is excluded — the common case, since it defaults off like the other two.
+    const [evaluationRun, adaptiveScopeSource, policyEvaluationRun] = await Promise.all([
       evaluations ? loadLatestEvaluationRun(vid) : Promise.resolve(null),
       adaptiveScope
         ? Promise.all([
@@ -138,6 +144,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
             scopeEvaluationRun,
           }))
         : Promise.resolve(null),
+      interviewerPolicy ? loadLatestPolicyEvaluationRun(vid) : Promise.resolve(null),
     ]);
 
     const model = buildPackModel(
@@ -147,6 +154,7 @@ const handleGet = withAdminAuth<{ id: string; vid: string }>(
       glossary,
       evaluationRun,
       adaptiveScopeSource,
+      policyEvaluationRun,
       include,
       new Date().toISOString()
     );

@@ -473,3 +473,20 @@ export const policyEvaluationLimiter = createRateLimiter({
   interval: POLICY_EVALUATION_RATE_LIMIT_INTERVAL_MS,
   maxRequests: POLICY_EVALUATION_RATE_LIMIT_MAX,
 });
+
+/**
+ * Policy-evaluation-apply sub-cap (F18.8). Applying a finding is not LLM work, but it mutates the
+ * version's config — and, for `set_question_fidelity`, a question row — and may **fork** a launched
+ * version. Same value as both sibling apply caps: an apply here is a single config-block upsert or
+ * a one-row slot update, never a multi-row deep copy, so 60/min is ample. Keyed on the admin user
+ * id, who owns the version.
+ */
+export const POLICY_EVALUATION_APPLY_RATE_LIMIT_MAX = 60;
+
+/** Sliding-window length for {@link policyEvaluationApplyLimiter}, in milliseconds. */
+export const POLICY_EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS = 60_000;
+
+export const policyEvaluationApplyLimiter = createRateLimiter({
+  interval: POLICY_EVALUATION_APPLY_RATE_LIMIT_INTERVAL_MS,
+  maxRequests: POLICY_EVALUATION_APPLY_RATE_LIMIT_MAX,
+});

@@ -38,6 +38,11 @@ import type {
   ScopeEvaluationDimension,
   ScopeProposedEdit,
 } from '@/lib/app/questionnaire/scope-evaluation';
+// F18.8: the interviewer-policy panel, likewise its own dimension + edit-op vocabulary.
+import type {
+  PolicyEvaluationDimension,
+  PolicyProposedEdit,
+} from '@/lib/app/questionnaire/policy-evaluation';
 // Ref-lookup turns carry their full inspector call trace so the admin evaluator can show the raw
 // prompt of every call (same shape the preview drawer / diagnostics render).
 import type { AgentCallTrace } from '@/lib/app/questionnaire/inspector/types';
@@ -396,6 +401,91 @@ export interface ScopeEvaluationRunDetail extends ScopeEvaluationRunListItem {
   questionnaireId: string;
   error: string | null;
   findings: ScopeEvaluationFindingView[];
+}
+
+/* ── Interviewer-policy evaluation (F18.8) ──────────────────────────────── */
+
+/**
+ * The target vocabulary for the interviewer-policy judge panel. Note `house_rule`, not `rule` — the
+ * scope panel already owns `rule:<id>` for a hard routing rule, and a pack printing both appendices
+ * must never mis-resolve one as the other.
+ */
+export type PolicyFindingTargetKind =
+  'house_rule' | 'house_rules' | 'strategy' | 'fidelity' | 'tone' | 'question' | 'unknown';
+
+/** The resolved subject of a policy finding. */
+export interface PolicyFindingTargetView {
+  kind: PolicyFindingTargetKind;
+  /** The raw `targetKey`, unchanged — still the handle apply reconciles against. */
+  key: string;
+  /**
+   * Human label. For a question this reads `Fidelity — "<prompt>"` rather than the bare prompt, so a
+   * question flagged by BOTH this panel and the question-design panel is never mistaken for one
+   * subject appearing in two queues.
+   */
+  label: string;
+  /** The target exists only in the run's snapshot — it was removed from the live config since. */
+  removed: boolean;
+}
+
+/** One persisted policy-evaluation finding (F18.8) — client-safe projection of the DB row. */
+export interface PolicyEvaluationFindingView {
+  id: string;
+  dimension: PolicyEvaluationDimension;
+  ordinal: number;
+  targetKey: string;
+  /** `targetKey` resolved to its subject for display, derived at read time, never stored. */
+  target: PolicyFindingTargetView | null;
+  severity: FindingSeverity;
+  proposedChange: string;
+  rationale: string;
+  sourceQuote: string | null;
+  status: FindingReviewStatus;
+  proposedEdit: PolicyProposedEdit | null;
+  editedOverride: PolicyProposedEdit | null;
+  decidedByUserId: string | null;
+  decidedAt: string | null;
+  appliedAt: string | null;
+  appliedToVersionId: string | null;
+  /**
+   * Derived at read time, never stored. Compares ONLY the field the op writes — a blanket diff of
+   * the whole strategy blob would mark every strategy finding stale as soon as any one applied, and
+   * the panel would look broken. This matters more here than on either sibling: three of the four
+   * dimensions can target the same field, so same-field collisions are the normal path, not an edge.
+   */
+  stale: boolean;
+  applicable: FindingApplicability;
+}
+
+/** One dimension's outcome captured on a policy-evaluation run (F18.8). */
+export interface PolicyEvaluationDimensionSummary {
+  dimension: PolicyEvaluationDimension;
+  score: number | null;
+  findingCount: number;
+  diagnostic: string | null;
+}
+
+/** One row in the policy-evaluation-runs list for a version (F18.8), newest-first. */
+export interface PolicyEvaluationRunListItem {
+  id: string;
+  status: string;
+  dimensionsRequested: number;
+  dimensionsRun: number;
+  dimensionsFailed: number;
+  totalFindings: number;
+  dimensionSummary: PolicyEvaluationDimensionSummary[];
+  triggeredByUserId: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+/** Full policy-evaluation-run detail (F18.8) — the list row plus its findings and run context. */
+export interface PolicyEvaluationRunDetail extends PolicyEvaluationRunListItem {
+  versionId: string;
+  questionnaireId: string;
+  error: string | null;
+  findings: PolicyEvaluationFindingView[];
 }
 
 /**

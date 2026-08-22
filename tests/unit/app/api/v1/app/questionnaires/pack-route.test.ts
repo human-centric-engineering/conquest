@@ -221,6 +221,7 @@ describe('GET pack — include flags', () => {
       null,
       null,
       null,
+      null,
       {
         meta: true,
         questions: true,
@@ -230,6 +231,7 @@ describe('GET pack — include flags', () => {
         setupTechnical: false,
         evaluations: false,
         adaptiveScope: false,
+        interviewerPolicy: false,
       },
       expect.any(String)
     );
@@ -248,6 +250,7 @@ describe('GET pack — include flags', () => {
       null,
       null,
       null,
+      null,
       {
         meta: true,
         questions: true,
@@ -257,6 +260,7 @@ describe('GET pack — include flags', () => {
         setupTechnical: false,
         evaluations: false,
         adaptiveScope: false,
+        interviewerPolicy: false,
       },
       expect.any(String)
     );
@@ -272,6 +276,7 @@ describe('GET pack — include flags', () => {
       QUESTIONNAIRE_ROW.title,
       GRAPH,
       [],
+      null,
       null,
       null,
       null,
@@ -304,6 +309,7 @@ describe('GET pack — include flags', () => {
       null,
       null,
       null,
+      null,
       expect.objectContaining({ evaluations: false }),
       expect.any(String)
     );
@@ -327,6 +333,7 @@ describe('GET pack — include flags', () => {
       null,
       run,
       null,
+      null,
       expect.objectContaining({ evaluations: true }),
       expect.any(String)
     );
@@ -341,6 +348,7 @@ describe('GET pack — include flags', () => {
       QUESTIONNAIRE_ROW.title,
       GRAPH,
       [],
+      null,
       null,
       null,
       null,
@@ -373,6 +381,7 @@ describe('GET pack — include flags', () => {
       null,
       null,
       { topics, settings, scopeEvaluationRun },
+      null,
       expect.objectContaining({ adaptiveScope: true }),
       expect.any(String)
     );

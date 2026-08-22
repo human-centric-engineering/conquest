@@ -60,6 +60,20 @@ export {
 
 export { describePolicyProposedEdit } from '@/lib/app/questionnaire/policy-evaluation/describe-op';
 
+export {
+  policyReviewFindingSchema,
+  type PolicyReviewFindingInput,
+} from '@/lib/app/questionnaire/policy-evaluation/review-schema';
+
+export {
+  POLICY_GROUP_SORTS,
+  type PolicyGroupSort,
+  type PolicySeverityCounts,
+  type PolicyFindingGroup,
+  groupPolicyFindingsByTarget,
+  tallyPolicySeverities,
+} from '@/lib/app/questionnaire/policy-evaluation/group-findings';
+
 // `run-panel.ts` is NOT re-exported here, unlike every other leaf module — it imports the capability
 // dispatcher, which imports Prisma, which pulls `pg` and its node built-ins (`net`, `tls`, `fs`,
 // `dns`) into any bundle that touches this barrel. Three CLIENT components import

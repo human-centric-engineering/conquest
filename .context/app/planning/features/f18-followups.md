@@ -19,7 +19,19 @@ follow-ups that closed around them (`f18.4`–`f18.7`). Same shape as
 
 ---
 
-## 1. Nothing judges whether a policy is any good · **the largest open item**
+## 1. Nothing judges whether a policy is any good · **DONE** — see [`f18.8.md`](./f18.8.md)
+
+> Shipped 2026-08-22 in two PRs. Four judges (`rule_coherence`, `arc_fit`, `fidelity_calibration`,
+> `cross_layer_conflict`), twelve single-field ops, a review queue with one-click apply, and a
+> top-level Questionnaire Pack section. Both things flagged below as worth carrying held up: the
+> "no reconciler" argument really is different here, and there really is no provenance column — the
+> audit log carries `previousValue` instead.
+>
+> Still open, and deliberately: the judges are **structural**. They read authored config, never live
+> session data or the F18.7 behavioural findings. Layering that signal in is a later phase.
+
+<details>
+<summary>The original entry</summary>
 
 Question design has a judge panel (F5.1–F5.3). Routing design has one (F17.21). The interviewer
 policy — house rules × the arc × per-question fidelity, three layers resolved by later-section-wins

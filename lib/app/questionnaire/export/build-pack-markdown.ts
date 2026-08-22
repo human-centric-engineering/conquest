@@ -331,5 +331,90 @@ export function buildPackMarkdown(model: PackModel): string {
   lines.push('');
   lines.push(`[${PACK_BRAND.website}](https://${PACK_BRAND.website})`);
 
+  // ── Interviewer policy (F18.8) ───────────────────────────────────────────
+  if (model.interviewerPolicy) {
+    const p = model.interviewerPolicy;
+    lines.push('## The interviewer');
+    lines.push('');
+    if (!p.conversational) {
+      lines.push(
+        '_This questionnaire is filled in as a form, so none of the interviewer settings apply._'
+      );
+      lines.push('');
+    } else {
+      lines.push(`**Questioning approach:** ${p.approachLabel}`);
+      if (p.paceLabel) lines.push(`**Pace:** ${p.paceLabel}`);
+      lines.push(`**Opening questions:** ${p.openingSource}`);
+      if (p.tacticLabels.length > 0) lines.push(`**Tactics:** ${p.tacticLabels.join(', ')}`);
+      lines.push('');
+
+      if (p.arcBands.length > 0) {
+        lines.push('### How the questioning narrows');
+        lines.push('');
+        for (const band of p.arcBands) lines.push(`- **${band.label}** — ${band.detail}`);
+        lines.push('');
+      }
+
+      lines.push('### House rules');
+      lines.push('');
+      if (!p.houseRulesEnabled || p.houseRules.length === 0) {
+        lines.push('_No house rules are in force for this questionnaire._');
+      } else {
+        for (const rule of p.houseRules) {
+          const trigger = rule.trigger ? ` _(when asked about: ${rule.trigger})_` : '';
+          lines.push(`- **${rule.kind}**${trigger}: ${rule.text}`);
+        }
+      }
+      lines.push('');
+
+      lines.push('### Questions asked as written');
+      lines.push('');
+      if (!p.fidelityEnabled) {
+        lines.push('_Every question is asked conversationally._');
+      } else {
+        for (const d of p.fidelityDistribution) {
+          if (d.count > 0) lines.push(`- ${d.label}: ${d.count}`);
+        }
+        if (p.mustAskQuestions.length > 0) {
+          lines.push('');
+          lines.push('Put to the respondent word for word:');
+          for (const q of p.mustAskQuestions) lines.push(`- ${q.prompt}`);
+        }
+      }
+      lines.push('');
+    }
+
+    // The judge panel's verdict, nested inside the policy it is about. `hasRun: false` still
+    // renders — stating the fact beats silently having no section.
+    const ev = p.evaluation;
+    lines.push('### Interviewer review');
+    lines.push('');
+    if (!ev.hasRun) {
+      lines.push('_This interviewer setup has not been reviewed._');
+      lines.push('');
+    } else {
+      lines.push(`Reviewed ${ev.runAt ?? 'recently'} · ${ev.totalFindings} finding(s).`);
+      lines.push('');
+      lines.push('| Reviewer | Score | Findings |');
+      lines.push('| --- | --- | --- |');
+      for (const sc of ev.scores) {
+        const score =
+          sc.score === null ? (sc.diagnostic ?? 'unavailable') : `${Math.round(sc.score * 100)}%`;
+        lines.push(`| ${sc.label} | ${score} | ${sc.findingCount} |`);
+      }
+      lines.push('');
+      for (const target of ev.targets) {
+        lines.push(`**${target.label}**${target.removed ? ' _(since removed)_' : ''}`);
+        lines.push('');
+        for (const judge of target.judges) {
+          lines.push(`- _${judge.label}_ (${judge.severity}): ${judge.proposedChange}`);
+          lines.push(`  - ${judge.rationale}`);
+          if (judge.proposedEditSummary) lines.push(`  - Proposed: ${judge.proposedEditSummary}`);
+        }
+        lines.push('');
+      }
+    }
+  }
+
   return `${lines.join('\n').trimEnd()}\n`;
 }

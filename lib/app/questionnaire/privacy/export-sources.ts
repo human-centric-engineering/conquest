@@ -461,6 +461,36 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
       ),
   },
   {
+    model: 'AppQuestionnairePolicyEvaluationRun',
+    section: 'policyEvaluationRunsTriggered',
+    disposition: 'attribution',
+    description:
+      'Interviewer-policy evaluation runs you triggered. The judges’ findings about the questionnaire are not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnairePolicyEvaluationRun.findMany({
+          where: { triggeredByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
+    model: 'AppQuestionnairePolicyEvaluationFinding',
+    section: 'policyEvaluationFindingsDecided',
+    disposition: 'attribution',
+    description:
+      'Interviewer-policy evaluation findings you accepted, declined, edited, or applied. The finding’s content is not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnairePolicyEvaluationFinding.findMany({
+          where: { decidedByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
     // Preserved AI runs (F14.15). `triggeredByUserId` is the admin who ran the extraction critic,
     // the config advisor, an edit, a suggester — authorship of a config action, never respondent
     // data, so the prompt/output snapshots stay out of the attribution payload.

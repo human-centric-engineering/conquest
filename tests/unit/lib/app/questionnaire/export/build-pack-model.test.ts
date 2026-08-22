@@ -378,6 +378,7 @@ describe('buildPackModel', () => {
       GLOSSARY,
       EVALUATION_RUN,
       null,
+      null,
       DEFAULT_PACK_INCLUDE,
       '2026-08-10T00:00:00.000Z'
     );
@@ -403,12 +404,14 @@ describe('buildPackModel', () => {
       setupTechnical: false,
       evaluations: false,
       adaptiveScope: false,
+      interviewerPolicy: false,
     };
     const model = buildPackModel(
       'T',
       graphOf(SECTIONS),
       DATA_SLOTS,
       GLOSSARY,
+      null,
       null,
       null,
       include,
@@ -430,6 +433,7 @@ describe('buildPackModel', () => {
       null,
       null,
       null,
+      null,
       { ...DEFAULT_PACK_INCLUDE, questions: false },
       'now'
     );
@@ -443,6 +447,7 @@ describe('buildPackModel', () => {
       'T',
       graphOf(SECTIONS),
       DATA_SLOTS,
+      null,
       null,
       null,
       null,
@@ -462,6 +467,7 @@ describe('buildPackModel', () => {
       'T',
       graphOf(SECTIONS),
       DATA_SLOTS,
+      null,
       null,
       null,
       null,
@@ -486,6 +492,7 @@ describe('buildPackModel', () => {
       GLOSSARY,
       null,
       null,
+      null,
       { ...DEFAULT_PACK_INCLUDE, definitions: false },
       'now'
     );
@@ -502,6 +509,7 @@ describe('buildPackModel', () => {
         'T',
         graphOf(SECTIONS, configOverrides),
         [],
+        null,
         null,
         null,
         null,
@@ -615,6 +623,7 @@ describe('buildPackModel', () => {
         null,
         EVALUATION_RUN,
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: false },
         'now'
       );
@@ -626,6 +635,7 @@ describe('buildPackModel', () => {
         'T',
         graphOf(SECTIONS),
         [],
+        null,
         null,
         null,
         null,
@@ -649,6 +659,7 @@ describe('buildPackModel', () => {
         null,
         EVALUATION_RUN,
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -670,6 +681,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
@@ -694,6 +706,7 @@ describe('buildPackModel', () => {
         null,
         EVALUATION_RUN,
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -710,6 +723,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
@@ -754,6 +768,7 @@ describe('buildPackModel', () => {
         null,
         twice,
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -770,6 +785,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
@@ -794,6 +810,7 @@ describe('buildPackModel', () => {
         null,
         EVALUATION_RUN,
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -811,6 +828,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
@@ -832,6 +850,7 @@ describe('buildPackModel', () => {
         null,
         EVALUATION_RUN,
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -850,6 +869,7 @@ describe('buildPackModel', () => {
         null,
         { ...EVALUATION_RUN, reconciled: [] },
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -863,6 +883,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
@@ -879,6 +900,7 @@ describe('buildPackModel', () => {
         [],
         null,
         EVALUATION_RUN,
+        null,
         null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
@@ -898,6 +920,7 @@ describe('buildPackModel', () => {
         null,
         { ...EVALUATION_RUN, completedAt: null },
         null,
+        null,
         { ...DEFAULT_PACK_INCLUDE, evaluations: true },
         'now'
       );
@@ -914,6 +937,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
         'now'
       );
@@ -925,6 +949,7 @@ describe('buildPackModel', () => {
         'T',
         graphOf(SECTIONS),
         [],
+        null,
         null,
         null,
         null,
@@ -942,6 +967,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -965,6 +991,7 @@ describe('buildPackModel', () => {
           settings: { ...SCOPE_SETTINGS, enabled: false },
           scopeEvaluationRun: null,
         },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -981,6 +1008,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -999,6 +1027,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1016,6 +1045,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1035,6 +1065,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1051,6 +1082,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1067,6 +1099,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1083,6 +1116,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1103,6 +1137,7 @@ describe('buildPackModel', () => {
         null,
         null,
         { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1127,6 +1162,7 @@ describe('buildPackModel', () => {
           settings: SCOPE_SETTINGS,
           scopeEvaluationRun: SCOPE_EVALUATION_RUN,
         },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: false },
         'now'
       );
@@ -1145,6 +1181,7 @@ describe('buildPackModel', () => {
           settings: SCOPE_SETTINGS,
           scopeEvaluationRun: SCOPE_EVALUATION_RUN,
         },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1183,6 +1220,7 @@ describe('buildPackModel', () => {
           settings: SCOPE_SETTINGS,
           scopeEvaluationRun: SCOPE_EVALUATION_RUN,
         },
+        null,
         { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
         'now'
       );
@@ -1198,6 +1236,115 @@ describe('buildPackModel', () => {
       expect(targets[0].judges.map((j) => j.status)).toEqual(['pending', 'declined']);
       expect(targets[0].judges[0].proposedEditSummary).toBe('Rewrite the topic’s criteria');
       expect(targets[0].judges[1].proposedEditSummary).toBeNull();
+    });
+  });
+});
+
+/**
+ * The interviewer-policy appendix (F18.8).
+ *
+ * Its own top-level include flag rather than a nest under `setup` — that section is a flat list
+ * across ~15 groups and defaults ON, so nesting a judge's verdict there would attach a judgement to
+ * twelve things it never read AND ship unreviewed AI critique into every default download.
+ */
+describe('interviewer policy appendix', () => {
+  const call = (
+    include: Partial<typeof DEFAULT_PACK_INCLUDE>,
+    configOverrides: Partial<typeof DEFAULT_QUESTIONNAIRE_CONFIG> = {}
+  ) =>
+    buildPackModel(
+      'T',
+      graphOf(SECTIONS, configOverrides),
+      [],
+      null,
+      null,
+      null,
+      null,
+      { ...DEFAULT_PACK_INCLUDE, ...include },
+      'now'
+    );
+
+  it('is null when excluded, and excluded is the default', () => {
+    expect(DEFAULT_PACK_INCLUDE.interviewerPolicy).toBe(false);
+    expect(call({}).interviewerPolicy).toBeNull();
+  });
+
+  it('renders the arc bands from the runtime’s own pace profile', () => {
+    // The FunnelArcExplainer trick applied to the pack: a hard-coded band table that drifted would
+    // be worse than none, because a reader has no reason to doubt it.
+    const model = call(
+      { interviewerPolicy: true },
+      {
+        interviewerStrategy: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+          enabled: true,
+          approach: 'funnel',
+          pace: 'brisk',
+        },
+      }
+    );
+    const bands = model.interviewerPolicy?.arcBands ?? [];
+    expect(bands).toHaveLength(3);
+    // `brisk` is openingWindow 1, openBelow 0.25, targetedAbove 0.55.
+    expect(bands[0].detail).toContain('first 1 question');
+    expect(bands[2].detail).toContain('55%');
+  });
+
+  it('renders no arc bands when no funnel is running', () => {
+    const model = call(
+      { interviewerPolicy: true },
+      {
+        interviewerStrategy: {
+          ...DEFAULT_QUESTIONNAIRE_CONFIG.interviewerStrategy,
+          enabled: true,
+          approach: 'targeted',
+        },
+      }
+    );
+    expect(model.interviewerPolicy?.arcBands).toEqual([]);
+    // And no pace is named, since the runtime does not read one here.
+    expect(model.interviewerPolicy?.paceLabel).toBeNull();
+  });
+
+  it('prints only the rules actually in force — a parked rule is a draft', () => {
+    const model = call(
+      { interviewerPolicy: true },
+      {
+        houseRules: {
+          enabled: true,
+          rules: [
+            { id: 'r1', kind: 'never', enabled: true, text: 'Never use humour.' },
+            { id: 'r2', kind: 'always', enabled: false, text: 'A parked draft.' },
+          ],
+        },
+      }
+    );
+    const rules = model.interviewerPolicy?.houseRules ?? [];
+    expect(rules).toHaveLength(1);
+    expect(rules[0].text).toBe('Never use humour.');
+  });
+
+  it('says a form-only questionnaire has no interviewer at all', () => {
+    const model = call({ interviewerPolicy: true }, { presentationMode: 'form' });
+    expect(model.interviewerPolicy?.conversational).toBe(false);
+  });
+
+  it('reports no fidelity distribution while the gate is off', () => {
+    // With the gate off every question resolves to Balanced, so a distribution would describe a
+    // dial that is not in force.
+    const model = call({ interviewerPolicy: true });
+    expect(model.interviewerPolicy?.fidelityEnabled).toBe(false);
+    expect(model.interviewerPolicy?.fidelityDistribution).toEqual([]);
+    expect(model.interviewerPolicy?.mustAskQuestions).toEqual([]);
+  });
+
+  it('states that the panel has not run rather than omitting the section', () => {
+    const model = call({ interviewerPolicy: true });
+    expect(model.interviewerPolicy?.evaluation).toMatchObject({
+      hasRun: false,
+      totalFindings: 0,
+      scores: [],
+      targets: [],
     });
   });
 });
