@@ -10,7 +10,10 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { buildTurnEvaluatorPrompt } from '@/lib/app/questionnaire/turn-evaluation/prompt';
+import {
+  buildTurnEvaluatorPrompt,
+  TURN_RUBRIC_VERSION,
+} from '@/lib/app/questionnaire/turn-evaluation/prompt';
 import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluation/types';
 import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
 
@@ -90,5 +93,84 @@ describe('buildTurnEvaluatorPrompt', () => {
   it('degrades gracefully when no context is supplied', () => {
     const user = userOf(buildTurnEvaluatorPrompt({ turn }));
     expect(user).toMatch(/no questionnaire context was supplied/i);
+  });
+});
+
+/**
+ * The interviewer-policy context. These four blocks plus the per-turn fidelity level exist so the
+ * judge scores a turn against the behaviour the admin CONFIGURED rather than against a generic
+ * ideal — without them a `must_ask` question, required to be put verbatim with its options
+ * recited, reads to the rubric as closed and leading and is marked down for complying.
+ */
+describe('buildTurnEvaluatorPrompt — interviewer policy context', () => {
+  it('tells the judge that configured policy is the standard, not a fault', () => {
+    const sys = systemOf(buildTurnEvaluatorPrompt({ turn }));
+    expect(sys).toMatch(/configured policy is the standard, not a fault/i);
+    // The specific trap: a must-ask question must not lose openness points for being verbatim.
+    expect(sys).toMatch(/must ask/i);
+    expect(sys).toMatch(/openEndedness/);
+    // Obeying a house rule is compliance, so it is never a violation.
+    expect(sys).toMatch(/never a `?violations`? entry/i);
+  });
+
+  it('renders each policy block when supplied', () => {
+    const user = userOf(
+      buildTurnEvaluatorPrompt({
+        turn,
+        context: {
+          houseRules: 'House rules: 2 x always, 1 x never',
+          interviewerStrategy: 'Questioning approach: Funnel; Funnel pace: Narrow quickly',
+          questionFidelity: 'Question fidelity: On - new questions start Balanced',
+          adaptiveScope: 'Adaptive scope: Enabled; Conditional topics per interview: Up to 3',
+          questionFidelityLevel: 'Must ask - Put it to them as written.',
+        },
+      })
+    );
+    expect(user).toContain('2 x always, 1 x never');
+    expect(user).toContain('Funnel pace: Narrow quickly');
+    expect(user).toContain('new questions start Balanced');
+    expect(user).toContain('Conditional topics per interview: Up to 3');
+    expect(user).toContain('Must ask - Put it to them as written.');
+  });
+
+  it('omits every policy field when nothing is configured, leaving the block unchanged', () => {
+    // The off-is-silent invariant, at the context layer: a questionnaire that never enabled any of
+    // these must produce exactly the context block it produced before the fields existed.
+    const before = userOf(
+      buildTurnEvaluatorPrompt({ turn, context: { goal: 'Understand housing security' } })
+    );
+    const after = userOf(
+      buildTurnEvaluatorPrompt({
+        turn,
+        context: {
+          goal: 'Understand housing security',
+          houseRules: undefined,
+          interviewerStrategy: undefined,
+          questionFidelity: undefined,
+          adaptiveScope: undefined,
+          questionFidelityLevel: undefined,
+        },
+      })
+    );
+    expect(after).toBe(before);
+    expect(after).not.toMatch(/house rules/i);
+    expect(after).not.toMatch(/adaptive scope/i);
+  });
+
+  it('drops a policy field that is present but blank', () => {
+    const user = userOf(
+      buildTurnEvaluatorPrompt({ turn, context: { goal: 'A goal', houseRules: '   ' } })
+    );
+    expect(user).not.toMatch(/house rules/i);
+  });
+
+  /**
+   * The rubric version is stamped onto every persisted verdict and is what makes two scores
+   * comparable. Editing the rubric without bumping it silently mixes incomparable verdicts under
+   * one label, so the value is pinned here: a future rubric edit has to change this test
+   * deliberately rather than drift past review.
+   */
+  it('pins the rubric version, so a rubric edit must bump it deliberately', () => {
+    expect(TURN_RUBRIC_VERSION).toBe('1.1.0');
   });
 });

@@ -147,21 +147,37 @@ The build moves from scaffolding → ingestion → admin manage → demo brandin
 | **P8**   | Admin analytics, exports, anonymous mode        | done   | Dashboards, CSV/JSON export, anonymous-mode handling. All three features merged: F8.1 admin analytics dashboards (#53); F8.2 result exports (#54); F8.3 anonymous-mode hardening (#55).                                                                                                                                                                                                                                                                               |
 | **P9**   | Hardening + forking docs                        | done   | Concurrent-session sanity, flag inventory, runbook, `forking.md`. F9.1 production hardening (#56) + F9.4 demo-content seed (#57) done; F9.2 operational runbook road-tested and shipped; F9.3 forking docs done (#58).                                                                                                                                                                                                                                                |
 
-> **This plan stops at P9.** Work has continued through **P17** — Experiences (P15), Definitions &
-> Glossary (P16), Adaptive Scope (P17) and the phases between — and none of it is described above.
-> Those phases are tracked in [`features/`](./features/) (one `fX.Y.md` tracker per feature, written
-> after the code) plus the domain docs under
-> [`../questionnaire/`](../questionnaire/). The [[#Work completed to date]] log below is also stale:
-> its newest entry is 2026-06-28.
->
-> So a reader asking "is X planned?" for anything post-P9 will not find the answer here. The two
-> phase-level records of what remains open are
-> [`features/f15-followups.md`](./features/f15-followups.md) and
-> [`features/f17-followups.md`](./features/f17-followups.md).
->
-> Bringing P10–P17 into this document is real, unscheduled work. Recorded here rather than left for
-> the next reader to discover, per this plan's own rule that it is allowed to be wrong as long as
-> the reframe is written down.
+### P10 onward
+
+The narrative sections below stop at P9 and the [[#Work completed to date]] log is stale (newest
+entry 2026-06-28). The phases since are listed here so a reader asking "is X planned?" finds the
+answer, but each one's **detail lives in its trackers**, one `fX.Y.md` per feature written after the
+code, plus the domain doc named alongside.
+
+| Phase   | Title                                   | Status | Where it is written down                                                                                              |
+| ------- | --------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| **P10** | Reporting                               | done   | 8 trackers, `f10.1`–`f10.8` · [`respondent-report.md`](../questionnaire/respondent-report.md)                         |
+| **P11** | Cohorts & Rounds                        | done   | `f11.1` · [`cohorts.md`](../questionnaire/cohorts.md)                                                                 |
+| **P12** | Respondent onboarding                   | done   | `f12.1`, `f12.2`                                                                                                      |
+| **P13** | Cohort-round context & learning         | done   | `f13.1`–`f13.3`                                                                                                       |
+| **P14** | Cohort Report, then hardening & cleanup | done   | 15 trackers, `f14.1`–`f14.15` — the phase splits in two: the cohort report, then a quality sweep                      |
+| **P15** | Experiences                             | done   | 9 trackers · [`f15-followups.md`](./features/f15-followups.md) — **the record of what is still open**                 |
+| **P16** | Definitions & Glossary                  | done   | [`definitions-glossary.md`](../questionnaire/definitions-glossary.md) — no trackers; the domain doc is the record     |
+| **P17** | Adaptive Scope                          | done   | 19 trackers · [`f17-followups.md`](./features/f17-followups.md) — **the record of what is still open**                |
+| **P18** | Per-questionnaire interviewer policy    | done   | `f18.1`–`f18.7` — house rules, question fidelity, the funnel arc, and the ring of follow-ups closing around all three |
+
+Two caveats a reader should carry:
+
+- **The `fX.Y` numbering is not contiguous and was never meant to be.** A tracker is written when a
+  feature ships, so gaps are features that were planned and dropped, or numbers reserved for work
+  done under another phase. P16 has none at all — its domain doc carries the record instead.
+- **"Done" means shipped, not finished.** The two `*-followups.md` files are the phase-level record
+  of what was deliberately left open, and they are the first thing to read before planning more work
+  in those areas.
+
+Writing P10–P18 up as full narrative sections in the style of P0–P9 remains real, unscheduled work.
+Recorded here rather than left for the next reader to discover, per this plan's own rule that it is
+allowed to be wrong as long as the reframe is written down.
 
 ---
 

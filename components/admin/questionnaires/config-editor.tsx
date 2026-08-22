@@ -870,6 +870,12 @@ export function ConfigEditor({
         openingExamples: interviewerStrategy.openingExamples,
         houseRulesEnabled: houseRules.enabled,
         houseRules: houseRules.rules,
+        // Adaptive Scope is authored on the Topics tab, not here, so it is read straight off the
+        // saved config rather than from editor state — there is no local copy to drift from. It is
+        // already in `config` (`CONFIG_SELECT` selects it); this tab simply never read it before.
+        adaptiveScopeEnabled: config.adaptiveScope.enabled,
+        limitOpeningProbes: config.adaptiveScope.limitOpeningProbes,
+        maxOpeningProbes: config.adaptiveScope.maxOpeningProbes,
       }),
     [
       anonymousMode,
@@ -887,6 +893,7 @@ export function ConfigEditor({
       supportMessage,
       interviewerStrategy,
       houseRules,
+      config.adaptiveScope,
     ]
   );
   const conflictsFor = (sectionId: string) => conflicts.filter((c) => c.sectionId === sectionId);

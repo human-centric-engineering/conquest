@@ -1,6 +1,11 @@
 /**
  * Completion funnel (F8.1): invited → opened → started → completed, with drop-off.
  *
+ * NOT the interviewer's **funnel arc** (`chat/interviewer-strategy.ts`), which is how a single
+ * conversation moves from broad to specific questioning. Two unrelated things share the word: this
+ * one is about respondents dropping out of a cohort, that one about one interview narrowing.
+ * `analytics/interviewer-policy.ts` reports the arc.
+ *
  * The invite stages come from `AppQuestionnaireInvitation` timestamps (set reliably
  * by F3.2: `sentAt`, `openedAt`). The downstream stages are derived from real
  * session data rather than the invitation's `status` string, so the funnel reflects

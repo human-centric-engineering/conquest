@@ -37,7 +37,10 @@ function question(
   };
 }
 
-function graphOf(sections: SectionView[]): VersionGraphView {
+function graphOf(
+  sections: SectionView[],
+  configOver: Partial<VersionGraphView['config']> = {}
+): VersionGraphView {
   return {
     id: 'v1',
     questionnaireId: 'q1',
@@ -49,8 +52,13 @@ function graphOf(sections: SectionView[]): VersionGraphView {
     audienceProvenance: null,
     tags: [],
     sections,
-    config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, saved: true },
+    config: { ...DEFAULT_QUESTIONNAIRE_CONFIG, saved: true, ...configOver },
   };
+}
+
+/** One section holding the given questions — the shape most fidelity cases need. */
+function oneSection(questions: QuestionSlotView[]): SectionView {
+  return { id: 's1', ordinal: 0, title: 'S', description: null, questions };
 }
 
 describe('buildInstrumentModel', () => {
@@ -182,5 +190,45 @@ describe('buildInstrumentModel', () => {
     expect(q.options).toEqual([]);
     expect(q.constraint).toBeNull();
     expect(q.typeLabel).toBe('Free text');
+  });
+});
+
+/**
+ * Question fidelity on the blank instrument.
+ *
+ * The dial changes what the document *describes*: at `must_ask` a question is an instrument whose
+ * wording and options are put as written; at `free` it may never be asked aloud at all. A reader
+ * given only the prompt cannot tell those apart, which is why the level belongs in the export
+ * beside the type and the required flag.
+ */
+describe('buildInstrumentModel — question fidelity', () => {
+  const questions = [
+    question({ key: 'q1', type: 'likert', fidelity: 1 }),
+    question({ key: 'q2', type: 'free_text', fidelity: 0 }),
+    question({ key: 'q3', type: 'free_text', fidelity: 0.5 }),
+  ];
+
+  it('reports null for every question when the version-level gate is off', () => {
+    // The gate is off by default, so this is the overwhelming majority of questionnaires. With it
+    // off every question resolves to `balanced` regardless of its stored value, and a uniform
+    // column would be noise on every export that never opted in.
+    const graph = graphOf([oneSection(questions)]);
+    const out = buildInstrumentModel('T', graph, 'now').sections[0].questions;
+    expect(out.map((q) => q.fidelity)).toEqual([null, null, null]);
+  });
+
+  it('resolves each stop when the gate is on', () => {
+    const graph = graphOf([oneSection(questions)], {
+      questionFidelity: { enabled: true, defaultFidelity: 0.5 },
+    });
+    const out = buildInstrumentModel('T', graph, 'now').sections[0].questions;
+    expect(out.map((q) => q.fidelity)).toEqual(['must_ask', 'free', 'balanced']);
+  });
+
+  it('does not read the stored column directly', () => {
+    // The anti-pattern `question-fidelity.md` names: a value an admin pre-set on the Structure
+    // editor before switching the feature on must read as absent, not as in force.
+    const graph = graphOf([oneSection([question({ key: 'q1', type: 'likert', fidelity: 1 })])]);
+    expect(buildInstrumentModel('T', graph, 'now').sections[0].questions[0].fidelity).toBeNull();
   });
 });

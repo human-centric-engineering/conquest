@@ -410,6 +410,104 @@ export const APP_SUBJECT_DATA_SOURCES: AppSubjectDataSource[] = [
         () => null
       ),
   },
+  {
+    // The F5.1–F5.3 design panel, the older sibling of the scope panel above. It went undeclared
+    // for as long as the coverage guard's column-name net omitted `triggeredByUserId`.
+    model: 'AppQuestionnaireEvaluationRun',
+    section: 'evaluationRunsTriggered',
+    disposition: 'attribution',
+    description:
+      'Questionnaire design-evaluation runs you triggered. The judges’ findings about the questionnaire are not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnaireEvaluationRun.findMany({
+          where: { triggeredByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
+    model: 'AppQuestionnaireEvaluationFinding',
+    section: 'evaluationFindingsDecided',
+    disposition: 'attribution',
+    description:
+      'Questionnaire design-evaluation findings you accepted, declined, edited, or applied. The finding’s content is not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnaireEvaluationFinding.findMany({
+          where: { decidedByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
+    // A turn evaluation is a judgement about the INTERVIEWER, not about the admin who ran it, and
+    // not about the respondent (whose words live on the turn row, exported through their session).
+    // So the admin's link to it is authorship of the act, and nothing more is returned.
+    model: 'AppQuestionnaireTurnEvaluation',
+    section: 'turnEvaluationsRun',
+    disposition: 'attribution',
+    description:
+      'Interview-turn evaluations you ran. The verdict itself, and the respondent’s words it judged, are not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnaireTurnEvaluation.findMany({
+          where: { evaluatedByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
+    model: 'AppQuestionnairePolicyEvaluationRun',
+    section: 'policyEvaluationRunsTriggered',
+    disposition: 'attribution',
+    description:
+      'Interviewer-policy evaluation runs you triggered. The judges’ findings about the questionnaire are not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnairePolicyEvaluationRun.findMany({
+          where: { triggeredByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
+    model: 'AppQuestionnairePolicyEvaluationFinding',
+    section: 'policyEvaluationFindingsDecided',
+    disposition: 'attribution',
+    description:
+      'Interviewer-policy evaluation findings you accepted, declined, edited, or applied. The finding’s content is not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appQuestionnairePolicyEvaluationFinding.findMany({
+          where: { decidedByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
+  {
+    // Preserved AI runs (F14.15). `triggeredByUserId` is the admin who ran the extraction critic,
+    // the config advisor, an edit, a suggester — authorship of a config action, never respondent
+    // data, so the prompt/output snapshots stay out of the attribution payload.
+    model: 'AppAiRun',
+    section: 'aiRunsTriggered',
+    disposition: 'attribution',
+    description:
+      'AI runs you triggered while authoring questionnaires — extraction checks, advice, edits, and suggestions. The prompts and outputs are not included here.',
+    fetch: async ({ userId }) =>
+      toAttribution(
+        await prisma.appAiRun.findMany({
+          where: { triggeredByUserId: userId },
+          ...ATTRIBUTION_BARE,
+        }),
+        () => null
+      ),
+  },
 ];
 
 /**

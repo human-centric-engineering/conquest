@@ -25,6 +25,7 @@ import type {
   PackModel,
   PackSetupItem,
 } from '@/lib/app/questionnaire/export/build-pack-model';
+import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
 import type { InstrumentQuestion } from '@/lib/app/questionnaire/export/build-instrument-model';
 
 const COLORS = {
@@ -413,7 +414,14 @@ function QuestionBlock({ q }: { q: InstrumentQuestion }) {
   return (
     <View style={styles.question} wrap={false}>
       <Text style={styles.prompt}>{`${q.number}  ${q.prompt}`}</Text>
-      <Text style={styles.flags}>{`${q.typeLabel} · ${q.required ? 'required' : 'optional'}`}</Text>
+      <Text style={styles.flags}>
+        {[
+          q.typeLabel,
+          q.required ? 'required' : 'optional',
+          // Absent entirely when the version's fidelity gate is off.
+          ...(q.fidelity ? [`fidelity: ${QUESTION_FIDELITY_LABELS[q.fidelity]}`] : []),
+        ].join(' · ')}
+      </Text>
       {q.constraint && <Text style={styles.constraint}>{q.constraint}</Text>}
       {q.options.map((option, i) => (
         <Text key={i} style={styles.option}>{`•  ${option}`}</Text>

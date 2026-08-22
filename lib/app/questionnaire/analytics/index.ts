@@ -34,6 +34,12 @@ export {
   ROUTING_FINDING_MIN_PLANS,
 } from '@/lib/app/questionnaire/analytics/routing';
 export {
+  getInterviewerPolicyAnalytics,
+  assembleInterviewerPolicyAnalytics,
+  POLICY_FINDING_MIN_SESSIONS,
+  POLICY_TURN_READ_CAP,
+} from '@/lib/app/questionnaire/analytics/interviewer-policy';
+export {
   getVersionDiagnostics,
   getInvitationDiagnostics,
 } from '@/lib/app/questionnaire/analytics/diagnostics';
@@ -44,6 +50,11 @@ export {
 } from '@/lib/app/questionnaire/analytics/privacy';
 
 export type {
+  FunnelPhaseKey,
+  MustAskQuestionRow,
+  InterviewerPolicyFindingCode,
+  InterviewerPolicyFinding,
+  InterviewerPolicyResult,
   AnalyticsRange,
   ProvenanceBreakdown,
   ValueBucket,

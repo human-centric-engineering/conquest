@@ -42,6 +42,7 @@ const MODEL: InstrumentModel = {
           tags: ['Wellbeing'],
           options: ['1 — Low', '2 — Mid', '3 — High'],
           constraint: 'Scale 1 (Low) to 3 (High)',
+          fidelity: null,
         },
         {
           number: '1.2',
@@ -56,6 +57,7 @@ const MODEL: InstrumentModel = {
           tags: [],
           options: [],
           constraint: null,
+          fidelity: null,
         },
       ],
     },
@@ -82,7 +84,7 @@ describe('buildInstrumentCsv', () => {
     const csv = buildInstrumentCsv(MODEL);
     const lines = csv.trimEnd().split('\r\n');
     expect(lines[0]).toBe(
-      'section_number,section_title,question_number,key,prompt,type,required,weight,options,constraint,guidelines,tags'
+      'section_number,section_title,question_number,key,prompt,type,required,weight,fidelity,options,constraint,guidelines,tags'
     );
     expect(lines).toHaveLength(3); // header + 2 questions
     expect(lines[1]).toContain('overall');

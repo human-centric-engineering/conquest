@@ -36,6 +36,9 @@ function question(over: Partial<InstrumentQuestion> = {}): InstrumentQuestion {
     tags: [],
     options: [],
     constraint: null,
+    // The gate-off default: with `questionFidelity.enabled` false every question resolves to
+    // `balanced`, and the model reports null so no renderer prints a uniform column.
+    fidelity: null,
     ...over,
   };
 }
@@ -67,13 +70,13 @@ function model(over: Partial<InstrumentModel> = {}): InstrumentModel {
 }
 
 const HEADER =
-  'section_number,section_title,question_number,key,prompt,type,required,weight,options,constraint,guidelines,tags';
+  'section_number,section_title,question_number,key,prompt,type,required,weight,fidelity,options,constraint,guidelines,tags';
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 
 describe('buildInstrumentCsv', () => {
   describe('header row', () => {
-    it('emits all 12 column headers in the documented order on the first row', () => {
+    it('emits all 13 column headers in the documented order on the first row', () => {
       const csv = buildInstrumentCsv(model({ sections: [], sectionCount: 0, questionCount: 0 }));
       expect(csv.split('\r\n')[0]).toBe(HEADER);
     });
@@ -331,5 +334,39 @@ describe('buildInstrumentCsv', () => {
       expect(rows[1]).toContain('alpha');
       expect(rows[2]).toContain('beta');
     });
+  });
+});
+
+/**
+ * Question fidelity in the export.
+ *
+ * Two properties, and the first is the one that matters: a version that never turned the gate on
+ * must produce byte-for-byte the document it produced before the field existed.
+ */
+describe('buildInstrumentCsv — question fidelity', () => {
+  it('keeps the column but leaves the cell empty when the gate is off', () => {
+    const out = buildInstrumentCsv(model({ sections: [section({ questions: [question()] })] }));
+    // The header stays regardless so the CSV shape is stable for a spreadsheet
+    // consumer; only the value is absent.
+    expect(out).toMatch(/fidelity/);
+    expect(out).not.toMatch(/Must ask/);
+  });
+
+  it('keeps the header and every row the same width', () => {
+    const out = buildInstrumentCsv(
+      model({ sections: [section({ questions: [question({ fidelity: 'close' })] })] })
+    );
+    // The header array and the cell array are maintained separately, so a column added
+    // to one and not the other silently shifts every later value.
+    const rows = out.split('\n').filter((r) => r.includes(','));
+    const widths = new Set(rows.map((r) => r.split(',').length));
+    expect(widths.size).toBe(1);
+  });
+
+  it('names the level when the gate is on', () => {
+    const out = buildInstrumentCsv(
+      model({ sections: [section({ questions: [question({ fidelity: 'must_ask' })] })] })
+    );
+    expect(out).toMatch(/Must ask/);
   });
 });

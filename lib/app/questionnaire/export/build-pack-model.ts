@@ -24,13 +24,24 @@
  * deterministic in its input.
  */
 
+import {
+  QUESTION_FIDELITY_LABELS,
+  QUESTION_FIDELITY_LEVELS,
+  resolveQuestionFidelity,
+  type QuestionFidelityLevel,
+} from '@/lib/app/questionnaire/types';
 import type {
   EvaluationRunDetail,
   ScopeEvaluationRunDetail,
   ScopeFindingTargetKind,
+  PolicyFindingTargetKind,
+  PolicyEvaluationRunDetail,
   VersionGraphView,
 } from '@/lib/app/questionnaire/views';
 import type { GlossaryAppendixView } from '@/lib/app/questionnaire/glossary/types';
+// The pure chat leaf — `paceProfile` reads `FUNNEL_PACE_PROFILES`, the same table the runtime uses,
+// so the pack's arc bands cannot drift from the arc the interviewer actually runs.
+import { paceProfile } from '@/lib/app/questionnaire/chat/interviewer-strategy';
 import { buildSettingRows, type PackSetupItem } from '@/lib/app/questionnaire/settings-registry';
 import type { DataSlotView } from '@/lib/app/questionnaire/data-slots/views';
 import {
@@ -59,6 +70,14 @@ import {
   type ScopeEvaluationDimension,
   type ScopeSeverityCounts,
 } from '@/lib/app/questionnaire/scope-evaluation';
+import {
+  POLICY_EVALUATION_DIMENSIONS,
+  POLICY_EVALUATION_DIMENSION_SPECS,
+  describePolicyProposedEdit,
+  groupPolicyFindingsByTarget,
+  type PolicyEvaluationDimension,
+  type PolicySeverityCounts,
+} from '@/lib/app/questionnaire/policy-evaluation';
 import {
   buildInstrumentModel,
   type InstrumentSection,
@@ -102,6 +121,17 @@ export interface PackInclude {
    * `buildAdaptiveScopeSection`.
    */
   adaptiveScope: boolean;
+  /**
+   * The interviewer policy — the client's house rules, the questioning arc, and which questions are
+   * asked as written — plus the F18.8 judge panel's verdict on it.
+   *
+   * Its own top-level flag rather than a nest under `setup`, for two reasons. `setup` is a flat list
+   * across ~15 setting groups, so nesting a verdict about three of them there would attach a
+   * judgement to twelve things it never read. And `setup` defaults **true**, which would ship
+   * unreviewed AI critique into every default download the moment this landed. Defaults `false`,
+   * like `evaluations` and `adaptiveScope`, for that second reason.
+   */
+  interviewerPolicy: boolean;
 }
 
 /**
@@ -117,6 +147,7 @@ export const DEFAULT_PACK_INCLUDE: PackInclude = {
   setupTechnical: false,
   evaluations: false,
   adaptiveScope: false,
+  interviewerPolicy: false,
 };
 
 /** One data slot, resolved for the pack — its linked questions carry their prompt, not just a key. */
@@ -355,6 +386,90 @@ export interface PackAdaptiveScope {
   evaluation: PackScopeEvaluation;
 }
 
+/** One policy judge's verdict on one target, for the pack. */
+export interface PackPolicyEvaluationJudgeView {
+  dimension: PolicyEvaluationDimension;
+  /** The judge's display name, so a reader needn't know the slug. */
+  label: string;
+  severity: FindingSeverity;
+  status: FindingReviewStatus;
+  proposedChange: string;
+  rationale: string;
+  sourceQuote: string | null;
+  /** Plain-English rendering of the structured edit; `null` when prose-only. */
+  proposedEditSummary: string | null;
+}
+
+/** One flagged policy target with every judge's view of it gathered underneath. */
+export interface PackPolicyEvaluationTarget {
+  key: string;
+  kind: PolicyFindingTargetKind;
+  /** The rule's text, the question's prompt (prefixed "Fidelity — "), or the block's name. */
+  label: string;
+  removed: boolean;
+  counts: PolicySeverityCounts;
+  judges: PackPolicyEvaluationJudgeView[];
+}
+
+/** One policy judge's scoreboard line. */
+export interface PackPolicyEvaluationScore {
+  dimension: PolicyEvaluationDimension;
+  label: string;
+  score: number | null;
+  diagnostic: string | null;
+  findingCount: number;
+}
+
+/** The policy-evaluation appendix — the latest F18.8 run, if one has ever been made. */
+export interface PackPolicyEvaluation {
+  hasRun: boolean;
+  runAt: string | null;
+  totalFindings: number;
+  scores: PackPolicyEvaluationScore[];
+  targets: PackPolicyEvaluationTarget[];
+}
+
+/** One house rule, for the pack. */
+export interface PackHouseRule {
+  kind: string;
+  /** What the interviewer must do, never do, or say. */
+  text: string;
+  /** What the respondent asks about, for an if-asked rule; `null` otherwise. */
+  trigger: string | null;
+}
+
+/**
+ * The interviewer-policy appendix — how this questionnaire's interviewer is set up, in plain
+ * language, with the judge panel's verdict nested inside it.
+ *
+ * Duplicates the one-line `setup` rows deliberately, exactly as `PackAdaptiveScope` does: the setup
+ * row is the summary, this is the appendix.
+ */
+export interface PackInterviewerPolicy {
+  /** False when the questionnaire is filled in as a form — there is no interviewer at all. */
+  conversational: boolean;
+  houseRulesEnabled: boolean;
+  /** Only the rules actually in force. A parked rule is a draft and is not printed. */
+  houseRules: PackHouseRule[];
+  approachLabel: string;
+  /** `null` under Open or Targeted, where the pace is not read. */
+  paceLabel: string | null;
+  openingSource: string;
+  tacticLabels: string[];
+  /**
+   * The arc's bands, derived from the SAME `FUNNEL_PACE_PROFILES` the runtime reads — the
+   * `FunnelArcExplainer` trick applied to the pack. A hard-coded table that drifted would be worse
+   * than none, because the reader has no reason to doubt it. Empty when no funnel is running.
+   */
+  arcBands: { label: string; detail: string }[];
+  fidelityEnabled: boolean;
+  /** Counts per level over every question; empty when the gate is off. */
+  fidelityDistribution: { level: string; label: string; count: number }[];
+  /** The questions held to their exact wording. */
+  mustAskQuestions: { key: string; prompt: string }[];
+  evaluation: PackPolicyEvaluation;
+}
+
 /** The full Questionnaire Pack model the serialisers render. */
 export interface PackModel {
   title: string;
@@ -370,6 +485,7 @@ export interface PackModel {
   setup: PackSetupItem[] | null;
   evaluations: PackEvaluations | null;
   adaptiveScope: PackAdaptiveScope | null;
+  interviewerPolicy: PackInterviewerPolicy | null;
 }
 
 /** Resolve a data slot's `questionKeys` to `{ key, prompt }` pairs against a pre-built prompt map. */
@@ -587,6 +703,164 @@ export interface PackAdaptiveScopeSource {
 }
 
 /** Assemble the Questionnaire Pack model. Pure. */
+
+/** The policy-evaluation appendix — the latest run, or a stated absence. */
+function buildPolicyEvaluationSection(run: PolicyEvaluationRunDetail | null): PackPolicyEvaluation {
+  if (!run) return { hasRun: false, runAt: null, totalFindings: 0, scores: [], targets: [] };
+
+  const scores: PackPolicyEvaluationScore[] = POLICY_EVALUATION_DIMENSIONS.map((dimension) => {
+    const summary = run.dimensionSummary.find((sm) => sm.dimension === dimension) ?? null;
+    return {
+      dimension,
+      label: POLICY_EVALUATION_DIMENSION_SPECS[dimension].label,
+      score: summary?.score ?? null,
+      diagnostic: summary?.diagnostic ?? null,
+      findingCount: run.findings.filter((f) => f.dimension === dimension).length,
+    };
+  });
+
+  // The SAME pure grouping the admin run-detail view uses, so the console and the pack can never
+  // disagree about what counts as one subject.
+  const targets: PackPolicyEvaluationTarget[] = groupPolicyFindingsByTarget(
+    run.findings,
+    'natural'
+  ).map((group) => ({
+    key: group.key,
+    kind: group.kind,
+    label: group.label,
+    removed: group.removed,
+    counts: group.counts,
+    judges: group.findings.map((f) => {
+      const op = f.editedOverride ?? f.proposedEdit;
+      return {
+        dimension: f.dimension,
+        label: POLICY_EVALUATION_DIMENSION_SPECS[f.dimension].label,
+        severity: f.severity,
+        status: f.status,
+        proposedChange: f.proposedChange,
+        rationale: f.rationale,
+        sourceQuote: f.sourceQuote,
+        proposedEditSummary: op ? describePolicyProposedEdit(op) : null,
+      };
+    }),
+  }));
+
+  return {
+    hasRun: true,
+    runAt: run.completedAt ?? run.startedAt,
+    totalFindings: run.totalFindings,
+    scores,
+    targets,
+  };
+}
+
+const POLICY_APPROACH_LABELS: Record<string, string> = {
+  funnel: 'Funnel — open questions first, narrowing to specifics',
+  open: 'Open throughout',
+  targeted: 'Targeted from the first question',
+};
+
+const POLICY_PACE_LABELS: Record<string, string> = {
+  gradual: 'Stay open longer',
+  balanced: 'Balanced',
+  brisk: 'Narrow quickly',
+};
+
+const POLICY_RULE_KIND_LABELS: Record<string, string> = {
+  always: 'Always',
+  never: 'Never',
+  if_asked: 'If asked',
+};
+
+/**
+ * The interviewer-policy appendix — how this questionnaire's interviewer is set up, in plain
+ * language, with the judge panel's verdict nested inside it.
+ */
+function buildInterviewerPolicySection(
+  graph: VersionGraphView,
+  run: PolicyEvaluationRunDetail | null
+): PackInterviewerPolicy {
+  const config = graph.config;
+  const strategy = config.interviewerStrategy;
+  const questions = graph.sections.flatMap((section) => section.questions);
+  const gateOn = config.questionFidelity.enabled;
+
+  const levelCounts = new Map<QuestionFidelityLevel, number>();
+  const mustAskQuestions: { key: string; prompt: string }[] = [];
+  for (const q of questions) {
+    const level = resolveQuestionFidelity(q.fidelity, config.questionFidelity);
+    levelCounts.set(level, (levelCounts.get(level) ?? 0) + 1);
+    if (level === 'must_ask') mustAskQuestions.push({ key: q.key, prompt: q.prompt });
+  }
+
+  // Derived from the same FUNNEL_PACE_PROFILES the runtime reads, never hard-coded — a table that
+  // drifted would be worse than none, because a reader has no reason to doubt it.
+  const profile = paceProfile(strategy);
+  const arcBands =
+    strategy.enabled && strategy.approach === 'funnel'
+      ? [
+          {
+            label: 'Opening',
+            detail: `The first ${profile.openingWindow} question${profile.openingWindow === 1 ? '' : 's'} are broad and unhurried`,
+          },
+          {
+            label: 'Broad',
+            detail: `While less than ${Math.round(profile.openBelow * 100)}% of the questionnaire is covered`,
+          },
+          {
+            label: 'Specific',
+            detail: `Once more than ${Math.round(profile.targetedAbove * 100)}% is covered`,
+          },
+        ]
+      : [];
+
+  const tacticLabels = [
+    strategy.probeDepth && 'Probes shallow answers',
+    strategy.reflect && 'Reflects answers back',
+    strategy.batchRelated && 'Invites related gaps together',
+  ].filter((t): t is string => typeof t === 'string');
+
+  return {
+    conversational: config.presentationMode !== 'form',
+    houseRulesEnabled: config.houseRules.enabled,
+    // Only the rules actually in force — a parked rule is a draft, not policy.
+    houseRules: config.houseRules.enabled
+      ? config.houseRules.rules
+          .filter((r) => r.enabled && r.text.trim() !== '')
+          .map((r) => ({
+            kind: POLICY_RULE_KIND_LABELS[r.kind] ?? r.kind,
+            text: r.text,
+            trigger: r.trigger ?? null,
+          }))
+      : [],
+    approachLabel: strategy.enabled
+      ? (POLICY_APPROACH_LABELS[strategy.approach] ?? strategy.approach)
+      : 'Default',
+    // The pace is read for the funnel only, so naming one elsewhere would describe an arc that is
+    // not running.
+    paceLabel:
+      strategy.enabled && strategy.approach === 'funnel'
+        ? (POLICY_PACE_LABELS[strategy.pace] ?? strategy.pace)
+        : null,
+    openingSource:
+      strategy.enabled && strategy.openingMode === 'examples'
+        ? 'Guided by the examples you wrote'
+        : "The interviewer's own framings",
+    tacticLabels,
+    arcBands,
+    fidelityEnabled: gateOn,
+    fidelityDistribution: gateOn
+      ? QUESTION_FIDELITY_LEVELS.map((level) => ({
+          level,
+          label: QUESTION_FIDELITY_LABELS[level],
+          count: levelCounts.get(level) ?? 0,
+        }))
+      : [],
+    mustAskQuestions: gateOn ? mustAskQuestions : [],
+    evaluation: buildPolicyEvaluationSection(run),
+  };
+}
+
 export function buildPackModel(
   title: string,
   graph: VersionGraphView,
@@ -594,6 +868,7 @@ export function buildPackModel(
   glossary: GlossaryAppendixView | null,
   evaluationRun: EvaluationRunDetail | null,
   adaptiveScopeSource: PackAdaptiveScopeSource | null,
+  policyEvaluationRun: PolicyEvaluationRunDetail | null,
   include: PackInclude,
   generatedAt: string
 ): PackModel {
@@ -628,6 +903,9 @@ export function buildPackModel(
     glossary: include.definitions ? glossary : null,
     setup: include.setup ? buildSettingRows(graph.config, include.setupTechnical) : null,
     evaluations: include.evaluations ? buildEvaluationsSection(evaluationRun) : null,
+    interviewerPolicy: include.interviewerPolicy
+      ? buildInterviewerPolicySection(graph, policyEvaluationRun)
+      : null,
     adaptiveScope:
       include.adaptiveScope && adaptiveScopeSource
         ? buildAdaptiveScopeSection(

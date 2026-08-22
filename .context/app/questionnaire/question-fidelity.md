@@ -252,9 +252,12 @@ as they are going to.
 | Per-question control                   | `components/admin/questionnaires/question-editor.tsx` (`FidelityControl`)                                                                                                      |
 | New-question default                   | `…/sections/[sectionId]/questions/route.ts` — applies `questionFidelity.defaultFidelity` on create (the midpoint while the gate is off, or whatever the body names explicitly) |
 | Admin preview context                  | `app/api/v1/app/questionnaires/_lib/selection-context.ts` — must carry `fidelity`, or the `/next-question` preview silently diverges from the live turn loop                   |
+| Turn-evaluator context                 | `app/api/v1/app/questionnaire-sessions/_lib/turn-evaluation-context.ts` (`describeTurnFidelity`) — tells the judge how faithfully THIS turn's question had to be put           |
 | Section bulk-set                       | `components/admin/questionnaires/section-editor.tsx` → `PATCH …/versions/:vid/questions`                                                                                       |
 | Settings gate                          | `components/admin/questionnaires/config-editor.tsx`, "Questions & completion" group                                                                                            |
 | Pack / audit summary                   | `lib/app/questionnaire/settings-registry.ts` (`questionFidelity` descriptor)                                                                                                   |
+| Instrument + pack export               | `lib/app/questionnaire/export/build-instrument-model.ts` (`InstrumentQuestion.fidelity`) — resolved once per question; `null` when the gate is off                             |
+| Export renderers (6)                   | `build-instrument-{text,csv}.ts`, `build-pack-{markdown,csv}.ts`, `components/app/questionnaire/export/{instrument,pack}-pdf-document.tsx`                                     |
 | Fork / duplicate / clone               | `app/api/v1/app/questionnaires/_lib/copy-version-graph.ts` (question select **and** create)                                                                                    |
 | Definition export / import             | `lib/app/questionnaire/authoring/definition-export.ts`, `_lib/import-definition.ts`                                                                                            |
 
@@ -273,6 +276,37 @@ Audit actions are kept distinct rather than folded together, so existing history
 `questionnaire_question.bulk_required` (required only, unchanged), `…bulk_fidelity` (fidelity only),
 `…bulk_update` (both).
 
+## The export has to say it too
+
+A blank instrument that prints only the prompt cannot distinguish a question that will be put word
+for word, with its scale read out, from one that may never be asked aloud at all. Both are in the
+document; only one of them is a script. So `InstrumentQuestion` carries the resolved level and all
+six renderers print it beside the type and the required flag — the branded Questionnaire Pack and
+the brand-free instrument export share one model, so this is one field and six one-line changes.
+
+`null` when the gate is off, and the renderers print nothing at all in that case: with the gate off
+every question resolves to `balanced`, so a uniform column would be noise on the large majority of
+questionnaires that never opted in. The two CSV writers keep the **column** either way — a stable
+shape is what a spreadsheet consumer needs — and leave the cell empty.
+
+## The judge has to be told
+
+`must_ask` is the one stop that makes a _correct_ turn look wrong to an automated reviewer. The
+turn-evaluator's rubric scores `openEndedness`, `nonLeading` and `specificity`; putting a question
+verbatim and reciting its scale is the opposite of open and reads as leading, so a compliant
+must-ask turn was being marked down for doing exactly what the author asked.
+
+So the evaluator is handed two things it did not have before: the version-level gate, and — via
+`describeTurnFidelity` — the resolved level for the question _this_ turn asked about. The level is
+resolved server-side through `resolveQuestionFidelity`, never taken from the request body: on the
+saved-turn path from the row's `targetedQuestionId`, and on the live drawer path from the rendered
+card's `questionKey` (so the live path covers `must_ask` and last-resort re-asks, and falls back to
+version-level context elsewhere). `balanced` is omitted — it is the behaviour the rubric already
+assumes.
+
+The rubric clause that reads it is pinned by `TURN_RUBRIC_VERSION`, which moved to `1.1.0` when this
+landed: a score is only comparable to another score under the same rubric.
+
 ## Anti-patterns
 
 - **Don't** read `slot.fidelity` directly in runtime code — use `resolveQuestionFidelity`, or you
@@ -289,8 +323,9 @@ Audit actions are kept distinct rather than folded together, so existing history
 - **Don't** persist the card's rendered content. Store the key and rebuild from the live slot, or a
   reworded question leaves a stale copy pinned in every resumed transcript.
 - **Don't** read `fidelity` in a new context builder without adding it to that builder's Prisma
-  select. There are two — `turn-context.ts` (live) and `selection-context.ts` (admin preview) — and a
-  preview that resolves everything to `balanced` tells an admin the feature is broken when it isn't.
+  select. There are now three — `turn-context.ts` (live), `selection-context.ts` (admin preview) and
+  `turn-evaluation-context.ts` (the judge) — and a preview that resolves everything to `balanced`
+  tells an admin the feature is broken when it isn't.
 - **Don't** suppress the card on a per-question flag. Dismissal must be per-turn, or a dismissed
   must-ask can never be answered.
 - **Don't** hand-wire the _settings_ block into import/export — it flows from

@@ -8,6 +8,7 @@
  */
 
 import { csvEscape } from '@/lib/api/csv';
+import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
 import type { InstrumentModel } from '@/lib/app/questionnaire/export/build-instrument-model';
 
 /** Column headers — one row per question. */
@@ -20,6 +21,9 @@ const HEADERS = [
   'type',
   'required',
   'weight',
+  // Empty on every row when the version's fidelity gate is off — the column stays so the shape is
+  // stable across exports, which is what a spreadsheet consumer needs.
+  'fidelity',
   'options',
   'constraint',
   'guidelines',
@@ -41,6 +45,7 @@ export function buildInstrumentCsv(model: InstrumentModel): string {
         q.typeLabel,
         q.required ? 'yes' : 'no',
         String(q.weight),
+        q.fidelity ? QUESTION_FIDELITY_LABELS[q.fidelity] : '',
         q.options.join(' | '),
         q.constraint ?? '',
         q.guidelines ?? '',

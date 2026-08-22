@@ -389,7 +389,12 @@ const RECENT_CONTEXT_LINES = 12;
 function deriveTurnContext(
   messages: QuestionnaireTurn[] | undefined,
   turnIndex: number
-): { respondentMessage?: string; interviewerMessage?: string; recentMessages?: string[] } {
+): {
+  respondentMessage?: string;
+  interviewerMessage?: string;
+  questionKey?: string;
+  recentMessages?: string[];
+} {
   if (!messages || messages.length === 0) return {};
 
   // Find the index of the (turnIndex)-th user message.
@@ -408,9 +413,17 @@ function deriveTurnContext(
 
   const respondentMessage = messages[userIdx].content;
   let interviewerMessage: string | undefined;
+  // Question fidelity: the key of the question this turn asked about, so the judge is told how
+  // faithfully it had to be put rather than marking a verbatim `must_ask` down as closed and
+  // leading. Only a rendered answer control carries a key on the client, so this covers the
+  // `must_ask` turns (where the mismatch actually bites) and the last-resort re-asks; every other
+  // turn falls back to the version-level context. The saved-turn path has no such limit — it reads
+  // `targetedQuestionId` off the row.
+  let questionKey: string | undefined;
   for (let j = userIdx + 1; j < messages.length; j++) {
     if (messages[j].role === 'assistant') {
       interviewerMessage = messages[j].content;
+      questionKey = messages[j].card?.questionKey;
       break;
     }
   }
@@ -423,6 +436,7 @@ function deriveTurnContext(
   return {
     ...(respondentMessage ? { respondentMessage } : {}),
     ...(interviewerMessage ? { interviewerMessage } : {}),
+    ...(questionKey ? { questionKey } : {}),
     ...(recentMessages.length > 0 ? { recentMessages } : {}),
   };
 }

@@ -28,6 +28,11 @@ import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import type { QuestionnaireVersionSummary } from '@/lib/app/questionnaire/views';
 import { isPreviewAvailable } from '@/lib/app/questionnaire/launch/readiness';
 import {
+  configConflictInputFromConfig,
+  detectConfigConflicts,
+} from '@/lib/app/questionnaire/authoring/config-conflicts';
+import { ConfigConflictBanner } from '@/components/admin/questionnaires/config-conflicts';
+import {
   isLikertLabelled,
   isMatrixLabelled,
 } from '@/lib/app/questionnaire/authoring/type-config-schema';
@@ -102,6 +107,14 @@ export default async function OverviewTab({ params }: PageProps) {
   const adaptiveScopeErrorCount =
     scope === null ? 0 : scope.issues.filter((i) => i.severity === 'error').length;
 
+  // Settings conflicts for the saved version, from the same detector the Settings tab runs live —
+  // built here from the SAVED config (the editor builds its own from unsaved local state, so the
+  // banner reacts as an admin types; this one has to describe the version as it stands).
+  const configConflicts =
+    isDraft && graph
+      ? detectConfigConflicts(configConflictInputFromConfig(graph.config, selected.questionCount))
+      : [];
+
   // Preview is available for a launched version OR a launchable draft (passes the same readiness
   // gate as launch — so an admin can rehearse before going live), and only when the live-sessions
   // surface is on. Shared with the workspace-header Preview button; the server
@@ -158,6 +171,17 @@ export default async function OverviewTab({ params }: PageProps) {
       {/* Launch readiness */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Launch readiness</h2>
+        {/*
+         * Settings conflicts, beside the checklist rather than in it. `detectConfigConflicts` never
+         * emits `error` by design — it is guessing at intent — so wiring it into the checklist's
+         * pass/fail rows would misrepresent both. But its sharpest finding (a house rule promising
+         * more anonymity than the questionnaire offers) is a claim the client has to stand behind
+         * afterwards, and it was visible only to an admin who happened to open the Settings tab.
+         * The banner's jump-links go there.
+         */}
+        {isDraft && graph && configConflicts.length > 0 ? (
+          <ConfigConflictBanner conflicts={configConflicts} basePath={`${base}/settings`} />
+        ) : null}
         {isDraft && graph ? (
           <div className="bg-card rounded-xl border p-4">
             <LaunchChecklist

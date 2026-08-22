@@ -20,6 +20,7 @@ import { getVersionGraphCached } from '@/lib/app/questionnaire/workspace-data';
 import { listRoundsForVersion } from '@/app/api/v1/app/rounds/_lib/read';
 import type {
   CompletionFunnelResult,
+  InterviewerPolicyResult,
   QuestionDistributionsResult,
   QuestionnaireCostResult,
   SafeguardingSummary,
@@ -100,6 +101,24 @@ async function getCost(
   }
 }
 
+async function getInterviewerPolicy(
+  id: string,
+  versionId: string,
+  query: string
+): Promise<InterviewerPolicyResult | null> {
+  try {
+    const res = await serverFetch(
+      `${API.APP.QUESTIONNAIRES.versionAnalyticsInterviewerPolicy(id, versionId)}${query}`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<InterviewerPolicyResult>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('analytics tab: interviewer policy fetch failed', err);
+    return null;
+  }
+}
+
 async function getSafeguarding(
   id: string,
   versionId: string,
@@ -136,11 +155,12 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
   // Round-scope options (Cohorts & Rounds): only rounds that actually produced sessions for this
   // version — so the selector appears just when it's useful.
   const roundScope = await listRoundsForVersion(vid);
-  const [distributions, funnel, cost, safeguarding] = await Promise.all([
+  const [distributions, funnel, cost, safeguarding, interviewerPolicy] = await Promise.all([
     getDistributions(id, vid, query),
     getFunnel(id, vid, query),
     getCost(id, vid, query),
     getSafeguarding(id, vid, query),
+    getInterviewerPolicy(id, vid, query),
   ]);
 
   return (
@@ -186,6 +206,7 @@ export default async function AnalyticsTab({ params, searchParams }: PageProps) 
         distributions={distributions}
         funnel={funnel}
         cost={cost}
+        interviewerPolicy={interviewerPolicy}
         filters={filters}
         roundOptions={roundScope.rounds}
         hasOpenEnded={roundScope.hasOpenEnded}

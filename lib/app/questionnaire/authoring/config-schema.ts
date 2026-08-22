@@ -30,6 +30,7 @@ import {
   CONTRADICTION_MODES,
   FUNNEL_PACES,
   HOUSE_RULE_KINDS,
+  type HouseRuleKind,
   HOUSE_RULE_TEXT_MAX,
   HOUSE_RULE_TRIGGER_MAX,
   INTERVIEWER_APPROACHES,
@@ -173,6 +174,49 @@ const interviewerStrategySchema = z
  * never fire; forbidden elsewhere because a kind changed in the editor must not leave an orphaned
  * trigger behind in stored JSON (the read-path narrower drops such strays, and the two must agree).
  */
+/**
+ * `trigger` belongs to `if_asked` and to nothing else — an `if_asked` rule without one has no way to
+ * fire, and a trigger on any other kind renders as a dangling clause.
+ *
+ * Extracted as a standalone refinement because two schemas need it and only one of them has an `id`:
+ * the config PATCH validates whole stored rules, while the policy judge panel (F18.8) proposes rule
+ * *bodies* whose id is either preserved from the live rule or minted server-side. Sharing the
+ * function rather than the schema is what keeps one definition of the invariant — and this is the
+ * invariant a judge gets wrong most often.
+ */
+export function refineHouseRuleTrigger(
+  rule: { kind: HouseRuleKind; trigger?: string },
+  ctx: z.RefinementCtx
+): void {
+  if (rule.kind === 'if_asked') {
+    if (!rule.trigger) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'An "if asked" rule needs to say what the respondent asks about',
+        path: ['trigger'],
+      });
+    }
+    return;
+  }
+  if (rule.trigger !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Only an "if asked" rule can have a trigger',
+      path: ['trigger'],
+    });
+  }
+}
+
+/** The authored fields of a house rule, without the id — what a proposer supplies. */
+export const houseRuleBodySchema = z
+  .object({
+    kind: z.enum(HOUSE_RULE_KINDS),
+    text: z.string().trim().min(1).max(HOUSE_RULE_TEXT_MAX),
+    trigger: z.string().trim().max(HOUSE_RULE_TRIGGER_MAX).optional(),
+  })
+  .strict()
+  .superRefine(refineHouseRuleTrigger);
+
 const houseRuleSchema = z
   .object({
     id: z.string().trim().min(1).max(64),
@@ -182,25 +226,7 @@ const houseRuleSchema = z
     trigger: z.string().trim().max(HOUSE_RULE_TRIGGER_MAX).optional(),
   })
   .strict()
-  .superRefine((rule, ctx) => {
-    if (rule.kind === 'if_asked') {
-      if (!rule.trigger) {
-        ctx.addIssue({
-          code: 'custom',
-          message: 'An "if asked" rule needs to say what the respondent asks about',
-          path: ['trigger'],
-        });
-      }
-      return;
-    }
-    if (rule.trigger !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Only an "if asked" rule can have a trigger',
-        path: ['trigger'],
-      });
-    }
-  });
+  .superRefine(refineHouseRuleTrigger);
 
 /**
  * The question-fidelity gate. `.strict()` like its neighbours so a typo'd key is a 400 rather than a

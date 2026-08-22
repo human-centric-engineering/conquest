@@ -25,7 +25,7 @@ import type { TurnEvaluationInput } from '@/lib/app/questionnaire/turn-evaluatio
  * tightened rule. Treat it like a migration: an edit to the rubric without a bump silently
  * mixes incomparable verdicts under one version label.
  */
-export const TURN_RUBRIC_VERSION = '1.0.0';
+export const TURN_RUBRIC_VERSION = '1.1.0';
 
 /**
  * The evaluator's standing instructions. Condensed from the product spec: WHO it is, WHAT to
@@ -58,6 +58,18 @@ have no instruction-compliance or text-output quality to score.
 - Be specific and evidence-based. Quote or reference the prompt/response when you make a claim.
 - If context (goal, audience, history) is missing, evaluate on what is provided and note the gap; \
 do not fabricate objectives.
+- CONFIGURED POLICY IS THE STANDARD, NOT A FAULT. The context block may describe an interviewer \
+policy the admin deliberately set: house rules (always / never / if-asked), a questioning approach \
+and pace, and a per-question fidelity level. Judge the turn against that policy, never against a \
+generic ideal it was configured away from. Specifically: when the question's fidelity is "Close" or \
+"Must ask", putting it close to its written wording — and, for a choice or scale question at "Must \
+ask", stating its options — is CORRECT and must not cost it \`openEndedness\`, \`nonLeading\` or \
+\`specificity\`; score those on how well it did the thing it was told to do. A "targeted" approach is \
+meant to be narrow; an "open" one is meant to be broad. An interviewer obeying a house rule is \
+complying, so that is never a \`violations\` entry — a rule it BROKE is. Where a policy makes a \
+sub-score inapplicable rather than good or bad, score it neutrally and say why in \`violations\`-free \
+prose. If a policy itself looks ill-judged, that belongs in \`improvements\`, not in a low score for \
+the turn that followed it.
 
 SCORING BANDS (overall 0–100): 90–100 Excellent (strong instruction adherence, strong information \
 gain, high-quality extraction, strong adaptive interviewing, minimal drift); 75–89 Good (minor \
@@ -145,6 +157,21 @@ function buildContextBlock(input: TurnEvaluationInput): string {
     pushField(lines, 'Audience', ctx.audience);
     pushField(lines, 'Selection strategy', ctx.selectionStrategy);
     pushField(lines, 'Interviewer tone/persona', ctx.tone);
+    // The configured interviewer policy. These state the negative ("House rules: None") rather
+    // than vanishing when a feature is off, because a judge that is not told about a policy cannot
+    // tell "none is in force" from "you weren't told" — see `TurnEvaluationContext`. Each is still
+    // omitted if the caller supplies nothing at all, so the builder stays honest about absence.
+    pushField(lines, 'Interviewer house rules (the client’s behaviour policy)', ctx.houseRules);
+    pushField(lines, 'Questioning approach', ctx.interviewerStrategy);
+    pushField(lines, 'Question fidelity setting', ctx.questionFidelity);
+    pushField(lines, 'Adaptive scope (which topics this interview covers)', ctx.adaptiveScope);
+    // The per-question level for THIS turn — the one that most often makes a correct turn look
+    // wrong to the rubric — so it comes last of the policy lines, closest to the turn itself.
+    pushField(
+      lines,
+      'How faithfully this turn’s question had to be put',
+      ctx.questionFidelityLevel
+    );
     pushField(lines, 'Respondent answer that opened this turn', ctx.respondentMessage);
     pushField(lines, 'Interviewer reply that closed this turn', ctx.interviewerMessage);
     if (ctx.recentMessages && ctx.recentMessages.length > 0) {

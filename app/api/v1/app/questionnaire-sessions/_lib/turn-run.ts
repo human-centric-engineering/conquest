@@ -70,6 +70,10 @@ export async function persistTurn(opts: {
   durationMs?: number | null;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  /** Interviewer funnel arc: the phase this turn fell in, and the coverage that decided it.
+   *  Omitted ⇒ persisted as null (pre-feature turns), which readers treat as unknown, not zero. */
+  funnelPhase?: string | null;
+  coverage?: number | null;
   upserts: AnswerSlotIntent[];
   refinements: RefinementDecision[];
   keyToSlotId: Map<string, string>;
@@ -253,6 +257,8 @@ export async function persistTurn(opts: {
     ...(opts.durationMs != null ? { durationMs: opts.durationMs } : {}),
     ...(opts.promptTokens != null ? { promptTokens: opts.promptTokens } : {}),
     ...(opts.completionTokens != null ? { completionTokens: opts.completionTokens } : {}),
+    ...(opts.funnelPhase != null ? { funnelPhase: opts.funnelPhase } : {}),
+    ...(opts.coverage != null ? { coverage: opts.coverage } : {}),
     ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
   });
 }

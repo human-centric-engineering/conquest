@@ -68,8 +68,20 @@ function topSeverity(conflicts: ConfigConflict[]): ConflictSeverity {
 /**
  * Summary banner at the top of the settings column. Renders nothing when there are no conflicts.
  * Each row jumps to its section via the anchor id the SettingsGroup already exposes.
+ *
+ * `basePath` prefixes those anchors for callers rendering the banner somewhere other than the
+ * Settings page — the launch-readiness section on the version overview passes the settings path, so
+ * "A rule may promise more anonymity than this questionnaire offers" is a link to the control that
+ * fixes it rather than a dead `#house-rules` on a page that has no such section. Omitted on the
+ * Settings tab itself, where a bare fragment is right (and avoids a navigation).
  */
-export function ConfigConflictBanner({ conflicts }: { conflicts: ConfigConflict[] }) {
+export function ConfigConflictBanner({
+  conflicts,
+  basePath = '',
+}: {
+  conflicts: ConfigConflict[];
+  basePath?: string;
+}) {
   if (conflicts.length === 0) return null;
   const accent = SEVERITY_STYLES[topSeverity(conflicts)];
   const AccentIcon = accent.Icon;
@@ -103,7 +115,7 @@ export function ConfigConflictBanner({ conflicts }: { conflicts: ConfigConflict[
                       <>
                         {' — '}
                         <a
-                          href={`#${c.sectionId}`}
+                          href={`${basePath}#${c.sectionId}`}
                           className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
                         >
                           {SECTION_LABELS[c.sectionId]}

@@ -350,6 +350,7 @@ describe('renderPackPdf', () => {
       GLOSSARY,
       EVALUATION_RUN,
       { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: SCOPE_EVALUATION_RUN },
+      null,
       { ...DEFAULT_PACK_INCLUDE, evaluations: true, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -369,12 +370,14 @@ describe('renderPackPdf', () => {
       setupTechnical: false,
       evaluations: false,
       adaptiveScope: false,
+      interviewerPolicy: false,
     };
     const model = buildPackModel(
       'Bare Pack',
       graphOf([]),
       DATA_SLOTS,
       GLOSSARY,
+      null,
       null,
       null,
       include,
@@ -391,6 +394,7 @@ describe('renderPackPdf', () => {
       graphOf([]),
       [],
       GLOSSARY,
+      null,
       null,
       null,
       DEFAULT_PACK_INCLUDE,
@@ -412,6 +416,7 @@ describe('renderPackPdf', () => {
       'Sparse Pack',
       graphOf(sections),
       DATA_SLOTS,
+      null,
       null,
       null,
       null,
@@ -442,6 +447,7 @@ describe('renderPackPdf', () => {
       null,
       null,
       null,
+      null,
       DEFAULT_PACK_INCLUDE,
       '2026-08-10T00:00:00.000Z'
     );
@@ -455,6 +461,7 @@ describe('renderPackPdf', () => {
       'Unevaluated Pack',
       graphOf([]),
       [],
+      null,
       null,
       null,
       null,
@@ -486,6 +493,7 @@ describe('renderPackPdf', () => {
         settings: { ...SCOPE_SETTINGS, enabled: false, rules: [] },
         scopeEvaluationRun: null,
       },
+      null,
       { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -504,6 +512,7 @@ describe('renderPackPdf', () => {
       null,
       null,
       { topics: [], settings: { ...SCOPE_SETTINGS, rules: [] }, scopeEvaluationRun: null },
+      null,
       { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );
@@ -527,6 +536,7 @@ describe('renderPackPdf', () => {
       null,
       null,
       { topics: SCOPE_TOPICS, settings: SCOPE_SETTINGS, scopeEvaluationRun: null },
+      null,
       { ...DEFAULT_PACK_INCLUDE, adaptiveScope: true },
       '2026-08-10T00:00:00.000Z'
     );

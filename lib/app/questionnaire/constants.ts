@@ -1309,6 +1309,55 @@ export const EVALUATE_SCOPE_FUNCTION_DEFINITION: CapabilityFunctionDefinition = 
   },
 };
 
+/* ── Interviewer policy — the policy-evaluation judge panel (F18.8) ────────── */
+
+/**
+ * Dispatcher slug of the evaluate-policy capability — one judge call, one dimension of a
+ * questionnaire's interviewer policy. The third panel, sibling to `app_evaluate_structure`
+ * (question design) and `app_evaluate_scope` (routing design).
+ */
+export const EVALUATE_POLICY_CAPABILITY_SLUG = 'app_evaluate_policy';
+
+/**
+ * `AiCapability.executionHandler` value — the class name the dispatcher resolves the in-memory
+ * handler by. Must match the class registered in `lib/app/capabilities.ts`.
+ */
+export const EVALUATE_POLICY_HANDLER = 'AppEvaluatePolicyCapability';
+
+/**
+ * The evaluate-policy capability's OpenAI-compatible function definition — the single source of
+ * truth shared by the `BaseCapability` subclass and the `AiCapability` seed row. Dispatched
+ * programmatically by the policy evaluate-preview route, never exposed to a chat tool loop.
+ * `structure` is passed as an opaque object (the pure `PolicyStructureInput` DTO); the capability
+ * validates it with Zod at execute time.
+ */
+export const EVALUATE_POLICY_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
+  name: EVALUATE_POLICY_CAPABILITY_SLUG,
+  description:
+    "Judge one dimension of a questionnaire version's interviewer policy (rule coherence, arc fit, fidelity calibration, or cross-layer conflict) — the authored house rules, questioning arc, and per-question ask-as-written dial — via a provider-agnostic structured LLM call. Returns a continuous score in [0, 1] and a list of actionable findings (proposed edits). Dispatched once per dimension; persists nothing.",
+  parameters: {
+    type: 'object',
+    properties: {
+      dimension: {
+        type: 'string',
+        description:
+          'Which dimension to judge: rule_coherence | arc_fit | fidelity_calibration | cross_layer_conflict.',
+      },
+      structure: {
+        type: 'object',
+        description:
+          'The policy structure DTO to judge — { meta, context, tone, houseRules, strategy, fidelity, routing, knownIssues[] }.',
+        additionalProperties: true,
+      },
+      versionId: {
+        type: 'string',
+        description: 'Stable version identity, threaded into cost-log metadata.',
+      },
+    },
+    required: ['dimension', 'structure'],
+  },
+};
+
 /* ── Interviewer house rules — suggestion assistant ────────────────────────── */
 
 /**

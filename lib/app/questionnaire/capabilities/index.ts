@@ -140,3 +140,9 @@ export {
   type EvaluateScopeArgs,
   type EvaluateScopeData,
 } from '@/lib/app/questionnaire/capabilities/evaluate-scope';
+
+export {
+  AppEvaluatePolicyCapability,
+  type EvaluatePolicyArgs,
+  type EvaluatePolicyData,
+} from '@/lib/app/questionnaire/capabilities/evaluate-policy';

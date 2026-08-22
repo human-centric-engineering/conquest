@@ -9,6 +9,7 @@
  * Pure: deterministic in its input. Sibling to {@link file://./build-transcript-text.ts}.
  */
 
+import { QUESTION_FIDELITY_LABELS } from '@/lib/app/questionnaire/types';
 import type { InstrumentModel } from '@/lib/app/questionnaire/export/build-instrument-model';
 
 /** A horizontal rule between blocks. */
@@ -74,7 +75,13 @@ export function buildInstrumentText(model: InstrumentModel): string {
       }
 
       for (const q of section.questions) {
-        const flags = [q.typeLabel, q.required ? 'required' : 'optional'].join(', ');
+        // Fidelity joins the flag line rather than getting its own, so it reads as a property of
+        // the question alongside its type. Absent entirely when the version's gate is off.
+        const flags = [
+          q.typeLabel,
+          q.required ? 'required' : 'optional',
+          ...(q.fidelity ? [`fidelity: ${QUESTION_FIDELITY_LABELS[q.fidelity]}`] : []),
+        ].join(', ');
         lines.push(`  ${q.number}  ${q.prompt}  [${flags}]`);
         if (q.constraint) lines.push(`      ${q.constraint}`);
         for (const option of q.options) lines.push(`      • ${option}`);

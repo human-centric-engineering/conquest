@@ -18,6 +18,25 @@ import type { TurnInspectorData } from '@/lib/app/questionnaire/inspector';
  * Optional context about the questionnaire and the turn, loaded server-side. Every field is
  * optional: the evaluator degrades gracefully when a field is absent (e.g. an anonymous
  * questionnaire with no stated audience, or a turn with no prior history).
+ *
+ * The four **policy** fields below (`houseRules`, `interviewerStrategy`, `questionFidelity`,
+ * `adaptiveScope`) exist for the same reason `tone` does: they describe behaviour the admin
+ * *configured*, so the judge must read it as the standard to score against rather than as a fault.
+ * Without them a `must_ask` question — required to be put verbatim, with its options recited —
+ * reads to the rubric as a closed, leading question and is marked down for doing exactly as it
+ * was told.
+ *
+ * They are **descriptions, not instructions**: rendered from the neutral third-person
+ * `SETTING_DESCRIPTORS` rows, never from the second-person prompt builders in `chat/**` (splicing
+ * "You have wide latitude with this question…" into a judge's context would tell the *judge* to
+ * behave that way).
+ *
+ * Unlike the interviewer's own prompt blocks, these do NOT vanish when a feature is off: the
+ * registry states "House rules: None" and "Adaptive scope: Disabled" rather than emitting nothing.
+ * That is deliberate here — a judge that is simply not told about a policy cannot tell "none is in
+ * force" from "you weren't told", and will speculate. The interviewer needs silence (an empty
+ * block costs it nothing and says nothing); the judge needs the negative stated. `tone` is the one
+ * exception and it predates this: its descriptor genuinely emits nothing when no dial is set.
  */
 export interface TurnEvaluationContext {
   /** The questionnaire's overall goal/objective (from the version). */
@@ -28,6 +47,21 @@ export interface TurnEvaluationContext {
   selectionStrategy?: string;
   /** Human-readable summary of the configured interviewer tone/persona. */
   tone?: string;
+  /** The client's behaviour policy for this questionnaire (always / never / if-asked), summarised. */
+  houseRules?: string;
+  /** The questioning approach, pace, opening mode and tactics, summarised. */
+  interviewerStrategy?: string;
+  /** The version-level question-fidelity gate, summarised. */
+  questionFidelity?: string;
+  /** Whether this interview was narrowed by Adaptive Scope, and under what limits. */
+  adaptiveScope?: string;
+  /**
+   * How faithfully THIS turn's targeted question had to be put — the resolved five-stop level,
+   * already gate-aware. Omitted at `balanced` (the default behaviour the rubric already assumes)
+   * and whenever the turn targeted no question, matching the prompt builder's own
+   * "nothing to say ⇒ say nothing" rule.
+   */
+  questionFidelityLevel?: string;
   /** The respondent's answer that opened this turn. */
   respondentMessage?: string;
   /** The interviewer's composed reply that closed this turn (the next question/offer). */

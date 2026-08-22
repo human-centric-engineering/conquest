@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation';
 
 import { DemoClientAssign } from '@/components/admin/demo-clients/demo-client-assign';
 import { AdvisorPanel } from '@/components/admin/questionnaires/advisor/advisor-panel';
+import { PolicyEvaluationCard } from '@/components/admin/questionnaires/policy-evaluation-card';
 import { CloneForClientDialog } from '@/components/admin/questionnaires/clone-for-client-dialog';
 import { RenameQuestionnaire } from '@/components/admin/questionnaires/rename-questionnaire';
 import { VersionSettingsPanel } from '@/components/admin/questionnaires/version-settings-panel';
@@ -75,6 +76,25 @@ export default async function SettingsTab({ params }: PageProps) {
       {/* Config Advisor (admin-triggered AI review of the whole config). Sits above the editor so the
           advice is read before tweaking; applying a suggestion PATCHes the same config endpoint. */}
       {graph && <AdvisorPanel questionnaireId={id} graph={graph} />}
+
+      {/* Interviewer-policy judge panel (F18.8). Sits in the same slot as the Advisor, and for the
+          same stated reason — the review is read before tweaking — but one layer more specific:
+          it judges the house rules, the questioning arc and the ask-as-written dial together.
+          Not inside any one SettingsGroup: one of its four reviewers is about the arc, one about
+          the questions, and one about how all of them interact. */}
+      {graph && (
+        <PolicyEvaluationCard
+          questionnaireId={id}
+          versionId={vid}
+          ruleTextById={Object.fromEntries(
+            graph.config.houseRules.rules.map((rule) => [rule.id, rule.text])
+          )}
+          questionPromptByKey={Object.fromEntries(
+            graph.sections.flatMap((section) => section.questions.map((q) => [q.key, q.prompt]))
+          )}
+          formOnly={graph.config.presentationMode === 'form'}
+        />
+      )}
 
       {/* Version-scoped run-time config (F3.1 + F9.7). Editing a launched version forks a new
           draft (the panel surfaces the notice). Goal & audience are edited on the Structure tab. */}

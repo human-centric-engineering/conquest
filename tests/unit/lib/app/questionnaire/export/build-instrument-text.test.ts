@@ -37,6 +37,9 @@ function question(over: Partial<InstrumentQuestion> = {}): InstrumentQuestion {
     tags: [],
     options: [],
     constraint: null,
+    // The gate-off default: with `questionFidelity.enabled` false every question resolves to
+    // `balanced`, and the model reports null so no renderer prints a uniform column.
+    fidelity: null,
     ...over,
   };
 }
@@ -369,6 +372,7 @@ describe('buildInstrumentText', () => {
                 tags: ['Engagement'],
                 options: ['1 — Low', '2 — High'],
                 constraint: 'Scale 1 (Low) to 2 (High)',
+                fidelity: null,
               },
             ],
           },
@@ -402,5 +406,26 @@ describe('buildInstrumentText', () => {
       // Rule must appear between header and sections
       expect(txt.indexOf('─'.repeat(60))).toBeLessThan(txt.indexOf('1. Overview'));
     });
+  });
+});
+
+/**
+ * Question fidelity in the export.
+ *
+ * Two properties, and the first is the one that matters: a version that never turned the gate on
+ * must produce byte-for-byte the document it produced before the field existed.
+ */
+describe('buildInstrumentText — question fidelity', () => {
+  it('renders nothing at all when the gate is off', () => {
+    const out = buildInstrumentText(model({ sections: [section({ questions: [question()] })] }));
+    expect(out).not.toMatch(/fidelity/i);
+    expect(out).not.toMatch(/must ask/i);
+  });
+
+  it('names the level when the gate is on', () => {
+    const out = buildInstrumentText(
+      model({ sections: [section({ questions: [question({ fidelity: 'must_ask' })] })] })
+    );
+    expect(out).toMatch(/Must ask/);
   });
 });

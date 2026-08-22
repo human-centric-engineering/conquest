@@ -44,6 +44,9 @@ function question(over: Partial<InstrumentQuestion> = {}): InstrumentQuestion {
     tags: [],
     options: [],
     constraint: null,
+    // The gate-off default: with `questionFidelity.enabled` false every question resolves to
+    // `balanced`, and the model reports null so no renderer prints a uniform column.
+    fidelity: null,
     ...over,
   };
 }
@@ -72,6 +75,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
       setupTechnical: false,
       evaluations: false,
       adaptiveScope: false,
+      interviewerPolicy: false,
     },
     meta: { goal: 'A goal', audienceSummary: 'Everyone' },
     sections: [section()],
@@ -94,6 +98,7 @@ function model(over: Partial<PackModel> = {}): PackModel {
     setup: [{ group: 'Access & participation', label: 'Access', value: 'Public link' }],
     evaluations: null,
     adaptiveScope: null,
+    interviewerPolicy: null,
     ...over,
   };
 }
@@ -550,5 +555,28 @@ describe('buildPackCsv', () => {
         'talent,topic,Talent & culture,no,criteria_quality,Criteria-Quality Judge,major,pending,Make the criteria more specific,Too broad to reliably trigger this topic,Rewrite the topic’s criteria,'
       );
     });
+  });
+});
+
+/**
+ * Question fidelity in the export.
+ *
+ * Two properties, and the first is the one that matters: a version that never turned the gate on
+ * must produce byte-for-byte the document it produced before the field existed.
+ */
+describe('buildPackCsv — question fidelity', () => {
+  it('keeps the column but leaves the cell empty when the gate is off', () => {
+    const out = buildPackCsv(model({ sections: [section({ questions: [question()] })] }));
+    // The header stays regardless so the CSV shape is stable for a spreadsheet
+    // consumer; only the value is absent.
+    expect(out).toMatch(/fidelity/);
+    expect(out).not.toMatch(/Must ask/);
+  });
+
+  it('names the level when the gate is on', () => {
+    const out = buildPackCsv(
+      model({ sections: [section({ questions: [question({ fidelity: 'must_ask' })] })] })
+    );
+    expect(out).toMatch(/Must ask/);
   });
 });
