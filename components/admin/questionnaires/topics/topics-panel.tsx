@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Sparkles } from 'lucide-react';
 
 import {
   authoringMutate,
@@ -33,6 +34,7 @@ import {
   TopicListEditor,
   type DraftTopic,
 } from '@/components/admin/questionnaires/topics/topic-list-editor';
+import { Button } from '@/components/ui/button';
 import { FieldHelp } from '@/components/ui/field-help';
 import { API } from '@/lib/api/endpoints';
 import type { AdaptiveScopeSettings, ProposedGap } from '@/lib/app/questionnaire/scope/types';
@@ -61,6 +63,11 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
     criteria: string;
     nonce: number;
   } | null>(null);
+
+  // A request from the Topics section below to run the Routing Analyst (F17.22 Phase 1). Same nonce
+  // shape as the two above, and for the same reason: pressing the button twice must scroll and run
+  // twice, and unchanged state would leave the card's effect silent on the second press.
+  const [analystRequest, setAnalystRequest] = useState<{ nonce: number } | null>(null);
 
   const turnGapIntoTopic = (gap: ProposedGap) =>
     setSeedTopic((prev) => ({
@@ -195,6 +202,8 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
         liveTopicCount={payload.topics.length}
         candidacy={payload.candidacy}
         autoTriggerPending={payload.autoTriggerPending}
+        runRequest={analystRequest}
+        onRunHandled={() => setAnalystRequest(null)}
         onTurnGapIntoTopic={turnGapIntoTopic}
         disabled={busy}
       />
@@ -254,31 +263,49 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
       />
 
       <section className="space-y-3">
-        <div className="space-y-1">
-          <h2 className="flex items-center gap-1.5 text-lg font-semibold">
-            Topics
-            <FieldHelp title="What a topic is">
-              <p>
-                The unit adaptive scope decides about: a named group of questions and data slots,
-                with a phase saying when it runs and — if it is conditional — your criteria for when
-                it applies.
-              </p>
-              <p className="mt-2">
-                <strong>Every question should belong to exactly one topic.</strong> A question no
-                topic claims can never be asked once you switch on, and nothing else in the system
-                would tell you.
-              </p>
-              <p className="mt-2">
-                <strong>Size is not significant.</strong> A one-question topic is how you express a
-                fine-grained “only ask this if…”, so there is no second rule language to learn.
-              </p>
-            </FieldHelp>
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            Group the questions, then decide which groups are conditional. Uploading a document
-            seeds one always-asked topic per section, so a fresh questionnaire starts with a
-            complete set that changes nothing about how it runs.
-          </p>
+        {/* The heading and the AI action share a row. The analyst has always been reachable, but
+            only from its own card — above the settings, the preview, the quality card and the
+            evaluation card, several screens from here. An admin who arrives at this list to decide
+            which groups are conditional is at the exact point of need, and had nothing to press.
+            The button does not duplicate the analyst; it asks the card above to run and scrolls
+            them to it, so there is still one place a proposal is reviewed. */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <h2 className="flex items-center gap-1.5 text-lg font-semibold">
+              Topics
+              <FieldHelp title="What a topic is">
+                <p>
+                  The unit adaptive scope decides about: a named group of questions and data slots,
+                  with a phase saying when it runs and — if it is conditional — your criteria for
+                  when it applies.
+                </p>
+                <p className="mt-2">
+                  <strong>Every question should belong to exactly one topic.</strong> A question no
+                  topic claims can never be asked once you switch on, and nothing else in the system
+                  would tell you.
+                </p>
+                <p className="mt-2">
+                  <strong>Size is not significant.</strong> A one-question topic is how you express
+                  a fine-grained “only ask this if…”, so there is no second rule language to learn.
+                </p>
+              </FieldHelp>
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              Group the questions, then decide which groups are conditional. Uploading a document
+              seeds one always-asked topic per section, so a fresh questionnaire starts with a
+              complete set that changes nothing about how it runs.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={busy}
+            onClick={() => setAnalystRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))}
+          >
+            <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            Set up conditional topics with AI
+          </Button>
         </div>
         <TopicListEditor
           key={`topics-${payload.topics.map((t) => t.key).join('|')}`}

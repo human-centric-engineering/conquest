@@ -457,6 +457,33 @@ put the routing logic itself into the [Questionnaire Pack](./questionnaire-pack.
 stakeholder audience, distinct from every other Adaptive Scope surface (all authoring tools, not
 distribution artifacts).
 
+### When the check says no (F17.22)
+
+The candidacy check answers "does this document **say** it routes", not "could this instrument
+usefully route" — its rubric forbids inferring conditionality from question variety and tells it to
+answer `false` when in doubt. That bias is right for an unattended auto-run, and it left two holes:
+
+- **A negative verdict used to render nothing.** The card's banner was gated on
+  `candidacy?.isCandidate`, so "we checked and found no routing instructions" drew no pixels — and an
+  admin who did not already know the card existed had no reason to look at it, in exactly the case
+  where they most need telling. The card now states the verdict either way (and distinguishes
+  "checked and found nothing" from "never checked"), and says the analyst can still propose
+  conditional topics from the questions alone. It can: the analyst's own rubric permits it and
+  reports it as `fromDocument: false` on the proposal, with a warning to check every criterion.
+- **The only button was several screens from the work.** The analyst card sits above the settings,
+  the preview, the quality card and the evaluation card. An admin scrolling the topic list to decide
+  which groups are conditional is authoring by hand exactly what the analyst authors, and had nothing
+  to press. The Topics section header now carries **"Set up conditional topics with AI"**, which asks
+  the card to run and scrolls the admin to it — one place a proposal is still reviewed and accepted.
+
+`runRequest: { nonce }` / `onRunHandled` is the same request-prop contract `focusTopic` and
+`seedTopic` use, and for the same reason: pressing twice must act twice. **A pending proposal is
+never overwritten by one of these** — the request scrolls to it and stops, because the admin has
+unreviewed work there and a silent re-run would discard a review in progress.
+
+None of this touches the invariant. A proposal is inert until accepted, and `enabled` still moves
+only when an admin moves it.
+
 ## Reports and scoring (F17.5)
 
 The `notAssessed` list on the session export is what makes an adaptive instrument honest downstream.
