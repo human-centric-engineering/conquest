@@ -376,6 +376,49 @@ release process.
 
 ### Fixed
 
+- **The public landing page was serving the About page.**
+  `app/(public)/page.tsx` had been replaced wholesale with a byte-identical copy
+  of `app/(public)/about/page.tsx`, so `/` and `/about` rendered the same hero,
+  the same body copy and the same `title: 'About'`. `Pricing` and `FAQ` were
+  left exported from `components/marketing/index.ts` and rendered by nothing.
+  It shipped to `main` and would have shipped in this release.
+  The page is restored, and its metadata carries the change the clobbering
+  commit intended but did not apply: `title: 'Home'`, with the layout's
+  `%s - ${BRAND.name}` template supplying the brand once.
+
+  **How it happened, because the mechanism recurs.** A flat backup directory
+  keyed by **basename**. In an App Router tree `page.tsx` and `route.ts` are not
+  distinctive names — this repo has 82 of the first and 228 of the second — so
+  `cp <several paths> "$TMP"/` keeps exactly one of each, and the restore writes
+  it back over every path it came from. The commit that did it was editing
+  `page.tsx` and `about/page.tsx` together: the small intended edit to
+  `about/page.tsx` landed (6 lines), and `page.tsx` received about's whole file
+  (331 lines) instead of its own 3-line change.
+  The same mechanism hit `app/api/health/route.ts` two days later, which took
+  the **stats** route's content and became an admin-guarded endpoint returning
+  user counts. Both were verified after restoring — by diffing against the
+  backup, which is corrupted-compared-against-corrupted, an assertion that
+  cannot fail in the one place whose job is to notice. `npm run validate` passes
+  either way: a clobbered route is a real, valid module, just the wrong one.
+
+  **The guard is structural, not content-shaped**
+  (`tests/unit/app/route-module-distinctness.test.ts`, registered in
+  `ALWAYS_RUN_TESTS`): no two route-segment modules under `app/` may be
+  byte-identical — `page`, `layout`, `route`, `error`, `loading`, `not-found`,
+  `template`, `default` and `global-error`, 325 of them today. It catches both
+  incidents above and needs no opinion about what any page *says*, which matters
+  because the marketing pages are fork-owned placeholders: a core test pinning
+  their content would be a core test a fork cannot satisfy, the #480 / #525 /
+  #530 / #533 class this release closes four instances of. That is also why
+  Sunrise still ships **no** content test for the landing page, and says so in
+  the file. A fork with a genuine collision appends to the exported
+  `ALLOWED_IDENTICAL_GROUPS` rather than editing the guard, so the merge stays
+  additive the way `ALWAYS_RUN_TESTS` already is; it ships empty upstream, and a
+  third file joining a declared group still fails. Its reach is byte-identity
+  and no further — a copy that renames the default export passes.
+  **Forks:** if you merged the affected range and had not yet rewritten your
+  landing page, take this file wholesale; if you had, keep yours.
+
 - **The rolling conversation summary was recomputed on every single turn past
   the history window, and the cost row for each of those calls was silently
   discarded (#654).** Two defects that concealed each other. The reuse check was
@@ -909,9 +952,16 @@ release process.
   carry a patch here.** Next resolves metadata at the nearest segment that
   defines a field, so any route group declaring `description` overrides the root
   outright — all four of Sunrise's do. `tests/unit/app/layout-metadata.test.ts`
-  now scans every `export const metadata` block under `app/` rather than
-  checking the root object, because the first version of that test passed while
-  the blurb was still live.
+  is now on its **third** shape, because the first two both passed while the
+  blurb was still live: v1 asserted on the root `metadata` object, which cannot
+  see a route group's override, and v2 text-scanned
+  `export const metadata[^;]*?;`, which any value hoisted into a module const
+  escapes — exactly what the two remaining offenders did. Both guessed at
+  *where* a leak might be written. v3 does not guess: it stubs
+  `NEXT_PUBLIC_APP_NAME` to a value no fixture would produce, re-imports each
+  metadata module, and reads the strings Next would actually serve. Anything
+  still naming the product after that is hardcoded by definition — however it
+  was spelled, hoisted, interpolated or computed.
 
   Page **body copy** remains fork-owned and deliberately out of scope — the seam
   covers the brand name, not marketing prose (see `lib/brand.ts`).
