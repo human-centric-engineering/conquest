@@ -65,7 +65,7 @@ const ROUTING_ANALYSIS_MAX_TOKENS = 12_288;
 
 /**
  * One analysis call. Longer than the glossary's 90s because the input is bigger: this analyst reads
- * the WHOLE source document, instruction pages included, where the glossary analyst reads the
+ * the WHOLE source document, the author's guidance included, where the glossary analyst reads the
  * questions plus a (usually short) definitions file. No respondent is waiting — an admin clicked a
  * button and is watching a progress stream, so patience is cheap here in a way it never is in the
  * planner's 12-second budget.

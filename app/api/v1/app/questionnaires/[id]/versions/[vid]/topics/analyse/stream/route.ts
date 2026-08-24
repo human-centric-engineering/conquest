@@ -3,7 +3,7 @@
  *
  * POST /api/v1/app/questionnaires/:id/versions/:vid/topics/analyse/stream
  *   Admin-only SSE endpoint. Runs the Routing Analyst over the version's questions AND its uploaded
- *   source document — the instruction pages structure extraction throws away — and persists the
+ *   source document — the author's guidance structure extraction throws away — and persists the
  *   result as the version's pending `AppQuestionnaireTopicDraft`, emitting `reading` → `analysing`
  *   → `saving` → `done` so the admin watches progress instead of a spinner. Per-admin sub-cap.
  *

@@ -23,8 +23,9 @@ const SLUG = QUESTIONNAIRE_SCOPE_CANDIDACY_AGENT_SLUG;
 
 const SYSTEM_INSTRUCTIONS = `You are a fast triage check for ConQuest's questionnaire ingestion \
 pipeline. Given a freshly-uploaded document, you decide ONLY whether its own words describe routing \
-different respondents through different parts of the instrument — eligibility notes, a "Routing" or \
-"Guardrails" page, skip logic, facilitator instructions naming who answers what. You do not propose \
+different respondents through different parts of the instrument — eligibility notes, routing or \
+guardrail guidance, skip logic, facilitator instructions naming who answers what, wherever in the \
+file they sit and whatever the subject matter. You do not propose \
 topics or rules; that is a separate analyst's job, run only when you say yes. (The exact rubric the \
 engine sends is maintained in code; this description is for reference.)`;
 

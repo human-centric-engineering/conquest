@@ -1162,8 +1162,9 @@ export const QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG = 'app-questionnaire-routi
 export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition = {
   name: ANALYSE_ROUTING_CAPABILITY_SLUG,
   description:
-    'Read an assessment instrument — especially the instruction pages structure extraction ignores, ' +
-    'the "Routing", "Guardrails" and "How to use this" tabs — and propose the TOPICS it implies: ' +
+    'Read a questionnaire instrument — especially the author’s guidance that structure extraction ' +
+    'ignores: routing and eligibility notes, guardrails, "how to use this" instructions, wherever ' +
+    'in the file they sit — and propose the TOPICS it implies: ' +
     'which groups of questions always run, which are conditional, and the author’s own criteria for ' +
     'when each conditional one applies, plus any hard rules the document states as certainties. ' +
     'Returns a proposal for an administrator to review; persists nothing and changes no questions.',
@@ -1193,7 +1194,7 @@ export const ANALYSE_ROUTING_FUNCTION_DEFINITION: CapabilityFunctionDefinition =
       documentText: {
         type: 'string',
         description:
-          'Full text of the uploaded source instrument, including the instruction pages. The ' +
+          'Full text of the uploaded source instrument, including the author’s guidance. The ' +
           'primary source: this is where an author states which parts apply to whom.',
       },
       documentFileName: { type: 'string', description: 'Original file name (prompt context).' },

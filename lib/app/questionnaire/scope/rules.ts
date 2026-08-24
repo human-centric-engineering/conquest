@@ -2,8 +2,8 @@
  * Adaptive Scope hard rules (P17) — pure, DB-free.
  *
  * Evaluated BEFORE the planner. These exist for the cases an author is *certain* about — "if they
- * sell through partners, always ask about channel conflict", "if they never named an outcome they
- * want AI to move, never score them on AI readiness". Judgement is the planner's job; certainty is
+ * said they have done this before, always ask the follow-up section", "if they never named an
+ * outcome they care about, never score them on it". Judgement is the planner's job; certainty is
  * this module's.
  *
  * ## Two deliberate differences from the Experience router's rules

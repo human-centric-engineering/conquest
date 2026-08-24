@@ -2,9 +2,10 @@
  * The Routing Analyst's structured-output contract (P17.4).
  *
  * The analyst is a PROPOSER, not an author. It reads an uploaded instrument — including the
- * instruction pages real questionnaires carry but the extractor deliberately ignores, the
- * "Routing", "Guardrails", "How to use this" tabs — and returns the topic set and hard rules those
- * pages describe. Nothing it returns is live: the whole proposal lands in
+ * guidance real questionnaires carry but the extractor deliberately ignores: routing and
+ * eligibility notes, guardrails, "how to use this" instructions, wherever in the file they sit —
+ * and returns the topic set and hard rules that guidance describes. Nothing it returns is live:
+ * the whole proposal lands in
  * `AppQuestionnaireTopicDraft` for an admin to review, exactly as a generated data-slot set does.
  *
  * **Why this contract carries `rationale` and `sourceQuote` on every item.** The admin's job here

@@ -8,10 +8,11 @@
  * ## What makes this analyst different from the extractor
  *
  * Structure extraction reads a document for its QUESTIONS and deliberately discards everything
- * else. But real instruments — the ones consultancies actually hand over — carry pages the
- * extractor throws away: "Routing", "Guardrails", "How to use this assessment", "Scoring notes".
- * Those pages are the author telling you, in their own words, which parts of the instrument apply
- * to whom. This analyst exists to read exactly the pages the extractor ignored.
+ * else. But real instruments carry material the extractor throws away: routing and skip-logic
+ * notes, eligibility rules, guardrails, scoring notes, "how to use this" guidance — wherever the
+ * author put them in the file. That material is the author telling you, in their own words, which
+ * parts of the instrument apply to whom. This analyst exists to read exactly what the extractor
+ * ignored.
  *
  * ## The hard part is grounding, not generation
  *
@@ -60,12 +61,13 @@ export interface RoutingAnalysisInput {
   documentFileName?: string;
   /** The version's current topics, so a re-run proposes a revision rather than a duplicate set. */
   existingTopics?: readonly Topic[];
-  /** Admin's free-text steer for this run ("the routing rules are on the Guardrails tab"). */
+  /** Admin's free-text steer for this run ("the routing rules are in the notes up front"). */
   instructions?: string;
 }
 
 const SYSTEM_RULES = `You are the Routing Analyst for a conversational questionnaire platform. You \
-read an assessment instrument and work out WHICH PARTS OF IT APPLY TO WHOM.
+read a questionnaire instrument — in any subject area, and in whatever shape its author wrote it — \
+and work out WHICH PARTS OF IT APPLY TO WHOM.
 
 The platform models this with TOPICS. A topic is a named group of the instrument's questions with:
 - a PHASE — one of:
@@ -78,15 +80,18 @@ between.
 - a DEPTH — "full" (every question) or "light" (a sample of the most important few).
 
 SIZE IS NOT SIGNIFICANT. A topic may hold thirty questions or one. A ONE-QUESTION conditional topic \
-is how a fine-grained dependency is expressed — "only ask about channel conflict if they sell \
-through partners" is a topic, not a special case. Do not force everything to section size.
+is how a fine-grained dependency is expressed — "ask this single question only when the respondent \
+said X" is a topic, not a special case. Do not force everything to section size.
 
-## Read the instruction pages, not just the questions
+## Read the author's guidance, not just the questions
 
-Real instruments carry pages that are not questions: "Routing", "Guardrails", "Scoring notes", \
-"How to use this", facilitator instructions, eligibility notes. THOSE PAGES ARE YOUR PRIMARY \
-SOURCE. They are where the author states which sections apply to whom, how many areas to cover, \
-and what never to ask certain respondents. Read them first and let them drive your proposal.
+Documents usually carry material that is not questions: routing or skip-logic notes, eligibility \
+or screener rules, guardrails, scoring notes, "how to use this" guidance, facilitator or \
+interviewer instructions. THAT MATERIAL IS YOUR PRIMARY SOURCE. It may sit anywhere the author \
+chose to put it — a preamble or appendix, a heading part-way through, a sidebar or footnote, a \
+separate sheet or section, a note beside the questions themselves. Find it wherever it is, read it \
+first, and let it drive your proposal. It is where the author states which sections apply to whom, \
+how many areas to cover, and what never to ask certain respondents.
 
 ## Quoting versus inferring — the distinction that matters most
 
@@ -120,7 +125,7 @@ as core. That is a legitimate, useful answer — do not manufacture conditionali
 
 ## Criteria
 
-Write the CONDITION, not the instruction. "They sell through partners or resellers" is judgeable; \
+Write the CONDITION, not the instruction. "They said they have done this before" is judgeable; \
 "ask this if relevant" is not. Describe what would be true of the respondent, in terms a reader of \
 their opening answers could actually check.
 
@@ -235,8 +240,8 @@ export function buildRoutingAnalysisPrompt(input: RoutingAnalysisInput): LlmMess
 
   if (input.documentText) {
     const header = input.documentFileName
-      ? `SOURCE DOCUMENT (${input.documentFileName}) — read its instruction pages first:`
-      : 'SOURCE DOCUMENT — read its instruction pages first:';
+      ? `SOURCE DOCUMENT (${input.documentFileName}) — read the author's guidance in it first:`
+      : "SOURCE DOCUMENT — read the author's guidance in it first:";
     parts.push(`${header}\n${input.documentText}`);
   } else {
     parts.push(

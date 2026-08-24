@@ -4,9 +4,9 @@
  * The Routing Analyst — run it, then review what it proposed.
  *
  * One card holding both halves, because they are one act. Structure extraction reads an uploaded
- * instrument for its QUESTIONS and discards the rest; the pages it discards — "Routing",
- * "Guardrails", "How to use this" — are the author saying which parts apply to whom. This is the
- * surface that reads them back.
+ * instrument for its QUESTIONS and discards the rest; what it discards — routing notes,
+ * eligibility rules, guardrails, "how to use this" guidance, wherever they sit in the file — is
+ * the author saying which parts apply to whom. This is the surface that reads them back.
  *
  * ## What the review has to make visible
  *
@@ -370,9 +370,10 @@ export function RoutingAnalystCard({
         <div className="min-w-0 flex-1 space-y-0.5">
           <CardTitle className="text-sm font-semibold">Routing Analyst</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            Reads your uploaded document — including the instruction pages extraction ignores, the
-            “Routing” and “Guardrails” tabs — and proposes the topics they describe, each traced
-            back to the words it came from. Nothing goes live until you accept it.
+            Reads your uploaded document — including the guidance extraction ignores, wherever it
+            sits: routing notes, eligibility rules, instructions about who answers what — and
+            proposes the topics it describes, each traced back to the words it came from. Nothing
+            goes live until you accept it.
           </CardDescription>
         </div>
       </CardHeader>
@@ -427,15 +428,15 @@ export function RoutingAnalystCard({
               <Label className="text-muted-foreground text-xs">
                 Where are the routing rules? (optional){' '}
                 <FieldHelp title="Steering the analyst">
-                  A one-line pointer saves the analyst hunting: “the routing rules are on the
-                  Guardrails tab”, or “sections 4–7 only apply to people who manage a team”. It is
+                  A one-line pointer saves the analyst hunting: “the routing rules are in the notes
+                  before the questions”, or “sections 4–7 only apply to some respondents”. It is
                   used for this run only and is not saved.
                 </FieldHelp>
               </Label>
               <Input
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
-                placeholder="e.g. the routing rules are on the “Guardrails” tab"
+                placeholder="e.g. the routing rules are in the notes before the questions"
                 disabled={disabled || analysing}
               />
             </div>

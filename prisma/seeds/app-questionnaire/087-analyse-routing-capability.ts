@@ -39,7 +39,7 @@ const unit: SeedUnit = {
         slug: ANALYSE_ROUTING_CAPABILITY_SLUG,
         name: 'Analyse Routing',
         description:
-          'Reads an uploaded assessment instrument — especially the instruction pages structure ' +
+          'Reads an uploaded instrument — especially the author’s guidance that structure ' +
           'extraction ignores — and proposes the topics it implies: which groups of questions ' +
           'always run, which are conditional, and the author’s own criteria for each. Returns a ' +
           'proposal for an administrator to review; persists nothing and changes no questions.',

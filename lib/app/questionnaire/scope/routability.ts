@@ -2,9 +2,9 @@
  * Is the opening already routable? (G03 / F17.17)
  *
  * The half of the probe allowance that needs care. Spending the opening's one follow-up on an
- * answer that was *already* specific enough to route is the failure G03 actually names: "we need a
- * predictable revenue engine" is worth a follow-up; "our reps cannot hold a conversation with a
- * CFO" names a section on its own and must not cost one.
+ * answer that was *already* specific enough to route is the failure G03 actually names: "we want
+ * things to run better" is worth a follow-up; "our handovers stall waiting for one person to sign
+ * off" names a section on its own and must not cost one.
  *
  * The counter that rations the probes is `scope/probe.ts`, and is pure. This module calls a model,
  * so it is kept apart — the orchestrator imports the counter and never this.
@@ -163,11 +163,11 @@ export async function assessOpeningRoutability(
           'candidate topics below against their criteria — even if it is brief, and even if you ' +
           'would personally like more detail. Wanting more is not the test.',
         'Answer `routable: false` ONLY when the account is too abstract to point at any topic in ' +
-          'particular — a stated ambition or a slogan rather than a situation. "We need a ' +
-          'predictable revenue engine" names no topic; "our reps cannot hold a conversation with ' +
-          'a CFO" names one on its own.',
-        'Read for what they MEAN, not the words they used. A respondent who describes deals that ' +
-          '"go dark at procurement" has named a pipeline problem without using the word pipeline.',
+          'particular — a stated ambition or a slogan rather than a situation. "We want things to ' +
+          'run better" names no topic; "our handovers stall waiting for one person to sign off" ' +
+          'names one on its own.',
+        'Read for what they MEAN, not the words they used. A topic can be named clearly by an ' +
+          'account that uses none of its words.',
         'Pointing at the WRONG topic is still routable. You are judging whether a decision can be ' +
           'made, not whether you agree with it.',
         'When you genuinely cannot tell, answer `routable: false` — the interview then asks its ' +

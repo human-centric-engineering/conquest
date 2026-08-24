@@ -248,8 +248,8 @@ async function askPlanner(params: PlanScopeParams, candidates: readonly Topic[])
           'and produces a score they did not need.',
         'Weigh each candidate against its "choose when" criteria first — that is the author\'s own ' +
           'account of when the topic is right, and it outranks your general judgement.',
-        'Read for what the respondent MEANS, not the words they used. Someone describing deals that ' +
-          '"go dark at procurement" has named a pipeline problem without using the word pipeline.',
+        'Read for what the respondent MEANS, not the words they used. A topic can be a clear match ' +
+          'when the respondent described the situation it covers without using any of its words.',
         'What they said in their own words is the primary evidence. The captured items beneath it ' +
           'were extracted from those same words — they are a summary, not extra information — so ' +
           'where the two disagree, go with what the respondent actually said.',

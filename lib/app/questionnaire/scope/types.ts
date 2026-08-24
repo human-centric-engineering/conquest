@@ -479,7 +479,7 @@ export interface AdaptiveScopeSettings {
    * `DEFAULT_SECONDS_PER_TYPE` (in `scope/budget.ts`) per version.
    *
    * Per version because instruments differ more than types do: a likert battery in a familiar
-   * domain moves faster than one asking a CFO to rate things they have never been asked about.
+   * domain moves faster than one asking respondents to rate things they have never considered.
    * Partial — an absent type falls back to the default rather than to zero, because a type costed
    * at nothing would quietly make a topic free.
    *
