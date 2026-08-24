@@ -10,13 +10,16 @@
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 
 const SYSTEM_RULES = `You are a fast triage check for a conversational questionnaire platform. You \
-read a freshly-uploaded document and decide ONE thing: does the document's OWN WORDS describe \
+read a freshly-uploaded document and decide ONE thing: do the document's OWN WORDS describe \
 routing different respondents through different parts of the instrument?
 
-Look for: eligibility or screener language, "only ask this section if…", role- or segment-specific \
-sections, a "Routing" / "Guardrails" / "How to use this" / "Scoring notes" page, facilitator \
-instructions naming who answers what, skip logic, branching, or a stated limit on how many sections \
-one respondent should cover.
+Look for: eligibility or screener language, "only ask this section if…", sections addressed to \
+particular kinds of respondent, routing or guardrail notes, scoring notes, "how to use this" \
+guidance, facilitator or interviewer instructions naming who answers what, skip logic, branching, \
+or a stated limit on how many sections one respondent should cover. This material can sit anywhere \
+the author put it — a preamble or appendix, a heading part-way through, a sidebar or footnote, a \
+separate sheet or section, a note beside the questions — and the subject matter can be anything, \
+so judge the words, not where they appear or what field they are about.
 
 ## What does NOT count
 

@@ -53,7 +53,7 @@ output and the absent query.
 ### Size is not significant
 
 A topic may hold thirty questions or one — and **a one-question topic is how a fine-grained
-interdependency is expressed** ("only ask about channel conflict if they sell through partners").
+interdependency is expressed** ("ask this single question only when the respondent said X").
 That is why there is no second `showIf` expression language: the coarse and fine cases are the same
 mechanism at different sizes, so an author learns one thing and we maintain one evaluator.
 
@@ -326,8 +326,8 @@ author who asked for three probes silently received two. The bug was invisible a
 
 ### Spending the probe on an already-routable answer is the failure
 
-"We need a predictable revenue engine" is worth a follow-up. "Our reps cannot hold a conversation
-with a CFO" names a section on its own, and probing it wastes the only probe the opening has. So
+"We want things to run better" is worth a follow-up. "Our handovers stall waiting for one person to
+sign off" names a section on its own, and probing it wastes the only probe the opening has. So
 before a probe is spent, `assessOpeningRoutability` asks whether the plan could already be decided
 from what has been said — against **the author's own criteria**, which is the only test that means
 anything.
@@ -385,10 +385,15 @@ the tab says so (`opening_probe_limit_inert`) rather than leaving the author to 
 ## The Routing Analyst (F17.4)
 
 Structure extraction reads an uploaded document for its **questions** and discards everything else.
-Real instruments carry pages it throws away — "Routing", "Guardrails", "How to use this", facilitator
-notes — and those pages are the author stating which parts apply to whom. The analyst reads exactly
-the pages the extractor ignored, and proposes the topic set, the criteria and the hard rules they
-describe.
+Real instruments carry guidance it throws away — routing and eligibility notes, guardrails, "how to
+use this" instructions, facilitator notes, wherever in the file the author put them — and that
+guidance is the author stating which parts apply to whom. The analyst reads exactly what the
+extractor ignored, and proposes the topic set, the criteria and the hard rules it describes.
+
+The wording throughout this surface is deliberately agnostic to both **document format** and
+**subject matter**: the guidance may sit in a preamble, an appendix, a sidebar, a separate sheet or
+section, or a note beside the questions, and the instrument may be about anything. Copy, prompts and
+seeded agent instructions must not assume a shape (no "the Guardrails tab") or a domain.
 
 It is a **proposer**. Everything lands in `AppQuestionnaireTopicDraft` for review — the same not-live
 contract as `AppDataSlotDraft`. The analysis route does **not** fork a launched version (a proposal
@@ -456,6 +461,33 @@ put the routing logic itself into the [Questionnaire Pack](./questionnaire-pack.
 "Adaptive scope" section that explains the topics, criteria, and hard rules in plain language for a
 stakeholder audience, distinct from every other Adaptive Scope surface (all authoring tools, not
 distribution artifacts).
+
+### When the check says no (F17.22)
+
+The candidacy check answers "does this document **say** it routes", not "could this instrument
+usefully route" — its rubric forbids inferring conditionality from question variety and tells it to
+answer `false` when in doubt. That bias is right for an unattended auto-run, and it left two holes:
+
+- **A negative verdict used to render nothing.** The card's banner was gated on
+  `candidacy?.isCandidate`, so "we checked and found no routing instructions" drew no pixels — and an
+  admin who did not already know the card existed had no reason to look at it, in exactly the case
+  where they most need telling. The card now states the verdict either way (and distinguishes
+  "checked and found nothing" from "never checked"), and says the analyst can still propose
+  conditional topics from the questions alone. It can: the analyst's own rubric permits it and
+  reports it as `fromDocument: false` on the proposal, with a warning to check every criterion.
+- **The only button was several screens from the work.** The analyst card sits above the settings,
+  the preview, the quality card and the evaluation card. An admin scrolling the topic list to decide
+  which groups are conditional is authoring by hand exactly what the analyst authors, and had nothing
+  to press. The Topics section header now carries **"Set up conditional topics with AI"**, which asks
+  the card to run and scrolls the admin to it — one place a proposal is still reviewed and accepted.
+
+`runRequest: { nonce }` / `onRunHandled` is the same request-prop contract `focusTopic` and
+`seedTopic` use, and for the same reason: pressing twice must act twice. **A pending proposal is
+never overwritten by one of these** — the request scrolls to it and stops, because the admin has
+unreviewed work there and a silent re-run would discard a review in progress.
+
+None of this touches the invariant. A proposal is inert until accepted, and `enabled` still moves
+only when an admin moves it.
 
 ## Reports and scoring (F17.5)
 

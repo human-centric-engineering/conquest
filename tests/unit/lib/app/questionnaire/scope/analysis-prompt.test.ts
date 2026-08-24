@@ -105,7 +105,7 @@ describe('buildRoutingAnalysisPrompt', () => {
       })
     );
     expect(content).toContain(
-      'SOURCE DOCUMENT (channel-instrument.pdf) — read its instruction pages first:'
+      "SOURCE DOCUMENT (channel-instrument.pdf) — read the author's guidance in it first:"
     );
     expect(content).toContain(
       'Only ask the Partner Channel section if they sell through resellers.'
@@ -119,7 +119,7 @@ describe('buildRoutingAnalysisPrompt', () => {
         documentText: 'Route by company size.',
       })
     );
-    expect(content).toContain('SOURCE DOCUMENT — read its instruction pages first:');
+    expect(content).toContain("SOURCE DOCUMENT — read the author's guidance in it first:");
     expect(content).not.toContain('SOURCE DOCUMENT (');
   });
 

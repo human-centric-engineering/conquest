@@ -47,16 +47,21 @@ vi.mock('@/components/admin/questionnaires/topics/routing-analyst-card', () => (
   RoutingAnalystCard: ({
     candidacy,
     autoTriggerPending,
+    runRequest,
+    onRunHandled,
     onTurnGapIntoTopic,
   }: {
     candidacy: { isCandidate: boolean } | null;
     autoTriggerPending: boolean;
+    runRequest?: { nonce: number } | null;
+    onRunHandled?: () => void;
     onTurnGapIntoTopic?: (gap: { sourceQuote: string; explanation: string }) => void;
   }) => (
     <div
       data-testid="analyst-card"
       data-is-candidate={candidacy?.isCandidate ?? ''}
       data-auto-trigger-pending={autoTriggerPending}
+      data-run-nonce={runRequest?.nonce ?? ''}
     >
       <button
         type="button"
@@ -64,6 +69,9 @@ vi.mock('@/components/admin/questionnaires/topics/routing-analyst-card', () => (
         onClick={() => onTurnGapIntoTopic?.(GAP_FIXTURE)}
       >
         Turn into topic
+      </button>
+      <button type="button" data-testid="ack-run" onClick={() => onRunHandled?.()}>
+        ack
       </button>
     </div>
   ),
@@ -601,6 +609,85 @@ describe('TopicsPanel — turning a gap into a topic (F17.20)', () => {
     await user.click(screen.getByTestId('seed-handled'));
 
     expect(screen.getByTestId('seed')).toHaveAttribute('data-nonce', '');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The AI entry point in the Topics section (F17.22 Phase 1)                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The analyst was always reachable — but only from its own card, which sits above the settings, the
+ * preview, the quality card and the evaluation card. An admin scrolling the topic list to decide
+ * which groups are conditional is doing by hand exactly what the analyst does, and had nothing to
+ * press. This is the same nonce contract as `focusTopic` and `seedTopic`: the panel asks, the card
+ * acts, and asking twice must ask twice.
+ */
+describe('TopicsPanel — "Set up conditional topics with AI"', () => {
+  const pressAiButton = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole('button', { name: /Set up conditional topics with AI/ }));
+
+  it('passes no run request until the button is pressed', () => {
+    renderPanel();
+    expect(screen.getByTestId('analyst-card')).toHaveAttribute('data-run-nonce', '');
+  });
+
+  it('asks the analyst card to run', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await pressAiButton(user);
+
+    expect(screen.getByTestId('analyst-card')).toHaveAttribute('data-run-nonce', '1');
+  });
+
+  it('increments the nonce when pressed again before the card has consumed the first', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await pressAiButton(user);
+    await pressAiButton(user);
+
+    // Without the counter this would be unchanged state and the card's effect would stay silent.
+    expect(screen.getByTestId('analyst-card')).toHaveAttribute('data-run-nonce', '2');
+  });
+
+  it('restarts the nonce at 1 after an ack, which is harmless — the card keys on identity', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await pressAiButton(user);
+    await user.click(screen.getByTestId('ack-run'));
+    await pressAiButton(user);
+
+    // Same reasoning as the focus nonce: the previous request is gone, so the count restarts, and
+    // each press still hands the card a fresh object its effect fires on.
+    expect(screen.getByTestId('analyst-card')).toHaveAttribute('data-run-nonce', '1');
+  });
+
+  it('drops the request once the card reports it handled', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await pressAiButton(user);
+
+    await user.click(screen.getByTestId('ack-run'));
+
+    expect(screen.getByTestId('analyst-card')).toHaveAttribute('data-run-nonce', '');
+  });
+
+  it('is disabled while a save is in flight, so it cannot race a fork', async () => {
+    const user = userEvent.setup();
+    // A save that never settles holds the panel's busy lock open.
+    authoringMutateMock.mockReturnValue(new Promise(() => {}));
+    renderPanel();
+
+    await user.click(screen.getByTestId('save-topics'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /Set up conditional topics with AI/ })
+      ).toBeDisabled()
+    );
   });
 });
 

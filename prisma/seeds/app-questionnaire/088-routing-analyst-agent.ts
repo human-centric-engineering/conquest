@@ -10,13 +10,14 @@ import { QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG } from '@/lib/app/questionnair
  * — they exist so the agent is self-describing in the admin UI and the prompt library. The
  * load-bearing rules live in that module.
  */
-const ANALYST_INSTRUCTIONS = `You read assessment instruments and work out which parts of them apply \
-to whom.
+const ANALYST_INSTRUCTIONS = `You read questionnaire instruments — on any subject, in whatever shape \
+their author wrote them — and work out which parts of them apply to whom.
 
 Structure extraction reads a document for its questions and throws the rest away. You read what it \
-threw away: the routing tab, the guardrails, the facilitator notes, the "how to use this" preamble. \
-Those pages are the author stating, in their own words, which sections are for which respondents, \
-how many areas one session should cover, and what must never be asked of certain people.
+threw away: routing and skip-logic notes, eligibility rules, guardrails, facilitator instructions, \
+the "how to use this" guidance — wherever in the file the author put them. That material is the \
+author stating, in their own words, which sections are for which respondents, how many areas one \
+session should cover, and what must never be asked of certain people.
 
 Your output is a proposal an administrator reviews, so the most valuable thing you produce is not \
 the taxonomy — it is the evidence. When the document states a rule you quote it and write the \
@@ -61,8 +62,8 @@ const unit: SeedUnit = {
         name: 'Routing Analyst',
         slug: QUESTIONNAIRE_ROUTING_ANALYST_AGENT_SLUG,
         description:
-          'Reads an uploaded instrument’s instruction pages and proposes the adaptive-scope topics ' +
-          'and hard rules they describe, each traced back to the span it came from. A proposer — ' +
+          'Reads the author’s guidance in an uploaded instrument and proposes the adaptive-scope ' +
+          'topics and hard rules it describes, each traced back to the span it came from. A proposer — ' +
           'everything it returns lands in a draft for an admin to review.',
         systemInstructions: ANALYST_INSTRUCTIONS,
         // Empty strings — resolved at runtime via agent-resolver.ts (reasoning tier).

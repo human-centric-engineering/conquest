@@ -284,7 +284,7 @@ const STRUCTURE_EXTRACTOR: PromptAgentCatalogEntry = {
           buildExtractionPrompt({
             documentText:
               '{{ text extracted from the uploaded document — its questions, sections, and instructions }}',
-            fileName: '{{ uploaded-file.pdf }}',
+            fileName: '{{ uploaded-file }}',
             mediaType: 'application/pdf',
             adminSupplied: {
               goal: '{{ admin-supplied goal, if any }}',
@@ -325,7 +325,7 @@ const EXTRACTION_VERIFIER: PromptAgentCatalogEntry = {
             ],
             documentText:
               '{{ text extracted from the uploaded document — its questions, sections, and rating grids }}',
-            fileName: '{{ uploaded-file.pdf }}',
+            fileName: '{{ uploaded-file }}',
           })
         ),
     }),
@@ -428,7 +428,7 @@ const SCALE_MATRIX_REPAIR: PromptAgentCatalogEntry = {
               q1: 'matrix_flattened: a rating grid was collapsed into one multi_choice',
             },
             documentText: '{{ text extracted from the uploaded document }}',
-            fileName: '{{ uploaded-file.pdf }}',
+            fileName: '{{ uploaded-file }}',
           })
         ),
     }),
@@ -455,7 +455,7 @@ const SCOPE_CANDIDACY_CHECK: PromptAgentCatalogEntry = {
           buildScopeCandidacyPrompt({
             documentText:
               '{{ text extracted from the uploaded document — its questions, sections, and any routing/eligibility instructions }}',
-            documentFileName: '{{ uploaded-file.pdf }}',
+            documentFileName: '{{ uploaded-file }}',
           })
         ),
     }),
@@ -467,7 +467,7 @@ const ROUTING_ANALYST: PromptAgentCatalogEntry = {
   name: 'Routing Analyst',
   stage: 'authoring',
   summary:
-    'Reads the pages structure extraction discards — "Routing", "Guardrails", "How to use this", facilitator notes — plus the version\'s questions, and proposes the topic set, criteria and hard rules they describe. A proposer only; everything lands in a draft for review.',
+    'Reads the author’s guidance that structure extraction discards — routing and eligibility notes, guardrails, "how to use this" instructions, facilitator notes, wherever in the file they sit — plus the version\'s questions, and proposes the topic set, criteria and hard rules they describe. A proposer only; everything lands in a draft for review.',
   dispatch: 'On demand from the Topics tab, or auto-invited when the candidacy check fires.',
   builderModule: 'lib/app/questionnaire/scope/analysis-prompt.ts',
   instructionsAreLoadBearing: false,
@@ -488,8 +488,8 @@ const ROUTING_ANALYST: PromptAgentCatalogEntry = {
             ],
             dataSlots: [{ key: 'slot_1', name: '{{ data slot 1 }}', theme: '{{ theme }}' }],
             documentText:
-              '{{ text extracted from the uploaded document — its routing/eligibility pages }}',
-            documentFileName: '{{ uploaded-file.pdf }}',
+              '{{ text extracted from the uploaded document — its routing/eligibility guidance }}',
+            documentFileName: '{{ uploaded-file }}',
           })
         ),
     }),

@@ -4,9 +4,9 @@
  * The Routing Analyst — run it, then review what it proposed.
  *
  * One card holding both halves, because they are one act. Structure extraction reads an uploaded
- * instrument for its QUESTIONS and discards the rest; the pages it discards — "Routing",
- * "Guardrails", "How to use this" — are the author saying which parts apply to whom. This is the
- * surface that reads them back.
+ * instrument for its QUESTIONS and discards the rest; what it discards — routing notes,
+ * eligibility rules, guardrails, "how to use this" guidance, wherever they sit in the file — is
+ * the author saying which parts apply to whom. This is the surface that reads them back.
  *
  * ## What the review has to make visible
  *
@@ -42,6 +42,20 @@
  * keep re-proposing itself every time the admin comes back to this tab. A failure during an
  * auto-triggered run stays silent (`{ silent: true }`) rather than surfacing an error banner for an
  * action the admin never took — they can still press the button themselves, which reports normally.
+ *
+ * ## Two more ways in (F17.22 Phase 1)
+ *
+ * The auto-trigger only fires for a document the ingestion-time check flagged. That check is
+ * quote-grounded and biased to "no" by design, which left the two cases below with no route to the
+ * analyst at all:
+ *
+ * - **A negative verdict now renders.** The candidacy banner used to be `candidacy?.isCandidate &&`,
+ *   so "we checked and found no routing instructions" drew nothing — and an admin who did not
+ *   already know this card existed had no reason to look at it. It now says so, and says the
+ *   analyst can still propose conditional topics from the questions themselves.
+ * - **`runRequest`** lets the Topics section, several screens below, ask this card to run and pull
+ *   the admin up to it. The point is the point of need: an admin scrolling the topic list deciding
+ *   which groups are conditional is doing by hand exactly what the analyst does.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -103,6 +117,21 @@ export interface RoutingAnalystCardProps {
   candidacy: ScopeCandidacyVerdict | null;
   /** True when this card should invoke the analyst itself, on mount (F17.19 Phase 3). */
   autoTriggerPending: boolean;
+  /**
+   * A request from elsewhere on the tab — the Topics section's "Set up conditional topics with AI"
+   * action — to scroll here and run (F17.22 Phase 1).
+   *
+   * Carries a `nonce` for the same reason `focusTopic` and `seedTopic` do in the topic editor:
+   * asking a second time must move the page a second time, and a plain boolean would be unchanged
+   * state on the second press with the effect below never re-firing.
+   *
+   * **A pending proposal is never overwritten by one of these.** When a draft is already on screen
+   * the request scrolls to it and stops: the admin has unreviewed work here, and silently replacing
+   * it with a fresh run would discard a review they were part-way through.
+   */
+  runRequest?: { nonce: number } | null;
+  /** Called once a {@link runRequest} has been honoured, so the caller can drop it. */
+  onRunHandled?: () => void;
   /** Called when the admin asks to turn a gap into a new draft topic (F17.20). Optional so a
    *  caller that doesn't yet host the topic editor (there is only one today) can omit it. */
   onTurnGapIntoTopic?: (gap: ProposedGap) => void;
@@ -160,10 +189,13 @@ export function RoutingAnalystCard({
   liveTopicCount,
   candidacy,
   autoTriggerPending,
+  runRequest,
+  onRunHandled,
   onTurnGapIntoTopic,
   disabled = false,
 }: RoutingAnalystCardProps) {
   const router = useRouter();
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState<ProposedTopicSet | null>(initialDraft);
   const [instructions, setInstructions] = useState('');
   const [analysing, setAnalysing] = useState(false);
@@ -246,6 +278,19 @@ export function RoutingAnalystCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTriggerPending, draft, disabled]);
 
+  // F17.22 Phase 1: the Topics section asked for a run. Scroll here either way — the admin pressed
+  // a button several screens down and must be shown where the answer will appear — but only START
+  // one when there is nothing pending and nothing already running.
+  useEffect(() => {
+    if (!runRequest) return;
+    cardRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    if (draft === null && !analysing && !disabled) void run();
+    onRunHandled?.();
+    // `run` closes over `instructions`; including it here would re-fire this effect on every
+    // keystroke in that field, for no behavioural change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runRequest]);
+
   const discard = async () => {
     setBusy(true);
     setError(null);
@@ -317,7 +362,7 @@ export function RoutingAnalystCard({
   const conditionalCount = draft?.topics.filter((t) => t.phase === 'conditional').length ?? 0;
 
   return (
-    <Card className="overflow-hidden shadow-sm">
+    <Card className="overflow-hidden shadow-sm" ref={cardRef}>
       <CardHeader className="bg-muted/30 flex-row items-start gap-3 space-y-0 border-b p-4">
         <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400">
           <FileSearch className="h-4 w-4" aria-hidden="true" />
@@ -325,9 +370,10 @@ export function RoutingAnalystCard({
         <div className="min-w-0 flex-1 space-y-0.5">
           <CardTitle className="text-sm font-semibold">Routing Analyst</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            Reads your uploaded document — including the instruction pages extraction ignores, the
-            “Routing” and “Guardrails” tabs — and proposes the topics they describe, each traced
-            back to the words it came from. Nothing goes live until you accept it.
+            Reads your uploaded document — including the guidance extraction ignores, wherever it
+            sits: routing notes, eligibility rules, instructions about who answers what — and
+            proposes the topics it describes, each traced back to the words it came from. Nothing
+            goes live until you accept it.
           </CardDescription>
         </div>
       </CardHeader>
@@ -344,7 +390,7 @@ export function RoutingAnalystCard({
 
         {draft === null ? (
           <div className="space-y-3">
-            {candidacy?.isCandidate && (
+            {candidacy?.isCandidate ? (
               <div className={SKY_BANNER_CLASSNAME}>
                 <p className="font-medium">
                   {/* `analysing` gates the present-progressive wording, not `autoStarted` alone —
@@ -357,20 +403,40 @@ export function RoutingAnalystCard({
                 </p>
                 <p>{candidacy.summary}</p>
               </div>
+            ) : (
+              /* F17.22 Phase 1. The ingestion-time check is deliberately quote-grounded and biased
+                 to "no" — it answers "does the document SAY it routes", not "could this instrument
+                 usefully route". Rendering nothing on a negative verdict (which is what this branch
+                 used to do) left an admin with no way to know the analyst existed at all, in
+                 exactly the case where they most need telling: the analyst can still propose
+                 conditional topics from the questions themselves, and says so on its own proposal
+                 (`fromDocument: false`). Muted, not a warning — nothing is wrong here. */
+              <div className="text-muted-foreground bg-muted/40 space-y-1 rounded-md border p-3 text-sm">
+                <p className="text-foreground font-medium">
+                  {candidacy === null
+                    ? 'This version has not been checked for routing instructions.'
+                    : 'No explicit routing instructions were found in your document.'}
+                </p>
+                <p>
+                  The analyst can still propose conditional topics from the questionnaire’s own
+                  questions — it will tell you it inferred them rather than read them, so you can
+                  check each criterion before accepting. Nothing goes live until you do.
+                </p>
+              </div>
             )}
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs">
                 Where are the routing rules? (optional){' '}
                 <FieldHelp title="Steering the analyst">
-                  A one-line pointer saves the analyst hunting: “the routing rules are on the
-                  Guardrails tab”, or “sections 4–7 only apply to people who manage a team”. It is
+                  A one-line pointer saves the analyst hunting: “the routing rules are in the notes
+                  before the questions”, or “sections 4–7 only apply to some respondents”. It is
                   used for this run only and is not saved.
                 </FieldHelp>
               </Label>
               <Input
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
-                placeholder="e.g. the routing rules are on the “Guardrails” tab"
+                placeholder="e.g. the routing rules are in the notes before the questions"
                 disabled={disabled || analysing}
               />
             </div>

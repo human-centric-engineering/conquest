@@ -722,3 +722,91 @@ describe('RoutingAnalystCard — reviewing a pending draft', () => {
     expect(screen.getByText('Pipeline')).toBeInTheDocument();
   });
 });
+
+/**
+ * F17.22 Phase 1 — the two additional ways an admin reaches the analyst.
+ *
+ * Both exist because the ingestion-time candidacy check is deliberately biased to "no": it answers
+ * "does this document SAY it routes", not "could this instrument usefully route". Before this, a
+ * negative verdict drew nothing at all and the only button lived several screens above the topic
+ * list, so the common case — a real instrument whose routing is implicit — had no visible route to
+ * the analyst.
+ */
+describe('RoutingAnalystCard — reaching the analyst when candidacy said no', () => {
+  it('explains a negative verdict instead of rendering nothing, and still offers the run', () => {
+    renderCard({
+      candidacy: { isCandidate: false, confidence: 0.1, summary: 'No routing language found.' },
+    });
+
+    expect(
+      screen.getByText(/No explicit routing instructions were found in your document/)
+    ).toBeInTheDocument();
+    // The point of saying so: the analyst can still do the work from the questions alone.
+    expect(
+      screen.getByText(/still propose conditional topics from the questionnaire’s own questions/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Propose topics from the document/ })
+    ).toBeInTheDocument();
+  });
+
+  it('distinguishes "checked and found nothing" from "never checked"', () => {
+    renderCard({ candidacy: null });
+    expect(
+      screen.getByText(/This version has not been checked for routing instructions/)
+    ).toBeInTheDocument();
+  });
+
+  it('does not draw the negative note over a positive verdict', () => {
+    renderCard({
+      candidacy: { isCandidate: true, confidence: 0.9, summary: 'A guardrails tab states rules.' },
+    });
+    expect(screen.getByText(/This document reads like it describes routing/)).toBeInTheDocument();
+    expect(screen.queryByText(/No explicit routing instructions/)).not.toBeInTheDocument();
+  });
+
+  it('runs when the Topics section asks it to, and reports errors (unlike a silent auto-run)', async () => {
+    fetchMock.mockResolvedValue(
+      sseResponse([
+        {
+          type: 'done',
+          versionId: VID,
+          draft: draft(),
+          replacedCount: 0,
+          uncoveredQuestionCount: 0,
+        },
+      ])
+    );
+    const onRunHandled = vi.fn();
+
+    renderCard({ runRequest: { nonce: 1 }, onRunHandled });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(STREAM_URL, expect.anything()));
+    await waitFor(() => expect(screen.getByText('Pipeline')).toBeInTheDocument());
+    // The request is consumed, so the parent can drop it and a second press fires again.
+    expect(onRunHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it('never replaces a pending proposal the admin has not reviewed yet', async () => {
+    const onRunHandled = vi.fn();
+    renderCard({ initialDraft: draft(), runRequest: { nonce: 1 }, onRunHandled });
+
+    // Scrolling to the pending proposal is the whole response — no run is started over it.
+    await waitFor(() => expect(onRunHandled).toHaveBeenCalled());
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByText('Pipeline')).toBeInTheDocument();
+  });
+
+  it('starts nothing while the tab is busy saving', async () => {
+    const onRunHandled = vi.fn();
+    renderCard({ runRequest: { nonce: 1 }, onRunHandled, disabled: true });
+
+    await waitFor(() => expect(onRunHandled).toHaveBeenCalled());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does nothing at all without a request — the effect is not a mount-time run', () => {
+    renderCard({ runRequest: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

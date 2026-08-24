@@ -8,8 +8,8 @@
  *
  * ```
  * Include this when the opening shows ANY of the following — the more that apply, the stronger:
- * • Growth source — new business (high priority) — they said something like: new logo, hunting.
- * • Partner and channel (medium priority) — they said: partners, resellers, alliances.
+ * • Recent change (high priority) — they said something like: reorganised, just moved.
+ * • Working with others (medium priority) — they said: partners, suppliers, other teams.
  * ```
  *
  * Rendered as one block of text that structure is invisible, and a reader has to re-derive the list
@@ -34,7 +34,7 @@ export type CriteriaPriority = 'high' | 'medium' | 'low';
 /** One signal in a criteria list. */
 export interface CriteriaItem {
   /**
-   * The short label the line leads with, when it has one — `"Growth source"` above.
+   * The short label the line leads with, when it has one — `"Recent change"` above.
    *
    * Null whenever the line does not obviously start with one, which is the safer answer: a term
    * wrongly split out of a sentence bolds a fragment and reads as a typo.

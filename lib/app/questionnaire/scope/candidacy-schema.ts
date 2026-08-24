@@ -3,7 +3,7 @@
  *
  * A cheap, fast triage — NOT the Routing Analyst (`analysis-schema.ts`). Its only job is to decide
  * whether a freshly-uploaded document's OWN WORDS describe conditional routing at all: eligibility
- * notes, a "Routing"/"Guardrails" page, facilitator instructions naming who answers what. It never
+ * notes, routing or guardrail guidance, facilitator instructions naming who answers what. It never
  * proposes topics or rules — that stays the analyst's job, run automatically when this check fires.
  *
  * Same quote-or-absent grounding discipline as the analyst: a signal without a quote is a weaker
