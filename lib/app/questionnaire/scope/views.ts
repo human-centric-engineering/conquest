@@ -115,6 +115,24 @@ export interface TopicsPayload {
    * record the attempt, and this flips back to false.
    */
   autoTriggerPending: boolean;
+  /**
+   * How much of the instrument the topic set actually claims.
+   *
+   * Server-computed from `uncoveredQuestionKeys` — the SAME function the `orphaned_questions`
+   * finding uses — so the number a persistent header shows and the number the issue list shows
+   * cannot disagree. Deriving it in the browser was the alternative and it is subtly wrong: the
+   * finding suppresses itself when a version has no topics at all, so a naive client-side count
+   * would report orphans on a version whose issue list is deliberately silent.
+   */
+  coverage: TopicsCoverage;
+}
+
+/** The `coverage` block of {@link TopicsPayload}. Counts only — the keys stay server-side. */
+export interface TopicsCoverage {
+  totalQuestions: number;
+  uncoveredQuestions: number;
+  totalDataSlots: number;
+  uncoveredDataSlots: number;
 }
 
 /** The empty payload — what a failed fetch degrades to, so a tab renders rather than crashing. */
@@ -127,6 +145,12 @@ export const EMPTY_TOPICS_PAYLOAD: Omit<TopicsPayload, 'settings'> = {
   preview: { openingQuestions: [], fillTargets: [] },
   candidacy: null,
   autoTriggerPending: false,
+  coverage: {
+    totalQuestions: 0,
+    uncoveredQuestions: 0,
+    totalDataSlots: 0,
+    uncoveredDataSlots: 0,
+  },
 };
 
 /* -------------------------------------------------------------------------- */

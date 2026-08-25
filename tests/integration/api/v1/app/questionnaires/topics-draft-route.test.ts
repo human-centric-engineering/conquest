@@ -224,6 +224,30 @@ describe('POST /api/v1/app/questionnaires/:id/versions/:vid/topics/draft', () =>
     expect(discardTopicDraft).not.toHaveBeenCalled();
   });
 
+  it('forwards the two settings the analyst may now propose, and never `enabled` (F17.23)', async () => {
+    (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
+    (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
+    (acceptTopicDraft as Mock).mockResolvedValue(acceptResult());
+
+    const res = await POST(
+      jsonReq({
+        ...validAcceptBody(),
+        fallbackTopicKeys: ['wellbeing'],
+        checkTopicPreference: ['wellbeing'],
+      }),
+      ctx(PARAMS)
+    );
+    expect(res.status).toBe(200);
+
+    const body = (acceptTopicDraft as Mock).mock.calls[0][1];
+    expect(body.fallbackTopicKeys).toEqual(['wellbeing']);
+    expect(body.checkTopicPreference).toEqual(['wellbeing']);
+    // The load-bearing omission: accepting a proposal is an authoring act, and turning the feature
+    // on is a decision about what respondents are asked. The accept contract must have no way to
+    // express it, or a wizard that accepts on the admin's behalf silently changes the interview.
+    expect(body).not.toHaveProperty('enabled');
+  });
+
   it('accepts on a LAUNCHED version — forks, writes to the fork, AND clears the source draft', async () => {
     (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('launched'));
     (forkVersionIfLaunched as Mock).mockResolvedValue(forkResult());

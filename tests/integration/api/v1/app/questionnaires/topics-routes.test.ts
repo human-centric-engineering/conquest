@@ -281,6 +281,81 @@ describe('GET /api/v1/app/questionnaires/:id/versions/:vid/topics', () => {
     expect(body.data.costs.alwaysSeconds).toBe(0);
   });
 
+  it('reports coverage from the same helper the orphan finding uses', async () => {
+    // The header this feeds is visible whether or not the issue list is, so the two numbers must
+    // come from one implementation. Deriving it in the browser was the alternative and is subtly
+    // wrong: the finding suppresses itself on a version with no topics, so a client-side count
+    // would report orphans against an issue list that is deliberately silent.
+    (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
+      {
+        key: 'q1',
+        prompt: 'A',
+        type: 'likert',
+        typeConfig: null,
+        weight: 1,
+        section: { title: 'S', ordinal: 0 },
+      },
+      {
+        key: 'q2',
+        prompt: 'B',
+        type: 'likert',
+        typeConfig: null,
+        weight: 1,
+        section: { title: 'S', ordinal: 0 },
+      },
+      {
+        key: 'q3',
+        prompt: 'C',
+        type: 'likert',
+        typeConfig: null,
+        weight: 1,
+        section: { title: 'S', ordinal: 0 },
+      },
+    ]);
+    (prisma.appDataSlot.findMany as Mock).mockResolvedValue([
+      { key: 'mood', name: 'Mood', theme: 'wellbeing', weight: 1 },
+      { key: 'sleep', name: 'Sleep', theme: 'wellbeing', weight: 1 },
+    ]);
+    (loadTopics as Mock).mockResolvedValue([
+      sampleTopic({ members: { questionKeys: ['q1'], dataSlotKeys: ['mood'] } }),
+    ]);
+
+    const res = await GET(getReq(), ctx(PARAMS));
+    const body = await res.json();
+
+    expect(body.data.coverage).toEqual({
+      totalQuestions: 3,
+      uncoveredQuestions: 2,
+      totalDataSlots: 2,
+      uncoveredDataSlots: 1,
+    });
+    // And it agrees with the issue list computed in the same request.
+    const codes = body.data.issues.map((i: { code: string }) => i.code);
+    expect(codes).toContain('orphaned_questions');
+    expect(codes).toContain('orphaned_data_slots');
+  });
+
+  it('reports full coverage as zero uncovered, not as a missing block', async () => {
+    (prisma.appQuestionSlot.findMany as Mock).mockResolvedValue([
+      {
+        key: 'q1',
+        prompt: 'A',
+        type: 'likert',
+        typeConfig: null,
+        weight: 1,
+        section: { title: 'S', ordinal: 0 },
+      },
+    ]);
+    (loadTopics as Mock).mockResolvedValue([
+      sampleTopic({ members: { questionKeys: ['q1'], dataSlotKeys: [] } }),
+    ]);
+
+    const res = await GET(getReq(), ctx(PARAMS));
+    const body = await res.json();
+
+    expect(body.data.coverage).toMatchObject({ totalQuestions: 1, uncoveredQuestions: 0 });
+  });
+
   it('reports a scale that routing can leave partially assessed (F17.15)', async () => {
     // `wellbeing` is the version's only topic and it is conditional, so a respondent not routed to
     // it is scored on none of the scale — and the cohort report will exclude them.

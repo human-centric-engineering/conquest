@@ -337,6 +337,17 @@ export function RoutingAnalystCard({
           ...(draft.maxConditionalTopics !== undefined
             ? { maxConditionalTopics: draft.maxConditionalTopics }
             : {}),
+          // Settings rather than topics, but read out of the same routing prose in the same pass,
+          // so they are accepted or discarded with it rather than left for the admin to re-derive.
+          // `.length > 0`, not truthiness: `[]` is truthy, and `acceptTopicDraft` merges on
+          // `!== undefined` — so sending an empty array would ERASE the admin's existing list
+          // rather than leave it alone, which is the opposite of "the proposal said nothing".
+          ...((draft.fallbackTopicKeys?.length ?? 0) > 0
+            ? { fallbackTopicKeys: draft.fallbackTopicKeys }
+            : {}),
+          ...((draft.checkTopicPreference?.length ?? 0) > 0
+            ? { checkTopicPreference: draft.checkTopicPreference }
+            : {}),
         }
       );
       setDraft(null);
@@ -360,6 +371,12 @@ export function RoutingAnalystCard({
   const uncovered = questionKeys.filter((k) => !covered.has(k));
   const replacedCount = draft?.topics.filter((t) => t.replacesExisting).length ?? 0;
   const conditionalCount = draft?.topics.filter((t) => t.phase === 'conditional').length ?? 0;
+
+  // Settings lists and the depth-correction note address topics by key; a reviewer reads labels.
+  // Falls back to the key so an unresolvable one is visible rather than blank — though
+  // `narrowProposedTopicSet` already drops settings keys the proposal does not carry.
+  const labelForKey = (key: string): string =>
+    draft?.topics.find((t) => t.key === key)?.label ?? key;
 
   return (
     <Card className="overflow-hidden shadow-sm" ref={cardRef}>
@@ -491,6 +508,37 @@ export function RoutingAnalystCard({
                 <> · limit of {draft.maxConditionalTopics} per interview</>
               )}
             </p>
+
+            {((draft.fallbackTopicKeys?.length ?? 0) > 0 ||
+              (draft.checkTopicPreference?.length ?? 0) > 0) && (
+              <div className="text-muted-foreground space-y-1 text-sm">
+                {draft.fallbackTopicKeys && draft.fallbackTopicKeys.length > 0 && (
+                  <p>
+                    <span className="text-foreground font-medium">Ask if nothing matches:</span>{' '}
+                    {draft.fallbackTopicKeys.map(labelForKey).join(', ')}
+                  </p>
+                )}
+                {draft.checkTopicPreference && draft.checkTopicPreference.length > 0 && (
+                  <p>
+                    <span className="text-foreground font-medium">Sample as a blind spot:</span>{' '}
+                    {draft.checkTopicPreference.map(labelForKey).join(', ')}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Corrected, not refused (see narrowProposedTopicSet) — but never silently. The admin
+                needs to know the analyst asked for something that would have dropped questions. */}
+            {draft.depthCorrectedKeys && draft.depthCorrectedKeys.length > 0 && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                {draft.depthCorrectedKeys.length === 1 ? 'One topic' : 'Some topics'} came back set
+                to Light depth but {draft.depthCorrectedKeys.length === 1 ? 'runs' : 'run'} for
+                everyone — {draft.depthCorrectedKeys.map(labelForKey).join(', ')}. Light would have
+                dropped questions for every respondent, so{' '}
+                {draft.depthCorrectedKeys.length === 1 ? 'it has' : 'they have'} been set back to
+                Full.
+              </p>
+            )}
 
             {liveTopicCount > 0 && (
               <p className="text-sm text-amber-600">

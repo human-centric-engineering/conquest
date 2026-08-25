@@ -38,6 +38,7 @@ import {
   patchAdaptiveScopeSettings,
   TOPIC_SELECT,
 } from '@/app/api/v1/app/questionnaires/_lib/topic-routes';
+import { adaptiveScopeSettingsSchema } from '@/lib/app/questionnaire/scope/schemas';
 import type { TopicInput, AdaptiveScopeSettingsPatch } from '@/lib/app/questionnaire/scope/schemas';
 import { executeTransaction } from '@/lib/db/utils';
 
@@ -331,6 +332,49 @@ describe('patchAdaptiveScopeSettings', () => {
     // ...but fields the patch never mentioned survived the merge untouched.
     expect(result.maxConditionalTopics).toBe(5);
     expect(result.plannerInstructions).toBe('Existing guidance');
+  });
+
+  it('survives a lone-field patch that came through the real Zod schema, not a hand-built object', async () => {
+    // The test above proves the MERGE preserves siblings. This one proves the thing the merge
+    // depends on: that `adaptiveScopeSettingsSchema` omits absent optional keys from its output
+    // rather than emitting them as `undefined`. `{ ...current, ...patch }` would happily write
+    // `undefined` over a sibling, and every field on this schema is optional — so a lone-field
+    // PATCH is the shape most likely to silently wipe the rest.
+    //
+    // It is a real risk rather than a hypothetical: the persistent on/off switch this tab is
+    // getting sends exactly `{ enabled }` and nothing else.
+    const parsed = adaptiveScopeSettingsSchema.parse({ enabled: true });
+    expect(Object.keys(parsed)).toEqual(['enabled']);
+
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      adaptiveScope: {
+        enabled: false,
+        maxConditionalTopics: 5,
+        plannerInstructions: 'Existing guidance',
+        fallbackTopicKeys: ['safe_default'],
+        rules: [
+          {
+            id: 'r1',
+            dataSlotKey: 'licence',
+            operator: 'not_exists',
+            value: null,
+            action: 'exclude',
+            topicKey: 'audit',
+            ordinal: 0,
+          },
+        ],
+      },
+    });
+    prismaMock.appQuestionnaireConfig.upsert.mockResolvedValue({});
+
+    const result = await patchAdaptiveScopeSettings('v-1', parsed);
+
+    expect(result.enabled).toBe(true);
+    expect(result.maxConditionalTopics).toBe(5);
+    expect(result.plannerInstructions).toBe('Existing guidance');
+    expect(result.fallbackTopicKeys).toEqual(['safe_default']);
+    expect(result.rules).toHaveLength(1);
+    expect(result.rules[0]).toMatchObject({ topicKey: 'audit', action: 'exclude' });
   });
 
   it('writes the merged blob through upsert, keyed by versionId', async () => {

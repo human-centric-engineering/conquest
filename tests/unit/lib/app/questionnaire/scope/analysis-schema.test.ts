@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   ROUTING_ANALYSIS_MAX_GAPS,
+  ROUTING_ANALYSIS_MAX_SETTING_KEYS,
   ROUTING_ANALYSIS_MAX_TOPICS,
   validateRoutingAnalysis,
 } from '@/lib/app/questionnaire/scope/analysis-schema';
@@ -226,5 +227,47 @@ describe('validateRoutingAnalysis', () => {
       explanation: 'x',
     }));
     expect(validateRoutingAnalysis(proposal({ gaps: many })).ok).toBe(false);
+  });
+});
+
+describe('validateRoutingAnalysis — the two settings the analyst may now propose (F17.23)', () => {
+  it('accepts both lists', () => {
+    const result = validateRoutingAnalysis(
+      proposal({
+        fallbackTopicKeys: ['growth_ambition'],
+        checkTopicPreference: ['growth_ambition'],
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.fallbackTopicKeys).toEqual(['growth_ambition']);
+    expect(result.value.checkTopicPreference).toEqual(['growth_ambition']);
+  });
+
+  it('leaves both undefined when the document said nothing about either', () => {
+    const result = validateRoutingAnalysis(proposal());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Undefined, NOT an empty array — omitted means "the author was silent", and a default here
+    // would sit where that silence was. Same discipline as maxConditionalTopics.
+    expect(result.value.fallbackTopicKeys).toBeUndefined();
+    expect(result.value.checkTopicPreference).toBeUndefined();
+  });
+
+  it('refuses more keys than a settings hint should carry', () => {
+    const tooMany = Array.from(
+      { length: ROUTING_ANALYSIS_MAX_SETTING_KEYS + 1 },
+      (_, i) => `t${i}`
+    );
+    expect(validateRoutingAnalysis(proposal({ fallbackTopicKeys: tooMany })).ok).toBe(false);
+  });
+
+  it('does NOT refuse a key that names no proposed topic — that is dropped on the way out', () => {
+    // Membership is enforced in narrowProposedTopicSet, deliberately: an unknown key is inert at
+    // runtime, so refusing the whole response over one would throw away a good proposal and pay
+    // for a retry to fix a hint.
+    expect(validateRoutingAnalysis(proposal({ fallbackTopicKeys: ['not_a_topic'] })).ok).toBe(true);
   });
 });

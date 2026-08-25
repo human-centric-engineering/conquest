@@ -20,7 +20,7 @@ import {
   buildRoutingAnalysisPrompt,
   buildRoutingAnalysisRetryMessage,
 } from '@/lib/app/questionnaire/scope/analysis-prompt';
-import type { Topic } from '@/lib/app/questionnaire/scope/types';
+import { LIGHT_DEPTH_MEMBER_COUNT, type Topic } from '@/lib/app/questionnaire/scope/types';
 
 const QUESTIONS = [
   { key: 'q1', prompt: 'How many partners does your firm work through?', sectionTitle: 'Channel' },
@@ -243,5 +243,58 @@ describe('buildRoutingAnalysisRetryMessage', () => {
     expect(message).toContain('"gaps"');
     expect(message).toContain('"fromDocument"');
     expect(message).toContain('No prose, no code fences');
+  });
+});
+
+describe('the rubric the analyst kept getting wrong (F17.23)', () => {
+  /** The system turn — where SYSTEM_RULES lives. */
+  const rubric = () => buildRoutingAnalysisPrompt({ questions: QUESTIONS })[0].content;
+
+  describe('depth', () => {
+    it('forbids light on every phase that runs for everyone, by name', () => {
+      const text = rubric();
+      expect(text).toContain('NEVER set "light" on an "opening", "core" or "closing" topic');
+    });
+
+    it('says what light actually costs, in members rather than adjectives', () => {
+      // The old rubric called light "a sample of the most important few", which reads as a
+      // refinement rather than a deletion — and the analyst proposed it on openings twice on real
+      // instruments. Naming the number is what makes the instruction checkable.
+      expect(rubric()).toContain(`${LIGHT_DEPTH_MEMBER_COUNT} highest-weighted questions`);
+    });
+
+    it('names full as the answer when the document says nothing about depth', () => {
+      expect(rubric()).toContain('If the document says nothing about depth, use "full"');
+    });
+  });
+
+  describe('the two settings that are not topics', () => {
+    it('teaches both fields', () => {
+      const text = rubric();
+      expect(text).toContain('"fallbackTopicKeys"');
+      expect(text).toContain('"checkTopicPreference"');
+    });
+
+    it('says the fallback list is used only when nothing else was chosen', () => {
+      // The distinction that matters: it is not a preference ordering, and folding it into topic
+      // criteria instead (which is what the analyst used to do) is a different runtime path.
+      expect(rubric()).toContain('ONLY when nothing else was chosen');
+    });
+
+    it('tells the analyst to omit them rather than guess, like maxConditionalTopics', () => {
+      expect(rubric()).toContain('OMIT the field');
+    });
+
+    it('stops them being reported as unformalizable gaps', () => {
+      expect(rubric()).toContain(
+        'Do NOT report a gap for anything "fallbackTopicKeys" or "checkTopicPreference" can express'
+      );
+    });
+
+    it('puts both keys in the output template', () => {
+      const text = rubric();
+      expect(text).toContain('"fallbackTopicKeys": [');
+      expect(text).toContain('"checkTopicPreference": [');
+    });
   });
 });

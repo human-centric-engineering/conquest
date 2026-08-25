@@ -218,3 +218,69 @@ describe('TopicListEditor — focusTopic', () => {
     });
   });
 });
+
+describe('TopicListEditor — focusTopic while hidden (active=false)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+  });
+
+  function renderWithActive(active: boolean, onFocusHandled = vi.fn()) {
+    const result = render(
+      <TopicListEditor
+        topics={TOPICS}
+        inventory={INVENTORY}
+        onSave={vi.fn().mockResolvedValue(true)}
+        busy={false}
+        enabled
+        focusTopic={{ key: 'pricing', nonce: 1 }}
+        onFocusHandled={onFocusHandled}
+        active={active}
+      />
+    );
+    return { ...result, onFocusHandled };
+  }
+
+  it('does not consume the request while hidden', () => {
+    // Under the sub-tab split this panel stays mounted while hidden (`forceMount`) so its unsaved
+    // drafts survive a tab change. A hidden-but-mounted editor still commits effects, so without
+    // this gate the request would be retired against a node with no layout — the admin lands on
+    // the Topics tab having been scrolled nowhere, with no way to ask again.
+    const { onFocusHandled } = renderWithActive(false);
+
+    expect(onFocusHandled).not.toHaveBeenCalled();
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('acts on a request that arrived while hidden, the moment it becomes visible', () => {
+    const onFocusHandled = vi.fn();
+    const { rerender } = renderWithActive(false, onFocusHandled);
+    expect(onFocusHandled).not.toHaveBeenCalled();
+
+    // The request waits rather than being spent — which is why `active` is a dependency of the
+    // effect and not merely a guard inside it.
+    rerender(
+      <TopicListEditor
+        topics={TOPICS}
+        inventory={INVENTORY}
+        onSave={vi.fn().mockResolvedValue(true)}
+        busy={false}
+        enabled
+        focusTopic={{ key: 'pricing', nonce: 1 }}
+        onFocusHandled={onFocusHandled}
+        active
+      />
+    );
+
+    expect(onFocusHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults to active, so today’s single-stack tab is unaffected', () => {
+    const { onFocusHandled } = renderWithActive(true);
+    expect(onFocusHandled).toHaveBeenCalledTimes(1);
+  });
+});

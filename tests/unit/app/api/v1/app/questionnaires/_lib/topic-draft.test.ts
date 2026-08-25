@@ -286,6 +286,30 @@ describe('acceptTopicDraft', () => {
     expect(withCap.settings.maxConditionalTopics).toBe(2);
   });
 
+  it('only touches the two analyst-proposable settings when the body supplies them (F17.23)', async () => {
+    prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
+      adaptiveScope: {
+        fallbackTopicKeys: ['existing_fallback'],
+        checkTopicPreference: ['existing_check'],
+        rules: [],
+      },
+    });
+
+    // Omitted leaves the version's own values alone — the same contract as rules and the cap, so
+    // an accept from a proposal that said nothing about them cannot wipe hand-authored settings.
+    const untouched = await acceptTopicDraft('v-1', BODY);
+    expect(untouched.settings.fallbackTopicKeys).toEqual(['existing_fallback']);
+    expect(untouched.settings.checkTopicPreference).toEqual(['existing_check']);
+
+    const replaced = await acceptTopicDraft('v-1', {
+      ...BODY,
+      fallbackTopicKeys: ['wellbeing'],
+      checkTopicPreference: ['wellbeing'],
+    });
+    expect(replaced.settings.fallbackTopicKeys).toEqual(['wellbeing']);
+    expect(replaced.settings.checkTopicPreference).toEqual(['wellbeing']);
+  });
+
   it('never touches enabled — accepting a proposal is authoring, not activation', async () => {
     prismaMock.appQuestionnaireConfig.findUnique.mockResolvedValue({
       adaptiveScope: { enabled: true, rules: [] },

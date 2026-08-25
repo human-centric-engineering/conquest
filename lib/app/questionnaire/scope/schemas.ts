@@ -167,6 +167,17 @@ export const acceptTopicDraftSchema = z.object({
     .min(MIN_CONDITIONAL_TOPICS)
     .max(MAX_CONDITIONAL_TOPICS_CEILING)
     .optional(),
+  /**
+   * Only sent when the analyst read one out of the document and the admin kept it. Omitted leaves
+   * the version's existing value alone; present REPLACES it — same contract as `rules`.
+   *
+   * Capped at 20 to match the settings PATCH above rather than the analyst's own proposal cap —
+   * both paths write the same field, so a value acceptable through one must be acceptable through
+   * the other.
+   */
+  fallbackTopicKeys: z.array(topicKeySchema).max(20).optional(),
+  /** Same contract as `fallbackTopicKeys` above. */
+  checkTopicPreference: z.array(topicKeySchema).max(20).optional(),
 });
 
 export type AcceptTopicDraftBody = z.infer<typeof acceptTopicDraftSchema>;

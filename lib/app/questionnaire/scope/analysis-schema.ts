@@ -28,6 +28,7 @@ import { z } from 'zod';
 
 import {
   MAX_CONDITIONAL_TOPICS_CEILING,
+  MAX_PROPOSED_SETTING_KEYS,
   MIN_CONDITIONAL_TOPICS,
   SCOPE_RATIONALE_MAX_LENGTH,
   SCOPE_RULE_ACTIONS,
@@ -111,6 +112,16 @@ const proposedGapSchema = z.object({
 
 export type ProposedGapPayload = z.infer<typeof proposedGapSchema>;
 
+/**
+ * Re-exported so the analyst's contract and its tests read the cap from one place.
+ *
+ * Membership — that every key names a topic the same proposal carries — is enforced in
+ * `narrowProposedTopicSet`, not here. Deliberately: an unknown key is inert at runtime (both the
+ * fallback loop and `chooseCheckTopic` skip keys they cannot resolve), so refusing the whole
+ * response over one would throw away an otherwise-good proposal and pay for a retry to fix a hint.
+ */
+export const ROUTING_ANALYSIS_MAX_SETTING_KEYS = MAX_PROPOSED_SETTING_KEYS;
+
 export const routingAnalysisSchema = z.object({
   topics: z
     .array(proposedTopicSchema)
@@ -135,6 +146,22 @@ export const routingAnalysisSchema = z.object({
     .int()
     .min(MIN_CONDITIONAL_TOPICS)
     .max(MAX_CONDITIONAL_TOPICS_CEILING)
+    .optional(),
+  /**
+   * Topics to ask when the planner chose nothing at all. Only when the document names a safe
+   * default — omitted otherwise, same reason as `maxConditionalTopics`.
+   */
+  fallbackTopicKeys: z
+    .array(z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH))
+    .max(ROUTING_ANALYSIS_MAX_SETTING_KEYS)
+    .optional(),
+  /**
+   * Preferred topics for the blind-spot check, best first. Only when the document names an area
+   * worth probing unprompted.
+   */
+  checkTopicPreference: z
+    .array(z.string().trim().min(1).max(TOPIC_KEY_MAX_LENGTH))
+    .max(ROUTING_ANALYSIS_MAX_SETTING_KEYS)
     .optional(),
   summary: z.string().trim().min(1).max(SCOPE_RATIONALE_MAX_LENGTH),
   /** The analyst's own claim about whether the document contained routing instructions at all. */

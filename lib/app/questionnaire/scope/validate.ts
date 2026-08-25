@@ -26,6 +26,7 @@ import { routedAllowanceSeconds } from '@/lib/app/questionnaire/scope/budget';
 import { checkScaleComparability } from '@/lib/app/questionnaire/scope/comparability';
 import {
   ALWAYS_PHASES,
+  LIGHT_DEPTH_MEMBER_COUNT,
   type AdaptiveScopeSettings,
   type Topic,
 } from '@/lib/app/questionnaire/scope/types';
@@ -92,6 +93,42 @@ export interface ValidateScopeInput {
  *
  * Pure and total: never throws, and an empty result means "nothing to say", not "not checked".
  */
+/**
+ * Question keys no topic claims — the orphan set, as keys rather than a count.
+ *
+ * Exported because two callers need the same answer and must not compute it twice: the orphan
+ * finding below, and the Topics payload's `coverage` block, which reports the number on a header
+ * that is visible whether or not the issue list is. A second implementation would eventually
+ * disagree with this one, and "the header says 3, the issue says 4" is the kind of contradiction
+ * that makes an admin stop trusting both.
+ *
+ * Note this is the raw set: the finding additionally suppresses itself when the version has no
+ * topics at all (nothing is authored yet, so "belongs to no topic" is not yet a mistake). A caller
+ * reporting coverage wants the count regardless, and decides its own framing.
+ */
+export function uncoveredQuestionKeys(
+  topics: readonly Topic[],
+  allQuestionKeys: readonly string[]
+): string[] {
+  const covered = new Set<string>();
+  for (const topic of topics) {
+    for (const key of topic.members.questionKeys) covered.add(key);
+  }
+  return allQuestionKeys.filter((k) => !covered.has(k));
+}
+
+/** Data-slot equivalent of {@link uncoveredQuestionKeys}. */
+export function uncoveredDataSlotKeys(
+  topics: readonly Topic[],
+  allDataSlotKeys: readonly string[]
+): string[] {
+  const covered = new Set<string>();
+  for (const topic of topics) {
+    for (const key of topic.members.dataSlotKeys) covered.add(key);
+  }
+  return allDataSlotKeys.filter((k) => !covered.has(k));
+}
+
 export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
   const { topics, settings } = input;
   const issues: ScopeIssue[] = [];
@@ -100,11 +137,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
   // ── The orphan check ───────────────────────────────────────────────────────────────────────
   // Reported whether or not the feature is on, because it is precisely what an admin needs to see
   // BEFORE flipping the switch — afterwards, the symptom is a question that silently never appears.
-  const covered = new Set<string>();
-  for (const topic of topics) {
-    for (const key of topic.members.questionKeys) covered.add(key);
-  }
-  const orphans = input.allQuestionKeys.filter((k) => !covered.has(k));
+  const orphans = uncoveredQuestionKeys(topics, input.allQuestionKeys);
   if (orphans.length > 0 && topics.length > 0) {
     issues.push({
       severity: settings.enabled ? 'error' : 'warning',
@@ -115,10 +148,7 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
     });
   }
 
-  const orphanSlots = (input.allDataSlotKeys ?? []).filter((k) => {
-    for (const topic of topics) if (topic.members.dataSlotKeys.includes(k)) return false;
-    return true;
-  });
+  const orphanSlots = uncoveredDataSlotKeys(topics, input.allDataSlotKeys ?? []);
   if (orphanSlots.length > 0 && topics.length > 0) {
     issues.push({
       severity: settings.enabled ? 'error' : 'warning',
@@ -144,6 +174,46 @@ export function validateAdaptiveScope(input: ValidateScopeInput): ScopeIssue[] {
         topicKey: topic.key,
         message: `"${topic.label}" is conditional but has no "include this when…" criteria, so the agent has nothing to judge it on.`,
       });
+    }
+    // Light depth on a topic EVERYONE gets does not sample — it deletes. `membersAtDepth`
+    // (scope/resolve.ts) applies depth to every phase, not just conditional ones, so the members it
+    // drops from an always-run topic are asked of nobody. Reported regardless of `enabled` for the
+    // same reason as the orphan check: before the switch this is advice, after it is a defect.
+    //
+    // Counted PER KIND because that is how `membersAtDepth` is applied — questions and data slots
+    // are each trimmed to LIGHT_DEPTH_MEMBER_COUNT separately (see graph.ts, "up to two of EACH
+    // kind"). A topic small enough that light and full are the same run is not a finding: the
+    // resolver early-returns on it, so flagging it would be noise on a setting that changed nothing.
+    if (ALWAYS_PHASES.includes(topic.phase) && topic.depth === 'light') {
+      const droppedQuestions = Math.max(
+        0,
+        topic.members.questionKeys.length - LIGHT_DEPTH_MEMBER_COUNT
+      );
+      const droppedSlots = Math.max(
+        0,
+        topic.members.dataSlotKeys.length - LIGHT_DEPTH_MEMBER_COUNT
+      );
+      if (droppedQuestions > 0 || droppedSlots > 0) {
+        const total = topic.members.questionKeys.length;
+        const asked = Math.min(total, LIGHT_DEPTH_MEMBER_COUNT);
+        // Name whichever kind actually lost members. The check fires on either, so a topic whose
+        // questions all fit under the floor but whose data slots do not would otherwise read
+        // "asks only 1 of its 1 questions" — self-contradictory, and it points the admin at the
+        // half that is fine.
+        const lost =
+          droppedQuestions > 0
+            ? `it asks only ${asked} of its ${total} questions`
+            : `${droppedSlots} of its data slots are never filled`;
+        issues.push({
+          severity: settings.enabled ? 'error' : 'warning',
+          code: 'light_depth_on_always_topic',
+          topicKey: topic.key,
+          message:
+            topic.phase === 'opening'
+              ? `"${topic.label}" is the opening, but it is set to Light depth — so ${lost}. The opening is what the agent works out the rest of the interview from, so sampling it means deciding what to ask from part of the answers. Set it to Full depth.`
+              : `"${topic.label}" is asked of everyone, but it is set to Light depth — so ${lost}, for anyone. Set it to Full depth, or move what you do not need into a conditional topic.`,
+        });
+      }
     }
   }
 

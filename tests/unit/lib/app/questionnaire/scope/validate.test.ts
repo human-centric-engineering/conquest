@@ -717,3 +717,103 @@ describe('validateAdaptiveScope — the opening follow-up allowance', () => {
     expect(codes(issues).filter((c) => c.startsWith('opening_probe_'))).toHaveLength(0);
   });
 });
+
+describe('validateAdaptiveScope — light depth on an always-run topic (F17.23)', () => {
+  /** An always-run topic big enough that `light` actually drops members. */
+  function bigAlways(phase: TopicPhase, depth: 'full' | 'light') {
+    return topic('open', phase, {
+      depth,
+      members: { dataSlotKeys: [], questionKeys: ['q1', 'q2', 'q3', 'q4'] },
+    });
+  }
+
+  function withTopic(t: Topic, enabled: boolean) {
+    return {
+      topics: [t, topic('cond_a', 'conditional')],
+      settings: settings({ enabled }),
+      allQuestionKeys: ['q1', 'q2', 'q3', 'q4', 'cond_a_q'],
+      allDataSlotKeys: [],
+    };
+  }
+
+  it('is an error on the opening once the feature is on', () => {
+    const issues = validateAdaptiveScope(withTopic(bigAlways('opening', 'light'), true));
+    const found = issues.find((i) => i.code === 'light_depth_on_always_topic');
+    expect(found).toBeDefined();
+    expect(found?.severity).toBe('error');
+    expect(found?.topicKey).toBe('open');
+    // Names the real numbers, because "set it to Full" without them is not checkable.
+    expect(found?.message).toContain('2 of its 4 questions');
+  });
+
+  it('is only a warning while the feature is off — the same shape as the orphan check', () => {
+    const issues = validateAdaptiveScope(withTopic(bigAlways('opening', 'light'), false));
+    expect(issues.find((i) => i.code === 'light_depth_on_always_topic')?.severity).toBe('warning');
+  });
+
+  it('fires on core and closing too — they run for everyone as well', () => {
+    for (const phase of ['core', 'closing'] as const) {
+      expect(codes(withTopic(bigAlways(phase, 'light'), true))).toContain(
+        'light_depth_on_always_topic'
+      );
+    }
+  });
+
+  it('says nothing about a conditional topic — light is what conditional depth is for', () => {
+    const cond = topic('cond_a', 'conditional', {
+      depth: 'light',
+      members: { dataSlotKeys: [], questionKeys: ['q1', 'q2', 'q3', 'q4'] },
+    });
+    const issues = validateAdaptiveScope({
+      topics: [topic('open', 'opening'), cond],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'q1', 'q2', 'q3', 'q4'],
+      allDataSlotKeys: [],
+    });
+    expect(issues.map((i) => i.code)).not.toContain('light_depth_on_always_topic');
+  });
+
+  it('says nothing when the topic is too small to lose anything', () => {
+    // `membersAtDepth` early-returns at <= LIGHT_DEPTH_MEMBER_COUNT, so light and full are the
+    // same run here. Flagging it would be noise about a setting that changed nothing.
+    const small = topic('spine', 'core', {
+      depth: 'light',
+      members: { dataSlotKeys: [], questionKeys: ['q1', 'q2'] },
+    });
+    expect(codes(withTopic(small, true))).not.toContain('light_depth_on_always_topic');
+  });
+
+  it('fires on the data-slot side independently — depth trims each kind separately', () => {
+    const slotHeavy = topic('spine', 'core', {
+      depth: 'light',
+      members: { dataSlotKeys: ['s1', 's2', 's3'], questionKeys: ['q1'] },
+    });
+    const issues = validateAdaptiveScope({
+      topics: [topic('open', 'opening'), slotHeavy, topic('cond_a', 'conditional')],
+      settings: settings(),
+      allQuestionKeys: ['open_q', 'q1', 'cond_a_q'],
+      allDataSlotKeys: ['s1', 's2', 's3'],
+    });
+    expect(issues.map((i) => i.code)).toContain('light_depth_on_always_topic');
+  });
+
+  it('names the data slots, not the questions, when only the slots were trimmed', () => {
+    // The check fires on either kind, so the message has to follow. Reporting "asks only 1 of its
+    // 1 questions" on a topic whose questions all fit is self-contradictory, and it points the
+    // admin at the half that is fine.
+    const slotHeavyOpening = topic('open', 'opening', {
+      depth: 'light',
+      members: { dataSlotKeys: ['s1', 's2', 's3', 's4', 's5'], questionKeys: ['q1'] },
+    });
+    const issues = validateAdaptiveScope({
+      topics: [slotHeavyOpening, topic('cond_a', 'conditional')],
+      settings: settings(),
+      allQuestionKeys: ['q1', 'cond_a_q'],
+      allDataSlotKeys: ['s1', 's2', 's3', 's4', 's5'],
+    });
+
+    const found = issues.find((i) => i.code === 'light_depth_on_always_topic');
+    expect(found?.message).toContain('3 of its data slots are never filled');
+    expect(found?.message).not.toContain('of its 1 questions');
+  });
+});

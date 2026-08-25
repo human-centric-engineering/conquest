@@ -810,3 +810,63 @@ describe('RoutingAnalystCard — reaching the analyst when candidacy said no', (
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('RoutingAnalystCard — the settings and corrections a proposal can carry (F17.22)', () => {
+  it('names the fallback and blind-spot topics by label, not by key', () => {
+    renderCard({
+      initialDraft: draft({
+        fallbackTopicKeys: ['pipeline'],
+        checkTopicPreference: ['pipeline'],
+      }),
+    });
+
+    expect(screen.getByText(/Ask if nothing matches:/)).toBeInTheDocument();
+    expect(screen.getByText(/Sample as a blind spot:/)).toBeInTheDocument();
+    // "pipeline" is the key; "Pipeline" is what the admin is reviewing.
+    expect(screen.getAllByText(/Pipeline/).length).toBeGreaterThan(0);
+  });
+
+  it('says nothing about either when the proposal carries neither', () => {
+    renderCard({ initialDraft: draft() });
+
+    expect(screen.queryByText(/Ask if nothing matches:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample as a blind spot:/)).not.toBeInTheDocument();
+  });
+
+  it('tells the reviewer when a light always-run topic was set back to Full', () => {
+    // The correction happens in narrowProposedTopicSet, but it must never be silent: the analyst
+    // asked for something that would have dropped questions for every respondent.
+    renderCard({ initialDraft: draft({ depthCorrectedKeys: ['pipeline'] }) });
+
+    expect(screen.getByText(/set back to\s+Full/)).toBeInTheDocument();
+    expect(screen.getByText(/dropped questions for every respondent/)).toBeInTheDocument();
+  });
+
+  it('shows no correction note on a well-formed proposal', () => {
+    renderCard({ initialDraft: draft() });
+    expect(screen.queryByText(/set back to\s+Full/)).not.toBeInTheDocument();
+  });
+
+  it('sends both settings on accept, and never sends `enabled`', async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, data: {}, meta: { forked: false } }));
+
+    renderCard({
+      initialDraft: draft({
+        fallbackTopicKeys: ['pipeline'],
+        checkTopicPreference: ['pipeline'],
+      }),
+    });
+
+    await user.click(screen.getByRole('button', { name: /accept/i }));
+    const confirm = screen.getAllByRole('button', { name: /accept/i }).at(-1);
+    if (confirm) await user.click(confirm);
+
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(call).toBeDefined();
+    const sent = JSON.parse(String(call?.[1]?.body));
+    expect(sent.fallbackTopicKeys).toEqual(['pipeline']);
+    expect(sent.checkTopicPreference).toEqual(['pipeline']);
+    expect(sent).not.toHaveProperty('enabled');
+  });
+});

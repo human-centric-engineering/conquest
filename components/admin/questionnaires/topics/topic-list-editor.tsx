@@ -210,6 +210,19 @@ export interface TopicListEditorProps {
   seedTopic?: { description: string; criteria: string; nonce: number } | null;
   /** Called once a {@link seedTopic} request has been honoured, so the caller can drop it. */
   onSeedHandled?: () => void;
+  /**
+   * Whether this editor is the surface the admin can currently see. Default `true` — today it
+   * always is.
+   *
+   * It exists ahead of the sub-tab split, where this panel is kept mounted while hidden
+   * (`forceMount`) so its unsaved drafts survive a tab change. A hidden-but-mounted editor still
+   * commits effects, so both handoffs below would consume their request — calling
+   * `onFocusHandled` / `onSeedHandled`, clearing the intent — and then scroll a node with no
+   * layout, leaving the admin on another tab wondering why nothing happened and no way to ask
+   * again. Gating on `active` makes the request WAIT for the panel to be visible rather than be
+   * spent on it.
+   */
+  active?: boolean;
 }
 
 export function TopicListEditor({
@@ -222,6 +235,7 @@ export function TopicListEditor({
   onFocusHandled,
   seedTopic,
   onSeedHandled,
+  active = true,
 }: TopicListEditorProps) {
   // Per-item seconds, keyed once. The route priced every question and data slot against this
   // version's own overrides, so the browser never re-derives a per-type estimate.
@@ -340,7 +354,9 @@ export function TopicListEditor({
 
   // "Edit this topic", arriving from the routing map.
   useEffect(() => {
-    if (!focusTopic) return;
+    // Wait rather than spend: a request that arrives while this panel is hidden is acted on the
+    // moment it becomes visible, which is why `active` is a dependency and not just a guard.
+    if (!active || !focusTopic) return;
     const target = drafts.find((d) => d.key === focusTopic.key);
     if (!target) return;
     // Retire the request now it has been acted on. A remount must not replay it.
@@ -349,7 +365,7 @@ export function TopicListEditor({
     // `drafts` is deliberately not a dependency: this must fire when a request ARRIVES, not every
     // time the admin types a character into a topic.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusTopic]);
+  }, [focusTopic, active]);
 
   // "Turn into topic", arriving from a Routing Analyst gap (F17.20).
   //
@@ -359,7 +375,9 @@ export function TopicListEditor({
   // saves the trip back to re-read what the analyst already found — the admin still names it and
   // picks its members.
   useEffect(() => {
-    if (!seedTopic) return;
+    // Same wait-don't-spend rule as the focus effect above — and it matters more here, because a
+    // seed that fired while hidden would append a row the admin never saw it append.
+    if (!active || !seedTopic) return;
     const clientId = `gap-${seedTopic.nonce}`;
     const taken = new Set(drafts.map((d) => d.key));
     setDirty(true);
@@ -376,7 +394,7 @@ export function TopicListEditor({
     // `drafts` is deliberately not a dependency, for the same reason as the effect above: this must
     // fire once per seed REQUEST (a nonce change), not on every keystroke in an existing draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedTopic]);
+  }, [seedTopic, active]);
 
   const setOpen = (clientId: string, open: boolean) => {
     setExpanded((prev) => {

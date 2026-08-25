@@ -452,3 +452,120 @@ describe('narrowAdaptiveScopeSettings — time budget (C7)', () => {
     ).toEqual({});
   });
 });
+
+describe('narrowProposedTopicSet — the F17.23 additions', () => {
+  /** A minimal well-formed stored draft with one always-run topic and one conditional. */
+  function stored(overrides: Record<string, unknown> = {}) {
+    return {
+      v: 1,
+      topics: [
+        {
+          key: 'opening',
+          label: 'Opening',
+          phase: 'opening',
+          criteria: null,
+          depth: 'full',
+          members: { questionKeys: ['q1', 'q2', 'q3', 'q4'], dataSlotKeys: [] },
+          rationale: 'Gathers the signal.',
+        },
+        {
+          key: 'pipeline',
+          label: 'Pipeline',
+          phase: 'conditional',
+          criteria: 'They named deals stalling.',
+          depth: 'light',
+          members: { questionKeys: ['q5', 'q6', 'q7'], dataSlotKeys: [] },
+          rationale: 'Routed.',
+        },
+      ],
+      rules: [],
+      gaps: [],
+      summary: 'Read from the routing tab.',
+      fromDocument: true,
+      generatedAt: '2026-08-25T00:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  describe('light depth on an always-run topic is corrected, not obeyed', () => {
+    it('sets an opening proposed as light back to full, and names it', () => {
+      const topics = stored().topics.map((t) =>
+        t.key === 'opening' ? { ...t, depth: 'light' } : t
+      );
+      const set = narrowProposedTopicSet(stored({ topics }));
+
+      expect(set?.topics.find((t) => t.key === 'opening')?.depth).toBe('full');
+      // Corrected AND reported — a silent fix would leave the admin unable to learn that their
+      // document's wording invited a proposal that drops questions.
+      expect(set?.depthCorrectedKeys).toEqual(['opening']);
+    });
+
+    it.each(['core', 'closing'])('corrects a light %s topic too', (phase) => {
+      const topics = stored().topics.map((t) =>
+        t.key === 'opening' ? { ...t, phase, depth: 'light' } : t
+      );
+      const set = narrowProposedTopicSet(stored({ topics }));
+
+      expect(set?.topics.find((t) => t.key === 'opening')?.depth).toBe('full');
+      expect(set?.depthCorrectedKeys).toEqual(['opening']);
+    });
+
+    it('leaves a light conditional topic alone and reports no correction', () => {
+      const set = narrowProposedTopicSet(stored());
+
+      expect(set?.topics.find((t) => t.key === 'pipeline')?.depth).toBe('light');
+      expect(set?.depthCorrectedKeys).toBeUndefined();
+    });
+  });
+
+  describe('fallbackTopicKeys and checkTopicPreference', () => {
+    it('carries both through when the analyst proposed them', () => {
+      const set = narrowProposedTopicSet(
+        stored({ fallbackTopicKeys: ['pipeline'], checkTopicPreference: ['pipeline'] })
+      );
+
+      expect(set?.fallbackTopicKeys).toEqual(['pipeline']);
+      expect(set?.checkTopicPreference).toEqual(['pipeline']);
+    });
+
+    it('omits them entirely when the document said nothing', () => {
+      const set = narrowProposedTopicSet(stored());
+
+      // Absent, not empty — the same discipline as maxConditionalTopics, so a default never lands
+      // where the author's silence was.
+      expect(set?.fallbackTopicKeys).toBeUndefined();
+      expect(set?.checkTopicPreference).toBeUndefined();
+    });
+
+    it('filters for membership BEFORE capping, so a stale key does not cost a valid one', () => {
+      // Capping first spends the budget on keys about to be discarded: one stale key ahead of five
+      // valid ones would keep only four.
+      const many = Array.from({ length: 6 }, (_, i) => ({
+        key: `t${i}`,
+        label: `T${i}`,
+        phase: 'conditional',
+        criteria: 'c',
+        depth: 'full',
+        members: { questionKeys: [`q${i}`], dataSlotKeys: [] },
+        rationale: 'r',
+      }));
+      const set = narrowProposedTopicSet(
+        stored({
+          topics: many,
+          fallbackTopicKeys: ['ghost', 't0', 't1', 't2', 't3', 't4'],
+        })
+      );
+
+      expect(set?.fallbackTopicKeys).toEqual(['t0', 't1', 't2', 't3', 't4']);
+    });
+
+    it('drops a key the proposal itself does not carry', () => {
+      const set = narrowProposedTopicSet(
+        stored({ fallbackTopicKeys: ['pipeline', 'not_a_topic'], checkTopicPreference: ['ghost'] })
+      );
+
+      expect(set?.fallbackTopicKeys).toEqual(['pipeline']);
+      expect(set?.checkTopicPreference).toBeUndefined();
+    });
+  });
+});

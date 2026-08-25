@@ -32,6 +32,7 @@ import {
   ROUTING_ANALYSIS_MAX_TOPICS,
 } from '@/lib/app/questionnaire/scope/analysis-schema';
 import {
+  LIGHT_DEPTH_MEMBER_COUNT,
   MAX_CONDITIONAL_TOPICS_CEILING,
   SCOPE_RULE_OPERATORS,
   type Topic,
@@ -123,6 +124,20 @@ should be short: it is the price of admission, paid before the interview has pro
 - If the instrument genuinely has no conditional areas, say so in "summary" and propose them all \
 as core. That is a legitimate, useful answer — do not manufacture conditionality that is not there.
 
+## Depth
+
+"light" means the topic asks only its ${LIGHT_DEPTH_MEMBER_COUNT} highest-weighted questions and \
+its ${LIGHT_DEPTH_MEMBER_COUNT} highest-weighted data slots. Everything else in that topic is never \
+asked.
+
+- NEVER set "light" on an "opening", "core" or "closing" topic. Those run for EVERY respondent, so \
+"light" there does not sample — it silently deletes questions from the questionnaire. On the \
+opening it is worse still: the opening is the signal every later decision is made from, and \
+halving it halves what that decision is made from. Set "full".
+- Use "light" ONLY on a "conditional" topic, and only where the document itself says that area is \
+worth a quick look rather than a full pass ("touch on X briefly", "a couple of questions on Y").
+- If the document says nothing about depth, use "full".
+
 ## Criteria
 
 Write the CONDITION, not the instruction. "They said they have done this before" is judgeable; \
@@ -139,6 +154,25 @@ belongs in a topic's criteria.
 ${SCOPE_RULE_OPERATORS.join(', ')}.
 - "action" is "include" (always ask this topic) or "exclude" (never ask it). Exclude beats include.
 - Propose at most ${ROUTING_ANALYSIS_MAX_RULES} rules. Zero is the common and correct answer.
+
+## Two settings that are not topics
+
+Two settings sit outside the topic list. Until now you had nowhere to put the document's \
+instructions about them, so you reported them as gaps. Stop doing that — put them here.
+
+- "fallbackTopicKeys" — the topics to ask when the agent cannot work out a plan at all, either \
+because it failed or because it was not confident enough. If the document names a safe default — \
+"if in doubt, cover leadership and operations", "everyone should at least get the growth section" \
+— list those topic keys. This list is used ONLY when nothing else was chosen; it is not a \
+preference ordering.
+- "checkTopicPreference" — the interview always adds ONE topic the respondent did NOT raise, asked \
+at light depth, so the result can surprise them rather than only confirm what they already \
+believed. If the document says which area is worth probing even unprompted — "always sanity-check \
+culture", "carry two items from a section they did not pick" — list those topic keys, best first.
+
+Both name keys from YOUR OWN "topics" list, and only conditional ones can be sampled as the check. \
+Never name a key you did not propose. If the document says nothing about either, OMIT the field — \
+do not supply a default, for the same reason you omit "maxConditionalTopics".
 
 ## Gaps — what you recognized but could not formalize
 
@@ -157,6 +191,9 @@ undefined).
 
 Report at most ${ROUTING_ANALYSIS_MAX_GAPS} gaps. Zero is the common and correct answer — most \
 instruments state nothing you cannot formalize. Never invent a gap to seem thorough.
+
+Do NOT report a gap for anything "fallbackTopicKeys" or "checkTopicPreference" can express. Those \
+are formalizable — put them in the fields above.
 
 ## Breadth
 
@@ -200,6 +237,8 @@ Output ONLY a single JSON object — no prose, no code fences:
     }
   ],
   "maxConditionalTopics": <number — omit unless the document states one>,
+  "fallbackTopicKeys": ["<key of one of your topics>", ...],
+  "checkTopicPreference": ["<key of one of your conditional topics>", ...],
   "summary": "<one or two sentences: what you found, and whether it came from the document>",
   "fromDocument": true | false
 }`;
