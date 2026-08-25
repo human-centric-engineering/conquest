@@ -58,6 +58,13 @@ export interface PlanPreviewCardProps {
   topics: readonly Topic[];
   /** True when conditional topics is switched on — a preview against an off version still runs. */
   enabled: boolean;
+  /**
+   * Hand the last run up to the tab, so the routing map can light the path it took (F17.29).
+   *
+   * The card keeps owning the result — this is a copy for a second reader, not a move. `null` when
+   * a run failed, so the map stops showing a verdict the author has since disproved.
+   */
+  onResult?: (result: PlanPreviewResult | null) => void;
   disabled?: boolean;
 }
 
@@ -102,6 +109,7 @@ export function PlanPreviewCard({
   form,
   topics,
   enabled,
+  onResult,
   disabled = false,
 }: PlanPreviewCardProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -117,26 +125,27 @@ export function PlanPreviewCard({
     setRunning(true);
     setError(null);
     try {
-      setResult(
-        await apiClient.post<PlanPreviewResult>(
-          API.APP.QUESTIONNAIRES.versionTopicsPreview(questionnaireId, versionId),
-          {
-            body: {
-              answers: Object.entries(answers)
-                .map(([key, text]) => ({ key, text: text.trim() }))
-                .filter((a) => a.text !== ''),
-              // A blank box means "the extractor captured nothing", which is a real input rather
-              // than a missing one — so blanks are dropped here instead of being sent as empties.
-              fills: Object.entries(fills)
-                .map(([key, paraphrase]) => ({ key, paraphrase: paraphrase.trim() }))
-                .filter((f) => f.paraphrase !== ''),
-            },
-          }
-        )
+      const previewed = await apiClient.post<PlanPreviewResult>(
+        API.APP.QUESTIONNAIRES.versionTopicsPreview(questionnaireId, versionId),
+        {
+          body: {
+            answers: Object.entries(answers)
+              .map(([key, text]) => ({ key, text: text.trim() }))
+              .filter((a) => a.text !== ''),
+            // A blank box means "the extractor captured nothing", which is a real input rather
+            // than a missing one — so blanks are dropped here instead of being sent as empties.
+            fills: Object.entries(fills)
+              .map(([key, paraphrase]) => ({ key, paraphrase: paraphrase.trim() }))
+              .filter((f) => f.paraphrase !== ''),
+          },
+        }
       );
+      setResult(previewed);
+      onResult?.(previewed);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The preview could not be run.');
       setResult(null);
+      onResult?.(null);
     } finally {
       setRunning(false);
     }

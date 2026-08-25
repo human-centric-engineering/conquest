@@ -88,8 +88,10 @@ export function RoutingMapDetail({ node, onEditTopic }: RoutingMapDetailProps) {
       </div>
 
       <dl className="space-y-1.5 text-xs">
-        {detail.rows.map((row) => (
-          <div key={row.label} className="grid grid-cols-[6.5rem_1fr] gap-2">
+        {/* Keyed by position, not by label: an overlay can pin two findings onto one node, and both
+            are legitimately labelled "Problem". */}
+        {detail.rows.map((row, index) => (
+          <div key={`${row.label}-${index}`} className="grid grid-cols-[6.5rem_1fr] gap-2">
             <dt className="text-muted-foreground">{row.label}</dt>
             <dd className="break-words">{row.value}</dd>
           </div>

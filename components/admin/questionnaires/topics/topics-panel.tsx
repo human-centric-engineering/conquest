@@ -14,7 +14,7 @@
  * them unable to tell which half landed.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
 
@@ -25,6 +25,9 @@ import {
 import { RoutingAnalystCard } from '@/components/admin/questionnaires/topics/routing-analyst-card';
 import { SupportingDocumentsCard } from '@/components/admin/questionnaires/topics/supporting-documents-card';
 import { RoutingMapDialog } from '@/components/admin/questionnaires/topics/routing-map-dialog';
+import type { ScopeOverlayInput } from '@/lib/app/questionnaire/scope/graph-overlays';
+import type { RoutingAnalyticsResult } from '@/lib/app/questionnaire/analytics/views';
+import type { PlanPreviewResult } from '@/lib/app/questionnaire/scope/views';
 import { ScopeExplainer } from '@/components/admin/questionnaires/topics/scope-explainer';
 import { ScopeIssues } from '@/components/admin/questionnaires/topics/scope-issues';
 import { ScopeIssueStrip } from '@/components/admin/questionnaires/topics/scope-issue-strip';
@@ -82,6 +85,45 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
   // shape as the two above, and for the same reason: pressing the button twice must scroll and run
   // twice, and unchanged state would leave the card's effect silent on the second press.
   const [analystRequest, setAnalystRequest] = useState<{ nonce: number } | null>(null);
+
+  /**
+   * The two overlays the routing map cannot compute for itself (F17.29).
+   *
+   * Held here rather than in the map because they belong to two OTHER cards on this tab — the dry
+   * run and the routing-quality table — and a map that fetched them again could show a number the
+   * card beside it disagrees with. Both are copies handed up by their owner; neither card loses
+   * anything by sharing.
+   */
+  const [lastPreview, setLastPreview] = useState<PlanPreviewResult | null>(null);
+  const [routingAnalytics, setRoutingAnalytics] = useState<RoutingAnalyticsResult | null>(null);
+
+  const overlays = useMemo<ScopeOverlayInput>(
+    () => ({
+      dryRun: lastPreview
+        ? {
+            selectedKeys: lastPreview.plan.topics.map((t) => t.key),
+            excluded: lastPreview.plan.excluded.map((t) => ({
+              key: t.key,
+              rationale: t.rationale,
+            })),
+            proposedKeys: lastPreview.proposedKeys,
+          }
+        : null,
+      selection: routingAnalytics
+        ? {
+            plans: routingAnalytics.plans,
+            byTopicKey: new Map(
+              routingAnalytics.topics.map((t) => [
+                t.key,
+                { chosen: t.chosen, chosenRate: t.chosenRate },
+              ])
+            ),
+          }
+        : null,
+      findings: payload.issues,
+    }),
+    [lastPreview, routingAnalytics, payload.issues]
+  );
 
   const turnGapIntoTopic = (gap: ProposedGap) =>
     setSeedTopic((prev) => ({
@@ -273,6 +315,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
           // button after a save would be a picture of a version that no longer exists.
           key={`map-${payload.topics.map((t) => t.key).join('|')}-${payload.settings.enabled}-${payload.settings.rules.length}-${payload.settings.maxConditionalTopics}-${payload.settings.sessionBudgetSeconds}`}
           payload={payload}
+          overlays={overlays}
           onEditTopic={openTopic}
           disabled={busy}
         />
@@ -459,6 +502,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             form={payload.preview}
             topics={payload.topics}
             enabled={payload.settings.enabled}
+            onResult={setLastPreview}
             disabled={busy}
           />
           {/* Immediately after the dry-run, and deliberately: "what it would do" and "what it did" are
@@ -470,6 +514,7 @@ export function TopicsPanel({ questionnaireId, versionId, payload }: TopicsPanel
             versionId={versionId}
             enabled={payload.settings.enabled}
             conditionalCount={conditionalCount}
+            onLoaded={setRoutingAnalytics}
           />
           {/* A second, structural opinion — independent of the coherence checks above and of the
               behavioural evidence RoutingQualityCard reports. Sits beside its siblings on the tab

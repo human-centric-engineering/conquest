@@ -35,10 +35,25 @@ import {
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { buildScopeGraph } from '@/lib/app/questionnaire/scope/graph';
+import {
+  annotateScopeGraph,
+  availableOverlays,
+  SCOPE_OVERLAY_KINDS,
+  SCOPE_OVERLAY_LABELS,
+  type ScopeOverlayInput,
+  type ScopeOverlayKind,
+} from '@/lib/app/questionnaire/scope/graph-overlays';
 import type { TopicsPayload } from '@/lib/app/questionnaire/scope/views';
 
 export interface RoutingMapDialogProps {
   payload: TopicsPayload;
+  /**
+   * The last dry run and the version's real selection rates, when the tab has them (F17.29).
+   *
+   * Passed in rather than fetched: both already belong to cards on this tab, and a map that
+   * re-fetched them could show a number the card beside it disagrees with.
+   */
+  overlays?: ScopeOverlayInput;
   /**
    * Ask the tab to open a topic for editing. The dialog closes itself first — the row it lands on is
    * behind the overlay, so leaving the map open would look like nothing happened.
@@ -47,7 +62,12 @@ export interface RoutingMapDialogProps {
   disabled?: boolean;
 }
 
-export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapDialogProps) {
+export function RoutingMapDialog({
+  payload,
+  overlays,
+  onEditTopic,
+  disabled,
+}: RoutingMapDialogProps) {
   const [open, setOpen] = useState(false);
   // On by default. The band used to be drawn as a wrapped row, where fifteen expanded topics crowded
   // out the conditional band the map exists to explain; laid out as a column clear of every other
@@ -55,6 +75,9 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
   // rather than a summary of a third of it. The toggle stays, to put the band away again.
   const [expandAlways, setExpandAlways] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeOverlays, setActiveOverlays] = useState<ReadonlySet<ScopeOverlayKind>>(
+    () => new Set()
+  );
 
   const graph = useMemo(
     () =>
@@ -78,10 +101,44 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
     ]
   );
 
-  const selected = useMemo(
-    () => graph.nodes.find((n) => n.id === selectedId) ?? null,
-    [graph.nodes, selectedId]
+  // The findings are always to hand (they ride the payload); the other two arrive only once
+  // someone has pressed "Try it" or the version has real interviews behind it.
+  //
+  // Dependencies are whole values rather than `overlays?.dryRun` member paths: the compiler cannot
+  // preserve a memo keyed on an optional chain, and the two objects are already stable (each is
+  // state in the tab above, replaced only when its own card reloads).
+  const dryRun = overlays?.dryRun ?? null;
+  const selection = overlays?.selection ?? null;
+  const issues = payload.issues;
+  const overlayInput = useMemo<ScopeOverlayInput>(
+    () => ({
+      ...(dryRun ? { dryRun } : {}),
+      ...(selection ? { selection } : {}),
+      findings: issues,
+    }),
+    [dryRun, selection, issues]
   );
+
+  const available = useMemo(() => availableOverlays(overlayInput), [overlayInput]);
+
+  const annotated = useMemo(
+    () => annotateScopeGraph(graph, overlayInput, activeOverlays),
+    [graph, overlayInput, activeOverlays]
+  );
+
+  const selected = useMemo(
+    () => annotated.nodes.find((n) => n.id === selectedId) ?? null,
+    [annotated.nodes, selectedId]
+  );
+
+  const toggleOverlay = (kind: ScopeOverlayKind, on: boolean) => {
+    setActiveOverlays((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(kind);
+      else next.delete(kind);
+      return next;
+    });
+  };
 
   const conditionalCount = payload.topics.filter((t) => t.phase === 'conditional').length;
   const alwaysCount = payload.topics.filter(
@@ -134,6 +191,34 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
           </div>
         </div>
 
+        {/* The overlays (F17.29). Offered only when they have something to say: a toggle that
+            switches on nothing reads as "the overlay found nothing", when in fact nobody has
+            pressed "Try it" yet or the version has no interviews behind it. */}
+        {available.size > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-5 py-2"
+            data-testid="routing-map-overlays"
+          >
+            <span className="text-muted-foreground text-xs">Lay over the map:</span>
+            {SCOPE_OVERLAY_KINDS.filter((kind) => available.has(kind)).map((kind) => (
+              <span key={kind} className="flex items-center gap-1.5">
+                <Switch
+                  id={`routing-map-overlay-${kind}`}
+                  checked={activeOverlays.has(kind)}
+                  onCheckedChange={(on) => toggleOverlay(kind, on)}
+                />
+                <Label
+                  htmlFor={`routing-map-overlay-${kind}`}
+                  title={SCOPE_OVERLAY_LABELS[kind].hint}
+                  className="text-xs font-normal"
+                >
+                  {SCOPE_OVERLAY_LABELS[kind].label}
+                </Label>
+              </span>
+            ))}
+          </div>
+        )}
+
         {!payload.settings.enabled ? (
           <div
             className="border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
@@ -157,7 +242,7 @@ export function RoutingMapDialog({ payload, onEditTopic, disabled }: RoutingMapD
 
         <div className="flex min-h-0 flex-1">
           <div className="bg-muted/20 min-w-0 flex-1">
-            <RoutingMapCanvas graph={graph} onSelectNode={setSelectedId} />
+            <RoutingMapCanvas graph={annotated} onSelectNode={setSelectedId} />
           </div>
 
           <aside

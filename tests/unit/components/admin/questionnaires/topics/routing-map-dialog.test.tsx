@@ -248,6 +248,69 @@ describe('RoutingMapDialog', () => {
  * Wrapped in `act` because this is a bare callback rather than a DOM event — without it the selection
  * state update is scheduled and never flushed, and the detail panel still shows its empty prompt.
  */
+describe('RoutingMapDialog — the overlays (F17.29)', () => {
+  const DRY_RUN = {
+    selectedKeys: ['pricing'],
+    excluded: [],
+    proposedKeys: ['pricing'],
+  };
+
+  it('offers no overlay row when there is nothing to lay over the map', () => {
+    // An empty toggle row reads as "the overlays found nothing", which is not the same statement as
+    // "nobody has pressed Try it and this version has no interviews behind it".
+    open();
+    expect(screen.queryByTestId('routing-map-overlays')).not.toBeInTheDocument();
+  });
+
+  it('offers only the overlays whose data is loaded', () => {
+    open({ overlays: { dryRun: DRY_RUN } });
+
+    const row = within(screen.getByTestId('routing-map-overlays'));
+    expect(row.getByRole('switch', { name: 'Last try-it run' })).toBeInTheDocument();
+    expect(row.queryByRole('switch', { name: 'How often it is chosen' })).not.toBeInTheDocument();
+  });
+
+  it('offers the problems overlay off the payload’s own findings', () => {
+    render(
+      <RoutingMapDialog
+        payload={{
+          ...payload(FULL),
+          issues: [
+            {
+              severity: 'error',
+              code: 'no_criteria',
+              message: 'No criteria.',
+              topicKey: 'pricing',
+            },
+          ],
+        }}
+        onEditTopic={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /decision flow/i }));
+
+    expect(
+      within(screen.getByTestId('routing-map-overlays')).getByRole('switch', { name: 'Problems' })
+    ).toBeInTheDocument();
+  });
+
+  it('starts every overlay off, and annotates only once one is switched on', () => {
+    // The map's first sight must be the structure. An overlay is a question asked OF it.
+    open({ overlays: { dryRun: DRY_RUN } });
+    selectNode('conditional:pricing');
+
+    expect(
+      within(screen.getByTestId('routing-map-detail')).queryByText(/Last try-it run/)
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Last try-it run' }));
+
+    const detail = within(screen.getByTestId('routing-map-detail'));
+    expect(detail.getByText('Last try-it run')).toBeInTheDocument();
+    expect(detail.getByText(/it was asked/i)).toBeInTheDocument();
+  });
+});
+
 function selectNode(id: string): void {
   const props = ReactFlowMock.mock.calls[ReactFlowMock.mock.calls.length - 1]?.[0] as {
     onNodeClick: (event: unknown, node: { id: string }) => void;

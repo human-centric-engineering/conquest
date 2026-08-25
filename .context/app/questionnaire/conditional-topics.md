@@ -1642,12 +1642,39 @@ thing and gives a canvas the room it needs. There is no fetch, no route and no s
 the map is a pure function of `TopicsPayload`, so it cannot drift from the settings above it — and the
 dialog is `key`-remounted on the payload so a stale graph never sits behind the button after a save.
 
-### Still open
+### Three overlays, and why they are not part of the graph (F17.29)
 
-The three overlays this deliberately does not carry, all of which have their data source already built:
-the **dry-run's** verdict lit onto the path it took (`proposedKeys` would show which guardrail took a topic
-back), **routing analytics** (F17.16) weighting each topic by how often it was really selected, and the
-**coherence findings** pinned to the nodes they name rather than listed above the map.
+The map draws what a version _can_ do, from its settings alone. That is what makes it trustworthy —
+a pure function of the tab above it, unable to drift, never predicting. Three facts from elsewhere
+answer questions the structure raises but cannot settle, and each is a toggle rather than part of
+the picture:
+
+| Overlay                    | Source                      | What it shows                                                      |
+| -------------------------- | --------------------------- | ------------------------------------------------------------------ |
+| **Last try-it run**        | the plan preview (F17.14)   | what that run asked, and what it chose and then lost to a limit    |
+| **How often it is chosen** | routing analytics (F17.16)  | each topic's real selection rate, with the sample size beside it   |
+| **Problems**               | `validateConditionalTopics` | each finding pinned to the topic it names, instead of listed above |
+
+`annotateScopeGraph` lives in its own module and takes a built graph, returning a **new** one.
+Keeping it out of `graph.ts` is deliberate: that module's invariant is _structural, never
+predictive_, and a layer mixing a session's outcome into the structure would quietly end it. The
+base map is the same object with every overlay off, so switching one off restores exactly the
+picture that was there before.
+
+**The state worth having.** A topic the agent proposed and a guardrail then took back looks
+identical, on the plan alone, to one the agent never wanted. `proposedKeys` beside the plan is what
+tells them apart, and _"Taken back on the last run"_ is the only reason this overlay is worth
+building.
+
+**A rate is a fact; whether it is a problem is a judgement.** A topic that never fires may be a
+rare-case safety net working exactly as designed, so the badge states the share and the sample size
+and stops — the same restraint `RoutingFinding` takes.
+
+**A toggle is offered only when it has something to say.** An overlay that switches on nothing reads
+as "it found nothing", when in fact nobody has pressed **Try it** yet, or the version has no
+interviews behind it. `availableOverlays` decides that, and the dry-run and analytics data are
+handed up by the two cards that already own them rather than fetched again — a map that re-fetched
+could show a number the card beside it disagrees with.
 
 ## The authoring surface
 
