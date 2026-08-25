@@ -15,10 +15,17 @@ reconstruct it by reading seven trackers, the pilot client research notes' capab
 authoring script's stdout.
 
 **Nothing below is blocking.** Conditional Topics works end to end without any of it, and the pilot
-client instrument runs. What the first four items blocked was a **faithful** rendering of it — all
-of them (§1, §3, §4) have since shipped, as has the guardrail in §5, leaving **§2 alone** as the
-workbook behaviour we cannot yet express — and §2 is deliberately gated on a second instrument
-actually needing it.
+client instrument runs.
+
+> **Status, 2026-08-25 — every numbered item on this list has now shipped.** §2 (item injection) and
+> §9 (the analyst reading one document) were the last two, closed in
+> [`f17.29.md`](./f17.29.md) along with two of the smaller things in §10. What remains open is
+> recorded in §10 and in the two "still open, and deliberately" notes inside §1 and §5 — nothing
+> that changes what the product can do, and nothing anyone is waiting on.
+>
+> That tracker also renamed the feature: everything on this page was called **Adaptive Scope** until
+> 2026-08-25. Commits, PRs and the older `f17.*` trackers use the old name; this page and the code
+> no longer do.
 
 Ordered by value. Each heading carries a rough size, so a follow-up can tell a half-hour job from a
 phase without reading the whole entry.
@@ -74,7 +81,22 @@ re-asked on every pass of the fit, because the check is chosen from what the fit
 
 ---
 
-## 2. Item injection at arbitrary granularity (C6) · **~1–2 days**
+## 2. Item injection at arbitrary granularity (C6) · **DONE** — see [`f17.29.md`](./f17.29.md)
+
+> Shipped 2026-08-25. `PlannedTopic.members` is an optional explicit subset — absent on nearly every
+> planned topic, and when present intersected with what the topic actually claims, in authored
+> order. It can only narrow; an intersection that comes out empty falls back to the depth, because
+> "in scope and asks nothing" is a topic that reports as covered while contributing no answer. The
+> planner may propose one, from a candidate item list bounded three ways, and the fit prices the
+> subset on the items it names rather than charging the whole topic.
+>
+> The entry below asked whether anyone needs this. It was built without a second instrument
+> demanding it, so the question it raises is still worth watching: if no author's plan ever carries
+> a `members` subset, the honest reading is that a one-question topic was always the better way to
+> say it.
+
+<details>
+<summary>The original entry</summary>
 
 **What exists:** `light` depth takes a topic's two highest-weight members —
 `LIGHT_DEPTH_MEMBER_COUNT`, a module constant. That covers G04 (the blind-spot check) exactly,
@@ -88,6 +110,8 @@ a `depth`, not a member list.
 already expresses a fine-grained dependency (that is the "size is not significant" design), so the
 honest question is whether anyone needs _partial_ selection of a topic they did not select — as
 opposed to authoring the two items as their own topic, which works today.
+
+</details>
 
 ---
 
@@ -209,13 +233,28 @@ available signal that a version's criteria are wrong, and it is one query away.
 
 ---
 
-## 9. Routing Analyst reads one document · **~half a day**
+## 9. Routing Analyst reads one document · **DONE** — see [`f17.29.md`](./f17.29.md)
+
+> Shipped 2026-08-25, and it needed more than the multi-document input this entry imagined: there
+> was no way to PUT a second document on a version. Re-ingest replaces the structure extracted from
+> the first, so an admin could have the question bank or the routing memo, never both.
+> `AppQuestionnaireSourceDocument.role` now separates the instrument from the companions attached
+> beside it; the analyst reads the newest `primary` plus every `supplementary` one, budgeted.
+>
+> It also exposed a defect the entry could not have predicted: source documents did not fork with a
+> version at all, so on any forked version the analyst had nothing to read and reported
+> `fromDocument: false`. Fixed in the same change.
+
+<details>
+<summary>The original entry</summary>
 
 `buildRoutingAnalysisInput` takes the **newest** source document only. An instrument delivered as
 several files — a question bank plus a separate routing memo — needs either a re-ingest that merges
 them or a multi-document input.
 
 The pilot client arrived as one workbook, so this has not bitten yet.
+
+</details>
 
 ---
 
@@ -248,12 +287,15 @@ Not on the original list either, and it followed directly from §6 landing.
 
 ## 10. Smaller things
 
-- **No drag-reorder of topics.** Up/down buttons only. Fine for a dozen, tedious for forty.
+- ~~**No drag-reorder of topics.**~~ **DONE** — see [`f17.29.md`](./f17.29.md). Rows drag; the
+  up/down buttons stay for the keyboard, and both are still locked under a filter.
 - ~~**No duplicate-membership check.**~~ **DONE** — see [`f17.15.md`](./f17.15.md). It turned out
   not to be cosmetic: costs are priced per topic and summed, so a shared member is charged once per
   claiming topic and the floor, the allowance and the fit are all off by it.
-- **The amendment cue gate is English-only.** A localised respondent surface needs the cue list per
-  locale, or the regex replaced by a cheap classifier.
+- ~~**The amendment cue gate is English-only.**~~ **DONE** — see [`f17.29.md`](./f17.29.md). Not by
+  translating the cue list, which is work nobody here can check: a non-English version gates on the
+  topic LABELS, which are written in the instrument's own language, and hands the request-or-not
+  judgement to the agent.
 - **No replay of a recorded analysis.** The `AppAiRun` snapshot holds the analyst's output but not
   the resolved prompt, so a rubric change cannot be diffed against past runs.
 - **The pilot criteria carry builder-facing sentences.** A few of the client's NOTES are addressed to
@@ -291,6 +333,16 @@ for P17. Bringing the plan itself up to date across P10–P17 is a separate job,
   its phases have shipped
 - [`f17.20.md`](./f17.20.md) — turning a gap `f17.19.md` reports into a topic in one click, the one
   item that tracker's own follow-ups left open
+- [`f17.21.md`](./f17.21.md) — the scope evaluation judge panel · [`f17.22.md`](./f17.22.md) — the
+  four phases that made the feature author itself · [`f17.23.md`](./f17.23.md) — the defects the
+  first real imported instrument exposed. None of the three is a follow-up to F17.1–F17.7 either;
+  they are recorded here so this page is the whole P17 index rather than half of it
+- [`f17.24.md`](./f17.24.md) · [`f17.25.md`](./f17.25.md) · [`f17.26.md`](./f17.26.md) ·
+  [`f17.27.md`](./f17.27.md) · [`f17.28.md`](./f17.28.md) — the tab simplification, in five phases:
+  de-risk, the status header, the three sub-tabs, plain English, and the master switch mirrored onto
+  the Settings tab
+- [`f17.29.md`](./f17.29.md) — the rename to **Conditional Topics**, and the sweep that closed §2,
+  §9 and two of §10 along with the routing map's three deferred overlays
 - [`../../questionnaire/conditional-topics.md`](../../questionnaire/conditional-topics.md) — the domain doc
 - The pilot client research notes (held outside this repo) — the
   capability table (C1–C11) these are numbered against

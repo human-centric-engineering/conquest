@@ -18,6 +18,11 @@ several, which costs cross-section scoring and cohort analysis.
 > moved the master switch out of the tenth card, F17.26 split it into three sub-tabs, F17.27 swept
 > the remaining implementation vocabulary off the screen, and F17.28 mirrored the master switch
 > onto the Settings tab.
+>
+> F17.29 renamed the feature (see below) and closed the last of the P17 follow-up list: the analyst
+> reads a companion document beside the instrument, a plan may ask part of a topic, the amendment
+> gate works in a language other than English, topics drag into order, and the routing map carries
+> its three deferred overlays.
 
 ### It was called "Adaptive Scope" until 2026-08-25
 
