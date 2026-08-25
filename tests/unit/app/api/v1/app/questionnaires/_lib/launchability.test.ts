@@ -18,6 +18,7 @@ const prismaMock = vi.hoisted(() => ({
   appQuestionnaireConfig: { findUnique: vi.fn() },
   appDataSlot: { count: vi.fn(), findMany: vi.fn() },
   appScoringSchema: { findUnique: vi.fn() },
+  appQuestionnaireTopic: { count: vi.fn() },
 }));
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 
@@ -81,6 +82,7 @@ beforeEach(() => {
   prismaMock.appDataSlot.count.mockResolvedValue(1);
   prismaMock.appDataSlot.findMany.mockResolvedValue([]);
   prismaMock.appScoringSchema.findUnique.mockResolvedValue(null);
+  prismaMock.appQuestionnaireTopic.count.mockResolvedValue(0);
   (slotEmbeddingCoverage as unknown as Mock).mockResolvedValue({
     total: 1,
     embedded: 1,
@@ -97,6 +99,10 @@ beforeEach(() => {
 
 function scopeCheck(checks: { key: string; ok: boolean }[]) {
   return checks.find((c) => c.key === 'adaptiveScope');
+}
+
+function scopeOffCheck(checks: { key: string; ok: boolean; label: string }[]) {
+  return checks.find((c) => c.key === 'adaptiveScopeOff');
 }
 
 describe('loadLaunchReadiness — the Adaptive Scope arm', () => {
@@ -184,5 +190,41 @@ describe('loadLaunchReadiness — the Adaptive Scope arm', () => {
 
     expect(scopeCheck(result.checks)?.ok).toBe(true);
     expect(result.ready).toBe(true);
+  });
+});
+
+describe('loadLaunchReadiness — conditional topics with the feature off', () => {
+  it('warns without blocking, and still calls the version ready', async () => {
+    // The state F17.22 was written for: the analyst proposed conditional topics, an admin accepted
+    // them, and nothing between here and the respondent is choosing between them.
+    prismaMock.appQuestionnaireTopic.count.mockResolvedValue(3);
+
+    const result = await loadLaunchReadiness('ver-1');
+
+    expect(scopeOffCheck(result.checks)?.ok).toBe(false);
+    expect(scopeOffCheck(result.checks)?.label).toContain('3 conditional topics');
+    // The whole point: a warning row must not make a launchable version report itself unready.
+    expect(result.ready).toBe(true);
+  });
+
+  it('says nothing when the version has no conditional topics', async () => {
+    const result = await loadLaunchReadiness('ver-1');
+
+    expect(scopeOffCheck(result.checks)).toBeUndefined();
+    expect(result.ready).toBe(true);
+  });
+
+  it('says nothing once the feature is on, however many conditional topics there are', async () => {
+    prismaMock.appQuestionnaireTopic.count.mockResolvedValue(3);
+    topicMock.loadAdaptiveScopeSettings.mockResolvedValue(settings());
+    topicMock.loadTopics.mockResolvedValue([
+      { ...topic('open', ['q1']), phase: 'opening' as const },
+      { ...topic('cond', []), phase: 'conditional' as const, criteria: 'when it fits' },
+    ]);
+
+    const result = await loadLaunchReadiness('ver-1');
+
+    expect(scopeOffCheck(result.checks)).toBeUndefined();
+    expect(scopeCheck(result.checks)).toBeDefined();
   });
 });

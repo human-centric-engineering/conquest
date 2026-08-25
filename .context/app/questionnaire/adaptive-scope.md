@@ -533,6 +533,54 @@ unreviewed work there and a silent re-run would discard a review in progress.
 None of this touches the invariant. A proposal is inert until accepted, and `enabled` still moves
 only when an admin moves it.
 
+### Closing the loop to the switch (F17.22 Phase 4)
+
+Accepting a proposal wrote conditional topics and left the feature off, which is correct — and left
+the version in a state nothing outside this tab described: **topics authored with conditions on
+them, and every one of them asked to everybody.** The AI chain had succeeded; the product simply
+never said the configuration was inert. Two surfaces now say it.
+
+**A warning on the launch checklist.** `launchReadinessChecks` gains an `adaptiveScopeOff` row —
+"Adaptive scope is off, so all 4 conditional topics are asked to everyone" — shown only when the
+feature is off AND the version has ≥1 conditional topic. It is the mirror of the `adaptiveScope`
+coherence row, which appears only when the feature is on.
+
+It is also the first check on that list that does **not** block a launch, and that required a real
+change rather than a `false` in the right place. Readiness was computed in four places, each with
+its own `!c.ok`: `isLaunchReady`, the server `loadLaunchReadiness`, the status route's launch gate,
+and the checklist UI. A row that means "look at this" would have become a row that means "you may
+not launch" in three of them. So every check now carries an explicit `severity`, and one exported
+`blocksLaunch(check)` is what all four ask. Explicit on every check rather than optional-with-a-
+default: a new check must state that it blocks, instead of blocking by accident or — worse —
+becoming advisory by omission.
+
+Asking everyone everything is a legitimate way to run a questionnaire. The row exists because it is
+rarely what someone who just authored conditional topics meant.
+
+**An offer in the accept dialog.** When the reviewed proposal contains a conditional topic and the
+feature is off, the accept confirmation carries an **unticked** "Turn adaptive scope on now" box.
+Ticking it sends `enable: true` alongside the accepted set, and `acceptTopicDraft` merges
+`enabled: true` into the settings in the same transaction that writes the topics.
+
+Three details keep the invariant intact:
+
+- The schema field is `z.literal(true)` and is named for the **act** (`enable`), not the state
+  (`enabled`). This route can turn adaptive scope on and has no way to turn it off, so a caller
+  that spread a settings object into an accept body cannot switch routing off for every respondent
+  in flight. The `enabled` key remains unsettable through the accept contract, as it was.
+- The box starts unticked on every open **and** resets on cancel. Accepting is authoring; going
+  live is a separate yes, and a box that remembered a previous yes would turn the feature on for an
+  admin who reopened the dialog only to re-read the proposal.
+- The accept audit entry records `scopeEnabled` and `enabledByAccept`, because this accept may be
+  the moment routing started deciding what respondents are asked — previously only a settings PATCH
+  could be that moment, and only that PATCH was audited as such.
+
+The dialog's closing sentence follows the same three cases: already on ("these topics decide what
+respondents are asked as soon as you accept"), off with conditional topics ("every topic here would
+be asked to everyone until you turn it on"), and off with none ("adaptive scope stays off until you
+turn it on yourself" — the sentence that used to be shown unconditionally, including, wrongly, to
+versions where the feature was already on).
+
 ## Reports and scoring (F17.5)
 
 The `notAssessed` list on the session export is what makes an adaptive instrument honest downstream.

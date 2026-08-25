@@ -174,7 +174,7 @@ export function PlanPreviewCard({
         <CardDescription>
           {enabled
             ? 'Check what a respondent would be asked before anyone is asked it.'
-            : 'Adaptive scope is off, so this changes nothing for respondents yet — but the preview runs against your settings exactly as they stand.'}
+            : 'Adaptive scope is off, so this changes nothing for respondents yet — the switch is at the top of this tab. The preview runs against your settings exactly as they stand.'}
         </CardDescription>
       </CardHeader>
 

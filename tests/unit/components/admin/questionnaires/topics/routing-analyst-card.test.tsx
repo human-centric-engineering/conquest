@@ -107,6 +107,7 @@ function renderCard(props: Partial<ComponentProps<typeof RoutingAnalystCard>> = 
       initialDraft={null}
       questionKeys={['q1']}
       liveTopicCount={0}
+      scopeEnabled={false}
       candidacy={null}
       autoTriggerPending={false}
       {...props}
@@ -390,6 +391,7 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
         initialDraft={null}
         questionKeys={['q1']}
         liveTopicCount={0}
+        scopeEnabled={false}
         candidacy={CANDIDACY}
         autoTriggerPending={true}
       />
@@ -403,6 +405,7 @@ describe('RoutingAnalystCard — auto-trigger (F17.19 Phase 3)', () => {
         initialDraft={null}
         questionKeys={['q1']}
         liveTopicCount={0}
+        scopeEnabled={false}
         candidacy={CANDIDACY}
         autoTriggerPending={true}
       />
@@ -868,5 +871,109 @@ describe('RoutingAnalystCard — the settings and corrections a proposal can car
     expect(sent.fallbackTopicKeys).toEqual(['pipeline']);
     expect(sent.checkTopicPreference).toEqual(['pipeline']);
     expect(sent).not.toHaveProperty('enabled');
+  });
+});
+
+describe('RoutingAnalystCard — the accept dialog offers to turn the feature on (F17.22 Phase 4)', () => {
+  /** Accept-dialog POST that resolves, so the payload can be read back off the mock. */
+  function mockAcceptOk() {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === DRAFT_URL && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ success: true, data: {}, meta: null }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+  }
+
+  function acceptedBody() {
+    const [, init] = fetchMock.mock.calls.find(
+      ([url, callInit]) => url === DRAFT_URL && (callInit as RequestInit)?.method === 'POST'
+    ) as [string, RequestInit];
+    return JSON.parse(init.body as string) as Record<string, unknown>;
+  }
+
+  it('offers an UNTICKED box, and an untouched accept carries no enable', async () => {
+    // The invariant the whole feature sits inside: accepting is authoring, going live is a
+    // separate yes. A pre-ticked box would make the second happen as a side effect of the first.
+    const user = userEvent.setup();
+    mockAcceptOk();
+    renderCard({ initialDraft: draft(), scopeEnabled: false });
+
+    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
+    const dialog = screen.getByRole('alertdialog');
+    const box = within(dialog).getByRole('checkbox', { name: /Turn adaptive scope on now/ });
+    expect(box).not.toBeChecked();
+
+    await user.click(within(dialog).getByRole('button', { name: /^Accept$/ }));
+    await waitFor(() => expect(acceptedBody()).not.toHaveProperty('enable'));
+  });
+
+  it('sends enable: true once the admin ticks it', async () => {
+    const user = userEvent.setup();
+    mockAcceptOk();
+    renderCard({ initialDraft: draft(), scopeEnabled: false });
+
+    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
+    const dialog = screen.getByRole('alertdialog');
+    await user.click(within(dialog).getByRole('checkbox', { name: /Turn adaptive scope on now/ }));
+    await user.click(within(dialog).getByRole('button', { name: /^Accept$/ }));
+
+    await waitFor(() => expect(acceptedBody().enable).toBe(true));
+  });
+
+  it('forgets a tick that was cancelled rather than accepted', async () => {
+    // Reopening the dialog must not carry a previous yes: an admin who cancelled to re-read the
+    // proposal would otherwise turn the feature on by pressing Accept the second time.
+    const user = userEvent.setup();
+    mockAcceptOk();
+    renderCard({ initialDraft: draft(), scopeEnabled: false });
+
+    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('checkbox', {
+        name: /Turn adaptive scope on now/,
+      })
+    );
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: /Cancel/ })
+    );
+
+    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
+    expect(
+      within(screen.getByRole('alertdialog')).getByRole('checkbox', {
+        name: /Turn adaptive scope on now/,
+      })
+    ).not.toBeChecked();
+  });
+
+  it('does not offer it when the feature is already on, and says so instead', async () => {
+    const user = userEvent.setup();
+    renderCard({ initialDraft: draft(), scopeEnabled: true });
+
+    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /Turn adaptive scope on now/ })
+    ).not.toBeInTheDocument();
+    expect(dialog).toHaveTextContent(/already on/i);
+    expect(dialog).not.toHaveTextContent(/stays off until you turn it on yourself/i);
+  });
+
+  it('does not offer it when the proposal has no conditional topic', async () => {
+    // With every topic asked regardless, turning the feature on changes nothing — the box would be
+    // an invitation to enable something with no visible effect.
+    const user = userEvent.setup();
+    const coreOnly = draft();
+    renderCard({
+      initialDraft: { ...coreOnly, topics: [{ ...coreOnly.topics[0], phase: 'core' }] },
+      scopeEnabled: false,
+    });
+
+    await user.click(screen.getByRole('button', { name: /Accept 1 topic/ }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /Turn adaptive scope on now/ })
+    ).not.toBeInTheDocument();
+    expect(dialog).toHaveTextContent(/stays off until you turn it on yourself/i);
   });
 });

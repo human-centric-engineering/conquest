@@ -74,6 +74,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FieldHelp } from '@/components/ui/field-help';
@@ -113,6 +114,15 @@ export interface RoutingAnalystCardProps {
   questionKeys: readonly string[];
   /** Live topic count, so the banner can say what accepting would replace. */
   liveTopicCount: number;
+  /**
+   * Whether adaptive scope is currently ON for this version (F17.22 Phase 4).
+   *
+   * Two things read it, both in the accept dialog: whether to offer "turn it on as part of this
+   * accept" at all, and whether the dialog's closing sentence should promise the topics take
+   * effect immediately or say the feature is still off. Accepting into an already-on version was
+   * previously told, wrongly, that scope "stays off until you turn it on yourself".
+   */
+  scopeEnabled: boolean;
   /** The ingestion-time candidacy verdict (F17.19 Phase 1), or null. Explains an auto-run. */
   candidacy: ScopeCandidacyVerdict | null;
   /** True when this card should invoke the analyst itself, on mount (F17.19 Phase 3). */
@@ -187,6 +197,7 @@ export function RoutingAnalystCard({
   initialDraft,
   questionKeys,
   liveTopicCount,
+  scopeEnabled,
   candidacy,
   autoTriggerPending,
   runRequest,
@@ -203,6 +214,10 @@ export function RoutingAnalystCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmAccept, setConfirmAccept] = useState(false);
+  // The accept dialog's "turn adaptive scope on now" offer. Starts UNTICKED every time the dialog
+  // opens (see the `onOpenChange` below): a box that remembered a previous yes would turn the
+  // feature on for an admin who only came back to re-read the proposal.
+  const [enableOnAccept, setEnableOnAccept] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
   const autoTriggeredRef = useRef(false);
 
@@ -348,10 +363,14 @@ export function RoutingAnalystCard({
           ...((draft.checkTopicPreference?.length ?? 0) > 0
             ? { checkTopicPreference: draft.checkTopicPreference }
             : {}),
+          // Sent only when the admin ticked the box. An untouched accept carries no `enable` key
+          // at all, which is what leaves the version's own setting alone on the server.
+          ...(enableOnAccept ? { enable: true as const } : {}),
         }
       );
       setDraft(null);
       setConfirmAccept(false);
+      setEnableOnAccept(false);
       if (meta?.forked) {
         router.replace(`/admin/questionnaires/${questionnaireId}/v/${meta.versionId}/topics`);
       }
@@ -371,6 +390,10 @@ export function RoutingAnalystCard({
   const uncovered = questionKeys.filter((k) => !covered.has(k));
   const replacedCount = draft?.topics.filter((t) => t.replacesExisting).length ?? 0;
   const conditionalCount = draft?.topics.filter((t) => t.phase === 'conditional').length ?? 0;
+  // The accept dialog offers to turn the feature on only when both halves of the silent
+  // misconfiguration are in play: conditional topics about to exist, and nothing yet choosing
+  // between them. Already-on versions get a different sentence instead of a redundant box.
+  const offerEnable = !scopeEnabled && conditionalCount > 0;
 
   // Settings lists and the depth-correction note address topics by key; a reviewer reads labels.
   // Falls back to the key so an unresolvable one is visible rather than blank — though
@@ -705,7 +728,15 @@ export function RoutingAnalystCard({
         )}
       </CardContent>
 
-      <AlertDialog open={confirmAccept} onOpenChange={setConfirmAccept}>
+      <AlertDialog
+        open={confirmAccept}
+        onOpenChange={(next) => {
+          setConfirmAccept(next);
+          // Untick on every open AND every cancel. This is the one control in the dialog that
+          // changes what respondents are asked, so it never carries an answer between visits.
+          if (!next) setEnableOnAccept(false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Accept this topic set?</AlertDialogTitle>
@@ -714,10 +745,43 @@ export function RoutingAnalystCard({
                 ? `This replaces all ${liveTopicCount} of your current topics with the ${draft?.topics.length ?? 0} proposed here`
                 : `This writes the ${draft?.topics.length ?? 0} proposed topics`}
               {draft && draft.rules.length > 0 ? ', and replaces your hard rules' : ''}. You can
-              still edit everything afterwards. Adaptive scope stays off until you turn it on
-              yourself.
+              still edit everything afterwards.{' '}
+              {scopeEnabled
+                ? 'Adaptive scope is already on, so these topics decide what respondents are asked as soon as you accept.'
+                : offerEnable
+                  ? 'Adaptive scope is off, so every topic here would be asked to everyone until you turn it on.'
+                  : 'Adaptive scope stays off until you turn it on yourself.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Offered here rather than left for the admin to find, because this is the moment the
+              question arises — and it is the moment the silent misconfiguration is created. Shown
+              only when the proposal actually contains a conditional topic (with none, turning the
+              feature on changes nothing), and UNTICKED: accepting a proposal is an authoring act,
+              and going live stays a separate, deliberate yes. */}
+          {offerEnable && (
+            <label
+              htmlFor="accept-enable-scope"
+              className="flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm"
+            >
+              <Checkbox
+                id="accept-enable-scope"
+                checked={enableOnAccept}
+                onCheckedChange={(checked) => setEnableOnAccept(checked === true)}
+                disabled={busy}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Turn adaptive scope on now</span>
+                <span className="text-muted-foreground block text-xs">
+                  {conditionalCount === 1
+                    ? 'The 1 conditional topic below is asked only when it fits what the respondent said. Leave this unticked to keep asking everyone everything for now.'
+                    : `The ${conditionalCount} conditional topics below are asked only when they fit what the respondent said. Leave this unticked to keep asking everyone everything for now.`}
+                </span>
+              </span>
+            </label>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void accept()} disabled={busy}>

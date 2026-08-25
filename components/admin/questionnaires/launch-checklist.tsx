@@ -19,7 +19,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, ChevronRight, Circle, Loader2, Rocket } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Circle, Loader2, Rocket } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -35,8 +35,10 @@ import { API } from '@/lib/api/endpoints';
 import { authoringMutate } from '@/components/admin/questionnaires/authoring-mutate';
 import { workspaceVersionBase } from '@/lib/app/questionnaire/workspace-nav';
 import {
+  blocksLaunch,
   launchReadinessChecks,
   type LaunchCheckKey,
+  type LaunchCheckSeverity,
 } from '@/lib/app/questionnaire/launch/readiness';
 import type { AudienceShape } from '@/lib/app/questionnaire/types';
 
@@ -74,25 +76,62 @@ export interface LaunchChecklistProps {
   adaptiveScopeEnabled?: boolean;
   /** How many `error`-severity Adaptive Scope findings the version has (launch requires 0). */
   adaptiveScopeErrorCount?: number;
+  /**
+   * How many `conditional` topics the version has. With adaptive scope OFF and this above zero,
+   * the checklist raises a warning row — the topics are authored, and every one of them is being
+   * asked to every respondent. It never blocks a launch.
+   */
+  adaptiveScopeConditionalCount?: number;
 }
 
 interface LaunchCheck {
+  key: LaunchCheckKey;
   ok: boolean;
   label: string;
+  severity: LaunchCheckSeverity;
   /** Page that configures this step (opened by the row's "Configure" link). */
   href: string;
 }
 
-function ChecklistRow({ ok, label, href }: { ok: boolean; label: string; href?: string }) {
+function ChecklistRow({
+  ok,
+  label,
+  severity,
+  href,
+}: {
+  ok: boolean;
+  label: string;
+  severity: LaunchCheckSeverity;
+  href?: string;
+}) {
+  // Three states, not two. A failed warning is neither done nor outstanding-work-before-launch: it
+  // is something to look at, so it gets its own colour and its own screen-reader word rather than
+  // sitting among the muted rows an admin reads as "still to do".
+  const warning = !ok && severity === 'warning';
   return (
     <li className="flex items-center gap-2 text-sm">
       {ok ? (
         <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+      ) : warning ? (
+        <AlertTriangle
+          className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500"
+          aria-hidden="true"
+        />
       ) : (
         <Circle className="text-muted-foreground/50 h-4 w-4 shrink-0" aria-hidden="true" />
       )}
-      <span className={ok ? 'text-foreground' : 'text-muted-foreground'}>{label}</span>
-      <span className="sr-only">{ok ? '(ready)' : '(not ready)'}</span>
+      <span
+        className={
+          ok
+            ? 'text-foreground'
+            : warning
+              ? 'text-amber-700 dark:text-amber-400'
+              : 'text-muted-foreground'
+        }
+      >
+        {label}
+      </span>
+      <span className="sr-only">{ok ? '(ready)' : warning ? '(warning)' : '(not ready)'}</span>
       {href && (
         <Link
           href={href}
@@ -128,6 +167,7 @@ export function LaunchChecklist({
   misconfiguredMatrixCount = 0,
   adaptiveScopeEnabled = false,
   adaptiveScopeErrorCount = 0,
+  adaptiveScopeConditionalCount = 0,
 }: LaunchChecklistProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -153,6 +193,7 @@ export function LaunchChecklist({
     dataSlots: `${base}/data-slots`,
     dataSlotEmbeddings: `${base}/data-slots`,
     adaptiveScope: `${base}/topics`,
+    adaptiveScopeOff: `${base}/topics`,
   };
   const checks: LaunchCheck[] = launchReadinessChecks({
     goal,
@@ -172,9 +213,19 @@ export function LaunchChecklist({
     dataSlotEmbeddingsReady,
     adaptiveScopeEnabled,
     adaptiveScopeErrorCount,
-  }).map((c) => ({ ok: c.ok, label: c.label, href: hrefByKey[c.key] }));
-  const ready = checks.every((c) => c.ok);
-  const remaining = checks.filter((c) => !c.ok).length;
+    adaptiveScopeConditionalCount,
+  }).map((c) => ({
+    key: c.key,
+    ok: c.ok,
+    label: c.label,
+    severity: c.severity,
+    href: hrefByKey[c.key],
+  }));
+  // Both counts read blockers only, so a warning never claims a step is outstanding nor disables
+  // the Launch button — the server applies the same rule on the PATCH.
+  const ready = !checks.some(blocksLaunch);
+  const remaining = checks.filter(blocksLaunch).length;
+  const warnings = checks.filter((c) => !c.ok && c.severity === 'warning').length;
 
   const launch = () => {
     setBusy(true);
@@ -198,7 +249,9 @@ export function LaunchChecklist({
         <p className="text-muted-foreground text-sm">
           This version is a <span className="text-foreground font-medium">draft</span>.{' '}
           {ready
-            ? 'All steps are complete — review and launch when ready.'
+            ? warnings > 0
+              ? 'All steps are complete — read the highlighted note below, then launch when ready.'
+              : 'All steps are complete — review and launch when ready.'
             : `Complete the ${remaining} remaining ${remaining === 1 ? 'step' : 'steps'} below before going live.`}
         </p>
 
@@ -226,7 +279,7 @@ export function LaunchChecklist({
 
             <ul className="space-y-2 py-1">
               {checks.map((c) => (
-                <ChecklistRow key={c.label} ok={c.ok} label={c.label} />
+                <ChecklistRow key={c.key} ok={c.ok} label={c.label} severity={c.severity} />
               ))}
             </ul>
 
@@ -251,7 +304,7 @@ export function LaunchChecklist({
           can jump straight to whatever's outstanding without opening the dialog. */}
       <ul className="space-y-1.5">
         {checks.map((c) => (
-          <ChecklistRow key={c.label} ok={c.ok} label={c.label} href={c.href} />
+          <ChecklistRow key={c.key} ok={c.ok} label={c.label} severity={c.severity} href={c.href} />
         ))}
       </ul>
     </div>

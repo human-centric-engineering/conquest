@@ -106,6 +106,10 @@ export default async function OverviewTab({ params }: PageProps) {
   const adaptiveScopeEnabled = scope !== null && scope.settings.enabled;
   const adaptiveScopeErrorCount =
     scope === null ? 0 : scope.issues.filter((i) => i.severity === 'error').length;
+  // The mirror of the above, read only while the feature is off: conditional topics exist, nothing
+  // is choosing between them, so every respondent is asked all of them. A warning, never a gate.
+  const adaptiveScopeConditionalCount =
+    scope === null ? 0 : scope.topics.filter((t) => t.phase === 'conditional').length;
 
   // Settings conflicts for the saved version, from the same detector the Settings tab runs live —
   // built here from the SAVED config (the editor builds its own from unsaved local state, so the
@@ -198,6 +202,7 @@ export default async function OverviewTab({ params }: PageProps) {
               misconfiguredMatrixCount={misconfiguredMatrixCount}
               adaptiveScopeEnabled={adaptiveScopeEnabled}
               adaptiveScopeErrorCount={adaptiveScopeErrorCount}
+              adaptiveScopeConditionalCount={adaptiveScopeConditionalCount}
               configSaved={graph.config.saved}
               dataSlotsRequired={true}
               dataSlotsReady={dataSlotCount > 0}

@@ -242,10 +242,44 @@ describe('POST /api/v1/app/questionnaires/:id/versions/:vid/topics/draft', () =>
     const body = (acceptTopicDraft as Mock).mock.calls[0][1];
     expect(body.fallbackTopicKeys).toEqual(['wellbeing']);
     expect(body.checkTopicPreference).toEqual(['wellbeing']);
-    // The load-bearing omission: accepting a proposal is an authoring act, and turning the feature
-    // on is a decision about what respondents are asked. The accept contract must have no way to
-    // express it, or a wizard that accepts on the admin's behalf silently changes the interview.
+    // Still load-bearing after F17.22 Phase 4, and the naming is the reason. `enabled` — the
+    // SETTING — remains unsettable through this route: only the one-way `enable` act below can
+    // move it, and only to `true`. A caller that spread a settings object into an accept body
+    // therefore cannot flip routing off for every respondent by accident.
     expect(body).not.toHaveProperty('enabled');
+    expect(body).not.toHaveProperty('enable');
+  });
+
+  it('forwards `enable: true` when the admin ticked the accept-dialog offer (F17.22 Phase 4)', async () => {
+    (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
+    (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
+    (acceptTopicDraft as Mock).mockResolvedValue(
+      acceptResult({ settings: { ...DEFAULT_ADAPTIVE_SCOPE_SETTINGS, enabled: true } })
+    );
+
+    const res = await POST(jsonReq({ ...validAcceptBody(), enable: true }), ctx(PARAMS));
+    expect(res.status).toBe(200);
+    expect((acceptTopicDraft as Mock).mock.calls[0][1].enable).toBe(true);
+
+    // Audited: this accept is the moment adaptive scope started deciding what respondents are
+    // asked, which the audit log had no way to show while `enabled` moved only from the settings
+    // PATCH.
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'questionnaire_topics.accept_draft',
+        metadata: expect.objectContaining({ scopeEnabled: true, enabledByAccept: true }),
+      })
+    );
+  });
+
+  it('refuses `enable: false` — the route can turn the feature on and never off', async () => {
+    (loadScopedVersion as Mock).mockResolvedValue(scopedVersion('draft'));
+    (forkVersionIfLaunched as Mock).mockResolvedValue(noForkResult());
+
+    const res = await POST(jsonReq({ ...validAcceptBody(), enable: false }), ctx(PARAMS));
+
+    expect(res.status).toBe(400);
+    expect(acceptTopicDraft).not.toHaveBeenCalled();
   });
 
   it('accepts on a LAUNCHED version — forks, writes to the fork, AND clears the source draft', async () => {

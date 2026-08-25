@@ -10,6 +10,7 @@
 
 import { prisma } from '@/lib/db/client';
 import {
+  blocksLaunch,
   launchReadinessChecks,
   type LaunchReadinessCheck,
 } from '@/lib/app/questionnaire/launch/readiness';
@@ -76,7 +77,8 @@ async function countAdaptiveScopeErrors(
 /**
  * Resolve a version's launch readiness — the same criteria the launch gate enforces (goal,
  * audience, ≥1 section, ≥1 question, a saved config, generated data slots, and — for an `adaptive`
- * version — embedded question slots). `ready` is true when every check passes.
+ * version — embedded question slots). `ready` is true when every BLOCKING check passes; the list
+ * may also carry warning rows, which are reported and never enforced.
  */
 export async function loadLaunchReadiness(
   versionId: string,
@@ -84,28 +86,40 @@ export async function loadLaunchReadiness(
 ): Promise<VersionLaunchReadiness> {
   const includeEmbeddings = options.includeEmbeddings ?? true;
 
-  const [version, sectionCount, questionCount, scaleSlots, config, dataSlotCount, scopeSettings] =
-    await Promise.all([
-      prisma.appQuestionnaireVersion.findUnique({
-        where: { id: versionId },
-        select: { goal: true, audience: true },
-      }),
-      prisma.appQuestionnaireSection.count({ where: { versionId } }),
-      prisma.appQuestionSlot.count({ where: { versionId } }),
-      // Likert + matrix configs, to enforce "every rating scale is labelled" before launch (a
-      // complete per-point labels array OR both endpoint labels — see isLikertLabelled /
-      // isMatrixLabelled; a matrix also needs ≥1 row).
-      prisma.appQuestionSlot.findMany({
-        where: { versionId, type: { in: ['likert', 'matrix'] } },
-        select: { type: true, typeConfig: true },
-      }),
-      prisma.appQuestionnaireConfig.findUnique({
-        where: { versionId },
-        select: { selectionStrategy: true },
-      }),
-      prisma.appDataSlot.count({ where: { versionId } }),
-      loadAdaptiveScopeSettings(versionId),
-    ]);
+  const [
+    version,
+    sectionCount,
+    questionCount,
+    scaleSlots,
+    config,
+    dataSlotCount,
+    scopeSettings,
+    conditionalTopicCount,
+  ] = await Promise.all([
+    prisma.appQuestionnaireVersion.findUnique({
+      where: { id: versionId },
+      select: { goal: true, audience: true },
+    }),
+    prisma.appQuestionnaireSection.count({ where: { versionId } }),
+    prisma.appQuestionSlot.count({ where: { versionId } }),
+    // Likert + matrix configs, to enforce "every rating scale is labelled" before launch (a
+    // complete per-point labels array OR both endpoint labels — see isLikertLabelled /
+    // isMatrixLabelled; a matrix also needs ≥1 row).
+    prisma.appQuestionSlot.findMany({
+      where: { versionId, type: { in: ['likert', 'matrix'] } },
+      select: { type: true, typeConfig: true },
+    }),
+    prisma.appQuestionnaireConfig.findUnique({
+      where: { versionId },
+      select: { selectionStrategy: true },
+    }),
+    prisma.appDataSlot.count({ where: { versionId } }),
+    loadAdaptiveScopeSettings(versionId),
+    // Counted unconditionally, unlike the error count below: it costs one indexed count that
+    // rides along in this Promise.all, whereas making it conditional on the settings would cost
+    // a serial round-trip after them. It is read only while the feature is OFF.
+    prisma.appQuestionnaireTopic.count({ where: { versionId, phase: 'conditional' } }),
+  ]);
 
   // Adaptive Scope coherence is only a launch concern once the version opted in — while it is off,
   // `validateAdaptiveScope` reports the same orphans as WARNINGS on the Topics tab, which is where
@@ -152,7 +166,10 @@ export async function loadLaunchReadiness(
       dataSlotCoverage !== null && dataSlotCoverage.total > 0 && dataSlotCoverage.missing === 0,
     adaptiveScopeEnabled: scopeSettings.enabled,
     adaptiveScopeErrorCount,
+    adaptiveScopeConditionalCount: conditionalTopicCount,
   });
 
-  return { ready: checks.every((c) => c.ok), checks };
+  // `blocksLaunch`, not `every(ok)`: the conditional-topics-with-the-feature-off row is a warning,
+  // and a warning must never make a launchable version report itself unready.
+  return { ready: !checks.some(blocksLaunch), checks };
 }
